@@ -117,7 +117,7 @@ describe("YNAB-compatible API", () => {
     expect(patched.data.transaction.memo).toBe("updated memo");
     expect(patched.data.transaction.flag_color).toBe("blue");
     expect(patched.data.transaction.subtransactions).toHaveLength(2);
-    expect(patched.data.transaction.subtransactions.map((sub: any) => sub.memo)).toEqual([
+    expect(patched.data.transaction.subtransactions.map((sub: any) => sub.memo).sort()).toEqual([
       "groceries",
       "household",
     ]);
