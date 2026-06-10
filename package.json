@@ -1,0 +1,15 @@
+{
+  "name": "howmuch",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "api:dev": "bun --hot apps/api/src/server.ts",
+    "api:migrate": "bun apps/api/src/migrate.ts",
+    "test": "bun test"
+  }
+}
+

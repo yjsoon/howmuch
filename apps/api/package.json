@@ -1,0 +1,11 @@
+{
+  "name": "@howmuch/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot src/server.ts",
+    "migrate": "bun src/migrate.ts",
+    "test": "bun test"
+  }
+}
+
