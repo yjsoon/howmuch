@@ -1,0 +1,282 @@
+{
+  "plan": {
+    "id": "local-plan",
+    "name": "HowMuch Demo"
+  },
+  "accounts": [
+    {
+      "id": "acct-everyday",
+      "name": "Everyday Account",
+      "type": "checking",
+      "opening_balance": 185000000
+    },
+    {
+      "id": "acct-saver",
+      "name": "Rainy Day Saver",
+      "type": "savings",
+      "opening_balance": 420000000
+    },
+    {
+      "id": "acct-credit",
+      "name": "Travel Card",
+      "type": "creditCard",
+      "opening_balance": -64000000
+    }
+  ],
+  "category_groups": [
+    {
+      "id": "grp-income",
+      "name": "Income"
+    },
+    {
+      "id": "grp-home",
+      "name": "Home"
+    },
+    {
+      "id": "grp-living",
+      "name": "Living"
+    },
+    {
+      "id": "grp-travel",
+      "name": "Travel"
+    },
+    {
+      "id": "grp-future",
+      "name": "Future"
+    }
+  ],
+  "categories": [
+    {
+      "id": "cat-salary",
+      "group_id": "grp-income",
+      "name": "Salary"
+    },
+    {
+      "id": "cat-freelance",
+      "group_id": "grp-income",
+      "name": "Freelance"
+    },
+    {
+      "id": "cat-groceries",
+      "group_id": "grp-home",
+      "name": "Groceries"
+    },
+    {
+      "id": "cat-dining",
+      "group_id": "grp-home",
+      "name": "Dining Out"
+    },
+    {
+      "id": "cat-utilities",
+      "group_id": "grp-home",
+      "name": "Utilities"
+    },
+    {
+      "id": "cat-transport",
+      "group_id": "grp-living",
+      "name": "Transport"
+    },
+    {
+      "id": "cat-health",
+      "group_id": "grp-living",
+      "name": "Health"
+    },
+    {
+      "id": "cat-holiday",
+      "group_id": "grp-travel",
+      "name": "Holiday"
+    },
+    {
+      "id": "cat-shopping",
+      "group_id": "grp-living",
+      "name": "Shopping"
+    },
+    {
+      "id": "cat-investing",
+      "group_id": "grp-future",
+      "name": "Investing"
+    }
+  ],
+  "transactions": [
+    {
+      "id": "txn-2026-03-pay",
+      "account_id": "acct-everyday",
+      "date": "2026-03-01",
+      "amount": 4850000,
+      "payee_name": "Tinkermind Payroll",
+      "category_id": "cat-salary",
+      "memo": "March salary",
+      "approved": true
+    },
+    {
+      "id": "txn-2026-03-rent",
+      "account_id": "acct-everyday",
+      "date": "2026-03-03",
+      "amount": -1850000,
+      "payee_name": "Straits View Residences",
+      "category_id": "cat-utilities",
+      "memo": "Rent and service charge",
+      "approved": true
+    },
+    {
+      "id": "txn-2026-03-fairprice",
+      "account_id": "acct-everyday",
+      "date": "2026-03-05",
+      "amount": -142300,
+      "payee_name": "FairPrice Finest",
+      "category_id": "cat-groceries",
+      "memo": "Weekly shop",
+      "approved": true
+    },
+    {
+      "id": "txn-2026-03-hawker",
+      "account_id": "acct-everyday",
+      "date": "2026-03-08",
+      "amount": -38800,
+      "payee_name": "Maxwell Food Centre",
+      "category_id": "cat-dining",
+      "memo": "Lunch with Jo",
+      "approved": true
+    },
+    {
+      "id": "txn-2026-03-grab",
+      "account_id": "acct-credit",
+      "date": "2026-03-11",
+      "amount": -26400,
+      "payee_name": "Grab",
+      "category_id": "cat-transport",
+      "memo": "Airport run",
+      "approved": true
+    },
+    {
+      "id": "txn-2026-03-invest",
+      "account_id": "acct-saver",
+      "date": "2026-03-15",
+      "amount": 650000,
+      "payee_name": "Broker transfer",
+      "category_id": "cat-investing",
+      "memo": "Top-up from cash buffer",
+      "approved": true
+    },
+    {
+      "id": "txn-2026-04-pay",
+      "account_id": "acct-everyday",
+      "date": "2026-04-01",
+      "amount": 4850000,
+      "payee_name": "Tinkermind Payroll",
+      "category_id": "cat-salary",
+      "memo": "April salary",
+      "approved": true
+    },
+    {
+      "id": "txn-2026-04-freelance",
+      "account_id": "acct-everyday",
+      "date": "2026-04-06",
+      "amount": 920000,
+      "payee_name": "Workshop client",
+      "category_id": "cat-freelance",
+      "memo": "Cohort facilitation",
+      "approved": true
+    },
+    {
+      "id": "txn-2026-04-market",
+      "account_id": "acct-everyday",
+      "date": "2026-04-07",
+      "amount": -96100,
+      "payee_name": "Tekka Market",
+      "category_id": "cat-groceries",
+      "memo": "Fresh produce",
+      "approved": true
+    },
+    {
+      "id": "txn-2026-04-utilities",
+      "account_id": "acct-everyday",
+      "date": "2026-04-09",
+      "amount": -124500,
+      "payee_name": "SP Services",
+      "category_id": "cat-utilities",
+      "memo": "Utilities",
+      "approved": true
+    },
+    {
+      "id": "txn-2026-04-flight",
+      "account_id": "acct-credit",
+      "date": "2026-04-12",
+      "amount": -488900,
+      "payee_name": "Scoot",
+      "category_id": "cat-holiday",
+      "memo": "Taipei flights",
+      "approved": true
+    },
+    {
+      "id": "txn-2026-04-clinic",
+      "account_id": "acct-everyday",
+      "date": "2026-04-18",
+      "amount": -73500,
+      "payee_name": "Raffles Medical",
+      "category_id": "cat-health",
+      "memo": "GP visit",
+      "approved": true
+    },
+    {
+      "id": "txn-2026-05-pay",
+      "account_id": "acct-everyday",
+      "date": "2026-05-01",
+      "amount": 4850000,
+      "payee_name": "Tinkermind Payroll",
+      "category_id": "cat-salary",
+      "memo": "May salary",
+      "approved": true
+    },
+    {
+      "id": "txn-2026-05-shop",
+      "account_id": "acct-credit",
+      "date": "2026-05-04",
+      "amount": -228900,
+      "payee_name": "MUJI",
+      "category_id": "cat-shopping",
+      "memo": "Home bits",
+      "approved": true
+    },
+    {
+      "id": "txn-2026-05-cold-storage",
+      "account_id": "acct-everyday",
+      "date": "2026-05-08",
+      "amount": -118700,
+      "payee_name": "Cold Storage",
+      "category_id": "cat-groceries",
+      "memo": "Top-up shop",
+      "approved": true
+    },
+    {
+      "id": "txn-2026-05-restaurant",
+      "account_id": "acct-credit",
+      "date": "2026-05-13",
+      "amount": -86600,
+      "payee_name": "Candlenut",
+      "category_id": "cat-dining",
+      "memo": "Birthday supper",
+      "approved": true
+    },
+    {
+      "id": "txn-2026-05-bus",
+      "account_id": "acct-everyday",
+      "date": "2026-05-19",
+      "amount": -17600,
+      "payee_name": "SimplyGo",
+      "category_id": "cat-transport",
+      "memo": "Commuting",
+      "approved": true
+    },
+    {
+      "id": "txn-2026-05-invest",
+      "account_id": "acct-saver",
+      "date": "2026-05-24",
+      "amount": 850000,
+      "payee_name": "Broker transfer",
+      "category_id": "cat-investing",
+      "memo": "ETF top-up",
+      "approved": true
+    }
+  ]
+}
