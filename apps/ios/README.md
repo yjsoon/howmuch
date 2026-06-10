@@ -32,5 +32,5 @@ The app should stay transaction-led: choose account, amount, payee, category, me
 Build from the repo root:
 
 ```sh
-xcodebuild -project apps/ios/HowMuch.xcodeproj -target HowMuch -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+xcodebuild -project apps/ios/HowMuch.xcodeproj -scheme HowMuch -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/howmuch-derived CODE_SIGNING_ALLOWED=NO CLANG_MODULE_CACHE_PATH=/tmp/howmuch-module-cache SWIFT_MODULECACHE_PATH=/tmp/howmuch-module-cache build
 ```
