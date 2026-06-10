@@ -83,6 +83,46 @@ describe("YNAB-compatible API", () => {
     expect(patched.data.transaction.flag_color).toBe("green");
   });
 
+  test("preserves split subtransactions when patching other fields", async () => {
+    const created = await (await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: {
+        transaction: {
+          account_id: "acct-1",
+          date: "2026-06-10",
+          amount: -15000,
+          payee_name: "Supermarket",
+          memo: "weekly shop",
+          subtransactions: [
+            { amount: -10000, category_id: "cat-groceries", memo: "groceries" },
+            { amount: -5000, category_id: "cat-household", memo: "household" },
+          ],
+        },
+      },
+    })).json();
+
+    const transactionId = created.data.transaction.id;
+    expect(created.data.transaction.subtransactions).toHaveLength(2);
+
+    const patched = await (await request(`/v1/budgets/plan-test/transactions/${transactionId}`, {
+      method: "PATCH",
+      body: {
+        transaction: {
+          memo: "updated memo",
+          flag_color: "blue",
+        },
+      },
+    })).json();
+
+    expect(patched.data.transaction.memo).toBe("updated memo");
+    expect(patched.data.transaction.flag_color).toBe("blue");
+    expect(patched.data.transaction.subtransactions).toHaveLength(2);
+    expect(patched.data.transaction.subtransactions.map((sub: any) => sub.memo)).toEqual([
+      "groceries",
+      "household",
+    ]);
+  });
+
   test("supports category reads and incremental transaction sync", async () => {
     const created = await (await request("/v1/plans/plan-test/transactions", {
       method: "POST",

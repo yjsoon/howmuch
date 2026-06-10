@@ -437,6 +437,7 @@ export class LedgerRepository {
     if (!existing) {
       throw new NotFoundError("Transaction not found");
     }
+    const existingTransaction = this.getTransaction(planId, transactionId);
 
     const next: TransactionInput = {
       id: transactionId,
@@ -462,7 +463,22 @@ export class LedgerRepository {
         patch.import_payee_name_original === undefined
           ? existing.import_payee_name_original
           : patch.import_payee_name_original,
+      source_kind: patch.source_kind === undefined ? existing.source_kind : patch.source_kind,
+      source_ref: patch.source_ref === undefined ? existing.source_ref : patch.source_ref,
       external_ynab_id: existing.external_ynab_id,
+      subtransactions:
+        patch.subtransactions === undefined
+          ? existingTransaction.subtransactions.map((sub: any) => ({
+              id: sub.id,
+              amount: sub.amount,
+              payee_id: sub.payee_id,
+              payee_name: sub.payee_name,
+              category_id: sub.category_id,
+              memo: sub.memo,
+              transfer_account_id: sub.transfer_account_id,
+              transfer_transaction_id: sub.transfer_transaction_id,
+            }))
+          : patch.subtransactions,
     };
 
     const updated = this.createTransaction(planId, next);
