@@ -85,6 +85,24 @@ describe("YNAB-compatible API", () => {
 });
 
 describe("native reports and imports", () => {
+  test("creates mobile quick-entry transactions from decimal amounts", async () => {
+    const quickEntryResponse = await request("/api/mobile/quick-entry?plan_id=plan-test", {
+      method: "POST",
+      body: {
+        account_id: "acct-1",
+        date: "2026-06-10",
+        amount: -12.34,
+        payee_name: "Coffee Shop",
+        memo: "mobile fallback",
+      },
+    });
+
+    expect(quickEntryResponse.status).toBe(201);
+    const quickEntry = await quickEntryResponse.json();
+    expect(quickEntry.data.transaction.amount).toBe(-12340);
+    expect(quickEntry.data.transaction.source_kind).toBeUndefined();
+  });
+
   test("imports YNAB CSV-shaped rows and reports spending", async () => {
     const importResponse = await request("/api/import/csv?plan_id=plan-test", {
       method: "POST",
@@ -118,4 +136,3 @@ function request(path: string, init: { method?: string; body?: unknown } = {}): 
     }),
   );
 }
-

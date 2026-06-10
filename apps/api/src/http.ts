@@ -214,7 +214,7 @@ async function handleNative(
 
   if (segments[1] === "mobile" && segments[2] === "quick-entry" && method === "POST") {
     const body = await readJson(request);
-    const amount = body.amount_milli ?? (typeof body.amount === "number" ? body.amount : decimalToMilliunits(body.amount));
+    const amount = body.amount_milli ?? decimalToMilliunits(body.amount);
     const transaction = repo.createTransaction(planId, {
       id: body.client_id,
       account_id: body.account_id,
@@ -300,4 +300,3 @@ function json(body: unknown, status = 200): Response {
     },
   });
 }
-
