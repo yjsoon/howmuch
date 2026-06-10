@@ -326,7 +326,7 @@ export class LedgerRepository {
              matched_transaction_id, import_id, import_payee_name, import_payee_name_original,
              source_kind, source_ref, external_ynab_id, deleted, updated_at
            )
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
            ON CONFLICT(id) DO UPDATE SET
              account_id = excluded.account_id,
              date = excluded.date,
@@ -349,7 +349,7 @@ export class LedgerRepository {
              source_kind = excluded.source_kind,
              source_ref = excluded.source_ref,
              external_ynab_id = excluded.external_ynab_id,
-             deleted = 0,
+             deleted = excluded.deleted,
              updated_at = CURRENT_TIMESTAMP`,
         )
         .run(
@@ -376,6 +376,7 @@ export class LedgerRepository {
           input.source_kind ?? null,
           input.source_ref ?? null,
           input.external_ynab_id ?? input.id ?? null,
+          bool(input.deleted),
         );
 
       this.db.query("DELETE FROM subtransactions WHERE transaction_id = ?").run(transactionId);
@@ -429,7 +430,7 @@ export class LedgerRepository {
         .run(serverKnowledge, transactionId);
     })();
 
-    return this.getTransaction(planId, transactionId);
+    return this.getTransaction(planId, transactionId, bool(input.deleted));
   }
 
   updateTransaction(planId: string, transactionId: string, patch: Partial<TransactionInput>): any {

@@ -41,6 +41,17 @@ Useful environment variables:
 - `HOWMUCH_API_TOKEN`: bearer token. If unset, local development requests are allowed.
 - `HOWMUCH_DEFAULT_PLAN_ID`: default plan id for native routes.
 
+## YNAB Migration
+
+Preferred path: import directly from the YNAB API with a personal access token.
+
+```sh
+bun run import:ynab --list-plans
+bun run import:ynab --plan-id <ynab-plan-id> --db data/howmuch-real.sqlite
+```
+
+The importer creates a backup before overwriting an existing SQLite file and prints the imported counts. Full workflow details live in [docs/ynab-migration.md](docs/ynab-migration.md).
+
 ## Smoke Check
 
 ```sh

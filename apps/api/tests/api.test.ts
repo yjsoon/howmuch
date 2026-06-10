@@ -399,7 +399,7 @@ describe("native reports and imports", () => {
     expect(ageOfMoney.data.periods[1].spent).toBe(0);
   });
 
-  test("imports YNAB plan metadata and requests full history by default", async () => {
+  test("imports YNAB plan metadata, preserves deleted transactions, and requests full history by default", async () => {
     const originalFetch = globalThis.fetch;
     const calls: string[] = [];
 
@@ -440,7 +440,34 @@ describe("native reports and imports", () => {
         return jsonResponse({ data: { payees: [] } });
       }
       if (url.endsWith("/plans/plan-test/transactions?since_date=1900-01-01")) {
-        return jsonResponse({ data: { transactions: [] } });
+        return jsonResponse({
+          data: {
+            transactions: [
+              {
+                id: "txn-deleted",
+                account_id: "acct-deleted",
+                date: "2024-01-01",
+                amount: -1200,
+                payee_id: null,
+                payee_name: "Deleted Merchant",
+                category_id: null,
+                memo: "old import",
+                cleared: "cleared",
+                approved: true,
+                flag_color: null,
+                flag_name: null,
+                transfer_account_id: null,
+                transfer_transaction_id: null,
+                matched_transaction_id: null,
+                import_id: "deleted-import-id",
+                import_payee_name: null,
+                import_payee_name_original: null,
+                deleted: true,
+                subtransactions: [],
+              },
+            ],
+          },
+        });
       }
 
       return new Response("not found", { status: 404 });
@@ -465,6 +492,11 @@ describe("native reports and imports", () => {
       const settings = await (await request("/v1/plans/plan-test/settings")).json();
       expect(settings.data.settings.date_format.format).toBe("YYYY-MM-DD");
       expect(settings.data.settings.display.flag_names.blue).toBe("Follow up");
+
+      const transactions = await (await request("/v1/plans/plan-test/transactions?last_knowledge_of_server=0")).json();
+      expect(transactions.data.transactions).toHaveLength(1);
+      expect(transactions.data.transactions[0].id).toBe("txn-deleted");
+      expect(transactions.data.transactions[0].deleted).toBe(true);
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -5,6 +5,7 @@ export type TransactionInput = {
   account_id: string;
   date: string;
   amount: number;
+  deleted?: boolean | null;
   payee_id?: string | null;
   payee_name?: string | null;
   category_id?: string | null;

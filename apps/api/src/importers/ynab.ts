@@ -1,17 +1,25 @@
 import type { LedgerRepository } from "../repository";
 
-type YnabImportOptions = {
+export type YnabImportOptions = {
   token: string;
   planId: string;
   baseUrl?: string;
   sinceDate?: string;
 };
 
+export type YnabPlanSummary = {
+  id: string;
+  name: string;
+  last_modified_on?: string;
+};
+
+const DEFAULT_YNAB_BASE_URL = "https://api.ynab.com/v1";
+
 export async function importYnabFromApi(
   repo: LedgerRepository,
   options: YnabImportOptions,
 ): Promise<{ import_session_id: string; imported_transactions: number }> {
-  const baseUrl = options.baseUrl ?? "https://api.ynab.com/v1";
+  const baseUrl = options.baseUrl ?? DEFAULT_YNAB_BASE_URL;
   const sinceDate = options.sinceDate ?? "1900-01-01";
   const sessionId = repo.createImportSession(options.planId, "ynab-api");
 
@@ -25,7 +33,7 @@ export async function importYnabFromApi(
       ynabFetch(baseUrl, options.token, `/plans/${options.planId}/transactions?since_date=${sinceDate}`),
     ]);
 
-    repo.upsertPlan(options.planId, plan.data.plan ?? { id: options.planId }, settings.data.settings);
+    repo.upsertPlan(options.planId, plan.data.plan ?? plan.data.budget ?? { id: options.planId }, settings.data.settings);
 
     for (const account of accounts.data.accounts ?? []) {
       repo.upsertAccount(options.planId, account);
@@ -49,6 +57,7 @@ export async function importYnabFromApi(
         account_id: transaction.account_id,
         date: transaction.date,
         amount: transaction.amount,
+        deleted: transaction.deleted,
         payee_id: transaction.payee_id,
         payee_name: transaction.payee_name,
         category_id: transaction.category_id,
@@ -88,6 +97,15 @@ export async function importYnabFromApi(
     repo.finishImportSession(sessionId, "failed", { error: error instanceof Error ? error.message : String(error) });
     throw error;
   }
+}
+
+export async function listYnabPlans(options: {
+  token: string;
+  baseUrl?: string;
+}): Promise<YnabPlanSummary[]> {
+  const baseUrl = options.baseUrl ?? DEFAULT_YNAB_BASE_URL;
+  const response = await ynabFetch(baseUrl, options.token, "/plans");
+  return response.data.plans ?? response.data.budgets ?? [];
 }
 
 async function ynabFetch(baseUrl: string, token: string, path: string): Promise<any> {
