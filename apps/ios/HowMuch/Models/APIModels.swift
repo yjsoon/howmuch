@@ -107,7 +107,38 @@ struct CurrencyFormat: Decodable {
 }
 
 struct DisplaySettings: Decodable {
-  let flagNames: [String?]?
+  let flagNames: [String]?
+
+  private enum CodingKeys: String, CodingKey {
+    case flagNames
+  }
+
+  init(flagNames: [String]? = nil) {
+    self.flagNames = flagNames
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+
+    if let array = try? container.decodeIfPresent([String?].self, forKey: .flagNames) {
+      flagNames = array.compactMap { value in
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+          return nil
+        }
+        return trimmed
+      }
+      return
+    }
+
+    if let mapping = try? container.decodeIfPresent([String: String].self, forKey: .flagNames) {
+      flagNames = mapping
+        .sorted { $0.key < $1.key }
+        .map(\.value)
+      return
+    }
+
+    flagNames = nil
+  }
 }
 
 struct Account: Decodable, Identifiable, Hashable {
@@ -135,6 +166,13 @@ struct Category: Decodable, Identifiable, Hashable {
   let categoryGroupID: String
   let name: String
   let deleted: Bool
+
+  private enum CodingKeys: String, CodingKey {
+    case id
+    case categoryGroupID = "categoryGroupId"
+    case name
+    case deleted
+  }
 }
 
 enum ClearedState: String, Codable, CaseIterable, Identifiable {
@@ -195,6 +233,31 @@ struct Transaction: Decodable, Identifiable, Hashable {
   let importPayeeNameOriginal: String?
   let deleted: Bool
   let subtransactions: [Subtransaction]
+
+  private enum CodingKeys: String, CodingKey {
+    case id
+    case date
+    case amount
+    case memo
+    case cleared
+    case approved
+    case flagColor
+    case flagName
+    case accountID = "accountId"
+    case accountName
+    case payeeID = "payeeId"
+    case payeeName
+    case categoryID = "categoryId"
+    case categoryName
+    case transferAccountID = "transferAccountId"
+    case transferTransactionID = "transferTransactionId"
+    case matchedTransactionID = "matchedTransactionId"
+    case importID = "importId"
+    case importPayeeName = "importPayeeName"
+    case importPayeeNameOriginal = "importPayeeNameOriginal"
+    case deleted
+    case subtransactions
+  }
 }
 
 struct Subtransaction: Decodable, Hashable {
@@ -209,6 +272,20 @@ struct Subtransaction: Decodable, Hashable {
   let transferAccountID: String?
   let transferTransactionID: String?
   let deleted: Bool
+
+  private enum CodingKeys: String, CodingKey {
+    case id
+    case transactionID = "transactionId"
+    case amount
+    case memo
+    case payeeID = "payeeId"
+    case payeeName
+    case categoryID = "categoryId"
+    case categoryName
+    case transferAccountID = "transferAccountId"
+    case transferTransactionID = "transferTransactionId"
+    case deleted
+  }
 }
 
 struct SpendingBreakdownReport: Decodable {
@@ -226,6 +303,16 @@ struct SpendingBreakdownGroup: Decodable, Identifiable {
   let amount: Int
   let share: Double
   let transactionCount: Int
+
+  private enum CodingKeys: String, CodingKey {
+    case categoryID = "categoryId"
+    case categoryName = "categoryName"
+    case categoryGroupID = "categoryGroupId"
+    case categoryGroupName = "categoryGroupName"
+    case amount
+    case share
+    case transactionCount = "transactionCount"
+  }
 }
 
 struct IncomeVsSpendingReport: Decodable {
@@ -263,6 +350,12 @@ struct NetWorthAccount: Decodable, Identifiable {
   let accountID: String
   let accountName: String
   let balance: Int
+
+  private enum CodingKeys: String, CodingKey {
+    case accountID = "accountId"
+    case accountName = "accountName"
+    case balance
+  }
 }
 
 struct AgeOfMoneyReport: Decodable {
