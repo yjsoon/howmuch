@@ -18,6 +18,8 @@ export function IncomePage() {
     { income: 0, spending: 0 },
   );
   const net = totals.income - totals.spending;
+  const savingsRate =
+    totals.income > 0 ? `${net < 0 ? "−" : ""}${((Math.abs(net) / totals.income) * 100).toFixed(1)}%` : null;
 
   return (
     <>
@@ -44,46 +46,77 @@ export function IncomePage() {
               {formatMoney(net, { sign: true })}
             </span>
           </div>
+          <div className="headline-figure">
+            <span className="figure-label">Savings rate</span>
+            <span className={net >= 0 ? "figure-value figure-positive" : "figure-value figure-negative"}>
+              {savingsRate ?? "—"}
+            </span>
+          </div>
         </div>
       </div>
 
-      {report.error && <p className="error-note">{report.error}</p>}
-      {report.loading && !report.data && <p className="loading-note">Loading…</p>}
+      {report.error && (
+        <div className="status-panel status-panel-error">
+          <p className="status-title">Could not load the income report.</p>
+          <p className="status-detail">{report.error}</p>
+        </div>
+      )}
+      {report.loading && !report.data && (
+        <div className="status-panel">
+          <p className="status-title">Loading income versus spending…</p>
+        </div>
+      )}
 
       {report.data && (
         <>
-          <PairedColumns periods={periods} />
-          <table className="ledger-table">
-            <thead>
-              <tr>
-                <th>Period</th>
-                <th className="num">Income</th>
-                <th className="num">Spending</th>
-                <th className="num">Net</th>
-                <th className="num">Cumulative net</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...periods].reverse().map((period) => (
-                <tr key={period.period}>
-                  <td>{formatPeriod(period.period)}</td>
-                  <td className="num amount-positive">{formatAmount(period.income)}</td>
-                  <td className="num amount-negative">{formatAmount(period.spending)}</td>
-                  <td className={period.net >= 0 ? "num amount-positive" : "num amount-negative"}>
-                    {formatMoney(period.net, { sign: true })}
-                  </td>
-                  <td className="num muted">{formatMoney(period.cumulative_net, { sign: true })}</td>
-                </tr>
-              ))}
-              {periods.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="empty-row">
-                    No activity in this range.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+          {periods.length > 0 ? (
+            <>
+              <section className="report-section">
+                <div className="section-heading">
+                  <span className="section-title">Trend</span>
+                  <span className="section-meta">{periods.length} periods in view</span>
+                </div>
+                <PairedColumns periods={periods} />
+              </section>
+              <section className="report-section">
+                <div className="section-heading">
+                  <span className="section-title">Period ledger</span>
+                  <span className="section-meta">Newest periods first</span>
+                </div>
+                <div className="table-wrap">
+                  <table className="ledger-table">
+                    <thead>
+                      <tr>
+                        <th>Period</th>
+                        <th className="num">Income</th>
+                        <th className="num">Spending</th>
+                        <th className="num">Net</th>
+                        <th className="num">Cumulative net</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...periods].reverse().map((period) => (
+                        <tr key={period.period}>
+                          <td>{formatPeriod(period.period)}</td>
+                          <td className="num amount-positive">{formatAmount(period.income)}</td>
+                          <td className="num amount-negative">{formatAmount(period.spending)}</td>
+                          <td className={period.net >= 0 ? "num amount-positive" : "num amount-negative"}>
+                            {formatMoney(period.net, { sign: true })}
+                          </td>
+                          <td className="num muted">{formatMoney(period.cumulative_net, { sign: true })}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </>
+          ) : (
+            <div className="status-panel">
+              <p className="status-title">No activity in this range.</p>
+              <p className="status-detail">Try widening the date range or clearing account filters.</p>
+            </div>
+          )}
         </>
       )}
     </>

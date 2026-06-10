@@ -116,3 +116,16 @@ export function formatPeriod(period: string): string {
 export function formatDate(date: string): string {
   return formatPeriod(date);
 }
+
+export function formatDateRange(from?: string, to?: string): string {
+  if (from && to) {
+    return `${formatDate(from)} to ${formatDate(to)}`;
+  }
+  if (from) {
+    return `From ${formatDate(from)}`;
+  }
+  if (to) {
+    return `To ${formatDate(to)}`;
+  }
+  return "All time";
+}

@@ -37,12 +37,25 @@ export function MultiSelect({ label, options, selected, onChange }: Props) {
     return () => document.removeEventListener("mousedown", onClick);
   }, [open]);
 
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
   const summary =
     selected.length === 0
       ? `All ${label.toLowerCase()}`
       : selected.length === 1
         ? (options.find((option) => option.id === selected[0])?.label ?? "1 selected")
-        : `${selected.length} ${label.toLowerCase()}`;
+        : `${options.find((option) => option.id === selected[0])?.label ?? label} +${selected.length - 1}`;
 
   const toggle = (id: string) => {
     onChange(selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id]);
@@ -76,6 +89,8 @@ export function MultiSelect({ label, options, selected, onChange }: Props) {
         type="button"
         className={selected.length ? "filter-trigger filter-trigger-set" : "filter-trigger"}
         onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
       >
         {summary} <span className="caret">▾</span>
       </button>

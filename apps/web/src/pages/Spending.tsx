@@ -20,12 +20,20 @@ export function SpendingPage() {
     });
   };
 
-  // An explicit category filter is a deliberate choice — never hide its results.
+  // An explicit category filter is a deliberate choice - never hide its results.
   const hideQuiet = !includeQuiet && filters.categoryIds.length === 0;
 
-  const { grouped, total, excluded, maxAmount } = useMemo(() => {
+  const { grouped, total, excluded, maxAmount, totalTransactions, topCategory, averageTransaction } = useMemo(() => {
     if (!report.data) {
-      return { grouped: [], total: 0, excluded: 0, maxAmount: 1 };
+      return {
+        grouped: [],
+        total: 0,
+        excluded: 0,
+        maxAmount: 1,
+        totalTransactions: 0,
+        topCategory: null,
+        averageTransaction: null,
+      };
     }
     const rows = hideQuiet
       ? report.data.groups.filter((row) => !isQuietGroupName(row.category_group_name))
@@ -42,12 +50,15 @@ export function SpendingPage() {
       groups.set(row.category_group_id, group);
     }
     const total = rows.reduce((sum, row) => sum + row.amount, 0);
+    const totalTransactions = rows.reduce((sum, row) => sum + row.transaction_count, 0);
     return {
       grouped: [...groups.values()].sort((a, b) => b.amount - a.amount),
       total,
       excluded: report.data.total - total,
-      // The API returns rows sorted by amount, so the first visible row is the widest bar.
       maxAmount: rows[0]?.amount ?? 1,
+      totalTransactions,
+      topCategory: rows[0] ?? null,
+      averageTransaction: totalTransactions > 0 ? total / totalTransactions : null,
     };
   }, [report.data, hideQuiet]);
 
@@ -56,14 +67,35 @@ export function SpendingPage() {
       <FilterRail filters={filters} setFilters={setFilters} busy={report.loading} />
       <div className="report-header">
         <h1>Spending breakdown</h1>
-        <div className="headline-figure">
-          <span className="figure-label">Total spending</span>
-          <span className="figure-value figure-negative">{formatAmount(total)}</span>
+        <div className="headline-row">
+          <div className="headline-figure">
+            <span className="figure-label">Total spending</span>
+            <span className="figure-value figure-negative">{formatAmount(total)}</span>
+          </div>
+          <div className="headline-figure">
+            <span className="figure-label">Largest line</span>
+            <span className="figure-value">{topCategory ? topCategory.category_name : "-"}</span>
+          </div>
+          <div className="headline-figure">
+            <span className="figure-label">Average transaction</span>
+            <span className="figure-value">
+              {averageTransaction !== null ? formatAmount(averageTransaction) : "-"}
+            </span>
+          </div>
         </div>
       </div>
 
-      {report.error && <p className="error-note">{report.error}</p>}
-      {report.loading && !report.data && <p className="loading-note">Loading…</p>}
+      {report.error && (
+        <div className="status-panel status-panel-error">
+          <p className="status-title">Could not load the spending report.</p>
+          <p className="status-detail">{report.error}</p>
+        </div>
+      )}
+      {report.loading && !report.data && (
+        <div className="status-panel">
+          <p className="status-title">Loading spending breakdown...</p>
+        </div>
+      )}
 
       {report.data && (
         <>
@@ -77,55 +109,65 @@ export function SpendingPage() {
               </button>
             </p>
           )}
-          <table className="ledger-table breakdown-table">
-          <thead>
-            <tr>
-              <th>Category</th>
-              <th className="col-bar" aria-hidden="true"></th>
-              <th className="num">Amount</th>
-              <th className="num">Share</th>
-              <th className="num">Txns</th>
-            </tr>
-          </thead>
-          <tbody>
-            {grouped.map((group) => (
-              <Fragment key={group.name}>
-                <tr className="group-row">
-                  <td>{group.name}</td>
-                  <td className="col-bar"></td>
-                  <td className="num">{formatAmount(group.amount)}</td>
-                  <td className="num">{total > 0 ? formatShare(group.amount / total) : "—"}</td>
-                  <td className="num"></td>
-                </tr>
-                {group.rows.map((row) => (
-                  <tr key={row.category_id}>
-                    <td className="indent">
-                      <Link to={transactionsLink(filters, row.category_id)} className="drill-link">
-                        {row.category_name}
-                      </Link>
-                    </td>
-                    <td className="col-bar">
-                      <span
-                        className="share-bar"
-                        style={{ width: `${(row.amount / maxAmount) * 100}%` }}
-                      />
-                    </td>
-                    <td className="num">{formatAmount(row.amount)}</td>
-                    <td className="num muted">{total > 0 ? formatShare(row.amount / total) : "—"}</td>
-                    <td className="num muted">{row.transaction_count}</td>
-                  </tr>
-                ))}
-              </Fragment>
-            ))}
-            {grouped.length === 0 && (
-              <tr>
-                <td colSpan={5} className="empty-row">
-                  No spending in this range.
-                </td>
-              </tr>
+          <section className="report-section">
+            <div className="section-heading">
+              <span className="section-title">Category detail</span>
+              <span className="section-meta">
+                {grouped.length} categories · {totalTransactions} posted transactions
+              </span>
+            </div>
+            {grouped.length > 0 ? (
+              <div className="table-wrap">
+                <table className="ledger-table breakdown-table">
+                  <thead>
+                    <tr>
+                      <th>Category</th>
+                      <th className="col-bar" aria-hidden="true"></th>
+                      <th className="num">Amount</th>
+                      <th className="num">Share</th>
+                      <th className="num">Txns</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {grouped.map((group) => (
+                      <Fragment key={group.name}>
+                        <tr className="group-row">
+                          <td>{group.name}</td>
+                          <td className="col-bar"></td>
+                          <td className="num">{formatAmount(group.amount)}</td>
+                          <td className="num">{total > 0 ? formatShare(group.amount / total) : "-"}</td>
+                          <td className="num muted"></td>
+                        </tr>
+                        {group.rows.map((row) => (
+                          <tr key={row.category_id}>
+                            <td className="indent">
+                              <Link to={transactionsLink(filters, row.category_id)} className="drill-link">
+                                {row.category_name}
+                              </Link>
+                            </td>
+                            <td className="col-bar">
+                              <span
+                                className="share-bar"
+                                style={{ width: `${(row.amount / maxAmount) * 100}%` }}
+                              />
+                            </td>
+                            <td className="num">{formatAmount(row.amount)}</td>
+                            <td className="num muted">{total > 0 ? formatShare(row.amount / total) : "-"}</td>
+                            <td className="num muted">{row.transaction_count}</td>
+                          </tr>
+                        ))}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="status-panel">
+                <p className="status-title">No spending in this range.</p>
+                <p className="status-detail">Adjust the dates or clear category filters to widen the ledger.</p>
+              </div>
             )}
-          </tbody>
-          </table>
+          </section>
         </>
       )}
     </>

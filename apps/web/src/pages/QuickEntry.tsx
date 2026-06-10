@@ -25,6 +25,7 @@ export function QuickEntryPage() {
   const [date, setDate] = useState(todayIso());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
   const [recent, setRecent] = useState<Transaction[]>([]);
   // Generated per entry attempt so retries of a failed submit stay idempotent.
   const clientIdRef = useRef(crypto.randomUUID());
@@ -35,7 +36,14 @@ export function QuickEntryPage() {
   }, []);
 
   const selectedAccount = accountId || openAccounts[0]?.id || "";
+  const selectedAccountName =
+    openAccounts.find((account) => account.id === selectedAccount)?.name ?? "No open account";
   const canSave = Boolean(selectedAccount && payeeName.trim() && Number(amount) > 0 && !saving);
+
+  const clearStatus = () => {
+    setError(null);
+    setSaved(null);
+  };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -55,6 +63,7 @@ export function QuickEntryPage() {
         memo: memo.trim() || null,
         flag_color: null,
       });
+      setSaved(`${transaction.payee_name ?? "Entry"} saved.`);
       setRecent((entries) => [transaction, ...entries].slice(0, 5));
       setAmount("");
       setPayeeName("");
@@ -78,130 +87,210 @@ export function QuickEntryPage() {
         <span className="quick-entry-title">Quick entry</span>
       </header>
 
-      <form onSubmit={submit}>
-        <div className="segmented direction-toggle" role="group" aria-label="Direction">
-          <button
-            type="button"
-            className={direction === "spend" ? "segment segment-active" : "segment"}
-            onClick={() => setDirection("spend")}
-          >
-            Spend
-          </button>
-          <button
-            type="button"
-            className={direction === "income" ? "segment segment-active" : "segment"}
-            onClick={() => setDirection("income")}
-          >
-            Income
-          </button>
+      <div className="quick-entry-meta">
+        <div>
+          <span className="figure-label">Posting account</span>
+          <div className="quick-entry-meta-value">{selectedAccountName}</div>
         </div>
+        <div>
+          <span className="figure-label">Posting date</span>
+          <div className="quick-entry-meta-value">{date}</div>
+        </div>
+      </div>
 
-        <label className="field amount-field">
-          <span className="field-label">Amount</span>
-          <input
-            type="number"
-            name="amount"
-            inputMode="decimal"
-            step="0.01"
-            min="0"
-            placeholder="0.00"
-            value={amount}
-            onChange={(event) => setAmount(event.target.value)}
-            className={direction === "spend" ? "amount-input amount-input-spend" : "amount-input amount-input-income"}
-            ref={amountRef}
-            autoFocus
-            required
-          />
-        </label>
+      {!openAccounts.length ? (
+        <div className="status-panel status-panel-error">
+          <p className="status-title">No open accounts available.</p>
+          <p className="status-detail">Create or import an account before using quick entry.</p>
+        </div>
+      ) : (
+        <form onSubmit={submit} className="quick-entry-form">
+          <div className="segmented direction-toggle" role="group" aria-label="Direction">
+            <button
+              type="button"
+              className={direction === "spend" ? "segment segment-active" : "segment"}
+              onClick={() => {
+                clearStatus();
+                setDirection("spend");
+              }}
+            >
+              Spend
+            </button>
+            <button
+              type="button"
+              className={direction === "income" ? "segment segment-active" : "segment"}
+              onClick={() => {
+                clearStatus();
+                setDirection("income");
+              }}
+            >
+              Income
+            </button>
+          </div>
 
-        <label className="field">
-          <span className="field-label">Payee</span>
-          <input
-            type="text"
-            name="payee"
-            list="payee-options"
-            value={payeeName}
-            onChange={(event) => setPayeeName(event.target.value)}
-            placeholder="Merchant"
-            required
-          />
-          <datalist id="payee-options">
-            {(payees.data ?? [])
-              .filter((payee) => !payee.deleted)
-              .map((payee) => (
-                <option key={payee.id} value={payee.name} />
-              ))}
-          </datalist>
-        </label>
-
-        <label className="field">
-          <span className="field-label">Account</span>
-          <select name="account" value={selectedAccount} onChange={(event) => setAccountId(event.target.value)}>
-            {openAccounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="field">
-          <span className="field-label">Category (optional)</span>
-          <select name="category" value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
-            <option value="">Uncategorised</option>
-            {[...orderedGroups.primary, ...orderedGroups.quiet].map((group) => (
-              <optgroup key={group.id} label={group.name}>
-                {group.categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-        </label>
-
-        <div className="field-row">
-          <label className="field">
-            <span className="field-label">Date</span>
-            <div className="date-row">
-              <input type="date" name="date" value={date} onChange={(event) => setDate(event.target.value)} />
-              <div className="segmented date-presets" role="group" aria-label="Date shortcuts">
-                <button
-                  type="button"
-                  className={date === todayIso() ? "segment segment-active" : "segment"}
-                  onClick={() => setDate(todayIso())}
-                >
-                  Today
-                </button>
-                <button
-                  type="button"
-                  className={date === yesterdayIso() ? "segment segment-active" : "segment"}
-                  onClick={() => setDate(yesterdayIso())}
-                >
-                  Yest.
-                </button>
-              </div>
-            </div>
+          <label className="field amount-field">
+            <span className="field-label">Amount</span>
+            <input
+              type="number"
+              name="amount"
+              inputMode="decimal"
+              step="0.01"
+              min="0"
+              placeholder="0.00"
+              value={amount}
+              onChange={(event) => {
+                clearStatus();
+                setAmount(event.target.value);
+              }}
+              className={direction === "spend" ? "amount-input amount-input-spend" : "amount-input amount-input-income"}
+              ref={amountRef}
+              autoFocus
+              required
+            />
+            <span className="field-note">
+              {direction === "spend" ? "Saved as an outflow in the ledger." : "Saved as an inflow in the ledger."}
+            </span>
           </label>
+
           <label className="field">
-            <span className="field-label">Memo (optional)</span>
+            <span className="field-label">Payee</span>
             <input
               type="text"
-              name="memo"
-              value={memo}
-              onChange={(event) => setMemo(event.target.value)}
-              placeholder="Note"
+              name="payee"
+              list="payee-options"
+              value={payeeName}
+              onChange={(event) => {
+                clearStatus();
+                setPayeeName(event.target.value);
+              }}
+              placeholder="Merchant"
+              required
+              autoComplete="off"
             />
+            <datalist id="payee-options">
+              {(payees.data ?? [])
+                .filter((payee) => !payee.deleted)
+                .map((payee) => (
+                  <option key={payee.id} value={payee.name} />
+                ))}
+            </datalist>
           </label>
-        </div>
 
-        {error && <p className="error-note">{error}</p>}
+          <label className="field">
+            <span className="field-label">Account</span>
+            <select
+              name="account"
+              value={selectedAccount}
+              onChange={(event) => {
+                clearStatus();
+                setAccountId(event.target.value);
+              }}
+            >
+              {openAccounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <button type="submit" className="save-button" disabled={!canSave}>
-          {saving ? "Saving…" : direction === "spend" ? "Save spend" : "Save income"}
-        </button>
-      </form>
+          <label className="field">
+            <span className="field-label">Category (optional)</span>
+            <select
+              name="category"
+              value={categoryId}
+              onChange={(event) => {
+                clearStatus();
+                setCategoryId(event.target.value);
+              }}
+            >
+              <option value="">Uncategorised</option>
+              {[...orderedGroups.primary, ...orderedGroups.quiet].map((group) => (
+                <optgroup key={group.id} label={group.name}>
+                  {group.categories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+
+          <div className="field-row field-row-compact">
+            <label className="field">
+              <span className="field-label">Date</span>
+              <div className="date-row">
+                <input
+                  type="date"
+                  name="date"
+                  value={date}
+                  onChange={(event) => {
+                    clearStatus();
+                    setDate(event.target.value);
+                  }}
+                />
+                <div className="segmented date-presets" role="group" aria-label="Date shortcuts">
+                  <button
+                    type="button"
+                    className={date === todayIso() ? "segment segment-active" : "segment"}
+                    onClick={() => {
+                      clearStatus();
+                      setDate(todayIso());
+                    }}
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    className={date === yesterdayIso() ? "segment segment-active" : "segment"}
+                    onClick={() => {
+                      clearStatus();
+                      setDate(yesterdayIso());
+                    }}
+                  >
+                    Yest.
+                  </button>
+                </div>
+              </div>
+            </label>
+            <label className="field">
+              <span className="field-label">Memo (optional)</span>
+              <input
+                type="text"
+                name="memo"
+                value={memo}
+                onChange={(event) => {
+                  clearStatus();
+                  setMemo(event.target.value);
+                }}
+                placeholder="Note"
+              />
+            </label>
+          </div>
+
+          <p className="field-note">
+            Entries post straight to the selected account and refresh the reports after the next load.
+          </p>
+
+          {error && (
+            <div className="status-panel status-panel-error compact-panel">
+              <p className="status-title">Could not save this entry.</p>
+              <p className="status-detail">{error}</p>
+            </div>
+          )}
+          {saved && !error && (
+            <div className="status-panel status-panel-success compact-panel">
+              <p className="status-title">Saved.</p>
+              <p className="status-detail">{saved}</p>
+            </div>
+          )}
+
+          <button type="submit" className="save-button" disabled={!canSave}>
+            {saving ? "Saving..." : direction === "spend" ? "Save spend" : "Save income"}
+          </button>
+        </form>
+      )}
 
       {recent.length > 0 && (
         <section className="recent-entries" aria-label="Saved this session">

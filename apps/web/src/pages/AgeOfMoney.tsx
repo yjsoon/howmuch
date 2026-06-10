@@ -15,8 +15,13 @@ export function AgeOfMoneyPage() {
   const report = useApi(JSON.stringify(query), () => api.ageOfMoney(query));
 
   const periods = report.data?.periods ?? [];
-  const latest = [...periods].reverse().find((period) => period.age_of_money_days !== null);
+  const measuredPeriods = [...periods].filter((period) => period.age_of_money_days !== null);
+  const latest = measuredPeriods[measuredPeriods.length - 1];
+  const previous = measuredPeriods[measuredPeriods.length - 2];
+  const delta =
+    latest && previous ? Math.round(latest.age_of_money_days! - previous.age_of_money_days!) : null;
   const unmatchedTotal = periods.reduce((sum, period) => sum + period.unmatched_spending, 0);
+  const matchedTotal = periods.reduce((sum, period) => sum + period.spent, 0);
 
   return (
     <>
@@ -38,57 +43,92 @@ export function AgeOfMoneyPage() {
               {latest?.age_of_money_days != null ? `${Math.round(latest.age_of_money_days)} days` : "—"}
             </span>
           </div>
+          <div className="headline-figure">
+            <span className="figure-label">Change on previous period</span>
+            <span className={delta === null || delta >= 0 ? "figure-value figure-positive" : "figure-value figure-negative"}>
+              {delta === null ? "—" : `${delta > 0 ? "+" : ""}${delta} days`}
+            </span>
+          </div>
+          <div className="headline-figure">
+            <span className="figure-label">Spending matched</span>
+            <span className="figure-value">{matchedTotal > 0 ? formatAmount(matchedTotal) : "—"}</span>
+          </div>
         </div>
       </div>
 
-      {report.error && <p className="error-note">{report.error}</p>}
-      {report.loading && !report.data && <p className="loading-note">Loading…</p>}
+      {report.error && (
+        <div className="status-panel status-panel-error">
+          <p className="status-title">Could not load the age-of-money report.</p>
+          <p className="status-detail">{report.error}</p>
+        </div>
+      )}
+      {report.loading && !report.data && (
+        <div className="status-panel">
+          <p className="status-title">Loading age of money…</p>
+        </div>
+      )}
 
       {report.data && (
         <>
-          <DottedLine
-            periods={periods.map((period) => ({
-              period: period.period,
-              value: period.age_of_money_days,
-            }))}
-          />
-          {unmatchedTotal > 0 && (
-            <p className="diagnostic-note">
-              {formatAmount(unmatchedTotal)} of spending predates the earliest recorded income and is
-              excluded from the weighted age.
-            </p>
-          )}
-          <table className="ledger-table">
-            <thead>
-              <tr>
-                <th>Period</th>
-                <th className="num">Age of money</th>
-                <th className="num">Spending matched</th>
-                <th className="num">Unmatched spending</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...periods].reverse().map((period) => (
-                <tr key={period.period}>
-                  <td>{formatPeriod(period.period)}</td>
-                  <td className="num strong">
-                    {period.age_of_money_days != null ? `${Math.round(period.age_of_money_days)} days` : "—"}
-                  </td>
-                  <td className="num">{formatAmount(period.spent)}</td>
-                  <td className="num muted">
-                    {period.unmatched_spending > 0 ? formatAmount(period.unmatched_spending) : "—"}
-                  </td>
-                </tr>
-              ))}
-              {periods.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="empty-row">
-                    No spending in this range.
-                  </td>
-                </tr>
+          {periods.length > 0 ? (
+            <>
+              <section className="report-section">
+                <div className="section-heading">
+                  <span className="section-title">Trend</span>
+                  <span className="section-meta">{measuredPeriods.length} measured periods</span>
+                </div>
+                <DottedLine
+                  periods={periods.map((period) => ({
+                    period: period.period,
+                    value: period.age_of_money_days,
+                  }))}
+                />
+              </section>
+              {unmatchedTotal > 0 && (
+                <p className="diagnostic-note">
+                  {formatAmount(unmatchedTotal)} of spending predates the earliest recorded income and is
+                  excluded from the weighted age.
+                </p>
               )}
-            </tbody>
-          </table>
+              <section className="report-section">
+                <div className="section-heading">
+                  <span className="section-title">Period ledger</span>
+                  <span className="section-meta">Newest periods first</span>
+                </div>
+                <div className="table-wrap">
+                  <table className="ledger-table">
+                    <thead>
+                      <tr>
+                        <th>Period</th>
+                        <th className="num">Age of money</th>
+                        <th className="num">Spending matched</th>
+                        <th className="num">Unmatched spending</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...periods].reverse().map((period) => (
+                        <tr key={period.period}>
+                          <td>{formatPeriod(period.period)}</td>
+                          <td className="num strong">
+                            {period.age_of_money_days != null ? `${Math.round(period.age_of_money_days)} days` : "—"}
+                          </td>
+                          <td className="num">{formatAmount(period.spent)}</td>
+                          <td className="num muted">
+                            {period.unmatched_spending > 0 ? formatAmount(period.unmatched_spending) : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </>
+          ) : (
+            <div className="status-panel">
+              <p className="status-title">No spending in this range.</p>
+              <p className="status-detail">The ledger needs both inflows and outflows before age of money can be computed.</p>
+            </div>
+          )}
         </>
       )}
     </>
