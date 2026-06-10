@@ -124,6 +124,7 @@ export class LedgerRepository {
            type = excluded.type,
            on_budget = excluded.on_budget,
            closed = excluded.closed,
+           opening_balance_milli = excluded.opening_balance_milli,
            balance_milli = excluded.balance_milli,
            cleared_balance_milli = excluded.cleared_balance_milli,
            uncleared_balance_milli = excluded.uncleared_balance_milli,

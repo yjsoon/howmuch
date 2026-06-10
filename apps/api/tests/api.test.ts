@@ -244,6 +244,17 @@ describe("native reports and imports", () => {
     expect(imported.data.failed).toBe(0);
   });
 
+  test("updates account opening balances on reseed", async () => {
+    await createAccount("acct-reseeded", { name: "Reseeded", opening_balance: 0 });
+    await createAccount("acct-reseeded", { name: "Reseeded", opening_balance: 38000000 });
+
+    const netWorth = await (
+      await request("/api/reports/net-worth?plan_id=plan-test&from=2026-06-01&to=2026-06-30")
+    ).json();
+
+    expect(netWorth.data.periods[0].net_worth).toBe(38000000);
+  });
+
   test("supports report filters, closed-account toggles, and age-of-money period filling", async () => {
     await createAccount("acct-open", { name: "Main", opening_balance: 0 });
     await createAccount("acct-closed", { name: "Archived", closed: true, opening_balance: 10000 });
