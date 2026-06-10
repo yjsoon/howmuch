@@ -29,6 +29,7 @@ const router = createBrowserRouter([
       { path: "/net-worth", element: <NetWorthPage /> },
       { path: "/age-of-money", element: <AgeOfMoneyPage /> },
       { path: "/transactions", element: <TransactionsPage /> },
+      { path: "*", element: <Navigate to="/spending" replace /> },
     ],
   },
   { path: "/add", element: <PlanProvider><QuickEntryPage /></PlanProvider> },

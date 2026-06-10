@@ -1,15 +1,24 @@
+/** Local-time ISO date: quick entry and range presets follow the user's wall clock, not UTC. */
+function iso(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
 export function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return iso(new Date());
+}
+
+export function yesterdayIso(): string {
+  const date = new Date();
+  date.setDate(date.getDate() - 1);
+  return iso(date);
 }
 
 function shiftMonths(date: Date, months: number): Date {
   const result = new Date(date);
-  result.setUTCMonth(result.getUTCMonth() + months);
+  result.setMonth(result.getMonth() + months);
   return result;
-}
-
-function iso(date: Date): string {
-  return date.toISOString().slice(0, 10);
 }
 
 export interface RangePreset {
@@ -26,7 +35,7 @@ export const RANGE_PRESETS: RangePreset[] = [
   {
     id: "ytd",
     label: "YTD",
-    range: () => ({ from: `${new Date().getUTCFullYear()}-01-01`, to: todayIso() }),
+    range: () => ({ from: `${new Date().getFullYear()}-01-01`, to: todayIso() }),
   },
   { id: "all", label: "All", range: () => ({}) },
 ];

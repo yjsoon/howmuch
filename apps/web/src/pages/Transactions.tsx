@@ -46,7 +46,7 @@ export function TransactionsPage() {
 
   return (
     <>
-      <FilterRail filters={filters} setFilters={setFilters} />
+      <FilterRail filters={filters} setFilters={setFilters} busy={result.loading} />
       <div className="report-header">
         <h1>Transactions</h1>
         <div className="headline-row">
@@ -72,6 +72,7 @@ export function TransactionsPage() {
       {result.loading && !result.data && <p className="loading-note">Loading…</p>}
 
       {result.data && (
+        <div className="table-scroll">
         <table className="ledger-table register-table">
           <thead>
             <tr>
@@ -111,6 +112,7 @@ export function TransactionsPage() {
             )}
           </tbody>
         </table>
+        </div>
       )}
     </>
   );

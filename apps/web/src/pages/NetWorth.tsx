@@ -22,6 +22,7 @@ export function NetWorthPage() {
         setFilters={setFilters}
         intervals={["week", "month"]}
         showCategories={false}
+        busy={report.loading}
       />
       <div className="report-header">
         <h1>Net worth</h1>
@@ -49,6 +50,7 @@ export function NetWorthPage() {
       {report.data && (
         <>
           <SteppedArea periods={periods} />
+          <div className="table-scroll">
           <table className="ledger-table">
             <thead>
               <tr>
@@ -93,6 +95,7 @@ export function NetWorthPage() {
               )}
             </tbody>
           </table>
+          </div>
         </>
       )}
     </>

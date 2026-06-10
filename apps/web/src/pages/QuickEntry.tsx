@@ -1,7 +1,9 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, useApi } from "../api/client";
-import { todayIso } from "../lib/dates";
+import type { Transaction } from "../api/types";
+import { formatDate, todayIso, yesterdayIso } from "../lib/dates";
+import { formatMoney } from "../lib/money";
 import { usePlan } from "../state/plan";
 
 type Direction = "spend" | "income";
@@ -21,9 +23,14 @@ export function QuickEntryPage() {
   const [date, setDate] = useState(todayIso());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState<string | null>(null);
+  const [recent, setRecent] = useState<Transaction[]>([]);
   // Generated per entry attempt so retries of a failed submit stay idempotent.
   const clientIdRef = useRef(crypto.randomUUID());
+  const amountRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    document.title = "Quick entry · HowMuch";
+  }, []);
 
   const selectedAccount = accountId || openAccounts[0]?.id || "";
   const canSave = Boolean(selectedAccount && payeeName.trim() && Number(amount) > 0 && !saving);
@@ -46,12 +53,13 @@ export function QuickEntryPage() {
         memo: memo.trim() || null,
         flag_color: null,
       });
-      setSaved(`${transaction.payee_name ?? "Entry"} saved.`);
+      setRecent((entries) => [transaction, ...entries].slice(0, 5));
       setAmount("");
       setPayeeName("");
       setMemo("");
       setCategoryId("");
       clientIdRef.current = crypto.randomUUID();
+      amountRef.current?.focus();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -98,6 +106,7 @@ export function QuickEntryPage() {
             value={amount}
             onChange={(event) => setAmount(event.target.value)}
             className={direction === "spend" ? "amount-input amount-input-spend" : "amount-input amount-input-income"}
+            ref={amountRef}
             autoFocus
             required
           />
@@ -155,7 +164,25 @@ export function QuickEntryPage() {
         <div className="field-row">
           <label className="field">
             <span className="field-label">Date</span>
-            <input type="date" name="date" value={date} onChange={(event) => setDate(event.target.value)} />
+            <div className="date-row">
+              <input type="date" name="date" value={date} onChange={(event) => setDate(event.target.value)} />
+              <div className="segmented date-presets" role="group" aria-label="Date shortcuts">
+                <button
+                  type="button"
+                  className={date === todayIso() ? "segment segment-active" : "segment"}
+                  onClick={() => setDate(todayIso())}
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  className={date === yesterdayIso() ? "segment segment-active" : "segment"}
+                  onClick={() => setDate(yesterdayIso())}
+                >
+                  Yest.
+                </button>
+              </div>
+            </div>
           </label>
           <label className="field">
             <span className="field-label">Memo (optional)</span>
@@ -170,12 +197,28 @@ export function QuickEntryPage() {
         </div>
 
         {error && <p className="error-note">{error}</p>}
-        {saved && !error && <p className="saved-note">{saved}</p>}
 
         <button type="submit" className="save-button" disabled={!canSave}>
           {saving ? "Saving…" : direction === "spend" ? "Save spend" : "Save income"}
         </button>
       </form>
+
+      {recent.length > 0 && (
+        <section className="recent-entries" aria-label="Saved this session">
+          <h2 className="recent-heading">Saved this session</h2>
+          <ul>
+            {recent.map((entry) => (
+              <li key={entry.id}>
+                <span className="recent-payee">{entry.payee_name ?? "Entry"}</span>
+                <span className="recent-meta">{formatDate(entry.date)}</span>
+                <span className={entry.amount < 0 ? "recent-amount amount-negative" : "recent-amount amount-positive"}>
+                  {formatMoney(entry.amount)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   );
 }

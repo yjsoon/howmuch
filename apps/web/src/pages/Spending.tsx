@@ -36,7 +36,7 @@ export function SpendingPage() {
 
   return (
     <>
-      <FilterRail filters={filters} setFilters={setFilters} />
+      <FilterRail filters={filters} setFilters={setFilters} busy={report.loading} />
       <div className="report-header">
         <h1>Spending breakdown</h1>
         <div className="headline-figure">

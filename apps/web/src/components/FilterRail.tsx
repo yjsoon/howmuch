@@ -10,9 +10,11 @@ interface Props {
   /** Intervals this report supports; omit to hide the segmented control. */
   intervals?: Interval[];
   showCategories?: boolean;
+  /** Shows a quiet progress stripe along the rail while a report refetches. */
+  busy?: boolean;
 }
 
-export function FilterRail({ filters, setFilters, intervals, showCategories = true }: Props) {
+export function FilterRail({ filters, setFilters, intervals, showCategories = true, busy = false }: Props) {
   const { accounts, categoryGroups } = usePlan();
   const activePreset = matchPreset(filters.from, filters.to);
 
@@ -27,7 +29,7 @@ export function FilterRail({ filters, setFilters, intervals, showCategories = tr
   );
 
   return (
-    <div className="filter-rail">
+    <div className={busy ? "filter-rail filter-rail-busy" : "filter-rail"}>
       <div className="segmented" role="group" aria-label="Date range">
         {RANGE_PRESETS.map((preset) => (
           <button
@@ -44,6 +46,7 @@ export function FilterRail({ filters, setFilters, intervals, showCategories = tr
       <div className="custom-range">
         <input
           type="date"
+          name="from"
           value={filters.from ?? ""}
           onChange={(event) => setFilters({ from: event.target.value || undefined })}
           aria-label="From date"
@@ -51,6 +54,7 @@ export function FilterRail({ filters, setFilters, intervals, showCategories = tr
         <span className="range-dash">–</span>
         <input
           type="date"
+          name="to"
           value={filters.to ?? ""}
           onChange={(event) => setFilters({ to: event.target.value || undefined })}
           aria-label="To date"

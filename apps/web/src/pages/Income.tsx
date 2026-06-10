@@ -25,6 +25,7 @@ export function IncomePage() {
         filters={filters}
         setFilters={setFilters}
         intervals={["week", "month", "year"]}
+        busy={report.loading}
       />
       <div className="report-header">
         <h1>Income v spending</h1>

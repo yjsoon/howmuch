@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 const TABS = [
@@ -10,6 +11,10 @@ const TABS = [
 
 export function Shell() {
   const location = useLocation();
+  useEffect(() => {
+    const tab = TABS.find((entry) => entry.to === location.pathname);
+    document.title = tab ? `${tab.label} · HowMuch` : "HowMuch";
+  }, [location.pathname]);
   return (
     <div className="shell">
       <header className="masthead">

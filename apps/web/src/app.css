@@ -57,6 +57,11 @@ a {
   color: inherit;
 }
 
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
 /* ── Shell ──────────────────────────────────────────────────── */
 
 .shell {
@@ -154,12 +159,47 @@ a {
 /* ── Filter rail ────────────────────────────────────────────── */
 
 .filter-rail {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 14px;
   flex-wrap: wrap;
   padding: 8px 0 10px;
   border-bottom: 1px solid var(--rule);
+}
+
+/* quiet indeterminate stripe along the rail while a report refetches */
+.filter-rail-busy::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  height: 1px;
+  width: 30%;
+  background: var(--ink);
+  animation: rail-sweep 1.1s ease-in-out infinite;
+}
+
+@keyframes rail-sweep {
+  0% {
+    left: 0;
+    width: 0;
+  }
+  50% {
+    width: 30%;
+  }
+  100% {
+    left: 100%;
+    width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .filter-rail-busy::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.4;
+  }
 }
 
 .segmented {
@@ -363,6 +403,24 @@ a {
   padding: 6px 10px;
   border-bottom: 1px solid var(--rule-strong);
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--paper);
+  box-shadow: 0 1px 0 var(--rule-strong);
+}
+
+/* On small screens wide tables scroll sideways instead of squashing.
+   Desktop keeps no scroll container so sticky headers track the viewport. */
+@media (max-width: 720px) {
+  .table-scroll {
+    overflow-x: auto;
+  }
+
+  .table-scroll .ledger-table th {
+    position: static;
+    box-shadow: none;
+  }
 }
 
 .ledger-table td {
@@ -664,6 +722,14 @@ tr:hover .share-bar {
   font-weight: 500;
   text-align: right;
   font-variant-numeric: tabular-nums;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.amount-input::-webkit-outer-spin-button,
+.amount-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .amount-input-spend {
@@ -672,6 +738,75 @@ tr:hover .share-bar {
 
 .amount-input-income {
   color: var(--green) !important;
+}
+
+.date-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.date-row input[type="date"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.date-presets {
+  flex-shrink: 0;
+}
+
+.date-presets .segment {
+  padding: 0 10px;
+}
+
+.recent-entries {
+  margin-top: 26px;
+  border-top: 1px solid var(--rule-strong);
+  padding-top: 10px;
+}
+
+.recent-heading {
+  margin: 0 0 6px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+}
+
+.recent-entries ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.recent-entries li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--rule);
+  font-size: 13px;
+}
+
+.recent-payee {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-meta {
+  color: var(--ink-faint);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.recent-amount {
+  font-family: var(--font-figures);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .save-button {
@@ -714,12 +849,32 @@ tr:hover .share-bar {
     overflow-x: auto;
   }
 
+  .report-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 14px 0 10px;
+  }
+
   .report-header h1 {
     font-size: 22px;
   }
 
+  .headline-row {
+    gap: 22px;
+  }
+
+  .headline-figure {
+    align-items: flex-start;
+  }
+
   .figure-value {
     font-size: 18px;
+  }
+
+  .search-input {
+    min-width: 0;
+    width: 100%;
   }
 
   .memo-cell {
