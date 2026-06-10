@@ -121,6 +121,12 @@ describe("native reports and imports", () => {
     expect(report.data.periods).toHaveLength(1);
     expect(report.data.periods[0].income).toBe(1000000);
     expect(report.data.periods[0].spending).toBe(12340);
+
+    const spendingResponse = await request("/api/reports/spending-breakdown?plan_id=plan-test&from=2026-06-01&to=2026-06-30");
+    expect(spendingResponse.status).toBe(200);
+    const spending = await spendingResponse.json();
+    expect(spending.data.total).toBe(12340);
+    expect(spending.data.groups[0].category_name).toBe("Uncategorised");
   });
 });
 

@@ -22,7 +22,7 @@ export class ReportService {
          LEFT JOIN categories c ON c.id = lines.category_id
          LEFT JOIN category_groups cg ON cg.id = c.category_group_id
          WHERE ${where} AND lines.amount_milli < 0
-         GROUP BY category_id, category_name, category_group_id, category_group_name
+         GROUP BY 1, 2, 3, 4
          ORDER BY amount DESC`,
       )
       .all(...params) as Row[];
@@ -308,4 +308,3 @@ function daysBetween(from: string, to: string): number {
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
-
