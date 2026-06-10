@@ -53,6 +53,41 @@ describe("YNAB-compatible API", () => {
     expect(listJson.data.transactions[0].memo).toBe("FairPrice Group");
   });
 
+  test("treats repeated single-transaction import ids as idempotent", async () => {
+    const body = {
+      transaction: {
+        account_id: "acct-1",
+        date: "2026-06-10",
+        amount: -12340,
+        payee_name: "FairPrice",
+        import_id: "openclaw-single-1",
+      },
+    };
+
+    const first = await (await request("/v1/plans/plan-test/transactions", { method: "POST", body })).json();
+    const secondResponse = await request("/v1/plans/plan-test/transactions", { method: "POST", body });
+    const second = await secondResponse.json();
+
+    expect(secondResponse.status).toBe(200);
+    expect(second.data.transaction.id).toBe(first.data.transaction.id);
+    expect(second.data.duplicate_import_ids).toEqual(["openclaw-single-1"]);
+
+    const listed = await (await request("/v1/plans/plan-test/transactions")).json();
+    expect(listed.data.transactions).toHaveLength(1);
+  });
+
+  test("returns YNAB-shaped errors", async () => {
+    const response = await handler(new Request("http://howmuch.test/v1/user"));
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error).toEqual({
+      id: "401",
+      name: "not_authorized",
+      detail: "Invalid bearer token",
+    });
+  });
+
   test("patches transaction flags and memos", async () => {
     const created = await (await request("/v1/plans/plan-test/transactions", {
       method: "POST",

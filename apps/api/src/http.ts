@@ -19,7 +19,7 @@ export function createHandler({ db, config }: HandlerOptions): (request: Request
   return async function handle(request: Request): Promise<Response> {
     try {
       if (!isAuthorised(request, config.apiToken)) {
-        return json({ error: { id: "unauthorised", message: "Invalid bearer token" } }, 401);
+        return apiError(401, "not_authorized", "Invalid bearer token");
       }
 
       const url = new URL(request.url);
@@ -37,20 +37,12 @@ export function createHandler({ db, config }: HandlerOptions): (request: Request
         return await handleNative(request, url, segments, repo, reports);
       }
 
-      return json({ error: { id: "not_found", message: "Route not found" } }, 404);
+      return apiError(404, "not_found", "Route not found");
     } catch (error) {
       if (error instanceof NotFoundError) {
-        return json({ error: { id: "not_found", message: error.message } }, 404);
+        return apiError(404, "resource_not_found", error.message, "404.2");
       }
-      return json(
-        {
-          error: {
-            id: "internal_error",
-            message: error instanceof Error ? error.message : String(error),
-          },
-        },
-        500,
-      );
+      return apiError(500, "internal_server_error", error instanceof Error ? error.message : String(error));
     }
   };
 }
@@ -64,7 +56,7 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
 
   const collection = segments[1];
   if (collection !== "plans" && collection !== "budgets") {
-    return json({ error: { id: "not_found", message: "Route not found" } }, 404);
+    return apiError(404, "not_found", "Route not found");
   }
 
   const isBudgetAlias = collection === "budgets";
@@ -171,7 +163,19 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
     }
     if (segments.length === 4 && method === "POST") {
       const body = await readJson(request);
-      const created = repo.createTransaction(planId, body.transaction);
+      const input = body.transaction;
+      const duplicate = input?.import_id ? repo.findDuplicateTransaction(planId, input) : null;
+      if (duplicate) {
+        return json({
+          data: {
+            transaction: duplicate,
+            transaction_ids: [duplicate.id],
+            duplicate_import_ids: [input.import_id],
+            server_knowledge: repo.getServerKnowledge(planId),
+          },
+        });
+      }
+      const created = repo.createTransaction(planId, input);
       return json({ data: { transaction: created, transaction_ids: [created.id], server_knowledge: repo.getServerKnowledge(planId) } }, 201);
     }
     if (segments.length === 5 && segments[4] === "import" && method === "POST") {
@@ -198,7 +202,7 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
     }
   }
 
-  return json({ error: { id: "not_found", message: "Route not found" } }, 404);
+  return apiError(404, "not_found", "Route not found");
 }
 
 async function handleNative(
@@ -264,7 +268,7 @@ async function handleNative(
     return json({ data: result }, 201);
   }
 
-  return json({ error: { id: "not_found", message: "Route not found" } }, 404);
+  return apiError(404, "not_found", "Route not found");
 }
 
 function queryFilters(url: URL, overrides: Record<string, string | null> = {}) {
@@ -330,4 +334,17 @@ function json(body: unknown, status = 200): Response {
       "content-type": "application/json; charset=utf-8",
     },
   });
+}
+
+function apiError(status: number, name: string, detail: string, id = String(status)): Response {
+  return json(
+    {
+      error: {
+        id,
+        name,
+        detail,
+      },
+    },
+    status,
+  );
 }

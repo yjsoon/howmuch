@@ -21,6 +21,18 @@ Authorization: Bearer <token>
 
 For local development, the API may allow all requests if no token is configured. Production should set `HOWMUCH_API_TOKEN`.
 
+Error responses follow the YNAB wrapper shape:
+
+```json
+{
+  "error": {
+    "id": "401",
+    "name": "not_authorized",
+    "detail": "Invalid bearer token"
+  }
+}
+```
+
 ## YNAB-Compatible Endpoints
 
 ### User
@@ -175,6 +187,8 @@ Minimum create body:
   }
 }
 ```
+
+If a single create request includes an `import_id` that already exists for the plan, the API returns the existing transaction rather than creating a duplicate. This makes retrying OpenClaw writes safe even when the caller uses the single-transaction endpoint instead of the bulk import endpoint.
 
 Individual transaction:
 
