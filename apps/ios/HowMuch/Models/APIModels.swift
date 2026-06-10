@@ -50,6 +50,14 @@ struct APISettings: Codable, Equatable {
   }
 }
 
+struct UserPayload: Decodable {
+  let user: APIUser
+}
+
+struct APIUser: Decodable {
+  let id: String
+}
+
 struct ReferenceData {
   let planSettings: PlanSettings
   let accounts: [Account]
@@ -245,6 +253,7 @@ struct NetWorthPeriod: Decodable, Identifiable {
   let period: String
   let endDate: String
   let netWorth: Int
+  let delta: Int?
   let accounts: [NetWorthAccount]
 }
 
@@ -298,15 +307,32 @@ struct MobileQuickEntryRequest: Encodable {
   let flagColor: String?
 }
 
+enum EntryDirection: String, CaseIterable, Identifiable {
+  case spent
+  case received
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .spent:
+      return "Spent"
+    case .received:
+      return "Received"
+    }
+  }
+}
+
 struct QuickEntryDraft: Equatable {
   var accountID = ""
   var date = Date()
   var payeeName = ""
   var amountText = ""
+  var direction: EntryDirection = .spent
   var memo = ""
   var categoryID = ""
   var flagColour: FlagColour = .none
-  var clearedState: ClearedState = .uncleared
+  var clearedState: ClearedState = .cleared
 
   mutating func seedIfNeeded(accounts: [Account]) {
     if accountID.isEmpty, let first = accounts.first {
@@ -314,13 +340,25 @@ struct QuickEntryDraft: Equatable {
     }
   }
 
+  /// Milliunits with the sign taken from the Spent/Received toggle, ignoring
+  /// any sign typed into the amount field.
+  var signedMilliunits: Int? {
+    guard let parsed = MoneyCodec.milliunits(from: amountText), parsed != 0 else {
+      return nil
+    }
+    let magnitude = abs(parsed)
+    return direction == .spent ? -magnitude : magnitude
+  }
+
   var canAttemptSubmit: Bool {
-    !accountID.isEmpty && !payeeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    !accountID.isEmpty
+      && !payeeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      && signedMilliunits != nil
   }
 
   func makeTransactionRequest() throws -> TransactionCreateRequest {
-    guard let milliunits = MoneyCodec.milliunits(from: amountText) else {
-      throw APIClientError.validation("Enter a valid decimal amount.")
+    guard let milliunits = signedMilliunits else {
+      throw APIClientError.validation("Enter an amount above zero.")
     }
 
     return TransactionCreateRequest(
@@ -337,15 +375,15 @@ struct QuickEntryDraft: Equatable {
   }
 
   func makeMobileQuickEntryRequest() throws -> MobileQuickEntryRequest {
-    guard let milliunits = MoneyCodec.milliunits(from: amountText) else {
-      throw APIClientError.validation("Enter a valid decimal amount.")
+    guard let milliunits = signedMilliunits else {
+      throw APIClientError.validation("Enter an amount above zero.")
     }
 
     return MobileQuickEntryRequest(
       clientID: UUID().uuidString.lowercased(),
       accountID: accountID,
       date: date.isoDateString,
-      amount: amountText.trimmingCharacters(in: .whitespacesAndNewlines),
+      amount: (Decimal(milliunits) / 1000).description,
       amountMilli: milliunits,
       payeeName: payeeName.trimmingCharacters(in: .whitespacesAndNewlines),
       categoryID: categoryID.isEmpty ? nil : categoryID,
@@ -360,9 +398,10 @@ struct QuickEntryDraft: Equatable {
       date: Date(),
       payeeName: "",
       amountText: "",
+      direction: .spent,
       memo: "",
       categoryID: categoryID,
-      flagColour: flagColour,
+      flagColour: .none,
       clearedState: clearedState
     )
   }
@@ -372,6 +411,7 @@ enum ReportWindow: String, CaseIterable, Identifiable {
   case oneMonth
   case threeMonths
   case twelveMonths
+  case yearToDate
 
   var id: String { rawValue }
 
@@ -383,6 +423,8 @@ enum ReportWindow: String, CaseIterable, Identifiable {
       return "3M"
     case .twelveMonths:
       return "12M"
+    case .yearToDate:
+      return "YTD"
     }
   }
 
@@ -394,6 +436,9 @@ enum ReportWindow: String, CaseIterable, Identifiable {
       return calendar.date(byAdding: .month, value: -3, to: endDate) ?? endDate
     case .twelveMonths:
       return calendar.date(byAdding: .year, value: -1, to: endDate) ?? endDate
+    case .yearToDate:
+      let components = calendar.dateComponents([.year], from: endDate)
+      return calendar.date(from: components) ?? endDate
     }
   }
 }

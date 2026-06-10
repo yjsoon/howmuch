@@ -45,12 +45,56 @@ enum MoneyCodec {
     return formatter.string(from: decimalValue as NSDecimalNumber) ?? String(format: "%.2f", NSDecimalNumber(decimal: decimalValue).doubleValue)
   }
 
-  static func milliunitHint(for input: String) -> String? {
-    guard let milliunits = milliunits(from: input) else {
-      return nil
-    }
-    return "\(milliunits) milliunits"
+  /// Signed display with an explicit plus on inflows, for ledger-style rows.
+  static func signedDisplayString(for milliunits: Int, currencyFormat: CurrencyFormat?) -> String {
+    let base = displayString(for: milliunits, currencyFormat: currencyFormat)
+    return milliunits > 0 ? "+\(base)" : base
   }
+}
+
+enum LedgerDate {
+  /// "Today", "Yesterday", or "Mon 8 Jun 2026" from an ISO `yyyy-MM-dd` string.
+  static func friendlyString(fromISO isoDate: String) -> String {
+    guard let date = parser.date(from: isoDate) else {
+      return isoDate
+    }
+    if Calendar.current.isDateInToday(date) {
+      return "Today"
+    }
+    if Calendar.current.isDateInYesterday(date) {
+      return "Yesterday"
+    }
+    return display.string(from: date)
+  }
+
+  /// Human label for a report period key: `2026-06-10`, `2026-W23`, `2026-06`, or `2026`.
+  static func periodLabel(_ raw: String) -> String {
+    let parts = raw.split(separator: "-")
+    if parts.count == 3 {
+      return friendlyString(fromISO: raw)
+    }
+    if parts.count == 2, parts[1].hasPrefix("W") {
+      return "Week \(parts[1].dropFirst()), \(parts[0])"
+    }
+    if parts.count == 2, let month = Int(parts[1]), (1 ... 12).contains(month) {
+      return "\(Calendar.current.monthSymbols[month - 1]) \(parts[0])"
+    }
+    return raw
+  }
+
+  private static let parser: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.calendar = Calendar(identifier: .iso8601)
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd"
+    return formatter
+  }()
+
+  private static let display: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "EEE d MMM yyyy"
+    return formatter
+  }()
 }
 
 extension Date {

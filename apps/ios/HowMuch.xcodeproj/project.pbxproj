@@ -16,6 +16,7 @@
 		A10000000000000000000026 /* RecentTransactionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* RecentTransactionsView.swift */; };
 		A10000000000000000000027 /* ReportsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* ReportsView.swift */; };
 		A10000000000000000000028 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* SettingsView.swift */; };
+		A10000000000000000000029 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000019 /* Theme.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -29,6 +30,7 @@
 		A10000000000000000000016 /* RecentTransactionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentTransactionsView.swift; sourceTree = "<group>"; };
 		A10000000000000000000017 /* ReportsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportsView.swift; sourceTree = "<group>"; };
 		A10000000000000000000018 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A10000000000000000000019 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -91,6 +93,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000014 /* Formatting.swift */,
+				A10000000000000000000019 /* Theme.swift */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -178,6 +181,7 @@
 				A10000000000000000000022 /* APIModels.swift in Sources */,
 				A10000000000000000000023 /* APIClient.swift in Sources */,
 				A10000000000000000000024 /* Formatting.swift in Sources */,
+				A10000000000000000000029 /* Theme.swift in Sources */,
 				A10000000000000000000025 /* QuickEntryView.swift in Sources */,
 				A10000000000000000000026 /* RecentTransactionsView.swift in Sources */,
 				A10000000000000000000027 /* ReportsView.swift in Sources */,

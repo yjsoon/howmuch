@@ -3,43 +3,53 @@ import SwiftUI
 @main
 struct HowMuchApp: App {
   @State private var model = AppModel()
-  @State private var showingSettings = false
 
   var body: some Scene {
     WindowGroup {
-      TabView {
-        NavigationStack {
-          QuickEntryView()
-            .toolbar { settingsToolbar }
-        }
-        .tabItem {
-          Label("Capture", systemImage: "plus.circle.fill")
-        }
+      RootView()
+        .environment(model)
+    }
+  }
+}
 
-        NavigationStack {
-          RecentTransactionsView()
-            .toolbar { settingsToolbar }
-        }
-        .tabItem {
-          Label("Recents", systemImage: "list.bullet.rectangle.portrait")
-        }
+private struct RootView: View {
+  @Environment(AppModel.self) private var model
 
-        NavigationStack {
-          ReportsView()
-            .toolbar { settingsToolbar }
-        }
-        .tabItem {
-          Label("Reports", systemImage: "chart.bar.xaxis")
-        }
+  var body: some View {
+    @Bindable var model = model
+
+    TabView {
+      NavigationStack {
+        QuickEntryView()
+          .toolbar { settingsToolbar }
       }
-      .environment(model)
-      .task(id: model.settings.connectionFingerprint) {
-        await model.refreshAll()
+      .tabItem {
+        Label("Capture", systemImage: "plus.circle.fill")
       }
-      .sheet(isPresented: $showingSettings) {
-        SettingsView(settings: model.settings) { nextSettings in
-          await model.applySettings(nextSettings)
-        }
+
+      NavigationStack {
+        RecentTransactionsView()
+          .toolbar { settingsToolbar }
+      }
+      .tabItem {
+        Label("Recents", systemImage: "list.bullet.rectangle.portrait")
+      }
+
+      NavigationStack {
+        ReportsView()
+          .toolbar { settingsToolbar }
+      }
+      .tabItem {
+        Label("Reports", systemImage: "chart.bar.xaxis")
+      }
+    }
+    .tint(Theme.inflow)
+    .task(id: model.settings.connectionFingerprint) {
+      await model.refreshAll()
+    }
+    .sheet(isPresented: $model.isShowingSettings) {
+      SettingsView(settings: model.settings) { nextSettings in
+        await model.applySettings(nextSettings)
       }
     }
   }
@@ -48,9 +58,9 @@ struct HowMuchApp: App {
   private var settingsToolbar: some ToolbarContent {
     ToolbarItem(placement: .topBarTrailing) {
       Button {
-        showingSettings = true
+        model.isShowingSettings = true
       } label: {
-        Label("Settings", systemImage: "gearshape")
+        Label("Connection settings", systemImage: "gearshape")
       }
     }
   }

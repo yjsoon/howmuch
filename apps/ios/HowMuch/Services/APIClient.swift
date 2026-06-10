@@ -41,6 +41,12 @@ struct APIClient {
     )
   }
 
+  /// Cheap connectivity and auth check used by the settings sheet.
+  func fetchUser() async throws -> APIUser {
+    let response: APIEnvelope<UserPayload> = try await request(path: "/v1/user")
+    return response.data.user
+  }
+
   func fetchPlanSettings(planID: String) async throws -> PlanSettings {
     let response: APIEnvelope<PlanSettingsPayload> = try await request(path: "/v1/plans/\(planID)/settings")
     return response.data.settings

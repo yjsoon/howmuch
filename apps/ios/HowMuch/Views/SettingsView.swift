@@ -4,8 +4,15 @@ struct SettingsView: View {
   @Environment(\.dismiss) private var dismiss
   @State private var draft: APISettings
   @State private var isSaving = false
+  @State private var testResult: TestResult?
+  @State private var isTesting = false
 
   let onSave: @MainActor (APISettings) async -> Void
+
+  private enum TestResult: Equatable {
+    case success
+    case failure(String)
+  }
 
   init(settings: APISettings, onSave: @escaping @MainActor (APISettings) async -> Void) {
     _draft = State(initialValue: settings)
@@ -16,28 +23,67 @@ struct SettingsView: View {
     NavigationStack {
       Form {
         Section {
-          TextField("Base URL", text: $draft.baseURLString)
+          TextField("http://192.168.1.10:8787", text: $draft.baseURLString)
             .keyboardType(.URL)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
+        } header: {
+          Text("Server")
+        } footer: {
+          Text("The Bun API host, reachable from this device. Use your machine's LAN address rather than 127.0.0.1 when running on hardware.")
+        }
 
+        Section {
           TextField("Bearer token", text: $draft.bearerToken)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
+            .privacySensitive()
 
           TextField("Plan ID", text: $draft.planID)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
         } header: {
-          Text("Connection")
+          Text("Access")
         } footer: {
-          Text("Use the Bun API host, for example `http://127.0.0.1:8787`. Leave the token blank for local development when the API allows unauthenticated requests.")
+          Text("Leave the token blank when the API runs without one. The default plan ID is `local-plan`.")
+        }
+
+        Section {
+          Button {
+            testConnection()
+          } label: {
+            HStack {
+              Text("Test connection")
+              Spacer()
+              if isTesting {
+                ProgressView()
+              } else if let testResult {
+                switch testResult {
+                case .success:
+                  Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Theme.inflow)
+                case .failure:
+                  Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(Theme.outflow)
+                }
+              }
+            }
+          }
+          .disabled(isTesting)
+        } footer: {
+          if case .failure(let message) = testResult {
+            Text(message)
+              .foregroundStyle(Theme.outflow)
+          } else if testResult == .success {
+            Text("Connected. The server answered as expected.")
+          }
         }
       }
-      .navigationTitle("API Settings")
+      .navigationTitle("Connection")
+      .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .topBarLeading) {
-          Button("Close") {
+          Button("Cancel") {
             dismiss()
           }
         }
@@ -51,9 +97,23 @@ struct SettingsView: View {
               dismiss()
             }
           }
-          .disabled(isSaving)
+          .disabled(isSaving || !draft.isConfigured)
         }
       }
+    }
+  }
+
+  private func testConnection() {
+    isTesting = true
+    testResult = nil
+    Task {
+      do {
+        _ = try await APIClient(settings: draft).fetchUser()
+        testResult = .success
+      } catch {
+        testResult = .failure(error.localizedDescription)
+      }
+      isTesting = false
     }
   }
 }

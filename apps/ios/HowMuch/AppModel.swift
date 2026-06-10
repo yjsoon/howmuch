@@ -1,6 +1,24 @@
 import Foundation
 import Observation
 
+enum LoadPhase: Equatable {
+  case idle
+  case loading
+  case loaded
+  case failed(String)
+
+  var errorMessage: String? {
+    if case .failed(let message) = self {
+      return message
+    }
+    return nil
+  }
+
+  var isLoading: Bool {
+    self == .loading
+  }
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -15,10 +33,14 @@ final class AppModel {
   var ageOfMoney: AgeOfMoneyReport?
   var reportWindow: ReportWindow = .threeMonths
   var reportInterval: ReportInterval = .month
-  var isRefreshing = false
+
+  var referencePhase: LoadPhase = .idle
+  var recentsPhase: LoadPhase = .idle
+  var reportsPhase: LoadPhase = .idle
   var isSubmitting = false
-  var lastErrorMessage: String?
   var lastSaveMessage: String?
+  var isShowingSettings = false
+  private var saveMessageToken = 0
 
   init(settings: APISettings = .load()) {
     self.settings = settings
@@ -35,8 +57,13 @@ final class AppModel {
       .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
   }
 
-  var hasConnectionDetails: Bool {
-    settings.isConfigured
+  var currencyFormat: CurrencyFormat? {
+    planSettings?.currencyFormat
+  }
+
+  /// The first failure across surfaces, for the capture tab's connection banner.
+  var connectionProblem: String? {
+    referencePhase.errorMessage ?? recentsPhase.errorMessage ?? reportsPhase.errorMessage
   }
 
   func applySettings(_ nextSettings: APISettings) async {
@@ -46,64 +73,51 @@ final class AppModel {
   }
 
   func refreshAll() async {
-    guard hasConnectionDetails else {
-      lastErrorMessage = "Enter the local API URL before refreshing."
-      return
-    }
+    async let reference: Void = refreshReferenceData()
+    async let recents: Void = refreshRecentTransactions()
+    async let reports: Void = refreshReports()
+    _ = await (reference, recents, reports)
+  }
 
-    isRefreshing = true
-    defer { isRefreshing = false }
-
+  func refreshReferenceData() async {
+    referencePhase = .loading
     do {
-      async let referenceData = apiClient.fetchReferenceData(planID: settings.planID)
-      async let transactions = apiClient.fetchTransactions(planID: settings.planID)
-      async let reportBundle = fetchReportBundle()
-
-      let reference = try await referenceData
+      let reference = try await apiClient.fetchReferenceData(planID: settings.planID)
       planSettings = reference.planSettings
       accounts = reference.accounts
       categoryGroups = reference.categoryGroups
-      recentTransactions = Array(try await transactions.prefix(20))
-      let reports = try await reportBundle
-      spendingBreakdown = reports.spending
-      incomeVsSpending = reports.income
-      netWorth = reports.netWorth
-      ageOfMoney = reports.ageOfMoney
-      lastErrorMessage = nil
+      referencePhase = .loaded
     } catch {
-      lastErrorMessage = error.localizedDescription
+      referencePhase = .failed(error.localizedDescription)
     }
   }
 
   func refreshRecentTransactions() async {
-    guard hasConnectionDetails else { return }
+    recentsPhase = .loading
     do {
-      recentTransactions = Array(try await apiClient.fetchTransactions(planID: settings.planID).prefix(20))
-      lastErrorMessage = nil
+      let transactions = try await apiClient.fetchTransactions(planID: settings.planID)
+      recentTransactions = Array(transactions.sorted { $0.date > $1.date }.prefix(50))
+      recentsPhase = .loaded
     } catch {
-      lastErrorMessage = error.localizedDescription
+      recentsPhase = .failed(error.localizedDescription)
     }
   }
 
   func refreshReports() async {
-    guard hasConnectionDetails else { return }
+    reportsPhase = .loading
     do {
       let reports = try await fetchReportBundle()
       spendingBreakdown = reports.spending
       incomeVsSpending = reports.income
       netWorth = reports.netWorth
       ageOfMoney = reports.ageOfMoney
-      lastErrorMessage = nil
+      reportsPhase = .loaded
     } catch {
-      lastErrorMessage = error.localizedDescription
+      reportsPhase = .failed(error.localizedDescription)
     }
   }
 
   func submitQuickEntry(_ draft: QuickEntryDraft) async throws -> QuickEntryDraft {
-    guard hasConnectionDetails else {
-      throw APIClientError.validation("Enter the API settings before saving.")
-    }
-
     isSubmitting = true
     defer { isSubmitting = false }
 
@@ -111,12 +125,19 @@ final class AppModel {
     let created = try await apiClient.createTransaction(planID: settings.planID, request: request)
 
     recentTransactions.insert(created, at: 0)
-    if recentTransactions.count > 20 {
-      recentTransactions = Array(recentTransactions.prefix(20))
+    if recentTransactions.count > 50 {
+      recentTransactions = Array(recentTransactions.prefix(50))
     }
 
-    lastSaveMessage = "Saved \(MoneyCodec.displayString(for: created.amount, currencyFormat: planSettings?.currencyFormat)) for \(created.payeeName ?? "transaction")."
-    lastErrorMessage = nil
+    lastSaveMessage = "Saved \(MoneyCodec.displayString(for: created.amount, currencyFormat: currencyFormat)) — \(created.payeeName ?? "transaction")"
+    saveMessageToken += 1
+    let token = saveMessageToken
+    Task {
+      try? await Task.sleep(for: .seconds(3))
+      if token == saveMessageToken {
+        lastSaveMessage = nil
+      }
+    }
     await refreshReports()
     return draft.resetAfterSubmit()
   }
