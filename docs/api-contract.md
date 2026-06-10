@@ -119,12 +119,41 @@ Supported query parameters:
 - `type`
 - `last_knowledge_of_server`
 
+When `last_knowledge_of_server` is provided, the transaction list returns transactions changed since that knowledge value, including deleted rows so incremental clients can tombstone local copies.
+
 Scoped lists:
 
 - `GET /v1/plans/{plan_id}/accounts/{account_id}/transactions`
 - `GET /v1/plans/{plan_id}/payees/{payee_id}/transactions`
 - `GET /v1/plans/{plan_id}/categories/{category_id}/transactions`
 - `GET /v1/plans/{plan_id}/months/{month}/transactions`
+
+Bulk import:
+
+`POST /v1/plans/{plan_id}/transactions/import`
+
+Request body:
+
+```json
+{
+  "transactions": [
+    {
+      "account_id": "account-id",
+      "date": "2026-06-10",
+      "amount": -12340,
+      "payee_name": "Merchant",
+      "import_id": "source-unique-id"
+    }
+  ]
+}
+```
+
+Response fields:
+
+- `transaction_ids`
+- `duplicate_import_ids`
+- `duplicate_transaction_ids`
+- `server_knowledge`
 
 Create:
 
@@ -212,7 +241,12 @@ Common filters:
 - `category_ids`
 - `category_group_ids`
 - `payee_ids`
+- `include_transfers`
 
+Extra filters:
+
+- `include_closed_accounts` on Net Worth
+- `top_payees_limit` on Spending Breakdown
 ### Mobile Quick Entry
 
 `POST /api/mobile/quick-entry`
@@ -258,4 +292,3 @@ Accepts rows shaped like:
   ]
 }
 ```
-

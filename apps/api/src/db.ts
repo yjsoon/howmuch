@@ -29,6 +29,10 @@ export function applyMigrations(db: Database): void {
       version: "001_initial",
       path: join(migrationsDir, "001_initial.sql"),
     },
+    {
+      version: "002_transaction_server_knowledge",
+      path: join(migrationsDir, "002_transaction_server_knowledge.sql"),
+    },
   ];
 
   for (const migration of migrations) {

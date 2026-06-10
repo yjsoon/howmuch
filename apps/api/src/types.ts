@@ -45,6 +45,7 @@ export type TransactionFilters = {
   categoryId?: string | null;
   month?: string | null;
   type?: string | null;
+  lastKnowledgeOfServer?: number | null;
   includeDeleted?: boolean;
 };
 
@@ -56,6 +57,7 @@ export type ReportFilters = {
   categoryGroupIds?: string[];
   payeeIds?: string[];
   includeTransfers?: boolean;
+  includeClosedAccounts?: boolean;
   interval?: "day" | "week" | "month" | "year";
+  topPayeesLimit?: number;
 };
-

@@ -16,12 +16,16 @@ export async function importYnabFromApi(
   const sessionId = repo.createImportSession(options.planId, "ynab-api");
 
   try {
-    const [accounts, categories, payees, transactions] = await Promise.all([
+    const [plan, settings, accounts, categories, payees, transactions] = await Promise.all([
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}`),
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/settings`),
       ynabFetch(baseUrl, options.token, `/plans/${options.planId}/accounts`),
       ynabFetch(baseUrl, options.token, `/plans/${options.planId}/categories`),
       ynabFetch(baseUrl, options.token, `/plans/${options.planId}/payees`),
       ynabFetch(baseUrl, options.token, `/plans/${options.planId}/transactions?since_date=${sinceDate}`),
     ]);
+
+    repo.upsertPlan(options.planId, plan.data.plan ?? { id: options.planId }, settings.data.settings);
 
     for (const account of accounts.data.accounts ?? []) {
       repo.upsertAccount(options.planId, account);
@@ -97,4 +101,3 @@ async function ynabFetch(baseUrl: string, token: string, path: string): Promise<
   }
   return response.json();
 }
-

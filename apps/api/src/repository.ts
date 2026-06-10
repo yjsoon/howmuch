@@ -54,6 +54,37 @@ export class LedgerRepository {
     return formatPlan(row);
   }
 
+  upsertPlan(planId: string, plan: any, settings?: any): void {
+    this.ensurePlan(planId, plan.name ?? "HowMuch");
+    const existing = this.db.query("SELECT * FROM plans WHERE id = ?").get(planId) as Row;
+
+    this.db
+      .query(
+        `UPDATE plans
+         SET name = ?,
+             first_month = ?,
+             last_month = ?,
+             date_format_json = ?,
+             currency_format_json = ?,
+             flag_names_json = ?,
+             external_ynab_id = ?,
+             deleted = ?,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+      )
+      .run(
+        plan.name ?? existing.name,
+        plan.first_month ?? existing.first_month,
+        plan.last_month ?? existing.last_month,
+        JSON.stringify(settings?.date_format ?? JSON.parse(existing.date_format_json)),
+        JSON.stringify(settings?.currency_format ?? JSON.parse(existing.currency_format_json)),
+        JSON.stringify(settings?.display?.flag_names ?? JSON.parse(existing.flag_names_json)),
+        plan.id ?? existing.external_ynab_id ?? planId,
+        bool(plan.deleted),
+        planId,
+      );
+  }
+
   getSettings(planId: string): any {
     this.ensurePlan(planId);
     const row = this.db.query("SELECT * FROM plans WHERE id = ?").get(planId) as Row;
@@ -391,7 +422,10 @@ export class LedgerRepository {
       }
 
       this.recalculateAccount(input.account_id);
-      this.touchPlan(planId);
+      const serverKnowledge = this.touchPlan(planId);
+      this.db
+        .query("UPDATE transactions SET server_knowledge = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .run(serverKnowledge, transactionId);
     })();
 
     return this.getTransaction(planId, transactionId);
@@ -447,8 +481,43 @@ export class LedgerRepository {
       .query("UPDATE transactions SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
       .run(transactionId, planId);
     this.recalculateAccount(existing.account_id);
-    this.touchPlan(planId);
+    const serverKnowledge = this.touchPlan(planId);
+    this.db
+      .query("UPDATE transactions SET server_knowledge = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
+      .run(serverKnowledge, transactionId, planId);
     return this.getTransaction(planId, transactionId, true);
+  }
+
+  importTransactions(planId: string, inputs: TransactionInput[]): {
+    transaction_ids: string[];
+    duplicate_import_ids: string[];
+    duplicate_transaction_ids: string[];
+    server_knowledge: number;
+  } {
+    const transactionIds: string[] = [];
+    const duplicateImportIds = new Set<string>();
+    const duplicateTransactionIds = new Set<string>();
+
+    for (const input of inputs) {
+      const duplicate = this.findDuplicateTransaction(planId, input);
+      if (duplicate) {
+        if (input.import_id) {
+          duplicateImportIds.add(input.import_id);
+        }
+        duplicateTransactionIds.add(duplicate.id);
+        continue;
+      }
+
+      const created = this.createTransaction(planId, input);
+      transactionIds.push(created.id);
+    }
+
+    return {
+      transaction_ids: transactionIds,
+      duplicate_import_ids: [...duplicateImportIds],
+      duplicate_transaction_ids: [...duplicateTransactionIds],
+      server_knowledge: this.getServerKnowledge(planId),
+    };
   }
 
   listTransactions(planId: string, filters: TransactionFilters = {}): any[] {
@@ -456,7 +525,7 @@ export class LedgerRepository {
     const clauses = ["t.plan_id = ?"];
     const params: any[] = [planId];
 
-    if (!filters.includeDeleted) {
+    if (!filters.includeDeleted && filters.lastKnowledgeOfServer == null) {
       clauses.push("t.deleted = 0");
     }
     if (filters.sinceDate) {
@@ -480,8 +549,9 @@ export class LedgerRepository {
       params.push(filters.categoryId);
     }
     if (filters.month) {
+      const monthStart = normaliseMonthStart(filters.month);
       clauses.push("t.date >= ? AND t.date < date(?, '+1 month')");
-      params.push(filters.month, filters.month);
+      params.push(monthStart, monthStart);
     }
     if (filters.type === "uncategorized") {
       clauses.push("t.category_id IS NULL");
@@ -491,6 +561,10 @@ export class LedgerRepository {
     }
     if (filters.type === "approved") {
       clauses.push("t.approved = 1");
+    }
+    if (filters.lastKnowledgeOfServer != null) {
+      clauses.push("t.server_knowledge > ?");
+      params.push(filters.lastKnowledgeOfServer);
     }
 
     const rows = this.db
@@ -623,6 +697,76 @@ export class LedgerRepository {
     }
 
     return { payeeId, payeeName, categoryId, categoryName };
+  }
+
+  findDuplicateTransaction(planId: string, input: TransactionInput): any | null {
+    if (input.import_id) {
+      const importMatch = this.db
+        .query(
+          `SELECT
+             t.*,
+             a.name AS account_name,
+             p.name AS payee_name,
+             c.name AS category_name
+           FROM transactions t
+           JOIN accounts a ON a.id = t.account_id
+           LEFT JOIN payees p ON p.id = t.payee_id
+           LEFT JOIN categories c ON c.id = t.category_id
+           WHERE t.plan_id = ? AND t.import_id = ? AND t.deleted = 0
+           ORDER BY t.updated_at DESC
+           LIMIT 1`,
+        )
+        .get(planId, input.import_id) as Row | null;
+
+      if (importMatch) {
+        return this.formatTransaction(importMatch);
+      }
+    }
+
+    const clauses = ["t.plan_id = ?", "t.deleted = 0", "t.account_id = ?", "t.date = ?", "t.amount_milli = ?"];
+    const params: any[] = [planId, input.account_id, input.date, input.amount];
+    let hasStrongMatch = false;
+
+    if (input.payee_id) {
+      clauses.push("t.payee_id = ?");
+      params.push(input.payee_id);
+      hasStrongMatch = true;
+    } else if (input.payee_name) {
+      clauses.push("lower(COALESCE(p.name, t.payee_name_snapshot, '')) = lower(?)");
+      params.push(input.payee_name);
+      hasStrongMatch = true;
+    } else if (input.memo) {
+      clauses.push("COALESCE(t.memo, '') = ?");
+      params.push(input.memo);
+      hasStrongMatch = true;
+    } else if (input.category_id) {
+      clauses.push("t.category_id = ?");
+      params.push(input.category_id);
+      hasStrongMatch = true;
+    }
+
+    if (!hasStrongMatch) {
+      return null;
+    }
+
+    const row = this.db
+      .query(
+        `SELECT
+           t.*,
+           a.name AS account_name,
+           p.name AS payee_name,
+           c.name AS category_name
+         FROM transactions t
+         JOIN accounts a ON a.id = t.account_id
+         LEFT JOIN payees p ON p.id = t.payee_id
+         LEFT JOIN categories c ON c.id = t.category_id
+         WHERE ${clauses.join(" AND ")}
+         ORDER BY t.updated_at DESC
+         LIMIT 1`,
+      )
+      .get(...params) as Row | null;
+
+    return row ? this.formatTransaction(row) : null;
   }
 
   private getTransactionRow(planId: string, transactionId: string, includeDeleted = false): Row | null {
@@ -805,3 +949,6 @@ function toBoolean(value: unknown): boolean {
   return value === true || value === 1;
 }
 
+function normaliseMonthStart(month: string): string {
+  return month.length === 7 ? `${month}-01` : month;
+}

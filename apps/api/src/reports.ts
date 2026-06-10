@@ -26,6 +26,21 @@ export class ReportService {
          ORDER BY amount DESC`,
       )
       .all(...params) as Row[];
+    const topPayeeRows = this.db
+      .query(
+        `WITH lines AS (${lineItemsSql()})
+         SELECT
+           COALESCE(lines.payee_id, 'unknown-payee') AS payee_id,
+           COALESCE(p.name, lines.payee_name_snapshot, 'Unknown') AS payee_name,
+           SUM(ABS(lines.amount_milli)) AS amount
+         FROM lines
+         LEFT JOIN payees p ON p.id = lines.payee_id
+         WHERE ${where} AND lines.amount_milli < 0
+         GROUP BY 1, 2
+         ORDER BY amount DESC
+         LIMIT ?`,
+      )
+      .all(...params, filters.topPayeesLimit ?? 5) as Row[];
 
     const total = rows.reduce((sum, row) => sum + Number(row.amount), 0);
     return {
@@ -38,6 +53,12 @@ export class ReportService {
         amount: Number(row.amount),
         share: total > 0 ? Number(row.amount) / total : 0,
         transaction_count: Number(row.transaction_count),
+      })),
+      top_payees: topPayeeRows.map((row) => ({
+        payee_id: row.payee_id === "unknown-payee" ? null : row.payee_id,
+        payee_name: row.payee_name,
+        amount: Number(row.amount),
+        share: total > 0 ? Number(row.amount) / total : 0,
       })),
     };
   }
@@ -84,9 +105,17 @@ export class ReportService {
     const to = filters.to ?? todayIso();
     const periods = buildPeriods(from, to, filters.interval ?? "month");
     const accounts = this.db
-      .query("SELECT * FROM accounts WHERE plan_id = ? AND deleted = 0 AND include_in_net_worth = 1 ORDER BY name")
-      .all(planId) as Row[];
+      .query(
+        `SELECT * FROM accounts
+         WHERE plan_id = ?
+           AND deleted = 0
+           AND include_in_net_worth = 1
+           AND (? = 1 OR closed = 0)
+         ORDER BY name`,
+      )
+      .all(planId, filters.includeClosedAccounts === true ? 1 : 0) as Row[];
 
+    let previousNetWorth: number | null = null;
     const rows = periods.map((period) => {
       const accountRows = accounts
         .filter((account) => !filters.accountIds?.length || filters.accountIds.includes(account.id))
@@ -95,19 +124,24 @@ export class ReportService {
             .query(
               `SELECT ? + COALESCE(SUM(CASE WHEN deleted = 0 THEN amount_milli ELSE 0 END), 0) AS balance
                FROM transactions
-               WHERE account_id = ? AND date <= ?`,
+               WHERE plan_id = ? AND account_id = ? AND date <= ?`,
             )
-            .get(Number(account.opening_balance_milli ?? 0), account.id, period.end) as Row;
+            .get(Number(account.opening_balance_milli ?? 0), planId, account.id, period.end) as Row;
           return {
             account_id: account.id,
             account_name: account.name,
+            closed: account.closed === 1,
             balance: Number(balanceRow.balance ?? 0),
           };
         });
+      const netWorth = accountRows.reduce((sum, account) => sum + account.balance, 0);
+      const delta = previousNetWorth == null ? null : netWorth - previousNetWorth;
+      previousNetWorth = netWorth;
       return {
         period: period.label,
         end_date: period.end,
-        net_worth: accountRows.reduce((sum, account) => sum + account.balance, 0),
+        net_worth: netWorth,
+        delta,
         accounts: accountRows,
       };
     });
@@ -116,6 +150,8 @@ export class ReportService {
   }
 
   ageOfMoney(planId: string, filters: ReportFilters = {}): any {
+    const from = filters.from ?? earliestDate(this.db, planId) ?? todayIso();
+    const to = filters.to ?? todayIso();
     const { where, params } = this.lineFilters(planId, filters, true);
     const rows = this.db
       .query(
@@ -129,7 +165,9 @@ export class ReportService {
 
     const lots: Array<{ date: string; amount: number }> = [];
     const interval = filters.interval ?? "month";
-    const buckets = new Map<string, { weightedAge: number; spent: number; unmatched: number }>();
+    const buckets = new Map<string, { weightedAge: number; spent: number; unmatched: number }>(
+      buildPeriods(from, to, interval).map((period) => [period.label, { weightedAge: 0, spent: 0, unmatched: 0 }]),
+    );
 
     for (const row of rows) {
       const amount = Number(row.amount_milli);
@@ -208,6 +246,7 @@ function lineItemsSql(): string {
       t.date,
       COALESCE(st.amount_milli, t.amount_milli) AS amount_milli,
       COALESCE(st.payee_id, t.payee_id) AS payee_id,
+      COALESCE(st.payee_name_snapshot, t.payee_name_snapshot) AS payee_name_snapshot,
       COALESCE(st.category_id, t.category_id) AS category_id,
       c.category_group_id,
       COALESCE(st.transfer_transaction_id, t.transfer_transaction_id) AS transfer_transaction_id,

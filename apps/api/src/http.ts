@@ -113,6 +113,17 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
   if (resource === "categories" && segments.length === 4 && method === "GET") {
     return json({ data: { category_groups: repo.listCategoryGroups(planId), server_knowledge: repo.getServerKnowledge(planId) } });
   }
+  if (resource === "categories") {
+    const categoryId = segments[4];
+    if (segments.length === 6 && segments[5] === "transactions" && method === "GET") {
+      return json({
+        data: {
+          transactions: repo.listTransactions(planId, queryFilters(url, { categoryId })),
+          server_knowledge: repo.getServerKnowledge(planId),
+        },
+      });
+    }
+  }
 
   if (resource === "payees") {
     if (segments.length === 4 && method === "GET") {
@@ -164,7 +175,12 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
       return json({ data: { transaction: created, transaction_ids: [created.id], server_knowledge: repo.getServerKnowledge(planId) } }, 201);
     }
     if (segments.length === 5 && segments[4] === "import" && method === "POST") {
-      return json({ data: { transaction_ids: [], duplicate_import_ids: [], server_knowledge: repo.getServerKnowledge(planId) } });
+      const body = await readJson(request);
+      const result = repo.importTransactions(
+        planId,
+        (body.transactions ?? []).map((transaction: any) => transaction.transaction ?? transaction),
+      );
+      return json({ data: result }, 201);
     }
 
     const transactionId = segments[4];
@@ -259,7 +275,8 @@ function queryFilters(url: URL, overrides: Record<string, string | null> = {}) {
     accountId: overrides.accountId ?? null,
     payeeId: overrides.payeeId ?? null,
     categoryId: overrides.categoryId ?? null,
-    month: overrides.month ?? null,
+    month: overrides.month ? normaliseMonthStart(overrides.month) : null,
+    lastKnowledgeOfServer: parseNumber(url.searchParams.get("last_knowledge_of_server")) ?? null,
   };
 }
 
@@ -272,12 +289,26 @@ function reportFilters(url: URL) {
     categoryGroupIds: splitParam(url.searchParams.get("category_group_ids")),
     payeeIds: splitParam(url.searchParams.get("payee_ids")),
     includeTransfers: url.searchParams.get("include_transfers") === "true",
+    includeClosedAccounts: url.searchParams.get("include_closed_accounts") === "true",
     interval: (url.searchParams.get("interval") as any) ?? "month",
+    topPayeesLimit: parseNumber(url.searchParams.get("top_payees_limit")),
   };
 }
 
 function splitParam(value: string | null): string[] {
   return value ? value.split(",").map((item) => item.trim()).filter(Boolean) : [];
+}
+
+function parseNumber(value: string | null): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function normaliseMonthStart(month: string): string {
+  return month.length === 7 ? `${month}-01` : month;
 }
 
 async function readJson(request: Request): Promise<any> {

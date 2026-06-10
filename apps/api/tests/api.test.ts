@@ -82,6 +82,103 @@ describe("YNAB-compatible API", () => {
     expect(patched.data.transaction.memo).toBe("CLAIMED: receipt");
     expect(patched.data.transaction.flag_color).toBe("green");
   });
+
+  test("supports category reads and incremental transaction sync", async () => {
+    const created = await (await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: {
+        transaction: {
+          account_id: "acct-1",
+          date: "2026-06-10",
+          amount: -12340,
+          payee_name: "Hawker Centre",
+          category_id: "cat-food",
+          memo: "initial",
+        },
+      },
+    })).json();
+
+    const transactionId = created.data.transaction.id;
+    const initialKnowledge = created.data.server_knowledge;
+
+    const categoryTransactions = await (await request("/v1/plans/plan-test/categories/cat-food/transactions")).json();
+    expect(categoryTransactions.data.transactions).toHaveLength(1);
+    expect(categoryTransactions.data.transactions[0].id).toBe(transactionId);
+
+    const noChanges = await (
+      await request(`/v1/plans/plan-test/transactions?last_knowledge_of_server=${initialKnowledge}`)
+    ).json();
+    expect(noChanges.data.transactions).toHaveLength(0);
+
+    const patched = await (await request(`/v1/plans/plan-test/transactions/${transactionId}`, {
+      method: "PATCH",
+      body: {
+        transaction: {
+          memo: "updated",
+        },
+      },
+    })).json();
+
+    const changedSinceInitial = await (
+      await request(`/v1/plans/plan-test/transactions?last_knowledge_of_server=${initialKnowledge}`)
+    ).json();
+    expect(changedSinceInitial.data.transactions).toHaveLength(1);
+    expect(changedSinceInitial.data.transactions[0].memo).toBe("updated");
+
+    const patchKnowledge = patched.data.server_knowledge;
+    await request(`/v1/plans/plan-test/transactions/${transactionId}`, { method: "DELETE" });
+
+    const deletedSincePatch = await (
+      await request(`/v1/plans/plan-test/transactions?last_knowledge_of_server=${patchKnowledge}`)
+    ).json();
+    expect(deletedSincePatch.data.transactions).toHaveLength(1);
+    expect(deletedSincePatch.data.transactions[0].deleted).toBe(true);
+  });
+
+  test("imports transactions with duplicate detection", async () => {
+    const firstImport = await (await request("/v1/plans/plan-test/transactions/import", {
+      method: "POST",
+      body: {
+        transactions: [
+          {
+            account_id: "acct-1",
+            date: "2026-06-10",
+            amount: -12340,
+            payee_name: "Merchant",
+            import_id: "openclaw-1",
+          },
+          {
+            account_id: "acct-1",
+            date: "2026-06-10",
+            amount: -12340,
+            payee_name: "Merchant",
+            import_id: "openclaw-1",
+          },
+        ],
+      },
+    })).json();
+
+    expect(firstImport.data.transaction_ids).toHaveLength(1);
+    expect(firstImport.data.duplicate_import_ids).toEqual(["openclaw-1"]);
+    expect(firstImport.data.duplicate_transaction_ids).toHaveLength(1);
+
+    const fuzzyDuplicate = await (await request("/v1/plans/plan-test/transactions/import", {
+      method: "POST",
+      body: {
+        transactions: [
+          {
+            account_id: "acct-1",
+            date: "2026-06-10",
+            amount: -12340,
+            payee_name: "Merchant",
+          },
+        ],
+      },
+    })).json();
+
+    expect(fuzzyDuplicate.data.transaction_ids).toHaveLength(0);
+    expect(fuzzyDuplicate.data.duplicate_transaction_ids).toHaveLength(1);
+  });
 });
 
 describe("native reports and imports", () => {
@@ -128,6 +225,164 @@ describe("native reports and imports", () => {
     expect(spending.data.total).toBe(12340);
     expect(spending.data.groups[0].category_name).toBe("Uncategorised");
   });
+
+  test("imports CSV rows with row-level accounts and duplicate counts", async () => {
+    const importResponse = await request("/api/import/csv?plan_id=plan-test", {
+      method: "POST",
+      body: {
+        rows: [
+          { account_id: "acct-1", date: "2026-06-01", payee: "Cafe", outflow: "12.34" },
+          { account_id: "acct-1", date: "2026-06-01", payee: "Cafe", outflow: "12.34" },
+        ],
+      },
+    });
+    expect(importResponse.status).toBe(201);
+
+    const imported = await importResponse.json();
+    expect(imported.data.imported).toBe(1);
+    expect(imported.data.duplicate).toBe(1);
+    expect(imported.data.failed).toBe(0);
+  });
+
+  test("supports report filters, closed-account toggles, and age-of-money period filling", async () => {
+    await createAccount("acct-open", { name: "Main", opening_balance: 0 });
+    await createAccount("acct-closed", { name: "Archived", closed: true, opening_balance: 10000 });
+
+    const salaryPayeeId = await createPayee("Salary");
+    const coffeePayeeId = await createPayee("Coffee");
+    const rentPayeeId = await createPayee("Rent");
+    const giftPayeeId = await createPayee("Gift");
+
+    await createTransaction({
+      account_id: "acct-open",
+      date: "2026-06-01",
+      amount: 100000,
+      payee_id: salaryPayeeId,
+    });
+    await createTransaction({
+      account_id: "acct-open",
+      date: "2026-06-10",
+      amount: -20000,
+      payee_id: coffeePayeeId,
+      category_id: "cat-food",
+    });
+    await createTransaction({
+      account_id: "acct-open",
+      date: "2026-06-15",
+      amount: -30000,
+      payee_id: rentPayeeId,
+      category_id: "cat-home",
+    });
+    await createTransaction({
+      account_id: "acct-closed",
+      date: "2026-06-20",
+      amount: 50000,
+      payee_id: giftPayeeId,
+    });
+
+    const spendingBreakdown = await (
+      await request(
+        `/api/reports/spending-breakdown?plan_id=plan-test&from=2026-06-01&to=2026-07-31&payee_ids=${coffeePayeeId}&top_payees_limit=1`,
+      )
+    ).json();
+    expect(spendingBreakdown.data.total).toBe(20000);
+    expect(spendingBreakdown.data.top_payees).toHaveLength(1);
+    expect(spendingBreakdown.data.top_payees[0].payee_name).toBe("Coffee");
+
+    const netWorthOpenOnly = await (
+      await request(
+        "/api/reports/net-worth?plan_id=plan-test&from=2026-06-01&to=2026-07-31&interval=month&include_closed_accounts=false",
+      )
+    ).json();
+    expect(netWorthOpenOnly.data.periods[0].net_worth).toBe(50000);
+    expect(netWorthOpenOnly.data.periods[1].delta).toBe(0);
+
+    const netWorthAllAccounts = await (
+      await request(
+        "/api/reports/net-worth?plan_id=plan-test&from=2026-06-01&to=2026-07-31&interval=month&include_closed_accounts=true",
+      )
+    ).json();
+    expect(netWorthAllAccounts.data.periods[0].net_worth).toBe(110000);
+
+    const ageOfMoney = await (
+      await request("/api/reports/age-of-money?plan_id=plan-test&from=2026-06-01&to=2026-07-31&interval=month")
+    ).json();
+    expect(ageOfMoney.data.periods).toHaveLength(2);
+    expect(ageOfMoney.data.periods[0].age_of_money_days).toBe(12);
+    expect(ageOfMoney.data.periods[1].age_of_money_days).toBeNull();
+    expect(ageOfMoney.data.periods[1].spent).toBe(0);
+  });
+
+  test("imports YNAB plan metadata and requests full history by default", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: string[] = [];
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+
+      if (url.endsWith("/plans/plan-test")) {
+        return jsonResponse({
+          data: {
+            plan: {
+              id: "plan-test",
+              name: "Imported Plan",
+              first_month: "2024-01",
+              last_month: "2026-12",
+            },
+          },
+        });
+      }
+      if (url.endsWith("/plans/plan-test/settings")) {
+        return jsonResponse({
+          data: {
+            settings: {
+              date_format: { format: "YYYY-MM-DD" },
+              currency_format: { iso_code: "USD", currency_symbol: "$", decimal_digits: 2 },
+              display: { flag_names: { blue: "Follow up" } },
+            },
+          },
+        });
+      }
+      if (url.endsWith("/plans/plan-test/accounts")) {
+        return jsonResponse({ data: { accounts: [] } });
+      }
+      if (url.endsWith("/plans/plan-test/categories")) {
+        return jsonResponse({ data: { category_groups: [] } });
+      }
+      if (url.endsWith("/plans/plan-test/payees")) {
+        return jsonResponse({ data: { payees: [] } });
+      }
+      if (url.endsWith("/plans/plan-test/transactions?since_date=1900-01-01")) {
+        return jsonResponse({ data: { transactions: [] } });
+      }
+
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+
+    try {
+      const importResponse = await request("/api/import/ynab?plan_id=plan-test", {
+        method: "POST",
+        body: {
+          token: "ynab-token",
+          base_url: "https://ynab.example/v1",
+        },
+      });
+
+      expect(importResponse.status).toBe(201);
+      expect(calls).toContain("https://ynab.example/v1/plans/plan-test/settings");
+      expect(calls).toContain("https://ynab.example/v1/plans/plan-test/transactions?since_date=1900-01-01");
+
+      const plans = await (await request("/v1/plans")).json();
+      expect(plans.data.plans[0].name).toBe("Imported Plan");
+
+      const settings = await (await request("/v1/plans/plan-test/settings")).json();
+      expect(settings.data.settings.date_format.format).toBe("YYYY-MM-DD");
+      expect(settings.data.settings.display.flag_names.blue).toBe("Follow up");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 function request(path: string, init: { method?: string; body?: unknown } = {}): Promise<Response> {
@@ -141,4 +396,52 @@ function request(path: string, init: { method?: string; body?: unknown } = {}): 
       body: init.body ? JSON.stringify(init.body) : undefined,
     }),
   );
+}
+
+async function createAccount(id: string, account: Record<string, unknown>): Promise<void> {
+  const response = await request("/v1/plans/plan-test/accounts", {
+    method: "POST",
+    body: {
+      account: {
+        id,
+        ...account,
+      },
+    },
+  });
+  expect(response.status).toBe(201);
+}
+
+async function createPayee(name: string): Promise<string> {
+  const response = await request("/v1/plans/plan-test/payees", {
+    method: "POST",
+    body: {
+      payee: {
+        name,
+      },
+    },
+  });
+  expect(response.status).toBe(201);
+  const json = await response.json();
+  return json.data.payee.id;
+}
+
+async function createTransaction(transaction: Record<string, unknown>): Promise<string> {
+  const response = await request("/v1/plans/plan-test/transactions", {
+    method: "POST",
+    body: {
+      transaction,
+    },
+  });
+  expect(response.status).toBe(201);
+  const json = await response.json();
+  return json.data.transaction.id;
+}
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: {
+      "content-type": "application/json",
+    },
+  });
 }
