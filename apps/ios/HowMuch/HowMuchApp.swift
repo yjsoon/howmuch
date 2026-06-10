@@ -20,16 +20,8 @@ private struct RootView: View {
 
     TabView {
       NavigationStack {
-        QuickEntryView()
-          .toolbar { settingsToolbar }
-      }
-      .tabItem {
-        Label("Capture", systemImage: "plus.circle.fill")
-      }
-
-      NavigationStack {
         RecentTransactionsView()
-          .toolbar { settingsToolbar }
+          .toolbar { appToolbar }
       }
       .tabItem {
         Label("Recents", systemImage: "list.bullet.rectangle.portrait")
@@ -37,7 +29,7 @@ private struct RootView: View {
 
       NavigationStack {
         ReportsView()
-          .toolbar { settingsToolbar }
+          .toolbar { appToolbar }
       }
       .tabItem {
         Label("Reports", systemImage: "chart.bar.xaxis")
@@ -52,11 +44,32 @@ private struct RootView: View {
         await model.applySettings(nextSettings)
       }
     }
+    .sheet(isPresented: $model.isShowingCapture, onDismiss: model.captureDidDismiss) {
+      NavigationStack {
+        QuickEntryView()
+          .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+              Button("Done") {
+                model.isShowingCapture = false
+              }
+            }
+          }
+      }
+    }
   }
 
   @ToolbarContentBuilder
-  private var settingsToolbar: some ToolbarContent {
+  private var appToolbar: some ToolbarContent {
     ToolbarItem(placement: .topBarTrailing) {
+      Button {
+        model.isShowingCapture = true
+      } label: {
+        Label("Capture transaction", systemImage: "plus.circle.fill")
+      }
+      .tint(Theme.inflow)
+    }
+
+    ToolbarItem(placement: .topBarLeading) {
       Button {
         model.isShowingSettings = true
       } label: {

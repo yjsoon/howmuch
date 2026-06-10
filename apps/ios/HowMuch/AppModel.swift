@@ -40,6 +40,10 @@ final class AppModel {
   var isSubmitting = false
   var lastSaveMessage: String?
   var isShowingSettings = false
+  var isShowingCapture = false
+  var lastUsedAccountID: String?
+  var lastUsedCategoryID: String?
+  private var settingsRequestedFromCapture = false
   private var saveMessageToken = 0
 
   init(settings: APISettings = .load()) {
@@ -64,6 +68,20 @@ final class AppModel {
   /// The first failure across surfaces, for the capture tab's connection banner.
   var connectionProblem: String? {
     referencePhase.errorMessage ?? recentsPhase.errorMessage ?? reportsPhase.errorMessage
+  }
+
+  /// Settings cannot present while the capture sheet is up, so dismiss first
+  /// and let `captureDidDismiss` finish the hand-off.
+  func requestSettingsFromCapture() {
+    settingsRequestedFromCapture = true
+    isShowingCapture = false
+  }
+
+  func captureDidDismiss() {
+    if settingsRequestedFromCapture {
+      settingsRequestedFromCapture = false
+      isShowingSettings = true
+    }
   }
 
   func applySettings(_ nextSettings: APISettings) async {
@@ -124,6 +142,8 @@ final class AppModel {
     let request = try draft.makeTransactionRequest()
     let created = try await apiClient.createTransaction(planID: settings.planID, request: request)
 
+    lastUsedAccountID = request.accountID
+    lastUsedCategoryID = request.categoryID
     recentTransactions.insert(created, at: 0)
     if recentTransactions.count > 50 {
       recentTransactions = Array(recentTransactions.prefix(50))

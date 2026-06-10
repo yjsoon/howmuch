@@ -17,7 +17,7 @@ struct QuickEntryView: View {
       if let problem = model.connectionProblem {
         Section {
           ConnectionProblemBanner(message: problem) {
-            model.isShowingSettings = true
+            model.requestSettingsFromCapture()
           }
         }
       }
@@ -67,7 +67,11 @@ struct QuickEntryView: View {
     .navigationTitle("Capture")
     .scrollDismissesKeyboard(.interactively)
     .task(id: model.accounts.map(\.id).joined(separator: ",")) {
-      draft.seedIfNeeded(accounts: model.accounts)
+      draft.seedIfNeeded(
+        accounts: model.accounts,
+        preferredAccountID: model.lastUsedAccountID,
+        preferredCategoryID: model.lastUsedCategoryID
+      )
     }
     .overlay(alignment: .bottom) {
       if let saved = model.lastSaveMessage {

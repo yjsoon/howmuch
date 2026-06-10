@@ -427,9 +427,16 @@ struct QuickEntryDraft: Equatable {
   var flagColour: FlagColour = .none
   var clearedState: ClearedState = .cleared
 
-  mutating func seedIfNeeded(accounts: [Account]) {
-    if accountID.isEmpty, let first = accounts.first {
-      accountID = first.id
+  mutating func seedIfNeeded(accounts: [Account], preferredAccountID: String? = nil, preferredCategoryID: String? = nil) {
+    if accountID.isEmpty {
+      if let preferredAccountID, accounts.contains(where: { $0.id == preferredAccountID && !$0.closed }) {
+        accountID = preferredAccountID
+      } else if let first = accounts.first(where: { !$0.closed }) ?? accounts.first {
+        accountID = first.id
+      }
+    }
+    if categoryID.isEmpty, let preferredCategoryID {
+      categoryID = preferredCategoryID
     }
   }
 

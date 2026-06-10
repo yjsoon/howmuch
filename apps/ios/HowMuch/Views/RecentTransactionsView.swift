@@ -40,7 +40,13 @@ struct RecentTransactionsView: View {
       ContentUnavailableView {
         Label("No transactions yet", systemImage: "tray")
       } description: {
-        Text("Capture a spend from the first tab, or import history on the server, then pull to refresh.")
+        Text("Capture a spend with the plus button, or import history on the server, then pull to refresh.")
+      } actions: {
+        Button("Add transaction") {
+          model.isShowingCapture = true
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(Theme.inflow)
       }
     }
   }
