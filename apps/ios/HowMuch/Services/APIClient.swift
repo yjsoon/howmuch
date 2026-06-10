@@ -1,0 +1,201 @@
+import Foundation
+
+enum APIClientError: LocalizedError {
+  case invalidBaseURL
+  case invalidResponse
+  case server(String)
+  case httpStatus(Int)
+  case decoding(String)
+  case validation(String)
+
+  var errorDescription: String? {
+    switch self {
+    case .invalidBaseURL:
+      return "Enter a valid API base URL."
+    case .invalidResponse:
+      return "The API returned an invalid response."
+    case .server(let message):
+      return message
+    case .httpStatus(let code):
+      return "The API request failed with status \(code)."
+    case .decoding(let message):
+      return "Could not decode API data: \(message)"
+    case .validation(let message):
+      return message
+    }
+  }
+}
+
+struct APIClient {
+  let settings: APISettings
+
+  func fetchReferenceData(planID: String) async throws -> ReferenceData {
+    async let planSettings = fetchPlanSettings(planID: planID)
+    async let accounts = fetchAccounts(planID: planID)
+    async let categories = fetchCategories(planID: planID)
+
+    return try await ReferenceData(
+      planSettings: planSettings,
+      accounts: accounts,
+      categoryGroups: categories
+    )
+  }
+
+  func fetchPlanSettings(planID: String) async throws -> PlanSettings {
+    let response: APIEnvelope<PlanSettingsPayload> = try await request(path: "/v1/plans/\(planID)/settings")
+    return response.data.settings
+  }
+
+  func fetchAccounts(planID: String) async throws -> [Account] {
+    let response: APIEnvelope<AccountsPayload> = try await request(path: "/v1/plans/\(planID)/accounts")
+    return response.data.accounts.filter { !$0.deleted }
+  }
+
+  func fetchCategories(planID: String) async throws -> [CategoryGroup] {
+    let response: APIEnvelope<CategoriesPayload> = try await request(path: "/v1/plans/\(planID)/categories")
+    return response.data.categoryGroups.filter { !$0.deleted }
+  }
+
+  func fetchTransactions(planID: String) async throws -> [Transaction] {
+    let response: APIEnvelope<TransactionsPayload> = try await request(path: "/v1/plans/\(planID)/transactions")
+    return response.data.transactions.filter { !$0.deleted }
+  }
+
+  func fetchSpendingBreakdown(planID: String, from: String, to: String) async throws -> SpendingBreakdownReport {
+    try await report(path: "/api/reports/spending-breakdown", planID: planID, from: from, to: to, interval: nil)
+  }
+
+  func fetchIncomeVsSpending(planID: String, from: String, to: String, interval: ReportInterval) async throws -> IncomeVsSpendingReport {
+    try await report(path: "/api/reports/income-vs-spending", planID: planID, from: from, to: to, interval: interval.rawValue)
+  }
+
+  func fetchNetWorth(planID: String, from: String, to: String, interval: ReportInterval) async throws -> NetWorthReport {
+    try await report(path: "/api/reports/net-worth", planID: planID, from: from, to: to, interval: interval.rawValue)
+  }
+
+  func fetchAgeOfMoney(planID: String, from: String, to: String, interval: ReportInterval) async throws -> AgeOfMoneyReport {
+    try await report(path: "/api/reports/age-of-money", planID: planID, from: from, to: to, interval: interval.rawValue)
+  }
+
+  func createTransaction(planID: String, request body: TransactionCreateRequest) async throws -> Transaction {
+    let response: APIEnvelope<TransactionPayload> = try await request(
+      path: "/v1/plans/\(planID)/transactions",
+      method: "POST",
+      body: TransactionCreateEnvelope(transaction: body)
+    )
+    return response.data.transaction
+  }
+
+  func submitMobileQuickEntry(planID: String, request body: MobileQuickEntryRequest) async throws -> Transaction {
+    let response: APIEnvelope<TransactionPayload> = try await request(
+      path: "/api/mobile/quick-entry",
+      queryItems: [URLQueryItem(name: "plan_id", value: planID)],
+      method: "POST",
+      body: body
+    )
+    return response.data.transaction
+  }
+
+  private func report<Payload: Decodable>(
+    path: String,
+    planID: String,
+    from: String,
+    to: String,
+    interval: String?
+  ) async throws -> Payload {
+    var queryItems = [
+      URLQueryItem(name: "plan_id", value: planID),
+      URLQueryItem(name: "from", value: from),
+      URLQueryItem(name: "to", value: to),
+    ]
+    if let interval {
+      queryItems.append(URLQueryItem(name: "interval", value: interval))
+    }
+
+    let response: APIEnvelope<Payload> = try await request(path: path, queryItems: queryItems)
+    return response.data
+  }
+
+  private func request<Payload: Decodable>(
+    path: String,
+    queryItems: [URLQueryItem] = [],
+    method: String = "GET"
+  ) async throws -> Payload {
+    try await executeRequest(path: path, queryItems: queryItems, method: method, bodyData: nil)
+  }
+
+  private func request<Payload: Decodable, Body: Encodable>(
+    path: String,
+    queryItems: [URLQueryItem] = [],
+    method: String = "GET",
+    body: Body
+  ) async throws -> Payload {
+    try await executeRequest(path: path, queryItems: queryItems, method: method, bodyData: try encoder.encode(body))
+  }
+
+  private func executeRequest<Payload: Decodable>(
+    path: String,
+    queryItems: [URLQueryItem] = [],
+    method: String = "GET",
+    bodyData: Data?
+  ) async throws -> Payload {
+    let url = try makeURL(path: path, queryItems: queryItems)
+    var request = URLRequest(url: url)
+    request.httpMethod = method
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+    let trimmedToken = settings.bearerToken.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmedToken.isEmpty {
+      request.setValue("Bearer \(trimmedToken)", forHTTPHeaderField: "Authorization")
+    }
+
+    if let bodyData {
+      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      request.httpBody = bodyData
+    }
+
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let httpResponse = response as? HTTPURLResponse else {
+      throw APIClientError.invalidResponse
+    }
+
+    guard (200 ..< 300).contains(httpResponse.statusCode) else {
+      if let serverError = try? decoder.decode(ServerErrorEnvelope.self, from: data) {
+        throw APIClientError.server(serverError.error.message)
+      }
+      throw APIClientError.httpStatus(httpResponse.statusCode)
+    }
+
+    do {
+      return try decoder.decode(Payload.self, from: data)
+    } catch {
+      throw APIClientError.decoding(error.localizedDescription)
+    }
+  }
+
+  private func makeURL(path: String, queryItems: [URLQueryItem]) throws -> URL {
+    guard var components = URLComponents(string: settings.trimmedBaseURL) else {
+      throw APIClientError.invalidBaseURL
+    }
+
+    components.path = path.hasPrefix("/") ? path : "/\(path)"
+    components.queryItems = queryItems.isEmpty ? nil : queryItems
+
+    guard let url = components.url else {
+      throw APIClientError.invalidBaseURL
+    }
+    return url
+  }
+
+  private var decoder: JSONDecoder {
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    return decoder
+  }
+
+  private var encoder: JSONEncoder {
+    let encoder = JSONEncoder()
+    encoder.keyEncodingStrategy = .convertToSnakeCase
+    return encoder
+  }
+}
