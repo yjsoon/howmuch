@@ -90,6 +90,7 @@ export function QuickEntryPage() {
           <span className="field-label">Amount</span>
           <input
             type="number"
+            name="amount"
             inputMode="decimal"
             step="0.01"
             min="0"
@@ -106,6 +107,7 @@ export function QuickEntryPage() {
           <span className="field-label">Payee</span>
           <input
             type="text"
+            name="payee"
             list="payee-options"
             value={payeeName}
             onChange={(event) => setPayeeName(event.target.value)}
@@ -123,7 +125,7 @@ export function QuickEntryPage() {
 
         <label className="field">
           <span className="field-label">Account</span>
-          <select value={selectedAccount} onChange={(event) => setAccountId(event.target.value)}>
+          <select name="account" value={selectedAccount} onChange={(event) => setAccountId(event.target.value)}>
             {openAccounts.map((account) => (
               <option key={account.id} value={account.id}>
                 {account.name}
@@ -134,7 +136,7 @@ export function QuickEntryPage() {
 
         <label className="field">
           <span className="field-label">Category (optional)</span>
-          <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
+          <select name="category" value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
             <option value="">Uncategorised</option>
             {categoryGroups.map((group) => (
               <optgroup key={group.id} label={group.name}>
@@ -153,12 +155,13 @@ export function QuickEntryPage() {
         <div className="field-row">
           <label className="field">
             <span className="field-label">Date</span>
-            <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+            <input type="date" name="date" value={date} onChange={(event) => setDate(event.target.value)} />
           </label>
           <label className="field">
             <span className="field-label">Memo (optional)</span>
             <input
               type="text"
+              name="memo"
               value={memo}
               onChange={(event) => setMemo(event.target.value)}
               placeholder="Note"

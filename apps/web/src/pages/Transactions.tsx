@@ -52,6 +52,7 @@ export function TransactionsPage() {
         <div className="headline-row">
           <input
             type="search"
+            name="search"
             className="search-input"
             placeholder="Search payee, memo or category…"
             value={search}
