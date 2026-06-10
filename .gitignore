@@ -8,5 +8,5 @@ dist/
 coverage/
 data/*.sqlite
 data/*.sqlite-*
+apps/ios/build/
 *.log
-
