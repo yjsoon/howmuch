@@ -719,25 +719,9 @@ export class LedgerRepository {
 
   findDuplicateTransaction(planId: string, input: TransactionInput): any | null {
     if (input.import_id) {
-      const importMatch = this.db
-        .query(
-          `SELECT
-             t.*,
-             a.name AS account_name,
-             p.name AS payee_name,
-             c.name AS category_name
-           FROM transactions t
-           JOIN accounts a ON a.id = t.account_id
-           LEFT JOIN payees p ON p.id = t.payee_id
-           LEFT JOIN categories c ON c.id = t.category_id
-           WHERE t.plan_id = ? AND t.import_id = ? AND t.deleted = 0
-           ORDER BY t.updated_at DESC
-           LIMIT 1`,
-        )
-        .get(planId, input.import_id) as Row | null;
-
+      const importMatch = this.findTransactionByImportId(planId, input.import_id);
       if (importMatch) {
-        return this.formatTransaction(importMatch);
+        return importMatch;
       }
     }
 
@@ -783,6 +767,27 @@ export class LedgerRepository {
          LIMIT 1`,
       )
       .get(...params) as Row | null;
+
+    return row ? this.formatTransaction(row) : null;
+  }
+
+  findTransactionByImportId(planId: string, importId: string): any | null {
+    const row = this.db
+      .query(
+        `SELECT
+           t.*,
+           a.name AS account_name,
+           p.name AS payee_name,
+           c.name AS category_name
+         FROM transactions t
+         JOIN accounts a ON a.id = t.account_id
+         LEFT JOIN payees p ON p.id = t.payee_id
+         LEFT JOIN categories c ON c.id = t.category_id
+         WHERE t.plan_id = ? AND t.import_id = ? AND t.deleted = 0
+         ORDER BY t.updated_at DESC
+         LIMIT 1`,
+      )
+      .get(planId, importId) as Row | null;
 
     return row ? this.formatTransaction(row) : null;
   }

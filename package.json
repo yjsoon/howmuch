@@ -9,6 +9,7 @@
   "scripts": {
     "demo:seed": "bun scripts/seed-demo.ts",
     "import:ynab": "bun scripts/import-ynab.ts",
+    "import:ynab-export": "bun scripts/import-ynab-export.ts",
     "dev": "bun run dev:stack",
     "dev:stack": "./scripts/dev-stack.sh",
     "api:dev": "bun --hot apps/api/src/server.ts",

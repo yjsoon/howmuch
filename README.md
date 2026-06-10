@@ -50,7 +50,13 @@ bun run import:ynab --list-plans
 bun run import:ynab --plan-id <ynab-plan-id> --db data/howmuch-real.sqlite
 ```
 
-The importer creates a backup before overwriting an existing SQLite file and prints the imported counts. Full workflow details live in [docs/ynab-migration.md](docs/ynab-migration.md).
+If a logged-in YNAB web session is available but a token is not, use the official web export fallback:
+
+```sh
+bun run import:ynab-export -- --zip "/path/to/YNAB Export - Actual Budget as of 2026-06-11 00-25.zip" --db data/howmuch-real.sqlite
+```
+
+Both importers create a backup before overwriting an existing SQLite file and print imported counts. Full workflow details live in [docs/ynab-migration.md](docs/ynab-migration.md).
 
 ## Smoke Check
 
