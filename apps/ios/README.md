@@ -15,7 +15,7 @@ The app stays transaction-led: accounts, registers, capture, and reflection. It 
 
 ## App Structure
 
-`apps/ios/HowMuch.xcodeproj` contains a SwiftUI app (iOS 17+) with a custom YNAB-style bottom bar — Accounts | + Transaction | Reflect — plus a connection sheet:
+`apps/ios/HowMuch.xcodeproj` contains a SwiftUI app (iOS 26+) with a Liquid Glass tab bar — Accounts | Reflect, with + Transaction floating separately at the trailing edge as a search-role tab that opens the capture sheet — plus a connection sheet:
 
 - `Accounts`: grouped account list (Cash / Credit / Tracking / Closed) with collapsible sections, group totals, and an All Transactions row. Each account opens its register.
 - `Register`: date-grouped transactions with working balance, search, uncleared and uncategorised filter banners, cleared/reconciled badges, flag bars, memo chips, and split/transfer labels. Tapping a row opens the edit form.
@@ -23,7 +23,7 @@ The app stays transaction-led: accounts, registers, capture, and reflection. It 
 - `Reflect`: cards for Spending Breakdown (stacked share bar, top categories), Net Worth (assets/debts, column trend), Income vs Spending (paired columns), and Age of Money. Each card opens a detail screen; Spending Breakdown and the trends support Month (`‹ June 2026 ›` stepper) and Preset (This Month … Year to Date) ranges, and category rows drill into a filtered register. Age of Money always measures the full history, since the server replays income lots from `from`.
 - `Connection` (ellipsis on either tab): base URL, bearer token, and plan ID persisted in `UserDefaults`, with a test-connection check against `GET /v1/user`.
 
-Visual language follows YNAB: warm cream canvas, white rounded cards, blurple accent, lime inflow highlight, ledger red/green amounts, monospaced digits.
+Visual language follows YNAB: warm cream canvas, white rounded cards, blurple accent, lime inflow highlight, ledger red/green amounts, monospaced digits. Chrome follows iOS 26 Liquid Glass: native glass tab and navigation bars (the tab bar minimises on scroll), a glass keypad panel, a glass-prominent Save pill, and a glass toast — content cards stay opaque per the glass guidelines.
 
 State lives in one observable `AppModel` with independent load phases per surface (reference data, ledger, reports), so a failure in one tab does not bleed into the others. Dates use the local calendar (a transaction entered before 8am SGT must not land on yesterday's GMT date). Bookkeeping category groups from the YNAB import ("Hidden Categories", "Non-Personal", inflows) are demoted in pickers and reports via the same quiet-group heuristic as the web app. The last-used account is remembered across launches.
 

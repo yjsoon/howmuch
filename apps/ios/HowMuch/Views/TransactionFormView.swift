@@ -399,12 +399,11 @@ struct TransactionFormView: View {
         Text("Save")
           .fontWeight(.semibold)
       }
-      .foregroundStyle(.white)
-      .padding(.horizontal, 24)
-      .padding(.vertical, 13)
-      .background(Theme.accent, in: Capsule())
-      .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+      .padding(.horizontal, 8)
+      .padding(.vertical, 6)
     }
+    .buttonStyle(.glassProminent)
+    .tint(Theme.accent)
     .disabled(!draft.canSave || model.isSubmitting)
     .opacity(draft.canSave ? 1 : 0.5)
   }
@@ -463,10 +462,12 @@ struct CalculatorKeypad: View {
         doneKey
       }
     }
-    .padding(.horizontal, 12)
-    .padding(.top, 10)
-    .padding(.bottom, 6)
-    .background(Theme.surfaceMuted.ignoresSafeArea(edges: .bottom))
+    .padding(10)
+    // The panel is glass; the done key stays a solid fill because glass
+    // cannot sample other glass.
+    .glassEffect(.regular, in: .rect(cornerRadius: 28))
+    .padding(.horizontal, 8)
+    .padding(.bottom, 4)
   }
 
   private func keypadRow(@ViewBuilder content: () -> some View) -> some View {

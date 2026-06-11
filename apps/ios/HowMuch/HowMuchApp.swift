@@ -13,9 +13,10 @@ struct HowMuchApp: App {
   }
 }
 
-enum AppTab {
+enum AppTab: Hashable {
   case accounts
   case reflect
+  case transaction
 }
 
 private struct RootView: View {
@@ -25,33 +26,48 @@ private struct RootView: View {
   var body: some View {
     @Bindable var model = model
 
-    TabView(selection: $tab) {
-      NavigationStack {
-        AccountsView()
+    // The Transaction tab takes the search role, so Liquid Glass floats it
+    // separately at the trailing edge. Selecting it opens the capture sheet
+    // rather than switching tabs.
+    let selection = Binding(
+      get: { tab },
+      set: { (next: AppTab) in
+        if next == .transaction {
+          model.isShowingCapture = true
+        } else {
+          tab = next
+        }
       }
-      .tag(AppTab.accounts)
-      .toolbar(.hidden, for: .tabBar)
+    )
 
-      NavigationStack {
-        ReflectView()
+    TabView(selection: selection) {
+      Tab("Accounts", systemImage: "building.columns", value: AppTab.accounts) {
+        NavigationStack {
+          AccountsView()
+        }
       }
-      .tag(AppTab.reflect)
-      .toolbar(.hidden, for: .tabBar)
-    }
-    .safeAreaInset(edge: .bottom, spacing: 0) {
-      YnabTabBar(selection: $tab) {
-        model.isShowingCapture = true
+
+      Tab("Reflect", systemImage: "chart.bar.fill", value: AppTab.reflect) {
+        NavigationStack {
+          ReflectView()
+        }
+      }
+
+      Tab("Transaction", systemImage: "plus", value: AppTab.transaction, role: .search) {
+        // Never shown: selecting this tab presents the capture sheet instead.
+        Color.clear
       }
     }
+    .tabBarMinimizeBehavior(.onScrollDown)
     .overlay(alignment: .bottom) {
       if let message = model.lastSaveMessage {
         Text(message)
           .font(.footnote.weight(.medium))
-          .foregroundStyle(.white)
+          .foregroundStyle(Theme.textPrimary)
           .padding(.horizontal, 16)
           .padding(.vertical, 10)
-          .background(Theme.textPrimary.opacity(0.92), in: Capsule())
-          .padding(.bottom, 86)
+          .glassEffect(.regular, in: .capsule)
+          .padding(.bottom, 90)
           .transition(.move(edge: .bottom).combined(with: .opacity))
       }
     }
@@ -67,63 +83,5 @@ private struct RootView: View {
     .sheet(isPresented: $model.isShowingCapture) {
       AddTransactionSheet()
     }
-  }
-}
-
-/// YNAB-style bottom bar: Accounts | + Transaction | Reflect.
-private struct YnabTabBar: View {
-  @Binding var selection: AppTab
-  let onAddTransaction: () -> Void
-
-  var body: some View {
-    HStack(alignment: .bottom) {
-      tabButton(.accounts, title: "Accounts", icon: "building.columns")
-
-      Button(action: onAddTransaction) {
-        VStack(spacing: 3) {
-          ZStack {
-            Circle()
-              .fill(Theme.accent)
-              .frame(width: 44, height: 44)
-            Image(systemName: "plus")
-              .font(.title3.weight(.semibold))
-              .foregroundStyle(.white)
-          }
-          Text("Transaction")
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-      }
-      .buttonStyle(.plain)
-      .accessibilityLabel("Add transaction")
-
-      tabButton(.reflect, title: "Reflect", icon: "chart.bar.fill")
-    }
-    .padding(.top, 8)
-    .padding(.bottom, 2)
-    .padding(.horizontal, 24)
-    .background(
-      Theme.card
-        .shadow(color: .black.opacity(0.08), radius: 6, y: -2)
-        .ignoresSafeArea(edges: .bottom)
-    )
-  }
-
-  private func tabButton(_ value: AppTab, title: String, icon: String) -> some View {
-    let isSelected = selection == value
-    return Button {
-      selection = value
-    } label: {
-      VStack(spacing: 4) {
-        Image(systemName: icon)
-          .font(.title3)
-        Text(title)
-          .font(.caption2)
-      }
-      .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
-      .frame(maxWidth: .infinity)
-    }
-    .buttonStyle(.plain)
   }
 }
