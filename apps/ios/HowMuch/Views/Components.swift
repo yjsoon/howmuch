@@ -69,6 +69,45 @@ struct CardDivider: View {
   }
 }
 
+/// `‹ June 2026 ›` month stepper, clamped to the current month.
+struct MonthStepper: View {
+  @Binding var monthAnchor: Date
+
+  var body: some View {
+    HStack {
+      stepButton(systemName: "chevron.left", monthDelta: -1)
+      Spacer()
+      Text(monthAnchor.monthYearLabel)
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(Theme.accent)
+      Spacer()
+      stepButton(systemName: "chevron.right", monthDelta: 1)
+        .disabled(isCurrentMonth)
+        .opacity(isCurrentMonth ? 0.3 : 1)
+    }
+    .padding(.horizontal, 8)
+  }
+
+  private var isCurrentMonth: Bool {
+    monthAnchor.startOfMonth() >= Date().startOfMonth()
+  }
+
+  private func stepButton(systemName: String, monthDelta: Int) -> some View {
+    Button {
+      if let next = Calendar.current.date(byAdding: .month, value: monthDelta, to: monthAnchor) {
+        monthAnchor = next
+      }
+    } label: {
+      Image(systemName: systemName)
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(Theme.accent)
+        .padding(8)
+        .background(Theme.surfaceMuted, in: Circle())
+    }
+    .buttonStyle(.plain)
+  }
+}
+
 /// Loading / error placeholder for a surface driven by a `LoadPhase`.
 struct PhasePlaceholder: View {
   let phase: LoadPhase

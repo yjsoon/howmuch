@@ -62,18 +62,7 @@ struct ReportRangePicker: View {
 
       switch range.mode {
       case .month:
-        HStack {
-          monthStepButton(systemName: "chevron.left", monthDelta: -1)
-          Spacer()
-          Text(range.monthAnchor.monthYearLabel)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Theme.accent)
-          Spacer()
-          monthStepButton(systemName: "chevron.right", monthDelta: 1)
-            .disabled(isCurrentMonth)
-            .opacity(isCurrentMonth ? 0.3 : 1)
-        }
-        .padding(.horizontal, 8)
+        MonthStepper(monthAnchor: $range.monthAnchor)
       case .preset:
         Menu {
           ForEach(ReportPreset.allCases) { preset in
@@ -97,24 +86,6 @@ struct ReportRangePicker: View {
     }
   }
 
-  private var isCurrentMonth: Bool {
-    range.monthAnchor.startOfMonth() >= Date().startOfMonth()
-  }
-
-  private func monthStepButton(systemName: String, monthDelta: Int) -> some View {
-    Button {
-      if let next = Calendar.current.date(byAdding: .month, value: monthDelta, to: range.monthAnchor) {
-        range.monthAnchor = next
-      }
-    } label: {
-      Image(systemName: systemName)
-        .font(.subheadline.weight(.semibold))
-        .foregroundStyle(Theme.accent)
-        .padding(8)
-        .background(Theme.surfaceMuted, in: Circle())
-    }
-    .buttonStyle(.plain)
-  }
 }
 
 // MARK: - Spending Breakdown

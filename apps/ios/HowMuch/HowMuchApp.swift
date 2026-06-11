@@ -15,6 +15,7 @@ struct HowMuchApp: App {
 
 enum AppTab: Hashable {
   case accounts
+  case categories
   case reflect
   case transaction
 }
@@ -44,6 +45,12 @@ private struct RootView: View {
       Tab("Accounts", systemImage: "building.columns", value: AppTab.accounts) {
         NavigationStack {
           AccountsView()
+        }
+      }
+
+      Tab("Categories", systemImage: "square.grid.2x2", value: AppTab.categories) {
+        NavigationStack {
+          CategoriesView()
         }
       }
 

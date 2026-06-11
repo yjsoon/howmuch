@@ -19,6 +19,7 @@
 		A10000000000000000000064 /* Pickers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000074 /* Pickers.swift */; };
 		A10000000000000000000065 /* ReflectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000075 /* ReflectView.swift */; };
 		A10000000000000000000066 /* ReflectDetails.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000076 /* ReflectDetails.swift */; };
+		A10000000000000000000067 /* CategoriesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000077 /* CategoriesView.swift */; };
 		A10000000000000000000028 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* SettingsView.swift */; };
 		A10000000000000000000029 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000019 /* Theme.swift */; };
 /* End PBXBuildFile section */
@@ -37,6 +38,7 @@
 		A10000000000000000000074 /* Pickers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pickers.swift; sourceTree = "<group>"; };
 		A10000000000000000000075 /* ReflectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReflectView.swift; sourceTree = "<group>"; };
 		A10000000000000000000076 /* ReflectDetails.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReflectDetails.swift; sourceTree = "<group>"; };
+		A10000000000000000000077 /* CategoriesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoriesView.swift; sourceTree = "<group>"; };
 		A10000000000000000000018 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A10000000000000000000019 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -112,6 +114,7 @@
 				A10000000000000000000070 /* Components.swift */,
 				A10000000000000000000071 /* AccountsView.swift */,
 				A10000000000000000000072 /* RegisterView.swift */,
+				A10000000000000000000077 /* CategoriesView.swift */,
 				A10000000000000000000073 /* TransactionFormView.swift */,
 				A10000000000000000000074 /* Pickers.swift */,
 				A10000000000000000000075 /* ReflectView.swift */,
@@ -201,6 +204,7 @@
 				A10000000000000000000064 /* Pickers.swift in Sources */,
 				A10000000000000000000065 /* ReflectView.swift in Sources */,
 				A10000000000000000000066 /* ReflectDetails.swift in Sources */,
+				A10000000000000000000067 /* CategoriesView.swift in Sources */,
 				A10000000000000000000028 /* SettingsView.swift in Sources */,
 				A10000000000000000000020 /* HowMuchApp.swift in Sources */,
 			);
