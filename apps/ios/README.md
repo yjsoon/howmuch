@@ -1,35 +1,31 @@
 # HowMuch iOS
 
-The first iOS scope is a quick-entry fallback and lightweight report companion.
+A YNAB-styled transaction ledger and reports companion (modelled on YNAB's iOS app, minus the Plan tab and all envelope-budgeting workflows).
 
-Initial API dependency:
+API dependency:
 
-- `POST /api/mobile/quick-entry`
+- `GET/POST/PUT/DELETE /v1/plans/{id}/transactions[/{txid}]`
+- `GET /v1/plans/{id}/accounts`, `/categories`, `/payees`, `/settings`
 - `GET /api/reports/spending-breakdown`
 - `GET /api/reports/income-vs-spending`
 - `GET /api/reports/net-worth`
 - `GET /api/reports/age-of-money`
 
-The app should stay transaction-led: choose account, amount, payee, category, memo, and optional flag. It should not expose envelope budgeting or YNAB credit-card payment workflows.
+The app stays transaction-led: accounts, registers, capture, and reflection. It does not expose envelope budgeting or YNAB credit-card payment workflows.
 
 ## App Structure
 
-`apps/ios/HowMuch.xcodeproj` contains a SwiftUI app (iOS 17+) with two primary tabs, a compose sheet, and a connection sheet:
+`apps/ios/HowMuch.xcodeproj` contains a SwiftUI app (iOS 17+) with a custom YNAB-style bottom bar — Accounts | + Transaction | Reflect — plus a connection sheet:
 
-- `Recents`: latest 50 transactions grouped by day with per-day totals, ledger-coloured amounts, flag dots, and an Uncleared badge. Loading, failure (with retry), and empty states are distinct.
-- `Reports`: compact cards for spending breakdown (share bars), income v spending (paired mini columns), net worth (sparkline plus delta), and age of money. Window (1M/3M/12M/YTD) and interval (week/month/year) controls refetch on change.
-- `Capture` (plus button): amount-first quick entry presented as a transient compose sheet. A Spent/Received toggle owns the sign (no typed minus signs), the amount uses the decimal pad, and the save button echoes the parsed amount. Saves confirm with a transient toast and haptic, then reset for the next entry while keeping account and category.
-- `Connection` (gear icon): base URL, bearer token, and plan ID persisted in `UserDefaults`, with a test-connection check against `GET /v1/user`.
+- `Accounts`: grouped account list (Cash / Credit / Tracking / Closed) with collapsible sections, group totals, and an All Transactions row. Each account opens its register.
+- `Register`: date-grouped transactions with working balance, search, uncleared and uncategorised filter banners, cleared/reconciled badges, flag bars, memo chips, and split/transfer labels. Tapping a row opens the edit form.
+- `Transaction` (centre + button): YNAB-style capture sheet. An Outflow/Inflow segmented pill owns the sign (the header turns lime for inflows), the amount is driven by a calculator keypad (digits, `+`, `−`, `=`, backspace, clear, done), and payee/category/account/date push pickers. Picking a payee pre-fills the category it was last used with. Cleared toggle, flag, and memo live in a second card. Editing adds Delete Transaction.
+- `Reflect`: cards for Spending Breakdown (stacked share bar, top categories), Net Worth (assets/debts, column trend), Income vs Spending (paired columns), and Age of Money. Each card opens a detail screen; Spending Breakdown and the trends support Month (`‹ June 2026 ›` stepper) and Preset (This Month … Year to Date) ranges, and category rows drill into a filtered register. Age of Money always measures the full history, since the server replays income lots from `from`.
+- `Connection` (ellipsis on either tab): base URL, bearer token, and plan ID persisted in `UserDefaults`, with a test-connection check against `GET /v1/user`.
 
-Visual language follows the web app's editorial-ledger palette: ledger red for outflows, racing green for inflows, monospaced digits for figures, serif report titles.
+Visual language follows YNAB: warm cream canvas, white rounded cards, blurple accent, lime inflow highlight, ledger red/green amounts, monospaced digits.
 
-State lives in one observable `AppModel` with independent load phases per surface (reference data, recents, reports), so a failure in one tab does not bleed into the others.
-
-## API Shape Notes
-
-- The client models both `/api/mobile/quick-entry` and `/v1/plans/{id}/transactions`.
-- The current capture flow posts to `/v1/plans/{id}/transactions` after client-side decimal-to-milliunit conversion so `cleared` survives end to end.
-- Backend gap: `/api/mobile/quick-entry` still ignores `cleared` and `approved`, so it cannot yet back the full native capture form without losing state.
+State lives in one observable `AppModel` with independent load phases per surface (reference data, ledger, reports), so a failure in one tab does not bleed into the others. Dates use the local calendar (a transaction entered before 8am SGT must not land on yesterday's GMT date). Bookkeeping category groups from the YNAB import ("Hidden Categories", "Non-Personal", inflows) are demoted in pickers and reports via the same quiet-group heuristic as the web app. The last-used account is remembered across launches.
 
 ## Validation
 
