@@ -15,10 +15,11 @@ The app stays transaction-led: accounts, registers, capture, and reflection. It 
 
 ## App Structure
 
-`apps/ios/HowMuch.xcodeproj` contains a SwiftUI app (iOS 26+) with a Liquid Glass tab bar — Accounts | Reflect, with + Transaction floating separately at the trailing edge as a search-role tab that opens the capture sheet — plus a connection sheet:
+`apps/ios/HowMuch.xcodeproj` contains a SwiftUI app (iOS 26+) with a Liquid Glass tab bar — Accounts | Categories | Reflect, with + Transaction floating separately at the trailing edge as a search-role tab that opens the capture sheet — plus a connection sheet:
 
 - `Accounts`: grouped account list (Cash / Credit / Tracking / Closed) with collapsible sections, group totals, and an All Transactions row. Each account opens its register.
 - `Register`: date-grouped transactions with working balance, search, uncleared and uncategorised filter banners, cleared/reconciled badges, flag bars, memo chips, and split/transfer labels. Tapping a row opens the edit form.
+- `Categories`: YNAB's category list without the budget columns — a `‹ June 2026 ›` month stepper, the month's total spending, collapsible groups with totals, and per-category spend (zero-spend categories included). Rows drill into that category's transactions for the month; bookkeeping groups sit behind a toggle.
 - `Transaction` (centre + button): YNAB-style capture sheet. An Outflow/Inflow segmented pill owns the sign (the header turns lime for inflows), the amount is driven by a calculator keypad (digits, `+`, `−`, `=`, backspace, clear, done), and payee/category/account/date push pickers. Picking a payee pre-fills the category it was last used with. Cleared toggle, flag, and memo live in a second card. Editing adds Delete Transaction.
 - `Reflect`: cards for Spending Breakdown (stacked share bar, top categories), Net Worth (assets/debts, column trend), Income vs Spending (paired columns), and Age of Money. Each card opens a detail screen; Spending Breakdown and the trends support Month (`‹ June 2026 ›` stepper) and Preset (This Month … Year to Date) ranges, and category rows drill into a filtered register. Age of Money always measures the full history, since the server replays income lots from `from`.
 - `Connection` (ellipsis on either tab): base URL, bearer token, and plan ID persisted in `UserDefaults`, with a test-connection check against `GET /v1/user`.
