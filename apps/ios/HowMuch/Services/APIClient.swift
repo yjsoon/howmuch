@@ -33,11 +33,13 @@ struct APIClient {
     async let planSettings = fetchPlanSettings(planID: planID)
     async let accounts = fetchAccounts(planID: planID)
     async let categories = fetchCategories(planID: planID)
+    async let payees = fetchPayees(planID: planID)
 
     return try await ReferenceData(
       planSettings: planSettings,
       accounts: accounts,
-      categoryGroups: categories
+      categoryGroups: categories,
+      payees: payees
     )
   }
 
@@ -62,6 +64,11 @@ struct APIClient {
     return response.data.categoryGroups.filter { !$0.deleted }
   }
 
+  func fetchPayees(planID: String) async throws -> [Payee] {
+    let response: APIEnvelope<PayeesPayload> = try await request(path: "/v1/plans/\(planID)/payees")
+    return response.data.payees.filter { $0.deleted != true }
+  }
+
   func fetchTransactions(planID: String) async throws -> [Transaction] {
     let response: APIEnvelope<TransactionsPayload> = try await request(path: "/v1/plans/\(planID)/transactions")
     return response.data.transactions.filter { !$0.deleted }
@@ -79,25 +86,34 @@ struct APIClient {
     try await report(path: "/api/reports/net-worth", planID: planID, from: from, to: to, interval: interval.rawValue)
   }
 
-  func fetchAgeOfMoney(planID: String, from: String, to: String, interval: ReportInterval) async throws -> AgeOfMoneyReport {
-    try await report(path: "/api/reports/age-of-money", planID: planID, from: from, to: to, interval: interval.rawValue)
+  /// Deliberately takes no date range: the server replays income lots from
+  /// `from`, so the weighted age is only honest over the full history.
+  func fetchAgeOfMoney(planID: String, interval: ReportInterval) async throws -> AgeOfMoneyReport {
+    try await report(path: "/api/reports/age-of-money", planID: planID, from: nil, to: nil, interval: interval.rawValue)
   }
 
-  func createTransaction(planID: String, request body: TransactionCreateRequest) async throws -> Transaction {
+  func createTransaction(planID: String, request body: TransactionWriteRequest) async throws -> Transaction {
     let response: APIEnvelope<TransactionPayload> = try await request(
       path: "/v1/plans/\(planID)/transactions",
       method: "POST",
-      body: TransactionCreateEnvelope(transaction: body)
+      body: TransactionWriteEnvelope(transaction: body)
     )
     return response.data.transaction
   }
 
-  func submitMobileQuickEntry(planID: String, request body: MobileQuickEntryRequest) async throws -> Transaction {
+  func updateTransaction(planID: String, transactionID: String, request body: TransactionWriteRequest) async throws -> Transaction {
     let response: APIEnvelope<TransactionPayload> = try await request(
-      path: "/api/mobile/quick-entry",
-      queryItems: [URLQueryItem(name: "plan_id", value: planID)],
-      method: "POST",
-      body: body
+      path: "/v1/plans/\(planID)/transactions/\(transactionID)",
+      method: "PUT",
+      body: TransactionWriteEnvelope(transaction: body)
+    )
+    return response.data.transaction
+  }
+
+  func deleteTransaction(planID: String, transactionID: String) async throws -> Transaction {
+    let response: APIEnvelope<TransactionPayload> = try await request(
+      path: "/v1/plans/\(planID)/transactions/\(transactionID)",
+      method: "DELETE"
     )
     return response.data.transaction
   }
@@ -105,15 +121,19 @@ struct APIClient {
   private func report<Payload: Decodable>(
     path: String,
     planID: String,
-    from: String,
-    to: String,
+    from: String?,
+    to: String?,
     interval: String?
   ) async throws -> Payload {
-    var queryItems = [
-      URLQueryItem(name: "plan_id", value: planID),
-      URLQueryItem(name: "from", value: from),
-      URLQueryItem(name: "to", value: to),
-    ]
+    // plan_id is mandatory on every report call: without it the API silently
+    // answers for its configured default plan.
+    var queryItems = [URLQueryItem(name: "plan_id", value: planID)]
+    if let from {
+      queryItems.append(URLQueryItem(name: "from", value: from))
+    }
+    if let to {
+      queryItems.append(URLQueryItem(name: "to", value: to))
+    }
     if let interval {
       queryItems.append(URLQueryItem(name: "interval", value: interval))
     }

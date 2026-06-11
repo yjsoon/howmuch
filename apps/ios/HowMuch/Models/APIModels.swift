@@ -50,6 +50,31 @@ struct APISettings: Codable, Equatable {
   }
 }
 
+/// View options remembered across launches, persisted like the connection
+/// settings. Defaults apply whenever a stored blob is missing or unreadable.
+struct ViewPrefs: Codable, Equatable {
+  static let userDefaultsKey = "HowMuch.ViewPrefs"
+
+  var lastUsedAccountID: String?
+
+  static func load(from defaults: UserDefaults = .standard) -> ViewPrefs {
+    guard
+      let data = defaults.data(forKey: userDefaultsKey),
+      let decoded = try? JSONDecoder().decode(ViewPrefs.self, from: data)
+    else {
+      return ViewPrefs()
+    }
+    return decoded
+  }
+
+  func save(to defaults: UserDefaults = .standard) {
+    guard let data = try? JSONEncoder().encode(self) else {
+      return
+    }
+    defaults.set(data, forKey: Self.userDefaultsKey)
+  }
+}
+
 struct UserPayload: Decodable {
   let user: APIUser
 }
@@ -62,6 +87,7 @@ struct ReferenceData {
   let planSettings: PlanSettings
   let accounts: [Account]
   let categoryGroups: [CategoryGroup]
+  let payees: [Payee]
 }
 
 struct PlanSettingsPayload: Decodable {
@@ -74,6 +100,21 @@ struct AccountsPayload: Decodable {
 
 struct CategoriesPayload: Decodable {
   let categoryGroups: [CategoryGroup]
+}
+
+struct PayeesPayload: Decodable {
+  let payees: [Payee]
+}
+
+struct Payee: Decodable, Identifiable, Hashable {
+  let id: String
+  let name: String
+  let transferAccountId: String?
+  let deleted: Bool?
+
+  var isTransferPayee: Bool {
+    transferAccountId != nil
+  }
 }
 
 struct TransactionsPayload: Decodable {
@@ -159,6 +200,22 @@ struct CategoryGroup: Decodable, Identifiable, Hashable {
   let hidden: Bool
   let deleted: Bool
   let categories: [Category]
+
+  /// Bookkeeping groups the YNAB import carries as ordinary groups ("Hidden
+  /// Categories", "Non-Personal (Don't Summarise)", inflows). Mirrors the web
+  /// app's quiet-group regex in lib/categories.ts so pickers and reports
+  /// demote the same groups everywhere.
+  var isQuiet: Bool {
+    hidden || CategoryGroup.isQuietName(name)
+  }
+
+  static func isQuietName(_ name: String?) -> Bool {
+    guard let name else {
+      return false
+    }
+    let pattern = "hidden|non.personal|don.t summari[sz]e|inflow|credit card payments|internal"
+    return name.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+  }
 }
 
 struct Category: Decodable, Identifiable, Hashable {
@@ -257,6 +314,18 @@ struct Transaction: Decodable, Identifiable, Hashable {
     case importPayeeNameOriginal = "importPayeeNameOriginal"
     case deleted
     case subtransactions
+  }
+}
+
+extension Transaction {
+  /// True when the row still needs a category: no category, not a transfer,
+  /// and not a split (whose categories live on the subtransactions).
+  var isUncategorised: Bool {
+    categoryID == nil && transferAccountID == nil && subtransactions.isEmpty
+  }
+
+  var isSplit: Bool {
+    !subtransactions.isEmpty
   }
 }
 
@@ -372,173 +441,191 @@ struct AgeOfMoneyPeriod: Decodable, Identifiable {
   let unmatchedSpending: Int
 }
 
-struct TransactionCreateEnvelope: Encodable {
-  let transaction: TransactionCreateRequest
+struct TransactionWriteEnvelope: Encodable {
+  let transaction: TransactionWriteRequest
 }
 
-struct TransactionCreateRequest: Encodable {
+/// Create/update body. Encodes optional fields as explicit nulls so an update
+/// can clear them — the API treats omitted keys as "keep existing".
+struct TransactionWriteRequest: Encodable {
   let accountID: String
   let date: String
   let amount: Int
-  let payeeName: String
+  let payeeID: String?
+  let payeeName: String?
   let categoryID: String?
   let memo: String?
   let cleared: ClearedState
   let approved: Bool
   let flagColor: String?
-}
 
-struct MobileQuickEntryRequest: Encodable {
-  let clientID: String
-  let accountID: String
-  let date: String
-  let amount: String
-  let amountMilli: Int
-  let payeeName: String
-  let categoryID: String?
-  let memo: String?
-  let flagColor: String?
+  private enum CodingKeys: String, CodingKey {
+    case accountID
+    case date
+    case amount
+    case payeeID
+    case payeeName
+    case categoryID
+    case memo
+    case cleared
+    case approved
+    case flagColor
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(accountID, forKey: .accountID)
+    try container.encode(date, forKey: .date)
+    try container.encode(amount, forKey: .amount)
+    try container.encode(payeeID, forKey: .payeeID)
+    try container.encode(payeeName, forKey: .payeeName)
+    try container.encode(categoryID, forKey: .categoryID)
+    try container.encode(memo, forKey: .memo)
+    try container.encode(cleared, forKey: .cleared)
+    try container.encode(approved, forKey: .approved)
+    try container.encode(flagColor, forKey: .flagColor)
+  }
 }
 
 enum EntryDirection: String, CaseIterable, Identifiable {
-  case spent
-  case received
+  case outflow
+  case inflow
 
   var id: String { rawValue }
 
   var title: String {
     switch self {
-    case .spent:
-      return "Spent"
-    case .received:
-      return "Received"
+    case .outflow:
+      return "− Outflow"
+    case .inflow:
+      return "+ Inflow"
     }
   }
 }
 
-struct QuickEntryDraft: Equatable {
-  var accountID = ""
-  var date = Date()
+/// Editable state behind both the Add Transaction sheet and the edit form.
+struct TransactionDraft: Equatable {
+  var id: String?
+  var direction: EntryDirection = .outflow
+  /// Magnitude only; the Outflow/Inflow toggle owns the sign.
+  var amountMagnitudeMilli = 0
+  var payeeID: String?
   var payeeName = ""
-  var amountText = ""
-  var direction: EntryDirection = .spent
+  var accountID = ""
+  var categoryID: String?
+  var date = Date()
+  var isCleared = false
+  var wasReconciled = false
+  var flag: FlagColour = .none
   var memo = ""
-  var categoryID = ""
-  var flagColour: FlagColour = .none
-  var clearedState: ClearedState = .cleared
 
-  mutating func seedIfNeeded(accounts: [Account], preferredAccountID: String? = nil, preferredCategoryID: String? = nil) {
-    if accountID.isEmpty {
-      if let preferredAccountID, accounts.contains(where: { $0.id == preferredAccountID && !$0.closed }) {
-        accountID = preferredAccountID
-      } else if let first = accounts.first(where: { !$0.closed }) ?? accounts.first {
-        accountID = first.id
-      }
+  init() {}
+
+  init(transaction: Transaction) {
+    id = transaction.id
+    direction = transaction.amount < 0 ? .outflow : .inflow
+    amountMagnitudeMilli = abs(transaction.amount)
+    payeeID = transaction.payeeID
+    payeeName = transaction.payeeName ?? ""
+    accountID = transaction.accountID
+    categoryID = transaction.categoryID
+    date = Date(isoDateString: transaction.date) ?? Date()
+    isCleared = transaction.cleared != .uncleared
+    wasReconciled = transaction.cleared == .reconciled
+    flag = FlagColour(rawValue: transaction.flagColor ?? "") ?? .none
+    memo = transaction.memo ?? ""
+  }
+
+  mutating func seedIfNeeded(accounts: [Account], preferredAccountID: String? = nil) {
+    guard accountID.isEmpty else {
+      return
     }
-    if categoryID.isEmpty, let preferredCategoryID {
-      categoryID = preferredCategoryID
+    if let preferredAccountID, accounts.contains(where: { $0.id == preferredAccountID && !$0.closed }) {
+      accountID = preferredAccountID
+    } else if let first = accounts.first(where: { !$0.closed }) ?? accounts.first {
+      accountID = first.id
     }
   }
 
-  /// Milliunits with the sign taken from the Spent/Received toggle, ignoring
-  /// any sign typed into the amount field.
-  var signedMilliunits: Int? {
-    guard let parsed = MoneyCodec.milliunits(from: amountText), parsed != 0 else {
-      return nil
-    }
-    let magnitude = abs(parsed)
-    return direction == .spent ? -magnitude : magnitude
+  var signedMilliunits: Int {
+    direction == .outflow ? -amountMagnitudeMilli : amountMagnitudeMilli
   }
 
-  var canAttemptSubmit: Bool {
-    !accountID.isEmpty
-      && !payeeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      && signedMilliunits != nil
+  var canSave: Bool {
+    !accountID.isEmpty && amountMagnitudeMilli > 0
   }
 
-  func makeTransactionRequest() throws -> TransactionCreateRequest {
-    guard let milliunits = signedMilliunits else {
-      throw APIClientError.validation("Enter an amount above zero.")
+  /// Editing keeps a reconciled transaction reconciled while the toggle is on.
+  var clearedState: ClearedState {
+    guard isCleared else {
+      return .uncleared
     }
+    return wasReconciled ? .reconciled : .cleared
+  }
 
-    return TransactionCreateRequest(
+  func writeRequest() -> TransactionWriteRequest {
+    let trimmedPayee = payeeName.trimmingCharacters(in: .whitespacesAndNewlines)
+    return TransactionWriteRequest(
       accountID: accountID,
       date: date.isoDateString,
-      amount: milliunits,
-      payeeName: payeeName.trimmingCharacters(in: .whitespacesAndNewlines),
-      categoryID: categoryID.isEmpty ? nil : categoryID,
+      amount: signedMilliunits,
+      payeeID: payeeID,
+      payeeName: trimmedPayee.isEmpty ? nil : trimmedPayee,
+      categoryID: categoryID,
       memo: memo.trimmedNil,
       cleared: clearedState,
       approved: true,
-      flagColor: flagColour.rawValue.isEmpty ? nil : flagColour.rawValue
-    )
-  }
-
-  func makeMobileQuickEntryRequest() throws -> MobileQuickEntryRequest {
-    guard let milliunits = signedMilliunits else {
-      throw APIClientError.validation("Enter an amount above zero.")
-    }
-
-    return MobileQuickEntryRequest(
-      clientID: UUID().uuidString.lowercased(),
-      accountID: accountID,
-      date: date.isoDateString,
-      amount: (Decimal(milliunits) / 1000).description,
-      amountMilli: milliunits,
-      payeeName: payeeName.trimmingCharacters(in: .whitespacesAndNewlines),
-      categoryID: categoryID.isEmpty ? nil : categoryID,
-      memo: memo.trimmedNil,
-      flagColor: flagColour.rawValue.isEmpty ? nil : flagColour.rawValue
-    )
-  }
-
-  func resetAfterSubmit() -> QuickEntryDraft {
-    QuickEntryDraft(
-      accountID: accountID,
-      date: Date(),
-      payeeName: "",
-      amountText: "",
-      direction: .spent,
-      memo: "",
-      categoryID: categoryID,
-      flagColour: .none,
-      clearedState: clearedState
+      flagColor: flag.rawValue.isEmpty ? nil : flag.rawValue
     )
   }
 }
 
-enum ReportWindow: String, CaseIterable, Identifiable {
-  case oneMonth
-  case threeMonths
-  case twelveMonths
+/// Date ranges for Reflect's "Preset" mode, matching YNAB's presets.
+enum ReportPreset: String, CaseIterable, Identifiable {
+  case thisMonth
+  case lastMonth
+  case lastThreeMonths
+  case lastSixMonths
+  case lastTwelveMonths
   case yearToDate
 
   var id: String { rawValue }
 
   var title: String {
     switch self {
-    case .oneMonth:
-      return "1M"
-    case .threeMonths:
-      return "3M"
-    case .twelveMonths:
-      return "12M"
+    case .thisMonth:
+      return "This Month"
+    case .lastMonth:
+      return "Last Month"
+    case .lastThreeMonths:
+      return "Last 3 Months"
+    case .lastSixMonths:
+      return "Last 6 Months"
+    case .lastTwelveMonths:
+      return "Last 12 Months"
     case .yearToDate:
-      return "YTD"
+      return "Year to Date"
     }
   }
 
-  func startDate(from endDate: Date = Date(), calendar: Calendar = .current) -> Date {
+  func range(now: Date = Date(), calendar: Calendar = .current) -> (from: Date, to: Date) {
+    let monthStart = now.startOfMonth(calendar: calendar)
     switch self {
-    case .oneMonth:
-      return calendar.date(byAdding: .month, value: -1, to: endDate) ?? endDate
-    case .threeMonths:
-      return calendar.date(byAdding: .month, value: -3, to: endDate) ?? endDate
-    case .twelveMonths:
-      return calendar.date(byAdding: .year, value: -1, to: endDate) ?? endDate
+    case .thisMonth:
+      return (monthStart, now)
+    case .lastMonth:
+      let previousStart = calendar.date(byAdding: .month, value: -1, to: monthStart) ?? monthStart
+      let previousEnd = calendar.date(byAdding: .day, value: -1, to: monthStart) ?? monthStart
+      return (previousStart, previousEnd)
+    case .lastThreeMonths:
+      return (calendar.date(byAdding: .month, value: -2, to: monthStart) ?? monthStart, now)
+    case .lastSixMonths:
+      return (calendar.date(byAdding: .month, value: -5, to: monthStart) ?? monthStart, now)
+    case .lastTwelveMonths:
+      return (calendar.date(byAdding: .month, value: -11, to: monthStart) ?? monthStart, now)
     case .yearToDate:
-      let components = calendar.dateComponents([.year], from: endDate)
-      return calendar.date(from: components) ?? endDate
+      let components = calendar.dateComponents([.year], from: now)
+      return (calendar.date(from: components) ?? now, now)
     }
   }
 }

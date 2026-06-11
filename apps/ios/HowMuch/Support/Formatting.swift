@@ -102,6 +102,38 @@ extension Date {
     Self.isoFormatter.string(from: self)
   }
 
+  init?(isoDateString: String) {
+    guard let parsed = Self.isoFormatter.date(from: isoDateString) else {
+      return nil
+    }
+    self = parsed
+  }
+
+  func startOfMonth(calendar: Calendar = .current) -> Date {
+    calendar.date(from: calendar.dateComponents([.year, .month], from: self)) ?? self
+  }
+
+  func endOfMonth(calendar: Calendar = .current) -> Date {
+    guard
+      let nextMonth = calendar.date(byAdding: .month, value: 1, to: startOfMonth(calendar: calendar)),
+      let lastDay = calendar.date(byAdding: .day, value: -1, to: nextMonth)
+    else {
+      return self
+    }
+    return lastDay
+  }
+
+  /// "September 2025"
+  var monthYearLabel: String {
+    Self.monthYearFormatter.string(from: self)
+  }
+
+  private static let monthYearFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "MMMM yyyy"
+    return formatter
+  }()
+
   private static let isoFormatter: DateFormatter = {
     let formatter = DateFormatter()
     formatter.calendar = Calendar(identifier: .iso8601)
