@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RecentTransactionsView: View {
   @Environment(AppModel.self) private var model
+  @State private var showingUncategorisedOnly = false
 
   var body: some View {
     Group {
@@ -53,6 +54,22 @@ struct RecentTransactionsView: View {
 
   private var transactionList: some View {
     List {
+      if uncategorisedCount > 0 || showingUncategorisedOnly {
+        Section {
+          uncategorisedPill
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets())
+        }
+      }
+
+      if showingUncategorisedOnly && visibleTransactions.isEmpty {
+        Section {
+          Text("Nothing uncategorised in the loaded transactions.")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
+      }
+
       ForEach(groupedByDate, id: \.date) { group in
         Section {
           ForEach(group.transactions) { transaction in
@@ -71,8 +88,34 @@ struct RecentTransactionsView: View {
     .listStyle(.grouped)
   }
 
+  private var uncategorisedPill: some View {
+    Button {
+      showingUncategorisedOnly.toggle()
+    } label: {
+      Text(showingUncategorisedOnly ? "Showing uncategorised · Clear" : "\(uncategorisedCount) uncategorised")
+        .font(.subheadline.weight(.medium))
+        .foregroundStyle(showingUncategorisedOnly ? Color.white : Theme.outflow)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+          Capsule().fill(showingUncategorisedOnly ? Theme.outflow : Theme.outflow.opacity(0.12))
+        )
+    }
+    .buttonStyle(.plain)
+  }
+
+  private var uncategorisedCount: Int {
+    model.recentTransactions.filter { $0.isUncategorised }.count
+  }
+
+  private var visibleTransactions: [Transaction] {
+    showingUncategorisedOnly
+      ? model.recentTransactions.filter { $0.isUncategorised }
+      : model.recentTransactions
+  }
+
   private var groupedByDate: [(date: String, total: Int, transactions: [Transaction])] {
-    let groups = Dictionary(grouping: model.recentTransactions, by: \.date)
+    let groups = Dictionary(grouping: visibleTransactions, by: \.date)
     return groups.keys.sorted(by: >).map { date in
       let transactions = groups[date] ?? []
       return (date: date, total: transactions.reduce(0) { $0 + $1.amount }, transactions: transactions)
