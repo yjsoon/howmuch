@@ -27,6 +27,19 @@ afterEach(() => {
 });
 
 describe("YNAB-compatible API", () => {
+  test("does not create default plans on handler boot or plan list reads", async () => {
+    const before = db.query("SELECT COUNT(*) AS count FROM plans").get() as { count: number };
+    expect(before.count).toBe(0);
+
+    const response = await request("/v1/plans");
+    expect(response.status).toBe(200);
+    const json = await response.json();
+    expect(json.data.plans).toEqual([]);
+
+    const after = db.query("SELECT COUNT(*) AS count FROM plans").get() as { count: number };
+    expect(after.count).toBe(0);
+  });
+
   test("creates and lists OpenClaw-shaped transactions", async () => {
     const createResponse = await request("/v1/plans/plan-test/transactions", {
       method: "POST",

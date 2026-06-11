@@ -14,7 +14,6 @@ type HandlerOptions = {
 export function createHandler({ db, config }: HandlerOptions): (request: Request) => Promise<Response> {
   const repo = new LedgerRepository(db, config.defaultPlanId);
   const reports = new ReportService(db);
-  repo.ensurePlan(config.defaultPlanId);
 
   return async function handle(request: Request): Promise<Response> {
     try {

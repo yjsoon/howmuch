@@ -44,7 +44,6 @@ export class LedgerRepository {
   }
 
   listPlans(): any[] {
-    this.ensurePlan();
     return this.db.query("SELECT * FROM plans WHERE deleted = 0 ORDER BY name").all().map(formatPlan);
   }
 
