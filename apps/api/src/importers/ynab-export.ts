@@ -12,11 +12,18 @@ export type YnabExportImportOptions = {
 
 type CsvRow = Record<string, string>;
 
+type PreparedTransaction = {
+  row: CsvRow;
+  index: number;
+  input: TransactionInput;
+};
+
 export type YnabExportImportResult = {
   import_session_id: string;
   imported: number;
   duplicate: number;
   failed: number;
+  transfer_pairs: number;
   accounts: number;
   category_groups: number;
   categories: number;
@@ -36,6 +43,7 @@ export function importYnabExport(
   const categoryGroupIds = new Set<string>();
   const categoryIds = new Set<string>();
   const payeeNames = new Set<string>();
+  const preparedTransactions: PreparedTransaction[] = [];
   let imported = 0;
   let duplicate = 0;
   let failed = 0;
@@ -162,26 +170,46 @@ export function importYnabExport(
           external_ynab_id: null,
         };
 
-        const existing = input.import_id ? repo.findTransactionByImportId(options.planId, input.import_id) : null;
-        if (existing) {
-          repo.recordImportRow(sessionId, index, "duplicate", row, undefined, existing.id);
-          duplicate += 1;
-          return;
-        }
-
-        const transaction = repo.createTransaction(options.planId, input);
-        repo.recordImportRow(sessionId, index, "imported", row, undefined, transaction.id);
-        imported += 1;
+        preparedTransactions.push({ row, index, input });
       } catch (error) {
         failed += 1;
         repo.recordImportRow(sessionId, index, "failed", row, error instanceof Error ? error.message : String(error));
       }
     });
 
+    const transferPairs = inferTransferPairs(preparedTransactions);
+
+    for (const prepared of preparedTransactions) {
+      try {
+        const existing = prepared.input.import_id
+          ? repo.findTransactionByImportId(options.planId, prepared.input.import_id)
+          : null;
+        if (existing) {
+          repo.recordImportRow(sessionId, prepared.index, "duplicate", prepared.row, undefined, existing.id);
+          duplicate += 1;
+          continue;
+        }
+
+        const transaction = repo.createTransaction(options.planId, prepared.input);
+        repo.recordImportRow(sessionId, prepared.index, "imported", prepared.row, undefined, transaction.id);
+        imported += 1;
+      } catch (error) {
+        failed += 1;
+        repo.recordImportRow(
+          sessionId,
+          prepared.index,
+          "failed",
+          prepared.row,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+
     const summary = {
       imported,
       duplicate,
       failed,
+      transfer_pairs: transferPairs,
       accounts: accountIds.size,
       category_groups: categoryGroupIds.size,
       categories: categoryIds.size,
@@ -334,6 +362,78 @@ function parseInflowOutflow(outflow: string, inflow: string): number {
     return -Math.abs(outflowAmount);
   }
   return Math.abs(parseMoneyToMilliunits(inflow));
+}
+
+function inferTransferPairs(transactions: PreparedTransaction[]): number {
+  const byAmount = new Map<number, { positives: PreparedTransaction[]; negatives: PreparedTransaction[] }>();
+
+  for (const transaction of transactions) {
+    if (!isTransferCandidate(transaction.input)) {
+      continue;
+    }
+
+    const amount = Math.abs(transaction.input.amount);
+    const bucket = byAmount.get(amount) ?? { positives: [], negatives: [] };
+    if (transaction.input.amount > 0) {
+      bucket.positives.push(transaction);
+    } else {
+      bucket.negatives.push(transaction);
+    }
+    byAmount.set(amount, bucket);
+  }
+
+  let pairs = 0;
+  for (const bucket of byAmount.values()) {
+    const unmatchedPositives = new Set(bucket.positives);
+    const negatives = [...bucket.negatives].sort((left, right) => left.input.date.localeCompare(right.input.date));
+
+    for (const negative of negatives) {
+      let best: PreparedTransaction | null = null;
+      let bestDistance = Number.POSITIVE_INFINITY;
+
+      for (const positive of unmatchedPositives) {
+        if (negative.input.account_id === positive.input.account_id) {
+          continue;
+        }
+
+        const distance = Math.abs(daysBetweenIso(negative.input.date, positive.input.date));
+        if (distance > 3 || distance > bestDistance) {
+          continue;
+        }
+
+        best = positive;
+        bestDistance = distance;
+      }
+
+      if (!best) {
+        continue;
+      }
+
+      unmatchedPositives.delete(best);
+      negative.input.transfer_transaction_id = best.input.id ?? null;
+      negative.input.transfer_account_id = best.input.account_id;
+      best.input.transfer_transaction_id = negative.input.id ?? null;
+      best.input.transfer_account_id = negative.input.account_id;
+      pairs += 1;
+    }
+  }
+
+  return pairs;
+}
+
+function isTransferCandidate(input: TransactionInput): boolean {
+  return (
+    input.category_id == null &&
+    input.amount !== 0 &&
+    input.payee_name !== "Starting Balance" &&
+    input.transfer_transaction_id == null
+  );
+}
+
+function daysBetweenIso(left: string, right: string): number {
+  const leftDate = Date.UTC(Number(left.slice(0, 4)), Number(left.slice(5, 7)) - 1, Number(left.slice(8, 10)));
+  const rightDate = Date.UTC(Number(right.slice(0, 4)), Number(right.slice(5, 7)) - 1, Number(right.slice(8, 10)));
+  return Math.round((leftDate - rightDate) / 86400000);
 }
 
 function parseCleared(value: string): ClearedState {

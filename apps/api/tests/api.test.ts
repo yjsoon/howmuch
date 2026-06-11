@@ -504,7 +504,7 @@ describe("native reports and imports", () => {
     }
   });
 
-  test("imports official YNAB web export CSV rows idempotently", () => {
+  test("imports official YNAB web export CSV rows idempotently", async () => {
     const repo = new LedgerRepository(db, "plan-test");
     const planCsv = `"Month","Category Group/Category","Category Group","Category","Assigned","Activity","Available"
 "June 2026","Everyday: Groceries","Everyday","Groceries","$10.00","-$12.34","-$2.34"
@@ -512,6 +512,9 @@ describe("native reports and imports", () => {
     const registerCsv = `"Account","Flag","Date","Payee","Category Group/Category","Category Group","Category","Memo","Outflow","Inflow","Cleared"
 "Current","Red","10/06/2026","Cafe","Everyday: Groceries","Everyday","Groceries","breakfast","$12.34","","Cleared"
 "Current","Red","10/06/2026","Cafe","Everyday: Groceries","Everyday","Groceries","breakfast","$12.34","","Cleared"
+"Current","","12/06/2026","Transfer to Savings","","","","","$500.00","","Cleared"
+"Savings","","13/06/2026","Transfer from Current","","","","","","$500.00","Cleared"
+"Current","","14/06/2026","Mystery Merchant","","","","needs category","$7.00","","Cleared"
 "Current","","11/06/2026","Salary","","","","","", "$1,000.00","Uncleared"
 `;
 
@@ -522,12 +525,13 @@ describe("native reports and imports", () => {
       planCsv,
       dateFormat: "dmy",
     });
-    expect(result.imported).toBe(3);
+    expect(result.imported).toBe(6);
     expect(result.duplicate).toBe(0);
     expect(result.failed).toBe(0);
+    expect(result.transfer_pairs).toBe(1);
 
     const transactions = repo.listTransactions("plan-test", { includeDeleted: true });
-    expect(transactions).toHaveLength(3);
+    expect(transactions).toHaveLength(6);
     const cafeTransactions = transactions.filter((transaction) => transaction.payee_name === "Cafe");
     expect(cafeTransactions).toHaveLength(2);
     expect(cafeTransactions[0].amount).toBe(-12340);
@@ -535,6 +539,12 @@ describe("native reports and imports", () => {
     expect(cafeTransactions[0].category_name).toBe("Groceries");
     expect(cafeTransactions[0].flag_name).toBe("Red");
     expect(transactions.find((transaction) => transaction.payee_name === "Salary")?.amount).toBe(1000000);
+    expect(transactions.find((transaction) => transaction.payee_name === "Transfer to Savings")?.transfer_transaction_id).toBeTruthy();
+    expect(transactions.find((transaction) => transaction.payee_name === "Transfer from Current")?.transfer_transaction_id).toBeTruthy();
+
+    const report = await (await request("/api/reports/spending-breakdown?plan_id=plan-test")).json();
+    expect(report.data.groups.find((group: any) => group.category_name === "Groceries")?.amount).toBe(24680);
+    expect(report.data.groups.find((group: any) => group.category_name === "Uncategorised")?.amount).toBe(7000);
 
     const duplicateResult = importYnabExport(repo, {
       planId: "plan-test",
@@ -544,7 +554,7 @@ describe("native reports and imports", () => {
       dateFormat: "dmy",
     });
     expect(duplicateResult.imported).toBe(0);
-    expect(duplicateResult.duplicate).toBe(3);
+    expect(duplicateResult.duplicate).toBe(6);
   });
 
   test("parses YNAB web export dates and money formats", () => {
