@@ -16,10 +16,12 @@ The app should stay transaction-led: choose account, amount, payee, category, me
 
 `apps/ios/HowMuch.xcodeproj` contains a SwiftUI app (iOS 17+) with two primary tabs, a compose sheet, and a connection sheet:
 
-- `Recents`: latest 50 transactions grouped by day with per-day totals, ledger-coloured amounts, flag dots, and an Uncleared badge. Loading, failure (with retry), and empty states are distinct.
-- `Reports`: compact cards for spending breakdown (share bars), income v spending (paired mini columns), net worth (sparkline plus delta), and age of money. Window (1M/3M/12M/YTD) and interval (week/month/year) controls refetch on change.
-- `Capture` (plus button): amount-first quick entry presented as a transient compose sheet. A Spent/Received toggle owns the sign (no typed minus signs), the amount uses the decimal pad, and the save button echoes the parsed amount. Saves confirm with a transient toast and haptic, then reset for the next entry while keeping account and category.
+- `Recents`: latest 50 transactions grouped by day with per-day totals, ledger-coloured amounts, flag dots, and an Uncleared badge. A tappable "N uncategorised" pill filters to transactions that still need a category. Loading, failure (with retry), and empty states are distinct.
+- `Reports`: compact cards for spending breakdown (share bars), income v spending (paired mini columns), net worth (sparkline plus delta), and age of money. Range presets follow the web app (This month default, Last month, 3M, YTD, 1Y) with a `‹ month ›` stepper whenever the active range is a single calendar month; interval (week/month/year) refetches on change. The spending card excludes bookkeeping ("quiet") category groups by default with an Include toggle. Age of money always measures the full history regardless of the selected range.
+- `Capture` (plus button): amount-first quick entry presented as a transient compose sheet. A Spent/Received toggle owns the sign (no typed minus signs), the amount uses the decimal pad, and the save button echoes the parsed amount. The category picker lists everyday groups first and demotes bookkeeping groups to the bottom. Saves confirm with a transient toast and haptic, then reset for the next entry while keeping account and category.
 - `Connection` (gear icon): base URL, bearer token, and plan ID persisted in `UserDefaults`, with a test-connection check against `GET /v1/user`.
+
+View options (report range and interval, the include-quiet toggle, and the last-used capture account and category) are remembered across launches in `UserDefaults` via `ViewPrefs`, alongside the connection settings.
 
 Visual language follows the web app's editorial-ledger palette: ledger red for outflows, racing green for inflows, monospaced digits for figures, serif report titles.
 
