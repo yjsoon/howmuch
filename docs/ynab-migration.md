@@ -62,6 +62,6 @@ Use this path when a logged-in browser session is available but API token genera
 bun run import:ynab-export -- --zip "/path/to/YNAB Export - Actual Budget as of 2026-06-11 00-25.zip" --plan-id 80bc6db0-d926-4635-a37a-1ba0787c4c4e --plan-name "Actual Budget" --db data/howmuch-real.sqlite --date-format dmy
 ```
 
-The command reads the `Register.csv` and `Plan.csv` files from the zip, creates a backup before overwriting an existing SQLite file, infers blank-category transfer pairs from equal/opposite transactions within three days, and prints account, payee, category, transaction, duplicate, failed-row, and inferred-transfer counts.
+The command reads the `Register.csv` and `Plan.csv` files from the zip, creates a backup before overwriting an existing SQLite file, infers blank-category transfer pairs from equal/opposite transactions within three days, marks YNAB `Transfer : ...` payee rows as transfers, and prints account, payee, category, transaction, duplicate, failed-row, and inferred-transfer counts.
 
 Do not commit the downloaded YNAB export zip, extracted CSV/TSV files, or imported SQLite databases.

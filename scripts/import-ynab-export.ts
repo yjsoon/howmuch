@@ -48,6 +48,7 @@ try {
   console.log(`Duplicate transactions: ${result.duplicate}`);
   console.log(`Failed rows: ${result.failed}`);
   console.log(`Inferred transfer pairs: ${result.transfer_pairs}`);
+  console.log(`Transfer payee rows: ${result.transfer_payees}`);
   console.log(`Accounts: ${summary.accounts}`);
   console.log(`Payees: ${summary.payees}`);
   console.log(`Category groups: ${summary.category_groups}`);

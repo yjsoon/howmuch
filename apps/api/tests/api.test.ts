@@ -514,6 +514,7 @@ describe("native reports and imports", () => {
 "Current","Red","10/06/2026","Cafe","Everyday: Groceries","Everyday","Groceries","breakfast","$12.34","","Cleared"
 "Current","","12/06/2026","Transfer to Savings","","","","","$500.00","","Cleared"
 "Savings","","13/06/2026","Transfer from Current","","","","","","$500.00","Cleared"
+"Current","","15/06/2026","Transfer : External Account","","","","","$50.00","","Cleared"
 "Current","","14/06/2026","Mystery Merchant","","","","needs category","$7.00","","Cleared"
 "Current","","11/06/2026","Salary","","","","","", "$1,000.00","Uncleared"
 `;
@@ -525,13 +526,14 @@ describe("native reports and imports", () => {
       planCsv,
       dateFormat: "dmy",
     });
-    expect(result.imported).toBe(6);
+    expect(result.imported).toBe(7);
     expect(result.duplicate).toBe(0);
     expect(result.failed).toBe(0);
     expect(result.transfer_pairs).toBe(1);
+    expect(result.transfer_payees).toBe(1);
 
     const transactions = repo.listTransactions("plan-test", { includeDeleted: true });
-    expect(transactions).toHaveLength(6);
+    expect(transactions).toHaveLength(7);
     const cafeTransactions = transactions.filter((transaction) => transaction.payee_name === "Cafe");
     expect(cafeTransactions).toHaveLength(2);
     expect(cafeTransactions[0].amount).toBe(-12340);
@@ -541,6 +543,7 @@ describe("native reports and imports", () => {
     expect(transactions.find((transaction) => transaction.payee_name === "Salary")?.amount).toBe(1000000);
     expect(transactions.find((transaction) => transaction.payee_name === "Transfer to Savings")?.transfer_transaction_id).toBeTruthy();
     expect(transactions.find((transaction) => transaction.payee_name === "Transfer from Current")?.transfer_transaction_id).toBeTruthy();
+    expect(transactions.find((transaction) => transaction.payee_name === "Transfer : External Account")?.transfer_account_id).toBeTruthy();
 
     const report = await (await request("/api/reports/spending-breakdown?plan_id=plan-test")).json();
     expect(report.data.groups.find((group: any) => group.category_name === "Groceries")?.amount).toBe(24680);
@@ -554,7 +557,7 @@ describe("native reports and imports", () => {
       dateFormat: "dmy",
     });
     expect(duplicateResult.imported).toBe(0);
-    expect(duplicateResult.duplicate).toBe(6);
+    expect(duplicateResult.duplicate).toBe(7);
   });
 
   test("parses YNAB web export dates and money formats", () => {

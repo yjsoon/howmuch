@@ -24,6 +24,7 @@ export type YnabExportImportResult = {
   duplicate: number;
   failed: number;
   transfer_pairs: number;
+  transfer_payees: number;
   accounts: number;
   category_groups: number;
   categories: number;
@@ -177,6 +178,7 @@ export function importYnabExport(
       }
     });
 
+    const transferPayees = markTransferPayees(preparedTransactions);
     const transferPairs = inferTransferPairs(preparedTransactions);
 
     for (const prepared of preparedTransactions) {
@@ -210,6 +212,7 @@ export function importYnabExport(
       duplicate,
       failed,
       transfer_pairs: transferPairs,
+      transfer_payees: transferPayees,
       accounts: accountIds.size,
       category_groups: categoryGroupIds.size,
       categories: categoryIds.size,
@@ -419,6 +422,24 @@ function inferTransferPairs(transactions: PreparedTransaction[]): number {
   }
 
   return pairs;
+}
+
+function markTransferPayees(transactions: PreparedTransaction[]): number {
+  let marked = 0;
+  for (const transaction of transactions) {
+    const targetAccountName = transferPayeeTarget(transaction.input.payee_name);
+    if (!targetAccountName || transaction.input.category_id != null) {
+      continue;
+    }
+    transaction.input.transfer_account_id = stableId("ynab-export-account", targetAccountName);
+    marked += 1;
+  }
+  return marked;
+}
+
+function transferPayeeTarget(payeeName?: string | null): string | null {
+  const match = clean(payeeName).match(/^Transfer\s*:\s*(.+)$/i);
+  return match ? clean(match[1]) : null;
 }
 
 function isTransferCandidate(input: TransactionInput): boolean {
