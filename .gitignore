@@ -6,7 +6,6 @@ node_modules/
 dist/
 .next/
 coverage/
-data/*.sqlite
-data/*.sqlite-*
+data/
 apps/ios/build/
 *.log
