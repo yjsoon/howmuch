@@ -50,6 +50,35 @@ struct APISettings: Codable, Equatable {
   }
 }
 
+/// View options remembered across launches, persisted like the connection
+/// settings. Defaults apply whenever a stored blob is missing or unreadable.
+struct ViewPrefs: Codable, Equatable {
+  static let userDefaultsKey = "HowMuch.ViewPrefs"
+
+  var reportRange: ReportRange = .thisMonth
+  var reportInterval: ReportInterval = .month
+  var includeQuietSpending = false
+  var lastUsedAccountID: String?
+  var lastUsedCategoryID: String?
+
+  static func load(from defaults: UserDefaults = .standard) -> ViewPrefs {
+    guard
+      let data = defaults.data(forKey: userDefaultsKey),
+      let decoded = try? JSONDecoder().decode(ViewPrefs.self, from: data)
+    else {
+      return ViewPrefs()
+    }
+    return decoded
+  }
+
+  func save(to defaults: UserDefaults = .standard) {
+    guard let data = try? JSONEncoder().encode(self) else {
+      return
+    }
+    defaults.set(data, forKey: Self.userDefaultsKey)
+  }
+}
+
 struct UserPayload: Decodable {
   let user: APIUser
 }
@@ -161,6 +190,50 @@ struct CategoryGroup: Decodable, Identifiable, Hashable {
   let categories: [Category]
 }
 
+extension CategoryGroup {
+  /// Bookkeeping groups the YNAB import carries as ordinary groups ("Hidden
+  /// Categories", "Non-Personal (Don't Summarise)", inflows). They are real
+  /// data but not part of day-to-day budgeting, so pickers and reports demote
+  /// them. Mirrors the web app's quiet-group heuristic in lib/categories.ts.
+  static func isQuietGroupName(_ name: String?) -> Bool {
+    guard let name else {
+      return false
+    }
+    let pattern = "hidden|non.personal|don.t summari[sz]e|inflow|credit card payments|internal"
+    return name.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+  }
+
+  var isQuiet: Bool {
+    hidden || Self.isQuietGroupName(name)
+  }
+
+  /// Live groups with live categories, partitioned into everyday and
+  /// bookkeeping ones, preserving the server's ordering within each side.
+  static func split(_ groups: [CategoryGroup]) -> (primary: [CategoryGroup], quiet: [CategoryGroup]) {
+    var primary: [CategoryGroup] = []
+    var quiet: [CategoryGroup] = []
+    for group in groups where !group.deleted {
+      let categories = group.categories.filter { !$0.deleted }
+      if categories.isEmpty {
+        continue
+      }
+      let pruned = CategoryGroup(
+        id: group.id,
+        name: group.name,
+        hidden: group.hidden,
+        deleted: group.deleted,
+        categories: categories
+      )
+      if group.isQuiet {
+        quiet.append(pruned)
+      } else {
+        primary.append(pruned)
+      }
+    }
+    return (primary, quiet)
+  }
+}
+
 struct Category: Decodable, Identifiable, Hashable {
   let id: String
   let categoryGroupID: String
@@ -257,6 +330,14 @@ struct Transaction: Decodable, Identifiable, Hashable {
     case importPayeeNameOriginal = "importPayeeNameOriginal"
     case deleted
     case subtransactions
+  }
+}
+
+extension Transaction {
+  /// True when the row still needs a category: no category, not a transfer,
+  /// and not a split (whose categories live on the subtransactions).
+  var isUncategorised: Bool {
+    categoryID == nil && transferAccountID == nil && subtransactions.isEmpty
   }
 }
 
@@ -543,7 +624,7 @@ enum ReportWindow: String, CaseIterable, Identifiable {
   }
 }
 
-enum ReportInterval: String, CaseIterable, Identifiable {
+enum ReportInterval: String, Codable, CaseIterable, Identifiable {
   case week
   case month
   case year
