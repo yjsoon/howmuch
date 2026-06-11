@@ -31,8 +31,9 @@ final class AppModel {
   var incomeVsSpending: IncomeVsSpendingReport?
   var netWorth: NetWorthReport?
   var ageOfMoney: AgeOfMoneyReport?
-  var reportWindow: ReportWindow = .threeMonths
-  var reportInterval: ReportInterval = .month
+  var reportRange: ReportRange
+  var reportInterval: ReportInterval
+  var includeQuietSpending: Bool
 
   var referencePhase: LoadPhase = .idle
   var recentsPhase: LoadPhase = .idle
@@ -46,8 +47,24 @@ final class AppModel {
   private var settingsRequestedFromCapture = false
   private var saveMessageToken = 0
 
-  init(settings: APISettings = .load()) {
+  init(settings: APISettings = .load(), viewPrefs: ViewPrefs = .load()) {
     self.settings = settings
+    self.reportRange = viewPrefs.reportRange
+    self.reportInterval = viewPrefs.reportInterval
+    self.includeQuietSpending = viewPrefs.includeQuietSpending
+    self.lastUsedAccountID = viewPrefs.lastUsedAccountID
+    self.lastUsedCategoryID = viewPrefs.lastUsedCategoryID
+  }
+
+  /// Snapshot the remembered view options; call after any deliberate change.
+  func saveViewPrefs() {
+    ViewPrefs(
+      reportRange: reportRange,
+      reportInterval: reportInterval,
+      includeQuietSpending: includeQuietSpending,
+      lastUsedAccountID: lastUsedAccountID,
+      lastUsedCategoryID: lastUsedCategoryID
+    ).save()
   }
 
   var apiClient: APIClient {
@@ -144,6 +161,7 @@ final class AppModel {
 
     lastUsedAccountID = request.accountID
     lastUsedCategoryID = request.categoryID
+    saveViewPrefs()
     recentTransactions.insert(created, at: 0)
     if recentTransactions.count > 50 {
       recentTransactions = Array(recentTransactions.prefix(50))
@@ -168,14 +186,14 @@ final class AppModel {
     netWorth: NetWorthReport,
     ageOfMoney: AgeOfMoneyReport
   ) {
-    let endDate = Date()
-    let from = reportWindow.startDate(from: endDate).isoDateString
-    let to = endDate.isoDateString
+    let dates = reportRange.resolvedDates()
 
-    async let spending = apiClient.fetchSpendingBreakdown(planID: settings.planID, from: from, to: to)
-    async let income = apiClient.fetchIncomeVsSpending(planID: settings.planID, from: from, to: to, interval: reportInterval)
-    async let netWorth = apiClient.fetchNetWorth(planID: settings.planID, from: from, to: to, interval: reportInterval)
-    async let ageOfMoney = apiClient.fetchAgeOfMoney(planID: settings.planID, from: from, to: to, interval: reportInterval)
+    async let spending = apiClient.fetchSpendingBreakdown(planID: settings.planID, from: dates.from, to: dates.to)
+    async let income = apiClient.fetchIncomeVsSpending(planID: settings.planID, from: dates.from, to: dates.to, interval: reportInterval)
+    async let netWorth = apiClient.fetchNetWorth(planID: settings.planID, from: dates.from, to: dates.to, interval: reportInterval)
+    // Age of money replays income lots from `from`, so a clipped window
+    // distorts the number — always measure across the full history.
+    async let ageOfMoney = apiClient.fetchAgeOfMoney(planID: settings.planID, interval: reportInterval)
 
     return try await (spending, income, netWorth, ageOfMoney)
   }

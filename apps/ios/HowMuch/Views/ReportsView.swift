@@ -35,12 +35,15 @@ struct ReportsView: View {
     @Bindable var model = model
 
     return VStack(spacing: 8) {
-      Picker("Window", selection: $model.reportWindow) {
-        ForEach(ReportWindow.allCases) { window in
-          Text(window.title).tag(window)
-        }
+      if let month = model.reportRange.calendarMonth() {
+        MonthStepper(
+          title: month.title,
+          onPrevious: { model.reportRange = model.reportRange.stepped(by: -1) },
+          onNext: { model.reportRange = model.reportRange.stepped(by: 1) }
+        )
       }
-      .pickerStyle(.segmented)
+
+      RangePresetRow(selection: $model.reportRange)
 
       Picker("Interval", selection: $model.reportInterval) {
         ForEach(ReportInterval.allCases) { interval in
@@ -49,10 +52,12 @@ struct ReportsView: View {
       }
       .pickerStyle(.segmented)
     }
-    .onChange(of: model.reportWindow) {
+    .onChange(of: model.reportRange) {
+      model.saveViewPrefs()
       Task { await model.refreshReports() }
     }
     .onChange(of: model.reportInterval) {
+      model.saveViewPrefs()
       Task { await model.refreshReports() }
     }
   }
@@ -75,34 +80,66 @@ struct ReportsView: View {
   private var spendingCard: some View {
     ReportCard(title: "Spending") {
       if let report = model.spendingBreakdown {
-        if report.groups.isEmpty {
-          quietEmpty("No spending in this window.")
+        let rows = model.includeQuietSpending
+          ? report.groups
+          : report.groups.filter { !CategoryGroup.isQuietGroupName($0.categoryGroupName) }
+        let total = rows.reduce(0) { $0 + $1.amount }
+        let excluded = report.total - total
+
+        if rows.isEmpty {
+          quietEmpty("No everyday spending in this range.")
         } else {
           AmountHeadline(
-            value: MoneyCodec.displayString(for: report.total, currencyFormat: model.currencyFormat),
-            caption: "total across \(report.groups.count) categories",
+            value: MoneyCodec.displayString(for: total, currencyFormat: model.currencyFormat),
+            caption: "total across \(rows.count) categories",
             colour: Theme.outflow
           )
 
           VStack(spacing: 8) {
-            ForEach(report.groups.prefix(6)) { group in
+            ForEach(rows.prefix(6)) { group in
               ShareBarRow(
                 label: group.categoryName,
                 amount: MoneyCodec.displayString(for: group.amount, currencyFormat: model.currencyFormat),
-                share: group.share
+                share: total > 0 ? Double(group.amount) / Double(total) : 0
               )
             }
           }
 
-          if report.groups.count > 6 {
-            Text("and \(report.groups.count - 6) more categories")
+          if rows.count > 6 {
+            Text("and \(rows.count - 6) more categories")
               .font(.caption)
               .foregroundStyle(.tertiary)
           }
         }
+
+        if excluded > 0 || model.includeQuietSpending {
+          quietToggleRow(excluded: excluded)
+        }
       } else {
         loadingPlaceholder
       }
+    }
+  }
+
+  private func quietToggleRow(excluded: Int) -> some View {
+    HStack(alignment: .firstTextBaseline, spacing: 8) {
+      Text(
+        model.includeQuietSpending
+          ? "Including hidden & non-personal categories."
+          : "\(MoneyCodec.displayString(for: excluded, currencyFormat: model.currencyFormat)) in hidden & non-personal categories excluded."
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .fixedSize(horizontal: false, vertical: true)
+
+      Spacer(minLength: 0)
+
+      Button(model.includeQuietSpending ? "Exclude" : "Include") {
+        model.includeQuietSpending.toggle()
+        model.saveViewPrefs()
+      }
+      .font(.caption.weight(.semibold))
+      .buttonStyle(.borderless)
     }
   }
 
@@ -112,7 +149,7 @@ struct ReportsView: View {
     ReportCard(title: "Income v Spending") {
       if let report = model.incomeVsSpending {
         if report.periods.isEmpty {
-          quietEmpty("No activity in this window.")
+          quietEmpty("No activity in this range.")
         } else {
           PairedColumnsChart(periods: report.periods)
             .frame(height: 72)
@@ -139,7 +176,7 @@ struct ReportsView: View {
     ReportCard(title: "Net Worth") {
       if let report = model.netWorth {
         if report.periods.isEmpty {
-          quietEmpty("No balances in this window.")
+          quietEmpty("No balances in this range.")
         } else if let latest = report.periods.last {
           AmountHeadline(
             value: MoneyCodec.displayString(for: latest.netWorth, currencyFormat: model.currencyFormat),
@@ -198,8 +235,10 @@ struct ReportsView: View {
           if latest.period.unmatchedSpending != 0 {
             captionRow("\(MoneyCodec.displayString(for: latest.period.unmatchedSpending, currencyFormat: model.currencyFormat)) of spending predates known income and is excluded.")
           }
+
+          captionRow("Measured across full history; the range above does not apply.")
         } else if report.periods.isEmpty {
-          quietEmpty("No activity in this window.")
+          quietEmpty("No activity yet.")
         } else {
           quietEmpty("Not enough matched income to measure yet.")
         }
@@ -251,6 +290,82 @@ struct ReportsView: View {
     } else {
       quietEmpty("Pull to refresh once the API is reachable.")
     }
+  }
+}
+
+// MARK: - Range controls
+
+/// Segmented control built from buttons rather than a Picker: a stepped
+/// `.month(...)` selection matches no preset, which a segmented Picker
+/// treats as an invalid selection.
+private struct RangePresetRow: View {
+  @Binding var selection: ReportRange
+
+  var body: some View {
+    HStack(spacing: 4) {
+      ForEach(ReportRange.presets, id: \.self) { preset in
+        Button {
+          selection = preset
+        } label: {
+          Text(preset.title)
+            .font(.footnote.weight(.semibold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(selection == preset ? Color.primary : Color.secondary)
+        .background(
+          RoundedRectangle(cornerRadius: 7, style: .continuous)
+            .fill(selection == preset ? Color(.secondarySystemGroupedBackground) : Color.clear)
+        )
+      }
+    }
+    .padding(3)
+    .background(
+      RoundedRectangle(cornerRadius: 9, style: .continuous)
+        .fill(Color(.tertiarySystemFill))
+    )
+  }
+}
+
+private struct MonthStepper: View {
+  let title: String
+  let onPrevious: () -> Void
+  let onNext: () -> Void
+
+  var body: some View {
+    HStack {
+      Button(action: onPrevious) {
+        Image(systemName: "chevron.left")
+          .font(.subheadline.weight(.semibold))
+          .frame(width: 44, height: 28)
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Previous month")
+
+      Spacer(minLength: 8)
+
+      Text(title)
+        .font(.subheadline.weight(.semibold))
+        .fontDesign(.serif)
+        .monospacedDigit()
+
+      Spacer(minLength: 8)
+
+      Button(action: onNext) {
+        Image(systemName: "chevron.right")
+          .font(.subheadline.weight(.semibold))
+          .frame(width: 44, height: 28)
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Next month")
+    }
+    .background(
+      RoundedRectangle(cornerRadius: 9, style: .continuous)
+        .fill(Color(.secondarySystemGroupedBackground))
+    )
   }
 }
 

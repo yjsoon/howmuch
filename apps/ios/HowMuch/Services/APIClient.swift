@@ -67,20 +67,22 @@ struct APIClient {
     return response.data.transactions.filter { !$0.deleted }
   }
 
-  func fetchSpendingBreakdown(planID: String, from: String, to: String) async throws -> SpendingBreakdownReport {
+  func fetchSpendingBreakdown(planID: String, from: String?, to: String?) async throws -> SpendingBreakdownReport {
     try await report(path: "/api/reports/spending-breakdown", planID: planID, from: from, to: to, interval: nil)
   }
 
-  func fetchIncomeVsSpending(planID: String, from: String, to: String, interval: ReportInterval) async throws -> IncomeVsSpendingReport {
+  func fetchIncomeVsSpending(planID: String, from: String?, to: String?, interval: ReportInterval) async throws -> IncomeVsSpendingReport {
     try await report(path: "/api/reports/income-vs-spending", planID: planID, from: from, to: to, interval: interval.rawValue)
   }
 
-  func fetchNetWorth(planID: String, from: String, to: String, interval: ReportInterval) async throws -> NetWorthReport {
+  func fetchNetWorth(planID: String, from: String?, to: String?, interval: ReportInterval) async throws -> NetWorthReport {
     try await report(path: "/api/reports/net-worth", planID: planID, from: from, to: to, interval: interval.rawValue)
   }
 
-  func fetchAgeOfMoney(planID: String, from: String, to: String, interval: ReportInterval) async throws -> AgeOfMoneyReport {
-    try await report(path: "/api/reports/age-of-money", planID: planID, from: from, to: to, interval: interval.rawValue)
+  /// Deliberately takes no date range: the server replays income lots from
+  /// `from`, so the weighted age is only honest over the full history.
+  func fetchAgeOfMoney(planID: String, interval: ReportInterval) async throws -> AgeOfMoneyReport {
+    try await report(path: "/api/reports/age-of-money", planID: planID, from: nil, to: nil, interval: interval.rawValue)
   }
 
   func createTransaction(planID: String, request body: TransactionCreateRequest) async throws -> Transaction {
@@ -105,15 +107,19 @@ struct APIClient {
   private func report<Payload: Decodable>(
     path: String,
     planID: String,
-    from: String,
-    to: String,
+    from: String?,
+    to: String?,
     interval: String?
   ) async throws -> Payload {
-    var queryItems = [
-      URLQueryItem(name: "plan_id", value: planID),
-      URLQueryItem(name: "from", value: from),
-      URLQueryItem(name: "to", value: to),
-    ]
+    // plan_id is mandatory on every report call: without it the API silently
+    // answers for its configured default plan.
+    var queryItems = [URLQueryItem(name: "plan_id", value: planID)]
+    if let from {
+      queryItems.append(URLQueryItem(name: "from", value: from))
+    }
+    if let to {
+      queryItems.append(URLQueryItem(name: "to", value: to))
+    }
     if let interval {
       queryItems.append(URLQueryItem(name: "interval", value: interval))
     }

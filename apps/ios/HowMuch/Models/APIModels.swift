@@ -588,42 +588,6 @@ struct QuickEntryDraft: Equatable {
   }
 }
 
-enum ReportWindow: String, CaseIterable, Identifiable {
-  case oneMonth
-  case threeMonths
-  case twelveMonths
-  case yearToDate
-
-  var id: String { rawValue }
-
-  var title: String {
-    switch self {
-    case .oneMonth:
-      return "1M"
-    case .threeMonths:
-      return "3M"
-    case .twelveMonths:
-      return "12M"
-    case .yearToDate:
-      return "YTD"
-    }
-  }
-
-  func startDate(from endDate: Date = Date(), calendar: Calendar = .current) -> Date {
-    switch self {
-    case .oneMonth:
-      return calendar.date(byAdding: .month, value: -1, to: endDate) ?? endDate
-    case .threeMonths:
-      return calendar.date(byAdding: .month, value: -3, to: endDate) ?? endDate
-    case .twelveMonths:
-      return calendar.date(byAdding: .year, value: -1, to: endDate) ?? endDate
-    case .yearToDate:
-      let components = calendar.dateComponents([.year], from: endDate)
-      return calendar.date(from: components) ?? endDate
-    }
-  }
-}
-
 enum ReportInterval: String, Codable, CaseIterable, Identifiable {
   case week
   case month
