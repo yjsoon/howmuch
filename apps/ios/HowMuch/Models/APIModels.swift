@@ -508,7 +508,12 @@ struct QuickEntryDraft: Equatable {
   var flagColour: FlagColour = .none
   var clearedState: ClearedState = .cleared
 
-  mutating func seedIfNeeded(accounts: [Account], preferredAccountID: String? = nil, preferredCategoryID: String? = nil) {
+  mutating func seedIfNeeded(
+    accounts: [Account],
+    categories: [Category] = [],
+    preferredAccountID: String? = nil,
+    preferredCategoryID: String? = nil
+  ) {
     if accountID.isEmpty {
       if let preferredAccountID, accounts.contains(where: { $0.id == preferredAccountID && !$0.closed }) {
         accountID = preferredAccountID
@@ -516,7 +521,9 @@ struct QuickEntryDraft: Equatable {
         accountID = first.id
       }
     }
-    if categoryID.isEmpty, let preferredCategoryID {
+    // The remembered category survives launches, so it can outlive the
+    // category itself — only seed ids that still exist.
+    if categoryID.isEmpty, let preferredCategoryID, categories.contains(where: { $0.id == preferredCategoryID }) {
       categoryID = preferredCategoryID
     }
   }

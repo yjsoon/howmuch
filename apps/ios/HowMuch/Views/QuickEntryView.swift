@@ -69,6 +69,7 @@ struct QuickEntryView: View {
     .task(id: model.accounts.map(\.id).joined(separator: ",")) {
       draft.seedIfNeeded(
         accounts: model.accounts,
+        categories: model.flattenedCategories,
         preferredAccountID: model.lastUsedAccountID,
         preferredCategoryID: model.lastUsedCategoryID
       )
@@ -139,17 +140,31 @@ struct QuickEntryView: View {
     }
   }
 
+  /// Everyday groups first, bookkeeping groups demoted to the bottom.
+  /// Pushed as a list rather than a menu so the long quiet sections stay
+  /// out of the way until scrolled to.
   private var categoryPicker: some View {
-    Picker("Category", selection: $draft.categoryID) {
+    let split = CategoryGroup.split(model.categoryGroups)
+    return Picker("Category", selection: $draft.categoryID) {
       Text("Uncategorised").tag("")
-      ForEach(model.categoryGroups.filter { !$0.hidden && !$0.deleted }) { group in
+      ForEach(split.primary) { group in
         Section(group.name) {
-          ForEach(group.categories.filter { !$0.deleted }) { category in
+          ForEach(group.categories) { category in
             Text(category.name).tag(category.id)
           }
         }
       }
+      ForEach(split.quiet) { group in
+        Section(group.name) {
+          ForEach(group.categories) { category in
+            Text(category.name)
+              .foregroundStyle(.secondary)
+              .tag(category.id)
+          }
+        }
+      }
     }
+    .pickerStyle(.navigationLink)
   }
 
   private var flagPicker: some View {
