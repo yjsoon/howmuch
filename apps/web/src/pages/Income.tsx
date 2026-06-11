@@ -1,12 +1,12 @@
 import { api, useApi } from "../api/client";
 import { FilterRail } from "../components/FilterRail";
 import { PairedColumns } from "../components/charts";
-import { formatPeriod } from "../lib/dates";
+import { formatPeriod, ytdRange } from "../lib/dates";
 import { formatAmount, formatMoney } from "../lib/money";
 import { useFilters } from "../state/filters";
 
 export function IncomePage() {
-  const { filters, setFilters, reportQuery } = useFilters();
+  const { filters, setFilters, reportQuery } = useFilters({ defaultRange: ytdRange });
   const report = useApi(JSON.stringify(reportQuery), () => api.incomeVsSpending(reportQuery));
 
   const periods = report.data?.periods ?? [];

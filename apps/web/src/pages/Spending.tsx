@@ -1,8 +1,10 @@
-import { Fragment, useMemo } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, useApi } from "../api/client";
 import { FilterRail } from "../components/FilterRail";
+import { isQuietGroupName } from "../lib/categories";
 import { formatAmount, formatShare } from "../lib/money";
+import { loadPrefs, savePrefs } from "../state/prefs";
 import { transactionsLink, useFilters } from "../state/filters";
 
 export function SpendingPage() {
@@ -10,15 +12,26 @@ export function SpendingPage() {
   const query = { ...reportQuery, interval: undefined };
   const report = useApi(JSON.stringify(query), () => api.spendingBreakdown(query));
 
-  const grouped = useMemo(() => {
+  const [includeQuiet, setIncludeQuiet] = useState(() => loadPrefs().includeQuietSpending ?? false);
+  const toggleQuiet = () => {
+    setIncludeQuiet((value) => {
+      savePrefs({ includeQuietSpending: !value });
+      return !value;
+    });
+  };
+
+  // An explicit category filter is a deliberate choice — never hide its results.
+  const hideQuiet = !includeQuiet && filters.categoryIds.length === 0;
+
+  const { grouped, total, excluded, maxAmount } = useMemo(() => {
     if (!report.data) {
-      return [];
+      return { grouped: [], total: 0, excluded: 0, maxAmount: 1 };
     }
-    const groups = new Map<
-      string,
-      { name: string; amount: number; rows: typeof report.data.groups }
-    >();
-    for (const row of report.data.groups) {
+    const rows = hideQuiet
+      ? report.data.groups.filter((row) => !isQuietGroupName(row.category_group_name))
+      : report.data.groups;
+    const groups = new Map<string, { name: string; amount: number; rows: typeof rows }>();
+    for (const row of rows) {
       const group = groups.get(row.category_group_id) ?? {
         name: row.category_group_name,
         amount: 0,
@@ -28,11 +41,15 @@ export function SpendingPage() {
       group.rows.push(row);
       groups.set(row.category_group_id, group);
     }
-    return [...groups.values()].sort((a, b) => b.amount - a.amount);
-  }, [report.data]);
-
-  const total = report.data?.total ?? 0;
-  const maxAmount = report.data?.groups[0]?.amount ?? 1;
+    const total = rows.reduce((sum, row) => sum + row.amount, 0);
+    return {
+      grouped: [...groups.values()].sort((a, b) => b.amount - a.amount),
+      total,
+      excluded: report.data.total - total,
+      // The API returns rows sorted by amount, so the first visible row is the widest bar.
+      maxAmount: rows[0]?.amount ?? 1,
+    };
+  }, [report.data, hideQuiet]);
 
   return (
     <>
@@ -49,7 +66,18 @@ export function SpendingPage() {
       {report.loading && !report.data && <p className="loading-note">Loading…</p>}
 
       {report.data && (
-        <table className="ledger-table breakdown-table">
+        <>
+          {filters.categoryIds.length === 0 && (excluded > 0 || includeQuiet) && (
+            <p className="diagnostic-note">
+              {includeQuiet
+                ? "Including hidden & non-personal categories."
+                : `${formatAmount(excluded)} in hidden & non-personal categories excluded.`}{" "}
+              <button type="button" className="inline-link" onClick={toggleQuiet}>
+                {includeQuiet ? "Exclude" : "Include"}
+              </button>
+            </p>
+          )}
+          <table className="ledger-table breakdown-table">
           <thead>
             <tr>
               <th>Category</th>
@@ -83,7 +111,7 @@ export function SpendingPage() {
                       />
                     </td>
                     <td className="num">{formatAmount(row.amount)}</td>
-                    <td className="num muted">{formatShare(row.share)}</td>
+                    <td className="num muted">{total > 0 ? formatShare(row.amount / total) : "—"}</td>
                     <td className="num muted">{row.transaction_count}</td>
                   </tr>
                 ))}
@@ -97,7 +125,8 @@ export function SpendingPage() {
               </tr>
             )}
           </tbody>
-        </table>
+          </table>
+        </>
       )}
     </>
   );

@@ -1,8 +1,9 @@
 import type { Interval } from "../api/types";
-import { matchPreset, RANGE_PRESETS } from "../lib/dates";
+import { calendarMonthOf, formatMonthName, matchPreset, RANGE_PRESETS, shiftMonth } from "../lib/dates";
+import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
 import { usePlan } from "../state/plan";
 import type { Filters } from "../state/filters";
-import { MultiSelect } from "./MultiSelect";
+import { MultiSelect, type MultiSelectOption } from "./MultiSelect";
 
 interface Props {
   filters: Filters;
@@ -17,19 +18,42 @@ interface Props {
 export function FilterRail({ filters, setFilters, intervals, showCategories = true, busy = false }: Props) {
   const { accounts, categoryGroups } = usePlan();
   const activePreset = matchPreset(filters.from, filters.to);
+  const month = calendarMonthOf(filters.from, filters.to);
 
   const accountOptions = accounts
     .filter((account) => !account.closed)
     .map((account) => ({ id: account.id, label: account.name }));
 
-  const categoryOptions = categoryGroups.flatMap((group) =>
-    (group.categories ?? [])
-      .filter((category) => !category.deleted)
-      .map((category) => ({ id: category.id, label: category.name, group: group.name })),
-  );
+  const { primary, quiet } = splitCategoryGroups(categoryGroups);
+  const categoryOptions: MultiSelectOption[] = [
+    ...primary.flatMap((group) =>
+      group.categories.map((category) => ({ id: category.id, label: category.name, group: group.name })),
+    ),
+    { id: UNCATEGORISED_CATEGORY_ID, label: "Uncategorised", group: "Needs a category", muted: true },
+    ...quiet.flatMap((group) =>
+      group.categories.map((category) => ({
+        id: category.id,
+        label: category.name,
+        group: group.name,
+        muted: true,
+      })),
+    ),
+  ];
 
   return (
     <div className={busy ? "filter-rail filter-rail-busy" : "filter-rail"}>
+      {month && (
+        <div className="month-stepper" role="group" aria-label="Month">
+          <button type="button" className="month-step" onClick={() => setFilters(shiftMonth(month, -1))} aria-label="Previous month">
+            ‹
+          </button>
+          <span className="month-label">{formatMonthName(month)}</span>
+          <button type="button" className="month-step" onClick={() => setFilters(shiftMonth(month, 1))} aria-label="Next month">
+            ›
+          </button>
+        </div>
+      )}
+
       <div className="segmented" role="group" aria-label="Date range">
         {RANGE_PRESETS.map((preset) => (
           <button
@@ -48,7 +72,7 @@ export function FilterRail({ filters, setFilters, intervals, showCategories = tr
           type="date"
           name="from"
           value={filters.from ?? ""}
-          onChange={(event) => setFilters({ from: event.target.value || undefined })}
+          onChange={(event) => setFilters({ from: event.target.value || undefined, to: filters.to })}
           aria-label="From date"
         />
         <span className="range-dash">–</span>
@@ -56,7 +80,7 @@ export function FilterRail({ filters, setFilters, intervals, showCategories = tr
           type="date"
           name="to"
           value={filters.to ?? ""}
-          onChange={(event) => setFilters({ to: event.target.value || undefined })}
+          onChange={(event) => setFilters({ from: filters.from, to: event.target.value || undefined })}
           aria-label="To date"
         />
       </div>

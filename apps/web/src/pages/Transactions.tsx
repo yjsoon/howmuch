@@ -1,37 +1,63 @@
 import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, useApi } from "../api/client";
 import { FilterRail } from "../components/FilterRail";
+import { UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
 import { formatDate } from "../lib/dates";
-import { formatMoney } from "../lib/money";
+import { formatAmount, formatMoney } from "../lib/money";
 import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
 
 export function TransactionsPage() {
   const { filters, setFilters } = useFilters();
   const { planId } = usePlan();
+  const [params] = useSearchParams();
   const [search, setSearch] = useState("");
+  const flow = params.get("flow");
 
   const listKey = JSON.stringify({ planId, from: filters.from, to: filters.to });
   const result = useApi(listKey, () =>
     api.transactions(planId, { since_date: filters.from, until_date: filters.to }),
   );
 
+  const wantsUncategorised = filters.categoryIds.includes(UNCATEGORISED_CATEGORY_ID);
+
+  const inScope = useMemo(
+    () =>
+      (result.data ?? [])
+        .filter((txn) => !txn.deleted)
+        .filter((txn) => !filters.accountIds.length || filters.accountIds.includes(txn.account_id)),
+    [result.data, filters.accountIds],
+  );
+
+  const uncategorisedCount = useMemo(
+    () =>
+      inScope.filter(
+        (txn) => txn.category_id === null && !txn.transfer_account_id && !txn.subtransactions?.length,
+      ).length,
+    [inScope],
+  );
+
   const rows = useMemo(() => {
-    if (!result.data) {
-      return [];
-    }
     const needle = search.trim().toLowerCase();
-    return result.data
-      .filter((txn) => !txn.deleted)
-      .filter((txn) => !filters.accountIds.length || filters.accountIds.includes(txn.account_id))
-      .filter(
-        (txn) =>
-          !filters.categoryIds.length ||
-          (txn.category_id !== null && filters.categoryIds.includes(txn.category_id)) ||
-          txn.subtransactions?.some(
-            (sub) => sub.category_id !== null && filters.categoryIds.includes(sub.category_id),
-          ),
-      )
+    const outflowOnly = flow === "outflow";
+    const categoryIds = filters.categoryIds.filter((categoryId) => categoryId !== UNCATEGORISED_CATEGORY_ID);
+    return inScope
+      .filter((txn) => !outflowOnly || (txn.amount < 0 && !txn.transfer_account_id))
+      .filter((txn) => {
+        if (!filters.categoryIds.length) {
+          return true;
+        }
+
+        const matchesCategory =
+          (txn.category_id !== null && categoryIds.includes(txn.category_id)) ||
+          txn.subtransactions?.some((sub) => sub.category_id !== null && categoryIds.includes(sub.category_id));
+        if (matchesCategory) {
+          return true;
+        }
+
+        return wantsUncategorised && txn.category_id === null && !txn.transfer_account_id && !txn.subtransactions?.length;
+      })
       .filter(
         (txn) =>
           !needle ||
@@ -40,7 +66,7 @@ export function TransactionsPage() {
           txn.category_name?.toLowerCase().includes(needle),
       )
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-  }, [result.data, filters.accountIds, filters.categoryIds, search]);
+  }, [inScope, filters.categoryIds, wantsUncategorised, flow, search]);
 
   const total = rows.reduce((sum, txn) => sum + txn.amount, 0);
 
@@ -50,6 +76,20 @@ export function TransactionsPage() {
       <div className="report-header">
         <h1>Transactions</h1>
         <div className="headline-row">
+          {uncategorisedCount > 0 && !wantsUncategorised && (
+            <button
+              type="button"
+              className="uncat-pill"
+              onClick={() => setFilters({ categoryIds: [UNCATEGORISED_CATEGORY_ID] })}
+            >
+              {uncategorisedCount} uncategorised
+            </button>
+          )}
+          {wantsUncategorised && (
+            <button type="button" className="uncat-pill uncat-pill-active" onClick={() => setFilters({ categoryIds: [] })}>
+              Showing uncategorised · clear
+            </button>
+          )}
           <input
             type="search"
             name="search"
@@ -81,7 +121,8 @@ export function TransactionsPage() {
               <th>Payee</th>
               <th>Category</th>
               <th>Memo</th>
-              <th className="num">Amount</th>
+              <th className="num">Outflow</th>
+              <th className="num">Inflow</th>
             </tr>
           </thead>
           <tbody>
@@ -98,14 +139,13 @@ export function TransactionsPage() {
                       : (txn.category_name ?? "Uncategorised")}
                 </td>
                 <td className="muted memo-cell">{txn.memo}</td>
-                <td className={txn.amount < 0 ? "num amount-negative" : "num amount-positive"}>
-                  {formatMoney(txn.amount)}
-                </td>
+                <td className="num amount-negative">{txn.amount < 0 ? formatAmount(txn.amount) : ""}</td>
+                <td className="num amount-positive">{txn.amount > 0 ? formatAmount(txn.amount) : ""}</td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={6} className="empty-row">
+                <td colSpan={7} className="empty-row">
                   No transactions match these filters.
                 </td>
               </tr>

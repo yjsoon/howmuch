@@ -44,6 +44,8 @@ function query(params: Record<string, string | undefined>): string {
 }
 
 export interface ReportQuery {
+  /** Always pass the loaded plan; otherwise the API falls back to its configured default plan. */
+  plan_id?: string;
   from?: string;
   to?: string;
   account_ids?: string;

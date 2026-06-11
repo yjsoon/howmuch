@@ -1,12 +1,14 @@
 import { api, useApi } from "../api/client";
 import { FilterRail } from "../components/FilterRail";
 import { SteppedArea } from "../components/charts";
-import { formatDate, formatPeriod } from "../lib/dates";
+import { formatDate, formatPeriod, trailingMonthsRange } from "../lib/dates";
 import { formatMoney } from "../lib/money";
 import { useFilters } from "../state/filters";
 
+const TRAILING_YEAR = () => trailingMonthsRange(12);
+
 export function NetWorthPage() {
-  const { filters, setFilters, reportQuery } = useFilters();
+  const { filters, setFilters, reportQuery } = useFilters({ defaultRange: TRAILING_YEAR });
   const query = { ...reportQuery, category_ids: undefined };
   const report = useApi(JSON.stringify(query), () => api.netWorth(query));
 
@@ -14,6 +16,15 @@ export function NetWorthPage() {
   const latest = periods[periods.length - 1];
   const previous = periods[periods.length - 2];
   const delta = latest && previous ? latest.net_worth - previous.net_worth : null;
+
+  // Accounts that never move in this window (long-closed cards etc.) only add noise.
+  const activeAccountIds = new Set(
+    periods.flatMap((period) =>
+      period.accounts.filter((account) => account.balance !== 0).map((account) => account.account_id),
+    ),
+  );
+  const visibleAccounts = (period: (typeof periods)[number]) =>
+    period.accounts.filter((account) => activeAccountIds.has(account.account_id));
 
   return (
     <>
@@ -55,7 +66,7 @@ export function NetWorthPage() {
             <thead>
               <tr>
                 <th>Period</th>
-                {latest?.accounts.map((account) => (
+                {latest && visibleAccounts(latest).map((account) => (
                   <th key={account.account_id} className="num">
                     {account.account_name}
                   </th>
@@ -71,7 +82,7 @@ export function NetWorthPage() {
                 return (
                   <tr key={period.period}>
                     <td>{formatPeriod(period.period)}</td>
-                    {period.accounts.map((account) => (
+                    {visibleAccounts(period).map((account) => (
                       <td
                         key={account.account_id}
                         className={account.balance < 0 ? "num amount-negative" : "num"}

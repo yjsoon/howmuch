@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, useApi } from "../api/client";
 import type { Transaction } from "../api/types";
+import { splitCategoryGroups } from "../lib/categories";
 import { formatDate, todayIso, yesterdayIso } from "../lib/dates";
 import { formatMoney } from "../lib/money";
 import { usePlan } from "../state/plan";
@@ -13,6 +14,7 @@ export function QuickEntryPage() {
   const payees = useApi(planId, () => api.payees(planId));
 
   const openAccounts = useMemo(() => accounts.filter((account) => !account.closed), [accounts]);
+  const orderedGroups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
 
   const [direction, setDirection] = useState<Direction>("spend");
   const [amount, setAmount] = useState("");
@@ -147,15 +149,13 @@ export function QuickEntryPage() {
           <span className="field-label">Category (optional)</span>
           <select name="category" value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
             <option value="">Uncategorised</option>
-            {categoryGroups.map((group) => (
+            {[...orderedGroups.primary, ...orderedGroups.quiet].map((group) => (
               <optgroup key={group.id} label={group.name}>
-                {(group.categories ?? [])
-                  .filter((category) => !category.deleted)
-                  .map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
+                {group.categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
               </optgroup>
             ))}
           </select>

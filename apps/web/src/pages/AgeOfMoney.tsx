@@ -5,8 +5,12 @@ import { formatPeriod } from "../lib/dates";
 import { formatAmount } from "../lib/money";
 import { useFilters } from "../state/filters";
 
+// Age of money replays income lots from the start of the range, so a clipped
+// window distorts the figure — default to the full history.
+const ALL_TIME = () => ({});
+
 export function AgeOfMoneyPage() {
-  const { filters, setFilters, reportQuery } = useFilters();
+  const { filters, setFilters, reportQuery } = useFilters({ defaultRange: ALL_TIME });
   const query = { ...reportQuery, category_ids: undefined };
   const report = useApi(JSON.stringify(query), () => api.ageOfMoney(query));
 

@@ -2,6 +2,9 @@ import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { Interval } from "../api/types";
 import type { ReportQuery } from "../api/client";
+import { monthRange } from "../lib/dates";
+import { usePlan } from "./plan";
+import { loadPrefs, savePrefs } from "./prefs";
 
 export interface Filters {
   from?: string;
@@ -11,6 +14,11 @@ export interface Filters {
   interval: Interval;
 }
 
+export interface FilterOptions {
+  /** Range shown when the URL carries no explicit dates. Defaults to the current month. */
+  defaultRange?: () => { from?: string; to?: string };
+}
+
 const INTERVALS: Interval[] = ["day", "week", "month", "year"];
 
 function parseList(value: string | null): string[] {
@@ -18,38 +26,77 @@ function parseList(value: string | null): string[] {
 }
 
 /**
- * Filters live in the URL search string so report views are linkable and the
- * chosen range carries across tabs.
+ * Explicit choices live in the URL search string so report views are linkable
+ * and carry across tabs. When a param is absent, each report falls back to its
+ * own sensible default range, and accounts/interval fall back to the
+ * remembered preferences from the last visit. `range=all` and `accounts=all`
+ * mark a deliberate "everything" so it is distinguishable from "no choice".
  */
-export function useFilters(): {
+export function useFilters(options?: FilterOptions): {
   filters: Filters;
   setFilters: (patch: Partial<Filters>) => void;
   reportQuery: ReportQuery;
 } {
   const [params, setParams] = useSearchParams();
+  const { planId } = usePlan();
+  const defaultRange = options?.defaultRange ?? monthRange;
 
   const filters = useMemo<Filters>(() => {
-    const interval = params.get("interval") as Interval | null;
+    const prefs = loadPrefs();
+    const explicitFrom = params.get("from") ?? undefined;
+    const explicitTo = params.get("to") ?? undefined;
+    const range =
+      explicitFrom || explicitTo
+        ? { from: explicitFrom, to: explicitTo }
+        : params.get("range") === "all"
+          ? {}
+          : defaultRange();
+
+    const accountsParam = params.get("accounts");
+    const accountIds =
+      accountsParam === null ? (prefs.accountIds ?? []) : accountsParam === "all" ? [] : parseList(accountsParam);
+
+    const interval = (params.get("interval") ?? prefs.interval) as Interval | null;
+
     return {
-      from: params.get("from") ?? undefined,
-      to: params.get("to") ?? undefined,
-      accountIds: parseList(params.get("accounts")),
+      from: range.from,
+      to: range.to,
+      accountIds,
       categoryIds: parseList(params.get("categories")),
       interval: interval && INTERVALS.includes(interval) ? interval : "month",
     };
-  }, [params]);
+  }, [params, defaultRange]);
 
   const setFilters = useCallback(
     (patch: Partial<Filters>) => {
+      if (patch.accountIds) {
+        savePrefs({ accountIds: patch.accountIds });
+      }
+      if (patch.interval) {
+        savePrefs({ interval: patch.interval });
+      }
       setParams(
         (previous) => {
           const next = new URLSearchParams(previous);
-          const merged = { ...filtersFromParams(previous), ...patch };
-          writeParam(next, "from", merged.from);
-          writeParam(next, "to", merged.to);
-          writeParam(next, "accounts", merged.accountIds.join(",") || undefined);
-          writeParam(next, "categories", merged.categoryIds.join(",") || undefined);
-          writeParam(next, "interval", merged.interval === "month" ? undefined : merged.interval);
+          if ("from" in patch) {
+            writeParam(next, "from", patch.from);
+          }
+          if ("to" in patch) {
+            writeParam(next, "to", patch.to);
+          }
+          if ("from" in patch || "to" in patch) {
+            // Both cleared means an explicit "all time", not "use the default".
+            writeParam(next, "range", next.get("from") || next.get("to") ? undefined : "all");
+          }
+          if (patch.accountIds) {
+            writeParam(next, "accounts", patch.accountIds.join(",") || "all");
+          }
+          if (patch.categoryIds) {
+            writeParam(next, "categories", patch.categoryIds.join(",") || undefined);
+          }
+          if (patch.interval) {
+            writeParam(next, "interval", patch.interval);
+          }
           return next;
         },
         { replace: true },
@@ -60,27 +107,17 @@ export function useFilters(): {
 
   const reportQuery = useMemo<ReportQuery>(
     () => ({
+      plan_id: planId,
       from: filters.from,
       to: filters.to,
       account_ids: filters.accountIds.join(",") || undefined,
       category_ids: filters.categoryIds.join(",") || undefined,
       interval: filters.interval,
     }),
-    [filters],
+    [filters, planId],
   );
 
   return { filters, setFilters, reportQuery };
-}
-
-function filtersFromParams(params: URLSearchParams): Filters {
-  const interval = params.get("interval") as Interval | null;
-  return {
-    from: params.get("from") ?? undefined,
-    to: params.get("to") ?? undefined,
-    accountIds: parseList(params.get("accounts")),
-    categoryIds: parseList(params.get("categories")),
-    interval: interval && INTERVALS.includes(interval) ? interval : "month",
-  };
 }
 
 function writeParam(params: URLSearchParams, key: string, value: string | undefined): void {
@@ -96,9 +133,11 @@ export function transactionsLink(filters: Filters, categoryId?: string): string 
   const params = new URLSearchParams();
   if (filters.from) params.set("from", filters.from);
   if (filters.to) params.set("to", filters.to);
+  if (!filters.from && !filters.to) params.set("range", "all");
   if (filters.accountIds.length) params.set("accounts", filters.accountIds.join(","));
-  if (categoryId) params.set("categories", categoryId);
-  else if (filters.categoryIds.length) params.set("categories", filters.categoryIds.join(","));
-  const text = params.toString();
-  return `/transactions${text ? `?${text}` : ""}`;
+  if (categoryId) {
+    params.set("categories", categoryId);
+    params.set("flow", "outflow");
+  } else if (filters.categoryIds.length) params.set("categories", filters.categoryIds.join(","));
+  return `/transactions?${params.toString()}`;
 }

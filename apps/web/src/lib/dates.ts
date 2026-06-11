@@ -21,6 +21,44 @@ function shiftMonths(date: Date, months: number): Date {
   return result;
 }
 
+function monthBounds(year: number, monthIndex: number): { from: string; to: string } {
+  return {
+    from: iso(new Date(year, monthIndex, 1)),
+    to: iso(new Date(year, monthIndex + 1, 0)),
+  };
+}
+
+/** The calendar month `offset` months away from today (0 = this month). */
+export function monthRange(offset = 0): { from: string; to: string } {
+  const now = new Date();
+  return monthBounds(now.getFullYear(), now.getMonth() + offset);
+}
+
+export function ytdRange(): { from: string; to: string } {
+  return { from: `${new Date().getFullYear()}-01-01`, to: todayIso() };
+}
+
+export function trailingMonthsRange(months: number): { from: string; to: string } {
+  return { from: iso(shiftMonths(new Date(), -months)), to: todayIso() };
+}
+
+/** "2026-06" when from–to spans exactly that calendar month, else null. */
+export function calendarMonthOf(from?: string, to?: string): string | null {
+  const start = from?.match(/^(\d{4})-(\d{2})-01$/);
+  if (!start || !to) {
+    return null;
+  }
+  const year = Number(start[1]);
+  const monthIndex = Number(start[2]) - 1;
+  return monthBounds(year, monthIndex).to === to ? `${start[1]}-${start[2]}` : null;
+}
+
+/** The calendar month `delta` months away from "YYYY-MM". */
+export function shiftMonth(month: string, delta: number): { from: string; to: string } {
+  const [year, monthNumber] = month.split("-").map(Number);
+  return monthBounds(year, monthNumber - 1 + delta);
+}
+
 export interface RangePreset {
   id: string;
   label: string;
@@ -28,16 +66,12 @@ export interface RangePreset {
 }
 
 export const RANGE_PRESETS: RangePreset[] = [
-  { id: "1m", label: "1M", range: () => ({ from: iso(shiftMonths(new Date(), -1)), to: todayIso() }) },
-  { id: "3m", label: "3M", range: () => ({ from: iso(shiftMonths(new Date(), -3)), to: todayIso() }) },
-  { id: "6m", label: "6M", range: () => ({ from: iso(shiftMonths(new Date(), -6)), to: todayIso() }) },
-  { id: "12m", label: "12M", range: () => ({ from: iso(shiftMonths(new Date(), -12)), to: todayIso() }) },
-  {
-    id: "ytd",
-    label: "YTD",
-    range: () => ({ from: `${new Date().getFullYear()}-01-01`, to: todayIso() }),
-  },
-  { id: "all", label: "All", range: () => ({}) },
+  { id: "this-month", label: "This month", range: () => monthRange(0) },
+  { id: "last-month", label: "Last month", range: () => monthRange(-1) },
+  { id: "3m", label: "3M", range: () => trailingMonthsRange(3) },
+  { id: "ytd", label: "YTD", range: () => ytdRange() },
+  { id: "1y", label: "1Y", range: () => trailingMonthsRange(12) },
+  { id: "all", label: "All", range: () => ({ from: undefined, to: undefined }) },
 ];
 
 export function matchPreset(from?: string, to?: string): string | null {
@@ -54,6 +88,17 @@ export function matchPreset(from?: string, to?: string): string | null {
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+const FULL_MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/** "2026-06" -> "June 2026", for the month stepper. */
+export function formatMonthName(month: string): string {
+  const [year, monthNumber] = month.split("-");
+  return `${FULL_MONTHS[Number(monthNumber) - 1]} ${year}`;
+}
 
 /** Renders API period labels ("2026-06", "2026-W23", "2026-06-10", "2026") for humans. */
 export function formatPeriod(period: string): string {
