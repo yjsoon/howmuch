@@ -15,8 +15,8 @@ struct SettingsView: View {
   }
 
   init(settings: APISettings, onSave: @escaping @MainActor (APISettings) async -> Void) {
-    _draft = State(initialValue: settings)
     self.onSave = onSave
+    self.draft = settings
   }
 
   var body: some View {

@@ -125,13 +125,15 @@ struct TransactionFormView: View {
   @State private var isConfirmingDelete = false
   private let isEditing: Bool
 
+  // Plain stored properties before @State, assigned as wrapped values: the
+  // shape the SDK 27 @State macro migration expects.
   init(draft: TransactionDraft, isEditing: Bool) {
-    _draft = State(initialValue: draft)
+    self.isEditing = isEditing
     var engine = AmountKeypadEngine()
     engine.setValue(draft.amountMagnitudeMilli)
-    _keypad = State(initialValue: engine)
-    _isKeypadVisible = State(initialValue: !isEditing)
-    self.isEditing = isEditing
+    self.draft = draft
+    self.keypad = engine
+    self.isKeypadVisible = !isEditing
   }
 
   var body: some View {
