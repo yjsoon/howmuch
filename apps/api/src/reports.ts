@@ -227,9 +227,10 @@ export class ReportService {
     }
     if (!includeTransfers && filters.includeTransfers !== true) {
       clauses.push("lines.transfer_transaction_id IS NULL");
+      clauses.push("lines.transfer_account_id IS NULL");
     }
     appendInFilter(clauses, params, "lines.account_id", filters.accountIds);
-    appendInFilter(clauses, params, "lines.category_id", filters.categoryIds);
+    appendCategoryFilter(clauses, params, filters.categoryIds);
     appendInFilter(clauses, params, "lines.category_group_id", filters.categoryGroupIds);
     appendInFilter(clauses, params, "lines.payee_id", filters.payeeIds);
 
@@ -250,6 +251,7 @@ function lineItemsSql(): string {
       COALESCE(st.category_id, t.category_id) AS category_id,
       c.category_group_id,
       COALESCE(st.transfer_transaction_id, t.transfer_transaction_id) AS transfer_transaction_id,
+      COALESCE(st.transfer_account_id, t.transfer_account_id) AS transfer_account_id,
       t.deleted
     FROM transactions t
     LEFT JOIN subtransactions st ON st.transaction_id = t.id AND st.deleted = 0
@@ -260,6 +262,25 @@ function lineItemsSql(): string {
     )
     OR st.id IS NOT NULL
   `;
+}
+
+/** Spending breakdown surfaces uncategorised lines under this synthetic id. */
+const UNCATEGORISED_ID = "uncategorised";
+
+/** Category filter that treats the synthetic uncategorised id as `category_id IS NULL`. */
+function appendCategoryFilter(clauses: string[], params: any[], values?: string[]): void {
+  if (!values?.length) {
+    return;
+  }
+  const ids = values.filter((value) => value !== UNCATEGORISED_ID);
+  if (ids.length === values.length) {
+    appendInFilter(clauses, params, "lines.category_id", ids);
+  } else if (!ids.length) {
+    clauses.push("lines.category_id IS NULL");
+  } else {
+    clauses.push(`(lines.category_id IN (${ids.map(() => "?").join(", ")}) OR lines.category_id IS NULL)`);
+    params.push(...ids);
+  }
 }
 
 function appendInFilter(clauses: string[], params: any[], column: string, values?: string[]): void {
