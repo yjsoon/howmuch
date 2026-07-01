@@ -29,6 +29,15 @@ export function formatAmount(milliunits: number): string {
   return formatMoney(Math.abs(milliunits));
 }
 
+/** Parses a user-typed decimal ("12.34", "-5") into integer milliunits. */
+export function decimalToMilli(value: string): number {
+  const parsed = Number(String(value).replace(/,/g, "").trim());
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Not a valid amount: ${value}`);
+  }
+  return Math.round(parsed * 1000);
+}
+
 export function formatShare(share: number): string {
   return `${(share * 100).toFixed(1)}%`;
 }

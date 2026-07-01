@@ -7,6 +7,8 @@ const TABS = [
   { to: "/net-worth", label: "Net Worth" },
   { to: "/age-of-money", label: "Age of Money" },
   { to: "/transactions", label: "Transactions" },
+  { to: "/accounts", label: "Accounts" },
+  { to: "/manage", label: "Manage" },
 ];
 
 export function Shell() {

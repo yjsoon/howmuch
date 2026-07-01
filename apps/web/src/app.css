@@ -1208,3 +1208,214 @@ tr:hover .share-bar {
     width: 16%;
   }
 }
+
+/* ── Ledger management (accounts, categories, import, register editing) ── */
+
+.register-row {
+  cursor: pointer;
+}
+
+.register-row:hover td {
+  background: var(--accent-press);
+}
+
+.quick-category {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 3px 6px;
+  border: 1px dashed var(--rule);
+  border-radius: 2px;
+  background: var(--paper-raised);
+  color: var(--ink-faint);
+  max-width: 180px;
+}
+
+.editor-row > td {
+  background: var(--paper-raised);
+  border: 1px solid var(--ink);
+  padding: 14px 16px;
+}
+
+.txn-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0 14px;
+}
+
+.txn-editor-grid .field {
+  margin-bottom: 10px;
+}
+
+.txn-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 4px;
+}
+
+.txn-editor-actions button[type="submit"],
+.inline-form button[type="submit"],
+.token-form button,
+.plan-list button {
+  border: 1px solid var(--ink);
+  padding: 6px 14px;
+  border-radius: 2px;
+  background: var(--paper-raised);
+  font-size: 13px;
+}
+
+.txn-editor-actions button[type="submit"]:hover,
+.inline-form button[type="submit"]:hover,
+.token-form button:hover,
+.plan-list button:hover {
+  background: var(--accent-press);
+}
+
+.danger {
+  color: var(--red) !important;
+  border-color: var(--red) !important;
+}
+
+.inline-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+}
+
+.inline-form input,
+.inline-form select {
+  font: inherit;
+  font-size: 13.5px;
+  padding: 6px 9px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--paper-raised);
+  color: var(--ink);
+}
+
+.inline-form input:focus,
+.inline-form select:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
+.manage-form {
+  margin-top: 6px;
+}
+
+.confirm-strip {
+  border: 1px dashed var(--red);
+  padding: 8px 12px;
+  margin: 6px 0;
+}
+
+.manage-list {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+
+.manage-list > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 7px 2px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 13.5px;
+}
+
+.manage-actions {
+  display: flex;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.section-meta .text-button {
+  margin-left: 12px;
+}
+
+.token-form {
+  display: flex;
+  gap: 10px;
+  margin: 10px 0 6px;
+}
+
+.token-form input {
+  font: inherit;
+  font-size: 13.5px;
+  flex: 1;
+  min-width: 220px;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--paper-raised);
+  color: var(--ink);
+}
+
+.import-form {
+  max-width: 560px;
+}
+
+.import-form textarea {
+  font-family: var(--font-figures);
+  font-size: 12.5px;
+  padding: 9px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--paper-raised);
+  color: var(--ink);
+  width: 100%;
+  resize: vertical;
+}
+
+.import-form textarea:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
+.plan-list {
+  list-style: none;
+  margin: 10px 0;
+  padding: 0;
+  text-align: left;
+}
+
+.plan-list > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.onboarding {
+  max-width: 560px;
+  text-align: left;
+}
+
+.onboarding-title {
+  font-family: var(--font-display);
+  font-size: 28px;
+  margin: 0 0 6px;
+}
+
+.onboarding .segmented {
+  margin: 14px 0;
+}
+
+.onboarding-account {
+  margin-top: 12px;
+}
+
+.ledger-table td .text-button + .text-button {
+  margin-left: 12px;
+}
+
+.txn-editor .segment {
+  padding: 7px 12px;
+}

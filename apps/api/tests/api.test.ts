@@ -225,6 +225,126 @@ describe("YNAB-compatible API", () => {
     expect(deletedSincePatch.data.transactions[0].deleted).toBe(true);
   });
 
+  test("creates and updates accounts for ledger management", async () => {
+    const createResponse = await request("/v1/plans/plan-test/accounts", {
+      method: "POST",
+      body: { account: { name: "Everyday", type: "checking", opening_balance: 250000 } },
+    });
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json();
+    const accountId = created.data.account.id;
+    expect(created.data.account.name).toBe("Everyday");
+    expect(created.data.account.balance).toBe(250000);
+
+    const renamed = await (await request(`/v1/plans/plan-test/accounts/${accountId}`, {
+      method: "PATCH",
+      body: { account: { name: "Everyday Checking", closed: true } },
+    })).json();
+    expect(renamed.data.account.name).toBe("Everyday Checking");
+    expect(renamed.data.account.closed).toBe(true);
+
+    const reopened = await (await request(`/v1/plans/plan-test/accounts/${accountId}`, {
+      method: "PATCH",
+      body: { account: { closed: false, opening_balance: 100000 } },
+    })).json();
+    expect(reopened.data.account.closed).toBe(false);
+    expect(reopened.data.account.balance).toBe(100000);
+
+    const missing = await request("/v1/plans/plan-test/accounts/acct-missing", {
+      method: "PATCH",
+      body: { account: { name: "Ghost" } },
+    });
+    expect(missing.status).toBe(404);
+
+    const nameless = await request("/v1/plans/plan-test/accounts", {
+      method: "POST",
+      body: { account: { type: "savings" } },
+    });
+    expect(nameless.status).toBe(400);
+  });
+
+  test("manages category groups and categories with reassignment", async () => {
+    const groupResponse = await request("/v1/plans/plan-test/category_groups", {
+      method: "POST",
+      body: { category_group: { name: "Everyday" } },
+    });
+    expect(groupResponse.status).toBe(201);
+    const groupId = (await groupResponse.json()).data.category_group.id;
+
+    const categoryResponse = await request("/v1/plans/plan-test/categories", {
+      method: "POST",
+      body: { category: { name: "Groceries", category_group_id: groupId } },
+    });
+    expect(categoryResponse.status).toBe(201);
+    const groceriesId = (await categoryResponse.json()).data.category.id;
+
+    const diningId = (await (await request("/v1/plans/plan-test/categories", {
+      method: "POST",
+      body: { category: { name: "Dining", category_group_id: groupId } },
+    })).json()).data.category.id;
+
+    const transactionId = await createTransaction({
+      account_id: "acct-1",
+      date: "2026-06-10",
+      amount: -12340,
+      payee_name: "FairPrice",
+      category_id: groceriesId,
+    });
+
+    const renamed = await (await request(`/v1/plans/plan-test/categories/${groceriesId}`, {
+      method: "PATCH",
+      body: { category: { name: "Food Shop" } },
+    })).json();
+    expect(renamed.data.category.name).toBe("Food Shop");
+
+    const renamedGroup = await (await request(`/v1/plans/plan-test/category_groups/${groupId}`, {
+      method: "PATCH",
+      body: { category_group: { name: "Daily Life" } },
+    })).json();
+    expect(renamedGroup.data.category_group.name).toBe("Daily Life");
+
+    const deleteResponse = await (await request(
+      `/v1/plans/plan-test/categories/${groceriesId}?reassign_to=${diningId}`,
+      { method: "DELETE" },
+    )).json();
+    expect(deleteResponse.data.category.reassigned_transactions).toBe(1);
+
+    const transaction = await (await request(`/v1/plans/plan-test/transactions/${transactionId}`)).json();
+    expect(transaction.data.transaction.category_id).toBe(diningId);
+    expect(transaction.data.transaction.category_name).toBe("Dining");
+
+    const groups = await (await request("/v1/plans/plan-test/categories")).json();
+    const group = groups.data.category_groups.find((entry: any) => entry.id === groupId);
+    expect(group.name).toBe("Daily Life");
+    expect(group.categories.map((category: any) => category.name)).toEqual(["Dining"]);
+
+    const groupDelete = await (await request(`/v1/plans/plan-test/category_groups/${groupId}`, {
+      method: "DELETE",
+    })).json();
+    expect(groupDelete.data.category_group.deleted).toBe(true);
+    expect(groupDelete.data.category_group.reassigned_transactions).toBe(1);
+
+    const uncategorised = await (await request(`/v1/plans/plan-test/transactions/${transactionId}`)).json();
+    expect(uncategorised.data.transaction.category_id).toBeNull();
+  });
+
+  test("renames payees and rejects duplicate payee names", async () => {
+    const payeeId = await createPayee("Coffe Shop");
+    await createPayee("Bakery");
+
+    const renamed = await (await request(`/v1/plans/plan-test/payees/${payeeId}`, {
+      method: "PATCH",
+      body: { payee: { name: "Coffee Shop" } },
+    })).json();
+    expect(renamed.data.payee.name).toBe("Coffee Shop");
+
+    const conflict = await request(`/v1/plans/plan-test/payees/${payeeId}`, {
+      method: "PATCH",
+      body: { payee: { name: "bakery" } },
+    });
+    expect(conflict.status).toBe(400);
+  });
+
   test("imports transactions with duplicate detection", async () => {
     const firstImport = await (await request("/v1/plans/plan-test/transactions/import", {
       method: "POST",
@@ -422,7 +542,7 @@ describe("native reports and imports", () => {
       const url = String(input);
       calls.push(url);
 
-      if (url.endsWith("/plans/plan-test")) {
+      if (url.endsWith("/budgets/plan-test")) {
         return jsonResponse({
           data: {
             plan: {
@@ -434,7 +554,7 @@ describe("native reports and imports", () => {
           },
         });
       }
-      if (url.endsWith("/plans/plan-test/settings")) {
+      if (url.endsWith("/budgets/plan-test/settings")) {
         return jsonResponse({
           data: {
             settings: {
@@ -445,16 +565,16 @@ describe("native reports and imports", () => {
           },
         });
       }
-      if (url.endsWith("/plans/plan-test/accounts")) {
+      if (url.endsWith("/budgets/plan-test/accounts")) {
         return jsonResponse({ data: { accounts: [] } });
       }
-      if (url.endsWith("/plans/plan-test/categories")) {
+      if (url.endsWith("/budgets/plan-test/categories")) {
         return jsonResponse({ data: { category_groups: [] } });
       }
-      if (url.endsWith("/plans/plan-test/payees")) {
+      if (url.endsWith("/budgets/plan-test/payees")) {
         return jsonResponse({ data: { payees: [] } });
       }
-      if (url.endsWith("/plans/plan-test/transactions?since_date=1900-01-01")) {
+      if (url.endsWith("/budgets/plan-test/transactions?since_date=1900-01-01")) {
         return jsonResponse({
           data: {
             transactions: [
@@ -498,8 +618,8 @@ describe("native reports and imports", () => {
       });
 
       expect(importResponse.status).toBe(201);
-      expect(calls).toContain("https://ynab.example/v1/plans/plan-test/settings");
-      expect(calls).toContain("https://ynab.example/v1/plans/plan-test/transactions?since_date=1900-01-01");
+      expect(calls).toContain("https://ynab.example/v1/budgets/plan-test/settings");
+      expect(calls).toContain("https://ynab.example/v1/budgets/plan-test/transactions?since_date=1900-01-01");
 
       const plans = await (await request("/v1/plans")).json();
       expect(plans.data.plans[0].name).toBe("Imported Plan");

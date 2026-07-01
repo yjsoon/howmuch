@@ -1,10 +1,11 @@
 import { startTransition, useDeferredValue, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, useApi } from "../api/client";
+import type { Transaction } from "../api/types";
 import { FilterRail } from "../components/FilterRail";
-import { UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
+import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
 import { formatDate } from "../lib/dates";
-import { formatAmount, formatMoney } from "../lib/money";
+import { decimalToMilli, formatAmount, formatMoney } from "../lib/money";
 import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
 
@@ -13,10 +14,16 @@ export function TransactionsPage() {
   const { planId } = usePlan();
   const [params] = useSearchParams();
   const [search, setSearch] = useState("");
+  const [version, setVersion] = useState(0);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const deferredSearch = useDeferredValue(search);
   const flow = params.get("flow");
+  const refresh = () => {
+    setEditingId(null);
+    setVersion((n) => n + 1);
+  };
 
-  const listKey = JSON.stringify({ planId, from: filters.from, to: filters.to });
+  const listKey = JSON.stringify({ planId, from: filters.from, to: filters.to, version });
   const result = useApi(listKey, () =>
     api.transactions(planId, { since_date: filters.from, until_date: filters.to }),
   );
@@ -174,7 +181,7 @@ export function TransactionsPage() {
         <section className="report-section">
           <div className="section-heading">
             <span className="section-title">Register</span>
-            <span className="section-meta">Newest entries first</span>
+            <span className="section-meta">Click a row to edit · newest first</span>
           </div>
           {rows.length > 0 ? (
             <div className="table-wrap table-wrap-wide">
@@ -191,25 +198,25 @@ export function TransactionsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((txn) => (
-                    <tr key={txn.id}>
-                      <td className="nowrap">{formatDate(txn.date)}</td>
-                      <td className="muted">{txn.account_name}</td>
-                      <td>{txn.payee_name ?? (txn.transfer_account_id ? "Transfer" : "-")}</td>
-                      <td className="muted">
-                        {txn.subtransactions?.length
-                          ? `Split · ${txn.subtransactions.length} lines`
-                          : txn.transfer_account_id
-                            ? "Transfer"
-                            : (txn.category_name ?? "Uncategorised")}
-                      </td>
-                      <td className="muted memo-cell" title={txn.memo ?? ""}>
-                        {txn.memo ?? "-"}
-                      </td>
-                      <td className="num amount-negative">{txn.amount < 0 ? formatAmount(txn.amount) : ""}</td>
-                      <td className="num amount-positive">{txn.amount > 0 ? formatAmount(txn.amount) : ""}</td>
-                    </tr>
-                  ))}
+                  {rows.map((txn) =>
+                    editingId === txn.id ? (
+                      <TransactionEditorRow
+                        key={txn.id}
+                        transaction={txn}
+                        planId={planId}
+                        onDone={refresh}
+                        onCancel={() => setEditingId(null)}
+                      />
+                    ) : (
+                      <RegisterRow
+                        key={txn.id}
+                        transaction={txn}
+                        planId={planId}
+                        onEdit={() => setEditingId(txn.id)}
+                        onChanged={refresh}
+                      />
+                    ),
+                  )}
                 </tbody>
               </table>
             </div>
@@ -222,5 +229,314 @@ export function TransactionsPage() {
         </section>
       )}
     </>
+  );
+}
+
+function RegisterRow({
+  transaction: txn,
+  planId,
+  onEdit,
+  onChanged,
+}: {
+  transaction: Transaction;
+  planId: string;
+  onEdit: () => void;
+  onChanged: () => void;
+}) {
+  const canQuickCategorise = txn.category_id === null && !txn.transfer_account_id && !txn.subtransactions?.length;
+  return (
+    <tr className="register-row" onClick={onEdit}>
+      <td className="nowrap">{formatDate(txn.date)}</td>
+      <td className="muted">{txn.account_name}</td>
+      <td>{txn.payee_name ?? (txn.transfer_account_id ? "Transfer" : "-")}</td>
+      <td className="muted">
+        {txn.subtransactions?.length ? (
+          `Split · ${txn.subtransactions.length} lines`
+        ) : txn.transfer_account_id ? (
+          "Transfer"
+        ) : canQuickCategorise ? (
+          <QuickCategorySelect planId={planId} transactionId={txn.id} onChanged={onChanged} />
+        ) : (
+          (txn.category_name ?? "Uncategorised")
+        )}
+      </td>
+      <td className="muted memo-cell" title={txn.memo ?? ""}>
+        {txn.memo ?? "-"}
+      </td>
+      <td className="num amount-negative">{txn.amount < 0 ? formatAmount(txn.amount) : ""}</td>
+      <td className="num amount-positive">{txn.amount > 0 ? formatAmount(txn.amount) : ""}</td>
+    </tr>
+  );
+}
+
+/** One-click categorisation straight from the register, without opening the editor. */
+function QuickCategorySelect({
+  planId,
+  transactionId,
+  onChanged,
+}: {
+  planId: string;
+  transactionId: string;
+  onChanged: () => void;
+}) {
+  const { categoryGroups } = usePlan();
+  const orderedGroups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <select
+      className="quick-category"
+      value=""
+      disabled={busy}
+      onClick={(event) => event.stopPropagation()}
+      onChange={async (event) => {
+        const categoryId = event.target.value;
+        if (!categoryId) {
+          return;
+        }
+        setBusy(true);
+        try {
+          await api.updateTransaction(planId, transactionId, { category_id: categoryId });
+          onChanged();
+        } finally {
+          setBusy(false);
+        }
+      }}
+      aria-label="Set category"
+    >
+      <option value="">{busy ? "Saving…" : "Uncategorised"}</option>
+      {[...orderedGroups.primary, ...orderedGroups.quiet].map((group) => (
+        <optgroup key={group.id} label={group.name}>
+          {group.categories.map((category) => (
+            <option key={category.id} value={category.id}>
+              {category.name}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+    </select>
+  );
+}
+
+function TransactionEditorRow({
+  transaction: txn,
+  planId,
+  onDone,
+  onCancel,
+}: {
+  transaction: Transaction;
+  planId: string;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const { accounts, categoryGroups } = usePlan();
+  const payees = useApi(`payees-${planId}`, () => api.payees(planId));
+  const orderedGroups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
+
+  const isTransfer = Boolean(txn.transfer_transaction_id || txn.transfer_account_id);
+  const isSplit = Boolean(txn.subtransactions?.length);
+  const amountLocked = isTransfer || isSplit;
+
+  const [date, setDate] = useState(txn.date);
+  const [accountId, setAccountId] = useState(txn.account_id);
+  const [payeeName, setPayeeName] = useState(txn.payee_name ?? "");
+  const [categoryId, setCategoryId] = useState(txn.category_id ?? "");
+  const [memo, setMemo] = useState(txn.memo ?? "");
+  const [cleared, setCleared] = useState(txn.cleared);
+  const [direction, setDirection] = useState<"spend" | "income">(txn.amount < 0 ? "spend" : "income");
+  const [amount, setAmount] = useState((Math.abs(txn.amount) / 1000).toFixed(2));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const patch: Parameters<typeof api.updateTransaction>[2] = {
+        date,
+        memo: memo.trim() || null,
+        cleared,
+      };
+      if (!isTransfer) {
+        patch.payee_id = null;
+        patch.payee_name = payeeName.trim() || null;
+      }
+      if (!amountLocked) {
+        const magnitude = Math.abs(decimalToMilli(amount));
+        patch.amount = direction === "spend" ? -magnitude : magnitude;
+      }
+      if (!isTransfer && !isSplit) {
+        patch.category_id = categoryId || null;
+      }
+      if (accountId !== txn.account_id && !isTransfer) {
+        patch.account_id = accountId;
+      }
+      await api.updateTransaction(planId, txn.id, patch);
+      onDone();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!window.confirm("Delete this transaction? This cannot be undone from the web app.")) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteTransaction(planId, txn.id);
+      onDone();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <tr className="editor-row">
+      <td colSpan={7}>
+        <form className="txn-editor" onSubmit={save}>
+          <div className="txn-editor-grid">
+            <label className="field">
+              <span className="field-label">Date</span>
+              <input type="date" value={date} onChange={(event) => setDate(event.target.value)} required />
+            </label>
+            <label className="field">
+              <span className="field-label">Account</span>
+              <select
+                value={accountId}
+                onChange={(event) => setAccountId(event.target.value)}
+                disabled={isTransfer}
+              >
+                {accounts
+                  .filter((account) => !account.closed || account.id === txn.account_id)
+                  .map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="field">
+              <span className="field-label">Payee</span>
+              <input
+                value={payeeName}
+                onChange={(event) => setPayeeName(event.target.value)}
+                list="editor-payees"
+                disabled={isTransfer}
+                placeholder={isTransfer ? "Transfer" : "Payee"}
+              />
+              <datalist id="editor-payees">
+                {(payees.data ?? [])
+                  .filter((payee) => !payee.deleted)
+                  .map((payee) => (
+                    <option key={payee.id} value={payee.name} />
+                  ))}
+              </datalist>
+            </label>
+            <label className="field">
+              <span className="field-label">Category</span>
+              {isSplit ? (
+                <input value={`Split · ${txn.subtransactions?.length} lines`} disabled />
+              ) : (
+                <select
+                  value={categoryId}
+                  onChange={(event) => setCategoryId(event.target.value)}
+                  disabled={isTransfer}
+                >
+                  <option value="">Uncategorised</option>
+                  {[...orderedGroups.primary, ...orderedGroups.quiet].map((group) => (
+                    <optgroup key={group.id} label={group.name}>
+                      {group.categories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              )}
+            </label>
+            <label className="field">
+              <span className="field-label">Memo</span>
+              <input value={memo} onChange={(event) => setMemo(event.target.value)} placeholder="Note" />
+            </label>
+            <label className="field">
+              <span className="field-label">Amount</span>
+              <div className="date-row">
+                <div className="segmented" role="group" aria-label="Direction">
+                  <button
+                    type="button"
+                    className={direction === "spend" ? "segment segment-active" : "segment"}
+                    disabled={amountLocked}
+                    onClick={() => setDirection("spend")}
+                  >
+                    Out
+                  </button>
+                  <button
+                    type="button"
+                    className={direction === "income" ? "segment segment-active" : "segment"}
+                    disabled={amountLocked}
+                    onClick={() => setDirection("income")}
+                  >
+                    In
+                  </button>
+                </div>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={amount}
+                  onChange={(event) => setAmount(event.target.value)}
+                  disabled={amountLocked}
+                  required
+                />
+              </div>
+            </label>
+            <label className="field">
+              <span className="field-label">Status</span>
+              <select value={cleared} onChange={(event) => setCleared(event.target.value)}>
+                <option value="uncleared">Uncleared</option>
+                <option value="cleared">Cleared</option>
+                <option value="reconciled">Reconciled</option>
+              </select>
+            </label>
+          </div>
+
+          {isTransfer && (
+            <p className="field-note">
+              This entry is one side of a transfer; the account, payee, category, and amount stay linked to the other
+              side.
+            </p>
+          )}
+          {isSplit && (
+            <p className="field-note">Split amounts and categories are preserved as imported; edit the shared fields here.</p>
+          )}
+          {error && (
+            <div className="status-panel status-panel-error compact-panel">
+              <p className="status-title">Could not save.</p>
+              <p className="status-detail">{error}</p>
+            </div>
+          )}
+
+          <div className="txn-editor-actions">
+            <button type="submit" disabled={busy}>
+              {busy ? "Saving…" : "Save changes"}
+            </button>
+            <button type="button" className="text-button" onClick={onCancel} disabled={busy}>
+              Cancel
+            </button>
+            {!isTransfer && (
+              <button type="button" className="text-button danger" onClick={remove} disabled={busy}>
+                Delete
+              </button>
+            )}
+          </div>
+        </form>
+      </td>
+    </tr>
   );
 }

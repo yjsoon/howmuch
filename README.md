@@ -41,9 +41,19 @@ Useful environment variables:
 - `HOWMUCH_API_TOKEN`: bearer token. If unset, local development requests are allowed.
 - `HOWMUCH_DEFAULT_PLAN_ID`: default plan id for native routes.
 
+## Web App
+
+The web app (`apps/web`, `bun run dev:stack` or `cd apps/web && bun run dev`) covers day-to-day use:
+
+- The four reports, with shareable URL filters.
+- An editable register: click any row to fix its date, account, payee, category, memo, amount, or cleared status; uncategorised rows get an inline category picker.
+- Accounts: create with a starting balance, rename, close/reopen, and reconcile.
+- Manage: category groups/categories (rename, hide, delete with reassignment), payee renaming, YNAB/CSV imports, and the API token.
+- First-run onboarding: with an empty database it offers a YNAB token import or a fresh start.
+
 ## YNAB Migration
 
-Preferred path: import directly from the YNAB API with a personal access token.
+The fastest path is in the web app: onboarding (or Manage → Import) accepts a YNAB personal access token, lists your budgets, and imports the chosen one. Equivalent CLI, with backups and balance-parity reporting:
 
 ```sh
 bun run import:ynab --list-plans

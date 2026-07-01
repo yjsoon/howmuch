@@ -1,10 +1,10 @@
 import type { Database } from "bun:sqlite";
 import type { ApiConfig } from "./config";
-import { LedgerRepository, NotFoundError } from "./repository";
+import { LedgerRepository, NotFoundError, ValidationError } from "./repository";
 import { ReportService } from "./reports";
 import { decimalToMilliunits } from "./money";
 import { importCsvRows } from "./importers/csv";
-import { importYnabFromApi } from "./importers/ynab";
+import { importYnabFromApi, listYnabPlans } from "./importers/ynab";
 
 type HandlerOptions = {
   db: Database;
@@ -40,6 +40,9 @@ export function createHandler({ db, config }: HandlerOptions): (request: Request
     } catch (error) {
       if (error instanceof NotFoundError) {
         return apiError(404, "resource_not_found", error.message, "404.2");
+      }
+      if (error instanceof ValidationError) {
+        return apiError(400, "bad_request", error.message);
       }
       return apiError(500, "internal_server_error", error instanceof Error ? error.message : String(error));
     }
@@ -84,12 +87,17 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
     }
     if (segments.length === 4 && method === "POST") {
       const body = await readJson(request);
-      repo.upsertAccount(planId, body.account ?? body);
-      return json({ data: { account: repo.getAccount(planId, (body.account ?? body).id), server_knowledge: repo.getServerKnowledge(planId) } }, 201);
+      const account = repo.createAccount(planId, body.account ?? body);
+      return json({ data: { account, server_knowledge: repo.getServerKnowledge(planId) } }, 201);
     }
     const accountId = segments[4];
     if (segments.length === 5 && method === "GET") {
       return json({ data: { account: repo.getAccount(planId, accountId) } });
+    }
+    if (segments.length === 5 && (method === "PUT" || method === "PATCH")) {
+      const body = await readJson(request);
+      const account = repo.updateAccount(planId, accountId, body.account ?? body);
+      return json({ data: { account, server_knowledge: repo.getServerKnowledge(planId) } });
     }
     if (segments.length === 6 && segments[5] === "transactions" && method === "GET") {
       return json({
@@ -101,11 +109,46 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
     }
   }
 
+  if (resource === "category_groups") {
+    if (segments.length === 4 && method === "POST") {
+      const body = await readJson(request);
+      const group = repo.createCategoryGroup(planId, body.category_group ?? body);
+      return json({ data: { category_group: group, server_knowledge: repo.getServerKnowledge(planId) } }, 201);
+    }
+    const groupId = segments[4];
+    if (segments.length === 5 && (method === "PUT" || method === "PATCH")) {
+      const body = await readJson(request);
+      const group = repo.updateCategoryGroup(planId, groupId, body.category_group ?? body);
+      return json({ data: { category_group: group, server_knowledge: repo.getServerKnowledge(planId) } });
+    }
+    if (segments.length === 5 && method === "DELETE") {
+      const group = repo.deleteCategoryGroup(planId, groupId, url.searchParams.get("reassign_to"));
+      return json({ data: { category_group: group, server_knowledge: repo.getServerKnowledge(planId) } });
+    }
+  }
+
   if (resource === "categories" && segments.length === 4 && method === "GET") {
     return json({ data: { category_groups: repo.listCategoryGroups(planId), server_knowledge: repo.getServerKnowledge(planId) } });
   }
+  if (resource === "categories" && segments.length === 4 && method === "POST") {
+    const body = await readJson(request);
+    const category = repo.createCategory(planId, body.category ?? body);
+    return json({ data: { category, server_knowledge: repo.getServerKnowledge(planId) } }, 201);
+  }
   if (resource === "categories") {
     const categoryId = segments[4];
+    if (segments.length === 5 && method === "GET") {
+      return json({ data: { category: repo.getCategory(planId, categoryId), server_knowledge: repo.getServerKnowledge(planId) } });
+    }
+    if (segments.length === 5 && (method === "PUT" || method === "PATCH")) {
+      const body = await readJson(request);
+      const category = repo.updateCategory(planId, categoryId, body.category ?? body);
+      return json({ data: { category, server_knowledge: repo.getServerKnowledge(planId) } });
+    }
+    if (segments.length === 5 && method === "DELETE") {
+      const category = repo.deleteCategory(planId, categoryId, url.searchParams.get("reassign_to"));
+      return json({ data: { category, server_knowledge: repo.getServerKnowledge(planId) } });
+    }
     if (segments.length === 6 && segments[5] === "transactions" && method === "GET") {
       return json({
         data: {
@@ -126,6 +169,11 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
       return json({ data: { payee, server_knowledge: repo.getServerKnowledge(planId) } }, 201);
     }
     const payeeId = segments[4];
+    if (segments.length === 5 && (method === "PUT" || method === "PATCH")) {
+      const body = await readJson(request);
+      const payee = repo.updatePayee(planId, payeeId, body.payee ?? body);
+      return json({ data: { payee, server_knowledge: repo.getServerKnowledge(planId) } });
+    }
     if (segments.length === 6 && segments[5] === "transactions" && method === "GET") {
       return json({
         data: {
@@ -212,6 +260,18 @@ async function handleNative(
   reports: ReportService,
 ): Promise<Response> {
   const method = request.method.toUpperCase();
+
+  if (segments[1] === "bootstrap" && segments.length === 2 && method === "GET") {
+    return json({ data: { default_plan_id: repo.getDefaultPlanId(), plans: repo.listPlans() } });
+  }
+
+  // Listing YNAB budgets is read-only against YNAB; it must not create a local plan.
+  if (segments[1] === "import" && segments[2] === "ynab" && segments[3] === "plans" && method === "POST") {
+    const body = await readJson(request);
+    const plans = await listYnabPlans({ token: body.token, baseUrl: body.base_url });
+    return json({ data: { plans } });
+  }
+
   const planId = url.searchParams.get("plan_id") ?? repo.getDefaultPlanId();
   repo.ensurePlan(planId);
 
@@ -256,7 +316,7 @@ async function handleNative(
     return json({ data: result }, 201);
   }
 
-  if (segments[1] === "import" && segments[2] === "ynab" && method === "POST") {
+  if (segments[1] === "import" && segments[2] === "ynab" && segments.length === 3 && method === "POST") {
     const body = await readJson(request);
     const result = await importYnabFromApi(repo, {
       token: body.token,

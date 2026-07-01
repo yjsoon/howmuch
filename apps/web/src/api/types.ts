@@ -134,6 +134,45 @@ export interface AgeOfMoneyReport {
   }>;
 }
 
+export interface TransactionPatch {
+  account_id?: string;
+  date?: string;
+  amount?: number;
+  payee_id?: string | null;
+  payee_name?: string | null;
+  category_id?: string | null;
+  memo?: string | null;
+  cleared?: string;
+  approved?: boolean;
+  flag_color?: string | null;
+}
+
+export interface CsvImportRow {
+  date: string;
+  payee?: string;
+  memo?: string;
+  outflow?: string;
+  inflow?: string;
+  amount?: string;
+}
+
+export interface ImportResult {
+  import_session_id: string;
+  imported: number;
+  duplicate: number;
+  failed: number;
+}
+
+export interface YnabImportResult {
+  plan_id?: string;
+  accounts?: number;
+  payees?: number;
+  category_groups?: number;
+  categories?: number;
+  transactions?: number;
+  [key: string]: unknown;
+}
+
 export interface QuickEntryInput {
   client_id: string;
   account_id: string;

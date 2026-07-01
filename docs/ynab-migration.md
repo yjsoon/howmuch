@@ -2,6 +2,8 @@
 
 Preferred migration source: the YNAB API with a personal access token.
 
+The quickest route is in the web app itself: on first run (empty database) the onboarding screen accepts a YNAB personal access token, lists your budgets, and imports the chosen one server-side. The same flow is available later under **Manage → Import**, and re-running it is idempotent. The CLI workflow below is equivalent and adds backups and balance-parity reporting.
+
 Why this path:
 
 - Preserves plan metadata, accounts, payees, categories, flags, cleared state, imports, transfers, split transactions, and deleted transactions.

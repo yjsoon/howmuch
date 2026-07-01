@@ -24,13 +24,14 @@ export async function importYnabFromApi(
   const sessionId = repo.createImportSession(options.planId, "ynab-api");
 
   try {
+    // The real YNAB API only serves /budgets/... paths; "plan" is HowMuch's internal name.
     const [plan, settings, accounts, categories, payees, transactions] = await Promise.all([
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}`),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/settings`),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/accounts`),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/categories`),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/payees`),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/transactions?since_date=${sinceDate}`),
+      ynabFetch(baseUrl, options.token, `/budgets/${options.planId}`),
+      ynabFetch(baseUrl, options.token, `/budgets/${options.planId}/settings`),
+      ynabFetch(baseUrl, options.token, `/budgets/${options.planId}/accounts`),
+      ynabFetch(baseUrl, options.token, `/budgets/${options.planId}/categories`),
+      ynabFetch(baseUrl, options.token, `/budgets/${options.planId}/payees`),
+      ynabFetch(baseUrl, options.token, `/budgets/${options.planId}/transactions?since_date=${sinceDate}`),
     ]);
 
     repo.upsertPlan(options.planId, plan.data.plan ?? plan.data.budget ?? { id: options.planId }, settings.data.settings);
@@ -104,8 +105,8 @@ export async function listYnabPlans(options: {
   baseUrl?: string;
 }): Promise<YnabPlanSummary[]> {
   const baseUrl = options.baseUrl ?? DEFAULT_YNAB_BASE_URL;
-  const response = await ynabFetch(baseUrl, options.token, "/plans");
-  return response.data.plans ?? response.data.budgets ?? [];
+  const response = await ynabFetch(baseUrl, options.token, "/budgets");
+  return response.data.budgets ?? response.data.plans ?? [];
 }
 
 async function ynabFetch(baseUrl: string, token: string, path: string): Promise<any> {

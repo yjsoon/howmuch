@@ -1,58 +1,55 @@
 # Integration Status
 
-Last updated: 2026-06-10
+Last updated: 2026-07-01
 
-This document tracks merge readiness across backend, web, iOS, importer, auth, and design. It is integration glue only, so open items owned by other tracks stay as TODOs rather than guessed implementations.
+This document tracks merge readiness across backend, web, iOS, importer, auth, and design.
 
 ## Current State
 
 | Track | Status | Notes |
 | --- | --- | --- |
-| Backend/API | In progress, usable locally | Bun API, SQLite migrations, YNAB-compatible `/v1`, native reports, CSV import, YNAB import route, and mobile quick-entry route are present. |
-| Web | Pending merge into this worktree | `apps/web` is not present here yet. Claude Fable owns implementation and design direction in the main checkout. |
-| iOS | Early planning only | `apps/ios/README.md` defines the initial API dependency, but no app scaffold is present in this worktree. |
+| Backend/API | Usable for daily migration | YNAB-compatible `/v1` reads and writes (transactions, accounts, category groups/categories, payees), native reports, CSV import, YNAB API import (fixed to the real `/budgets` paths), mobile quick entry, and `/api/bootstrap` for first-run detection. |
+| Web | Usable for daily migration | Reports, editable register, accounts page (create/rename/close/reconcile), category and payee management, in-app YNAB and CSV imports, first-run onboarding, and bearer-token auth. Verified end-to-end in Chromium against seeded data. |
+| iOS | App scaffold present | `apps/ios` contains the YNAB-style SwiftUI app; see `apps/ios/README.md`. |
 | Demo data | Ready | `bun run demo:seed` loads [fixtures/demo-ledger.json](../fixtures/demo-ledger.json) into the default SQLite database. |
 | Smoke test | Ready | `bun run smoke` exercises health, core `/v1` resources, representative `/api` reports, and mobile quick entry against a temporary seeded database. |
-| Auth | Local-only shape exists | Static bearer token is supported; local development remains open if `HOWMUCH_API_TOKEN` is unset. No web or device auth UI is wired yet. |
-| Design | Owned elsewhere | Design direction is defined in [docs/frontend/brief.md](frontend/brief.md); implementation is intentionally untouched here. |
+| Auth | Working end to end | Static bearer token via `HOWMUCH_API_TOKEN`; the web app prompts for it and stores it locally. Tokenless localhost remains open for development. |
+| Design | Owned elsewhere | Design direction is defined in [docs/frontend/brief.md](frontend/brief.md). |
 
 ## Ready Now
 
 - `bun run demo:seed` for meaningful local data without a live YNAB import.
 - `bun run api:dev` for backend-only development.
-- `bun run dev:stack` for a tmux-based API plus web session once `apps/web` lands.
+- `bun run dev:stack` for a tmux-based API plus web session.
 - `bun run smoke` for quick integration verification.
+- Web onboarding: with an empty database, the app offers a YNAB token import or a fresh first account.
 
-## Merge Checklist
+## Migration Checklist
 
 - Backend
   - [x] API starts against SQLite and applies migrations automatically.
   - [x] Reports return seeded data for spending, income vs spending, net worth, and age of money.
   - [x] CSV import endpoint exists.
-  - [ ] YNAB import flow verified against a real token and full-history import.
+  - [x] YNAB importer targets the real API's `/budgets/...` paths (was `/plans/...`, which would 404 against api.ynab.com).
+  - [x] Write routes for accounts, category groups, categories, and payees (create/rename/hide/close/delete with reassignment).
+  - [ ] YNAB import flow verified against a real token and full-history import (needs a live token; the web flow surfaces errors inline).
 - Web
-  - [ ] Merge Claude’s `apps/web` branch into the shared integration branch.
-  - [ ] Confirm `apps/web/package.json` exposes `bun run dev`.
-  - [ ] Verify the web dev server proxies `/api` and `/v1` to `:8787` as described in the brief.
-  - [ ] Open the seeded data flow and confirm all four reports render with meaningful labels and totals.
+  - [x] `apps/web` merged; `bun run dev` and `bun run build` work.
+  - [x] Dev server proxies `/api` and `/v1` to `:8787`.
+  - [x] All four reports render with seeded data.
+  - [x] Register editing, quick categorisation, and deletion.
+  - [x] Accounts: create, rename, close/reopen, reconcile via balance adjustment.
+  - [x] Categories/payees management with delete-and-reassign.
+  - [x] In-app YNAB token import and CSV paste import.
 - iOS
-  - [ ] Scaffold the app target or import the current iOS branch.
-  - [ ] Point quick entry to `/api/mobile/quick-entry` against the seeded local plan.
-  - [ ] Confirm report screens can read seeded data without a YNAB migration.
-- Importer
-  - [x] CSV import route exists for fixture-style ingestion.
-  - [ ] Decide whether demoing should use direct seed data, CSV import, or a captured YNAB fixture for parity testing.
-  - [ ] Capture at least one real YNAB import verification run before release.
+  - [x] App scaffold present with quick entry and report/category screens.
+  - [ ] Point quick entry at a deployed API and verify against real data.
 - Auth
-  - [ ] Decide whether morning demo builds run tokenless on localhost or with a shared `HOWMUCH_API_TOKEN`.
-  - [ ] Document where web and iOS should source that token if it is required before launch.
-- Design and release
-  - [ ] Merge the design/web track without overwriting root workflow scripts.
-  - [ ] Run `bun run smoke` after each major merge.
-  - [ ] Do one end-to-end morning-demo pass with seeded data and both API and web running together.
+  - [x] Web sends `HOWMUCH_API_TOKEN` as a bearer token and prompts when the server requires one.
+  - [ ] Decide the deployment story (see [docs/deployment.md](deployment.md)).
 
 ## Known Risks
 
-- `apps/web` is absent in this worktree, so local convergence with the real web UI cannot be verified here yet.
-- The YNAB import route exists but has not been exercised in this integration pass because no live token fixture is available in-repo.
-- The demo seed uses direct repository writes for stable labels and categories; that is correct for local fixtures, but it does not replace importer parity testing.
+- The YNAB API import has not been exercised against a live token in-repo; the paths now match the public API docs and the flow is covered by mocked tests, but do the first real import into a scratch database (`--db data/howmuch-real.sqlite`) and check the printed balance parity counts.
+- Transfer pairs are linked on import; editing one side of a transfer in the web app deliberately locks amount/account/category to avoid desyncing the pair, and deleting a side is blocked in the editor.
+- Split transactions keep their imported subtransaction lines; the web editor edits shared fields only and does not yet re-split.

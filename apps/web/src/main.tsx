@@ -11,8 +11,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
 import { Shell } from "./components/Shell";
+import { AccountsPage } from "./pages/Accounts";
 import { AgeOfMoneyPage } from "./pages/AgeOfMoney";
 import { IncomePage } from "./pages/Income";
+import { ManagePage } from "./pages/Manage";
 import { NetWorthPage } from "./pages/NetWorth";
 import { QuickEntryPage } from "./pages/QuickEntry";
 import { SpendingPage } from "./pages/Spending";
@@ -29,6 +31,8 @@ const router = createBrowserRouter([
       { path: "/net-worth", element: <NetWorthPage /> },
       { path: "/age-of-money", element: <AgeOfMoneyPage /> },
       { path: "/transactions", element: <TransactionsPage /> },
+      { path: "/accounts", element: <AccountsPage /> },
+      { path: "/manage", element: <ManagePage /> },
       { path: "*", element: <Navigate to="/spending" replace /> },
     ],
   },

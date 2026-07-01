@@ -153,6 +153,47 @@ export class LedgerRepository {
       );
   }
 
+  createAccount(planId: string, input: any): any {
+    this.ensurePlan(planId);
+    if (!input?.id && (!input?.name || typeof input.name !== "string" || !input.name.trim())) {
+      throw new ValidationError("Account name is required");
+    }
+    const accountId = input.id ?? createId("acct");
+    this.upsertAccount(planId, { ...input, id: accountId });
+    this.recalculateAccount(accountId);
+    this.touchPlan(planId);
+    return this.getAccount(planId, accountId);
+  }
+
+  updateAccount(planId: string, accountId: string, patch: any): any {
+    this.ensurePlan(planId);
+    const existing = this.db
+      .query("SELECT * FROM accounts WHERE id = ? AND plan_id = ? AND deleted = 0")
+      .get(accountId, planId) as Row | null;
+    if (!existing) {
+      throw new NotFoundError("Account not found");
+    }
+
+    this.db
+      .query(
+        `UPDATE accounts
+         SET name = ?, type = ?, on_budget = ?, closed = ?, opening_balance_milli = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND plan_id = ?`,
+      )
+      .run(
+        patch.name ?? existing.name,
+        patch.type ?? existing.type,
+        patch.on_budget === undefined ? existing.on_budget : bool(patch.on_budget),
+        patch.closed === undefined ? existing.closed : bool(patch.closed),
+        patch.opening_balance === undefined ? existing.opening_balance_milli : patch.opening_balance,
+        accountId,
+        planId,
+      );
+    this.recalculateAccount(accountId);
+    this.touchPlan(planId);
+    return this.getAccount(planId, accountId);
+  }
+
   listAccounts(planId: string): any[] {
     this.ensurePlan(planId);
     return this.db
@@ -216,6 +257,33 @@ export class LedgerRepository {
         payee.external_ynab_id ?? payee.id,
         bool(payee.deleted),
       );
+  }
+
+  updatePayee(planId: string, payeeId: string, patch: any): any {
+    this.ensurePlan(planId);
+    const existing = this.db
+      .query("SELECT * FROM payees WHERE id = ? AND plan_id = ? AND deleted = 0")
+      .get(payeeId, planId) as Row | null;
+    if (!existing) {
+      throw new NotFoundError("Payee not found");
+    }
+
+    const name = typeof patch.name === "string" ? patch.name.trim() : existing.name;
+    if (!name) {
+      throw new ValidationError("Payee name cannot be empty");
+    }
+    const collision = this.db
+      .query("SELECT id FROM payees WHERE plan_id = ? AND lower(name) = lower(?) AND id != ? AND deleted = 0")
+      .get(planId, name, payeeId) as Row | null;
+    if (collision) {
+      throw new ValidationError("Another payee already uses this name");
+    }
+
+    this.db
+      .query("UPDATE payees SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
+      .run(name, payeeId, planId);
+    this.touchPlan(planId);
+    return formatPayee(this.db.query("SELECT * FROM payees WHERE id = ?").get(payeeId) as Row);
   }
 
   listPayees(planId: string): any[] {
@@ -307,6 +375,189 @@ export class LedgerRepository {
       deleted: toBoolean(group.deleted),
       categories: categories.filter((category) => category.category_group_id === group.id).map(formatCategory),
     }));
+  }
+
+  getCategoryGroup(planId: string, groupId: string): any {
+    const row = this.db
+      .query("SELECT * FROM category_groups WHERE id = ? AND plan_id = ? AND deleted = 0")
+      .get(groupId, planId) as Row | null;
+    if (!row) {
+      throw new NotFoundError("Category group not found");
+    }
+    const categories = this.db
+      .query("SELECT * FROM categories WHERE plan_id = ? AND category_group_id = ? AND deleted = 0 ORDER BY name")
+      .all(planId, groupId) as Row[];
+    return {
+      id: row.id,
+      name: row.name,
+      hidden: toBoolean(row.hidden),
+      deleted: toBoolean(row.deleted),
+      categories: categories.map(formatCategory),
+    };
+  }
+
+  createCategoryGroup(planId: string, input: any): any {
+    this.ensurePlan(planId);
+    const name = typeof input?.name === "string" ? input.name.trim() : "";
+    if (!name) {
+      throw new ValidationError("Category group name is required");
+    }
+    const groupId = input.id ?? createId("grp");
+    this.upsertCategoryGroup(planId, { ...input, id: groupId, name });
+    this.touchPlan(planId);
+    return this.getCategoryGroup(planId, groupId);
+  }
+
+  updateCategoryGroup(planId: string, groupId: string, patch: any): any {
+    const existing = this.db
+      .query("SELECT * FROM category_groups WHERE id = ? AND plan_id = ? AND deleted = 0")
+      .get(groupId, planId) as Row | null;
+    if (!existing) {
+      throw new NotFoundError("Category group not found");
+    }
+
+    const name = typeof patch.name === "string" ? patch.name.trim() : existing.name;
+    if (!name) {
+      throw new ValidationError("Category group name cannot be empty");
+    }
+    this.db
+      .query("UPDATE category_groups SET name = ?, hidden = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
+      .run(name, patch.hidden === undefined ? existing.hidden : bool(patch.hidden), groupId, planId);
+    this.touchPlan(planId);
+    return this.getCategoryGroup(planId, groupId);
+  }
+
+  deleteCategoryGroup(planId: string, groupId: string, reassignTo: string | null = null): any {
+    const group = this.getCategoryGroup(planId, groupId);
+    const categoryIds = group.categories.map((category: any) => category.id);
+    if (reassignTo && categoryIds.includes(reassignTo)) {
+      throw new ValidationError("Cannot reassign transactions to a category in the deleted group");
+    }
+
+    const reassigned = this.reassignCategoryTransactions(planId, categoryIds, reassignTo);
+    if (categoryIds.length) {
+      const placeholders = categoryIds.map(() => "?").join(", ");
+      this.db
+        .query(`UPDATE categories SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE plan_id = ? AND id IN (${placeholders})`)
+        .run(planId, ...categoryIds);
+    }
+    this.db
+      .query("UPDATE category_groups SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
+      .run(groupId, planId);
+    this.touchPlan(planId);
+    return { ...group, deleted: true, reassigned_transactions: reassigned };
+  }
+
+  getCategory(planId: string, categoryId: string): any {
+    const row = this.db
+      .query("SELECT * FROM categories WHERE id = ? AND plan_id = ? AND deleted = 0")
+      .get(categoryId, planId) as Row | null;
+    if (!row) {
+      throw new NotFoundError("Category not found");
+    }
+    return formatCategory(row);
+  }
+
+  createCategory(planId: string, input: any): any {
+    this.ensurePlan(planId);
+    const name = typeof input?.name === "string" ? input.name.trim() : "";
+    if (!name) {
+      throw new ValidationError("Category name is required");
+    }
+    const groupId = input.category_group_id;
+    if (!groupId) {
+      throw new ValidationError("category_group_id is required");
+    }
+    this.getCategoryGroup(planId, groupId);
+
+    const categoryId = input.id ?? createId("cat");
+    this.upsertCategory(planId, { id: categoryId, name, hidden: input.hidden }, groupId);
+    this.touchPlan(planId);
+    return this.getCategory(planId, categoryId);
+  }
+
+  updateCategory(planId: string, categoryId: string, patch: any): any {
+    const existing = this.db
+      .query("SELECT * FROM categories WHERE id = ? AND plan_id = ? AND deleted = 0")
+      .get(categoryId, planId) as Row | null;
+    if (!existing) {
+      throw new NotFoundError("Category not found");
+    }
+
+    const name = typeof patch.name === "string" ? patch.name.trim() : existing.name;
+    if (!name) {
+      throw new ValidationError("Category name cannot be empty");
+    }
+    const groupId = patch.category_group_id ?? existing.category_group_id;
+    if (groupId !== existing.category_group_id) {
+      this.getCategoryGroup(planId, groupId);
+    }
+
+    this.db
+      .query(
+        `UPDATE categories
+         SET name = ?, category_group_id = ?, hidden = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND plan_id = ?`,
+      )
+      .run(name, groupId, patch.hidden === undefined ? existing.hidden : bool(patch.hidden), categoryId, planId);
+
+    if (name !== existing.name) {
+      // Snapshots keep register rows labelled if the category is ever deleted, so track renames.
+      this.db
+        .query("UPDATE transactions SET category_name_snapshot = ? WHERE plan_id = ? AND category_id = ?")
+        .run(name, planId, categoryId);
+      this.db
+        .query(
+          `UPDATE subtransactions SET category_name_snapshot = ?
+           WHERE category_id = ? AND transaction_id IN (SELECT id FROM transactions WHERE plan_id = ?)`,
+        )
+        .run(name, categoryId, planId);
+    }
+    this.touchPlan(planId);
+    return this.getCategory(planId, categoryId);
+  }
+
+  deleteCategory(planId: string, categoryId: string, reassignTo: string | null = null): any {
+    const category = this.getCategory(planId, categoryId);
+    if (reassignTo === categoryId) {
+      throw new ValidationError("Cannot reassign transactions to the deleted category");
+    }
+
+    const reassigned = this.reassignCategoryTransactions(planId, [categoryId], reassignTo);
+    this.db
+      .query("UPDATE categories SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
+      .run(categoryId, planId);
+    this.touchPlan(planId);
+    return { ...category, deleted: true, reassigned_transactions: reassigned };
+  }
+
+  private reassignCategoryTransactions(planId: string, categoryIds: string[], reassignTo: string | null): number {
+    if (!categoryIds.length) {
+      return 0;
+    }
+    let reassignName: string | null = null;
+    if (reassignTo) {
+      reassignName = this.getCategory(planId, reassignTo).name;
+    }
+
+    const placeholders = categoryIds.map(() => "?").join(", ");
+    const serverKnowledge = this.touchPlan(planId);
+    const result = this.db
+      .query(
+        `UPDATE transactions
+         SET category_id = ?, category_name_snapshot = ?, server_knowledge = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE plan_id = ? AND category_id IN (${placeholders})`,
+      )
+      .run(reassignTo, reassignName, serverKnowledge, planId, ...categoryIds);
+    this.db
+      .query(
+        `UPDATE subtransactions
+         SET category_id = ?, category_name_snapshot = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE category_id IN (${placeholders})
+           AND transaction_id IN (SELECT id FROM transactions WHERE plan_id = ?)`,
+      )
+      .run(reassignTo, reassignName, ...categoryIds, planId);
+    return Number(result.changes ?? 0);
   }
 
   createTransaction(planId: string, input: TransactionInput): any {
@@ -897,6 +1148,8 @@ export class LedgerRepository {
 }
 
 export class NotFoundError extends Error {}
+
+export class ValidationError extends Error {}
 
 function formatPlan(row: Row): any {
   return {
