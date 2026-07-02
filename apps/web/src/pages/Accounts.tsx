@@ -1,9 +1,15 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { Account } from "../api/types";
-import { todayIso } from "../lib/dates";
+import { ReconcileStrip } from "../components/ReconcileStrip";
 import { decimalToMilli, formatMoney } from "../lib/money";
 import { usePlan } from "../state/plan";
+
+/** The account's own register, all history, YNAB style. */
+function registerLink(accountId: string): string {
+  return `/transactions?accounts=${accountId}&range=all`;
+}
 
 const ACCOUNT_TYPES: Array<{ value: string; label: string }> = [
   { value: "checking", label: "Checking" },
@@ -159,7 +165,6 @@ function AccountRow({
 }) {
   const [mode, setMode] = useState<"view" | "rename" | "reconcile">("view");
   const [name, setName] = useState(account.name);
-  const [actualBalance, setActualBalance] = useState("");
 
   if (mode === "rename") {
     return (
@@ -187,65 +192,18 @@ function AccountRow({
   }
 
   if (mode === "reconcile") {
-    const parsed = (() => {
-      try {
-        return actualBalance.trim() === "" ? null : decimalToMilli(actualBalance);
-      } catch {
-        return null;
-      }
-    })();
-    const difference = parsed === null ? null : parsed - account.balance;
     return (
       <tr>
         <td colSpan={6}>
-          <form
-            className="inline-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (difference === null) {
-                return;
-              }
-              onAction(async () => {
-                if (difference !== 0) {
-                  await api.createTransaction(planId, {
-                    account_id: account.id,
-                    date: todayIso(),
-                    amount: difference,
-                    payee_name: "Balance Adjustment",
-                    memo: "Reconciled via web",
-                    cleared: "reconciled",
-                    approved: true,
-                  });
-                }
-              });
+          <ReconcileStrip
+            planId={planId}
+            account={account}
+            onDone={() => {
               setMode("view");
-              setActualBalance("");
+              onAction(async () => {});
             }}
-          >
-            <span className="muted">
-              {account.name}: ledger shows {formatMoney(account.balance)}. Actual balance:
-            </span>
-            <input
-              type="number"
-              step="0.01"
-              value={actualBalance}
-              onChange={(event) => setActualBalance(event.target.value)}
-              placeholder="0.00"
-              autoFocus
-              required
-            />
-            {difference !== null && (
-              <span className={difference === 0 ? "muted" : difference > 0 ? "amount-positive" : "amount-negative"}>
-                {difference === 0 ? "Already matches" : `Adjustment ${formatMoney(difference, { sign: true })}`}
-              </span>
-            )}
-            <button type="submit" disabled={busy || parsed === null}>
-              {difference === 0 ? "Done" : "Post adjustment"}
-            </button>
-            <button type="button" className="text-button" onClick={() => setMode("view")}>
-              Cancel
-            </button>
-          </form>
+            onCancel={() => setMode("view")}
+          />
         </td>
       </tr>
     );
@@ -253,7 +211,11 @@ function AccountRow({
 
   return (
     <tr>
-      <td className="strong">{account.name}</td>
+      <td className="strong">
+        <Link to={registerLink(account.id)} className="account-link">
+          {account.name}
+        </Link>
+      </td>
       <td className="muted">{typeLabel(account.type)}</td>
       <td className="num">{formatMoney(account.cleared_balance)}</td>
       <td className="num">{formatMoney(account.uncleared_balance)}</td>

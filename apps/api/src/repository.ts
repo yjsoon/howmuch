@@ -739,10 +739,99 @@ export class LedgerRepository {
     return updated;
   }
 
+  /**
+   * Creates both sides of a transfer as linked transactions, using the same
+   * payee convention as imported YNAB data ("Transfer : {Account}") so the
+   * pair stays excluded from spending and income reports.
+   */
+  createTransfer(
+    planId: string,
+    input: { from_account_id: string; to_account_id: string; amount: number; date: string; memo?: string | null; cleared?: ClearedState },
+  ): { outflow: any; inflow: any } {
+    this.ensurePlan(planId);
+    if (!input.from_account_id || !input.to_account_id || input.from_account_id === input.to_account_id) {
+      throw new ValidationError("A transfer needs two different accounts");
+    }
+    const amount = Math.abs(Number(input.amount));
+    if (!Number.isFinite(amount) || amount === 0) {
+      throw new ValidationError("A transfer needs a non-zero amount");
+    }
+    const fromAccount = this.getAccount(planId, input.from_account_id);
+    const toAccount = this.getAccount(planId, input.to_account_id);
+
+    const outflowId = createId("txn");
+    const inflowId = createId("txn");
+    const shared = {
+      date: input.date,
+      memo: input.memo ?? null,
+      cleared: input.cleared ?? "uncleared",
+      approved: true,
+      source_kind: "transfer",
+    } as const;
+
+    const outflow = this.createTransaction(planId, {
+      ...shared,
+      id: outflowId,
+      account_id: input.from_account_id,
+      amount: -amount,
+      payee_name: `Transfer : ${toAccount.name}`,
+      transfer_account_id: input.to_account_id,
+      transfer_transaction_id: inflowId,
+    });
+    const inflow = this.createTransaction(planId, {
+      ...shared,
+      id: inflowId,
+      account_id: input.to_account_id,
+      amount,
+      payee_name: `Transfer : ${fromAccount.name}`,
+      transfer_account_id: input.from_account_id,
+      transfer_transaction_id: outflowId,
+    });
+
+    return { outflow, inflow };
+  }
+
+  approveTransactions(planId: string, transactionIds?: string[]): number {
+    this.ensurePlan(planId);
+    const serverKnowledge = this.touchPlan(planId);
+    if (transactionIds && transactionIds.length) {
+      const placeholders = transactionIds.map(() => "?").join(", ");
+      const result = this.db
+        .query(
+          `UPDATE transactions
+           SET approved = 1, server_knowledge = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE plan_id = ? AND approved = 0 AND deleted = 0 AND id IN (${placeholders})`,
+        )
+        .run(serverKnowledge, planId, ...transactionIds);
+      return Number(result.changes ?? 0);
+    }
+    const result = this.db
+      .query(
+        `UPDATE transactions
+         SET approved = 1, server_knowledge = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE plan_id = ? AND approved = 0 AND deleted = 0`,
+      )
+      .run(serverKnowledge, planId);
+    return Number(result.changes ?? 0);
+  }
+
   deleteTransaction(planId: string, transactionId: string): any {
     const existing = this.getTransactionRow(planId, transactionId);
     if (!existing) {
       throw new NotFoundError("Transaction not found");
+    }
+
+    // Transfers are a linked pair; removing one side must remove both.
+    const ids = [transactionId];
+    if (existing.transfer_transaction_id) {
+      const counterpart = this.getTransactionRow(planId, existing.transfer_transaction_id);
+      if (counterpart) {
+        ids.push(counterpart.id);
+        this.db
+          .query("UPDATE transactions SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
+          .run(counterpart.id, planId);
+        this.recalculateAccount(counterpart.account_id);
+      }
     }
 
     this.db
@@ -750,9 +839,12 @@ export class LedgerRepository {
       .run(transactionId, planId);
     this.recalculateAccount(existing.account_id);
     const serverKnowledge = this.touchPlan(planId);
+    const placeholders = ids.map(() => "?").join(", ");
     this.db
-      .query("UPDATE transactions SET server_knowledge = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
-      .run(serverKnowledge, transactionId, planId);
+      .query(
+        `UPDATE transactions SET server_knowledge = ?, updated_at = CURRENT_TIMESTAMP WHERE plan_id = ? AND id IN (${placeholders})`,
+      )
+      .run(serverKnowledge, planId, ...ids);
     return this.getTransaction(planId, transactionId, true);
   }
 

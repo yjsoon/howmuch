@@ -37,7 +37,9 @@ export function PlanProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    setState({ kind: "loading" });
+    // Keep the current value while refetching so post-mutation reloads
+    // refresh balances in place instead of unmounting the page.
+    setState((previous) => (previous.kind === "ready" ? previous : { kind: "loading" }));
     (async () => {
       try {
         const plans = await api.plans();

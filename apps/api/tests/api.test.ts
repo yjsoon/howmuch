@@ -408,6 +408,83 @@ describe("native reports and imports", () => {
     const quickEntry = await quickEntryResponse.json();
     expect(quickEntry.data.transaction.amount).toBe(-12340);
     expect(quickEntry.data.transaction.source_kind).toBeUndefined();
+    expect(quickEntry.data.transaction.approved).toBe(true);
+  });
+
+  test("creates linked transfer pairs that stay out of spending reports", async () => {
+    await createAccount("acct-current", { name: "Current", opening_balance: 100000 });
+    await createAccount("acct-savings", { name: "Savings", opening_balance: 0 });
+
+    const transferResponse = await request("/api/transfers?plan_id=plan-test", {
+      method: "POST",
+      body: {
+        from_account_id: "acct-current",
+        to_account_id: "acct-savings",
+        amount: "250.00",
+        date: "2026-06-10",
+        memo: "monthly saving",
+      },
+    });
+    expect(transferResponse.status).toBe(201);
+    const transfer = await transferResponse.json();
+    expect(transfer.data.outflow.amount).toBe(-250000);
+    expect(transfer.data.inflow.amount).toBe(250000);
+    expect(transfer.data.outflow.transfer_transaction_id).toBe(transfer.data.inflow.id);
+    expect(transfer.data.inflow.transfer_transaction_id).toBe(transfer.data.outflow.id);
+    expect(transfer.data.outflow.payee_name).toBe("Transfer : Savings");
+
+    const current = await (await request("/v1/plans/plan-test/accounts/acct-current")).json();
+    const savings = await (await request("/v1/plans/plan-test/accounts/acct-savings")).json();
+    expect(current.data.account.balance).toBe(-150000);
+    expect(savings.data.account.balance).toBe(250000);
+
+    const spending = await (await request("/api/reports/spending-breakdown?plan_id=plan-test&from=2026-06-01&to=2026-06-30")).json();
+    expect(spending.data.total).toBe(0);
+
+    // Deleting one side removes the pair and restores balances.
+    await request(`/v1/plans/plan-test/transactions/${transfer.data.outflow.id}`, { method: "DELETE" });
+    const counterpart = await request(`/v1/plans/plan-test/transactions/${transfer.data.inflow.id}`);
+    expect(counterpart.status).toBe(404);
+    const savingsAfter = await (await request("/v1/plans/plan-test/accounts/acct-savings")).json();
+    expect(savingsAfter.data.account.balance).toBe(0);
+
+    const sameAccount = await request("/api/transfers?plan_id=plan-test", {
+      method: "POST",
+      body: { from_account_id: "acct-current", to_account_id: "acct-current", amount: "10", date: "2026-06-10" },
+    });
+    expect(sameAccount.status).toBe(400);
+  });
+
+  test("bulk-approves unapproved transactions", async () => {
+    const first = await createTransaction({
+      account_id: "acct-1",
+      date: "2026-06-10",
+      amount: -1000,
+      payee_name: "Importer A",
+      approved: false,
+    });
+    await createTransaction({
+      account_id: "acct-1",
+      date: "2026-06-11",
+      amount: -2000,
+      payee_name: "Importer B",
+      approved: false,
+    });
+
+    const single = await (await request("/api/transactions/approve?plan_id=plan-test", {
+      method: "POST",
+      body: { transaction_ids: [first] },
+    })).json();
+    expect(single.data.approved).toBe(1);
+
+    const rest = await (await request("/api/transactions/approve?plan_id=plan-test", {
+      method: "POST",
+      body: {},
+    })).json();
+    expect(rest.data.approved).toBe(1);
+
+    const unapproved = await (await request("/v1/plans/plan-test/transactions?type=unapproved")).json();
+    expect(unapproved.data.transactions).toHaveLength(0);
   });
 
   test("imports YNAB CSV-shaped rows and reports spending", async () => {

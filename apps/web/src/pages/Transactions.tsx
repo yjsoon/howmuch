@@ -1,32 +1,41 @@
 import { startTransition, useDeferredValue, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, useApi } from "../api/client";
-import type { Transaction } from "../api/types";
 import { FilterRail } from "../components/FilterRail";
-import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
-import { formatDate } from "../lib/dates";
-import { decimalToMilli, formatAmount, formatMoney } from "../lib/money";
+import { AddTransactionRow, RegisterRow, TransactionEditorRow } from "../components/RegisterRows";
+import { ReconcileStrip } from "../components/ReconcileStrip";
+import { UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
+import { formatMoney } from "../lib/money";
 import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
 
 export function TransactionsPage() {
   const { filters, setFilters } = useFilters();
-  const { planId } = usePlan();
+  const { planId, accounts, reload } = usePlan();
   const [params] = useSearchParams();
   const [search, setSearch] = useState("");
   const [version, setVersion] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
+  const [approving, setApproving] = useState(false);
   const deferredSearch = useDeferredValue(search);
   const flow = params.get("flow");
+  const refreshRows = () => setVersion((n) => n + 1);
   const refresh = () => {
     setEditingId(null);
-    setVersion((n) => n + 1);
+    refreshRows();
   };
 
   const listKey = JSON.stringify({ planId, from: filters.from, to: filters.to, version });
   const result = useApi(listKey, () =>
     api.transactions(planId, { since_date: filters.from, until_date: filters.to }),
   );
+  const payees = useApi(`payees-${planId}-${version}`, () => api.payees(planId));
+
+  const openAccounts = useMemo(() => accounts.filter((account) => !account.closed), [accounts]);
+  const selectedAccount =
+    filters.accountIds.length === 1 ? accounts.find((account) => account.id === filters.accountIds[0]) : undefined;
 
   const wantsUncategorised = filters.categoryIds.includes(UNCATEGORISED_CATEGORY_ID);
   const accountIds = useMemo(() => new Set(filters.accountIds), [filters.accountIds]);
@@ -50,6 +59,8 @@ export function TransactionsPage() {
       ).length,
     [inScope],
   );
+
+  const unapproved = useMemo(() => inScope.filter((txn) => !txn.approved), [inScope]);
 
   const scopedRows = useMemo(() => {
     const outflowOnly = flow === "outflow" || wantsUncategorised;
@@ -107,6 +118,22 @@ export function TransactionsPage() {
     [rows],
   );
 
+  const approveAll = async () => {
+    setApproving(true);
+    try {
+      await api.approveTransactions(planId, unapproved.map((txn) => txn.id));
+      refreshRows();
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const showAccountColumn = !selectedAccount;
+  const rowsChanged = () => {
+    reload();
+    refreshRows();
+  };
+
   const emptyMessage =
     result.data && result.data.length === 0
       ? "No transactions have been recorded in this ledger yet."
@@ -117,426 +144,230 @@ export function TransactionsPage() {
   return (
     <>
       <FilterRail filters={filters} setFilters={setFilters} busy={result.loading} />
-      <div className="report-header">
-        <h1>Transactions</h1>
-        <div className="headline-row">
-          {uncategorisedCount > 0 && !wantsUncategorised && (
+
+      <div className="register-layout">
+        <aside className="account-rail" aria-label="Accounts">
+          <button
+            type="button"
+            className={!filters.accountIds.length ? "account-rail-item account-rail-active" : "account-rail-item"}
+            onClick={() => setFilters({ accountIds: [] })}
+          >
+            <span>All accounts</span>
+            <span className="account-rail-balance">
+              {formatMoney(openAccounts.reduce((total, account) => total + account.balance, 0))}
+            </span>
+          </button>
+          {openAccounts.map((account) => (
             <button
+              key={account.id}
               type="button"
-              className="uncat-pill"
-              onClick={() => setFilters({ categoryIds: [UNCATEGORISED_CATEGORY_ID] })}
+              className={
+                filters.accountIds.length === 1 && filters.accountIds[0] === account.id
+                  ? "account-rail-item account-rail-active"
+                  : "account-rail-item"
+              }
+              onClick={() => setFilters({ accountIds: [account.id] })}
             >
-              {uncategorisedCount} uncategorised
+              <span>{account.name}</span>
+              <span className={account.balance < 0 ? "account-rail-balance amount-negative" : "account-rail-balance"}>
+                {formatMoney(account.balance)}
+              </span>
             </button>
-          )}
-          {wantsUncategorised && (
-            <button type="button" className="uncat-pill uncat-pill-active" onClick={() => setFilters({ categoryIds: [] })}>
-              Showing uncategorised · clear
-            </button>
-          )}
-          <div className="search-stack">
-            <input
-              type="search"
-              name="search"
-              className="search-input"
-              placeholder="Search payee, memo, category or account..."
-              value={search}
-              onChange={(event) => startTransition(() => setSearch(event.target.value))}
-              aria-label="Search transactions"
-            />
-            <span className="search-meta">
-              Showing {rows.length} of {scopedRows.length} filtered entries
-            </span>
-          </div>
-          <div className="headline-figure">
-            <span className="figure-label">Money in</span>
-            <span className="figure-value figure-positive">{formatMoney(totals.inflow)}</span>
-          </div>
-          <div className="headline-figure">
-            <span className="figure-label">Money out</span>
-            <span className="figure-value figure-negative">{formatMoney(totals.outflow)}</span>
-          </div>
-          <div className="headline-figure">
-            <span className="figure-label">{rows.length} transactions · net</span>
-            <span className={totals.net >= 0 ? "figure-value figure-positive" : "figure-value figure-negative"}>
-              {formatMoney(totals.net, { sign: true })}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {result.error && (
-        <div className="status-panel status-panel-error">
-          <p className="status-title">Could not load transactions.</p>
-          <p className="status-detail">{result.error}</p>
-        </div>
-      )}
-      {result.loading && !result.data && (
-        <div className="status-panel">
-          <p className="status-title">Loading transactions...</p>
-        </div>
-      )}
-
-      {result.data && (
-        <section className="report-section">
-          <div className="section-heading">
-            <span className="section-title">Register</span>
-            <span className="section-meta">Click a row to edit · newest first</span>
-          </div>
-          {rows.length > 0 ? (
-            <div className="table-wrap table-wrap-wide">
-              <table className="ledger-table register-table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Account</th>
-                    <th>Payee</th>
-                    <th>Category</th>
-                    <th>Memo</th>
-                    <th className="num">Outflow</th>
-                    <th className="num">Inflow</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((txn) =>
-                    editingId === txn.id ? (
-                      <TransactionEditorRow
-                        key={txn.id}
-                        transaction={txn}
-                        planId={planId}
-                        onDone={refresh}
-                        onCancel={() => setEditingId(null)}
-                      />
-                    ) : (
-                      <RegisterRow
-                        key={txn.id}
-                        transaction={txn}
-                        planId={planId}
-                        onEdit={() => setEditingId(txn.id)}
-                        onChanged={refresh}
-                      />
-                    ),
-                  )}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="status-panel">
-              <p className="status-title">{emptyMessage}</p>
-              <p className="status-detail">Try widening the date range, clearing filters, or shortening the search term.</p>
-            </div>
-          )}
-        </section>
-      )}
-    </>
-  );
-}
-
-function RegisterRow({
-  transaction: txn,
-  planId,
-  onEdit,
-  onChanged,
-}: {
-  transaction: Transaction;
-  planId: string;
-  onEdit: () => void;
-  onChanged: () => void;
-}) {
-  const canQuickCategorise = txn.category_id === null && !txn.transfer_account_id && !txn.subtransactions?.length;
-  return (
-    <tr className="register-row" onClick={onEdit}>
-      <td className="nowrap">{formatDate(txn.date)}</td>
-      <td className="muted">{txn.account_name}</td>
-      <td>{txn.payee_name ?? (txn.transfer_account_id ? "Transfer" : "-")}</td>
-      <td className="muted">
-        {txn.subtransactions?.length ? (
-          `Split · ${txn.subtransactions.length} lines`
-        ) : txn.transfer_account_id ? (
-          "Transfer"
-        ) : canQuickCategorise ? (
-          <QuickCategorySelect planId={planId} transactionId={txn.id} onChanged={onChanged} />
-        ) : (
-          (txn.category_name ?? "Uncategorised")
-        )}
-      </td>
-      <td className="muted memo-cell" title={txn.memo ?? ""}>
-        {txn.memo ?? "-"}
-      </td>
-      <td className="num amount-negative">{txn.amount < 0 ? formatAmount(txn.amount) : ""}</td>
-      <td className="num amount-positive">{txn.amount > 0 ? formatAmount(txn.amount) : ""}</td>
-    </tr>
-  );
-}
-
-/** One-click categorisation straight from the register, without opening the editor. */
-function QuickCategorySelect({
-  planId,
-  transactionId,
-  onChanged,
-}: {
-  planId: string;
-  transactionId: string;
-  onChanged: () => void;
-}) {
-  const { categoryGroups } = usePlan();
-  const orderedGroups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
-  const [busy, setBusy] = useState(false);
-
-  return (
-    <select
-      className="quick-category"
-      value=""
-      disabled={busy}
-      onClick={(event) => event.stopPropagation()}
-      onChange={async (event) => {
-        const categoryId = event.target.value;
-        if (!categoryId) {
-          return;
-        }
-        setBusy(true);
-        try {
-          await api.updateTransaction(planId, transactionId, { category_id: categoryId });
-          onChanged();
-        } finally {
-          setBusy(false);
-        }
-      }}
-      aria-label="Set category"
-    >
-      <option value="">{busy ? "Saving…" : "Uncategorised"}</option>
-      {[...orderedGroups.primary, ...orderedGroups.quiet].map((group) => (
-        <optgroup key={group.id} label={group.name}>
-          {group.categories.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.name}
-            </option>
           ))}
-        </optgroup>
-      ))}
-    </select>
-  );
-}
+        </aside>
 
-function TransactionEditorRow({
-  transaction: txn,
-  planId,
-  onDone,
-  onCancel,
-}: {
-  transaction: Transaction;
-  planId: string;
-  onDone: () => void;
-  onCancel: () => void;
-}) {
-  const { accounts, categoryGroups } = usePlan();
-  const payees = useApi(`payees-${planId}`, () => api.payees(planId));
-  const orderedGroups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
-
-  const isTransfer = Boolean(txn.transfer_transaction_id || txn.transfer_account_id);
-  const isSplit = Boolean(txn.subtransactions?.length);
-  const amountLocked = isTransfer || isSplit;
-
-  const [date, setDate] = useState(txn.date);
-  const [accountId, setAccountId] = useState(txn.account_id);
-  const [payeeName, setPayeeName] = useState(txn.payee_name ?? "");
-  const [categoryId, setCategoryId] = useState(txn.category_id ?? "");
-  const [memo, setMemo] = useState(txn.memo ?? "");
-  const [cleared, setCleared] = useState(txn.cleared);
-  const [direction, setDirection] = useState<"spend" | "income">(txn.amount < 0 ? "spend" : "income");
-  const [amount, setAmount] = useState((Math.abs(txn.amount) / 1000).toFixed(2));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const save = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const patch: Parameters<typeof api.updateTransaction>[2] = {
-        date,
-        memo: memo.trim() || null,
-        cleared,
-      };
-      if (!isTransfer) {
-        patch.payee_id = null;
-        patch.payee_name = payeeName.trim() || null;
-      }
-      if (!amountLocked) {
-        const magnitude = Math.abs(decimalToMilli(amount));
-        patch.amount = direction === "spend" ? -magnitude : magnitude;
-      }
-      if (!isTransfer && !isSplit) {
-        patch.category_id = categoryId || null;
-      }
-      if (accountId !== txn.account_id && !isTransfer) {
-        patch.account_id = accountId;
-      }
-      await api.updateTransaction(planId, txn.id, patch);
-      onDone();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-      setBusy(false);
-    }
-  };
-
-  const remove = async () => {
-    if (!window.confirm("Delete this transaction? This cannot be undone from the web app.")) {
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      await api.deleteTransaction(planId, txn.id);
-      onDone();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-      setBusy(false);
-    }
-  };
-
-  return (
-    <tr className="editor-row">
-      <td colSpan={7}>
-        <form className="txn-editor" onSubmit={save}>
-          <div className="txn-editor-grid">
-            <label className="field">
-              <span className="field-label">Date</span>
-              <input type="date" value={date} onChange={(event) => setDate(event.target.value)} required />
-            </label>
-            <label className="field">
-              <span className="field-label">Account</span>
-              <select
-                value={accountId}
-                onChange={(event) => setAccountId(event.target.value)}
-                disabled={isTransfer}
-              >
-                {accounts
-                  .filter((account) => !account.closed || account.id === txn.account_id)
-                  .map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="field">
-              <span className="field-label">Payee</span>
-              <input
-                value={payeeName}
-                onChange={(event) => setPayeeName(event.target.value)}
-                list="editor-payees"
-                disabled={isTransfer}
-                placeholder={isTransfer ? "Transfer" : "Payee"}
-              />
-              <datalist id="editor-payees">
-                {(payees.data ?? [])
-                  .filter((payee) => !payee.deleted)
-                  .map((payee) => (
-                    <option key={payee.id} value={payee.name} />
-                  ))}
-              </datalist>
-            </label>
-            <label className="field">
-              <span className="field-label">Category</span>
-              {isSplit ? (
-                <input value={`Split · ${txn.subtransactions?.length} lines`} disabled />
-              ) : (
-                <select
-                  value={categoryId}
-                  onChange={(event) => setCategoryId(event.target.value)}
-                  disabled={isTransfer}
+        <div className="register-main">
+          <div className="report-header">
+            <h1>{selectedAccount ? selectedAccount.name : "Transactions"}</h1>
+            <div className="headline-row">
+              {uncategorisedCount > 0 && !wantsUncategorised && (
+                <button
+                  type="button"
+                  className="uncat-pill"
+                  onClick={() => setFilters({ categoryIds: [UNCATEGORISED_CATEGORY_ID] })}
                 >
-                  <option value="">Uncategorised</option>
-                  {[...orderedGroups.primary, ...orderedGroups.quiet].map((group) => (
-                    <optgroup key={group.id} label={group.name}>
-                      {group.categories.map((category) => (
-                        <option key={category.id} value={category.id}>
-                          {category.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
+                  {uncategorisedCount} uncategorised
+                </button>
               )}
-            </label>
-            <label className="field">
-              <span className="field-label">Memo</span>
-              <input value={memo} onChange={(event) => setMemo(event.target.value)} placeholder="Note" />
-            </label>
-            <label className="field">
-              <span className="field-label">Amount</span>
-              <div className="date-row">
-                <div className="segmented" role="group" aria-label="Direction">
-                  <button
-                    type="button"
-                    className={direction === "spend" ? "segment segment-active" : "segment"}
-                    disabled={amountLocked}
-                    onClick={() => setDirection("spend")}
-                  >
-                    Out
-                  </button>
-                  <button
-                    type="button"
-                    className={direction === "income" ? "segment segment-active" : "segment"}
-                    disabled={amountLocked}
-                    onClick={() => setDirection("income")}
-                  >
-                    In
+              {wantsUncategorised && (
+                <button
+                  type="button"
+                  className="uncat-pill uncat-pill-active"
+                  onClick={() => setFilters({ categoryIds: [] })}
+                >
+                  Showing uncategorised · clear
+                </button>
+              )}
+              <div className="search-stack">
+                <input
+                  type="search"
+                  name="search"
+                  className="search-input"
+                  placeholder={
+                    selectedAccount ? `Search ${selectedAccount.name}...` : "Search payee, memo, category or account..."
+                  }
+                  value={search}
+                  onChange={(event) => startTransition(() => setSearch(event.target.value))}
+                  aria-label="Search transactions"
+                />
+                <span className="search-meta">
+                  Showing {rows.length} of {scopedRows.length} filtered entries
+                </span>
+              </div>
+              {selectedAccount ? (
+                <div className="balance-strip">
+                  <div className="headline-figure">
+                    <span className="figure-label">Cleared balance</span>
+                    <span className="figure-value">{formatMoney(selectedAccount.cleared_balance)}</span>
+                  </div>
+                  <span className="balance-op">+</span>
+                  <div className="headline-figure">
+                    <span className="figure-label">Uncleared</span>
+                    <span className="figure-value">{formatMoney(selectedAccount.uncleared_balance)}</span>
+                  </div>
+                  <span className="balance-op">=</span>
+                  <div className="headline-figure">
+                    <span className="figure-label">Working balance</span>
+                    <span
+                      className={
+                        selectedAccount.balance >= 0 ? "figure-value figure-positive" : "figure-value figure-negative"
+                      }
+                    >
+                      {formatMoney(selectedAccount.balance)}
+                    </span>
+                  </div>
+                  <button type="button" className="reconcile-button" onClick={() => setReconciling((value) => !value)}>
+                    Reconcile
                   </button>
                 </div>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={amount}
-                  onChange={(event) => setAmount(event.target.value)}
-                  disabled={amountLocked}
-                  required
-                />
-              </div>
-            </label>
-            <label className="field">
-              <span className="field-label">Status</span>
-              <select value={cleared} onChange={(event) => setCleared(event.target.value)}>
-                <option value="uncleared">Uncleared</option>
-                <option value="cleared">Cleared</option>
-                <option value="reconciled">Reconciled</option>
-              </select>
-            </label>
+              ) : (
+                <>
+                  <div className="headline-figure">
+                    <span className="figure-label">Money in</span>
+                    <span className="figure-value figure-positive">{formatMoney(totals.inflow)}</span>
+                  </div>
+                  <div className="headline-figure">
+                    <span className="figure-label">Money out</span>
+                    <span className="figure-value figure-negative">{formatMoney(totals.outflow)}</span>
+                  </div>
+                  <div className="headline-figure">
+                    <span className="figure-label">{rows.length} transactions · net</span>
+                    <span className={totals.net >= 0 ? "figure-value figure-positive" : "figure-value figure-negative"}>
+                      {formatMoney(totals.net, { sign: true })}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
-          {isTransfer && (
-            <p className="field-note">
-              This entry is one side of a transfer; the account, payee, category, and amount stay linked to the other
-              side.
-            </p>
+          {reconciling && selectedAccount && (
+            <ReconcileStrip
+              planId={planId}
+              account={selectedAccount}
+              onDone={() => {
+                setReconciling(false);
+                rowsChanged();
+              }}
+              onCancel={() => setReconciling(false)}
+            />
           )}
-          {isSplit && (
-            <p className="field-note">Split amounts and categories are preserved as imported; edit the shared fields here.</p>
-          )}
-          {error && (
-            <div className="status-panel status-panel-error compact-panel">
-              <p className="status-title">Could not save.</p>
-              <p className="status-detail">{error}</p>
+
+          {unapproved.length > 0 && (
+            <div className="approve-banner">
+              <span>
+                {unapproved.length} new transaction{unapproved.length === 1 ? "" : "s"} to approve or categorise.
+              </span>
+              <button type="button" onClick={approveAll} disabled={approving}>
+                {approving ? "Approving…" : "Approve all"}
+              </button>
             </div>
           )}
 
-          <div className="txn-editor-actions">
-            <button type="submit" disabled={busy}>
-              {busy ? "Saving…" : "Save changes"}
-            </button>
-            <button type="button" className="text-button" onClick={onCancel} disabled={busy}>
-              Cancel
-            </button>
-            {!isTransfer && (
-              <button type="button" className="text-button danger" onClick={remove} disabled={busy}>
-                Delete
-              </button>
-            )}
-          </div>
-        </form>
-      </td>
-    </tr>
+          {result.error && (
+            <div className="status-panel status-panel-error">
+              <p className="status-title">Could not load transactions.</p>
+              <p className="status-detail">{result.error}</p>
+            </div>
+          )}
+          {result.loading && !result.data && (
+            <div className="status-panel">
+              <p className="status-title">Loading transactions...</p>
+            </div>
+          )}
+
+          {result.data && (
+            <section className="report-section">
+              <div className="section-heading">
+                <button type="button" className="add-transaction-button" onClick={() => setAdding((value) => !value)}>
+                  + Add transaction
+                </button>
+                <span className="section-meta">Click a row to edit · newest first</span>
+              </div>
+              {rows.length > 0 || adding ? (
+                <div className="table-wrap table-wrap-wide">
+                  <table className="ledger-table register-table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        {showAccountColumn && <th>Account</th>}
+                        <th>Payee</th>
+                        <th>Category</th>
+                        <th>Memo</th>
+                        <th className="num">Outflow</th>
+                        <th className="num">Inflow</th>
+                        <th className="cleared-cell" title="Cleared status">
+                          C
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adding && (
+                        <AddTransactionRow
+                          planId={planId}
+                          defaultAccountId={selectedAccount?.id}
+                          payees={payees.data ?? []}
+                          onSaved={rowsChanged}
+                          onClose={() => setAdding(false)}
+                        />
+                      )}
+                      {rows.map((txn) =>
+                        editingId === txn.id ? (
+                          <TransactionEditorRow
+                            key={txn.id}
+                            transaction={txn}
+                            planId={planId}
+                            payees={payees.data ?? []}
+                            onDone={() => {
+                              reload();
+                              refresh();
+                            }}
+                            onCancel={() => setEditingId(null)}
+                          />
+                        ) : (
+                          <RegisterRow
+                            key={txn.id}
+                            transaction={txn}
+                            planId={planId}
+                            showAccount={showAccountColumn}
+                            onEdit={() => setEditingId(txn.id)}
+                            onChanged={rowsChanged}
+                          />
+                        ),
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="status-panel">
+                  <p className="status-title">{emptyMessage}</p>
+                  <p className="status-detail">Try widening the date range, clearing filters, or shortening the search term.</p>
+                </div>
+              )}
+            </section>
+          )}
+        </div>
+      </div>
+    </>
   );
 }

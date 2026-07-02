@@ -23,8 +23,8 @@ Typechecks then emits a static bundle to `dist/`.
 ## Routes
 
 - `/spending`, `/income`, `/net-worth`, `/age-of-money` — the four reports
-- `/transactions` — editable register: click a row to change date, account, payee, category, memo, amount, and cleared status, or delete it; uncategorised rows get an inline category picker
-- `/accounts` — account management: create with a starting balance, rename, close/reopen, and reconcile (posts a balance-adjustment transaction)
+- `/transactions` — YNAB-style register: accounts rail with balances; per-account view with the Cleared + Uncleared = Working strip and Reconcile; inline Add Transaction with outflow/inflow fields and "Save and add another"; transfers via payee `Transfer : {Account}` (linked pairs, deleted together); cleared toggle per row; approve banner for new transactions; click a row to edit or delete; uncategorised rows get a "Needs a category" picker
+- `/accounts` — account management: create with a starting balance, rename, close/reopen, and reconcile (posts a balance-adjustment transaction); account names open the account's register
 - `/manage` — category and group CRUD (with transaction reassignment on delete), payee renaming, YNAB/CSV imports, and the API token
 - `/add` — mobile quick entry (posts to `/api/mobile/quick-entry`)
 

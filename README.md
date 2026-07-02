@@ -46,7 +46,9 @@ Useful environment variables:
 The web app (`apps/web`, `bun run dev:stack` or `cd apps/web && bun run dev`) covers day-to-day use:
 
 - The four reports, with shareable URL filters.
-- An editable register: click any row to fix its date, account, payee, category, memo, amount, or cleared status; uncategorised rows get an inline category picker.
+- A YNAB-style register: an accounts rail with balances, per-account view with the Cleared + Uncleared = Working balance strip and a Reconcile button, inline Add Transaction (with "Save and add another"), outflow/inflow fields, a cleared toggle on every row, and an "N new transactions to approve" banner.
+- Transfers from the payee field: type or pick `Transfer : {Account}` and both linked sides are created; deleting one side removes both.
+- An editable register row: click any row to fix its date, account, payee, category, memo, amount, or cleared status; uncategorised rows get a "Needs a category" picker.
 - Accounts: create with a starting balance, rename, close/reopen, and reconcile.
 - Manage: category groups/categories (rename, hide, delete with reassignment), payee renaming, YNAB/CSV imports, and the API token.
 - First-run onboarding: with an empty database it offers a YNAB token import or a fresh start.

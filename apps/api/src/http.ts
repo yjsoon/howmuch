@@ -304,10 +304,32 @@ async function handleNative(
       category_id: body.category_id ?? null,
       memo: body.memo ?? null,
       flag_color: body.flag_color ?? null,
+      // Hand-typed entries are trusted, matching YNAB's manually-entered = approved.
+      approved: body.approved ?? true,
       source_kind: "mobile",
       source_ref: body.client_id ?? null,
     });
     return json({ data: { transaction, server_knowledge: repo.getServerKnowledge(planId) } }, 201);
+  }
+
+  if (segments[1] === "transfers" && segments.length === 2 && method === "POST") {
+    const body = await readJson(request);
+    const result = repo.createTransfer(body.plan_id ?? planId, {
+      from_account_id: body.from_account_id,
+      to_account_id: body.to_account_id,
+      amount: body.amount_milli ?? decimalToMilliunits(body.amount),
+      date: body.date,
+      memo: body.memo ?? null,
+      cleared: body.cleared ?? undefined,
+    });
+    return json({ data: { ...result, server_knowledge: repo.getServerKnowledge(body.plan_id ?? planId) } }, 201);
+  }
+
+  if (segments[1] === "transactions" && segments[2] === "approve" && method === "POST") {
+    const body = await readJson(request);
+    const targetPlanId = body.plan_id ?? planId;
+    const approved = repo.approveTransactions(targetPlanId, body.transaction_ids);
+    return json({ data: { approved, server_knowledge: repo.getServerKnowledge(targetPlanId) } });
   }
 
   if (segments[1] === "import" && segments[2] === "csv" && method === "POST") {

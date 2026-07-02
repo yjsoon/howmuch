@@ -169,6 +169,19 @@ export const api = {
     request<{ transaction: Transaction }>(`/v1/plans/${planId}/transactions/${transactionId}`, {
       method: "DELETE",
     }).then((d) => d.transaction),
+  createTransfer: (
+    planId: string,
+    transfer: { from_account_id: string; to_account_id: string; amount_milli: number; date: string; memo?: string | null; cleared?: string },
+  ) =>
+    request<{ outflow: Transaction; inflow: Transaction }>(`/api/transfers${query({ plan_id: planId })}`, {
+      method: "POST",
+      body: JSON.stringify({ ...transfer, plan_id: planId }),
+    }),
+  approveTransactions: (planId: string, transactionIds?: string[]) =>
+    request<{ approved: number }>(`/api/transactions/approve${query({ plan_id: planId })}`, {
+      method: "POST",
+      body: JSON.stringify({ plan_id: planId, transaction_ids: transactionIds }),
+    }).then((d) => d.approved),
   spendingBreakdown: (params: ReportQuery) =>
     request<SpendingBreakdownReport>(`/api/reports/spending-breakdown${query({ ...params })}`),
   incomeVsSpending: (params: ReportQuery) =>
