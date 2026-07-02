@@ -48,10 +48,9 @@ struct PayeePickerView: View {
   }
 
   private var filteredPayees: [Payee] {
-    let query = trimmedSearch.lowercased()
-    return model.payees
+    model.payees
       .filter { !$0.isTransferPayee }
-      .filter { query.isEmpty || $0.name.lowercased().contains(query) }
+      .filter { trimmedSearch.isEmpty || $0.name.localizedStandardContains(trimmedSearch) }
       .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
   }
 
@@ -128,8 +127,7 @@ struct CategoryPickerView: View {
   }
 
   private func categoryMatches(_ category: Category) -> Bool {
-    let query = trimmedSearch.lowercased()
-    return query.isEmpty || category.name.lowercased().contains(query)
+    trimmedSearch.isEmpty || category.name.localizedStandardContains(trimmedSearch)
   }
 
   /// Everyday groups first, bookkeeping groups demoted to the bottom.

@@ -56,6 +56,9 @@ struct ViewPrefs: Codable, Equatable {
   static let userDefaultsKey = "HowMuch.ViewPrefs"
 
   var lastUsedAccountID: String?
+  /// Whether the spending report includes bookkeeping ("quiet") category
+  /// groups; mirrors the web app's persisted includeQuietSpending pref.
+  var includeQuietSpending: Bool?
 
   static func load(from defaults: UserDefaults = .standard) -> ViewPrefs {
     guard
@@ -195,6 +198,10 @@ struct Account: Decodable, Identifiable, Hashable {
 }
 
 struct CategoryGroup: Decodable, Identifiable, Hashable {
+  /// Matches the API's COALESCE id for transactions without a category, so it
+  /// can be used as a pseudo-category in report filters (as on the web).
+  static let uncategorisedCategoryID = "uncategorised"
+
   let id: String
   let name: String
   let hidden: Bool
@@ -513,7 +520,7 @@ struct TransactionDraft: Equatable {
   var payeeName = ""
   var accountID = ""
   var categoryID: String?
-  var date = Date()
+  var date = Date.now
   var isCleared = false
   var wasReconciled = false
   var flag: FlagColour = .none
@@ -529,7 +536,7 @@ struct TransactionDraft: Equatable {
     payeeName = transaction.payeeName ?? ""
     accountID = transaction.accountID
     categoryID = transaction.categoryID
-    date = Date(isoDateString: transaction.date) ?? Date()
+    date = Date(isoDateString: transaction.date) ?? .now
     isCleared = transaction.cleared != .uncleared
     wasReconciled = transaction.cleared == .reconciled
     flag = FlagColour(rawValue: transaction.flagColor ?? "") ?? .none
@@ -580,7 +587,8 @@ struct TransactionDraft: Equatable {
   }
 }
 
-/// Date ranges for Reflect's "Preset" mode, matching YNAB's presets.
+/// Date ranges for Reflect's "Preset" mode, matching YNAB's presets plus the
+/// web app's "All" range.
 enum ReportPreset: String, CaseIterable, Identifiable {
   case thisMonth
   case lastMonth
@@ -588,6 +596,7 @@ enum ReportPreset: String, CaseIterable, Identifiable {
   case lastSixMonths
   case lastTwelveMonths
   case yearToDate
+  case allTime
 
   var id: String { rawValue }
 
@@ -605,10 +614,13 @@ enum ReportPreset: String, CaseIterable, Identifiable {
       return "Last 12 Months"
     case .yearToDate:
       return "Year to Date"
+    case .allTime:
+      return "All Time"
     }
   }
 
-  func range(now: Date = Date(), calendar: Calendar = .current) -> (from: Date, to: Date) {
+  /// `nil` bounds mean "unbounded": All Time sends no dates at all.
+  func range(now: Date = .now, calendar: Calendar = .current) -> (from: Date?, to: Date?) {
     let monthStart = now.startOfMonth(calendar: calendar)
     switch self {
     case .thisMonth:
@@ -626,6 +638,8 @@ enum ReportPreset: String, CaseIterable, Identifiable {
     case .yearToDate:
       let components = calendar.dateComponents([.year], from: now)
       return (calendar.date(from: components) ?? now, now)
+    case .allTime:
+      return (nil, nil)
     }
   }
 }

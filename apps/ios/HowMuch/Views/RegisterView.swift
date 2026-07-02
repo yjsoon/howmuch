@@ -18,16 +18,24 @@ struct RegisterView: View {
   /// Optional pre-filter, used when drilling in from a Reflect category row.
   var categoryID: String?
   var dateRange: ClosedRange<String>?
+  /// Optional account scoping carried through from a report's account filter.
+  var accountIDs: Set<String>?
 
   @State private var searchText = ""
   @State private var unclearedOnly = false
   @State private var uncategorisedOnly = false
   @State private var editingTransaction: Transaction?
 
-  init(scope: RegisterScope, categoryID: String? = nil, dateRange: ClosedRange<String>? = nil) {
+  init(
+    scope: RegisterScope,
+    categoryID: String? = nil,
+    dateRange: ClosedRange<String>? = nil,
+    accountIDs: Set<String>? = nil
+  ) {
     self.scope = scope
     self.categoryID = categoryID
     self.dateRange = dateRange
+    self.accountIDs = accountIDs
   }
 
   var body: some View {
@@ -66,6 +74,9 @@ struct RegisterView: View {
               onLabel: "Showing uncategorised only"
             )
           }
+          if isNarrowed, !visibleTransactions.isEmpty {
+            totalsSummary
+          }
         }
 
         ForEach(sections, id: \.date) { section in
@@ -76,7 +87,7 @@ struct RegisterView: View {
               .padding(.horizontal, 4)
 
             VStack(spacing: 0) {
-              ForEach(Array(section.transactions.enumerated()), id: \.element.id) { index, transaction in
+              ForEach(section.transactions.enumerated(), id: \.element.id) { index, transaction in
                 Button {
                   editingTransaction = transaction
                 } label: {
@@ -98,16 +109,15 @@ struct RegisterView: View {
         }
 
         if visibleTransactions.isEmpty, model.ledgerPhase == .loaded {
-          VStack(spacing: 8) {
-            Image(systemName: "tray")
-              .font(.title2)
-              .foregroundStyle(.secondary)
-            Text(searchText.isEmpty ? "No transactions yet." : "No matches for “\(searchText)”.")
-              .font(.subheadline)
-              .foregroundStyle(.secondary)
+          if searchText.isEmpty {
+            ContentUnavailableView(
+              "No Transactions",
+              systemImage: "tray",
+              description: Text("Transactions you add or import will appear here.")
+            )
+          } else {
+            ContentUnavailableView.search
           }
-          .frame(maxWidth: .infinity)
-          .padding(.vertical, 40)
         }
       }
       .padding(.horizontal, 16)
@@ -149,13 +159,68 @@ struct RegisterView: View {
       if let accountID = scope.accountID, transaction.accountID != accountID {
         return false
       }
-      if let categoryID, transaction.categoryID != categoryID {
+      if let accountIDs, !accountIDs.isEmpty, !accountIDs.contains(transaction.accountID) {
+        return false
+      }
+      // A split matches when any of its lines carries the category, as on the web.
+      if let categoryID,
+         transaction.categoryID != categoryID,
+         !transaction.subtransactions.contains(where: { $0.categoryID == categoryID }) {
         return false
       }
       if let dateRange, !dateRange.contains(transaction.date) {
         return false
       }
       return true
+    }
+  }
+
+  /// True whenever the visible rows are a deliberate slice of the register —
+  /// a search, a filter banner, or a report drill-down.
+  private var isNarrowed: Bool {
+    !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      || unclearedOnly
+      || uncategorisedOnly
+      || categoryID != nil
+      || dateRange != nil
+      || accountIDs?.isEmpty == false
+  }
+
+  /// Money in / money out / net across the visible rows, as in the web
+  /// register header.
+  private var totalsSummary: some View {
+    let rows = visibleTransactions
+    let inflow = rows.filter { $0.amount > 0 }.reduce(0) { $0 + $1.amount }
+    let outflow = rows.filter { $0.amount < 0 }.reduce(0) { $0 + abs($1.amount) }
+    let net = inflow - outflow
+
+    return VStack(spacing: 8) {
+      Text("\(rows.count) transaction\(rows.count == 1 ? "" : "s")")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      HStack {
+        summaryColumn("Money In", MoneyCodec.displayString(for: inflow, currencyFormat: model.currencyFormat), colour: Theme.inflow)
+        Spacer()
+        summaryColumn("Money Out", MoneyCodec.displayString(for: outflow, currencyFormat: model.currencyFormat), colour: Theme.outflow)
+        Spacer()
+        summaryColumn("Net", MoneyCodec.signedDisplayString(for: net, currencyFormat: model.currencyFormat), colour: Theme.amountColour(net))
+      }
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 12)
+    .frame(maxWidth: .infinity)
+    .ynabCard()
+  }
+
+  private func summaryColumn(_ label: String, _ value: String, colour: Color) -> some View {
+    VStack(spacing: 2) {
+      Text(label)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      Text(value)
+        .font(.footnote.weight(.semibold))
+        .monospacedDigit()
+        .foregroundStyle(colour)
     }
   }
 
@@ -182,15 +247,15 @@ struct RegisterView: View {
   }
 
   private var unclearedCount: Int {
-    scopedTransactions.filter { $0.cleared == .uncleared }.count
+    scopedTransactions.count { $0.cleared == .uncleared }
   }
 
   private var uncategorisedCount: Int {
-    scopedTransactions.filter(\.isUncategorised).count
+    scopedTransactions.count(where: \.isUncategorised)
   }
 
   private var visibleTransactions: [Transaction] {
-    let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     return scopedTransactions.filter { transaction in
       if unclearedOnly, transaction.cleared != .uncleared {
         return false
@@ -207,7 +272,7 @@ struct RegisterView: View {
         transaction.memo,
         transaction.accountName,
       ]
-      return haystack.contains { $0?.lowercased().contains(query) == true }
+      return haystack.contains { $0?.localizedStandardContains(query) == true }
     }
   }
 
@@ -296,16 +361,19 @@ struct TransactionRow: View {
     switch transaction.cleared {
     case .reconciled:
       Image(systemName: "lock.fill")
-        .font(.caption2)
+        .font(.caption)
         .foregroundStyle(Theme.inflow)
+        .accessibilityLabel("Reconciled")
     case .cleared:
       Image(systemName: "c.circle.fill")
         .font(.footnote)
         .foregroundStyle(Theme.inflow)
+        .accessibilityLabel("Cleared")
     case .uncleared:
       Image(systemName: "c.circle")
         .font(.footnote)
         .foregroundStyle(.tertiary)
+        .accessibilityLabel("Uncleared")
     }
   }
 }

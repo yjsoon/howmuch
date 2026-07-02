@@ -74,22 +74,53 @@ struct APIClient {
     return response.data.transactions.filter { !$0.deleted }
   }
 
-  func fetchSpendingBreakdown(planID: String, from: String, to: String) async throws -> SpendingBreakdownReport {
-    try await report(path: "/api/reports/spending-breakdown", planID: planID, from: from, to: to, interval: nil)
+  func fetchSpendingBreakdown(
+    planID: String,
+    from: String?,
+    to: String?,
+    accountIDs: [String] = [],
+    categoryIDs: [String] = []
+  ) async throws -> SpendingBreakdownReport {
+    try await report(
+      path: "/api/reports/spending-breakdown", planID: planID, from: from, to: to,
+      interval: nil, accountIDs: accountIDs, categoryIDs: categoryIDs
+    )
   }
 
-  func fetchIncomeVsSpending(planID: String, from: String, to: String, interval: ReportInterval) async throws -> IncomeVsSpendingReport {
-    try await report(path: "/api/reports/income-vs-spending", planID: planID, from: from, to: to, interval: interval.rawValue)
+  func fetchIncomeVsSpending(
+    planID: String,
+    from: String?,
+    to: String?,
+    interval: ReportInterval,
+    accountIDs: [String] = [],
+    categoryIDs: [String] = []
+  ) async throws -> IncomeVsSpendingReport {
+    try await report(
+      path: "/api/reports/income-vs-spending", planID: planID, from: from, to: to,
+      interval: interval.rawValue, accountIDs: accountIDs, categoryIDs: categoryIDs
+    )
   }
 
-  func fetchNetWorth(planID: String, from: String, to: String, interval: ReportInterval) async throws -> NetWorthReport {
-    try await report(path: "/api/reports/net-worth", planID: planID, from: from, to: to, interval: interval.rawValue)
+  func fetchNetWorth(
+    planID: String,
+    from: String?,
+    to: String?,
+    interval: ReportInterval,
+    accountIDs: [String] = []
+  ) async throws -> NetWorthReport {
+    try await report(
+      path: "/api/reports/net-worth", planID: planID, from: from, to: to,
+      interval: interval.rawValue, accountIDs: accountIDs
+    )
   }
 
   /// Deliberately takes no date range: the server replays income lots from
   /// `from`, so the weighted age is only honest over the full history.
-  func fetchAgeOfMoney(planID: String, interval: ReportInterval) async throws -> AgeOfMoneyReport {
-    try await report(path: "/api/reports/age-of-money", planID: planID, from: nil, to: nil, interval: interval.rawValue)
+  func fetchAgeOfMoney(planID: String, interval: ReportInterval, accountIDs: [String] = []) async throws -> AgeOfMoneyReport {
+    try await report(
+      path: "/api/reports/age-of-money", planID: planID, from: nil, to: nil,
+      interval: interval.rawValue, accountIDs: accountIDs
+    )
   }
 
   func createTransaction(planID: String, request body: TransactionWriteRequest) async throws -> Transaction {
@@ -123,7 +154,9 @@ struct APIClient {
     planID: String,
     from: String?,
     to: String?,
-    interval: String?
+    interval: String?,
+    accountIDs: [String] = [],
+    categoryIDs: [String] = []
   ) async throws -> Payload {
     // plan_id is mandatory on every report call: without it the API silently
     // answers for its configured default plan.
@@ -136,6 +169,12 @@ struct APIClient {
     }
     if let interval {
       queryItems.append(URLQueryItem(name: "interval", value: interval))
+    }
+    if !accountIDs.isEmpty {
+      queryItems.append(URLQueryItem(name: "account_ids", value: accountIDs.sorted().joined(separator: ",")))
+    }
+    if !categoryIDs.isEmpty {
+      queryItems.append(URLQueryItem(name: "category_ids", value: categoryIDs.sorted().joined(separator: ",")))
     }
 
     let response: APIEnvelope<Payload> = try await request(path: path, queryItems: queryItems)
