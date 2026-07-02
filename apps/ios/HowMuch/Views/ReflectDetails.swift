@@ -13,10 +13,10 @@ struct ReportRange: Equatable {
   }
 
   var mode: Mode = .month
-  var monthAnchor = Date().startOfMonth()
+  var monthAnchor = Date.now.startOfMonth()
   var preset: ReportPreset = .lastThreeMonths
-  var customFrom = Date().startOfMonth()
-  var customTo = Date()
+  var customFrom = Date.now.startOfMonth()
+  var customTo = Date.now
 
   /// `nil` means unbounded, e.g. the All Time preset.
   var fromISO: String? {
@@ -33,7 +33,7 @@ struct ReportRange: Equatable {
   var toISO: String? {
     switch mode {
     case .month:
-      return min(monthAnchor.endOfMonth(), Date()).isoDateString
+      return min(monthAnchor.endOfMonth(), Date.now).isoDateString
     case .preset:
       return preset.range().to?.isoDateString
     case .custom:
@@ -118,11 +118,11 @@ struct ReportRangePicker: View {
         }
       case .custom:
         HStack(spacing: 12) {
-          DatePicker("From", selection: $range.customFrom, in: ...Date(), displayedComponents: .date)
+          DatePicker("From", selection: $range.customFrom, in: ...Date.now, displayedComponents: .date)
             .labelsHidden()
           Text("–")
             .foregroundStyle(.secondary)
-          DatePicker("To", selection: $range.customTo, in: ...Date(), displayedComponents: .date)
+          DatePicker("To", selection: $range.customTo, in: ...Date.now, displayedComponents: .date)
             .labelsHidden()
         }
         .frame(maxWidth: .infinity)
@@ -199,7 +199,8 @@ struct ReportScopeBar: View {
         Text(label)
           .font(.footnote.weight(.medium))
         Image(systemName: "chevron.down")
-          .font(.caption2.weight(.semibold))
+          .font(.caption.weight(.semibold))
+          .accessibilityHidden(true)
       }
       .foregroundStyle(isActive ? Theme.card : Theme.accent)
       .padding(.horizontal, 12)
@@ -340,13 +341,11 @@ struct CategoryScopePicker: View {
   }
 
   private func matches(_ category: Category) -> Bool {
-    let query = trimmedSearch.lowercased()
-    return query.isEmpty || category.name.lowercased().contains(query)
+    trimmedSearch.isEmpty || category.name.localizedStandardContains(trimmedSearch)
   }
 
   private var matchesUncategorised: Bool {
-    let query = trimmedSearch.lowercased()
-    return query.isEmpty || "uncategorised".contains(query)
+    trimmedSearch.isEmpty || "Uncategorised".localizedStandardContains(trimmedSearch)
   }
 
   private var visibleGroups: [CategoryGroup] {
@@ -411,11 +410,11 @@ struct SpendingBreakdownDetailView: View {
           }
 
           if rows.isEmpty {
-            Text("No spending in this range.")
-              .font(.subheadline)
-              .foregroundStyle(.secondary)
-              .frame(maxWidth: .infinity)
-              .padding(.vertical, 24)
+            ContentUnavailableView(
+              "No Spending",
+              systemImage: "chart.pie",
+              description: Text("Adjust the dates or clear filters to widen the ledger.")
+            )
           } else {
             ForEach(ReflectMaths.groupSections(rows)) { section in
               groupSection(section, total: total, maxAmount: rows.map { abs($0.amount) }.max() ?? 1)
@@ -518,7 +517,7 @@ struct SpendingBreakdownDetailView: View {
       .padding(.horizontal, 4)
 
       VStack(spacing: 0) {
-        ForEach(Array(section.rows.enumerated()), id: \.element.id) { index, group in
+        ForEach(section.rows.enumerated(), id: \.element.id) { index, group in
           NavigationLink {
             RegisterView(
               scope: .all,
@@ -574,6 +573,7 @@ struct SpendingBreakdownDetailView: View {
       Image(systemName: "chevron.right")
         .font(.footnote.weight(.semibold))
         .foregroundStyle(.tertiary)
+        .accessibilityHidden(true)
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 11)
@@ -620,112 +620,19 @@ struct NetWorthDetailView: View {
         ReportScopeBar(scope: $scope)
 
         if let report, let latest = report.periods.last {
-          let assets = latest.accounts.map(\.balance).filter { $0 > 0 }.reduce(0, +)
-          let debts = latest.accounts.map(\.balance).filter { $0 < 0 }.reduce(0, +)
-          let previous = report.periods.dropLast().last
-          let change = previous.map { latest.netWorth - $0.netWorth }
-
-          VStack(spacing: 10) {
-            Text("Net Worth · as at \(LedgerDate.friendlyString(fromISO: latest.endDate))")
-              .font(.subheadline)
-              .foregroundStyle(.secondary)
-            Text(MoneyCodec.displayString(for: latest.netWorth, currencyFormat: model.currencyFormat))
-              .font(.system(size: 34, weight: .bold))
-              .monospacedDigit()
-              .foregroundStyle(Theme.textPrimary)
-            if let change {
-              Text("\(MoneyCodec.signedDisplayString(for: change, currencyFormat: model.currencyFormat)) on previous period")
-                .font(.footnote.weight(.medium))
-                .monospacedDigit()
-                .foregroundStyle(Theme.amountColour(change))
-            }
-            HStack(spacing: 24) {
-              VStack(spacing: 2) {
-                Text("Assets")
-                  .font(.caption)
-                  .foregroundStyle(Theme.accent)
-                Text(MoneyCodec.displayString(for: assets, currencyFormat: model.currencyFormat))
-                  .font(.subheadline.weight(.semibold))
-                  .monospacedDigit()
-              }
-              VStack(spacing: 2) {
-                Text("Debts")
-                  .font(.caption)
-                  .foregroundStyle(Theme.outflow)
-                Text(MoneyCodec.displayString(for: debts, currencyFormat: model.currencyFormat))
-                  .font(.subheadline.weight(.semibold))
-                  .monospacedDigit()
-              }
-            }
-            ColumnChart(values: report.periods.map { Double($0.netWorth) }, height: 120)
-          }
-          .frame(maxWidth: .infinity)
-          .padding(16)
-          .ynabCard()
+          headlineCard(report: report, latest: latest)
 
           Text("Accounts")
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(Theme.textPrimary)
             .padding(.horizontal, 4)
-
-          VStack(spacing: 0) {
-            let accounts = latest.accounts.sorted { abs($0.balance) > abs($1.balance) }
-            ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
-              HStack {
-                Text(account.accountName)
-                  .font(.subheadline)
-                  .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
-                  .font(.subheadline)
-                  .monospacedDigit()
-                  .foregroundStyle(account.balance == 0 ? .secondary : Theme.amountColour(account.balance))
-              }
-              .padding(.horizontal, 16)
-              .padding(.vertical, 11)
-              if index < accounts.count - 1 {
-                Divider().padding(.leading, 16)
-              }
-            }
-          }
-          .ynabCard()
+          accountsCard(latest: latest)
 
           Text("History")
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(Theme.textPrimary)
             .padding(.horizontal, 4)
-
-          VStack(spacing: 0) {
-            let periods = Array(report.periods.reversed())
-            ForEach(Array(periods.enumerated()), id: \.element.id) { index, period in
-              let prior = index + 1 < periods.count ? periods[index + 1] : nil
-              let delta = prior.map { period.netWorth - $0.netWorth }
-              HStack {
-                Text(LedgerDate.periodLabel(period.period))
-                  .font(.subheadline)
-                  .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                  Text(MoneyCodec.displayString(for: period.netWorth, currencyFormat: model.currencyFormat))
-                    .font(.subheadline.weight(.medium))
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.textPrimary)
-                  if let delta {
-                    Text(MoneyCodec.signedDisplayString(for: delta, currencyFormat: model.currencyFormat))
-                      .font(.caption)
-                      .monospacedDigit()
-                      .foregroundStyle(Theme.amountColour(delta))
-                  }
-                }
-              }
-              .padding(.horizontal, 16)
-              .padding(.vertical, 9)
-              if index < periods.count - 1 {
-                Divider().padding(.leading, 16)
-              }
-            }
-          }
-          .ynabCard()
+          historyCard(report: report)
         } else {
           PhasePlaceholder(phase: phase) {
             await fetch()
@@ -741,6 +648,108 @@ struct NetWorthDetailView: View {
     .task(id: range.key + "|" + scope.key + "|" + interval.rawValue) {
       await fetch()
     }
+  }
+
+  private func headlineCard(report: NetWorthReport, latest: NetWorthPeriod) -> some View {
+    let assets = latest.accounts.map(\.balance).filter { $0 > 0 }.reduce(0, +)
+    let debts = latest.accounts.map(\.balance).filter { $0 < 0 }.reduce(0, +)
+    let change = report.periods.dropLast().last.map { latest.netWorth - $0.netWorth }
+
+    return VStack(spacing: 10) {
+      Text("Net Worth · as at \(LedgerDate.friendlyString(fromISO: latest.endDate))")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+      Text(MoneyCodec.displayString(for: latest.netWorth, currencyFormat: model.currencyFormat))
+        .font(.system(size: 34, weight: .bold))
+        .monospacedDigit()
+        .foregroundStyle(Theme.textPrimary)
+      if let change {
+        Text("\(MoneyCodec.signedDisplayString(for: change, currencyFormat: model.currencyFormat)) on previous period")
+          .font(.footnote.weight(.medium))
+          .monospacedDigit()
+          .foregroundStyle(Theme.amountColour(change))
+      }
+      HStack(spacing: 24) {
+        VStack(spacing: 2) {
+          Text("Assets")
+            .font(.caption)
+            .foregroundStyle(Theme.accent)
+          Text(MoneyCodec.displayString(for: assets, currencyFormat: model.currencyFormat))
+            .font(.subheadline.weight(.semibold))
+            .monospacedDigit()
+        }
+        VStack(spacing: 2) {
+          Text("Debts")
+            .font(.caption)
+            .foregroundStyle(Theme.outflow)
+          Text(MoneyCodec.displayString(for: debts, currencyFormat: model.currencyFormat))
+            .font(.subheadline.weight(.semibold))
+            .monospacedDigit()
+        }
+      }
+      ColumnChart(values: report.periods.map { Double($0.netWorth) }, height: 120)
+    }
+    .frame(maxWidth: .infinity)
+    .padding(16)
+    .ynabCard()
+  }
+
+  private func accountsCard(latest: NetWorthPeriod) -> some View {
+    let accounts = latest.accounts.sorted { abs($0.balance) > abs($1.balance) }
+    return VStack(spacing: 0) {
+      ForEach(accounts.enumerated(), id: \.element.id) { index, account in
+        HStack {
+          Text(account.accountName)
+            .font(.subheadline)
+            .foregroundStyle(Theme.textPrimary)
+          Spacer()
+          Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
+            .font(.subheadline)
+            .monospacedDigit()
+            .foregroundStyle(account.balance == 0 ? .secondary : Theme.amountColour(account.balance))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+        if index < accounts.count - 1 {
+          Divider().padding(.leading, 16)
+        }
+      }
+    }
+    .ynabCard()
+  }
+
+  private func historyCard(report: NetWorthReport) -> some View {
+    let periods = Array(report.periods.reversed())
+    return VStack(spacing: 0) {
+      ForEach(periods.enumerated(), id: \.element.id) { index, period in
+        let prior = index + 1 < periods.count ? periods[index + 1] : nil
+        let delta = prior.map { period.netWorth - $0.netWorth }
+        HStack {
+          Text(LedgerDate.periodLabel(period.period))
+            .font(.subheadline)
+            .foregroundStyle(Theme.textPrimary)
+          Spacer()
+          VStack(alignment: .trailing, spacing: 2) {
+            Text(MoneyCodec.displayString(for: period.netWorth, currencyFormat: model.currencyFormat))
+              .font(.subheadline.weight(.medium))
+              .monospacedDigit()
+              .foregroundStyle(Theme.textPrimary)
+            if let delta {
+              Text(MoneyCodec.signedDisplayString(for: delta, currencyFormat: model.currencyFormat))
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(Theme.amountColour(delta))
+            }
+          }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        if index < periods.count - 1 {
+          Divider().padding(.leading, 16)
+        }
+      }
+    }
+    .ynabCard()
   }
 
   private func fetch() async {
@@ -778,57 +787,8 @@ struct IncomeVsSpendingDetailView: View {
         ReportScopeBar(scope: $scope, showsCategories: true)
 
         if let report, !report.periods.isEmpty {
-          let income = report.periods.reduce(0) { $0 + $1.income }
-          let spending = report.periods.reduce(0) { $0 + abs($1.spending) }
-          let net = income - spending
-
-          VStack(spacing: 12) {
-            HStack {
-              statColumn("Income", MoneyCodec.displayString(for: income, currencyFormat: model.currencyFormat), colour: Theme.inflow)
-              Spacer()
-              statColumn("Spending", MoneyCodec.displayString(for: spending, currencyFormat: model.currencyFormat), colour: Theme.outflow)
-              Spacer()
-              statColumn("Net", MoneyCodec.signedDisplayString(for: net, currencyFormat: model.currencyFormat), colour: Theme.amountColour(net))
-              Spacer()
-              statColumn("Savings Rate", savingsRate(net: net, income: income), colour: Theme.amountColour(net))
-            }
-
-            PairedColumnChart(
-              pairs: report.periods.map { (Double($0.income), Double(abs($0.spending))) },
-              height: 120
-            )
-            HStack(spacing: 16) {
-              legendDot(colour: Theme.inflow, label: "Income")
-              legendDot(colour: Theme.outflow, label: "Spending")
-            }
-          }
-          .padding(16)
-          .ynabCard()
-
-          VStack(spacing: 0) {
-            ForEach(Array(report.periods.reversed().enumerated()), id: \.element.id) { index, period in
-              VStack(alignment: .leading, spacing: 6) {
-                Text(LedgerDate.periodLabel(period.period))
-                  .font(.subheadline.weight(.semibold))
-                  .foregroundStyle(Theme.textPrimary)
-                HStack {
-                  amountColumn("Income", MoneyCodec.displayString(for: period.income, currencyFormat: model.currencyFormat), colour: Theme.inflow)
-                  Spacer()
-                  amountColumn("Spending", MoneyCodec.displayString(for: period.spending, currencyFormat: model.currencyFormat), colour: Theme.outflow)
-                  Spacer()
-                  amountColumn("Net", MoneyCodec.signedDisplayString(for: period.net, currencyFormat: model.currencyFormat), colour: Theme.amountColour(period.net))
-                  Spacer()
-                  amountColumn("Cumulative", MoneyCodec.signedDisplayString(for: period.cumulativeNet, currencyFormat: model.currencyFormat), colour: .secondary)
-                }
-              }
-              .padding(.horizontal, 16)
-              .padding(.vertical, 11)
-              if index < report.periods.count - 1 {
-                Divider().padding(.leading, 16)
-              }
-            }
-          }
-          .ynabCard()
+          totalsCard(report: report)
+          periodsCard(report: report)
         } else {
           PhasePlaceholder(phase: phase) {
             await fetch()
@@ -846,13 +806,68 @@ struct IncomeVsSpendingDetailView: View {
     }
   }
 
+  private func totalsCard(report: IncomeVsSpendingReport) -> some View {
+    let income = report.periods.reduce(0) { $0 + $1.income }
+    let spending = report.periods.reduce(0) { $0 + abs($1.spending) }
+    let net = income - spending
+
+    return VStack(spacing: 12) {
+      HStack {
+        statColumn("Income", MoneyCodec.displayString(for: income, currencyFormat: model.currencyFormat), colour: Theme.inflow)
+        Spacer()
+        statColumn("Spending", MoneyCodec.displayString(for: spending, currencyFormat: model.currencyFormat), colour: Theme.outflow)
+        Spacer()
+        statColumn("Net", MoneyCodec.signedDisplayString(for: net, currencyFormat: model.currencyFormat), colour: Theme.amountColour(net))
+        Spacer()
+        statColumn("Savings Rate", savingsRate(net: net, income: income), colour: Theme.amountColour(net))
+      }
+
+      PairedColumnChart(
+        pairs: report.periods.map { (Double($0.income), Double(abs($0.spending))) },
+        height: 120
+      )
+      HStack(spacing: 16) {
+        legendDot(colour: Theme.inflow, label: "Income")
+        legendDot(colour: Theme.outflow, label: "Spending")
+      }
+    }
+    .padding(16)
+    .ynabCard()
+  }
+
+  private func periodsCard(report: IncomeVsSpendingReport) -> some View {
+    VStack(spacing: 0) {
+      ForEach(report.periods.reversed().enumerated(), id: \.element.id) { index, period in
+        VStack(alignment: .leading, spacing: 6) {
+          Text(LedgerDate.periodLabel(period.period))
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Theme.textPrimary)
+          HStack {
+            amountColumn("Income", MoneyCodec.displayString(for: period.income, currencyFormat: model.currencyFormat), colour: Theme.inflow)
+            Spacer()
+            amountColumn("Spending", MoneyCodec.displayString(for: period.spending, currencyFormat: model.currencyFormat), colour: Theme.outflow)
+            Spacer()
+            amountColumn("Net", MoneyCodec.signedDisplayString(for: period.net, currencyFormat: model.currencyFormat), colour: Theme.amountColour(period.net))
+            Spacer()
+            amountColumn("Cumulative", MoneyCodec.signedDisplayString(for: period.cumulativeNet, currencyFormat: model.currencyFormat), colour: .secondary)
+          }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+        if index < report.periods.count - 1 {
+          Divider().padding(.leading, 16)
+        }
+      }
+    }
+    .ynabCard()
+  }
+
   /// Net over income for the range, as on the web ("−12.3%" when overspent).
   private func savingsRate(net: Int, income: Int) -> String {
     guard income > 0 else {
       return "—"
     }
-    let rate = Double(net) / Double(income) * 100
-    return String(format: "%.1f%%", rate)
+    return (Double(net) / Double(income)).formatted(.percent.precision(.fractionLength(1)))
   }
 
   private func statColumn(_ label: String, _ value: String, colour: Color) -> some View {
@@ -974,7 +989,7 @@ struct AgeOfMoneyDetailView: View {
           }
 
           VStack(spacing: 0) {
-            ForEach(Array(report.periods.reversed().enumerated()), id: \.element.id) { index, period in
+            ForEach(report.periods.reversed().enumerated(), id: \.element.id) { index, period in
               periodRow(period)
               if index < report.periods.count - 1 {
                 Divider().padding(.leading, 16)

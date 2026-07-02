@@ -89,7 +89,7 @@ struct MonthStepper: View {
   }
 
   private var isCurrentMonth: Bool {
-    monthAnchor.startOfMonth() >= Date().startOfMonth()
+    monthAnchor.startOfMonth() >= Date.now.startOfMonth()
   }
 
   private func stepButton(systemName: String, monthDelta: Int) -> some View {
@@ -148,7 +148,7 @@ struct StackedShareBar: View {
   var body: some View {
     GeometryReader { proxy in
       HStack(spacing: 2) {
-        ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+        ForEach(segments.enumerated(), id: \.offset) { _, segment in
           RoundedRectangle(cornerRadius: 3, style: .continuous)
             .fill(segment.colour)
             .frame(width: max(4, proxy.size.width * segment.fraction))
@@ -170,7 +170,7 @@ struct ColumnChart: View {
   var body: some View {
     let magnitude = max(values.map(abs).max() ?? 1, 1)
     HStack(alignment: .bottom, spacing: 4) {
-      ForEach(Array(values.enumerated()), id: \.offset) { _, value in
+      ForEach(values.enumerated(), id: \.offset) { _, value in
         VStack(spacing: 0) {
           Spacer(minLength: 0)
           Capsule()
@@ -191,7 +191,7 @@ struct PairedColumnChart: View {
   var body: some View {
     let magnitude = max(pairs.flatMap { [$0.income, $0.spending] }.max() ?? 1, 1)
     HStack(alignment: .bottom, spacing: 6) {
-      ForEach(Array(pairs.enumerated()), id: \.offset) { _, pair in
+      ForEach(pairs.enumerated(), id: \.offset) { _, pair in
         HStack(alignment: .bottom, spacing: 2) {
           Capsule()
             .fill(Theme.inflow)

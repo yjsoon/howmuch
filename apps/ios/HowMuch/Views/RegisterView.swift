@@ -87,7 +87,7 @@ struct RegisterView: View {
               .padding(.horizontal, 4)
 
             VStack(spacing: 0) {
-              ForEach(Array(section.transactions.enumerated()), id: \.element.id) { index, transaction in
+              ForEach(section.transactions.enumerated(), id: \.element.id) { index, transaction in
                 Button {
                   editingTransaction = transaction
                 } label: {
@@ -109,16 +109,15 @@ struct RegisterView: View {
         }
 
         if visibleTransactions.isEmpty, model.ledgerPhase == .loaded {
-          VStack(spacing: 8) {
-            Image(systemName: "tray")
-              .font(.title2)
-              .foregroundStyle(.secondary)
-            Text(searchText.isEmpty ? "No transactions yet." : "No matches for “\(searchText)”.")
-              .font(.subheadline)
-              .foregroundStyle(.secondary)
+          if searchText.isEmpty {
+            ContentUnavailableView(
+              "No Transactions",
+              systemImage: "tray",
+              description: Text("Transactions you add or import will appear here.")
+            )
+          } else {
+            ContentUnavailableView.search
           }
-          .frame(maxWidth: .infinity)
-          .padding(.vertical, 40)
         }
       }
       .padding(.horizontal, 16)
@@ -248,15 +247,15 @@ struct RegisterView: View {
   }
 
   private var unclearedCount: Int {
-    scopedTransactions.filter { $0.cleared == .uncleared }.count
+    scopedTransactions.count { $0.cleared == .uncleared }
   }
 
   private var uncategorisedCount: Int {
-    scopedTransactions.filter(\.isUncategorised).count
+    scopedTransactions.count(where: \.isUncategorised)
   }
 
   private var visibleTransactions: [Transaction] {
-    let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     return scopedTransactions.filter { transaction in
       if unclearedOnly, transaction.cleared != .uncleared {
         return false
@@ -273,7 +272,7 @@ struct RegisterView: View {
         transaction.memo,
         transaction.accountName,
       ]
-      return haystack.contains { $0?.lowercased().contains(query) == true }
+      return haystack.contains { $0?.localizedStandardContains(query) == true }
     }
   }
 
@@ -362,16 +361,19 @@ struct TransactionRow: View {
     switch transaction.cleared {
     case .reconciled:
       Image(systemName: "lock.fill")
-        .font(.caption2)
+        .font(.caption)
         .foregroundStyle(Theme.inflow)
+        .accessibilityLabel("Reconciled")
     case .cleared:
       Image(systemName: "c.circle.fill")
         .font(.footnote)
         .foregroundStyle(Theme.inflow)
+        .accessibilityLabel("Cleared")
     case .uncleared:
       Image(systemName: "c.circle")
         .font(.footnote)
         .foregroundStyle(.tertiary)
+        .accessibilityLabel("Uncleared")
     }
   }
 }

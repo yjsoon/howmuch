@@ -152,7 +152,7 @@ final class AppModel {
       reportsPhase = .loading
     }
     do {
-      let now = Date()
+      let now = Date.now
       let monthStart = now.startOfMonth()
       let yearStart = Calendar.current.date(byAdding: .month, value: -11, to: monthStart) ?? monthStart
       let today = now.isoDateString

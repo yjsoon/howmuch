@@ -88,7 +88,7 @@ struct AccountsView: View {
 
       if !isCollapsed {
         VStack(spacing: 0) {
-          ForEach(Array(group.accounts.enumerated()), id: \.element.id) { index, account in
+          ForEach(group.accounts.enumerated(), id: \.element.id) { index, account in
             NavigationLink {
               RegisterView(scope: .account(account.id))
             } label: {

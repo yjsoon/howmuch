@@ -42,7 +42,8 @@ enum MoneyCodec {
     }
 
     let decimalValue = Decimal(milliunits) / 1000
-    return formatter.string(from: decimalValue as NSDecimalNumber) ?? String(format: "%.2f", NSDecimalNumber(decimal: decimalValue).doubleValue)
+    return formatter.string(from: decimalValue as NSDecimalNumber)
+      ?? decimalValue.formatted(.number.precision(.fractionLength(2)))
   }
 
   /// Signed display with an explicit plus on inflows, for ledger-style rows.

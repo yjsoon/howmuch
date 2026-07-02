@@ -69,7 +69,7 @@ struct ReflectView: View {
       let rows = model.includeQuietSpending ? split.primary + split.quiet : split.primary
       let total = rows.reduce(0) { $0 + abs($1.amount) }
       VStack(alignment: .leading, spacing: 12) {
-        Text(Date().monthYearLabel)
+        Text(Date.now.monthYearLabel)
           .font(.subheadline)
           .foregroundStyle(.secondary)
         Text(MoneyCodec.displayString(for: total, currencyFormat: model.currencyFormat))
@@ -89,7 +89,7 @@ struct ReflectView: View {
           .foregroundStyle(.secondary)
 
           VStack(spacing: 8) {
-            ForEach(Array(rows.prefix(5).enumerated()), id: \.element.id) { index, group in
+            ForEach(rows.prefix(5).enumerated(), id: \.element.id) { index, group in
               HStack(spacing: 8) {
                 Circle()
                   .fill(Theme.chartColour(index))
@@ -242,14 +242,18 @@ struct ReflectCard<Destination: View, Content: View>: View {
     } label: {
       VStack(alignment: .leading, spacing: 12) {
         HStack {
-          Image(systemName: icon)
-            .font(.subheadline)
-          Text(title)
-            .font(.subheadline.weight(.semibold))
+          Label {
+            Text(title)
+              .font(.subheadline.weight(.semibold))
+          } icon: {
+            Image(systemName: icon)
+              .font(.subheadline)
+          }
           Spacer()
           Image(systemName: "chevron.right")
             .font(.footnote.weight(.semibold))
             .foregroundStyle(.tertiary)
+            .accessibilityHidden(true)
         }
         .foregroundStyle(Theme.accent)
 

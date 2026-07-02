@@ -520,7 +520,7 @@ struct TransactionDraft: Equatable {
   var payeeName = ""
   var accountID = ""
   var categoryID: String?
-  var date = Date()
+  var date = Date.now
   var isCleared = false
   var wasReconciled = false
   var flag: FlagColour = .none
@@ -536,7 +536,7 @@ struct TransactionDraft: Equatable {
     payeeName = transaction.payeeName ?? ""
     accountID = transaction.accountID
     categoryID = transaction.categoryID
-    date = Date(isoDateString: transaction.date) ?? Date()
+    date = Date(isoDateString: transaction.date) ?? .now
     isCleared = transaction.cleared != .uncleared
     wasReconciled = transaction.cleared == .reconciled
     flag = FlagColour(rawValue: transaction.flagColor ?? "") ?? .none
@@ -620,7 +620,7 @@ enum ReportPreset: String, CaseIterable, Identifiable {
   }
 
   /// `nil` bounds mean "unbounded": All Time sends no dates at all.
-  func range(now: Date = Date(), calendar: Calendar = .current) -> (from: Date?, to: Date?) {
+  func range(now: Date = .now, calendar: Calendar = .current) -> (from: Date?, to: Date?) {
     let monthStart = now.startOfMonth(calendar: calendar)
     switch self {
     case .thisMonth:

@@ -4,7 +4,7 @@ import SwiftUI
 /// every category, grouped and collapsible, with drill-down to transactions.
 struct CategoriesView: View {
   @Environment(AppModel.self) private var model
-  @State private var monthAnchor = Date().startOfMonth()
+  @State private var monthAnchor = Date.now.startOfMonth()
   @State private var report: SpendingBreakdownReport?
   @State private var phase: LoadPhase = .idle
   @State private var collapsedGroups: Set<String> = []
@@ -181,7 +181,7 @@ struct CategoriesView: View {
 
       if !isCollapsed {
         VStack(spacing: 0) {
-          ForEach(Array(categories.enumerated()), id: \.element.id) { index, category in
+          ForEach(categories.enumerated(), id: \.element.id) { index, category in
             categoryRow(category, spent: spent[category.id] ?? 0)
             if index < categories.count - 1 {
               Divider().padding(.leading, 16)
