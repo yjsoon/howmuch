@@ -42,12 +42,26 @@ final class AppModel {
   var lastSaveMessage: String?
   var isShowingSettings = false
   var isShowingCapture = false
-  var lastUsedAccountID: String?
+  private var viewPrefs: ViewPrefs
   private var saveMessageToken = 0
 
   init(settings: APISettings = .load(), viewPrefs: ViewPrefs = .load()) {
     self.settings = settings
-    self.lastUsedAccountID = viewPrefs.lastUsedAccountID
+    self.viewPrefs = viewPrefs
+  }
+
+  var lastUsedAccountID: String? {
+    viewPrefs.lastUsedAccountID
+  }
+
+  /// Web parity: the spending report hides bookkeeping groups until asked.
+  var includeQuietSpending: Bool {
+    viewPrefs.includeQuietSpending ?? false
+  }
+
+  func setIncludeQuietSpending(_ include: Bool) {
+    viewPrefs.includeQuietSpending = include
+    viewPrefs.save()
   }
 
   var apiClient: APIClient {
@@ -187,8 +201,8 @@ final class AppModel {
     }
     transactions.sort { ($0.date, $0.id) > ($1.date, $1.id) }
 
-    lastUsedAccountID = request.accountID
-    ViewPrefs(lastUsedAccountID: request.accountID).save()
+    viewPrefs.lastUsedAccountID = request.accountID
+    viewPrefs.save()
     showSaveMessage("Saved \(MoneyCodec.displayString(for: saved.amount, currencyFormat: currencyFormat)) — \(saved.payeeName ?? "transaction")")
     Task { await refreshAll(quiet: true) }
     return saved

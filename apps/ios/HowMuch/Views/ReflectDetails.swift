@@ -1,11 +1,13 @@
 import SwiftUI
 
 /// Range selection shared by the Reflect detail screens: a single month with
-/// stepper arrows, or one of YNAB's presets.
+/// stepper arrows, one of YNAB's presets, or a custom from/to pair — the same
+/// choices as the web filter rail.
 struct ReportRange: Equatable {
   enum Mode: String, CaseIterable, Identifiable {
     case month = "Month"
     case preset = "Preset"
+    case custom = "Custom"
 
     var id: String { rawValue }
   }
@@ -13,22 +15,29 @@ struct ReportRange: Equatable {
   var mode: Mode = .month
   var monthAnchor = Date().startOfMonth()
   var preset: ReportPreset = .lastThreeMonths
+  var customFrom = Date().startOfMonth()
+  var customTo = Date()
 
-  var fromISO: String {
+  /// `nil` means unbounded, e.g. the All Time preset.
+  var fromISO: String? {
     switch mode {
     case .month:
       return monthAnchor.startOfMonth().isoDateString
     case .preset:
-      return preset.range().from.isoDateString
+      return preset.range().from?.isoDateString
+    case .custom:
+      return min(customFrom, customTo).isoDateString
     }
   }
 
-  var toISO: String {
+  var toISO: String? {
     switch mode {
     case .month:
       return min(monthAnchor.endOfMonth(), Date()).isoDateString
     case .preset:
-      return preset.range().to.isoDateString
+      return preset.range().to?.isoDateString
+    case .custom:
+      return max(customFrom, customTo).isoDateString
     }
   }
 
@@ -38,16 +47,41 @@ struct ReportRange: Equatable {
       return monthAnchor.monthYearLabel
     case .preset:
       return preset.title
+    case .custom:
+      return "Custom range"
     }
+  }
+
+  /// The drill-down window for register links; nil when unbounded.
+  var dateRange: ClosedRange<String>? {
+    guard let from = fromISO, let to = toISO, from <= to else {
+      return nil
+    }
+    return from ... to
   }
 
   /// Cache key for `.task(id:)` refetching.
   var key: String {
-    "\(mode.rawValue)|\(fromISO)|\(toISO)"
+    "\(mode.rawValue)|\(fromISO ?? "open")|\(toISO ?? "open")"
   }
 }
 
-/// Month/Preset segmented control plus the matching range selector pill.
+/// Account/category scoping shared by the Reflect detail screens, mirroring
+/// the web filter rail's multi-selects. Empty means "all".
+struct ReportScope: Equatable {
+  var accountIDs: Set<String> = []
+  var categoryIDs: Set<String> = []
+
+  var isActive: Bool {
+    !accountIDs.isEmpty || !categoryIDs.isEmpty
+  }
+
+  var key: String {
+    accountIDs.sorted().joined(separator: ",") + "|" + categoryIDs.sorted().joined(separator: ",")
+  }
+}
+
+/// Month/Preset/Custom segmented control plus the matching range selector.
 struct ReportRangePicker: View {
   @Binding var range: ReportRange
 
@@ -82,10 +116,267 @@ struct ReportRangePicker: View {
           .padding(.vertical, 8)
           .background(Theme.surfaceMuted, in: Capsule())
         }
+      case .custom:
+        HStack(spacing: 12) {
+          DatePicker("From", selection: $range.customFrom, in: ...Date(), displayedComponents: .date)
+            .labelsHidden()
+          Text("–")
+            .foregroundStyle(.secondary)
+          DatePicker("To", selection: $range.customTo, in: ...Date(), displayedComponents: .date)
+            .labelsHidden()
+        }
+        .frame(maxWidth: .infinity)
       }
     }
   }
+}
 
+/// Interval segmented control; each report offers the same intervals as the web.
+struct ReportIntervalPicker: View {
+  @Binding var interval: ReportInterval
+  let choices: [ReportInterval]
+
+  var body: some View {
+    Picker("Interval", selection: $interval) {
+      ForEach(choices) { choice in
+        Text(choice.title).tag(choice)
+      }
+    }
+    .pickerStyle(.segmented)
+  }
+}
+
+/// Account (and optionally category) filter chips with their picker sheets.
+struct ReportScopeBar: View {
+  @Binding var scope: ReportScope
+  var showsCategories = false
+
+  @State private var isPickingAccounts = false
+  @State private var isPickingCategories = false
+
+  var body: some View {
+    HStack(spacing: 8) {
+      chip(label: accountsLabel, isActive: !scope.accountIDs.isEmpty) {
+        isPickingAccounts = true
+      }
+      if showsCategories {
+        chip(label: categoriesLabel, isActive: !scope.categoryIDs.isEmpty) {
+          isPickingCategories = true
+        }
+      }
+      Spacer()
+      if scope.isActive {
+        Button("Clear") {
+          scope = ReportScope()
+        }
+        .font(.footnote.weight(.medium))
+        .foregroundStyle(Theme.accent)
+      }
+    }
+    .sheet(isPresented: $isPickingAccounts) {
+      AccountScopePicker(selection: $scope.accountIDs)
+    }
+    .sheet(isPresented: $isPickingCategories) {
+      CategoryScopePicker(selection: $scope.categoryIDs)
+    }
+  }
+
+  private var accountsLabel: String {
+    scope.accountIDs.isEmpty
+      ? "All Accounts"
+      : "\(scope.accountIDs.count) Account\(scope.accountIDs.count == 1 ? "" : "s")"
+  }
+
+  private var categoriesLabel: String {
+    scope.categoryIDs.isEmpty
+      ? "All Categories"
+      : "\(scope.categoryIDs.count) Categor\(scope.categoryIDs.count == 1 ? "y" : "ies")"
+  }
+
+  private func chip(label: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      HStack(spacing: 5) {
+        Text(label)
+          .font(.footnote.weight(.medium))
+        Image(systemName: "chevron.down")
+          .font(.caption2.weight(.semibold))
+      }
+      .foregroundStyle(isActive ? Theme.card : Theme.accent)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 7)
+      .background(isActive ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Theme.surfaceMuted), in: Capsule())
+    }
+    .buttonStyle(.plain)
+  }
+}
+
+/// Multi-select over open accounts; empty selection means "all accounts".
+struct AccountScopePicker: View {
+  @Environment(AppModel.self) private var model
+  @Environment(\.dismiss) private var dismiss
+  @Binding var selection: Set<String>
+
+  var body: some View {
+    NavigationStack {
+      List {
+        Button {
+          selection = []
+        } label: {
+          HStack {
+            Text("All Accounts")
+              .foregroundStyle(Theme.textPrimary)
+            Spacer()
+            if selection.isEmpty {
+              Image(systemName: "checkmark")
+                .foregroundStyle(Theme.accent)
+            }
+          }
+        }
+
+        Section {
+          ForEach(model.openAccounts) { account in
+            Button {
+              toggle(account.id)
+            } label: {
+              HStack {
+                Text(account.name)
+                  .foregroundStyle(Theme.textPrimary)
+                Spacer()
+                if selection.contains(account.id) {
+                  Image(systemName: "checkmark")
+                    .foregroundStyle(Theme.accent)
+                }
+              }
+            }
+          }
+        }
+      }
+      .listStyle(.insetGrouped)
+      .scrollContentBackground(.hidden)
+      .background(Theme.canvas)
+      .navigationTitle("Accounts")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Done") {
+            dismiss()
+          }
+        }
+      }
+    }
+    .presentationDetents([.medium, .large])
+  }
+
+  private func toggle(_ id: String) {
+    if selection.contains(id) {
+      selection.remove(id)
+    } else {
+      selection.insert(id)
+    }
+  }
+}
+
+/// Multi-select over categories (plus the Uncategorised pseudo-category);
+/// empty selection means "all categories". Bookkeeping groups sit at the end,
+/// as in the web filter rail.
+struct CategoryScopePicker: View {
+  @Environment(AppModel.self) private var model
+  @Environment(\.dismiss) private var dismiss
+  @Binding var selection: Set<String>
+  @State private var searchText = ""
+
+  var body: some View {
+    NavigationStack {
+      List {
+        if trimmedSearch.isEmpty {
+          Button {
+            selection = []
+          } label: {
+            HStack {
+              Text("All Categories")
+                .foregroundStyle(Theme.textPrimary)
+              Spacer()
+              if selection.isEmpty {
+                Image(systemName: "checkmark")
+                  .foregroundStyle(Theme.accent)
+              }
+            }
+          }
+        }
+
+        ForEach(visibleGroups) { group in
+          Section(group.name) {
+            ForEach(group.categories.filter(matches)) { category in
+              row(id: category.id, name: category.name)
+            }
+          }
+        }
+
+        if matchesUncategorised {
+          Section("Needs a Category") {
+            row(id: CategoryGroup.uncategorisedCategoryID, name: "Uncategorised")
+          }
+        }
+      }
+      .listStyle(.insetGrouped)
+      .scrollContentBackground(.hidden)
+      .background(Theme.canvas)
+      .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search categories")
+      .navigationTitle("Categories")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Done") {
+            dismiss()
+          }
+        }
+      }
+    }
+    .presentationDetents([.medium, .large])
+  }
+
+  private var trimmedSearch: String {
+    searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private func matches(_ category: Category) -> Bool {
+    let query = trimmedSearch.lowercased()
+    return query.isEmpty || category.name.lowercased().contains(query)
+  }
+
+  private var matchesUncategorised: Bool {
+    let query = trimmedSearch.lowercased()
+    return query.isEmpty || "uncategorised".contains(query)
+  }
+
+  private var visibleGroups: [CategoryGroup] {
+    let live = model.categoryGroups.filter { group in
+      !group.deleted && group.categories.contains { !$0.deleted && matches($0) }
+    }
+    let primary = live.filter { !$0.isQuiet }
+    let quiet = live.filter(\.isQuiet)
+    return primary + quiet
+  }
+
+  private func row(id: String, name: String) -> some View {
+    Button {
+      if selection.contains(id) {
+        selection.remove(id)
+      } else {
+        selection.insert(id)
+      }
+    } label: {
+      HStack {
+        Text(name)
+          .foregroundStyle(Theme.textPrimary)
+        Spacer()
+        if selection.contains(id) {
+          Image(systemName: "checkmark")
+            .foregroundStyle(Theme.accent)
+        }
+      }
+    }
+  }
 }
 
 // MARK: - Spending Breakdown
@@ -93,6 +384,7 @@ struct ReportRangePicker: View {
 struct SpendingBreakdownDetailView: View {
   @Environment(AppModel.self) private var model
   @State private var range = ReportRange()
+  @State private var scope = ReportScope()
   @State private var report: SpendingBreakdownReport?
   @State private var phase: LoadPhase = .idle
 
@@ -100,23 +392,23 @@ struct SpendingBreakdownDetailView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
         ReportRangePicker(range: $range)
+        ReportScopeBar(scope: $scope, showsCategories: true)
 
         if let report {
-          let rows = ReflectMaths.demoted(report.groups)
+          // Web parity: bookkeeping groups are excluded until asked, unless
+          // an explicit category filter made the choice deliberate.
+          let hideQuiet = !model.includeQuietSpending && scope.categoryIDs.isEmpty
+          let split = ReflectMaths.split(report.groups)
+          let rows = hideQuiet ? split.primary : split.primary + split.quiet
+          let total = rows.reduce(0) { $0 + abs($1.amount) }
+          let excluded = abs(report.total) - total
+          let transactionCount = rows.reduce(0) { $0 + $1.transactionCount }
 
-          VStack(spacing: 10) {
-            Text("Total Spending")
-              .font(.subheadline)
-              .foregroundStyle(.secondary)
-            Text(MoneyCodec.displayString(for: abs(report.total), currencyFormat: model.currencyFormat))
-              .font(.system(size: 34, weight: .bold))
-              .monospacedDigit()
-              .foregroundStyle(Theme.textPrimary)
-            StackedShareBar(segments: ReflectMaths.shareSegments(rows, limit: 6))
+          headlineCard(rows: rows, total: total, transactionCount: transactionCount)
+
+          if scope.categoryIDs.isEmpty, excluded > 0 || model.includeQuietSpending {
+            quietToggleNote(excluded: excluded)
           }
-          .frame(maxWidth: .infinity)
-          .padding(16)
-          .ynabCard()
 
           if rows.isEmpty {
             Text("No spending in this range.")
@@ -125,29 +417,9 @@ struct SpendingBreakdownDetailView: View {
               .frame(maxWidth: .infinity)
               .padding(.vertical, 24)
           } else {
-            Text("Categories")
-              .font(.subheadline.weight(.semibold))
-              .foregroundStyle(Theme.textPrimary)
-              .padding(.horizontal, 4)
-
-            VStack(spacing: 0) {
-              ForEach(Array(rows.enumerated()), id: \.element.id) { index, group in
-                NavigationLink {
-                  RegisterView(
-                    scope: .all,
-                    categoryID: group.categoryID,
-                    dateRange: range.fromISO ... range.toISO
-                  )
-                } label: {
-                  categoryRow(group, colour: Theme.chartColour(index), total: abs(report.total))
-                }
-                .buttonStyle(.plain)
-                if index < rows.count - 1 {
-                  Divider().padding(.leading, 16)
-                }
-              }
+            ForEach(ReflectMaths.groupSections(rows)) { section in
+              groupSection(section, total: total, maxAmount: rows.map { abs($0.amount) }.max() ?? 1)
             }
-            .ynabCard()
           }
         } else {
           PhasePlaceholder(phase: phase) {
@@ -161,13 +433,116 @@ struct SpendingBreakdownDetailView: View {
     .background(Theme.canvas)
     .navigationTitle("Spending Breakdown")
     .navigationBarTitleDisplayMode(.inline)
-    .task(id: range.key) {
+    .task(id: range.key + "|" + scope.key) {
       await fetch()
     }
   }
 
-  private func categoryRow(_ group: SpendingBreakdownGroup, colour: Color, total: Int) -> some View {
-    HStack(spacing: 12) {
+  private func headlineCard(rows: [SpendingBreakdownGroup], total: Int, transactionCount: Int) -> some View {
+    VStack(spacing: 10) {
+      Text("Total Spending")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+      Text(MoneyCodec.displayString(for: total, currencyFormat: model.currencyFormat))
+        .font(.system(size: 34, weight: .bold))
+        .monospacedDigit()
+        .foregroundStyle(Theme.textPrimary)
+      StackedShareBar(segments: ReflectMaths.shareSegments(rows, limit: 6))
+
+      HStack {
+        statColumn("Largest Line", rows.max { abs($0.amount) < abs($1.amount) }?.categoryName ?? "—")
+        Spacer()
+        statColumn(
+          "Avg Transaction",
+          transactionCount > 0
+            ? MoneyCodec.displayString(for: total / transactionCount, currencyFormat: model.currencyFormat)
+            : "—"
+        )
+        Spacer()
+        statColumn("Transactions", "\(transactionCount)")
+      }
+      .padding(.top, 2)
+    }
+    .frame(maxWidth: .infinity)
+    .padding(16)
+    .ynabCard()
+  }
+
+  private func statColumn(_ label: String, _ value: String) -> some View {
+    VStack(spacing: 2) {
+      Text(label)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      Text(value)
+        .font(.footnote.weight(.semibold))
+        .monospacedDigit()
+        .foregroundStyle(Theme.textPrimary)
+        .lineLimit(1)
+    }
+  }
+
+  private func quietToggleNote(excluded: Int) -> some View {
+    HStack(spacing: 6) {
+      Text(
+        model.includeQuietSpending
+          ? "Including hidden & non-personal categories."
+          : "\(MoneyCodec.displayString(for: max(excluded, 0), currencyFormat: model.currencyFormat)) in hidden & non-personal categories excluded."
+      )
+      .font(.footnote)
+      .foregroundStyle(.secondary)
+      Button(model.includeQuietSpending ? "Exclude" : "Include") {
+        model.setIncludeQuietSpending(!model.includeQuietSpending)
+      }
+      .font(.footnote.weight(.semibold))
+      .foregroundStyle(Theme.accent)
+    }
+    .padding(.horizontal, 4)
+  }
+
+  private func groupSection(_ section: SpendingGroupSection, total: Int, maxAmount: Int) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      HStack {
+        Text(section.name)
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(Theme.textPrimary)
+        Spacer()
+        Text(MoneyCodec.displayString(for: section.amount, currencyFormat: model.currencyFormat))
+          .font(.subheadline.weight(.semibold))
+          .monospacedDigit()
+          .foregroundStyle(Theme.textPrimary)
+        Text(total > 0 ? shareLabel(Double(section.amount) / Double(total)) : "—")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .frame(width: 44, alignment: .trailing)
+      }
+      .padding(.horizontal, 4)
+
+      VStack(spacing: 0) {
+        ForEach(Array(section.rows.enumerated()), id: \.element.id) { index, group in
+          NavigationLink {
+            RegisterView(
+              scope: .all,
+              categoryID: group.categoryID,
+              dateRange: range.dateRange,
+              accountIDs: scope.accountIDs.isEmpty ? nil : scope.accountIDs
+            )
+          } label: {
+            categoryRow(group, total: total, maxAmount: maxAmount)
+          }
+          .buttonStyle(.plain)
+          if index < section.rows.count - 1 {
+            Divider().padding(.leading, 16)
+          }
+        }
+      }
+      .ynabCard()
+    }
+  }
+
+  private func categoryRow(_ group: SpendingBreakdownGroup, total: Int, maxAmount: Int) -> some View {
+    let amount = abs(group.amount)
+    let share = total > 0 ? Double(amount) / Double(total) : 0
+    return HStack(spacing: 12) {
       VStack(alignment: .leading, spacing: 6) {
         Text(group.categoryName)
           .font(.subheadline)
@@ -178,18 +553,21 @@ struct SpendingBreakdownDetailView: View {
               .fill(Theme.surfaceMuted)
               .overlay(alignment: .leading) {
                 Capsule()
-                  .fill(colour)
-                  .frame(width: max(4, proxy.size.width * min(group.share, 1)))
+                  .fill(Theme.accent)
+                  .frame(width: max(4, proxy.size.width * min(Double(amount) / Double(max(maxAmount, 1)), 1)))
               }
           }
           .frame(width: 120, height: 6)
-          Text(shareLabel(group.share))
+          Text(shareLabel(share))
             .font(.caption)
             .foregroundStyle(.secondary)
+          Text("· \(group.transactionCount) txn\(group.transactionCount == 1 ? "" : "s")")
+            .font(.caption)
+            .foregroundStyle(.tertiary)
         }
       }
       Spacer()
-      Text(MoneyCodec.displayString(for: abs(group.amount), currencyFormat: model.currencyFormat))
+      Text(MoneyCodec.displayString(for: amount, currencyFormat: model.currencyFormat))
         .font(.subheadline)
         .monospacedDigit()
         .foregroundStyle(Theme.textPrimary)
@@ -211,7 +589,11 @@ struct SpendingBreakdownDetailView: View {
     phase = .loading
     do {
       report = try await model.apiClient.fetchSpendingBreakdown(
-        planID: model.settings.planID, from: range.fromISO, to: range.toISO
+        planID: model.settings.planID,
+        from: range.fromISO,
+        to: range.toISO,
+        accountIDs: Array(scope.accountIDs),
+        categoryIDs: Array(scope.categoryIDs)
       )
       phase = .loaded
     } catch {
@@ -225,6 +607,8 @@ struct SpendingBreakdownDetailView: View {
 struct NetWorthDetailView: View {
   @Environment(AppModel.self) private var model
   @State private var range = ReportRange(mode: .preset, preset: .lastTwelveMonths)
+  @State private var scope = ReportScope()
+  @State private var interval: ReportInterval = .month
   @State private var report: NetWorthReport?
   @State private var phase: LoadPhase = .idle
 
@@ -232,19 +616,29 @@ struct NetWorthDetailView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
         ReportRangePicker(range: $range)
+        ReportIntervalPicker(interval: $interval, choices: [.week, .month])
+        ReportScopeBar(scope: $scope)
 
         if let report, let latest = report.periods.last {
           let assets = latest.accounts.map(\.balance).filter { $0 > 0 }.reduce(0, +)
           let debts = latest.accounts.map(\.balance).filter { $0 < 0 }.reduce(0, +)
+          let previous = report.periods.dropLast().last
+          let change = previous.map { latest.netWorth - $0.netWorth }
 
           VStack(spacing: 10) {
-            Text("Net Worth")
+            Text("Net Worth · as at \(LedgerDate.friendlyString(fromISO: latest.endDate))")
               .font(.subheadline)
               .foregroundStyle(.secondary)
             Text(MoneyCodec.displayString(for: latest.netWorth, currencyFormat: model.currencyFormat))
               .font(.system(size: 34, weight: .bold))
               .monospacedDigit()
               .foregroundStyle(Theme.textPrimary)
+            if let change {
+              Text("\(MoneyCodec.signedDisplayString(for: change, currencyFormat: model.currencyFormat)) on previous period")
+                .font(.footnote.weight(.medium))
+                .monospacedDigit()
+                .foregroundStyle(Theme.amountColour(change))
+            }
             HStack(spacing: 24) {
               VStack(spacing: 2) {
                 Text("Assets")
@@ -295,6 +689,43 @@ struct NetWorthDetailView: View {
             }
           }
           .ynabCard()
+
+          Text("History")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Theme.textPrimary)
+            .padding(.horizontal, 4)
+
+          VStack(spacing: 0) {
+            let periods = Array(report.periods.reversed())
+            ForEach(Array(periods.enumerated()), id: \.element.id) { index, period in
+              let prior = index + 1 < periods.count ? periods[index + 1] : nil
+              let delta = prior.map { period.netWorth - $0.netWorth }
+              HStack {
+                Text(LedgerDate.periodLabel(period.period))
+                  .font(.subheadline)
+                  .foregroundStyle(Theme.textPrimary)
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                  Text(MoneyCodec.displayString(for: period.netWorth, currencyFormat: model.currencyFormat))
+                    .font(.subheadline.weight(.medium))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.textPrimary)
+                  if let delta {
+                    Text(MoneyCodec.signedDisplayString(for: delta, currencyFormat: model.currencyFormat))
+                      .font(.caption)
+                      .monospacedDigit()
+                      .foregroundStyle(Theme.amountColour(delta))
+                  }
+                }
+              }
+              .padding(.horizontal, 16)
+              .padding(.vertical, 9)
+              if index < periods.count - 1 {
+                Divider().padding(.leading, 16)
+              }
+            }
+          }
+          .ynabCard()
         } else {
           PhasePlaceholder(phase: phase) {
             await fetch()
@@ -307,7 +738,7 @@ struct NetWorthDetailView: View {
     .background(Theme.canvas)
     .navigationTitle("Net Worth")
     .navigationBarTitleDisplayMode(.inline)
-    .task(id: range.key) {
+    .task(id: range.key + "|" + scope.key + "|" + interval.rawValue) {
       await fetch()
     }
   }
@@ -316,7 +747,11 @@ struct NetWorthDetailView: View {
     phase = .loading
     do {
       report = try await model.apiClient.fetchNetWorth(
-        planID: model.settings.planID, from: range.fromISO, to: range.toISO, interval: .month
+        planID: model.settings.planID,
+        from: range.fromISO,
+        to: range.toISO,
+        interval: interval,
+        accountIDs: Array(scope.accountIDs)
       )
       phase = .loaded
     } catch {
@@ -329,7 +764,9 @@ struct NetWorthDetailView: View {
 
 struct IncomeVsSpendingDetailView: View {
   @Environment(AppModel.self) private var model
-  @State private var range = ReportRange(mode: .preset, preset: .lastTwelveMonths)
+  @State private var range = ReportRange(mode: .preset, preset: .yearToDate)
+  @State private var scope = ReportScope()
+  @State private var interval: ReportInterval = .month
   @State private var report: IncomeVsSpendingReport?
   @State private var phase: LoadPhase = .idle
 
@@ -337,9 +774,25 @@ struct IncomeVsSpendingDetailView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
         ReportRangePicker(range: $range)
+        ReportIntervalPicker(interval: $interval, choices: [.week, .month, .year])
+        ReportScopeBar(scope: $scope, showsCategories: true)
 
         if let report, !report.periods.isEmpty {
+          let income = report.periods.reduce(0) { $0 + $1.income }
+          let spending = report.periods.reduce(0) { $0 + abs($1.spending) }
+          let net = income - spending
+
           VStack(spacing: 12) {
+            HStack {
+              statColumn("Income", MoneyCodec.displayString(for: income, currencyFormat: model.currencyFormat), colour: Theme.inflow)
+              Spacer()
+              statColumn("Spending", MoneyCodec.displayString(for: spending, currencyFormat: model.currencyFormat), colour: Theme.outflow)
+              Spacer()
+              statColumn("Net", MoneyCodec.signedDisplayString(for: net, currencyFormat: model.currencyFormat), colour: Theme.amountColour(net))
+              Spacer()
+              statColumn("Savings Rate", savingsRate(net: net, income: income), colour: Theme.amountColour(net))
+            }
+
             PairedColumnChart(
               pairs: report.periods.map { (Double($0.income), Double(abs($0.spending))) },
               height: 120
@@ -359,11 +812,13 @@ struct IncomeVsSpendingDetailView: View {
                   .font(.subheadline.weight(.semibold))
                   .foregroundStyle(Theme.textPrimary)
                 HStack {
-                  amountColumn("Income", period.income, colour: Theme.inflow)
+                  amountColumn("Income", MoneyCodec.displayString(for: period.income, currencyFormat: model.currencyFormat), colour: Theme.inflow)
                   Spacer()
-                  amountColumn("Spending", period.spending, colour: Theme.outflow)
+                  amountColumn("Spending", MoneyCodec.displayString(for: period.spending, currencyFormat: model.currencyFormat), colour: Theme.outflow)
                   Spacer()
-                  amountColumn("Net", period.net, colour: Theme.amountColour(period.net))
+                  amountColumn("Net", MoneyCodec.signedDisplayString(for: period.net, currencyFormat: model.currencyFormat), colour: Theme.amountColour(period.net))
+                  Spacer()
+                  amountColumn("Cumulative", MoneyCodec.signedDisplayString(for: period.cumulativeNet, currencyFormat: model.currencyFormat), colour: .secondary)
                 }
               }
               .padding(.horizontal, 16)
@@ -386,17 +841,40 @@ struct IncomeVsSpendingDetailView: View {
     .background(Theme.canvas)
     .navigationTitle("Income vs Spending")
     .navigationBarTitleDisplayMode(.inline)
-    .task(id: range.key) {
+    .task(id: range.key + "|" + scope.key + "|" + interval.rawValue) {
       await fetch()
     }
   }
 
-  private func amountColumn(_ label: String, _ amount: Int, colour: Color) -> some View {
+  /// Net over income for the range, as on the web ("−12.3%" when overspent).
+  private func savingsRate(net: Int, income: Int) -> String {
+    guard income > 0 else {
+      return "—"
+    }
+    let rate = Double(net) / Double(income) * 100
+    return String(format: "%.1f%%", rate)
+  }
+
+  private func statColumn(_ label: String, _ value: String, colour: Color) -> some View {
+    VStack(spacing: 2) {
+      Text(label)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      Text(value)
+        .font(.footnote.weight(.semibold))
+        .monospacedDigit()
+        .foregroundStyle(colour)
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+    }
+  }
+
+  private func amountColumn(_ label: String, _ value: String, colour: Color) -> some View {
     VStack(alignment: .leading, spacing: 2) {
       Text(label)
         .font(.caption)
         .foregroundStyle(.secondary)
-      Text(MoneyCodec.displayString(for: amount, currencyFormat: model.currencyFormat))
+      Text(value)
         .font(.footnote.weight(.medium))
         .monospacedDigit()
         .foregroundStyle(colour)
@@ -418,7 +896,12 @@ struct IncomeVsSpendingDetailView: View {
     phase = .loading
     do {
       report = try await model.apiClient.fetchIncomeVsSpending(
-        planID: model.settings.planID, from: range.fromISO, to: range.toISO, interval: .month
+        planID: model.settings.planID,
+        from: range.fromISO,
+        to: range.toISO,
+        interval: interval,
+        accountIDs: Array(scope.accountIDs),
+        categoryIDs: Array(scope.categoryIDs)
       )
       phase = .loaded
     } catch {
@@ -431,6 +914,8 @@ struct IncomeVsSpendingDetailView: View {
 
 struct AgeOfMoneyDetailView: View {
   @Environment(AppModel.self) private var model
+  @State private var scope = ReportScope()
+  @State private var interval: ReportInterval = .month
   @State private var report: AgeOfMoneyReport?
   @State private var phase: LoadPhase = .idle
 
@@ -439,49 +924,58 @@ struct AgeOfMoneyDetailView: View {
       VStack(alignment: .leading, spacing: 16) {
         // No range picker: the server replays income lots from the start of
         // the window, so the age is only honest over the full history.
+        ReportIntervalPicker(interval: $interval, choices: [.week, .month])
+        ReportScopeBar(scope: $scope)
+
         if let report {
-          let ages = report.periods.compactMap(\.ageOfMoneyDays)
+          let measured = report.periods.filter { $0.ageOfMoneyDays != nil }
+          let latest = measured.last?.ageOfMoneyDays
+          let previous = measured.dropLast().last?.ageOfMoneyDays
+          let matchedTotal = report.periods.reduce(0) { $0 + $1.spent }
+          let unmatchedTotal = report.periods.reduce(0) { $0 + $1.unmatchedSpending }
 
           VStack(spacing: 10) {
             Text("Age of Money")
               .font(.subheadline)
               .foregroundStyle(.secondary)
-            if let latest = ages.last {
+            if let latest {
               Text("\(Int(latest.rounded())) Days")
                 .font(.system(size: 34, weight: .bold))
                 .foregroundStyle(Theme.textPrimary)
+              if let previous {
+                let delta = Int(latest.rounded()) - Int(previous.rounded())
+                Text("\(delta > 0 ? "+" : "")\(delta) days on previous period")
+                  .font(.footnote.weight(.medium))
+                  .foregroundStyle(delta >= 0 ? Theme.inflow : Theme.outflow)
+              }
             } else {
               Text("Not enough matched income yet")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             }
-            if ages.count > 1 {
-              Sparkline(values: ages, colour: Theme.inflow, height: 80)
+            if measured.count > 1 {
+              Sparkline(values: measured.compactMap(\.ageOfMoneyDays), colour: Theme.inflow, height: 80)
+            }
+            if matchedTotal > 0 {
+              Text("\(MoneyCodec.displayString(for: matchedTotal, currencyFormat: model.currencyFormat)) of spending matched to income")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
           }
           .frame(maxWidth: .infinity)
           .padding(16)
           .ynabCard()
 
+          if unmatchedTotal > 0 {
+            Text("\(MoneyCodec.displayString(for: unmatchedTotal, currencyFormat: model.currencyFormat)) of spending predates the earliest recorded income and is excluded from the weighted age.")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+              .padding(.horizontal, 4)
+          }
+
           VStack(spacing: 0) {
             ForEach(Array(report.periods.reversed().enumerated()), id: \.element.id) { index, period in
-              HStack {
-                Text(LedgerDate.periodLabel(period.period))
-                  .font(.subheadline)
-                  .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                if let age = period.ageOfMoneyDays {
-                  Text("\(Int(age.rounded())) days")
-                    .font(.subheadline.weight(.medium))
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.textPrimary)
-                } else {
-                  Text("—")
-                    .foregroundStyle(.secondary)
-                }
-              }
-              .padding(.horizontal, 16)
-              .padding(.vertical, 11)
+              periodRow(period)
               if index < report.periods.count - 1 {
                 Divider().padding(.leading, 16)
               }
@@ -500,15 +994,50 @@ struct AgeOfMoneyDetailView: View {
     .background(Theme.canvas)
     .navigationTitle("Age of Money")
     .navigationBarTitleDisplayMode(.inline)
-    .task {
+    .task(id: scope.key + "|" + interval.rawValue) {
       await fetch()
     }
+  }
+
+  private func periodRow(_ period: AgeOfMoneyPeriod) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack {
+        Text(LedgerDate.periodLabel(period.period))
+          .font(.subheadline)
+          .foregroundStyle(Theme.textPrimary)
+        Spacer()
+        if let age = period.ageOfMoneyDays {
+          Text("\(Int(age.rounded())) days")
+            .font(.subheadline.weight(.medium))
+            .monospacedDigit()
+            .foregroundStyle(Theme.textPrimary)
+        } else {
+          Text("—")
+            .foregroundStyle(.secondary)
+        }
+      }
+      HStack(spacing: 12) {
+        Text("Matched \(MoneyCodec.displayString(for: period.spent, currencyFormat: model.currencyFormat))")
+        if period.unmatchedSpending > 0 {
+          Text("Unmatched \(MoneyCodec.displayString(for: period.unmatchedSpending, currencyFormat: model.currencyFormat))")
+        }
+      }
+      .font(.caption)
+      .monospacedDigit()
+      .foregroundStyle(.secondary)
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 9)
   }
 
   private func fetch() async {
     phase = .loading
     do {
-      report = try await model.apiClient.fetchAgeOfMoney(planID: model.settings.planID, interval: .month)
+      report = try await model.apiClient.fetchAgeOfMoney(
+        planID: model.settings.planID,
+        interval: interval,
+        accountIDs: Array(scope.accountIDs)
+      )
       phase = .loaded
     } catch {
       phase = .failed(error.localizedDescription)
