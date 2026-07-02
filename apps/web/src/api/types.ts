@@ -134,6 +134,15 @@ export interface AgeOfMoneyReport {
   }>;
 }
 
+export interface SubtransactionInput {
+  id?: string;
+  amount: number;
+  category_id?: string | null;
+  payee_id?: string | null;
+  payee_name?: string | null;
+  memo?: string | null;
+}
+
 export interface TransactionPatch {
   account_id?: string;
   date?: string;
@@ -145,6 +154,7 @@ export interface TransactionPatch {
   cleared?: string;
   approved?: boolean;
   flag_color?: string | null;
+  subtransactions?: SubtransactionInput[];
 }
 
 export interface CsvImportRow {

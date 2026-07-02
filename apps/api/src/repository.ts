@@ -815,6 +815,62 @@ export class LedgerRepository {
     return Number(result.changes ?? 0);
   }
 
+  /**
+   * Applies one patch to many transactions. Categorising skips transfers and
+   * splits (their categories live elsewhere); deleting cascades transfer
+   * pairs via deleteTransaction.
+   */
+  bulkUpdateTransactions(
+    planId: string,
+    transactionIds: string[],
+    patch: { category_id?: string | null; cleared?: ClearedState; approved?: boolean; deleted?: boolean },
+  ): { updated: number; skipped: number } {
+    this.ensurePlan(planId);
+    let updated = 0;
+    let skipped = 0;
+
+    for (const transactionId of transactionIds ?? []) {
+      const row = this.getTransactionRow(planId, transactionId);
+      if (!row) {
+        skipped += 1;
+        continue;
+      }
+
+      if (patch.deleted === true) {
+        this.deleteTransaction(planId, transactionId);
+        updated += 1;
+        continue;
+      }
+
+      const transactionPatch: Partial<TransactionInput> = {};
+      if (patch.category_id !== undefined) {
+        const isTransfer = Boolean(row.transfer_transaction_id || row.transfer_account_id);
+        const splitCount = this.db
+          .query("SELECT COUNT(*) AS count FROM subtransactions WHERE transaction_id = ? AND deleted = 0")
+          .get(transactionId) as Row;
+        if (isTransfer || Number(splitCount.count) > 0) {
+          skipped += 1;
+          continue;
+        }
+        transactionPatch.category_id = patch.category_id;
+      }
+      if (patch.cleared !== undefined) {
+        transactionPatch.cleared = patch.cleared;
+      }
+      if (patch.approved !== undefined) {
+        transactionPatch.approved = patch.approved;
+      }
+      if (!Object.keys(transactionPatch).length) {
+        skipped += 1;
+        continue;
+      }
+      this.updateTransaction(planId, transactionId, transactionPatch);
+      updated += 1;
+    }
+
+    return { updated, skipped };
+  }
+
   deleteTransaction(planId: string, transactionId: string): any {
     const existing = this.getTransactionRow(planId, transactionId);
     if (!existing) {

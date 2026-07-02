@@ -3,8 +3,11 @@ import { api } from "../api/client";
 import type { Account, Payee, Transaction } from "../api/types";
 import { splitCategoryGroups } from "../lib/categories";
 import { formatDate, todayIso } from "../lib/dates";
-import { decimalToMilli, formatAmount } from "../lib/money";
+import { decimalToMilli, formatAmount, formatMoney } from "../lib/money";
 import { usePlan } from "../state/plan";
+import { PayeeCombobox } from "./PayeeCombobox";
+
+const SPLIT_SENTINEL = "__split__";
 
 /** "Transfer : {Account}" in the payee field means a transfer, matching imported YNAB data. */
 export function transferTargetAccount(payeeName: string, accounts: Account[], excludeId: string): Account | null {
@@ -14,23 +17,6 @@ export function transferTargetAccount(payeeName: string, accounts: Account[], ex
   }
   const name = match[1].trim().toLowerCase();
   return accounts.find((account) => !account.closed && account.id !== excludeId && account.name.toLowerCase() === name) ?? null;
-}
-
-function PayeeDatalist({ id, payees, accounts, currentAccountId }: { id: string; payees: Payee[]; accounts: Account[]; currentAccountId: string }) {
-  return (
-    <datalist id={id}>
-      {accounts
-        .filter((account) => !account.closed && account.id !== currentAccountId)
-        .map((account) => (
-          <option key={account.id} value={`Transfer : ${account.name}`} />
-        ))}
-      {payees
-        .filter((payee) => !payee.deleted && !/^Transfer\s*:/i.test(payee.name))
-        .map((payee) => (
-          <option key={payee.id} value={payee.name} />
-        ))}
-    </datalist>
-  );
 }
 
 /** Paired outflow/inflow inputs, YNAB register style: filling one clears the other. */
@@ -71,7 +57,7 @@ function useOutflowInflow(initialAmount?: number) {
   };
 }
 
-function CategoryOptions() {
+export function CategoryOptions() {
   const { categoryGroups } = usePlan();
   const orderedGroups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
   return (
@@ -88,6 +74,210 @@ function CategoryOptions() {
     </>
   );
 }
+
+/* ── Splits ─────────────────────────────────────────────────── */
+
+interface SplitLine {
+  key: number;
+  id?: string;
+  category_id: string;
+  memo: string;
+  outflow: string;
+  inflow: string;
+}
+
+let splitLineKey = 0;
+
+function emptySplitLine(): SplitLine {
+  splitLineKey += 1;
+  return { key: splitLineKey, category_id: "", memo: "", outflow: "", inflow: "" };
+}
+
+function splitLinesFromTransaction(txn: Transaction): SplitLine[] {
+  return (txn.subtransactions ?? []).map((sub) => {
+    splitLineKey += 1;
+    return {
+      key: splitLineKey,
+      id: sub.id,
+      category_id: sub.category_id ?? "",
+      memo: sub.memo ?? "",
+      outflow: sub.amount < 0 ? (Math.abs(sub.amount) / 1000).toFixed(2) : "",
+      inflow: sub.amount > 0 ? (sub.amount / 1000).toFixed(2) : "",
+    };
+  });
+}
+
+function splitLineAmount(line: SplitLine): number | null {
+  if (line.outflow.trim()) {
+    return -Math.abs(decimalToMilli(line.outflow));
+  }
+  if (line.inflow.trim()) {
+    return Math.abs(decimalToMilli(line.inflow));
+  }
+  return null;
+}
+
+/** Validated subtransaction inputs, or an error describing what is missing. */
+function buildSubtransactions(
+  lines: SplitLine[],
+  parentAmount: number | null,
+): { subtransactions: Array<{ id?: string; amount: number; category_id: string | null; memo: string | null }> } | { error: string } {
+  if (lines.length < 2) {
+    return { error: "A split needs at least two lines — or pick a single category instead." };
+  }
+  if (parentAmount === null) {
+    return { error: "Enter the transaction amount before saving the split." };
+  }
+  const amounts = lines.map(splitLineAmount);
+  if (amounts.some((amount) => amount === null)) {
+    return { error: "Every split line needs an outflow or inflow amount." };
+  }
+  const total = (amounts as number[]).reduce((sum, amount) => sum + amount, 0);
+  if (total !== parentAmount) {
+    return {
+      error: `Split lines must add up to the transaction amount (${formatMoney(parentAmount - total, { sign: true })} left to assign).`,
+    };
+  }
+  return {
+    subtransactions: lines.map((line, index) => ({
+      id: line.id,
+      amount: amounts[index] as number,
+      category_id: line.category_id || null,
+      memo: line.memo.trim() || null,
+    })),
+  };
+}
+
+function SplitLinesEditor({
+  lines,
+  setLines,
+  parentAmount,
+}: {
+  lines: SplitLine[];
+  setLines: (lines: SplitLine[]) => void;
+  parentAmount: number | null;
+}) {
+  const patchLine = (key: number, patch: Partial<SplitLine>) => {
+    setLines(
+      lines.map((line) => {
+        if (line.key !== key) {
+          return line;
+        }
+        const next = { ...line, ...patch };
+        // Outflow and inflow are exclusive per line, like the main register.
+        if (patch.outflow?.trim()) {
+          next.inflow = "";
+        }
+        if (patch.inflow?.trim()) {
+          next.outflow = "";
+        }
+        return next;
+      }),
+    );
+  };
+
+  const assigned = lines.reduce((sum, line) => sum + (splitLineAmount(line) ?? 0), 0);
+  const remaining = parentAmount === null ? null : parentAmount - assigned;
+
+  return (
+    <div className="split-editor">
+      {lines.map((line, index) => (
+        <div key={line.key} className="split-line">
+          <select
+            value={line.category_id}
+            onChange={(event) => patchLine(line.key, { category_id: event.target.value })}
+            aria-label={`Split ${index + 1} category`}
+          >
+            <option value="">Uncategorised</option>
+            <CategoryOptions />
+          </select>
+          <input
+            value={line.memo}
+            onChange={(event) => patchLine(line.key, { memo: event.target.value })}
+            placeholder="Memo"
+            aria-label={`Split ${index + 1} memo`}
+          />
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={line.outflow}
+            onChange={(event) => patchLine(line.key, { outflow: event.target.value })}
+            placeholder="Outflow"
+            className="amount-cell-input outflow-input"
+            aria-label={`Split ${index + 1} outflow`}
+          />
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={line.inflow}
+            onChange={(event) => patchLine(line.key, { inflow: event.target.value })}
+            placeholder="Inflow"
+            className="amount-cell-input inflow-input"
+            aria-label={`Split ${index + 1} inflow`}
+          />
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => setLines(lines.filter((entry) => entry.key !== line.key))}
+            disabled={lines.length <= 2}
+            title={lines.length <= 2 ? "A split needs at least two lines" : "Remove this line"}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      <div className="split-footer">
+        <button type="button" className="text-button" onClick={() => setLines([...lines, emptySplitLine()])}>
+          + Add another split
+        </button>
+        <span className={remaining === 0 ? "split-remaining split-remaining-ok" : "split-remaining"}>
+          {remaining === null
+            ? "Enter the transaction amount to balance the split."
+            : remaining === 0
+              ? "All assigned"
+              : `${formatMoney(remaining, { sign: true })} left to assign`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Category picker that can flip into split mode, YNAB's "Split (Multiple Categories)". */
+function CategoryField({
+  categoryId,
+  setCategoryId,
+  splitMode,
+  onEnterSplit,
+  onExitSplit,
+}: {
+  categoryId: string;
+  setCategoryId: (id: string) => void;
+  splitMode: boolean;
+  onEnterSplit: () => void;
+  onExitSplit: () => void;
+}) {
+  return (
+    <select
+      value={splitMode ? SPLIT_SENTINEL : categoryId}
+      onChange={(event) => {
+        if (event.target.value === SPLIT_SENTINEL) {
+          onEnterSplit();
+        } else {
+          onExitSplit();
+          setCategoryId(event.target.value);
+        }
+      }}
+    >
+      <option value="">Uncategorised</option>
+      <option value={SPLIT_SENTINEL}>Split (multiple categories)…</option>
+      <CategoryOptions />
+    </select>
+  );
+}
+
+/* ── Row chrome ─────────────────────────────────────────────── */
 
 /** YNAB-style cleared circle: click toggles uncleared/cleared; reconciled is locked. */
 export function ClearedBadge({
@@ -168,10 +358,12 @@ export function QuickCategorySelect({
   );
 }
 
+/* ── Add row ────────────────────────────────────────────────── */
+
 /**
  * Inline new-transaction row at the top of the register, mirroring YNAB's
  * Add Transaction: outflow/inflow fields, transfers via the payee field,
- * and "Save and add another" for batch entry.
+ * splits, and "Save and add another" for batch entry.
  */
 export function AddTransactionRow({
   planId,
@@ -194,6 +386,8 @@ export function AddTransactionRow({
   const [payeeName, setPayeeName] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [memo, setMemo] = useState("");
+  const [splitMode, setSplitMode] = useState(false);
+  const [splitLines, setSplitLines] = useState<SplitLine[]>([]);
   const amounts = useOutflowInflow();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -211,7 +405,7 @@ export function AddTransactionRow({
         throw new Error("Enter an outflow or an inflow amount.");
       }
       if (!payeeName.trim() && !transferTarget) {
-        throw new Error("Enter a payee, or “Transfer : {account}” for a transfer.");
+        throw new Error("Enter a payee, or pick a transfer from the payee list.");
       }
       if (transferTarget) {
         await api.createTransfer(planId, {
@@ -222,15 +416,24 @@ export function AddTransactionRow({
           memo: memo.trim() || null,
         });
       } else {
+        let subtransactions;
+        if (splitMode) {
+          const built = buildSubtransactions(splitLines, amount);
+          if ("error" in built) {
+            throw new Error(built.error);
+          }
+          subtransactions = built.subtransactions;
+        }
         await api.createTransaction(planId, {
           account_id: accountId,
           date,
           amount,
           payee_name: payeeName.trim(),
-          category_id: categoryId || null,
+          category_id: splitMode ? null : categoryId || null,
           memo: memo.trim() || null,
           cleared: "uncleared",
           approved: true,
+          ...(subtransactions ? { subtransactions } : {}),
         });
       }
       if (addAnother) {
@@ -238,6 +441,8 @@ export function AddTransactionRow({
         setPayeeName("");
         setCategoryId("");
         setMemo("");
+        setSplitMode(false);
+        setSplitLines([]);
         amounts.reset();
         setBusy(false);
         onSaved();
@@ -254,7 +459,7 @@ export function AddTransactionRow({
 
   return (
     <tr className="editor-row add-row">
-      <td colSpan={8}>
+      <td colSpan={9}>
         <form
           className="txn-editor"
           onSubmit={(event) => {
@@ -279,25 +484,32 @@ export function AddTransactionRow({
             </label>
             <label className="field">
               <span className="field-label">Payee</span>
-              <input
+              <PayeeCombobox
                 value={payeeName}
-                onChange={(event) => setPayeeName(event.target.value)}
-                list="add-payees"
-                placeholder="Payee or Transfer : Account"
-                ref={payeeRef}
+                onChange={setPayeeName}
+                accounts={accounts}
+                currentAccountId={accountId}
+                payees={payees}
+                placeholder="Payee or transfer"
                 autoFocus
+                inputRef={payeeRef}
               />
-              <PayeeDatalist id="add-payees" payees={payees} accounts={accounts} currentAccountId={accountId} />
             </label>
             <label className="field">
               <span className="field-label">Category</span>
               {transferTarget ? (
                 <input value="Category not needed" disabled />
               ) : (
-                <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
-                  <option value="">Uncategorised</option>
-                  <CategoryOptions />
-                </select>
+                <CategoryField
+                  categoryId={categoryId}
+                  setCategoryId={setCategoryId}
+                  splitMode={splitMode}
+                  onEnterSplit={() => {
+                    setSplitMode(true);
+                    setSplitLines((lines) => (lines.length >= 2 ? lines : [emptySplitLine(), emptySplitLine()]));
+                  }}
+                  onExitSplit={() => setSplitMode(false)}
+                />
               )}
             </label>
             <label className="field">
@@ -329,6 +541,10 @@ export function AddTransactionRow({
               />
             </label>
           </div>
+
+          {splitMode && !transferTarget && (
+            <SplitLinesEditor lines={splitLines} setLines={setSplitLines} parentAmount={amounts.amountMilli()} />
+          )}
 
           {transferTarget && (
             <p className="field-note">
@@ -365,6 +581,8 @@ function accountNameById(accounts: Account[], accountId: string): string {
   return accounts.find((account) => account.id === accountId)?.name ?? "this account";
 }
 
+/* ── Edit row ───────────────────────────────────────────────── */
+
 export function TransactionEditorRow({
   transaction: txn,
   planId,
@@ -381,8 +599,6 @@ export function TransactionEditorRow({
   const { accounts } = usePlan();
 
   const isTransfer = Boolean(txn.transfer_transaction_id || txn.transfer_account_id);
-  const isSplit = Boolean(txn.subtransactions?.length);
-  const amountLocked = isTransfer || isSplit;
 
   const [date, setDate] = useState(txn.date);
   const [accountId, setAccountId] = useState(txn.account_id);
@@ -390,6 +606,8 @@ export function TransactionEditorRow({
   const [categoryId, setCategoryId] = useState(txn.category_id ?? "");
   const [memo, setMemo] = useState(txn.memo ?? "");
   const [cleared, setCleared] = useState(txn.cleared);
+  const [splitMode, setSplitMode] = useState(Boolean(txn.subtransactions?.length));
+  const [splitLines, setSplitLines] = useState<SplitLine[]>(() => splitLinesFromTransaction(txn));
   const amounts = useOutflowInflow(txn.amount);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -407,19 +625,27 @@ export function TransactionEditorRow({
       if (!isTransfer) {
         patch.payee_id = null;
         patch.payee_name = payeeName.trim() || null;
-      }
-      if (!amountLocked) {
         const amount = amounts.amountMilli();
         if (amount === null) {
           throw new Error("Enter an outflow or an inflow amount.");
         }
         patch.amount = amount;
-      }
-      if (!isTransfer && !isSplit) {
-        patch.category_id = categoryId || null;
-      }
-      if (accountId !== txn.account_id && !isTransfer) {
-        patch.account_id = accountId;
+        if (splitMode) {
+          const built = buildSubtransactions(splitLines, amount);
+          if ("error" in built) {
+            throw new Error(built.error);
+          }
+          patch.subtransactions = built.subtransactions;
+          patch.category_id = null;
+        } else {
+          patch.category_id = categoryId || null;
+          if (txn.subtransactions?.length) {
+            patch.subtransactions = [];
+          }
+        }
+        if (accountId !== txn.account_id) {
+          patch.account_id = accountId;
+        }
       }
       await api.updateTransaction(planId, txn.id, patch);
       onDone();
@@ -449,7 +675,7 @@ export function TransactionEditorRow({
 
   return (
     <tr className="editor-row">
-      <td colSpan={8}>
+      <td colSpan={9}>
         <form className="txn-editor" onSubmit={save}>
           <div className="txn-editor-grid">
             <label className="field">
@@ -470,26 +696,31 @@ export function TransactionEditorRow({
             </label>
             <label className="field">
               <span className="field-label">Payee</span>
-              <input
+              <PayeeCombobox
                 value={payeeName}
-                onChange={(event) => setPayeeName(event.target.value)}
-                list="editor-payees"
+                onChange={setPayeeName}
+                accounts={accounts}
+                currentAccountId={accountId}
+                payees={payees}
                 disabled={isTransfer}
                 placeholder={isTransfer ? "Transfer" : "Payee"}
               />
-              <PayeeDatalist id="editor-payees" payees={payees} accounts={accounts} currentAccountId={accountId} />
             </label>
             <label className="field">
               <span className="field-label">Category</span>
-              {isSplit ? (
-                <input value={`Split · ${txn.subtransactions?.length} lines`} disabled />
-              ) : isTransfer ? (
+              {isTransfer ? (
                 <input value="Category not needed" disabled />
               ) : (
-                <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
-                  <option value="">Uncategorised</option>
-                  <CategoryOptions />
-                </select>
+                <CategoryField
+                  categoryId={categoryId}
+                  setCategoryId={setCategoryId}
+                  splitMode={splitMode}
+                  onEnterSplit={() => {
+                    setSplitMode(true);
+                    setSplitLines((lines) => (lines.length >= 2 ? lines : [emptySplitLine(), emptySplitLine()]));
+                  }}
+                  onExitSplit={() => setSplitMode(false)}
+                />
               )}
             </label>
             <label className="field">
@@ -504,7 +735,7 @@ export function TransactionEditorRow({
                 min="0"
                 value={amounts.outflow}
                 onChange={(event) => amounts.setOutflow(event.target.value)}
-                disabled={amountLocked}
+                disabled={isTransfer}
                 className="amount-cell-input outflow-input"
               />
             </label>
@@ -516,7 +747,7 @@ export function TransactionEditorRow({
                 min="0"
                 value={amounts.inflow}
                 onChange={(event) => amounts.setInflow(event.target.value)}
-                disabled={amountLocked}
+                disabled={isTransfer}
                 className="amount-cell-input inflow-input"
               />
             </label>
@@ -530,14 +761,15 @@ export function TransactionEditorRow({
             </label>
           </div>
 
+          {splitMode && !isTransfer && (
+            <SplitLinesEditor lines={splitLines} setLines={setSplitLines} parentAmount={amounts.amountMilli()} />
+          )}
+
           {isTransfer && (
             <p className="field-note">
               This entry is one side of a transfer; the account, payee, category, and amount stay linked to the other
               side.
             </p>
-          )}
-          {isSplit && (
-            <p className="field-note">Split amounts and categories are preserved as imported; edit the shared fields here.</p>
           )}
           {error && (
             <div className="status-panel status-panel-error compact-panel">
@@ -563,22 +795,36 @@ export function TransactionEditorRow({
   );
 }
 
+/* ── Register row ───────────────────────────────────────────── */
+
 export function RegisterRow({
   transaction: txn,
   planId,
   showAccount,
+  selected,
+  onToggleSelect,
   onEdit,
   onChanged,
 }: {
   transaction: Transaction;
   planId: string;
   showAccount: boolean;
+  selected: boolean;
+  onToggleSelect: () => void;
   onEdit: () => void;
   onChanged: () => void;
 }) {
   const canQuickCategorise = txn.category_id === null && !txn.transfer_account_id && !txn.subtransactions?.length;
   return (
-    <tr className="register-row" onClick={onEdit}>
+    <tr className={selected ? "register-row register-row-selected" : "register-row"} onClick={onEdit}>
+      <td className="select-cell" onClick={(event) => event.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelect}
+          aria-label={`Select transaction: ${txn.payee_name ?? txn.date}`}
+        />
+      </td>
       <td className="nowrap">{formatDate(txn.date)}</td>
       {showAccount && <td className="muted">{txn.account_name}</td>}
       <td>

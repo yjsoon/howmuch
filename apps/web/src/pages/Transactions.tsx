@@ -2,7 +2,7 @@ import { startTransition, useDeferredValue, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, useApi } from "../api/client";
 import { FilterRail } from "../components/FilterRail";
-import { AddTransactionRow, RegisterRow, TransactionEditorRow } from "../components/RegisterRows";
+import { AddTransactionRow, CategoryOptions, RegisterRow, TransactionEditorRow } from "../components/RegisterRows";
 import { ReconcileStrip } from "../components/ReconcileStrip";
 import { UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
 import { formatMoney } from "../lib/money";
@@ -19,6 +19,9 @@ export function TransactionsPage() {
   const [adding, setAdding] = useState(false);
   const [reconciling, setReconciling] = useState(false);
   const [approving, setApproving] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkNote, setBulkNote] = useState<string | null>(null);
   const deferredSearch = useDeferredValue(search);
   const flow = params.get("flow");
   const refreshRows = () => setVersion((n) => n + 1);
@@ -132,6 +135,56 @@ export function TransactionsPage() {
   const rowsChanged = () => {
     reload();
     refreshRows();
+  };
+
+  // Selection only counts rows still visible under the current filters.
+  const selectedRows = useMemo(() => rows.filter((txn) => selectedIds.has(txn.id)), [rows, selectedIds]);
+  const allVisibleSelected = rows.length > 0 && selectedRows.length === rows.length;
+
+  const toggleSelect = (transactionId: string) => {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(transactionId)) {
+        next.delete(transactionId);
+      } else {
+        next.add(transactionId);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds(allVisibleSelected ? new Set() : new Set(rows.map((txn) => txn.id)));
+  };
+
+  const runBulk = async (
+    patch: Parameters<typeof api.bulkUpdateTransactions>[2],
+    label: string,
+    confirmMessage?: string,
+  ) => {
+    if (confirmMessage && !window.confirm(confirmMessage)) {
+      return;
+    }
+    setBulkBusy(true);
+    setBulkNote(null);
+    try {
+      const result = await api.bulkUpdateTransactions(
+        planId,
+        selectedRows.map((txn) => txn.id),
+        patch,
+      );
+      setBulkNote(
+        `${label} ${result.updated} transaction${result.updated === 1 ? "" : "s"}${
+          result.skipped ? ` · skipped ${result.skipped} (transfers and splits keep their own categories)` : ""
+        }.`,
+      );
+      setSelectedIds(new Set());
+      rowsChanged();
+    } catch (cause) {
+      setBulkNote(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBulkBusy(false);
+    }
   };
 
   const emptyMessage =
@@ -296,6 +349,15 @@ export function TransactionsPage() {
             </div>
           )}
 
+          {bulkNote && (
+            <div className="approve-banner bulk-note">
+              <span>{bulkNote}</span>
+              <button type="button" className="text-button" onClick={() => setBulkNote(null)}>
+                Dismiss
+              </button>
+            </div>
+          )}
+
           {result.data && (
             <section className="report-section">
               <div className="section-heading">
@@ -309,6 +371,14 @@ export function TransactionsPage() {
                   <table className="ledger-table register-table">
                     <thead>
                       <tr>
+                        <th className="select-cell">
+                          <input
+                            type="checkbox"
+                            checked={allVisibleSelected}
+                            onChange={toggleSelectAll}
+                            aria-label="Select all shown transactions"
+                          />
+                        </th>
                         <th>Date</th>
                         {showAccountColumn && <th>Account</th>}
                         <th>Payee</th>
@@ -350,6 +420,8 @@ export function TransactionsPage() {
                             transaction={txn}
                             planId={planId}
                             showAccount={showAccountColumn}
+                            selected={selectedIds.has(txn.id)}
+                            onToggleSelect={() => toggleSelect(txn.id)}
                             onEdit={() => setEditingId(txn.id)}
                             onChanged={rowsChanged}
                           />
@@ -368,6 +440,54 @@ export function TransactionsPage() {
           )}
         </div>
       </div>
+
+      {selectedRows.length > 0 && (
+        <div className="bulk-bar" role="toolbar" aria-label="Bulk actions">
+          <button type="button" className="bulk-clear" onClick={() => setSelectedIds(new Set())} title="Clear selection">
+            ×
+          </button>
+          <span className="bulk-count">
+            {selectedRows.length} transaction{selectedRows.length === 1 ? "" : "s"}
+          </span>
+          <button type="button" disabled={bulkBusy} onClick={() => runBulk({ approved: true }, "Approved")}>
+            Approve
+          </button>
+          <select
+            value=""
+            disabled={bulkBusy}
+            onChange={(event) => {
+              if (event.target.value) {
+                runBulk({ category_id: event.target.value }, "Categorised");
+              }
+            }}
+            aria-label="Categorise selected"
+          >
+            <option value="">Categorise…</option>
+            <CategoryOptions />
+          </select>
+          <button type="button" disabled={bulkBusy} onClick={() => runBulk({ cleared: "cleared" }, "Cleared")}>
+            Clear
+          </button>
+          <button type="button" disabled={bulkBusy} onClick={() => runBulk({ cleared: "uncleared" }, "Uncleared")}>
+            Unclear
+          </button>
+          <button
+            type="button"
+            className="bulk-danger"
+            disabled={bulkBusy}
+            onClick={() =>
+              runBulk(
+                { deleted: true },
+                "Deleted",
+                `Delete ${selectedRows.length} transaction${selectedRows.length === 1 ? "" : "s"}? Transfers lose both sides. This cannot be undone from the web app.`,
+              )
+            }
+          >
+            Delete
+          </button>
+          {bulkBusy && <span className="bulk-count">Working…</span>}
+        </div>
+      )}
     </>
   );
 }

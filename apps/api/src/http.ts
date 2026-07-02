@@ -325,6 +325,13 @@ async function handleNative(
     return json({ data: { ...result, server_knowledge: repo.getServerKnowledge(body.plan_id ?? planId) } }, 201);
   }
 
+  if (segments[1] === "transactions" && segments[2] === "bulk" && method === "POST") {
+    const body = await readJson(request);
+    const targetPlanId = body.plan_id ?? planId;
+    const result = repo.bulkUpdateTransactions(targetPlanId, body.transaction_ids ?? [], body.patch ?? {});
+    return json({ data: { ...result, server_knowledge: repo.getServerKnowledge(targetPlanId) } });
+  }
+
   if (segments[1] === "transactions" && segments[2] === "approve" && method === "POST") {
     const body = await readJson(request);
     const targetPlanId = body.plan_id ?? planId;

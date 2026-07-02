@@ -455,6 +455,63 @@ describe("native reports and imports", () => {
     expect(sameAccount.status).toBe(400);
   });
 
+  test("bulk-updates transactions, skipping transfers and splits for categorise", async () => {
+    await createAccount("acct-a", { name: "A", opening_balance: 0 });
+    await createAccount("acct-b", { name: "B", opening_balance: 0 });
+
+    const plain = await createTransaction({
+      account_id: "acct-a",
+      date: "2026-06-10",
+      amount: -1000,
+      payee_name: "Shop",
+    });
+    const split = await createTransaction({
+      account_id: "acct-a",
+      date: "2026-06-11",
+      amount: -3000,
+      payee_name: "Market",
+      subtransactions: [
+        { amount: -1000, category_id: "cat-a" },
+        { amount: -2000, category_id: "cat-b" },
+      ],
+    });
+    const transferResponse = await (await request("/api/transfers?plan_id=plan-test", {
+      method: "POST",
+      body: { from_account_id: "acct-a", to_account_id: "acct-b", amount: "5", date: "2026-06-12" },
+    })).json();
+    const transferId = transferResponse.data.outflow.id;
+
+    const categorise = await (await request("/api/transactions/bulk?plan_id=plan-test", {
+      method: "POST",
+      body: {
+        transaction_ids: [plain, split, transferId],
+        patch: { category_id: "cat-a" },
+      },
+    })).json();
+    expect(categorise.data.updated).toBe(1);
+    expect(categorise.data.skipped).toBe(2);
+
+    const cleared = await (await request("/api/transactions/bulk?plan_test&plan_id=plan-test", {
+      method: "POST",
+      body: {
+        transaction_ids: [plain, split, transferId],
+        patch: { cleared: "cleared" },
+      },
+    })).json();
+    expect(cleared.data.updated).toBe(3);
+
+    const deleted = await (await request("/api/transactions/bulk?plan_id=plan-test", {
+      method: "POST",
+      body: {
+        transaction_ids: [transferId],
+        patch: { deleted: true },
+      },
+    })).json();
+    expect(deleted.data.updated).toBe(1);
+    const counterpart = await request(`/v1/plans/plan-test/transactions/${transferResponse.data.inflow.id}`);
+    expect(counterpart.status).toBe(404);
+  });
+
   test("bulk-approves unapproved transactions", async () => {
     const first = await createTransaction({
       account_id: "acct-1",

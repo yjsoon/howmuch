@@ -177,6 +177,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ...transfer, plan_id: planId }),
     }),
+  bulkUpdateTransactions: (
+    planId: string,
+    transactionIds: string[],
+    patch: { category_id?: string | null; cleared?: string; approved?: boolean; deleted?: boolean },
+  ) =>
+    request<{ updated: number; skipped: number }>(`/api/transactions/bulk${query({ plan_id: planId })}`, {
+      method: "POST",
+      body: JSON.stringify({ plan_id: planId, transaction_ids: transactionIds, patch }),
+    }),
   approveTransactions: (planId: string, transactionIds?: string[]) =>
     request<{ approved: number }>(`/api/transactions/approve${query({ plan_id: planId })}`, {
       method: "POST",

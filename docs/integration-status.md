@@ -52,4 +52,4 @@ This document tracks merge readiness across backend, web, iOS, importer, auth, a
 
 - The YNAB API import has not been exercised against a live token in-repo; the paths now match the public API docs and the flow is covered by mocked tests, but do the first real import into a scratch database (`--db data/howmuch-real.sqlite`) and check the printed balance parity counts.
 - Transfer pairs are linked on import and on web creation (payee `Transfer : {Account}`); editing one side deliberately locks amount/account/category to avoid desyncing the pair, and deleting either side removes both.
-- Split transactions keep their imported subtransaction lines; the web editor edits shared fields only and does not yet re-split.
+- Split transactions are fully editable in the web register (per-line category/memo/amount with sum validation); bulk categorise deliberately skips transfers and splits because their categories live on the lines.

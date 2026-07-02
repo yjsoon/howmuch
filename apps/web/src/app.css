@@ -1637,3 +1637,172 @@ tr:hover .share-bar {
   flex-wrap: nowrap;
   white-space: nowrap;
 }
+
+/* ── Bulk selection, splits, payee dropdown ─────────────────── */
+
+.select-cell {
+  width: 30px;
+  text-align: center !important;
+}
+
+.select-cell input[type="checkbox"] {
+  accent-color: var(--ink);
+  cursor: pointer;
+}
+
+.register-row-selected td {
+  background: var(--accent-press);
+}
+
+.bulk-bar {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 3px;
+  box-shadow: 0 4px 18px #1c1b1855;
+  font-size: 13px;
+  max-width: calc(100vw - 32px);
+  flex-wrap: wrap;
+}
+
+.bulk-bar button {
+  color: var(--paper);
+  border: 1px solid #fdfcf866;
+  border-radius: 2px;
+  padding: 4px 12px;
+  font-size: 12.5px;
+}
+
+.bulk-bar button:hover {
+  background: #fdfcf822;
+}
+
+.bulk-bar .bulk-clear {
+  border: none;
+  font-size: 16px;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.bulk-bar .bulk-danger {
+  border-color: #e08a84;
+  color: #f2b8b3;
+}
+
+.bulk-count {
+  font-family: var(--font-figures);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.bulk-bar select {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 4px 8px;
+  border-radius: 2px;
+  border: 1px solid #fdfcf866;
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.bulk-note {
+  border-style: dashed;
+}
+
+.split-editor {
+  margin: 2px 0 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--rule);
+  background: var(--paper);
+}
+
+.split-line {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.4fr) minmax(120px, 1.2fr) 110px 110px 24px;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.split-line select,
+.split-line input {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--paper-raised);
+  color: var(--ink);
+  min-width: 0;
+}
+
+.split-line select:focus,
+.split-line input:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
+.split-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.split-remaining {
+  font-family: var(--font-figures);
+  font-size: 12px;
+  color: var(--red);
+}
+
+.split-remaining-ok {
+  color: var(--green);
+}
+
+.payee-combobox {
+  position: relative;
+}
+
+.payee-combobox input {
+  width: 100%;
+}
+
+.payee-menu {
+  width: max(100%, 240px);
+  max-height: 260px;
+}
+
+.payee-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+
+.payee-option-active {
+  background: var(--accent-press);
+}
+
+.menu-footer-link {
+  display: block;
+  padding: 7px 10px;
+  border-top: 1px solid var(--rule);
+  font-size: 12px;
+  color: var(--ink-soft);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+@media (max-width: 720px) {
+  .split-line {
+    grid-template-columns: 1fr 1fr;
+  }
+}
