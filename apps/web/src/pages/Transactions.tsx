@@ -1,12 +1,21 @@
 import { startTransition, useDeferredValue, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, useApi } from "../api/client";
+import type { Transaction } from "../api/types";
 import { FilterRail } from "../components/FilterRail";
 import { UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
 import { formatDate } from "../lib/dates";
 import { formatAmount, formatMoney } from "../lib/money";
 import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
+
+/** True when the row (or any of its split lines) still needs a category. */
+function hasUncategorisedLine(txn: Transaction): boolean {
+  if (txn.subtransactions?.length) {
+    return txn.subtransactions.some((sub) => sub.category_id === null && !sub.transfer_account_id);
+  }
+  return txn.category_id === null && !txn.transfer_account_id;
+}
 
 export function TransactionsPage() {
   const { filters, setFilters } = useFilters();
@@ -36,13 +45,7 @@ export function TransactionsPage() {
     [accountIds, result.data],
   );
 
-  const uncategorisedCount = useMemo(
-    () =>
-      inScope.filter(
-        (txn) => txn.category_id === null && !txn.transfer_account_id && !txn.subtransactions?.length,
-      ).length,
-    [inScope],
-  );
+  const uncategorisedCount = useMemo(() => inScope.filter(hasUncategorisedLine).length, [inScope]);
 
   const scopedRows = useMemo(() => {
     const outflowOnly = flow === "outflow" || wantsUncategorised;
@@ -60,7 +63,7 @@ export function TransactionsPage() {
           return true;
         }
 
-        return wantsUncategorised && txn.category_id === null && !txn.transfer_account_id && !txn.subtransactions?.length;
+        return wantsUncategorised && hasUncategorisedLine(txn);
       })
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   }, [categoryIds, filters.categoryIds.length, flow, inScope, wantsUncategorised]);

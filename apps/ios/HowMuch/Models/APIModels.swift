@@ -575,7 +575,8 @@ struct TransactionDraft: Equatable {
   }
 
   var canSave: Bool {
-    !accountID.isEmpty && amountMagnitudeMilli > 0
+    // A split whose lines net to zero is a legal YNAB reallocation.
+    !accountID.isEmpty && (amountMagnitudeMilli > 0 || isSplit)
   }
 
   /// Editing keeps a reconciled transaction reconciled while the toggle is on.

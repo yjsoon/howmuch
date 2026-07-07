@@ -72,9 +72,13 @@ struct PayeePickerView: View {
   }
 
   /// Other accounts' transfer payees; picking one records a transfer and the
-  /// API creates the mirrored side (YNAB behaviour).
+  /// API creates the mirrored side (YNAB behaviour). A split parent cannot
+  /// itself be a transfer, so splits get no Transfers section.
   private var filteredTransferPayees: [Payee] {
-    model.payees
+    guard !draft.isSplit else {
+      return []
+    }
+    return model.payees
       .filter { payee in
         guard let targetAccountID = payee.transferAccountId, targetAccountID != draft.accountID else {
           return false
@@ -203,6 +207,9 @@ struct AccountPickerView: View {
     if !accounts.isEmpty {
       Section(title) {
         ForEach(accounts) { account in
+          // A split line transferring to this account pins the parent
+          // elsewhere; the server rejects the self-transfer anyway.
+          let isSplitTransferTarget = draft.subtransactions.contains { $0.transferAccountID == account.id }
           Button {
             draft.accountID = account.id
             if draft.transferAccountID == account.id {
@@ -215,7 +222,7 @@ struct AccountPickerView: View {
           } label: {
             HStack {
               Text(account.name)
-                .foregroundStyle(Theme.textPrimary)
+                .foregroundStyle(isSplitTransferTarget ? Color.secondary : Theme.textPrimary)
               Spacer()
               if account.id == draft.accountID {
                 Image(systemName: "checkmark")
@@ -223,6 +230,7 @@ struct AccountPickerView: View {
               }
             }
           }
+          .disabled(isSplitTransferTarget)
         }
       }
     }

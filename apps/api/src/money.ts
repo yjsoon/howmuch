@@ -4,6 +4,16 @@ export function decimalToMilliunits(value: string | number): number {
     return 0;
   }
 
+  if (!/^[+-]?\d*(\.\d*)?$/.test(raw)) {
+    // Scientific notation and other JS-parsable spellings ("2e2") would be
+    // mangled by the digit parse below; round them via Number instead.
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`Invalid money value: ${value}`);
+    }
+    return Math.round(parsed * 1000);
+  }
+
   const sign = raw.startsWith("-") ? -1 : 1;
   const unsigned = raw.replace(/^[+-]/, "");
   const [wholePart, fractionPart = ""] = unsigned.split(".");

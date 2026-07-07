@@ -98,13 +98,12 @@ export function QuickEntryPage() {
 
   const toggleSplit = () => {
     clearStatus();
-    setIsSplit((current) => {
-      if (!current) {
-        setSplitLines((lines) => (lines.length >= 2 ? lines : [newSplitLine(), newSplitLine()]));
-        setCategoryId("");
-      }
-      return !current;
-    });
+    const next = !isSplit;
+    setIsSplit(next);
+    if (next) {
+      setSplitLines((lines) => (lines.length >= 2 ? lines : [newSplitLine(), newSplitLine()]));
+      setCategoryId("");
+    }
   };
 
   const updateSplitLine = (key: string, patch: Partial<SplitLineDraft>) => {
@@ -227,7 +226,7 @@ export function QuickEntryPage() {
                 clearStatus();
                 setAmount(event.target.value);
               }}
-              className={direction === "spend" ? "amount-input amount-input-spend" : "amount-input amount-input-income"}
+              className={direction === "income" ? "amount-input amount-input-income" : "amount-input amount-input-spend"}
               ref={amountRef}
               autoFocus
               required

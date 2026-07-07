@@ -14,6 +14,13 @@ export type TransactionWriteOptions = {
 };
 
 export class LedgerRepository {
+  /**
+   * Transaction ids touched by the current write operation. The outermost
+   * write stamps them all with one final server_knowledge so incremental
+   * clients always receive every side of a transfer in the same delta.
+   */
+  private touchedTransactionIds: Set<string> | null = null;
+
   constructor(
     private readonly db: Database,
     private readonly defaultPlanId: string,
@@ -119,15 +126,23 @@ export class LedgerRepository {
 
   createAccount(planId: string, account: any): any {
     const accountId = account.id ?? createId("acct");
-    // YNAB's create-account body carries the starting balance in `balance`.
-    const openingBalance = account.opening_balance ?? account.balance ?? 0;
-    this.upsertAccount(planId, {
-      ...account,
-      id: accountId,
-      opening_balance: openingBalance,
-      balance: account.balance ?? openingBalance,
-      cleared_balance: account.cleared_balance ?? account.balance ?? openingBalance,
-    });
+    if (account.id) {
+      // Pre-existing reseed shape: `balance` stays a transient snapshot that
+      // transaction recalculation owns; only an explicit opening_balance
+      // persists. Folding balance in here would double-count ledgers that
+      // POST accounts and then import their starting-balance transactions.
+      this.upsertAccount(planId, account);
+    } else {
+      // YNAB's create-account body carries the starting balance in `balance`.
+      const openingBalance = account.opening_balance ?? account.balance ?? 0;
+      this.upsertAccount(planId, {
+        ...account,
+        id: accountId,
+        opening_balance: openingBalance,
+        balance: account.balance ?? openingBalance,
+        cleared_balance: account.cleared_balance ?? account.balance ?? openingBalance,
+      });
+    }
     this.touchPlan(planId);
     return this.getAccount(planId, accountId);
   }
@@ -141,7 +156,7 @@ export class LedgerRepository {
     const account = this.db
       .query("SELECT * FROM accounts WHERE id = ? AND plan_id = ?")
       .get(accountId, planId) as Row | null;
-    if (!account) {
+    if (!account || toBoolean(account.deleted)) {
       return null;
     }
 
@@ -406,9 +421,16 @@ export class LedgerRepository {
     const autoLink = options.autoLink ?? true;
     validateTransactionInput(input, autoLink);
     const transactionId = input.id ?? createId("txn");
+    const ownsTouched = this.beginTouched();
 
-    this.db.transaction(() => {
+    try {
+      this.db.transaction(() => {
       this.ensureAccount(planId, input.account_id);
+      // The upsert path must respect what the row already carries, or a
+      // retried create would mint a second linked side and strand the first.
+      const existingRow = this.db
+        .query("SELECT * FROM transactions WHERE id = ? AND plan_id = ?")
+        .get(transactionId, planId) as Row | null;
       const refs = this.resolveTransactionRefs(planId, input);
 
       let payeeId = refs.payeeId;
@@ -416,15 +438,28 @@ export class LedgerRepository {
       let categoryId = refs.categoryId;
       let categoryName = refs.categoryName;
       let transferAccountId = input.transfer_account_id ?? null;
-      const transferTransactionId = input.transfer_transaction_id ?? null;
+      const transferTransactionId =
+        input.transfer_transaction_id !== undefined
+          ? input.transfer_transaction_id
+          : (existingRow?.transfer_transaction_id ?? null);
+      if (transferTransactionId && !transferAccountId) {
+        transferAccountId = existingRow?.transfer_account_id ?? null;
+      }
 
       // A payee that points at another account marks a transfer. The linked
       // side is created below once this row exists; rows that already carry a
-      // link (imports, updates) keep it untouched.
+      // link keep it, and an unchanged payee on an unlinked row (one-sided
+      // imports) must not start minting mirrors on unrelated edits.
       let createLinkedSide = false;
       if (autoLink && !transferTransactionId) {
         const targetAccountId = (payeeId ? this.payeeTransferTarget(planId, payeeId) : null) ?? transferAccountId;
-        if (targetAccountId) {
+        const payeeUnchanged = existingRow != null && existingRow.payee_id === payeeId;
+        if (targetAccountId && !payeeUnchanged) {
+          if (input.subtransactions?.length) {
+            throw new ValidationError(
+              "A split transaction cannot itself be a transfer; use a transfer subtransaction instead",
+            );
+          }
           const target = this.requireTransferTarget(planId, input.account_id, targetAccountId);
           transferAccountId = target.id;
           const targetPayee = this.ensureTransferPayee(planId, target.id);
@@ -514,6 +549,7 @@ export class LedgerRepository {
         .all(transactionId) as Row[];
       this.db.query("DELETE FROM subtransactions WHERE transaction_id = ?").run(transactionId);
       const keptSubIds = new Set<string>();
+      const keptLinkIds = new Set<string>();
       for (const sub of input.subtransactions ?? []) {
         const subId = sub.id ?? createId("sub");
         keptSubIds.add(subId);
@@ -535,6 +571,9 @@ export class LedgerRepository {
         let subTransferTransactionId = sub.transfer_transaction_id ?? null;
 
         if (autoLink && subTransferTransactionId) {
+          if (subTransferAccountId === input.account_id) {
+            throw new ValidationError("Transfer target must be a different account");
+          }
           // The split line already owns a linked side: keep it in step.
           this.syncLinkedTransaction(planId, subTransferTransactionId, {
             date: input.date,
@@ -570,6 +609,10 @@ export class LedgerRepository {
           }
         }
 
+        if (subTransferTransactionId) {
+          keptLinkIds.add(subTransferTransactionId);
+        }
+
         this.db
           .query(
             `INSERT INTO subtransactions (
@@ -594,9 +637,14 @@ export class LedgerRepository {
           );
       }
 
-      // Split lines that disappeared take their linked sides with them.
+      // Split lines that disappeared take their linked sides with them — but
+      // a line that was merely re-keyed keeps the linked side it still cites.
       for (const previous of previousSubs) {
-        if (!keptSubIds.has(previous.id) && previous.transfer_transaction_id) {
+        if (
+          !keptSubIds.has(previous.id) &&
+          previous.transfer_transaction_id &&
+          !keptLinkIds.has(previous.transfer_transaction_id)
+        ) {
           this.softDeleteLinkedTransaction(planId, previous.transfer_transaction_id);
         }
       }
@@ -623,14 +671,32 @@ export class LedgerRepository {
         this.db
           .query("UPDATE transactions SET transfer_transaction_id = ? WHERE id = ?")
           .run(linkedId, transactionId);
+      } else if (autoLink && transferTransactionId && !input.subtransactions?.length) {
+        // A re-created or edited row that already owns a linked side keeps
+        // that side in step instead of minting a new one.
+        this.syncLinkedTransaction(planId, transferTransactionId, {
+          date: input.date,
+          amount: -input.amount,
+          memo: input.memo ?? null,
+          sourceAccountId: input.account_id,
+          accountId: transferAccountId ?? undefined,
+        });
       }
 
       this.recalculateAccount(input.account_id);
-      const serverKnowledge = this.touchPlan(planId);
-      this.db
-        .query("UPDATE transactions SET server_knowledge = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-        .run(serverKnowledge, transactionId);
-    })();
+      if (existingRow && existingRow.account_id !== input.account_id) {
+        this.recalculateAccount(existingRow.account_id);
+      }
+      this.markTouched(transactionId);
+      if (ownsTouched) {
+        this.commitTouched(planId);
+      }
+      })();
+    } finally {
+      if (ownsTouched) {
+        this.touchedTransactionIds = null;
+      }
+    }
 
     return this.getTransaction(planId, transactionId, bool(input.deleted));
   }
@@ -641,6 +707,24 @@ export class LedgerRepository {
       throw new NotFoundError("Transaction not found");
     }
     const existingTransaction = this.getTransaction(planId, transactionId);
+
+    // The linked side of a split line cannot restate the transfer itself —
+    // its amount/date/accounts live on the split. Cosmetic edits are fine.
+    if (existing.transfer_transaction_id && !this.getTransactionRow(planId, existing.transfer_transaction_id)) {
+      const linkedSub = this.db
+        .query("SELECT id FROM subtransactions WHERE id = ? AND deleted = 0")
+        .get(existing.transfer_transaction_id) as Row | null;
+      if (linkedSub) {
+        const lockedFields = ["amount", "date", "account_id", "payee_id", "subtransactions"].filter(
+          (field) => (patch as Record<string, unknown>)[field] !== undefined,
+        );
+        if (lockedFields.length > 0) {
+          throw new ValidationError(
+            `This transaction is the linked side of a split line; edit the split to change ${lockedFields.join(", ")}`,
+          );
+        }
+      }
+    }
 
     const next: TransactionInput = {
       id: transactionId,
@@ -684,39 +768,41 @@ export class LedgerRepository {
           : patch.subtransactions,
     };
 
-    // Transfer link management (YNAB): changing the payee can break or move
-    // the linked side; every other edit keeps both sides in step.
-    let linkedRow = existing.transfer_transaction_id
-      ? this.getTransactionRow(planId, existing.transfer_transaction_id)
-      : null;
-    if (linkedRow && patch.payee_id !== undefined) {
-      const nextTarget = patch.payee_id ? this.payeeTransferTarget(planId, patch.payee_id) : null;
-      if (!nextTarget || nextTarget === next.account_id) {
-        // No longer a transfer: the linked side goes away.
-        this.softDeleteLinkedTransaction(planId, linkedRow.id);
-        linkedRow = null;
-        next.transfer_account_id = null;
-        next.transfer_transaction_id = null;
-      } else {
-        next.transfer_account_id = nextTarget;
+    const ownsTouched = this.beginTouched();
+    try {
+      this.db.transaction(() => {
+        // Transfer link management (YNAB): changing the payee can break or
+        // move the linked side; every other edit keeps both sides in step
+        // (createTransaction syncs a kept link itself).
+        const linkedRow = existing.transfer_transaction_id
+          ? this.getTransactionRow(planId, existing.transfer_transaction_id)
+          : null;
+        if (linkedRow && patch.payee_id !== undefined) {
+          const nextTarget = patch.payee_id ? this.payeeTransferTarget(planId, patch.payee_id) : null;
+          if (!nextTarget || nextTarget === next.account_id) {
+            // No longer a transfer: the linked side goes away.
+            this.softDeleteLinkedTransaction(planId, linkedRow.id);
+            next.transfer_account_id = null;
+            next.transfer_transaction_id = null;
+          } else {
+            next.transfer_account_id = nextTarget;
+          }
+        }
+
+        this.createTransaction(planId, next);
+        if (existing.account_id !== next.account_id) {
+          this.recalculateAccount(existing.account_id);
+        }
+        if (ownsTouched) {
+          this.commitTouched(planId);
+        }
+      })();
+    } finally {
+      if (ownsTouched) {
+        this.touchedTransactionIds = null;
       }
     }
-
-    const updated = this.createTransaction(planId, next);
-    if (existing.account_id !== next.account_id) {
-      this.recalculateAccount(existing.account_id);
-    }
-    if (linkedRow && next.transfer_account_id) {
-      this.syncLinkedTransaction(planId, linkedRow.id, {
-        date: next.date,
-        amount: -next.amount,
-        memo: next.memo ?? null,
-        sourceAccountId: next.account_id,
-        accountId: next.transfer_account_id,
-      });
-      return this.getTransaction(planId, transactionId);
-    }
-    return updated;
+    return this.getTransaction(planId, transactionId);
   }
 
   deleteTransaction(planId: string, transactionId: string): any {
@@ -1041,7 +1127,7 @@ export class LedgerRepository {
         opts.linkId,
       );
     this.recalculateAccount(opts.accountId);
-    this.stampTransaction(planId, id);
+    this.markTouched(id);
     return id;
   }
 
@@ -1086,7 +1172,7 @@ export class LedgerRepository {
     if (nextAccountId !== linked.account_id) {
       this.recalculateAccount(nextAccountId);
     }
-    this.stampTransaction(planId, linkedTransactionId);
+    this.markTouched(linkedTransactionId);
   }
 
   private softDeleteLinkedTransaction(planId: string, linkedTransactionId: string): void {
@@ -1098,14 +1184,34 @@ export class LedgerRepository {
       .query("UPDATE transactions SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
       .run(linkedTransactionId, planId);
     this.recalculateAccount(linked.account_id);
-    this.stampTransaction(planId, linkedTransactionId);
+    this.markTouched(linkedTransactionId);
   }
 
-  private stampTransaction(planId: string, transactionId: string): void {
+  /** Starts a touched-ids collection unless a caller already owns one. */
+  private beginTouched(): boolean {
+    if (this.touchedTransactionIds) {
+      return false;
+    }
+    this.touchedTransactionIds = new Set();
+    return true;
+  }
+
+  private markTouched(transactionId: string): void {
+    this.touchedTransactionIds?.add(transactionId);
+  }
+
+  /** Stamps every touched row with a single fresh server_knowledge. */
+  private commitTouched(planId: string): void {
+    const touched = this.touchedTransactionIds;
+    if (!touched?.size) {
+      return;
+    }
     const serverKnowledge = this.touchPlan(planId);
-    this.db
-      .query("UPDATE transactions SET server_knowledge = ? WHERE id = ? AND plan_id = ?")
-      .run(serverKnowledge, transactionId, planId);
+    for (const id of touched) {
+      this.db
+        .query("UPDATE transactions SET server_knowledge = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
+        .run(serverKnowledge, id, planId);
+    }
   }
 
   private resolveTransactionRefs(planId: string, input: TransactionInput): {
@@ -1326,7 +1432,9 @@ function validateTransactionInput(input: TransactionInput, strict: boolean): voi
   if (!input.account_id || typeof input.account_id !== "string") {
     throw new ValidationError("account_id is required");
   }
-  if (!input.date || !/^\d{4}-\d{2}-\d{2}$/.test(String(input.date))) {
+  if (!input.date || (strict && !/^\d{4}-\d{2}-\d{2}$/.test(String(input.date)))) {
+    // Importers (strict=false) keep accepting the loose date spellings they
+    // always stored verbatim; API writes must be ISO.
     throw new ValidationError("date must be an ISO date (YYYY-MM-DD)");
   }
   if (typeof input.amount !== "number" || !Number.isInteger(input.amount)) {

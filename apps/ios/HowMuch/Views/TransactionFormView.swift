@@ -477,6 +477,11 @@ struct TransactionFormView: View {
 
   private func save() {
     draft.amountMagnitudeMilli = keypad.commitValue()
+    if hidesCategory {
+      // The row is hidden, so a category left over from an earlier account
+      // choice would be sent (and discarded) invisibly.
+      draft.categoryID = nil
+    }
     errorMessage = nil
     Task {
       do {
