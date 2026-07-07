@@ -226,8 +226,11 @@ export class ReportService {
       params.push(filters.to);
     }
     if (!includeTransfers && filters.includeTransfers !== true) {
-      clauses.push("lines.transfer_transaction_id IS NULL");
-      clauses.push("lines.transfer_account_id IS NULL");
+      // YNAB counts categorised transfers (e.g. paying a tracking-account
+      // loan) as spending; only uncategorised transfer legs stay out.
+      clauses.push(
+        "(lines.category_id IS NOT NULL OR (lines.transfer_transaction_id IS NULL AND lines.transfer_account_id IS NULL))",
+      );
     }
     appendInFilter(clauses, params, "lines.account_id", filters.accountIds);
     appendCategoryFilter(clauses, params, filters.categoryIds);

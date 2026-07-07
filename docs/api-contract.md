@@ -73,6 +73,13 @@ Returns date format, currency format, and custom flag names.
 
 `GET /v1/plans/{plan_id}/accounts/{account_id}`
 
+`POST /v1/plans/{plan_id}/accounts`
+
+Create body: `{ "account": { "name": "Savings", "type": "savings", "balance": 0 } }`. The
+server generates an id when none is supplied and treats `balance` as the opening
+balance. Every account also owns a `Transfer : <name>` payee (created on demand
+and backfilled by migration), exposed through `transfer_payee_id`.
+
 Account fields to return:
 
 - `id`
@@ -210,6 +217,36 @@ Updatable fields:
 - `flag_color`
 - `flag_name`
 
+Transfers (YNAB semantics):
+
+- Creating a transaction whose `payee_id` is another account's
+  `transfer_payee_id` (or that carries a `transfer_account_id`) creates the
+  mirrored transaction in the target account. Both sides link through
+  `transfer_account_id`/`transfer_transaction_id` and use `Transfer : <account>`
+  payees.
+- Transfers between two on-budget accounts carry no category; transfers to a
+  tracking account keep the category supplied on the on-budget side.
+- Updating one side keeps the other in step (date, amount negated, memo).
+  Changing the payee to a regular payee deletes the mirrored side; changing it
+  to a different transfer payee moves the mirrored side to the new account.
+- Deleting either side deletes both.
+- `cleared` and flags stay per-side.
+
+Splits:
+
+- Create bodies may include `subtransactions` (each with `amount`,
+  `category_id`, optional `payee_id`/`payee_name`/`memo`). Amounts must sum to
+  the transaction amount or the API returns `400 bad_request`.
+- Split parents carry no category of their own and report `category_name`
+  `"Split"`.
+- A subtransaction whose payee is a transfer payee creates a mirrored
+  transaction in the target account, linked through the subtransaction's
+  `transfer_transaction_id`. Deleting the split deletes the mirrored sides;
+  removing a split line deletes its mirrored side.
+- Patching other fields preserves existing subtransactions.
+
+Validation errors use the YNAB shape with `"name": "bad_request"` and HTTP 400.
+
 Transaction response fields:
 
 - `id`
@@ -257,6 +294,11 @@ Common filters:
 - `payee_ids`
 - `include_transfers`
 
+By default reports count categorised transfer lines (for example a categorised
+payment to a tracking account) as spending, matching YNAB; only uncategorised
+transfer legs are excluded. `include_transfers=true` includes every transfer
+line.
+
 Extra filters:
 
 - `include_closed_accounts` on Net Worth
@@ -273,12 +315,21 @@ Body:
   "account_id": "account-id",
   "date": "2026-06-10",
   "amount": "-12.34",
+  "payee_id": null,
   "payee_name": "Merchant",
   "category_id": null,
   "memo": "optional",
-  "flag_color": null
+  "flag_color": null,
+  "subtransactions": [
+    { "amount": "-8.34", "category_id": "cat-a", "memo": "optional" },
+    { "amount": "-4.00", "category_id": "cat-b" }
+  ]
 }
 ```
+
+`payee_id` may be an account's `transfer_payee_id` to record a transfer, and
+`subtransactions` (optional, decimal amounts) records a split; both follow the
+`/v1` transfer and split semantics above.
 
 Returns a normal YNAB-compatible transaction envelope.
 

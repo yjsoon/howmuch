@@ -271,6 +271,412 @@ describe("YNAB-compatible API", () => {
   });
 });
 
+describe("transfers and splits", () => {
+  test("provisions transfer payees and creates both sides of a transfer", async () => {
+    const checking = await createAccountViaApi({ name: "Checking", type: "checking" });
+    const savings = await createAccountViaApi({ name: "Savings", type: "savings" });
+    expect(checking.transfer_payee_id).toBeTruthy();
+    expect(savings.transfer_payee_id).toBeTruthy();
+
+    const payees = await (await request("/v1/plans/plan-test/payees")).json();
+    const savingsPayee = payees.data.payees.find((payee: any) => payee.id === savings.transfer_payee_id);
+    expect(savingsPayee.name).toBe("Transfer : Savings");
+    expect(savingsPayee.transfer_account_id).toBe(savings.id);
+
+    const created = await (await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: {
+        transaction: {
+          account_id: checking.id,
+          date: "2026-06-10",
+          amount: -50000,
+          payee_id: savings.transfer_payee_id,
+          category_id: "cat-groceries",
+        },
+      },
+    })).json();
+
+    const outflow = created.data.transaction;
+    expect(outflow.transfer_account_id).toBe(savings.id);
+    expect(outflow.transfer_transaction_id).toBeTruthy();
+    expect(outflow.payee_name).toBe("Transfer : Savings");
+    // Transfers between two budget accounts carry no category.
+    expect(outflow.category_id).toBeNull();
+
+    const inflow = await (
+      await request(`/v1/plans/plan-test/transactions/${outflow.transfer_transaction_id}`)
+    ).json();
+    expect(inflow.data.transaction.account_id).toBe(savings.id);
+    expect(inflow.data.transaction.amount).toBe(50000);
+    expect(inflow.data.transaction.payee_name).toBe("Transfer : Checking");
+    expect(inflow.data.transaction.transfer_account_id).toBe(checking.id);
+    expect(inflow.data.transaction.transfer_transaction_id).toBe(outflow.id);
+
+    const accounts = await (await request("/v1/plans/plan-test/accounts")).json();
+    const balances = Object.fromEntries(accounts.data.accounts.map((account: any) => [account.name, account.balance]));
+    expect(balances.Checking).toBe(-50000);
+    expect(balances.Savings).toBe(50000);
+  });
+
+  test("syncs edits across a transfer and deletes both sides together", async () => {
+    const checking = await createAccountViaApi({ name: "Checking", type: "checking" });
+    const savings = await createAccountViaApi({ name: "Savings", type: "savings" });
+
+    const created = await (await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: {
+        transaction: {
+          account_id: checking.id,
+          date: "2026-06-10",
+          amount: -50000,
+          payee_id: savings.transfer_payee_id,
+        },
+      },
+    })).json();
+    const outflow = created.data.transaction;
+
+    const patched = await (await request(`/v1/plans/plan-test/transactions/${outflow.id}`, {
+      method: "PATCH",
+      body: { transaction: { amount: -75000, date: "2026-06-12", memo: "topped up" } },
+    })).json();
+    expect(patched.data.transaction.amount).toBe(-75000);
+
+    const mirrored = await (
+      await request(`/v1/plans/plan-test/transactions/${outflow.transfer_transaction_id}`)
+    ).json();
+    expect(mirrored.data.transaction.amount).toBe(75000);
+    expect(mirrored.data.transaction.date).toBe("2026-06-12");
+    expect(mirrored.data.transaction.memo).toBe("topped up");
+
+    const deleteResponse = await request(`/v1/plans/plan-test/transactions/${outflow.id}`, { method: "DELETE" });
+    expect(deleteResponse.status).toBe(200);
+    const afterDelete = await (await request("/v1/plans/plan-test/transactions")).json();
+    expect(afterDelete.data.transactions).toHaveLength(0);
+  });
+
+  test("breaks the transfer link when the payee becomes a regular payee", async () => {
+    const checking = await createAccountViaApi({ name: "Checking", type: "checking" });
+    const savings = await createAccountViaApi({ name: "Savings", type: "savings" });
+    const merchantId = await createPayee("Merchant");
+
+    const created = await (await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: {
+        transaction: {
+          account_id: checking.id,
+          date: "2026-06-10",
+          amount: -50000,
+          payee_id: savings.transfer_payee_id,
+        },
+      },
+    })).json();
+    const outflow = created.data.transaction;
+
+    const patched = await (await request(`/v1/plans/plan-test/transactions/${outflow.id}`, {
+      method: "PATCH",
+      body: { transaction: { payee_id: merchantId } },
+    })).json();
+    expect(patched.data.transaction.transfer_account_id).toBeNull();
+    expect(patched.data.transaction.transfer_transaction_id).toBeNull();
+    expect(patched.data.transaction.payee_name).toBe("Merchant");
+
+    const remaining = await (await request("/v1/plans/plan-test/transactions")).json();
+    expect(remaining.data.transactions).toHaveLength(1);
+    expect(remaining.data.transactions[0].id).toBe(outflow.id);
+  });
+
+  test("rejects split transactions whose lines do not sum to the total", async () => {
+    const response = await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: {
+        transaction: {
+          account_id: "acct-1",
+          date: "2026-06-10",
+          amount: -15000,
+          payee_name: "Supermarket",
+          subtransactions: [
+            { amount: -10000, category_id: "cat-groceries" },
+            { amount: -4000, category_id: "cat-household" },
+          ],
+        },
+      },
+    });
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.name).toBe("bad_request");
+  });
+
+  test("labels split parents and supports transfer subtransactions", async () => {
+    const checking = await createAccountViaApi({ name: "Checking", type: "checking" });
+    const savings = await createAccountViaApi({ name: "Savings", type: "savings" });
+
+    const created = await (await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: {
+        transaction: {
+          account_id: checking.id,
+          date: "2026-06-10",
+          amount: -80000,
+          payee_name: "Payday sorting",
+          subtransactions: [
+            { amount: -30000, category_id: "cat-groceries", memo: "groceries" },
+            { amount: -50000, payee_id: savings.transfer_payee_id, memo: "stash" },
+          ],
+        },
+      },
+    })).json();
+
+    const parent = created.data.transaction;
+    expect(parent.category_id).toBeNull();
+    expect(parent.category_name).toBe("Split");
+    expect(parent.subtransactions).toHaveLength(2);
+
+    const transferLine = parent.subtransactions.find((sub: any) => sub.transfer_account_id === savings.id);
+    expect(transferLine).toBeTruthy();
+    expect(transferLine.transfer_transaction_id).toBeTruthy();
+
+    const mirrored = await (
+      await request(`/v1/plans/plan-test/transactions/${transferLine.transfer_transaction_id}`)
+    ).json();
+    expect(mirrored.data.transaction.account_id).toBe(savings.id);
+    expect(mirrored.data.transaction.amount).toBe(50000);
+    expect(mirrored.data.transaction.transfer_transaction_id).toBe(transferLine.id);
+
+    // Deleting the split takes the linked transfer side with it.
+    await request(`/v1/plans/plan-test/transactions/${parent.id}`, { method: "DELETE" });
+    const remaining = await (await request("/v1/plans/plan-test/transactions")).json();
+    expect(remaining.data.transactions).toHaveLength(0);
+  });
+
+  test("re-posting a transfer with the same id stays idempotent", async () => {
+    const checking = await createAccountViaApi({ name: "Checking", type: "checking" });
+    const savings = await createAccountViaApi({ name: "Savings", type: "savings" });
+
+    const body = {
+      transaction: {
+        id: "txn-client-retry",
+        account_id: checking.id,
+        date: "2026-06-10",
+        amount: -50000,
+        payee_id: savings.transfer_payee_id,
+      },
+    };
+    const first = await (await request("/v1/plans/plan-test/transactions", { method: "POST", body })).json();
+    const second = await (await request("/v1/plans/plan-test/transactions", { method: "POST", body })).json();
+
+    expect(second.data.transaction.transfer_transaction_id).toBe(first.data.transaction.transfer_transaction_id);
+
+    const listed = await (await request("/v1/plans/plan-test/transactions")).json();
+    expect(listed.data.transactions).toHaveLength(2);
+
+    const accounts = await (await request("/v1/plans/plan-test/accounts")).json();
+    const balances = Object.fromEntries(accounts.data.accounts.map((account: any) => [account.name, account.balance]));
+    expect(balances.Checking).toBe(-50000);
+    expect(balances.Savings).toBe(50000);
+  });
+
+  test("cosmetic patches on a one-sided imported transfer do not mint a mirror", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    const checking = await createAccountViaApi({ name: "Checking", type: "checking" });
+    const savings = await createAccountViaApi({ name: "Savings", type: "savings" });
+
+    // A web-export import can leave a one-sided transfer: transfer payee and
+    // target set, but no linked row because the pair fell outside the export.
+    repo.createTransaction(
+      "plan-test",
+      {
+        id: "txn-one-sided",
+        account_id: checking.id,
+        date: "2026-06-10",
+        amount: -50000,
+        payee_id: savings.transfer_payee_id,
+        transfer_account_id: savings.id,
+      },
+      { autoLink: false },
+    );
+
+    const patched = await (await request("/v1/plans/plan-test/transactions/txn-one-sided", {
+      method: "PATCH",
+      body: { transaction: { memo: "fixed a typo" } },
+    })).json();
+    expect(patched.data.transaction.memo).toBe("fixed a typo");
+    expect(patched.data.transaction.transfer_transaction_id).toBeNull();
+
+    const listed = await (await request("/v1/plans/plan-test/transactions")).json();
+    expect(listed.data.transactions).toHaveLength(1);
+  });
+
+  test("locks the linked side of a split line to cosmetic edits", async () => {
+    const checking = await createAccountViaApi({ name: "Checking", type: "checking" });
+    const savings = await createAccountViaApi({ name: "Savings", type: "savings" });
+
+    const created = await (await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: {
+        transaction: {
+          account_id: checking.id,
+          date: "2026-06-10",
+          amount: -80000,
+          payee_name: "Payday sorting",
+          subtransactions: [
+            { amount: -30000, category_id: "cat-groceries" },
+            { amount: -50000, payee_id: savings.transfer_payee_id },
+          ],
+        },
+      },
+    })).json();
+    const transferLine = created.data.transaction.subtransactions.find((sub: any) => sub.transfer_account_id);
+    const mirrorId = transferLine.transfer_transaction_id;
+
+    const amountPatch = await request(`/v1/plans/plan-test/transactions/${mirrorId}`, {
+      method: "PATCH",
+      body: { transaction: { amount: 60000 } },
+    });
+    expect(amountPatch.status).toBe(400);
+
+    const memoPatch = await request(`/v1/plans/plan-test/transactions/${mirrorId}`, {
+      method: "PATCH",
+      body: { transaction: { memo: "stash note", cleared: "cleared" } },
+    });
+    expect(memoPatch.status).toBe(200);
+    const memoPatched = await memoPatch.json();
+    expect(memoPatched.data.transaction.amount).toBe(50000);
+  });
+
+  test("rejects split parents that are themselves transfers", async () => {
+    const checking = await createAccountViaApi({ name: "Checking", type: "checking" });
+    const savings = await createAccountViaApi({ name: "Savings", type: "savings" });
+
+    const response = await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: {
+        transaction: {
+          account_id: checking.id,
+          date: "2026-06-10",
+          amount: -80000,
+          payee_id: savings.transfer_payee_id,
+          subtransactions: [
+            { amount: -30000, category_id: "cat-groceries" },
+            { amount: -50000, category_id: "cat-household" },
+          ],
+        },
+      },
+    });
+    expect(response.status).toBe(400);
+  });
+
+  test("keeps posted account balances transient for reseed flows", async () => {
+    await createAccount("acct-snapshot", { name: "Snapshot", type: "checking", balance: 100000 });
+
+    // The posted balance is a snapshot, not an opening balance: importing the
+    // ledger's own starting-balance transaction must not double it.
+    await createTransaction({
+      account_id: "acct-snapshot",
+      date: "2026-06-01",
+      amount: 100000,
+      payee_name: "Starting Balance",
+    });
+
+    const accounts = await (await request("/v1/plans/plan-test/accounts")).json();
+    const snapshot = accounts.data.accounts.find((account: any) => account.name === "Snapshot");
+    expect(snapshot.balance).toBe(100000);
+  });
+
+  test("delivers both transfer legs in the same incremental sync delta", async () => {
+    const checking = await createAccountViaApi({ name: "Checking", type: "checking" });
+    const savings = await createAccountViaApi({ name: "Savings", type: "savings" });
+    const before = await (await request("/v1/plans/plan-test/transactions")).json();
+    const knowledgeBefore = before.data.server_knowledge;
+
+    await createTransaction({
+      account_id: checking.id,
+      date: "2026-06-10",
+      amount: -50000,
+      payee_id: savings.transfer_payee_id,
+    });
+
+    const delta = await (
+      await request(`/v1/plans/plan-test/transactions?last_knowledge_of_server=${knowledgeBefore}`)
+    ).json();
+    expect(delta.data.transactions).toHaveLength(2);
+    expect(delta.data.transactions.map((txn: any) => txn.amount).sort()).toEqual([-50000, 50000]);
+  });
+
+  test("records quick-entry transfers and splits", async () => {
+    const checking = await createAccountViaApi({ name: "Checking", type: "checking" });
+    const savings = await createAccountViaApi({ name: "Savings", type: "savings" });
+
+    const transferResponse = await request("/api/mobile/quick-entry?plan_id=plan-test", {
+      method: "POST",
+      body: {
+        client_id: "qe-transfer-1",
+        account_id: checking.id,
+        date: "2026-06-10",
+        amount: "-250.00",
+        payee_id: savings.transfer_payee_id,
+      },
+    });
+    expect(transferResponse.status).toBe(201);
+    const transfer = (await transferResponse.json()).data.transaction;
+    expect(transfer.transfer_account_id).toBe(savings.id);
+    expect(transfer.amount).toBe(-250000);
+
+    const splitResponse = await request("/api/mobile/quick-entry?plan_id=plan-test", {
+      method: "POST",
+      body: {
+        client_id: "qe-split-1",
+        account_id: checking.id,
+        date: "2026-06-11",
+        amount: "-90.00",
+        payee_name: "MegaMart",
+        subtransactions: [
+          { amount: "-60.00", category_id: "cat-groceries" },
+          { amount: "-30.00", category_id: "cat-household" },
+        ],
+      },
+    });
+    expect(splitResponse.status).toBe(201);
+    const split = (await splitResponse.json()).data.transaction;
+    expect(split.category_name).toBe("Split");
+    expect(split.subtransactions).toHaveLength(2);
+  });
+
+  test("counts categorised transfers in spending but hides bare transfer legs", async () => {
+    const checking = await createAccountViaApi({ name: "Checking", type: "checking" });
+    const savings = await createAccountViaApi({ name: "Savings", type: "savings" });
+    const mortgage = await createAccountViaApi({ name: "Mortgage", type: "mortgage", on_budget: false });
+
+    // On-budget to on-budget: no category, hidden from spending.
+    await createTransaction({
+      account_id: checking.id,
+      date: "2026-06-10",
+      amount: -50000,
+      payee_id: savings.transfer_payee_id,
+    });
+    // On-budget to tracking with a category: counts as spending, like YNAB.
+    await createTransaction({
+      account_id: checking.id,
+      date: "2026-06-11",
+      amount: -30000,
+      payee_id: mortgage.transfer_payee_id,
+      category_id: "cat-home",
+    });
+
+    const spending = await (
+      await request("/api/reports/spending-breakdown?plan_id=plan-test&from=2026-06-01&to=2026-06-30")
+    ).json();
+    expect(spending.data.total).toBe(30000);
+    expect(spending.data.groups[0].category_id).toBe("cat-home");
+
+    const withTransfers = await (
+      await request(
+        "/api/reports/spending-breakdown?plan_id=plan-test&from=2026-06-01&to=2026-06-30&include_transfers=true",
+      )
+    ).json();
+    expect(withTransfers.data.total).toBe(80000);
+  });
+});
+
 describe("native reports and imports", () => {
   test("creates mobile quick-entry transactions from decimal amounts", async () => {
     const quickEntryResponse = await request("/api/mobile/quick-entry?plan_id=plan-test", {
@@ -594,6 +1000,16 @@ function request(path: string, init: { method?: string; body?: unknown } = {}): 
       body: init.body ? JSON.stringify(init.body) : undefined,
     }),
   );
+}
+
+async function createAccountViaApi(account: Record<string, unknown>): Promise<any> {
+  const response = await request("/v1/plans/plan-test/accounts", {
+    method: "POST",
+    body: { account },
+  });
+  expect(response.status).toBe(201);
+  const json = await response.json();
+  return json.data.account;
 }
 
 async function createAccount(id: string, account: Record<string, unknown>): Promise<void> {

@@ -52,6 +52,7 @@ export async function importYnabFromApi(
 
     let imported = 0;
     for (const transaction of transactions.data.transactions ?? []) {
+      // YNAB data already contains both sides of every transfer.
       repo.createTransaction(options.planId, {
         id: transaction.id,
         account_id: transaction.account_id,
@@ -86,7 +87,7 @@ export async function importYnabFromApi(
           transfer_transaction_id: sub.transfer_transaction_id,
           external_ynab_id: sub.id,
         })),
-      });
+      }, { autoLink: false });
       repo.recordImportRow(sessionId, imported, "imported", transaction, undefined, transaction.id);
       imported += 1;
     }
