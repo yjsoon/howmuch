@@ -12,6 +12,7 @@ struct PayeePickerView: View {
         Button {
           draft.payeeID = nil
           draft.payeeName = trimmedSearch
+          draft.transferAccountID = nil
           dismiss()
         } label: {
           Label("Create payee “\(trimmedSearch)”", systemImage: "plus.circle.fill")
@@ -19,18 +20,18 @@ struct PayeePickerView: View {
         }
       }
 
-      ForEach(filteredPayees) { payee in
-        Button {
-          select(payee)
-        } label: {
-          HStack {
-            Text(payee.name)
-              .foregroundStyle(Theme.textPrimary)
-            Spacer()
-            if payee.id == draft.payeeID {
-              Image(systemName: "checkmark")
-                .foregroundStyle(Theme.accent)
-            }
+      if !filteredPayees.isEmpty {
+        Section("Payees") {
+          ForEach(filteredPayees) { payee in
+            payeeRow(payee)
+          }
+        }
+      }
+
+      if !filteredTransferPayees.isEmpty {
+        Section("Transfers") {
+          ForEach(filteredTransferPayees) { payee in
+            payeeRow(payee)
           }
         }
       }
@@ -41,6 +42,22 @@ struct PayeePickerView: View {
     .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search or add a payee")
     .navigationTitle("Payee")
     .navigationBarTitleDisplayMode(.inline)
+  }
+
+  private func payeeRow(_ payee: Payee) -> some View {
+    Button {
+      select(payee)
+    } label: {
+      HStack {
+        Text(payee.name)
+          .foregroundStyle(Theme.textPrimary)
+        Spacer()
+        if payee.id == draft.payeeID {
+          Image(systemName: "checkmark")
+            .foregroundStyle(Theme.accent)
+        }
+      }
+    }
   }
 
   private var trimmedSearch: String {
@@ -54,6 +71,23 @@ struct PayeePickerView: View {
       .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
   }
 
+  /// Other accounts' transfer payees; picking one records a transfer and the
+  /// API creates the mirrored side (YNAB behaviour).
+  private var filteredTransferPayees: [Payee] {
+    model.payees
+      .filter { payee in
+        guard let targetAccountID = payee.transferAccountId, targetAccountID != draft.accountID else {
+          return false
+        }
+        guard let account = model.account(withID: targetAccountID) else {
+          return false
+        }
+        return !account.closed
+      }
+      .filter { trimmedSearch.isEmpty || $0.name.localizedStandardContains(trimmedSearch) }
+      .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+  }
+
   private var hasExactMatch: Bool {
     model.payees.contains { $0.name.localizedCaseInsensitiveCompare(trimmedSearch) == .orderedSame }
   }
@@ -61,7 +95,13 @@ struct PayeePickerView: View {
   private func select(_ payee: Payee) {
     draft.payeeID = payee.id
     draft.payeeName = payee.name
-    if draft.categoryID == nil, let suggestion = model.suggestedCategoryID(forPayeeID: payee.id) {
+    draft.transferAccountID = payee.transferAccountId
+    if payee.isTransferPayee {
+      // Transfers between two budget accounts carry no category.
+      if model.accountsBothOnBudget(draft.accountID, payee.transferAccountId) {
+        draft.categoryID = nil
+      }
+    } else if draft.categoryID == nil, let suggestion = model.suggestedCategoryID(forPayeeID: payee.id) {
       draft.categoryID = suggestion
     }
     dismiss()
@@ -165,6 +205,12 @@ struct AccountPickerView: View {
         ForEach(accounts) { account in
           Button {
             draft.accountID = account.id
+            if draft.transferAccountID == account.id {
+              // A transfer cannot target its own account; drop the payee.
+              draft.transferAccountID = nil
+              draft.payeeID = nil
+              draft.payeeName = ""
+            }
             dismiss()
           } label: {
             HStack {

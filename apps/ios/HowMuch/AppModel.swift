@@ -98,6 +98,20 @@ final class AppModel {
     return flattenedCategories.first { $0.id == id }?.name
   }
 
+  /// True when both ids resolve to on-budget accounts; such transfers carry
+  /// no category (YNAB semantics).
+  func accountsBothOnBudget(_ firstAccountID: String?, _ secondAccountID: String?) -> Bool {
+    guard
+      let firstAccountID,
+      let secondAccountID,
+      let first = account(withID: firstAccountID),
+      let second = account(withID: secondAccountID)
+    else {
+      return false
+    }
+    return first.onBudget && second.onBudget
+  }
+
   /// YNAB-style: picking a payee pre-fills the category it was last used with.
   func suggestedCategoryID(forPayeeID payeeID: String) -> String? {
     transactions.first { $0.payeeID == payeeID && $0.categoryID != nil && $0.transferAccountID == nil }?.categoryID

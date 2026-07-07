@@ -191,7 +191,7 @@ export function TransactionsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((txn) => (
+                  {rows.flatMap((txn) => [
                     <tr key={txn.id}>
                       <td className="nowrap">{formatDate(txn.date)}</td>
                       <td className="muted">{txn.account_name}</td>
@@ -208,8 +208,23 @@ export function TransactionsPage() {
                       </td>
                       <td className="num amount-negative">{txn.amount < 0 ? formatAmount(txn.amount) : ""}</td>
                       <td className="num amount-positive">{txn.amount > 0 ? formatAmount(txn.amount) : ""}</td>
-                    </tr>
-                  ))}
+                    </tr>,
+                    ...(txn.subtransactions ?? []).map((sub) => (
+                      <tr key={sub.id} className="split-line-row">
+                        <td />
+                        <td />
+                        <td className="muted split-line-cell">↳ {sub.payee_name ?? txn.payee_name ?? "-"}</td>
+                        <td className="muted">
+                          {sub.transfer_account_id ? "Transfer" : (sub.category_name ?? "Uncategorised")}
+                        </td>
+                        <td className="muted memo-cell" title={sub.memo ?? ""}>
+                          {sub.memo ?? "-"}
+                        </td>
+                        <td className="num amount-negative">{sub.amount < 0 ? formatAmount(sub.amount) : ""}</td>
+                        <td className="num amount-positive">{sub.amount > 0 ? formatAmount(sub.amount) : ""}</td>
+                      </tr>
+                    )),
+                  ])}
                 </tbody>
               </table>
             </div>

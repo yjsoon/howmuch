@@ -618,6 +618,18 @@ select:focus-visible {
   background: var(--paper-raised);
 }
 
+/* Split subtransaction lines rendered beneath their parent row. */
+.split-line-row td {
+  border-bottom: 1px dotted var(--rule);
+  font-size: 12px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.split-line-cell {
+  padding-left: 22px;
+}
+
 .num {
   text-align: right;
   font-family: var(--font-figures);
@@ -1007,6 +1019,94 @@ tr:hover .share-bar {
 
 .amount-input-income {
   color: var(--green) !important;
+}
+
+.split-controls {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: -6px 0 14px;
+}
+
+.split-toggle {
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-soft);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.split-toggle:hover {
+  color: var(--ink);
+}
+
+.split-remainder {
+  font-family: var(--font-figures);
+  font-size: 12px;
+  color: var(--red);
+}
+
+.split-remainder-ok {
+  color: var(--green);
+}
+
+.split-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 10px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--paper-raised);
+}
+
+.split-line {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.split-line select,
+.split-line input {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--paper);
+  color: var(--ink);
+  min-width: 0;
+}
+
+.split-line input[type="number"] {
+  font-family: var(--font-figures);
+  text-align: right;
+}
+
+.split-line-remove {
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--ink-faint);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+
+.split-line-remove:hover:not(:disabled) {
+  color: var(--red);
+}
+
+.split-line-remove:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .date-row {

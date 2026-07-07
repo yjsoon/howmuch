@@ -4,6 +4,15 @@ import type { ClearedState, TransactionFilters, TransactionInput } from "./types
 
 type Row = Record<string, any>;
 
+export type TransactionWriteOptions = {
+  /**
+   * When true (the default for API writes), a payee that points at another
+   * account creates the linked side of the transfer, YNAB-style. Importers
+   * pass false because their data already carries both sides.
+   */
+  autoLink?: boolean;
+};
+
 export class LedgerRepository {
   constructor(
     private readonly db: Database,
@@ -105,6 +114,88 @@ export class LedgerRepository {
          ON CONFLICT(id) DO NOTHING`,
       )
       .run(accountId, planId, name ?? `Imported account ${accountId.slice(0, 8)}`, accountId);
+    this.ensureTransferPayee(planId, accountId);
+  }
+
+  createAccount(planId: string, account: any): any {
+    const accountId = account.id ?? createId("acct");
+    // YNAB's create-account body carries the starting balance in `balance`.
+    const openingBalance = account.opening_balance ?? account.balance ?? 0;
+    this.upsertAccount(planId, {
+      ...account,
+      id: accountId,
+      opening_balance: openingBalance,
+      balance: account.balance ?? openingBalance,
+      cleared_balance: account.cleared_balance ?? account.balance ?? openingBalance,
+    });
+    this.touchPlan(planId);
+    return this.getAccount(planId, accountId);
+  }
+
+  /**
+   * Every account owns a "Transfer : <name>" payee (YNAB parity) so clients
+   * can record transfers by picking a payee. Provisions the payee when
+   * missing and keeps its label in step with account renames.
+   */
+  ensureTransferPayee(planId: string, accountId: string): { id: string; name: string } | null {
+    const account = this.db
+      .query("SELECT * FROM accounts WHERE id = ? AND plan_id = ?")
+      .get(accountId, planId) as Row | null;
+    if (!account) {
+      return null;
+    }
+
+    let payee = this.db
+      .query("SELECT * FROM payees WHERE plan_id = ? AND transfer_account_id = ? AND deleted = 0")
+      .get(planId, accountId) as Row | null;
+
+    if (!payee && account.transfer_payee_id) {
+      const byId = this.db.query("SELECT * FROM payees WHERE id = ?").get(account.transfer_payee_id) as Row | null;
+      if (!byId) {
+        // Mid-import: the account references a payee that arrives later
+        // (YNAB imports write accounts before payees). Leave it alone.
+        return null;
+      }
+      if (byId.transfer_account_id == null) {
+        this.db
+          .query("UPDATE payees SET transfer_account_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+          .run(accountId, byId.id);
+        byId.transfer_account_id = accountId;
+      }
+      payee = byId;
+    }
+
+    const expectedName = `Transfer : ${account.name}`;
+    if (!payee) {
+      const payeeId = createId("payee");
+      try {
+        this.db
+          .query("INSERT INTO payees (id, plan_id, name, transfer_account_id, external_ynab_id) VALUES (?, ?, ?, ?, ?)")
+          .run(payeeId, planId, expectedName, accountId, payeeId);
+      } catch {
+        // Duplicate account names collide on the payee name; disambiguate.
+        this.db
+          .query("INSERT INTO payees (id, plan_id, name, transfer_account_id, external_ynab_id) VALUES (?, ?, ?, ?, ?)")
+          .run(payeeId, planId, `${expectedName} (${accountId.slice(-4)})`, accountId, payeeId);
+      }
+      payee = this.db.query("SELECT * FROM payees WHERE id = ?").get(payeeId) as Row;
+    } else if (payee.name !== expectedName && String(payee.name ?? "").startsWith("Transfer : ")) {
+      try {
+        this.db
+          .query("UPDATE payees SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+          .run(expectedName, payee.id);
+        payee.name = expectedName;
+      } catch {
+        // Another payee already holds the name; keep the stale label.
+      }
+    }
+
+    if (account.transfer_payee_id !== payee.id) {
+      this.db
+        .query("UPDATE accounts SET transfer_payee_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .run(payee.id, accountId);
+    }
+    return { id: payee.id, name: payee.name };
   }
 
   upsertAccount(planId: string, account: any): void {
@@ -127,7 +218,7 @@ export class LedgerRepository {
            balance_milli = excluded.balance_milli,
            cleared_balance_milli = excluded.cleared_balance_milli,
            uncleared_balance_milli = excluded.uncleared_balance_milli,
-           transfer_payee_id = excluded.transfer_payee_id,
+           transfer_payee_id = COALESCE(excluded.transfer_payee_id, accounts.transfer_payee_id),
            direct_import_linked = excluded.direct_import_linked,
            direct_import_in_error = excluded.direct_import_in_error,
            external_ynab_id = excluded.external_ynab_id,
@@ -151,6 +242,7 @@ export class LedgerRepository {
         account.external_ynab_id ?? account.id,
         bool(account.deleted),
       );
+    this.ensureTransferPayee(planId, account.id);
   }
 
   listAccounts(planId: string): any[] {
@@ -309,13 +401,52 @@ export class LedgerRepository {
     }));
   }
 
-  createTransaction(planId: string, input: TransactionInput): any {
+  createTransaction(planId: string, input: TransactionInput, options: TransactionWriteOptions = {}): any {
     this.ensurePlan(planId);
+    const autoLink = options.autoLink ?? true;
+    validateTransactionInput(input, autoLink);
     const transactionId = input.id ?? createId("txn");
 
     this.db.transaction(() => {
       this.ensureAccount(planId, input.account_id);
       const refs = this.resolveTransactionRefs(planId, input);
+
+      let payeeId = refs.payeeId;
+      let payeeName = refs.payeeName;
+      let categoryId = refs.categoryId;
+      let categoryName = refs.categoryName;
+      let transferAccountId = input.transfer_account_id ?? null;
+      const transferTransactionId = input.transfer_transaction_id ?? null;
+
+      // A payee that points at another account marks a transfer. The linked
+      // side is created below once this row exists; rows that already carry a
+      // link (imports, updates) keep it untouched.
+      let createLinkedSide = false;
+      if (autoLink && !transferTransactionId) {
+        const targetAccountId = (payeeId ? this.payeeTransferTarget(planId, payeeId) : null) ?? transferAccountId;
+        if (targetAccountId) {
+          const target = this.requireTransferTarget(planId, input.account_id, targetAccountId);
+          transferAccountId = target.id;
+          const targetPayee = this.ensureTransferPayee(planId, target.id);
+          if (targetPayee) {
+            payeeId = targetPayee.id;
+            payeeName = targetPayee.name;
+          }
+          createLinkedSide = true;
+        }
+      }
+      if (autoLink && transferAccountId && this.accountsBothOnBudget(planId, input.account_id, transferAccountId)) {
+        // Transfers between two budget accounts carry no category in YNAB;
+        // only transfers to tracking accounts count as categorised spending.
+        categoryId = null;
+        categoryName = null;
+      }
+      if (input.subtransactions?.length) {
+        // Split parents carry no category of their own.
+        categoryId = null;
+        categoryName = null;
+      }
+
       this.db
         .query(
           `INSERT INTO transactions (
@@ -362,12 +493,12 @@ export class LedgerRepository {
           bool(input.approved),
           input.flag_color ?? null,
           input.flag_name ?? null,
-          refs.payeeId,
-          refs.payeeName,
-          refs.categoryId,
-          refs.categoryName,
-          input.transfer_account_id ?? null,
-          input.transfer_transaction_id ?? null,
+          payeeId,
+          payeeName,
+          categoryId,
+          categoryName,
+          transferAccountId,
+          transferTransactionId,
           input.matched_transaction_id ?? null,
           input.import_id ?? null,
           input.import_payee_name ?? null,
@@ -378,8 +509,14 @@ export class LedgerRepository {
           bool(input.deleted),
         );
 
+      const previousSubs = this.db
+        .query("SELECT id, transfer_transaction_id FROM subtransactions WHERE transaction_id = ?")
+        .all(transactionId) as Row[];
       this.db.query("DELETE FROM subtransactions WHERE transaction_id = ?").run(transactionId);
+      const keptSubIds = new Set<string>();
       for (const sub of input.subtransactions ?? []) {
+        const subId = sub.id ?? createId("sub");
+        keptSubIds.add(subId);
         const subRefs = this.resolveTransactionRefs(planId, {
           account_id: input.account_id,
           date: input.date,
@@ -389,6 +526,50 @@ export class LedgerRepository {
           category_id: sub.category_id,
           memo: sub.memo,
         });
+
+        let subPayeeId = subRefs.payeeId;
+        let subPayeeName = subRefs.payeeName;
+        let subCategoryId = subRefs.categoryId;
+        let subCategoryName = subRefs.categoryName;
+        let subTransferAccountId = sub.transfer_account_id ?? null;
+        let subTransferTransactionId = sub.transfer_transaction_id ?? null;
+
+        if (autoLink && subTransferTransactionId) {
+          // The split line already owns a linked side: keep it in step.
+          this.syncLinkedTransaction(planId, subTransferTransactionId, {
+            date: input.date,
+            amount: -sub.amount,
+            memo: sub.memo ?? null,
+            sourceAccountId: input.account_id,
+            accountId: subTransferAccountId ?? undefined,
+          });
+        } else if (autoLink) {
+          const targetAccountId =
+            (subPayeeId ? this.payeeTransferTarget(planId, subPayeeId) : null) ?? subTransferAccountId;
+          if (targetAccountId) {
+            const target = this.requireTransferTarget(planId, input.account_id, targetAccountId);
+            subTransferAccountId = target.id;
+            const targetPayee = this.ensureTransferPayee(planId, target.id);
+            if (targetPayee) {
+              subPayeeId = targetPayee.id;
+              subPayeeName = targetPayee.name;
+            }
+            if (this.accountsBothOnBudget(planId, input.account_id, target.id)) {
+              subCategoryId = null;
+              subCategoryName = null;
+            }
+            subTransferTransactionId = this.insertLinkedTransaction(planId, {
+              accountId: target.id,
+              date: input.date,
+              amount: -sub.amount,
+              memo: sub.memo ?? null,
+              approved: input.approved,
+              sourceAccountId: input.account_id,
+              linkId: subId,
+            });
+          }
+        }
+
         this.db
           .query(
             `INSERT INTO subtransactions (
@@ -399,18 +580,25 @@ export class LedgerRepository {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)`,
           )
           .run(
-            sub.id ?? createId("sub"),
+            subId,
             transactionId,
             sub.amount,
             sub.memo ?? null,
-            subRefs.payeeId,
-            subRefs.payeeName,
-            subRefs.categoryId,
-            subRefs.categoryName,
-            sub.transfer_account_id ?? null,
-            sub.transfer_transaction_id ?? null,
+            subPayeeId,
+            subPayeeName,
+            subCategoryId,
+            subCategoryName,
+            subTransferAccountId,
+            subTransferTransactionId,
             sub.external_ynab_id ?? sub.id ?? null,
           );
+      }
+
+      // Split lines that disappeared take their linked sides with them.
+      for (const previous of previousSubs) {
+        if (!keptSubIds.has(previous.id) && previous.transfer_transaction_id) {
+          this.softDeleteLinkedTransaction(planId, previous.transfer_transaction_id);
+        }
       }
 
       if (input.source_kind || input.source_ref) {
@@ -420,6 +608,21 @@ export class LedgerRepository {
              VALUES (?, ?, ?, ?, ?, ?)`,
           )
           .run(createId("src"), planId, transactionId, input.source_kind ?? "api", input.source_ref ?? null, JSON.stringify(input));
+      }
+
+      if (createLinkedSide && transferAccountId) {
+        const linkedId = this.insertLinkedTransaction(planId, {
+          accountId: transferAccountId,
+          date: input.date,
+          amount: -input.amount,
+          memo: input.memo ?? null,
+          approved: input.approved,
+          sourceAccountId: input.account_id,
+          linkId: transactionId,
+        });
+        this.db
+          .query("UPDATE transactions SET transfer_transaction_id = ? WHERE id = ?")
+          .run(linkedId, transactionId);
       }
 
       this.recalculateAccount(input.account_id);
@@ -481,9 +684,37 @@ export class LedgerRepository {
           : patch.subtransactions,
     };
 
+    // Transfer link management (YNAB): changing the payee can break or move
+    // the linked side; every other edit keeps both sides in step.
+    let linkedRow = existing.transfer_transaction_id
+      ? this.getTransactionRow(planId, existing.transfer_transaction_id)
+      : null;
+    if (linkedRow && patch.payee_id !== undefined) {
+      const nextTarget = patch.payee_id ? this.payeeTransferTarget(planId, patch.payee_id) : null;
+      if (!nextTarget || nextTarget === next.account_id) {
+        // No longer a transfer: the linked side goes away.
+        this.softDeleteLinkedTransaction(planId, linkedRow.id);
+        linkedRow = null;
+        next.transfer_account_id = null;
+        next.transfer_transaction_id = null;
+      } else {
+        next.transfer_account_id = nextTarget;
+      }
+    }
+
     const updated = this.createTransaction(planId, next);
     if (existing.account_id !== next.account_id) {
       this.recalculateAccount(existing.account_id);
+    }
+    if (linkedRow && next.transfer_account_id) {
+      this.syncLinkedTransaction(planId, linkedRow.id, {
+        date: next.date,
+        amount: -next.amount,
+        memo: next.memo ?? null,
+        sourceAccountId: next.account_id,
+        accountId: next.transfer_account_id,
+      });
+      return this.getTransaction(planId, transactionId);
     }
     return updated;
   }
@@ -494,14 +725,68 @@ export class LedgerRepository {
       throw new NotFoundError("Transaction not found");
     }
 
-    this.db
-      .query("UPDATE transactions SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
-      .run(transactionId, planId);
-    this.recalculateAccount(existing.account_id);
-    const serverKnowledge = this.touchPlan(planId);
-    this.db
-      .query("UPDATE transactions SET server_knowledge = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
-      .run(serverKnowledge, transactionId, planId);
+    this.db.transaction(() => {
+      const removeIds = new Set<string>([transactionId]);
+      const stampIds = new Set<string>([transactionId]);
+      const accountIds = new Set<string>([existing.account_id]);
+
+      // Deleting one side of a transfer deletes the other (YNAB behaviour)...
+      if (existing.transfer_transaction_id) {
+        const linked = this.getTransactionRow(planId, existing.transfer_transaction_id);
+        if (linked) {
+          removeIds.add(linked.id);
+          stampIds.add(linked.id);
+          accountIds.add(linked.account_id);
+        } else {
+          // ...unless the link points at a split line on the other side:
+          // that line stays and simply forgets the link.
+          const sub = this.db
+            .query("SELECT id, transaction_id FROM subtransactions WHERE id = ?")
+            .get(existing.transfer_transaction_id) as Row | null;
+          if (sub) {
+            this.db
+              .query(
+                `UPDATE subtransactions
+                 SET transfer_account_id = NULL, transfer_transaction_id = NULL, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?`,
+              )
+              .run(sub.id);
+            stampIds.add(sub.transaction_id);
+          }
+        }
+      }
+
+      // Linked sides born from this row's own split lines go too.
+      const subLinks = this.db
+        .query(
+          "SELECT transfer_transaction_id FROM subtransactions WHERE transaction_id = ? AND deleted = 0 AND transfer_transaction_id IS NOT NULL",
+        )
+        .all(transactionId) as Row[];
+      for (const link of subLinks) {
+        const linked = this.getTransactionRow(planId, link.transfer_transaction_id);
+        if (linked) {
+          removeIds.add(linked.id);
+          stampIds.add(linked.id);
+          accountIds.add(linked.account_id);
+        }
+      }
+
+      for (const id of removeIds) {
+        this.db
+          .query("UPDATE transactions SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
+          .run(id, planId);
+      }
+      for (const accountId of accountIds) {
+        this.recalculateAccount(accountId);
+      }
+      const serverKnowledge = this.touchPlan(planId);
+      for (const id of stampIds) {
+        this.db
+          .query("UPDATE transactions SET server_knowledge = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
+          .run(serverKnowledge, id, planId);
+      }
+    })();
+
     return this.getTransaction(planId, transactionId, true);
   }
 
@@ -627,7 +912,6 @@ export class LedgerRepository {
              AND t.deleted = 0
              AND t.date >= ?
              AND t.date < date(?, '+1 month')
-             AND t.transfer_transaction_id IS NULL
          )
          SELECT
            c.id,
@@ -687,6 +971,141 @@ export class LedgerRepository {
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(createId("row"), sessionId, rowIndex, status, JSON.stringify(payload), error ?? null, transactionId ?? null);
+  }
+
+  private payeeTransferTarget(planId: string, payeeId: string): string | null {
+    const row = this.db
+      .query("SELECT transfer_account_id FROM payees WHERE id = ? AND plan_id = ? AND deleted = 0")
+      .get(payeeId, planId) as Row | null;
+    return row?.transfer_account_id ?? null;
+  }
+
+  private requireTransferTarget(planId: string, sourceAccountId: string, targetAccountId: string): Row {
+    if (targetAccountId === sourceAccountId) {
+      throw new ValidationError("Transfer target must be a different account");
+    }
+    const target = this.db
+      .query("SELECT * FROM accounts WHERE id = ? AND plan_id = ? AND deleted = 0")
+      .get(targetAccountId, planId) as Row | null;
+    if (!target) {
+      throw new ValidationError("Transfer target account not found");
+    }
+    return target;
+  }
+
+  private accountsBothOnBudget(planId: string, firstAccountId: string, secondAccountId: string): boolean {
+    const row = this.db
+      .query(
+        `SELECT COUNT(*) AS on_budget_count FROM accounts
+         WHERE plan_id = ? AND id IN (?, ?) AND on_budget = 1`,
+      )
+      .get(planId, firstAccountId, secondAccountId) as Row;
+    return Number(row.on_budget_count) === 2;
+  }
+
+  /** Creates the other side of a transfer and returns its id. */
+  private insertLinkedTransaction(
+    planId: string,
+    opts: {
+      accountId: string;
+      date: string;
+      amount: number;
+      memo: string | null;
+      approved?: boolean | null;
+      sourceAccountId: string;
+      linkId: string;
+    },
+  ): string {
+    this.ensureAccount(planId, opts.accountId);
+    const payee = this.ensureTransferPayee(planId, opts.sourceAccountId);
+    const id = createId("txn");
+    this.db
+      .query(
+        `INSERT INTO transactions (
+           id, plan_id, account_id, date, amount_milli, memo, cleared, approved,
+           payee_id, payee_name_snapshot, transfer_account_id, transfer_transaction_id, updated_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?, 'uncleared', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      )
+      .run(
+        id,
+        planId,
+        opts.accountId,
+        opts.date,
+        opts.amount,
+        opts.memo,
+        bool(opts.approved),
+        payee?.id ?? null,
+        payee?.name ?? null,
+        opts.sourceAccountId,
+        opts.linkId,
+      );
+    this.recalculateAccount(opts.accountId);
+    this.stampTransaction(planId, id);
+    return id;
+  }
+
+  /** Keeps the other side of a transfer in step after an edit. */
+  private syncLinkedTransaction(
+    planId: string,
+    linkedTransactionId: string,
+    opts: {
+      date: string;
+      amount: number;
+      memo: string | null;
+      sourceAccountId: string;
+      accountId?: string;
+    },
+  ): void {
+    const linked = this.getTransactionRow(planId, linkedTransactionId);
+    if (!linked) {
+      return;
+    }
+    const nextAccountId = opts.accountId ?? linked.account_id;
+    const payee = this.ensureTransferPayee(planId, opts.sourceAccountId);
+    this.db
+      .query(
+        `UPDATE transactions
+         SET account_id = ?, date = ?, amount_milli = ?, memo = ?,
+             payee_id = ?, payee_name_snapshot = ?, transfer_account_id = ?,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND plan_id = ?`,
+      )
+      .run(
+        nextAccountId,
+        opts.date,
+        opts.amount,
+        opts.memo,
+        payee?.id ?? linked.payee_id,
+        payee?.name ?? linked.payee_name_snapshot,
+        opts.sourceAccountId,
+        linkedTransactionId,
+        planId,
+      );
+    this.recalculateAccount(linked.account_id);
+    if (nextAccountId !== linked.account_id) {
+      this.recalculateAccount(nextAccountId);
+    }
+    this.stampTransaction(planId, linkedTransactionId);
+  }
+
+  private softDeleteLinkedTransaction(planId: string, linkedTransactionId: string): void {
+    const linked = this.getTransactionRow(planId, linkedTransactionId);
+    if (!linked) {
+      return;
+    }
+    this.db
+      .query("UPDATE transactions SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
+      .run(linkedTransactionId, planId);
+    this.recalculateAccount(linked.account_id);
+    this.stampTransaction(planId, linkedTransactionId);
+  }
+
+  private stampTransaction(planId: string, transactionId: string): void {
+    const serverKnowledge = this.touchPlan(planId);
+    this.db
+      .query("UPDATE transactions SET server_knowledge = ? WHERE id = ? AND plan_id = ?")
+      .run(serverKnowledge, transactionId, planId);
   }
 
   private resolveTransactionRefs(planId: string, input: TransactionInput): {
@@ -842,7 +1261,8 @@ export class LedgerRepository {
       payee_id: row.payee_id,
       payee_name: row.payee_name ?? row.payee_name_snapshot,
       category_id: row.category_id,
-      category_name: row.category_name ?? row.category_name_snapshot,
+      // Split parents report the YNAB-style synthetic category label.
+      category_name: subtransactions.length > 0 ? "Split" : (row.category_name ?? row.category_name_snapshot),
       transfer_account_id: row.transfer_account_id,
       transfer_transaction_id: row.transfer_transaction_id,
       matched_transaction_id: row.matched_transaction_id,
@@ -897,6 +1317,43 @@ export class LedgerRepository {
 }
 
 export class NotFoundError extends Error {}
+
+export class ValidationError extends Error {}
+
+const CLEARED_STATES = new Set(["cleared", "uncleared", "reconciled"]);
+
+function validateTransactionInput(input: TransactionInput, strict: boolean): void {
+  if (!input.account_id || typeof input.account_id !== "string") {
+    throw new ValidationError("account_id is required");
+  }
+  if (!input.date || !/^\d{4}-\d{2}-\d{2}$/.test(String(input.date))) {
+    throw new ValidationError("date must be an ISO date (YYYY-MM-DD)");
+  }
+  if (typeof input.amount !== "number" || !Number.isInteger(input.amount)) {
+    throw new ValidationError("amount must be integer milliunits");
+  }
+  if (input.cleared != null && !CLEARED_STATES.has(input.cleared)) {
+    throw new ValidationError("cleared must be one of cleared, uncleared, reconciled");
+  }
+
+  const subtransactions = input.subtransactions ?? [];
+  if (strict && subtransactions.length > 0) {
+    if (subtransactions.length < 2) {
+      throw new ValidationError("split transactions need at least two subtransactions");
+    }
+    for (const sub of subtransactions) {
+      if (typeof sub.amount !== "number" || !Number.isInteger(sub.amount)) {
+        throw new ValidationError("subtransaction amounts must be integer milliunits");
+      }
+    }
+    const total = subtransactions.reduce((sum, sub) => sum + sub.amount, 0);
+    if (total !== input.amount) {
+      throw new ValidationError(
+        `subtransactions must sum to the transaction amount (lines total ${total}, transaction is ${input.amount})`,
+      );
+    }
+  }
+}
 
 function formatPlan(row: Row): any {
   return {

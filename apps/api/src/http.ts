@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { ApiConfig } from "./config";
-import { LedgerRepository, NotFoundError } from "./repository";
+import { LedgerRepository, NotFoundError, ValidationError } from "./repository";
 import { ReportService } from "./reports";
 import { decimalToMilliunits } from "./money";
 import { importCsvRows } from "./importers/csv";
@@ -40,6 +40,9 @@ export function createHandler({ db, config }: HandlerOptions): (request: Request
     } catch (error) {
       if (error instanceof NotFoundError) {
         return apiError(404, "resource_not_found", error.message, "404.2");
+      }
+      if (error instanceof ValidationError) {
+        return apiError(400, "bad_request", error.message);
       }
       return apiError(500, "internal_server_error", error instanceof Error ? error.message : String(error));
     }
@@ -84,8 +87,12 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
     }
     if (segments.length === 4 && method === "POST") {
       const body = await readJson(request);
-      repo.upsertAccount(planId, body.account ?? body);
-      return json({ data: { account: repo.getAccount(planId, (body.account ?? body).id), server_knowledge: repo.getServerKnowledge(planId) } }, 201);
+      const payload = body.account ?? body;
+      if (!payload || (!payload.id && !payload.name)) {
+        return apiError(400, "bad_request", "account requires a name");
+      }
+      const account = repo.createAccount(planId, payload);
+      return json({ data: { account, server_knowledge: repo.getServerKnowledge(planId) } }, 201);
     }
     const accountId = segments[4];
     if (segments.length === 5 && method === "GET") {
@@ -163,6 +170,9 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
     if (segments.length === 4 && method === "POST") {
       const body = await readJson(request);
       const input = body.transaction;
+      if (!input) {
+        return apiError(400, "bad_request", "transaction is required");
+      }
       const duplicate = input?.import_id ? repo.findDuplicateTransaction(planId, input) : null;
       if (duplicate) {
         return json({
@@ -234,6 +244,15 @@ async function handleNative(
   if (segments[1] === "mobile" && segments[2] === "quick-entry" && method === "POST") {
     const body = await readJson(request);
     const amount = body.amount_milli ?? decimalToMilliunits(body.amount);
+    const subtransactions = Array.isArray(body.subtransactions)
+      ? body.subtransactions.map((sub: any) => ({
+          amount: sub.amount_milli ?? decimalToMilliunits(sub.amount),
+          payee_id: sub.payee_id ?? null,
+          payee_name: sub.payee_name ?? null,
+          category_id: sub.category_id ?? null,
+          memo: sub.memo ?? null,
+        }))
+      : undefined;
     const transaction = repo.createTransaction(planId, {
       id: body.client_id,
       account_id: body.account_id,
@@ -246,6 +265,7 @@ async function handleNative(
       flag_color: body.flag_color ?? null,
       source_kind: "mobile",
       source_ref: body.client_id ?? null,
+      subtransactions,
     });
     return json({ data: { transaction, server_knowledge: repo.getServerKnowledge(planId) } }, 201);
   }
@@ -316,7 +336,14 @@ function normaliseMonthStart(month: string): string {
 
 async function readJson(request: Request): Promise<any> {
   const text = await request.text();
-  return text ? JSON.parse(text) : {};
+  if (!text) {
+    return {};
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new ValidationError("Request body is not valid JSON");
+  }
 }
 
 function isAuthorised(request: Request, token?: string): boolean {

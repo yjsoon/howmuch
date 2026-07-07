@@ -143,6 +143,9 @@ struct TransactionFormView: View {
           VStack(spacing: 14) {
             amountHeader
             detailCard
+            if draft.isSplit {
+              splitCard
+            }
             extrasCard
 
             if isEditing {
@@ -216,9 +219,16 @@ struct TransactionFormView: View {
 
   private var amountHeader: some View {
     VStack(spacing: 14) {
-      directionToggle
+      if !draft.isSplit {
+        directionToggle
+      }
 
       Button {
+        guard !draft.isSplit else {
+          // Split totals are the sum of their lines; the amount stays put so
+          // the API's split invariant holds.
+          return
+        }
         withAnimation(.snappy) {
           isKeypadVisible = true
         }
@@ -300,18 +310,21 @@ struct TransactionFormView: View {
       .buttonStyle(.plain)
       CardDivider()
 
-      NavigationLink {
-        CategoryPickerView(draft: $draft)
-      } label: {
-        DisclosureValueRow(
-          icon: "tray.full",
-          caption: "Category",
-          value: model.categoryName(forID: draft.categoryID),
-          placeholder: "Choose Category"
-        )
+      if !hidesCategory {
+        NavigationLink {
+          CategoryPickerView(draft: $draft)
+        } label: {
+          DisclosureValueRow(
+            icon: "tray.full",
+            caption: "Category",
+            value: draft.isSplit ? "Split (\(draft.subtransactions.count))" : model.categoryName(forID: draft.categoryID),
+            placeholder: "Choose Category"
+          )
+        }
+        .buttonStyle(.plain)
+        .disabled(draft.isSplit)
+        CardDivider()
       }
-      .buttonStyle(.plain)
-      CardDivider()
 
       NavigationLink {
         AccountPickerView(draft: $draft)
@@ -339,6 +352,60 @@ struct TransactionFormView: View {
       .buttonStyle(.plain)
     }
     .ynabCard()
+  }
+
+  /// Transfers between two budget accounts carry no category (YNAB); the row
+  /// disappears rather than inviting a value the API would discard.
+  private var hidesCategory: Bool {
+    draft.isTransfer && model.accountsBothOnBudget(draft.accountID, draft.transferAccountID)
+  }
+
+  /// Read-only view of the split lines. Amounts stay locked so the lines
+  /// keep summing to the transaction total; other fields remain editable.
+  private var splitCard: some View {
+    VStack(spacing: 0) {
+      ForEach(draft.subtransactions, id: \.id) { line in
+        HStack(spacing: 12) {
+          Image(systemName: line.transferAccountID != nil ? "arrow.left.arrow.right" : "tray.full")
+            .foregroundStyle(.secondary)
+            .frame(width: 28)
+          VStack(alignment: .leading, spacing: 2) {
+            Text(splitLineTitle(line))
+              .foregroundStyle(Theme.textPrimary)
+            if let memo = line.memo, !memo.isEmpty {
+              Text(memo)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+          }
+          Spacer()
+          Text(MoneyCodec.displayString(for: line.amount, currencyFormat: model.currencyFormat))
+            .monospacedDigit()
+            .foregroundStyle(line.amount < 0 ? Theme.outflow : Theme.textPrimary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        if line.id != draft.subtransactions.last?.id {
+          CardDivider()
+        }
+      }
+
+      CardDivider()
+      Text("Split lines keep the total; edit payee, date, memo and flag here.")
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+    .ynabCard()
+  }
+
+  private func splitLineTitle(_ line: Subtransaction) -> String {
+    if line.transferAccountID != nil {
+      return line.payeeName ?? "Transfer"
+    }
+    return line.categoryName ?? "Uncategorised"
   }
 
   private var extrasCard: some View {

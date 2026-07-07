@@ -520,6 +520,12 @@ struct TransactionDraft: Equatable {
   var payeeName = ""
   var accountID = ""
   var categoryID: String?
+  /// Set when the chosen payee is another account's transfer payee; the API
+  /// keeps the mirrored transaction on that account in step.
+  var transferAccountID: String?
+  /// Existing split lines, shown read-only; the API preserves them as long
+  /// as the total amount still matches.
+  var subtransactions: [Subtransaction] = []
   var date = Date.now
   var isCleared = false
   var wasReconciled = false
@@ -536,11 +542,21 @@ struct TransactionDraft: Equatable {
     payeeName = transaction.payeeName ?? ""
     accountID = transaction.accountID
     categoryID = transaction.categoryID
+    transferAccountID = transaction.transferAccountID
+    subtransactions = transaction.subtransactions
     date = Date(isoDateString: transaction.date) ?? .now
     isCleared = transaction.cleared != .uncleared
     wasReconciled = transaction.cleared == .reconciled
     flag = FlagColour(rawValue: transaction.flagColor ?? "") ?? .none
     memo = transaction.memo ?? ""
+  }
+
+  var isTransfer: Bool {
+    transferAccountID != nil
+  }
+
+  var isSplit: Bool {
+    !subtransactions.isEmpty
   }
 
   mutating func seedIfNeeded(accounts: [Account], preferredAccountID: String? = nil) {

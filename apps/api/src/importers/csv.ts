@@ -60,7 +60,8 @@ export function importCsvRows(
         return;
       }
 
-      const transaction = repo.createTransaction(planId, input);
+      // Bank feeds carry each side separately; never mirror on import.
+      const transaction = repo.createTransaction(planId, input, { autoLink: false });
       repo.recordImportRow(sessionId, index, "imported", row, undefined, transaction.id);
       imported += 1;
     } catch (error) {

@@ -192,7 +192,8 @@ export function importYnabExport(
           continue;
         }
 
-        const transaction = repo.createTransaction(options.planId, prepared.input);
+        // Both sides of a transfer exist as rows in the export; never mirror.
+        const transaction = repo.createTransaction(options.planId, prepared.input, { autoLink: false });
         repo.recordImportRow(sessionId, prepared.index, "imported", prepared.row, undefined, transaction.id);
         imported += 1;
       } catch (error) {

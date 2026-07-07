@@ -30,6 +30,7 @@ export interface Account {
   balance: number;
   cleared_balance: number;
   uncleared_balance: number;
+  transfer_payee_id: string | null;
   deleted: boolean;
 }
 
@@ -52,6 +53,7 @@ export interface Category {
 export interface Payee {
   id: string;
   name: string;
+  transfer_account_id?: string | null;
   deleted?: boolean;
 }
 
@@ -63,6 +65,8 @@ export interface Subtransaction {
   category_id: string | null;
   category_name?: string | null;
   memo: string | null;
+  transfer_account_id?: string | null;
+  transfer_transaction_id?: string | null;
   deleted: boolean;
 }
 
@@ -134,13 +138,21 @@ export interface AgeOfMoneyReport {
   }>;
 }
 
+export interface QuickEntrySplitLine {
+  amount: string;
+  category_id: string | null;
+  memo?: string | null;
+}
+
 export interface QuickEntryInput {
   client_id: string;
   account_id: string;
   date: string;
   amount: string;
-  payee_name: string;
+  payee_id?: string | null;
+  payee_name?: string | null;
   category_id: string | null;
   memo: string | null;
   flag_color: string | null;
+  subtransactions?: QuickEntrySplitLine[];
 }
