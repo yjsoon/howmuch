@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
+import { DEFAULT_YNAB_SYNC_INTERVAL_MS, loadConfig, MIN_YNAB_SYNC_INTERVAL_MS } from "../src/config";
 import { applyMigrations } from "../src/db";
 import { importYnabFromApi, ynabSimilarity } from "../src/importers/ynab";
 import { LedgerRepository } from "../src/repository";
@@ -19,6 +20,7 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  setSystemTime();
   db.close();
 });
 
@@ -48,37 +50,46 @@ function ynabTransaction(id: string, overrides: Record<string, unknown> = {}) {
   };
 }
 
-function stubYnabApi(transactions: unknown[], options: { plans?: unknown[]; onFetch?: (url: string) => void } = {}) {
+function stubYnabApi(
+  transactions: unknown[],
+  options: { plans?: unknown[]; onFetch?: (url: string) => void; rateLimitHeader?: string } = {},
+) {
+  const headers = options.rateLimitHeader ? { "x-rate-limit": options.rateLimitHeader } : undefined;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     options.onFetch?.(url);
     if (url.endsWith("/plans")) {
-      return jsonResponse({ data: { plans: options.plans ?? [{ id: "plan-test", name: "Test Plan" }] } });
+      return jsonResponse({ data: { plans: options.plans ?? [{ id: "plan-test", name: "Test Plan" }] } }, headers);
     }
     if (url.endsWith("/plans/plan-test")) {
-      return jsonResponse({ data: { plan: { id: "plan-test", name: "Test Plan" } } });
+      return jsonResponse({ data: { plan: { id: "plan-test", name: "Test Plan" } } }, headers);
     }
     if (url.endsWith("/plans/plan-test/settings")) {
-      return jsonResponse({ data: { settings: {} } });
+      return jsonResponse({ data: { settings: {} } }, headers);
     }
     if (url.endsWith("/plans/plan-test/accounts")) {
-      return jsonResponse({ data: { accounts: [{ id: "acct-1", name: "Checking", type: "checking", on_budget: true }] } });
+      return jsonResponse(
+        { data: { accounts: [{ id: "acct-1", name: "Checking", type: "checking", on_budget: true }] } },
+        headers,
+      );
     }
     if (url.endsWith("/plans/plan-test/categories")) {
-      return jsonResponse({ data: { category_groups: [] } });
+      return jsonResponse({ data: { category_groups: [] } }, headers);
     }
     if (url.endsWith("/plans/plan-test/payees")) {
-      return jsonResponse({ data: { payees: [] } });
+      return jsonResponse({ data: { payees: [] } }, headers);
     }
     if (url.includes("/plans/plan-test/transactions")) {
-      return jsonResponse({ data: { transactions } });
+      return jsonResponse({ data: { transactions } }, headers);
     }
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
 }
 
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+function jsonResponse(body: unknown, extraHeaders?: Record<string, string>): Response {
+  return new Response(JSON.stringify(body), {
+    headers: { "content-type": "application/json", ...extraHeaders },
+  });
 }
 
 async function seedLedgerFromYnab(transactions: unknown[]): Promise<void> {
@@ -279,6 +290,85 @@ describe("YNAB hourly sync", () => {
         .query("SELECT COUNT(*) AS count FROM transactions WHERE plan_id = 'plan-test'")
         .get() as { count: number };
       expect(stored.count).toBe(20);
+    } finally {
+      handle?.stop();
+    }
+  });
+});
+
+describe("YNAB rate limit safety", () => {
+  test("loadConfig clamps the sync interval to the five-minute floor", () => {
+    expect(loadConfig({}).ynabSyncIntervalMs).toBe(DEFAULT_YNAB_SYNC_INTERVAL_MS);
+    expect(loadConfig({ HOWMUCH_YNAB_SYNC_INTERVAL_MS: "1000" }).ynabSyncIntervalMs).toBe(MIN_YNAB_SYNC_INTERVAL_MS);
+    expect(loadConfig({ HOWMUCH_YNAB_SYNC_INTERVAL_MS: "7200000" }).ynabSyncIntervalMs).toBe(7200000);
+  });
+
+  test("pauses for an hour after YNAB returns 429, then resumes", async () => {
+    let fetchCalls = 0;
+    let warned = 0;
+    globalThis.fetch = (async () => {
+      fetchCalls += 1;
+      return new Response("too many requests", { status: 429 });
+    }) as typeof fetch;
+
+    const handle = startYnabSync(
+      repo,
+      baseConfig({ ynabToken: "ynab-token", ynabPlanId: "plan-test" }),
+      { ...silentLogger, warn: () => (warned += 1) },
+    );
+    try {
+      await handle!.runNow();
+      expect(fetchCalls).toBeGreaterThan(0);
+      expect(warned).toBeGreaterThanOrEqual(1);
+
+      // While paused, sync passes make no requests at all.
+      const callsAfterLimit = fetchCalls;
+      expect(await handle!.runNow()).toBeNull();
+      expect(fetchCalls).toBe(callsAfterLimit);
+
+      // Once the rolling hour has passed, syncing resumes.
+      setSystemTime(new Date(Date.now() + 61 * 60 * 1000));
+      stubYnabApi([ynabTransaction("txn-1")]);
+      const result = await handle!.runNow();
+      expect(result?.imported_transactions).toBe(1);
+    } finally {
+      handle?.stop();
+    }
+  });
+
+  test("warns when the token is close to its hourly quota", async () => {
+    const warnings: string[] = [];
+    stubYnabApi([ynabTransaction("txn-1")], { rateLimitHeader: "190/200" });
+
+    const handle = startYnabSync(
+      repo,
+      baseConfig({ ynabToken: "ynab-token", ynabPlanId: "plan-test" }),
+      { ...silentLogger, warn: (message: string) => warnings.push(message) },
+    );
+    try {
+      const result = await handle!.runNow();
+      expect(result?.imported_transactions).toBe(1);
+      expect(warnings.some((message) => message.includes("190/200"))).toBe(true);
+      // Six parallel requests share the quota header but warn only once.
+      expect(warnings.filter((message) => message.includes("190/200"))).toHaveLength(1);
+    } finally {
+      handle?.stop();
+    }
+  });
+
+  test("does not warn while plenty of quota remains", async () => {
+    const warnings: string[] = [];
+    stubYnabApi([ynabTransaction("txn-1")], { rateLimitHeader: "12/200" });
+
+    const handle = startYnabSync(
+      repo,
+      baseConfig({ ynabToken: "ynab-token", ynabPlanId: "plan-test" }),
+      { ...silentLogger, warn: (message: string) => warnings.push(message) },
+    );
+    try {
+      const result = await handle!.runNow();
+      expect(result?.imported_transactions).toBe(1);
+      expect(warnings).toHaveLength(0);
     } finally {
       handle?.stop();
     }

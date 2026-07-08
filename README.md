@@ -51,7 +51,12 @@ unset, no sync ever runs.
 - `HOWMUCH_YNAB_PLAN_ID`: YNAB plan (budget) id to sync. Optional when the token
   can only see one plan; required when it can see several.
 - `HOWMUCH_YNAB_SYNC_INTERVAL_MS`: how often to check, in milliseconds. Defaults
-  to one hour.
+  to one hour and is clamped to a five-minute minimum so the sync cannot exceed
+  YNAB's rate limit of 200 requests per token per rolling hour (each pass costs
+  six requests, so even at the floor the sync uses at most 72 per hour). If
+  YNAB ever returns 429 — for example because other apps share the token — the
+  sync logs a warning and pauses for a full hour so the rolling quota can
+  recover, and it warns when the token passes 90% of its quota.
 - `HOWMUCH_YNAB_MIN_SIMILARITY`: safety threshold between 0 and 1, default `0.95`.
   Once the ledger already holds YNAB-imported transactions, a sync pass only
   applies when the fetched data is at least this similar (matched by

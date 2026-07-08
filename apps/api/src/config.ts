@@ -1,4 +1,7 @@
 export const DEFAULT_YNAB_SYNC_INTERVAL_MS = 60 * 60 * 1000;
+// YNAB allows 200 requests per token per rolling hour and a sync pass costs a
+// handful of them, so refuse intervals that could crowd out other consumers.
+export const MIN_YNAB_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 export const DEFAULT_YNAB_MIN_SIMILARITY = 0.95;
 
 export type ApiConfig = {
@@ -20,7 +23,10 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env): A
     defaultPlanId: env.HOWMUCH_DEFAULT_PLAN_ID ?? "local-plan",
     ynabToken: emptyToUndefined(env.HOWMUCH_YNAB_TOKEN),
     ynabPlanId: emptyToUndefined(env.HOWMUCH_YNAB_PLAN_ID),
-    ynabSyncIntervalMs: positiveNumber(env.HOWMUCH_YNAB_SYNC_INTERVAL_MS) ?? DEFAULT_YNAB_SYNC_INTERVAL_MS,
+    ynabSyncIntervalMs: Math.max(
+      positiveNumber(env.HOWMUCH_YNAB_SYNC_INTERVAL_MS) ?? DEFAULT_YNAB_SYNC_INTERVAL_MS,
+      MIN_YNAB_SYNC_INTERVAL_MS,
+    ),
     ynabMinSimilarity: ratio(env.HOWMUCH_YNAB_MIN_SIMILARITY) ?? DEFAULT_YNAB_MIN_SIMILARITY,
   };
 }

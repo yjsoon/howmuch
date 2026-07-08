@@ -14,6 +14,8 @@ export type YnabImportOptions = {
    * YNAB import are never blocked by this check.
    */
   minSimilarity?: number;
+  /** Receives non-fatal warnings, e.g. the token nearing its rate limit. */
+  warn?: (message: string) => void;
 };
 
 export type YnabImportResult = {
@@ -38,15 +40,16 @@ export async function importYnabFromApi(
   const baseUrl = options.baseUrl ?? DEFAULT_YNAB_BASE_URL;
   const sinceDate = options.sinceDate ?? "1900-01-01";
   const sessionId = repo.createImportSession(options.planId, "ynab-api");
+  const warn = dedupedWarn(options.warn);
 
   try {
     const [plan, settings, accounts, categories, payees, transactions] = await Promise.all([
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}`),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/settings`),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/accounts`),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/categories`),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/payees`),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/transactions?since_date=${sinceDate}`),
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}`, warn),
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/settings`, warn),
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/accounts`, warn),
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/categories`, warn),
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/payees`, warn),
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/transactions?since_date=${sinceDate}`, warn),
     ]);
 
     const fetchedTransactions = transactions.data.transactions ?? [];
@@ -138,11 +141,19 @@ export async function importYnabFromApi(
 export async function listYnabPlans(options: {
   token: string;
   baseUrl?: string;
+  warn?: (message: string) => void;
 }): Promise<YnabPlanSummary[]> {
   const baseUrl = options.baseUrl ?? DEFAULT_YNAB_BASE_URL;
-  const response = await ynabFetch(baseUrl, options.token, "/plans");
+  const response = await ynabFetch(baseUrl, options.token, "/plans", dedupedWarn(options.warn));
   return response.data.plans ?? response.data.budgets ?? [];
 }
+
+/** Thrown when YNAB reports the token's hourly request quota is spent. */
+export class YnabRateLimitError extends Error {}
+
+// YNAB allows 200 requests per token per rolling hour. Warn while there is
+// still room to finish the current pass, not only once requests start failing.
+const RATE_LIMIT_WARN_RATIO = 0.9;
 
 /**
  * Jaccard similarity between the transactions already imported from YNAB and
@@ -165,14 +176,43 @@ export function ynabSimilarity(
   return union === 0 ? 1 : shared / union;
 }
 
-async function ynabFetch(baseUrl: string, token: string, path: string): Promise<any> {
+async function ynabFetch(
+  baseUrl: string,
+  token: string,
+  path: string,
+  warn?: (message: string) => void,
+): Promise<any> {
   const response = await fetch(`${baseUrl}${path}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
   });
+  const rateLimit = response.headers.get("x-rate-limit");
+  if (rateLimit && warn) {
+    const [used, limit] = rateLimit.split("/").map(Number);
+    if (Number.isFinite(used) && Number.isFinite(limit) && limit > 0 && used / limit >= RATE_LIMIT_WARN_RATIO) {
+      warn(`YNAB token has used ${used}/${limit} requests in the current hour; other apps sharing it may be starved`);
+    }
+  }
+  if (response.status === 429) {
+    throw new YnabRateLimitError(`YNAB rate limit exceeded for ${path}`);
+  }
   if (!response.ok) {
     throw new Error(`YNAB fetch failed for ${path}: ${response.status} ${await response.text()}`);
   }
   return response.json();
+}
+
+// Six parallel requests all read the same quota header; report it once.
+function dedupedWarn(warn?: (message: string) => void): ((message: string) => void) | undefined {
+  if (!warn) {
+    return undefined;
+  }
+  let warned = false;
+  return (message: string) => {
+    if (!warned) {
+      warned = true;
+      warn(message);
+    }
+  };
 }

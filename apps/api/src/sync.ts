@@ -1,6 +1,10 @@
 import { DEFAULT_YNAB_MIN_SIMILARITY, DEFAULT_YNAB_SYNC_INTERVAL_MS, type ApiConfig } from "./config";
-import { importYnabFromApi, listYnabPlans, type YnabImportResult } from "./importers/ynab";
+import { importYnabFromApi, listYnabPlans, YnabRateLimitError, type YnabImportResult } from "./importers/ynab";
 import type { LedgerRepository } from "./repository";
+
+// YNAB's request quota is a rolling hour, so after a 429 every request made
+// before the rejection has expired once a full hour has passed.
+const RATE_LIMIT_PAUSE_MS = 60 * 60 * 1000;
 
 export type YnabSyncLogger = Pick<Console, "log" | "warn" | "error">;
 
@@ -32,8 +36,13 @@ export function startYnabSync(
   let planId = config.ynabPlanId;
   let current: Promise<YnabImportResult | null> | null = null;
   let stopped = false;
+  let pausedUntil = 0;
+  const warn = (message: string) => logger.warn(message);
 
   const runOnce = async (): Promise<YnabImportResult | null> => {
+    if (Date.now() < pausedUntil) {
+      return null;
+    }
     try {
       if (!planId) {
         planId = await discoverPlanId(token, logger);
@@ -41,7 +50,7 @@ export function startYnabSync(
           return null;
         }
       }
-      const result = await importYnabFromApi(repo, { token, planId, minSimilarity });
+      const result = await importYnabFromApi(repo, { token, planId, minSimilarity, warn });
       if (result.skipped) {
         logger.warn(
           `YNAB sync skipped for plan ${planId}: fetched data is only ${Math.round((result.similarity ?? 0) * 100)}% similar to the existing ledger (needs ${Math.round(minSimilarity * 100)}%)`,
@@ -51,7 +60,12 @@ export function startYnabSync(
       }
       return result;
     } catch (error) {
-      logger.error(`YNAB sync failed: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof YnabRateLimitError) {
+        pausedUntil = Date.now() + RATE_LIMIT_PAUSE_MS;
+        logger.warn("YNAB sync hit the API rate limit; pausing for an hour so the rolling quota can recover");
+      } else {
+        logger.error(`YNAB sync failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
       return null;
     }
   };
@@ -81,7 +95,7 @@ export function startYnabSync(
 }
 
 async function discoverPlanId(token: string, logger: YnabSyncLogger): Promise<string | undefined> {
-  const plans = await listYnabPlans({ token });
+  const plans = await listYnabPlans({ token, warn: (message) => logger.warn(message) });
   if (plans.length === 1) {
     logger.log(`YNAB sync using the only available plan: ${plans[0].name ?? plans[0].id} (${plans[0].id})`);
     return plans[0].id;
