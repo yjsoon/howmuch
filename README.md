@@ -41,6 +41,30 @@ Useful environment variables:
 - `HOWMUCH_API_TOKEN`: bearer token. If unset, local development requests are allowed.
 - `HOWMUCH_DEFAULT_PLAN_ID`: default plan id for native routes.
 
+## Automatic YNAB Sync
+
+When a YNAB personal access token is configured, the API server checks YNAB
+every hour and syncs the plan into the local ledger. If the token is empty or
+unset, no sync ever runs.
+
+- `HOWMUCH_YNAB_TOKEN`: YNAB personal access token. Empty/unset disables the sync.
+- `HOWMUCH_YNAB_PLAN_ID`: YNAB plan (budget) id to sync. Optional when the token
+  can only see one plan; required when it can see several.
+- `HOWMUCH_YNAB_SYNC_INTERVAL_MS`: how often to check, in milliseconds. Defaults
+  to one hour and is clamped to a five-minute minimum so the sync cannot exceed
+  YNAB's rate limit of 200 requests per token per rolling hour (each pass costs
+  six requests, so even at the floor the sync uses at most 72 per hour). If
+  YNAB ever returns 429 — for example because other apps share the token — the
+  sync logs a warning and pauses for a full hour so the rolling quota can
+  recover, and it warns when the token passes 90% of its quota.
+- `HOWMUCH_YNAB_MIN_SIMILARITY`: safety threshold between 0 and 1, default `0.95`.
+  Once the ledger already holds YNAB-imported transactions, a sync pass only
+  applies when the fetched data is at least this similar (matched by
+  transaction id, date, and amount) to what was previously imported. Wrong
+  budgets, truncated responses, and bulk rewrites are skipped and recorded as a
+  `skipped` import session instead of overwriting the ledger. The first sync
+  into an empty ledger is never blocked.
+
 ## YNAB Migration
 
 Preferred path: import directly from the YNAB API with a personal access token.

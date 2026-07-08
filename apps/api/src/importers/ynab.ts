@@ -5,6 +5,24 @@ export type YnabImportOptions = {
   planId: string;
   baseUrl?: string;
   sinceDate?: string;
+  /**
+   * When set, the fetched YNAB transactions must be at least this similar
+   * (0..1, matched by id/date/amount) to the transactions already imported
+   * from YNAB, or the import is skipped without writing anything. Protects a
+   * populated ledger from being resynced against the wrong budget or a
+   * token that suddenly returns very different data. Ledgers with no prior
+   * YNAB import are never blocked by this check.
+   */
+  minSimilarity?: number;
+  /** Receives non-fatal warnings, e.g. the token nearing its rate limit. */
+  warn?: (message: string) => void;
+};
+
+export type YnabImportResult = {
+  import_session_id: string;
+  imported_transactions: number;
+  skipped?: boolean;
+  similarity?: number;
 };
 
 export type YnabPlanSummary = {
@@ -18,20 +36,40 @@ const DEFAULT_YNAB_BASE_URL = "https://api.ynab.com/v1";
 export async function importYnabFromApi(
   repo: LedgerRepository,
   options: YnabImportOptions,
-): Promise<{ import_session_id: string; imported_transactions: number }> {
+): Promise<YnabImportResult> {
   const baseUrl = options.baseUrl ?? DEFAULT_YNAB_BASE_URL;
   const sinceDate = options.sinceDate ?? "1900-01-01";
   const sessionId = repo.createImportSession(options.planId, "ynab-api");
+  const warn = dedupedWarn(options.warn);
 
   try {
     const [plan, settings, accounts, categories, payees, transactions] = await Promise.all([
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}`),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/settings`),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/accounts`),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/categories`),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/payees`),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/transactions?since_date=${sinceDate}`),
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}`, warn),
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/settings`, warn),
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/accounts`, warn),
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/categories`, warn),
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/payees`, warn),
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/transactions?since_date=${sinceDate}`, warn),
     ]);
+
+    const fetchedTransactions = transactions.data.transactions ?? [];
+
+    if (options.minSimilarity !== undefined) {
+      const existing = repo.listYnabTransactionFingerprints(options.planId);
+      if (existing.length > 0) {
+        const similarity = ynabSimilarity(existing, fetchedTransactions);
+        if (similarity < options.minSimilarity) {
+          repo.finishImportSession(sessionId, "skipped", {
+            reason: "similarity_below_threshold",
+            similarity,
+            min_similarity: options.minSimilarity,
+            existing_transactions: existing.length,
+            fetched_transactions: fetchedTransactions.length,
+          });
+          return { import_session_id: sessionId, imported_transactions: 0, skipped: true, similarity };
+        }
+      }
+    }
 
     repo.upsertPlan(options.planId, plan.data.plan ?? plan.data.budget ?? { id: options.planId }, settings.data.settings);
 
@@ -51,7 +89,7 @@ export async function importYnabFromApi(
     }
 
     let imported = 0;
-    for (const transaction of transactions.data.transactions ?? []) {
+    for (const transaction of fetchedTransactions) {
       // YNAB data already contains both sides of every transfer.
       repo.createTransaction(options.planId, {
         id: transaction.id,
@@ -103,20 +141,78 @@ export async function importYnabFromApi(
 export async function listYnabPlans(options: {
   token: string;
   baseUrl?: string;
+  warn?: (message: string) => void;
 }): Promise<YnabPlanSummary[]> {
   const baseUrl = options.baseUrl ?? DEFAULT_YNAB_BASE_URL;
-  const response = await ynabFetch(baseUrl, options.token, "/plans");
+  const response = await ynabFetch(baseUrl, options.token, "/plans", dedupedWarn(options.warn));
   return response.data.plans ?? response.data.budgets ?? [];
 }
 
-async function ynabFetch(baseUrl: string, token: string, path: string): Promise<any> {
+/** Thrown when YNAB reports the token's hourly request quota is spent. */
+export class YnabRateLimitError extends Error {}
+
+// YNAB allows 200 requests per token per rolling hour. Warn while there is
+// still room to finish the current pass, not only once requests start failing.
+const RATE_LIMIT_WARN_RATIO = 0.9;
+
+/**
+ * Jaccard similarity between the transactions already imported from YNAB and
+ * the transactions the YNAB API just returned. A transaction on either side
+ * only counts as shared when id, date, and amount all agree, so a wrong
+ * budget, a truncated response, or bulk rewrites all push the score down.
+ */
+export function ynabSimilarity(
+  existing: Array<{ external_ynab_id: string; date: string; amount_milli: number }>,
+  fetched: Array<{ id: string; date: string; amount: number }>,
+): number {
+  const existingKeys = new Set(existing.map((row) => `${row.external_ynab_id}|${row.date}|${row.amount_milli}`));
+  let shared = 0;
+  for (const transaction of fetched) {
+    if (existingKeys.has(`${transaction.id}|${transaction.date}|${transaction.amount}`)) {
+      shared += 1;
+    }
+  }
+  const union = existingKeys.size + fetched.length - shared;
+  return union === 0 ? 1 : shared / union;
+}
+
+async function ynabFetch(
+  baseUrl: string,
+  token: string,
+  path: string,
+  warn?: (message: string) => void,
+): Promise<any> {
   const response = await fetch(`${baseUrl}${path}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
   });
+  const rateLimit = response.headers.get("x-rate-limit");
+  if (rateLimit && warn) {
+    const [used, limit] = rateLimit.split("/").map(Number);
+    if (Number.isFinite(used) && Number.isFinite(limit) && limit > 0 && used / limit >= RATE_LIMIT_WARN_RATIO) {
+      warn(`YNAB token has used ${used}/${limit} requests in the current hour; other apps sharing it may be starved`);
+    }
+  }
+  if (response.status === 429) {
+    throw new YnabRateLimitError(`YNAB rate limit exceeded for ${path}`);
+  }
   if (!response.ok) {
     throw new Error(`YNAB fetch failed for ${path}: ${response.status} ${await response.text()}`);
   }
   return response.json();
+}
+
+// Six parallel requests all read the same quota header; report it once.
+function dedupedWarn(warn?: (message: string) => void): ((message: string) => void) | undefined {
+  if (!warn) {
+    return undefined;
+  }
+  let warned = false;
+  return (message: string) => {
+    if (!warned) {
+      warned = true;
+      warn(message);
+    }
+  };
 }
