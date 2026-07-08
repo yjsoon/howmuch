@@ -1050,6 +1050,16 @@ export class LedgerRepository {
       .run(status, JSON.stringify(summary), id);
   }
 
+  listYnabTransactionFingerprints(planId: string): Array<{ external_ynab_id: string; date: string; amount_milli: number }> {
+    return this.db
+      .query(
+        `SELECT external_ynab_id, date, amount_milli
+         FROM transactions
+         WHERE plan_id = ? AND source_kind = 'ynab-import' AND external_ynab_id IS NOT NULL`,
+      )
+      .all(planId) as Array<{ external_ynab_id: string; date: string; amount_milli: number }>;
+  }
+
   recordImportRow(sessionId: string, rowIndex: number, status: string, payload: unknown, error?: string, transactionId?: string): void {
     this.db
       .query(
