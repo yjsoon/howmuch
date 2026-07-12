@@ -44,7 +44,9 @@ final class AppModel {
   var isShowingCapture = false
   /// Captures made while the server was unreachable, oldest first.
   var pendingTransactions: [PendingTransaction] = OutboxStore.load()
-  private var isSyncingOutbox = false
+  /// True while a replay pass is running, whoever started it — the outbox
+  /// card drives its spinner from this rather than view-local state.
+  var isSyncingOutbox = false
   private var viewPrefs: ViewPrefs
   private var saveMessageToken = 0
 
@@ -127,12 +129,15 @@ final class AppModel {
   }
 
   func refreshAll(quiet: Bool = false) async {
-    // Replay offline captures first so the ledger fetch below includes them.
-    await syncOutbox()
+    // Replay offline captures alongside the fetches rather than before them:
+    // an unreachable server must not stall the refresh for a full request
+    // timeout. Inserts dedupe by id, so a capture the ledger fetch already
+    // returned is never doubled.
+    async let outbox: Int = syncOutbox()
     async let reference: Void = refreshReferenceData(quiet: quiet)
     async let ledger: Void = refreshLedger(quiet: quiet)
     async let reports: Void = refreshReflectOverview(quiet: quiet)
-    _ = await (reference, ledger, reports)
+    _ = await (outbox, reference, ledger, reports)
   }
 
   func refreshReferenceData(quiet: Bool = false) async {
@@ -238,41 +243,56 @@ final class AppModel {
   /// The server never saw this capture; keep it locally and replay it once a
   /// refresh reaches the server again.
   private func queueOfflineCapture(_ request: TransactionWriteRequest) {
-    pendingTransactions.append(PendingTransaction(request: request))
+    pendingTransactions.append(PendingTransaction(request: request, connectionFingerprint: settings.connectionFingerprint))
     OutboxStore.save(pendingTransactions)
     viewPrefs.lastUsedAccountID = request.accountID
     viewPrefs.save()
-    showSaveMessage("Saved offline — will sync when connected")
+    showSaveMessage("Saved offline — will sync on next refresh")
   }
 
-  /// Replays offline captures oldest-first. A transport failure ends the pass
-  /// (still offline); a server rejection is kept and surfaced so the entry
-  /// can be reviewed or discarded rather than silently lost.
-  func syncOutbox() async {
+  /// Replays offline captures oldest-first, returning how many synced. Only
+  /// captures made against the current connection are attempted, and only a
+  /// manual pass retries entries the server has already rejected once. The
+  /// queue is persisted after every state change so a kill mid-pass cannot
+  /// replay an already-synced capture. A transport failure ends the pass.
+  @discardableResult
+  func syncOutbox(manual: Bool = false) async -> Int {
     guard !pendingTransactions.isEmpty, !isSyncingOutbox else {
-      return
+      return 0
     }
     isSyncingOutbox = true
     defer { isSyncingOutbox = false }
 
     var syncedCount = 0
     for item in pendingTransactions {
+      guard item.connectionFingerprint == settings.connectionFingerprint else {
+        continue
+      }
+      guard manual || item.lastSyncError == nil else {
+        continue
+      }
       do {
         let saved = try await apiClient.createTransaction(planID: settings.planID, request: item.request)
         pendingTransactions.removeAll { $0.id == item.id }
-        transactions.insert(saved, at: 0)
+        OutboxStore.save(pendingTransactions)
+        if !transactions.contains(where: { $0.id == saved.id }) {
+          transactions.insert(saved, at: 0)
+        }
         syncedCount += 1
       } catch let error where error.isOfflineError {
         break
       } catch {
         markSyncError(error.localizedDescription, for: item.id)
+        OutboxStore.save(pendingTransactions)
       }
     }
-    OutboxStore.save(pendingTransactions)
     if syncedCount > 0 {
       transactions.sort { ($0.date, $0.id) > ($1.date, $1.id) }
-      showSaveMessage(syncedCount == 1 ? "Synced 1 offline expense" : "Synced \(syncedCount) offline expenses")
+      showSaveMessage(syncedCount == 1 ? "Synced 1 offline transaction" : "Synced \(syncedCount) offline transactions")
+    } else if manual, !pendingTransactions.isEmpty {
+      showSaveMessage("Couldn’t sync — will retry on the next refresh")
     }
+    return syncedCount
   }
 
   func discardPending(_ item: PendingTransaction) {

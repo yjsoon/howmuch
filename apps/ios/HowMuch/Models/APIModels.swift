@@ -496,17 +496,21 @@ struct TransactionWriteRequest: Codable, Equatable {
 }
 
 /// A capture made while the server was unreachable, waiting to be replayed.
-/// Kept as the exact write request so the sync sends what the user saved.
+/// Kept as the exact write request so the sync sends what the user saved,
+/// stamped with the connection it was captured against so a later change of
+/// server or plan cannot replay it somewhere it does not belong.
 struct PendingTransaction: Codable, Equatable, Identifiable {
   let id: UUID
   let request: TransactionWriteRequest
+  let connectionFingerprint: String
   let capturedAt: Date
   /// Last non-transport failure from a sync attempt, e.g. a server rejection.
   var lastSyncError: String?
 
-  init(request: TransactionWriteRequest, capturedAt: Date = .now) {
+  init(request: TransactionWriteRequest, connectionFingerprint: String, capturedAt: Date = .now) {
     id = UUID()
     self.request = request
+    self.connectionFingerprint = connectionFingerprint
     self.capturedAt = capturedAt
   }
 }

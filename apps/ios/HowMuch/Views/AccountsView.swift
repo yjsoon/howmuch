@@ -125,25 +125,31 @@ struct AccountsView: View {
   /// Offline captures waiting to reach the server, with retry and discard.
   private struct OutboxCard: View {
     @Environment(AppModel.self) private var model
-    @State private var isSyncing = false
+    @State private var pendingDiscard: PendingTransaction?
 
     var body: some View {
       VStack(spacing: 0) {
         HStack(spacing: 8) {
           Image(systemName: "wifi.slash")
             .foregroundStyle(.secondary)
-          Text(title)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Theme.textPrimary)
+          VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(Theme.textPrimary)
+            Text("Shown here until synced")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
           Spacer()
           Button {
-            isSyncing = true
             Task {
-              await model.syncOutbox()
-              isSyncing = false
+              if await model.syncOutbox(manual: true) > 0 {
+                // Bring the balances under this card back in line.
+                await model.refreshAll(quiet: true)
+              }
             }
           } label: {
-            if isSyncing {
+            if model.isSyncingOutbox {
               ProgressView()
             } else {
               Text("Sync Now")
@@ -151,7 +157,7 @@ struct AccountsView: View {
             }
           }
           .tint(Theme.accent)
-          .disabled(isSyncing)
+          .disabled(model.isSyncingOutbox)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -162,11 +168,32 @@ struct AccountsView: View {
         }
       }
       .ynabCard()
+      .confirmationDialog(
+        "Discard this offline transaction? It hasn’t reached the server.",
+        isPresented: isConfirmingDiscard,
+        titleVisibility: .visible,
+        presenting: pendingDiscard
+      ) { item in
+        Button("Discard Transaction", role: .destructive) {
+          model.discardPending(item)
+        }
+      }
+    }
+
+    private var isConfirmingDiscard: Binding<Bool> {
+      Binding(
+        get: { pendingDiscard != nil },
+        set: { isPresented in
+          if !isPresented {
+            pendingDiscard = nil
+          }
+        }
+      )
     }
 
     private var title: String {
       let count = model.pendingTransactions.count
-      return count == 1 ? "1 expense waiting to sync" : "\(count) expenses waiting to sync"
+      return count == 1 ? "1 transaction waiting to sync" : "\(count) transactions waiting to sync"
     }
 
     private func pendingRow(_ item: PendingTransaction) -> some View {
@@ -178,7 +205,11 @@ struct AccountsView: View {
           Text(LedgerDate.friendlyString(fromISO: item.request.date))
             .font(.footnote)
             .foregroundStyle(.secondary)
-          if let error = item.lastSyncError {
+          if item.connectionFingerprint != model.settings.connectionFingerprint {
+            Text("Captured against a different connection")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+          } else if let error = item.lastSyncError {
             Text(error)
               .font(.footnote)
               .foregroundStyle(Theme.outflow)
@@ -190,18 +221,18 @@ struct AccountsView: View {
           .monospacedDigit()
           .foregroundStyle(Theme.registerAmountColour(item.request.amount))
         Button {
-          model.discardPending(item)
+          pendingDiscard = item
         } label: {
           Image(systemName: "trash")
             .font(.footnote)
             .foregroundStyle(.secondary)
-            .padding(6)
+            .frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Discard offline expense")
+        .accessibilityLabel("Discard \(item.request.payeeName ?? "offline transaction")")
       }
       .padding(.horizontal, 16)
-      .padding(.vertical, 10)
+      .padding(.vertical, 6)
     }
   }
 
