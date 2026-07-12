@@ -5,9 +5,13 @@ struct PayeePickerView: View {
   @Environment(\.dismiss) private var dismiss
   @Binding var draft: TransactionDraft
   @State private var searchText = ""
-  @FocusState private var isSearchFocused: Bool
+  /// Arriving with search already presented focuses the field declaratively —
+  /// typing is the primary gesture here, and an imperative focus request
+  /// would race the navigation push.
+  @State private var isSearchPresented = true
 
   var body: some View {
+    let recents = recentPayees
     List {
       if !trimmedSearch.isEmpty, !hasExactMatch {
         Button {
@@ -21,9 +25,9 @@ struct PayeePickerView: View {
         }
       }
 
-      if !recentPayees.isEmpty {
+      if !recents.isEmpty {
         Section("Recent") {
-          ForEach(recentPayees) { payee in
+          ForEach(recents) { payee in
             payeeRow(payee)
           }
         }
@@ -48,14 +52,14 @@ struct PayeePickerView: View {
     .listStyle(.insetGrouped)
     .scrollContentBackground(.hidden)
     .background(Theme.canvas)
-    .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search or add a payee")
-    .searchFocused($isSearchFocused)
+    .searchable(
+      text: $searchText,
+      isPresented: $isSearchPresented,
+      placement: .navigationBarDrawer(displayMode: .always),
+      prompt: "Search or add a payee"
+    )
     .navigationTitle("Payee")
     .navigationBarTitleDisplayMode(.inline)
-    .task {
-      // Typing is the primary gesture here; save the tap on the field.
-      isSearchFocused = true
-    }
   }
 
   /// The payees most recently used in the ledger — most expenses repeat, so
