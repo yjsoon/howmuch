@@ -71,6 +71,13 @@ struct AmountKeypadEngine: Equatable {
     return entry
   }
 
+  /// The value commitValue() would produce, without mutating state — so a
+  /// key's label and its action can agree before the commit happens.
+  var committedValue: Int {
+    var copy = self
+    return copy.commitValue()
+  }
+
   private mutating func evaluate() {
     guard let acc = accumulator, let op = pendingOp else {
       return
@@ -114,6 +121,25 @@ struct TransactionEditorSheet: View {
   }
 }
 
+/// What the keypad's confirm key does next: collapse the keypad, continue to
+/// the payee picker, or save outright — one downhill path from amount to done.
+enum KeypadPrimaryAction {
+  case done
+  case next
+  case save
+
+  var title: String {
+    switch self {
+    case .done:
+      return "done"
+    case .next:
+      return "next"
+    case .save:
+      return "save"
+    }
+  }
+}
+
 struct TransactionFormView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
@@ -123,6 +149,7 @@ struct TransactionFormView: View {
   @State private var isKeypadVisible: Bool
   @State private var errorMessage: String?
   @State private var isConfirmingDelete = false
+  @State private var isAutoAdvancingToPayee = false
   private let isEditing: Bool
 
   // Plain stored properties before @State, assigned as wrapped values: the
@@ -181,10 +208,25 @@ struct TransactionFormView: View {
         if isKeypadVisible {
           CalculatorKeypad(
             engine: $keypad,
-            onDone: {
+            primaryAction: keypadPrimaryAction,
+            onPrimary: {
+              // The first tap hides the keypad synchronously, so a fast
+              // double-tap cannot run the action (and a save) twice.
+              guard isKeypadVisible else {
+                return
+              }
+              let action = keypadPrimaryAction
               draft.amountMagnitudeMilli = keypad.commitValue()
               withAnimation(.snappy) {
                 isKeypadVisible = false
+              }
+              switch action {
+              case .done:
+                break
+              case .next:
+                isAutoAdvancingToPayee = true
+              case .save:
+                save()
               }
             }
           )
@@ -192,6 +234,9 @@ struct TransactionFormView: View {
         }
       }
       .background(Theme.canvas)
+      .navigationDestination(isPresented: $isAutoAdvancingToPayee) {
+        PayeePickerView(draft: $draft)
+      }
       .navigationTitle(isEditing ? "Transaction" : "Add Transaction")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -217,6 +262,24 @@ struct TransactionFormView: View {
         draft.amountMagnitudeMilli = keypad.display
       }
     }
+  }
+
+  /// A fresh capture without a payee flows straight to the payee picker; a
+  /// draft that is ready to go saves outright; otherwise just collapse.
+  /// Judged on the committed value, so the label always matches what the tap
+  /// will do once any pending arithmetic resolves.
+  private var keypadPrimaryAction: KeypadPrimaryAction {
+    guard !draft.accountID.isEmpty, keypad.committedValue > 0 else {
+      return .done
+    }
+    if !isEditing, !draft.isSplit, !hasPayee {
+      return .next
+    }
+    return .save
+  }
+
+  private var hasPayee: Bool {
+    draft.payeeID != nil || !draft.payeeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
   private var amountHeader: some View {
@@ -478,6 +541,9 @@ struct TransactionFormView: View {
   }
 
   private func save() {
+    guard !model.isSubmitting else {
+      return
+    }
     draft.amountMagnitudeMilli = keypad.commitValue()
     if hidesCategory {
       // The row is hidden, so a category left over from an earlier account
@@ -513,7 +579,8 @@ struct TransactionFormView: View {
 
 struct CalculatorKeypad: View {
   @Binding var engine: AmountKeypadEngine
-  let onDone: () -> Void
+  let primaryAction: KeypadPrimaryAction
+  let onPrimary: () -> Void
 
   var body: some View {
     VStack(spacing: 4) {
@@ -533,7 +600,7 @@ struct CalculatorKeypad: View {
         symbolKey("xmark.circle.fill", colour: .secondary) { engine.tapClear() }
         digitKey(0)
         symbolKey("delete.left") { engine.tapBackspace() }
-        doneKey
+        primaryKey
       }
     }
     .padding(10)
@@ -568,9 +635,9 @@ struct CalculatorKeypad: View {
     }
   }
 
-  private var doneKey: some View {
-    Button(action: onDone) {
-      Text("done")
+  private var primaryKey: some View {
+    Button(action: onPrimary) {
+      Text(primaryAction.title)
         .font(.headline)
         .foregroundStyle(.white)
         .frame(maxWidth: .infinity)
