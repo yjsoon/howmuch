@@ -71,6 +71,13 @@ struct AmountKeypadEngine: Equatable {
     return entry
   }
 
+  /// The value commitValue() would produce, without mutating state — so a
+  /// key's label and its action can agree before the commit happens.
+  var committedValue: Int {
+    var copy = self
+    return copy.commitValue()
+  }
+
   private mutating func evaluate() {
     guard let acc = accumulator, let op = pendingOp else {
       return
@@ -116,7 +123,7 @@ struct TransactionEditorSheet: View {
 
 /// What the keypad's confirm key does next: collapse the keypad, continue to
 /// the payee picker, or save outright — one downhill path from amount to done.
-enum KeypadPrimaryAction: Equatable {
+enum KeypadPrimaryAction {
   case done
   case next
   case save
@@ -201,13 +208,17 @@ struct TransactionFormView: View {
             engine: $keypad,
             primaryAction: keypadPrimaryAction,
             onPrimary: {
+              // The first tap hides the keypad synchronously, so a fast
+              // double-tap cannot run the action (and a save) twice.
+              guard isKeypadVisible else {
+                return
+              }
+              let action = keypadPrimaryAction
               draft.amountMagnitudeMilli = keypad.commitValue()
               withAnimation(.snappy) {
                 isKeypadVisible = false
               }
-              // Re-read the action after committing: a pending calculation
-              // can change the amount (e.g. to zero) and with it the step.
-              switch keypadPrimaryAction {
+              switch action {
               case .done:
                 break
               case .next:
@@ -253,14 +264,16 @@ struct TransactionFormView: View {
 
   /// A fresh capture without a payee flows straight to the payee picker; a
   /// draft that is ready to go saves outright; otherwise just collapse.
+  /// Judged on the committed value, so the label always matches what the tap
+  /// will do once any pending arithmetic resolves.
   private var keypadPrimaryAction: KeypadPrimaryAction {
-    if !isEditing, !draft.isSplit, !hasPayee, keypad.display > 0 {
+    guard !draft.accountID.isEmpty, keypad.committedValue > 0 else {
+      return .done
+    }
+    if !isEditing, !draft.isSplit, !hasPayee {
       return .next
     }
-    if draft.canSave {
-      return .save
-    }
-    return .done
+    return .save
   }
 
   private var hasPayee: Bool {
@@ -526,6 +539,9 @@ struct TransactionFormView: View {
   }
 
   private func save() {
+    guard !model.isSubmitting else {
+      return
+    }
     draft.amountMagnitudeMilli = keypad.commitValue()
     if hidesCategory {
       // The row is hidden, so a category left over from an earlier account
