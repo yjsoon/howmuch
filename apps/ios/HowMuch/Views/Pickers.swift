@@ -5,8 +5,13 @@ struct PayeePickerView: View {
   @Environment(\.dismiss) private var dismiss
   @Binding var draft: TransactionDraft
   @State private var searchText = ""
+  /// Arriving with search already presented focuses the field declaratively —
+  /// typing is the primary gesture here, and an imperative focus request
+  /// would race the navigation push.
+  @State private var isSearchPresented = true
 
   var body: some View {
+    let recents = recentPayees
     List {
       if !trimmedSearch.isEmpty, !hasExactMatch {
         Button {
@@ -17,6 +22,14 @@ struct PayeePickerView: View {
         } label: {
           Label("Create payee “\(trimmedSearch)”", systemImage: "plus.circle.fill")
             .foregroundStyle(Theme.accent)
+        }
+      }
+
+      if !recents.isEmpty {
+        Section("Recent") {
+          ForEach(recents) { payee in
+            payeeRow(payee)
+          }
         }
       }
 
@@ -39,9 +52,40 @@ struct PayeePickerView: View {
     .listStyle(.insetGrouped)
     .scrollContentBackground(.hidden)
     .background(Theme.canvas)
-    .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search or add a payee")
+    .searchable(
+      text: $searchText,
+      isPresented: $isSearchPresented,
+      placement: .navigationBarDrawer(displayMode: .always),
+      prompt: "Search or add a payee"
+    )
     .navigationTitle("Payee")
     .navigationBarTitleDisplayMode(.inline)
+  }
+
+  /// The payees most recently used in the ledger — most expenses repeat, so
+  /// the last few merchants outrank the alphabet. Hidden while searching.
+  private var recentPayees: [Payee] {
+    guard trimmedSearch.isEmpty else {
+      return []
+    }
+    let payeesByID = Dictionary(model.payees.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    var seen = Set<String>()
+    var recents: [Payee] = []
+    for transaction in model.transactions {
+      guard
+        let payeeID = transaction.payeeID,
+        seen.insert(payeeID).inserted,
+        let payee = payeesByID[payeeID],
+        !payee.isTransferPayee
+      else {
+        continue
+      }
+      recents.append(payee)
+      if recents.count == 6 {
+        break
+      }
+    }
+    return recents
   }
 
   private func payeeRow(_ payee: Payee) -> some View {

@@ -9,6 +9,12 @@ struct AccountsView: View {
       VStack(alignment: .leading, spacing: 16) {
         ScreenTitle("Accounts")
 
+        // Offline captures outrank everything else here: they are the user's
+        // money data that has not reached the server yet.
+        if !model.pendingTransactions.isEmpty {
+          OutboxCard()
+        }
+
         if model.accounts.isEmpty, model.referencePhase != .loaded {
           PhasePlaceholder(phase: model.referencePhase) {
             await model.refreshReferenceData()
@@ -113,6 +119,120 @@ struct AccountsView: View {
         }
         .ynabCard()
       }
+    }
+  }
+
+  /// Offline captures waiting to reach the server, with retry and discard.
+  private struct OutboxCard: View {
+    @Environment(AppModel.self) private var model
+    @State private var pendingDiscard: PendingTransaction?
+
+    var body: some View {
+      VStack(spacing: 0) {
+        HStack(spacing: 8) {
+          Image(systemName: "wifi.slash")
+            .foregroundStyle(.secondary)
+          VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(Theme.textPrimary)
+            Text("Shown here until synced")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          Spacer()
+          Button {
+            Task {
+              if await model.syncOutbox(manual: true) > 0 {
+                // Bring the balances under this card back in line.
+                await model.refreshAll(quiet: true)
+              }
+            }
+          } label: {
+            if model.isSyncingOutbox {
+              ProgressView()
+            } else {
+              Text("Sync Now")
+                .font(.subheadline.weight(.semibold))
+            }
+          }
+          .tint(Theme.accent)
+          .disabled(model.isSyncingOutbox)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+
+        ForEach(model.pendingTransactions) { item in
+          Divider().padding(.leading, 16)
+          pendingRow(item)
+        }
+      }
+      .ynabCard()
+      .confirmationDialog(
+        "Discard this offline transaction? It hasn’t reached the server.",
+        isPresented: isConfirmingDiscard,
+        titleVisibility: .visible,
+        presenting: pendingDiscard
+      ) { item in
+        Button("Discard Transaction", role: .destructive) {
+          model.discardPending(item)
+        }
+      }
+    }
+
+    private var isConfirmingDiscard: Binding<Bool> {
+      Binding(
+        get: { pendingDiscard != nil },
+        set: { isPresented in
+          if !isPresented {
+            pendingDiscard = nil
+          }
+        }
+      )
+    }
+
+    private var title: String {
+      let count = model.pendingTransactions.count
+      return count == 1 ? "1 transaction waiting to sync" : "\(count) transactions waiting to sync"
+    }
+
+    private func pendingRow(_ item: PendingTransaction) -> some View {
+      HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 2) {
+          Text(item.request.payeeName ?? "Transaction")
+            .foregroundStyle(Theme.textPrimary)
+            .lineLimit(1)
+          Text(LedgerDate.friendlyString(fromISO: item.request.date))
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+          if item.connectionFingerprint != model.settings.connectionFingerprint {
+            Text("Captured against a different connection")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+          } else if let error = item.lastSyncError {
+            Text(error)
+              .font(.footnote)
+              .foregroundStyle(Theme.outflow)
+              .lineLimit(2)
+          }
+        }
+        Spacer()
+        Text(MoneyCodec.signedDisplayString(for: item.request.amount, currencyFormat: model.currencyFormat))
+          .monospacedDigit()
+          .foregroundStyle(Theme.registerAmountColour(item.request.amount))
+        Button {
+          pendingDiscard = item
+        } label: {
+          Image(systemName: "trash")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Discard \(item.request.payeeName ?? "offline transaction")")
+      }
+      .padding(.horizontal, 16)
+      .padding(.vertical, 6)
     }
   }
 

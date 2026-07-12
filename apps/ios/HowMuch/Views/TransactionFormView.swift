@@ -160,7 +160,9 @@ struct TransactionFormView: View {
     engine.setValue(draft.amountMagnitudeMilli)
     self.draft = draft
     self.keypad = engine
-    self.isKeypadVisible = !isEditing
+    // A duplicate arrives with its amount prefilled; opening the keypad over
+    // it would just cost taps on the way to Save.
+    self.isKeypadVisible = !isEditing && draft.amountMagnitudeMilli == 0
   }
 
   var body: some View {

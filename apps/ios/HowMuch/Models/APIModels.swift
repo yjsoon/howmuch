@@ -454,7 +454,8 @@ struct TransactionWriteEnvelope: Encodable {
 
 /// Create/update body. Encodes optional fields as explicit nulls so an update
 /// can clear them — the API treats omitted keys as "keep existing".
-struct TransactionWriteRequest: Encodable {
+/// Decodable too, so offline captures can be persisted and replayed.
+struct TransactionWriteRequest: Codable, Equatable {
   let accountID: String
   let date: String
   let amount: Int
@@ -491,6 +492,49 @@ struct TransactionWriteRequest: Encodable {
     try container.encode(cleared, forKey: .cleared)
     try container.encode(approved, forKey: .approved)
     try container.encode(flagColor, forKey: .flagColor)
+  }
+}
+
+/// A capture made while the server was unreachable, waiting to be replayed.
+/// Kept as the exact write request so the sync sends what the user saved,
+/// stamped with the connection it was captured against so a later change of
+/// server or plan cannot replay it somewhere it does not belong.
+struct PendingTransaction: Codable, Equatable, Identifiable {
+  let id: UUID
+  let request: TransactionWriteRequest
+  let connectionFingerprint: String
+  let capturedAt: Date
+  /// Last non-transport failure from a sync attempt, e.g. a server rejection.
+  var lastSyncError: String?
+
+  init(request: TransactionWriteRequest, connectionFingerprint: String, capturedAt: Date = .now) {
+    id = UUID()
+    self.request = request
+    self.connectionFingerprint = connectionFingerprint
+    self.capturedAt = capturedAt
+  }
+}
+
+/// Persists the offline queue like the connection settings, so captures
+/// survive relaunches until they reach the server.
+enum OutboxStore {
+  static let userDefaultsKey = "HowMuch.Outbox"
+
+  static func load(from defaults: UserDefaults = .standard) -> [PendingTransaction] {
+    guard
+      let data = defaults.data(forKey: userDefaultsKey),
+      let decoded = try? JSONDecoder().decode([PendingTransaction].self, from: data)
+    else {
+      return []
+    }
+    return decoded
+  }
+
+  static func save(_ pending: [PendingTransaction], to defaults: UserDefaults = .standard) {
+    guard let data = try? JSONEncoder().encode(pending) else {
+      return
+    }
+    defaults.set(data, forKey: userDefaultsKey)
   }
 }
 
@@ -547,6 +591,22 @@ struct TransactionDraft: Equatable {
     date = Date(isoDateString: transaction.date) ?? .now
     isCleared = transaction.cleared != .uncleared
     wasReconciled = transaction.cleared == .reconciled
+    flag = FlagColour(rawValue: transaction.flagColor ?? "") ?? .none
+    memo = transaction.memo ?? ""
+  }
+
+  /// A fresh draft copying an existing transaction's details, dated today and
+  /// uncleared — the "same coffee again" shortcut. Splits are not duplicated:
+  /// the app's write request carries no subtransactions, so a split's copy
+  /// would silently flatten to its total.
+  init(duplicating transaction: Transaction) {
+    direction = transaction.amount < 0 ? .outflow : .inflow
+    amountMagnitudeMilli = abs(transaction.amount)
+    payeeID = transaction.payeeID
+    payeeName = transaction.payeeName ?? ""
+    accountID = transaction.accountID
+    categoryID = transaction.categoryID
+    transferAccountID = transaction.transferAccountID
     flag = FlagColour(rawValue: transaction.flagColor ?? "") ?? .none
     memo = transaction.memo ?? ""
   }
