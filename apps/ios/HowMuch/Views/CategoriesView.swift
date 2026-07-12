@@ -33,7 +33,7 @@ struct CategoriesView: View {
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
                 .contentTransition(.numericText(value: Double(abs(report?.total ?? 0))))
-                .animation(.snappy, value: report?.total)
+                .animation(.snappy, value: abs(report?.total ?? 0))
                 .foregroundStyle(Theme.textPrimary)
             }
           }
