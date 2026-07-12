@@ -5,6 +5,7 @@ struct PayeePickerView: View {
   @Environment(\.dismiss) private var dismiss
   @Binding var draft: TransactionDraft
   @State private var searchText = ""
+  @FocusState private var isSearchFocused: Bool
 
   var body: some View {
     List {
@@ -17,6 +18,14 @@ struct PayeePickerView: View {
         } label: {
           Label("Create payee “\(trimmedSearch)”", systemImage: "plus.circle.fill")
             .foregroundStyle(Theme.accent)
+        }
+      }
+
+      if !recentPayees.isEmpty {
+        Section("Recent") {
+          ForEach(recentPayees) { payee in
+            payeeRow(payee)
+          }
         }
       }
 
@@ -40,8 +49,39 @@ struct PayeePickerView: View {
     .scrollContentBackground(.hidden)
     .background(Theme.canvas)
     .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search or add a payee")
+    .searchFocused($isSearchFocused)
     .navigationTitle("Payee")
     .navigationBarTitleDisplayMode(.inline)
+    .task {
+      // Typing is the primary gesture here; save the tap on the field.
+      isSearchFocused = true
+    }
+  }
+
+  /// The payees most recently used in the ledger — most expenses repeat, so
+  /// the last few merchants outrank the alphabet. Hidden while searching.
+  private var recentPayees: [Payee] {
+    guard trimmedSearch.isEmpty else {
+      return []
+    }
+    let payeesByID = Dictionary(model.payees.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    var seen = Set<String>()
+    var recents: [Payee] = []
+    for transaction in model.transactions {
+      guard
+        let payeeID = transaction.payeeID,
+        seen.insert(payeeID).inserted,
+        let payee = payeesByID[payeeID],
+        !payee.isTransferPayee
+      else {
+        continue
+      }
+      recents.append(payee)
+      if recents.count == 6 {
+        break
+      }
+    }
+    return recents
   }
 
   private func payeeRow(_ payee: Payee) -> some View {
