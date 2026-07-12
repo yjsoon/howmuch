@@ -42,6 +42,9 @@ final class AppModel {
   var lastSaveMessage: String?
   var isShowingSettings = false
   var isShowingCapture = false
+  /// Captures made while the server was unreachable, oldest first.
+  var pendingTransactions: [PendingTransaction] = OutboxStore.load()
+  private var isSyncingOutbox = false
   private var viewPrefs: ViewPrefs
   private var saveMessageToken = 0
 
@@ -124,6 +127,8 @@ final class AppModel {
   }
 
   func refreshAll(quiet: Bool = false) async {
+    // Replay offline captures first so the ledger fetch below includes them.
+    await syncOutbox()
     async let reference: Void = refreshReferenceData(quiet: quiet)
     async let ledger: Void = refreshLedger(quiet: quiet)
     async let reports: Void = refreshReflectOverview(quiet: quiet)
@@ -193,8 +198,11 @@ final class AppModel {
     }
   }
 
+  /// Returns the saved transaction, or nil when the capture was queued
+  /// offline. Edits are never queued: replaying a stale update could clobber
+  /// changes made from elsewhere while this device was offline.
   @discardableResult
-  func saveTransaction(_ draft: TransactionDraft) async throws -> Transaction {
+  func saveTransaction(_ draft: TransactionDraft) async throws -> Transaction? {
     isSubmitting = true
     defer { isSubmitting = false }
 
@@ -210,7 +218,12 @@ final class AppModel {
         transactions[index] = saved
       }
     } else {
-      saved = try await apiClient.createTransaction(planID: settings.planID, request: request)
+      do {
+        saved = try await apiClient.createTransaction(planID: settings.planID, request: request)
+      } catch let error where error.isOfflineError {
+        queueOfflineCapture(request)
+        return nil
+      }
       transactions.insert(saved, at: 0)
     }
     transactions.sort { ($0.date, $0.id) > ($1.date, $1.id) }
@@ -220,6 +233,57 @@ final class AppModel {
     showSaveMessage("Saved \(MoneyCodec.displayString(for: saved.amount, currencyFormat: currencyFormat)) — \(saved.payeeName ?? "transaction")")
     Task { await refreshAll(quiet: true) }
     return saved
+  }
+
+  /// The server never saw this capture; keep it locally and replay it once a
+  /// refresh reaches the server again.
+  private func queueOfflineCapture(_ request: TransactionWriteRequest) {
+    pendingTransactions.append(PendingTransaction(request: request))
+    OutboxStore.save(pendingTransactions)
+    viewPrefs.lastUsedAccountID = request.accountID
+    viewPrefs.save()
+    showSaveMessage("Saved offline — will sync when connected")
+  }
+
+  /// Replays offline captures oldest-first. A transport failure ends the pass
+  /// (still offline); a server rejection is kept and surfaced so the entry
+  /// can be reviewed or discarded rather than silently lost.
+  func syncOutbox() async {
+    guard !pendingTransactions.isEmpty, !isSyncingOutbox else {
+      return
+    }
+    isSyncingOutbox = true
+    defer { isSyncingOutbox = false }
+
+    var syncedCount = 0
+    for item in pendingTransactions {
+      do {
+        let saved = try await apiClient.createTransaction(planID: settings.planID, request: item.request)
+        pendingTransactions.removeAll { $0.id == item.id }
+        transactions.insert(saved, at: 0)
+        syncedCount += 1
+      } catch let error where error.isOfflineError {
+        break
+      } catch {
+        markSyncError(error.localizedDescription, for: item.id)
+      }
+    }
+    OutboxStore.save(pendingTransactions)
+    if syncedCount > 0 {
+      transactions.sort { ($0.date, $0.id) > ($1.date, $1.id) }
+      showSaveMessage(syncedCount == 1 ? "Synced 1 offline expense" : "Synced \(syncedCount) offline expenses")
+    }
+  }
+
+  func discardPending(_ item: PendingTransaction) {
+    pendingTransactions.removeAll { $0.id == item.id }
+    OutboxStore.save(pendingTransactions)
+  }
+
+  private func markSyncError(_ message: String, for id: UUID) {
+    if let index = pendingTransactions.firstIndex(where: { $0.id == id }) {
+      pendingTransactions[index].lastSyncError = message
+    }
   }
 
   func deleteTransaction(_ transaction: Transaction) async throws {

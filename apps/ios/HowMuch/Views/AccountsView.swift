@@ -9,6 +9,12 @@ struct AccountsView: View {
       VStack(alignment: .leading, spacing: 16) {
         ScreenTitle("Accounts")
 
+        // Offline captures outrank everything else here: they are the user's
+        // money data that has not reached the server yet.
+        if !model.pendingTransactions.isEmpty {
+          OutboxCard()
+        }
+
         if model.accounts.isEmpty, model.referencePhase != .loaded {
           PhasePlaceholder(phase: model.referencePhase) {
             await model.refreshReferenceData()
@@ -113,6 +119,89 @@ struct AccountsView: View {
         }
         .ynabCard()
       }
+    }
+  }
+
+  /// Offline captures waiting to reach the server, with retry and discard.
+  private struct OutboxCard: View {
+    @Environment(AppModel.self) private var model
+    @State private var isSyncing = false
+
+    var body: some View {
+      VStack(spacing: 0) {
+        HStack(spacing: 8) {
+          Image(systemName: "wifi.slash")
+            .foregroundStyle(.secondary)
+          Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Theme.textPrimary)
+          Spacer()
+          Button {
+            isSyncing = true
+            Task {
+              await model.syncOutbox()
+              isSyncing = false
+            }
+          } label: {
+            if isSyncing {
+              ProgressView()
+            } else {
+              Text("Sync Now")
+                .font(.subheadline.weight(.semibold))
+            }
+          }
+          .tint(Theme.accent)
+          .disabled(isSyncing)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+
+        ForEach(model.pendingTransactions) { item in
+          Divider().padding(.leading, 16)
+          pendingRow(item)
+        }
+      }
+      .ynabCard()
+    }
+
+    private var title: String {
+      let count = model.pendingTransactions.count
+      return count == 1 ? "1 expense waiting to sync" : "\(count) expenses waiting to sync"
+    }
+
+    private func pendingRow(_ item: PendingTransaction) -> some View {
+      HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 2) {
+          Text(item.request.payeeName ?? "Transaction")
+            .foregroundStyle(Theme.textPrimary)
+            .lineLimit(1)
+          Text(LedgerDate.friendlyString(fromISO: item.request.date))
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+          if let error = item.lastSyncError {
+            Text(error)
+              .font(.footnote)
+              .foregroundStyle(Theme.outflow)
+              .lineLimit(2)
+          }
+        }
+        Spacer()
+        Text(MoneyCodec.signedDisplayString(for: item.request.amount, currencyFormat: model.currencyFormat))
+          .monospacedDigit()
+          .foregroundStyle(Theme.registerAmountColour(item.request.amount))
+        Button {
+          model.discardPending(item)
+        } label: {
+          Image(systemName: "trash")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .padding(6)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Discard offline expense")
+      }
+      .padding(.horizontal, 16)
+      .padding(.vertical, 10)
     }
   }
 

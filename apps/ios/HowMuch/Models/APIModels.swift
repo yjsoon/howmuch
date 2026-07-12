@@ -454,7 +454,8 @@ struct TransactionWriteEnvelope: Encodable {
 
 /// Create/update body. Encodes optional fields as explicit nulls so an update
 /// can clear them — the API treats omitted keys as "keep existing".
-struct TransactionWriteRequest: Encodable {
+/// Decodable too, so offline captures can be persisted and replayed.
+struct TransactionWriteRequest: Codable, Equatable {
   let accountID: String
   let date: String
   let amount: Int
@@ -491,6 +492,45 @@ struct TransactionWriteRequest: Encodable {
     try container.encode(cleared, forKey: .cleared)
     try container.encode(approved, forKey: .approved)
     try container.encode(flagColor, forKey: .flagColor)
+  }
+}
+
+/// A capture made while the server was unreachable, waiting to be replayed.
+/// Kept as the exact write request so the sync sends what the user saved.
+struct PendingTransaction: Codable, Equatable, Identifiable {
+  let id: UUID
+  let request: TransactionWriteRequest
+  let capturedAt: Date
+  /// Last non-transport failure from a sync attempt, e.g. a server rejection.
+  var lastSyncError: String?
+
+  init(request: TransactionWriteRequest, capturedAt: Date = .now) {
+    id = UUID()
+    self.request = request
+    self.capturedAt = capturedAt
+  }
+}
+
+/// Persists the offline queue like the connection settings, so captures
+/// survive relaunches until they reach the server.
+enum OutboxStore {
+  static let userDefaultsKey = "HowMuch.Outbox"
+
+  static func load(from defaults: UserDefaults = .standard) -> [PendingTransaction] {
+    guard
+      let data = defaults.data(forKey: userDefaultsKey),
+      let decoded = try? JSONDecoder().decode([PendingTransaction].self, from: data)
+    else {
+      return []
+    }
+    return decoded
+  }
+
+  static func save(_ pending: [PendingTransaction], to defaults: UserDefaults = .standard) {
+    guard let data = try? JSONEncoder().encode(pending) else {
+      return
+    }
+    defaults.set(data, forKey: userDefaultsKey)
   }
 }
 

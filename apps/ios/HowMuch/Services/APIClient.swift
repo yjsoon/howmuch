@@ -264,3 +264,22 @@ struct APIClient {
     return encoder
   }
 }
+
+extension Error {
+  /// Transport-level failures where the server was never reached — the cases
+  /// worth queueing a capture for, as opposed to a server rejection, which
+  /// must surface to the user instead of being retried blindly.
+  var isOfflineError: Bool {
+    guard let urlError = self as? URLError else {
+      return false
+    }
+    switch urlError.code {
+    case .notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost,
+         .cannotFindHost, .dnsLookupFailed, .timedOut, .dataNotAllowed,
+         .internationalRoamingOff:
+      return true
+    default:
+      return false
+    }
+  }
+}
