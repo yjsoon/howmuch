@@ -595,6 +595,22 @@ struct TransactionDraft: Equatable {
     memo = transaction.memo ?? ""
   }
 
+  /// A fresh draft copying an existing transaction's details, dated today and
+  /// uncleared — the "same coffee again" shortcut. Splits are not duplicated:
+  /// the app's write request carries no subtransactions, so a split's copy
+  /// would silently flatten to its total.
+  init(duplicating transaction: Transaction) {
+    direction = transaction.amount < 0 ? .outflow : .inflow
+    amountMagnitudeMilli = abs(transaction.amount)
+    payeeID = transaction.payeeID
+    payeeName = transaction.payeeName ?? ""
+    accountID = transaction.accountID
+    categoryID = transaction.categoryID
+    transferAccountID = transaction.transferAccountID
+    flag = FlagColour(rawValue: transaction.flagColor ?? "") ?? .none
+    memo = transaction.memo ?? ""
+  }
+
   var isTransfer: Bool {
     transferAccountID != nil
   }
