@@ -553,8 +553,8 @@ struct TransactionDraft: Equatable {
 
   /// A fresh draft copying an existing transaction's details, dated today and
   /// uncleared — the "same coffee again" shortcut. Splits are not duplicated:
-  /// the write API cannot create subtransactions, so a split's copy would
-  /// silently flatten to its total.
+  /// the app's write request carries no subtransactions, so a split's copy
+  /// would silently flatten to its total.
   init(duplicating transaction: Transaction) {
     direction = transaction.amount < 0 ? .outflow : .inflow
     amountMagnitudeMilli = abs(transaction.amount)

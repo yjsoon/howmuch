@@ -33,7 +33,8 @@ enum QuickAction {
         type: addExpenseType,
         localizedTitle: "Add Expense",
         localizedSubtitle: nil,
-        icon: UIApplicationShortcutIcon(systemImageName: "plus.circle.fill")
+        icon: UIApplicationShortcutIcon(type: .add),
+        userInfo: nil
       )
     ]
   }
@@ -42,7 +43,7 @@ enum QuickAction {
 final class AppDelegate: NSObject, UIApplicationDelegate {
   func application(
     _ application: UIApplication,
-    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     QuickAction.register()
     return true
@@ -155,19 +156,35 @@ private struct RootView: View {
       SettingsView(settings: model.settings) { nextSettings in
         await model.applySettings(nextSettings)
       }
+      // Runs once the dismissal has completed, so swapping to the capture
+      // sheet cannot race the settings sheet's teardown.
+      .onDisappear {
+        consumePendingCapture()
+      }
     }
     .sheet(isPresented: $model.isShowingCapture) {
       AddTransactionSheet()
     }
     .onAppear {
-      if QuickAction.pendingCapture {
-        QuickAction.pendingCapture = false
+      consumePendingCapture()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: QuickAction.notification)) { _ in
+      guard !model.isShowingCapture else {
+        return
+      }
+      if model.isShowingSettings {
+        // Dismiss settings first; its onDisappear picks the capture back up.
+        QuickAction.pendingCapture = true
+        model.isShowingSettings = false
+      } else {
         model.isShowingCapture = true
       }
     }
-    .onReceive(NotificationCenter.default.publisher(for: QuickAction.notification)) { _ in
-      // Warm launch: dismiss whatever sheet is up so capture can present.
-      model.isShowingSettings = false
+  }
+
+  private func consumePendingCapture() {
+    if QuickAction.pendingCapture {
+      QuickAction.pendingCapture = false
       model.isShowingCapture = true
     }
   }

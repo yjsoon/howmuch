@@ -111,7 +111,7 @@ struct RegisterView: View {
                   } label: {
                     Label("Edit", systemImage: "pencil")
                   }
-                  // Splits are not duplicated: the write API cannot create
+                  // Splits are not duplicated: the app's write request has no
                   // subtransactions, so the copy would flatten to its total.
                   if !transaction.isSplit {
                     Button {
