@@ -53,6 +53,8 @@ struct RegisterView: View {
             Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
               .font(.title2.weight(.bold))
               .monospacedDigit()
+              .contentTransition(.numericText(value: Double(account.balance)))
+              .animation(.snappy, value: account.balance)
               .foregroundStyle(Theme.amountColour(account.balance))
             Text("Working Balance")
               .font(.caption)

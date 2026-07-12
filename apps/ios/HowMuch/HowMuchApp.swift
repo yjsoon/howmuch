@@ -149,6 +149,11 @@ private struct RootView: View {
       }
     }
     .animation(.snappy, value: model.lastSaveMessage)
+    // A save (or delete) confirmation deserves a physical acknowledgement;
+    // the toast clearing itself three seconds later does not.
+    .sensoryFeedback(trigger: model.lastSaveMessage) { _, newValue in
+      newValue != nil ? .success : nil
+    }
     .task(id: model.settings.connectionFingerprint) {
       await model.refreshAll()
     }

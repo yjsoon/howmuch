@@ -32,6 +32,8 @@ struct CategoriesView: View {
               Text(MoneyCodec.displayString(for: abs(report?.total ?? 0), currencyFormat: model.currencyFormat))
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
+                .contentTransition(.numericText(value: Double(abs(report?.total ?? 0))))
+                .animation(.snappy, value: abs(report?.total ?? 0))
                 .foregroundStyle(Theme.textPrimary)
             }
           }

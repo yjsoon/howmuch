@@ -301,6 +301,8 @@ struct TransactionFormView: View {
         Text(amountDisplay)
           .font(.system(size: 40, weight: .bold))
           .monospacedDigit()
+          .contentTransition(.numericText(value: Double(displayedSignedAmount)))
+          .animation(.snappy, value: displayedSignedAmount)
           .foregroundStyle(draft.direction == .outflow ? Theme.outflow : Theme.textPrimary)
           .lineLimit(1)
           .minimumScaleFactor(0.5)
@@ -314,14 +316,20 @@ struct TransactionFormView: View {
       draft.direction == .inflow ? Theme.lime : Color.clear,
       in: RoundedRectangle(cornerRadius: 14, style: .continuous)
     )
+    .sensoryFeedback(.selection, trigger: draft.direction)
+  }
+
+  /// Signed milliunits behind the header, driving the rolling-digit motion.
+  private var displayedSignedAmount: Int {
+    let magnitude = isKeypadVisible ? keypad.display : draft.amountMagnitudeMilli
+    return draft.direction == .outflow ? -magnitude : magnitude
   }
 
   private var amountDisplay: String {
-    let magnitude = isKeypadVisible ? keypad.display : draft.amountMagnitudeMilli
-    let signed = draft.direction == .outflow ? -magnitude : magnitude
+    let signed = displayedSignedAmount
     let text = MoneyCodec.displayString(for: signed, currencyFormat: model.currencyFormat)
     // YNAB shows the minus even at zero while in outflow mode.
-    if draft.direction == .outflow, magnitude == 0 {
+    if draft.direction == .outflow, signed == 0 {
       return "−\(text)"
     }
     return text
@@ -582,6 +590,11 @@ struct CalculatorKeypad: View {
   let primaryAction: KeypadPrimaryAction
   let onPrimary: () -> Void
 
+  // Tap counters exist purely to trigger haptics: light ticks for digits,
+  // a firmer tap for operators and done, like a physical calculator.
+  @State private var digitTaps = 0
+  @State private var symbolTaps = 0
+
   var body: some View {
     VStack(spacing: 4) {
       keypadRow {
@@ -609,6 +622,8 @@ struct CalculatorKeypad: View {
     .glassEffect(.regular, in: .rect(cornerRadius: 28))
     .padding(.horizontal, 8)
     .padding(.bottom, 4)
+    .sensoryFeedback(.impact(weight: .light), trigger: digitTaps)
+    .sensoryFeedback(.impact(weight: .medium), trigger: symbolTaps)
   }
 
   private func keypadRow(@ViewBuilder content: () -> some View) -> some View {
@@ -619,6 +634,7 @@ struct CalculatorKeypad: View {
 
   private func digitKey(_ digit: Int) -> some View {
     key {
+      digitTaps += 1
       engine.tapDigit(digit)
     } label: {
       Text("\(digit)")
@@ -628,7 +644,10 @@ struct CalculatorKeypad: View {
   }
 
   private func symbolKey(_ systemName: String, colour: Color = Theme.accent, action: @escaping () -> Void) -> some View {
-    key(action: action) {
+    key {
+      symbolTaps += 1
+      action()
+    } label: {
       Image(systemName: systemName)
         .font(.title3.weight(.medium))
         .foregroundStyle(colour)
@@ -636,7 +655,10 @@ struct CalculatorKeypad: View {
   }
 
   private var primaryKey: some View {
-    Button(action: onPrimary) {
+    Button {
+      symbolTaps += 1
+      onPrimary()
+    } label: {
       Text(primaryAction.title)
         .font(.headline)
         .foregroundStyle(.white)
