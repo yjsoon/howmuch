@@ -21,8 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      # write, not read: the review posts its findings as PR comments.
+      pull-requests: write
+      issues: write
       id-token: write
 
     steps:
@@ -38,7 +39,13 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          # --comment posts findings as inline PR comments; without it the
+          # review's output never leaves the action log.
+          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment'
+          # The review reads the PR and diff through gh; without these
+          # allowances the agent's tool calls are denied and the run
+          # "succeeds" having reviewed nothing.
+          claude_args: '--allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh api:*),Bash(gh search:*)"'
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
