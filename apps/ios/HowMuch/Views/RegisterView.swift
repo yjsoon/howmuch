@@ -25,6 +25,13 @@ struct RegisterView: View {
   @State private var unclearedOnly = false
   @State private var uncategorisedOnly = false
   @State private var editingTransaction: Transaction?
+  @State private var duplicatingDraft: DuplicateDraft?
+
+  /// Identifiable box so sheet(item:) can present a prefilled capture form.
+  private struct DuplicateDraft: Identifiable {
+    let id = UUID()
+    let draft: TransactionDraft
+  }
 
   init(
     scope: RegisterScope,
@@ -98,6 +105,22 @@ struct RegisterView: View {
                   )
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                  Button {
+                    editingTransaction = transaction
+                  } label: {
+                    Label("Edit", systemImage: "pencil")
+                  }
+                  // Splits are not duplicated: the write API cannot create
+                  // subtransactions, so the copy would flatten to its total.
+                  if !transaction.isSplit {
+                    Button {
+                      duplicatingDraft = DuplicateDraft(draft: TransactionDraft(duplicating: transaction))
+                    } label: {
+                      Label("Duplicate for Today", systemImage: "plus.square.on.square")
+                    }
+                  }
+                }
 
                 if index < section.transactions.count - 1 {
                   Divider().padding(.leading, 16)
@@ -132,6 +155,9 @@ struct RegisterView: View {
     }
     .sheet(item: $editingTransaction) { transaction in
       TransactionEditorSheet(transaction: transaction)
+    }
+    .sheet(item: $duplicatingDraft) { duplicate in
+      TransactionFormView(draft: duplicate.draft, isEditing: false)
     }
   }
 

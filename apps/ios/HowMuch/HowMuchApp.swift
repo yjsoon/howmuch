@@ -1,7 +1,9 @@
 import SwiftUI
+import UIKit
 
 @main
 struct HowMuchApp: App {
+  @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   @State private var model = AppModel()
 
   var body: some Scene {
@@ -10,6 +12,73 @@ struct HowMuchApp: App {
         .environment(model)
         .tint(Theme.accent)
     }
+  }
+}
+
+/// Home-screen quick action ("Add Expense") plumbing. The shortcut is
+/// registered dynamically — no Info.plist entry, which this project generates
+/// from build settings — and the scene delegate relays taps into SwiftUI.
+@MainActor
+enum QuickAction {
+  static let addExpenseType = "local.howmuch.ios.add-expense"
+  static let notification = Notification.Name("HowMuch.QuickAction.addExpense")
+
+  /// Set when the app is cold-launched from the shortcut, before any SwiftUI
+  /// view is subscribed to the notification; RootView consumes it on appear.
+  static var pendingCapture = false
+
+  static func register() {
+    UIApplication.shared.shortcutItems = [
+      UIApplicationShortcutItem(
+        type: addExpenseType,
+        localizedTitle: "Add Expense",
+        localizedSubtitle: nil,
+        icon: UIApplicationShortcutIcon(systemImageName: "plus.circle.fill")
+      )
+    ]
+  }
+}
+
+final class AppDelegate: NSObject, UIApplicationDelegate {
+  func application(
+    _ application: UIApplication,
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+  ) -> Bool {
+    QuickAction.register()
+    return true
+  }
+
+  func application(
+    _ application: UIApplication,
+    configurationForConnecting connectingSceneSession: UISceneSession,
+    options: UIScene.ConnectionOptions
+  ) -> UISceneConfiguration {
+    let configuration = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
+    configuration.delegateClass = QuickActionSceneDelegate.self
+    return configuration
+  }
+}
+
+final class QuickActionSceneDelegate: NSObject, UIWindowSceneDelegate {
+  func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+    // Cold launch from the shortcut: RootView does not exist yet, so leave a
+    // flag for it rather than posting into the void.
+    if connectionOptions.shortcutItem?.type == QuickAction.addExpenseType {
+      QuickAction.pendingCapture = true
+    }
+  }
+
+  func windowScene(
+    _ windowScene: UIWindowScene,
+    performActionFor shortcutItem: UIApplicationShortcutItem,
+    completionHandler: @escaping (Bool) -> Void
+  ) {
+    guard shortcutItem.type == QuickAction.addExpenseType else {
+      completionHandler(false)
+      return
+    }
+    NotificationCenter.default.post(name: QuickAction.notification, object: nil)
+    completionHandler(true)
   }
 }
 
@@ -89,6 +158,17 @@ private struct RootView: View {
     }
     .sheet(isPresented: $model.isShowingCapture) {
       AddTransactionSheet()
+    }
+    .onAppear {
+      if QuickAction.pendingCapture {
+        QuickAction.pendingCapture = false
+        model.isShowingCapture = true
+      }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: QuickAction.notification)) { _ in
+      // Warm launch: dismiss whatever sheet is up so capture can present.
+      model.isShowingSettings = false
+      model.isShowingCapture = true
     }
   }
 }
