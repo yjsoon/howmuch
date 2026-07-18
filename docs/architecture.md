@@ -1,26 +1,30 @@
 # HowMuch Architecture
 
-HowMuch is a single-hosted personal ledger with a YNAB-compatible edge. It should accept existing OpenClaw-style transaction writes with minimal changes while owning a cleaner internal schema for reports and future clients.
+HowMuch is a single-user personal ledger with a YNAB-compatible edge. It accepts existing OpenClaw-style transaction writes with minimal changes while owning a cleaner internal schema for reports and native clients.
 
 ## Monorepo Shape
 
-Planned layout:
+Layout:
 
-- `apps/api`: Bun TypeScript API and SQLite persistence.
+- `apps/api`: shared API/domain code, local Bun server, and SQLite/Postgres adapters.
+- `apps/worker`: Cloudflare Worker entrypoint, static assets, and scheduled sync.
 - `apps/web`: report-first web app.
 - `apps/ios`: iOS quick-entry and report companion app.
 - `docs`: research, architecture, API contract, and migration notes.
 
 ## Storage Choice
 
-Use SQLite for the first version.
+Use SQLite for local development and source-ledger recovery. Use Neon Postgres
+for hosted preview and production.
 
 Reasons:
 
-- Single-user and single-hosted.
-- Simple backup, snapshot, and restore story.
-- Good enough for all report queries at personal-finance scale.
-- Easy future upgrade path to Postgres if multi-user accounts become real.
+- SQLite keeps local setup and YNAB export/import recovery simple.
+- Postgres supplies durable remote storage, transactions, branching, and
+  point-in-time recovery to the stateless Worker runtime.
+- A shared asynchronous repository boundary keeps both engines on the same API
+  and importer behaviour.
+- Exact ledger and report fingerprints gate every SQLite-to-Postgres cutover.
 
 The API stores amounts as integer milliunits at the compatibility boundary and in the ledger tables. Decimal display formatting happens only at the edge.
 
@@ -231,4 +235,3 @@ Later:
 7. Recompute account balances from imported transactions and compare with imported account balances.
 8. Generate parity reports for Spending Breakdown, Income vs Spending, Net Worth, and Age of Money.
 9. Point OpenClaw at HowMuch's `/v1` API base URL and run in shadow mode before cutting over writes.
-

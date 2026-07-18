@@ -1,6 +1,6 @@
 # HowMuch
 
-HowMuch is a self-hosted personal ledger and reporting app for the parts of YNAB that are actually in use:
+HowMuch is a personal ledger and reporting app for the parts of YNAB that are actually in use:
 
 - Spending Breakdown by category
 - Income vs Spending
@@ -9,6 +9,10 @@ HowMuch is a self-hosted personal ledger and reporting app for the parts of YNAB
 - Transaction ingestion from OpenClaw-style sources
 
 The API exposes a small YNAB-compatible `/v1` surface so existing ingestion scripts can target it with minimal changes, while native clients use `/api` routes for reports, imports, and quick entry.
+
+Local development runs on Bun with SQLite. The hosted application runs as a
+Cloudflare Worker with Neon Postgres and serves the React app from the same
+origin. See [the deployment runbook](docs/deployment.md).
 
 ## Quick Start
 
@@ -43,15 +47,17 @@ Useful environment variables:
 
 ## Automatic YNAB Sync
 
-When a YNAB personal access token is configured, the API server checks YNAB
-every hour and syncs the plan into the local ledger. If the token is empty or
-unset, no sync ever runs.
+When a YNAB personal access token is configured, the local Bun server checks
+YNAB every hour. Production uses an hourly Cloudflare scheduled handler instead;
+it stores the YNAB server-knowledge cursor in Postgres, rejects overlapping
+runs with a database lease, and deduplicates Cloudflare retries by scheduled
+timestamp. If the token is empty or unset, no sync runs.
 
 - `HOWMUCH_YNAB_TOKEN`: YNAB personal access token. Empty/unset disables the sync.
 - `HOWMUCH_YNAB_PLAN_ID`: YNAB plan (budget) id to sync. Optional when the token
   can only see one plan; required when it can see several.
 - `HOWMUCH_YNAB_SYNC_INTERVAL_MS`: how often to check, in milliseconds. Defaults
-  to one hour and is clamped to a five-minute minimum so the sync cannot exceed
+  to one hour for the local Bun server and is clamped to a five-minute minimum so the sync cannot exceed
   YNAB's rate limit of 200 requests per token per rolling hour (each pass costs
   six requests, so even at the floor the sync uses at most 72 per hour). If
   YNAB ever returns 429 — for example because other apps share the token — the
@@ -100,6 +106,18 @@ This boots the API against a temporary seeded database and checks:
 
 ```sh
 bun test
+```
+
+Postgres and deployment verification commands:
+
+```sh
+bun run baseline:sqlite --output data/migration-baseline.json
+DATABASE_URL='<Postgres URL>' bun run api:migrate:postgres
+DATABASE_URL='<Postgres URL>' bun run migrate:neon -- --source data/howmuch-real.sqlite
+DATABASE_URL='<Postgres URL>' bun run verify:postgres-reports -- --baseline data/migration-baseline.json
+DATABASE_URL='<Postgres URL>' bun run verify:postgres-api
+DATABASE_URL='<Postgres URL>' bun run verify:scheduled-sync
+cd apps/worker && bun run typecheck && bun run build
 ```
 
 ## Integration Status

@@ -1,159 +1,113 @@
 # HowMuch Deployment Runbook
 
-This is the practical deployment path for the current Bun + SQLite HowMuch app.
-The app is still a single-user, self-hosted service, so the deployment should
-preserve the SQLite backup story and avoid a last-minute Worker/D1 rewrite.
+The production shape is one Cloudflare Worker serving the built React app and
+the `/api`, `/v1`, and `/health` routes from the same origin. Ledger data lives
+in Neon Postgres. Local development continues to use Bun and SQLite.
 
-## Recommendation
+## Environments
 
-Use Cloudflare for the public edge, but do not port the API to Workers before
-the morning demo.
+| Environment | Worker | Neon branch | Scheduled YNAB sync |
+| --- | --- | --- | --- |
+| Preview | `howmuch-preview` | `preview` | Disabled |
+| Production | `howmuch` | Default protected branch | Hourly |
 
-The safest path is:
+Use Neon's Singapore region (`aws-ap-southeast-1`). Keep preview and production
+in the same project so the preview branch can be recreated without copying data
+through another provider.
 
-1. Run the Bun API on a small persistent host with a mounted SQLite volume.
-2. Put Cloudflare in front of it with either a proxied DNS record or Cloudflare
-   Tunnel.
-3. Serve the Vite web build from the same public origin, or add a tiny edge
-   proxy so `/api/*` and `/v1/*` stay same-origin for the web client.
+## Secrets
 
-Cloudflare Pages is a good fit for the static frontend, but only if `/api` and
-`/v1` are proxied to the Bun API. The web client currently calls relative paths,
-which is good for same-origin deployment but will not work from a plain Pages
-site unless the API paths exist on that same host.
+Never put these values in Git, Wrangler configuration, logs, or shell history:
 
-## Current Runtime Assumptions
+- `DATABASE_URL`: pooled Neon connection string for the matching branch.
+- `HOWMUCH_API_TOKEN`: independent random bearer token for each environment.
+- `HOWMUCH_YNAB_TOKEN`: production-only YNAB personal access token.
 
-- API runtime: Bun, using `Bun.serve` in `apps/api/src/server.ts`.
-- Config source: `Bun.env` in `apps/api/src/config.ts`.
-- Database: local SQLite via `bun:sqlite`, defaulting to
-  `data/howmuch.sqlite`.
-- Database setup: startup creates the parent directory, opens SQLite, enables
-  foreign keys and WAL mode, then applies SQL files from `apps/api/migrations`.
-- Auth: static bearer token through `HOWMUCH_API_TOKEN`; if unset, requests are
-  allowed for local development.
-- Web runtime: Vite/React static build from `apps/web`.
-- Web API calls: relative `/api/*` and `/v1/*` fetches.
-
-Production environment variables:
+Set them through Wrangler's encrypted secret store:
 
 ```sh
-PORT=8787
-HOWMUCH_DB_PATH=/var/lib/howmuch/howmuch.sqlite
-HOWMUCH_API_TOKEN=replace-with-a-long-random-token
-HOWMUCH_DEFAULT_PLAN_ID=local-plan
+cd apps/worker
+wrangler secret put DATABASE_URL --env preview
+wrangler secret put HOWMUCH_API_TOKEN --env preview
+
+wrangler secret put DATABASE_URL
+wrangler secret put HOWMUCH_API_TOKEN
+wrangler secret put HOWMUCH_YNAB_TOKEN
 ```
 
-## Cloudflare Feasibility
+The non-secret plan identifiers and similarity threshold live in
+`apps/worker/wrangler.jsonc`. The web app keeps its bearer token in the current
+browser tab only. The iOS app stores it in Keychain.
 
-### Cloudflare Pages
+## Preview Deployment
 
-Verdict: good for the web frontend only.
+Create a Neon `preview` branch, obtain its pooled connection string, then run:
 
-Use these build settings if deploying the web app as a Pages project:
+```sh
+DATABASE_URL='<preview URL>' bun run api:migrate:postgres
+DATABASE_URL='<preview URL>' bun run migrate:neon -- \
+  --source data/howmuch-real.sqlite \
+  --output data/neon-preview-verification.json
+DATABASE_URL='<preview URL>' bun run verify:postgres-reports -- \
+  --baseline data/migration-baseline.json
+DATABASE_URL='<preview URL>' bun run verify:postgres-api
+DATABASE_URL='<preview URL>' bun run verify:scheduled-sync
 
-- Root directory: repository root
-- Build command: `bun install --frozen-lockfile && cd apps/web && bun run build`
-- Build output directory: `apps/web/dist`
+cd apps/web && bun run build && cd ../worker
+bun run typecheck
+bun run deploy:preview
+```
 
-Blocker for a full app: the API paths are relative. Pages needs a reverse proxy
-for `/api/*` and `/v1/*`, or the API must be on the same origin by another
-route.
+The migration refuses a non-empty target unless `--resume` is supplied. It
+copies in transactions, preserves ledger order, and verifies exact counts and
+row fingerprints. Keep the generated verification file under ignored `data/`.
 
-### Cloudflare Workers
+Verify the deployed preview before promoting it:
 
-Verdict: not viable as a direct API deployment.
+1. An unauthenticated `/health` request returns `401`.
+2. Authenticated `/health`, `/v1/user`, accounts, transactions, and all four
+   reports return successfully.
+3. The web unlock screen accepts the preview token and renders the real ledger.
+4. iOS connects with the preview URL and token; a test entry can be created,
+   read back, and deleted.
+5. Imports are idempotent and transfer/split-transfer writes retain both sides.
+6. The scheduled-sync verifier proves delta cursors, retry deduplication,
+   overlap leasing, and lease release after failure. Preview itself has no cron.
 
-The current API imports `bun:sqlite` and uses Bun-specific server/config APIs.
-Workers can enable many Node.js compatibility APIs, but this does not provide
-`bun:sqlite` or a writable SQLite file at `data/howmuch.sqlite`.
+## Production Cutover
 
-### Cloudflare D1
+SQLite remains the source of truth until this sequence finishes:
 
-Verdict: plausible future Cloudflare-native path, not an overnight drop-in.
+1. Stop all writers and rerun `bun run baseline:sqlite --compare
+   data/migration-baseline.json`.
+2. Copy the SQLite database and its baseline manifest to encrypted backup
+   storage. Confirm both copies can be opened before continuing.
+3. Run the Postgres migration against an empty production branch.
+4. Run the ledger copy, report parity, and API verification commands against
+   production exactly as for preview.
+5. Set the production Worker secrets, build the web app, and run `bun run
+   deploy` from `apps/worker`.
+6. Verify authenticated reads and a reversible write through the live Worker.
+7. Configure the iOS app with the production URL, token, and plan ID.
+8. Trigger or wait for one production YNAB cron run. Check `sync_runs`,
+   `ynab_sync_state`, and Worker logs before declaring cutover complete.
 
-The SQL schema is close to D1's SQLite model, but the repository layer expects
-the synchronous `bun:sqlite` API:
+Do not resume the old writer after the production copy. Running SQLite and
+Postgres as independent writable ledgers creates an unreconcilable split brain.
 
-- `db.query(...).get(...)`
-- `db.query(...).all(...)`
-- `db.query(...).run(...)`
-- `db.transaction(...)`
+## Rollback And Recovery
 
-D1's Worker binding API is asynchronous and binding-based, so this requires a
-database adapter plus a broad async refactor through `LedgerRepository`,
-`ReportService`, importers, route handlers, tests, and migrations.
+Before the first production write, rollback is simply the previous Worker
+deployment plus the untouched SQLite source. After production writes begin,
+restore Neon to a new branch at a known point in time, verify it, and update the
+Worker's `DATABASE_URL`; do not overwrite the damaged branch in place.
 
-### Cloudflare Containers
+Retain:
 
-Verdict: technically aligned with the Bun runtime, but higher operational risk
-than a normal VPS/container host for tomorrow.
+- the last pre-cutover SQLite database and baseline manifest;
+- the migration verification manifest;
+- Neon point-in-time history for the account's available retention window;
+- Cloudflare Worker deployment history and structured scheduled-sync logs.
 
-Containers can run full-runtime applications with filesystem needs, but HowMuch
-would still need container config, image publishing, routing, secret handling,
-and a deliberate persistence/backup plan for SQLite. Use it after the demo if
-we want to keep everything inside Cloudflare.
-
-## Morning Ship Path
-
-### Option A: Cloudflare Tunnel to a persistent host
-
-Use this if a private machine or small VPS is available.
-
-1. Build and validate:
-
-   ```sh
-   bun install --frozen-lockfile
-   cd apps/web && bun run build && cd ../..
-   bun test
-   bun run smoke
-   ```
-
-2. Start the API on the host with a persistent database path:
-
-   ```sh
-   export PORT=8787
-   export HOWMUCH_DB_PATH=/var/lib/howmuch/howmuch.sqlite
-   export HOWMUCH_API_TOKEN="$(openssl rand -hex 32)"
-   bun apps/api/src/server.ts
-   ```
-
-3. Serve `apps/web/dist` and reverse-proxy `/api/*` and `/v1/*` to
-   `http://127.0.0.1:8787`.
-
-4. Put Cloudflare Tunnel or a proxied Cloudflare DNS record in front of that
-   single origin.
-
-### Option B: Cloudflare Pages plus external API
-
-Use this if Pages is required for the frontend.
-
-1. Create a Pages project for `apps/web`.
-2. Deploy the static web build.
-3. Add a small proxy for `/api/*` and `/v1/*` to the Bun API origin before
-   sharing the link.
-4. Set `HOWMUCH_API_TOKEN` on the API and configure the iOS client with the same
-   bearer token.
-
-### Option C: Worker + D1 port
-
-Use this only after the demo.
-
-1. Introduce a database interface that supports async calls.
-2. Port `LedgerRepository` and `ReportService` to that interface.
-3. Add a Worker entrypoint that binds `env.DB` and uses Worker-compatible env
-   vars/secrets.
-4. Move migrations to Wrangler/D1 migrations.
-5. Run the full API tests against both local SQLite and D1 local simulation.
-
-## Read-Only Cloudflare Inspection
-
-Wrangler is installed and usable on this machine. Read-only checks showed:
-
-- Account: `YJ`
-- Login: `cloudflare@yjsoon.com`
-- Existing Pages projects: `yjsoon-blog`
-- Existing D1 databases: none listed
-
-Do not create Cloudflare resources from this worktree unless the final target
-and naming are agreed.
+Test a restore quarterly by creating a temporary Neon branch, running report
+parity and API verification, then deleting the temporary branch.

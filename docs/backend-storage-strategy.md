@@ -1,5 +1,10 @@
 # Backend Storage Strategy
 
+> Historical decision record, superseded for deployment by
+> [Cloudflare Workers + Neon Migration](cloudflare-neon-migration.md) and the
+> [deployment runbook](deployment.md). SQLite remains the local source/recovery
+> format; hosted preview and production now target Neon Postgres.
+
 Last checked: 2026-06-11
 
 ## One-Line Recommendation
