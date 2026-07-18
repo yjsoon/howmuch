@@ -21,7 +21,8 @@
     "test": "bun test",
     "verify:postgres-api": "bun scripts/verify-postgres-api.ts",
     "verify:postgres-reports": "bun scripts/verify-postgres-reports.ts",
-    "verify:scheduled-sync": "bun scripts/verify-scheduled-sync.ts"
+    "verify:scheduled-sync": "bun scripts/verify-scheduled-sync.ts",
+    "verify:worker": "bun scripts/verify-worker.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

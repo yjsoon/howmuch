@@ -24,8 +24,10 @@ const dbPath = resolve(options.dbPath);
 const db = new Database(dbPath, { readonly: true, strict: true });
 
 try {
+  const expected = options.comparePath ? await Bun.file(resolve(options.comparePath)).json() : undefined;
   const planRows = db.query("SELECT id, name FROM plans ORDER BY id").all() as Array<{ id: string; name: string }>;
-  const planId = options.planId ?? (planRows.length === 1 ? planRows[0].id : undefined);
+  const expectedPlanId = typeof expected?.plan?.id === "string" ? expected.plan.id : undefined;
+  const planId = options.planId ?? expectedPlanId ?? (planRows.length === 1 ? planRows[0].id : undefined);
   if (!planId) {
     throw new Error(
       planRows.length === 0
@@ -38,7 +40,6 @@ try {
   const output = `${JSON.stringify(manifest, null, 2)}\n`;
 
   if (options.comparePath) {
-    const expected = await Bun.file(resolve(options.comparePath)).json();
     const differences = compareManifests(expected, manifest);
     if (differences.length > 0) {
       console.error(`Baseline mismatch (${differences.length} differences):`);

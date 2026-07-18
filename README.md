@@ -113,7 +113,7 @@ Postgres and deployment verification commands:
 ```sh
 bun run baseline:sqlite --output data/migration-baseline.json
 DATABASE_URL='<Postgres URL>' bun run api:migrate:postgres
-DATABASE_URL='<Postgres URL>' bun run migrate:neon -- --source data/howmuch-real.sqlite
+DATABASE_URL='<Postgres URL>' bun run migrate:neon -- --sqlite data/howmuch-real.sqlite
 DATABASE_URL='<Postgres URL>' bun run verify:postgres-reports -- --baseline data/migration-baseline.json
 DATABASE_URL='<Postgres URL>' bun run verify:postgres-api
 DATABASE_URL='<Postgres URL>' bun run verify:scheduled-sync

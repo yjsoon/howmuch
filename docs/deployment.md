@@ -46,7 +46,7 @@ Create a Neon `preview` branch, obtain its pooled connection string, then run:
 ```sh
 DATABASE_URL='<preview URL>' bun run api:migrate:postgres
 DATABASE_URL='<preview URL>' bun run migrate:neon -- \
-  --source data/howmuch-real.sqlite \
+  --sqlite data/howmuch-real.sqlite \
   --output data/neon-preview-verification.json
 DATABASE_URL='<preview URL>' bun run verify:postgres-reports -- \
   --baseline data/migration-baseline.json
@@ -73,6 +73,22 @@ Verify the deployed preview before promoting it:
 5. Imports are idempotent and transfer/split-transfer writes retain both sides.
 6. The scheduled-sync verifier proves delta cursors, retry deduplication,
    overlap leasing, and lease release after failure. Preview itself has no cron.
+
+Run the live edge verifier with the preview Worker URL and matching secrets:
+
+```sh
+HOWMUCH_BASE_URL='<preview Worker URL>' \
+HOWMUCH_DEFAULT_PLAN_ID='80bc6db0-d926-4635-a37a-1ba0787c4c4e' \
+DATABASE_URL='<preview URL>' \
+HOWMUCH_API_TOKEN='<preview token>' \
+bun run verify:worker
+```
+
+It checks static delivery, authentication, real report reads, transfers, splits,
+idempotent imports, CSV, offline entry, balances, and incremental deletion
+through the deployed HTTP edge. It uses a uniquely named synthetic plan and
+deletes that plan plus its import session directly from Postgres in `finally`,
+so a successful or failed verification does not contaminate the real ledger.
 
 ## Production Cutover
 

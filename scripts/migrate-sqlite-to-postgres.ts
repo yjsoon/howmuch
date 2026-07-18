@@ -72,7 +72,14 @@ try {
   }
 
   const mismatches = Object.entries(results).filter(([, result]) => !result.matches);
-  console.log(JSON.stringify({ source: resolve(options.sqlitePath), tables: results, matches: mismatches.length === 0 }, null, 2));
+  const manifest = JSON.stringify({ source: resolve(options.sqlitePath), tables: results, matches: mismatches.length === 0 }, null, 2);
+  if (options.outputPath) {
+    const outputPath = resolve(options.outputPath);
+    await Bun.write(outputPath, `${manifest}\n`);
+    console.error(`wrote verification manifest: ${outputPath}`);
+  } else {
+    console.log(manifest);
+  }
   if (mismatches.length > 0) process.exitCode = 1;
 } finally {
   sqlite.close();
@@ -151,18 +158,25 @@ function quoteIdentifier(identifier: string): string {
 }
 
 function parseArgs(args: string[]) {
-  const result = { sqlitePath: "data/howmuch-real.sqlite", resume: false, verifyOnly: false };
+  const result: { sqlitePath: string; outputPath?: string; resume: boolean; verifyOnly: boolean } = {
+    sqlitePath: "data/howmuch-real.sqlite",
+    resume: false,
+    verifyOnly: false,
+  };
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index];
     if (flag === "--sqlite" && args[index + 1]) {
       result.sqlitePath = args[index + 1];
+      index += 1;
+    } else if (flag === "--output" && args[index + 1]) {
+      result.outputPath = args[index + 1];
       index += 1;
     } else if (flag === "--resume") {
       result.resume = true;
     } else if (flag === "--verify-only") {
       result.verifyOnly = true;
     } else if (flag === "--help") {
-      console.log("Usage: DATABASE_URL=... bun run migrate:neon [--sqlite PATH] [--resume | --verify-only]");
+      console.log("Usage: DATABASE_URL=... bun run migrate:neon [--sqlite PATH] [--output PATH] [--resume | --verify-only]");
       process.exit(0);
     } else {
       throw new Error(`Unknown or incomplete argument: ${flag}`);
