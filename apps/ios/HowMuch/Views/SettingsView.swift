@@ -30,7 +30,7 @@ struct SettingsView: View {
         } header: {
           Text("Server")
         } footer: {
-          Text("The Bun API host, reachable from this device. Use your machine's LAN address rather than 127.0.0.1 when running on hardware.")
+          Text("Use the deployed HowMuch URL, or your computer's LAN address for local development. 127.0.0.1 on a physical device points to the phone itself.")
         }
 
         Section {
@@ -45,7 +45,7 @@ struct SettingsView: View {
         } header: {
           Text("Access")
         } footer: {
-          Text("Leave the token blank when the API runs without one. The default plan ID is `local-plan`.")
+          Text("A bearer token is required for a deployed server. Local development may run without one; its default plan ID is `local-plan`.")
         }
 
         Section {

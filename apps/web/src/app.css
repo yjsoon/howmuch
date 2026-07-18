@@ -169,6 +169,32 @@ select:focus-visible {
   background: var(--paper-raised);
 }
 
+.auth-form {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+}
+
+.auth-form h1,
+.auth-form p {
+  margin: 0;
+}
+
+.auth-form input {
+  width: min(320px, 80vw);
+  border: 1px solid var(--ink);
+  border-radius: 2px;
+  padding: 8px 10px;
+  background: var(--paper-raised);
+  color: var(--ink);
+  font: 14px var(--font-figures);
+}
+
+.auth-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 /* ── Filter rail ────────────────────────────────────────────── */
 
 .filter-stack {

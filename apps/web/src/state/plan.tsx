@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { api } from "../api/client";
+import { ApiError, api, setApiToken } from "../api/client";
 import type { Account, Category, CategoryGroup } from "../api/types";
 import { configureMoney } from "../lib/money";
 
@@ -25,6 +25,8 @@ export function usePlan(): PlanContextValue {
 export function PlanProvider({ children }: { children: ReactNode }) {
   const [value, setValue] = useState<PlanContextValue | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [token, setToken] = useState("");
   const [generation, setGeneration] = useState(0);
 
   useEffect(() => {
@@ -56,6 +58,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         });
       } catch (cause) {
         if (!cancelled) {
+          setAuthRequired(cause instanceof ApiError && cause.status === 401);
           setError(cause instanceof Error ? cause.message : String(cause));
         }
       }
@@ -66,11 +69,38 @@ export function PlanProvider({ children }: { children: ReactNode }) {
   }, [generation]);
 
   if (error) {
+    if (authRequired) {
+      return (
+        <form
+          className="boot-message auth-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setApiToken(token);
+            setAuthRequired(false);
+            setError(null);
+            setGeneration((n) => n + 1);
+          }}
+        >
+          <h1>Unlock HowMuch</h1>
+          <p>Enter the bearer token for this deployment.</p>
+          <input
+            type="password"
+            value={token}
+            onChange={(event) => setToken(event.target.value)}
+            autoComplete="current-password"
+            aria-label="Bearer token"
+            autoFocus
+          />
+          <button type="submit" disabled={!token.trim()}>Unlock</button>
+          <p className="boot-detail">The token is kept in this tab only.</p>
+        </form>
+      );
+    }
     return (
       <div className="boot-message">
         <p>Could not reach the HowMuch API.</p>
         <p className="boot-detail">{error}</p>
-        <button type="button" onClick={() => { setError(null); setGeneration((n) => n + 1); }}>
+        <button type="button" onClick={() => { setAuthRequired(false); setError(null); setGeneration((n) => n + 1); }}>
           Retry
         </button>
       </div>

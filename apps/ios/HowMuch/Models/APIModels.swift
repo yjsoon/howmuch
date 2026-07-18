@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 struct APIEnvelope<Payload: Decodable>: Decodable {
   let data: Payload
@@ -37,16 +38,66 @@ struct APISettings: Codable, Equatable {
       let data = defaults.data(forKey: userDefaultsKey),
       let decoded = try? JSONDecoder().decode(APISettings.self, from: data)
     else {
-      return APISettings()
+      var settings = APISettings()
+      settings.bearerToken = CredentialStore.load() ?? ""
+      return settings
     }
-    return decoded
+    var settings = decoded
+    if let token = CredentialStore.load() {
+      settings.bearerToken = token
+    } else if !decoded.bearerToken.isEmpty {
+      // One-time migration from versions that stored the token in UserDefaults.
+      CredentialStore.save(decoded.bearerToken)
+    }
+    return settings
   }
 
   func save(to defaults: UserDefaults = .standard) {
-    guard let data = try? JSONEncoder().encode(self) else {
+    CredentialStore.save(bearerToken)
+    var publicSettings = self
+    publicSettings.bearerToken = ""
+    guard let data = try? JSONEncoder().encode(publicSettings) else {
       return
     }
     defaults.set(data, forKey: Self.userDefaultsKey)
+  }
+}
+
+private enum CredentialStore {
+  private static let service = Bundle.main.bundleIdentifier ?? "HowMuch"
+  private static let account = "api-bearer-token"
+
+  static func load() -> String? {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrAccount as String: account,
+      kSecReturnData as String: true,
+      kSecMatchLimit as String: kSecMatchLimitOne,
+    ]
+    var item: CFTypeRef?
+    guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+          let data = item as? Data
+    else {
+      return nil
+    }
+    return String(data: data, encoding: .utf8)
+  }
+
+  static func save(_ token: String) {
+    let identity: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrAccount as String: account,
+    ]
+    SecItemDelete(identity as CFDictionary)
+    guard !token.isEmpty, let data = token.data(using: .utf8) else {
+      return
+    }
+    var item = identity
+    item[kSecValueData as String] = data
+    item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+    SecItemAdd(item as CFDictionary, nil)
   }
 }
 

@@ -13,20 +13,42 @@ import type {
   Transaction,
 } from "./types";
 
+const TOKEN_KEY = "howmuch.api-token";
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+export function setApiToken(token: string): void {
+  const trimmed = token.trim();
+  if (trimmed) sessionStorage.setItem(TOKEN_KEY, trimmed);
+  else sessionStorage.removeItem(TOKEN_KEY);
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = sessionStorage.getItem(TOKEN_KEY);
   const response = await fetch(path, {
     ...init,
-    headers: { "content-type": "application/json", ...init?.headers },
+    headers: {
+      "content-type": "application/json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...init?.headers,
+    },
   });
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`;
     try {
       const body = await response.json();
-      message = body?.error?.message ?? message;
+      message = body?.error?.detail ?? body?.error?.message ?? message;
     } catch {
       // keep the status message
     }
-    throw new Error(message);
+    throw new ApiError(message, response.status);
   }
   const body = await response.json();
   return body.data as T;
