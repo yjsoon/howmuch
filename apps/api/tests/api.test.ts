@@ -696,6 +696,35 @@ describe("native reports and imports", () => {
     expect(quickEntry.data.transaction.source_kind).toBeUndefined();
   });
 
+  test("honours the mobile quick-entry plan id when it differs from the configured default", async () => {
+    const alternatePlanId = "quick-entry-alternate-plan";
+    const accountResponse = await request(`/v1/plans/${alternatePlanId}/accounts`, {
+      method: "POST",
+      body: { account: { name: "Alternate checking" } },
+    });
+    expect(accountResponse.status).toBe(201);
+    const alternateAccount = (await accountResponse.json()).data.account;
+
+    const response = await request("/api/mobile/quick-entry", {
+      method: "POST",
+      body: {
+        plan_id: alternatePlanId,
+        client_id: "alternate-offline-entry",
+        account_id: alternateAccount.id,
+        date: "2026-07-18",
+        amount_milli: -4321,
+        payee_name: "Alternate cafe",
+      },
+    });
+
+    expect(response.status).toBe(201);
+    expect((await response.json()).data.transaction.id).toBe("alternate-offline-entry");
+    const alternateTransactions = (await (await request(`/v1/plans/${alternatePlanId}/transactions`)).json()).data.transactions;
+    const defaultTransactions = (await (await request("/v1/plans/plan-test/transactions")).json()).data.transactions;
+    expect(alternateTransactions.map((transaction: any) => transaction.id)).toContain("alternate-offline-entry");
+    expect(defaultTransactions.map((transaction: any) => transaction.id)).not.toContain("alternate-offline-entry");
+  });
+
   test("imports YNAB CSV-shaped rows and reports spending", async () => {
     const importResponse = await request("/api/import/csv?plan_id=plan-test", {
       method: "POST",

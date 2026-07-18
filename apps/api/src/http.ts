@@ -250,6 +250,8 @@ async function handleNative(
 
   if (segments[1] === "mobile" && segments[2] === "quick-entry" && method === "POST") {
     const body = await readJson(request);
+    const targetPlanId = body.plan_id ?? planId;
+    await repo.ensurePlan(targetPlanId);
     const amount = body.amount_milli ?? decimalToMilliunits(body.amount);
     const subtransactions = Array.isArray(body.subtransactions)
       ? body.subtransactions.map((sub: any) => ({
@@ -260,7 +262,7 @@ async function handleNative(
           memo: sub.memo ?? null,
         }))
       : undefined;
-    const transaction = await repo.createTransaction(planId, {
+    const transaction = await repo.createTransaction(targetPlanId, {
       id: body.client_id,
       account_id: body.account_id,
       date: body.date ?? new Date().toISOString().slice(0, 10),
@@ -274,7 +276,7 @@ async function handleNative(
       source_ref: body.client_id ?? null,
       subtransactions,
     });
-    return json({ data: { transaction, server_knowledge: await repo.getServerKnowledge(planId) } }, 201);
+    return json({ data: { transaction, server_knowledge: await repo.getServerKnowledge(targetPlanId) } }, 201);
   }
 
   if (segments[1] === "import" && segments[2] === "csv" && method === "POST") {
