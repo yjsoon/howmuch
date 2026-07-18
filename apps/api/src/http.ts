@@ -5,15 +5,22 @@ import { ReportService } from "./reports";
 import { decimalToMilliunits } from "./money";
 import { importCsvRows } from "./importers/csv";
 import { importYnabFromApi } from "./importers/ynab";
+import type { LedgerStore, ReportStore } from "./storage";
 
 type HandlerOptions = {
-  db: Database;
+  db?: Database;
+  repo?: LedgerStore;
+  reports?: ReportStore;
   config: ApiConfig;
 };
 
-export function createHandler({ db, config }: HandlerOptions): (request: Request) => Promise<Response> {
-  const repo = new LedgerRepository(db, config.defaultPlanId);
-  const reports = new ReportService(db);
+export function createHandler(options: HandlerOptions): (request: Request) => Promise<Response> {
+  const { config } = options;
+  const repo = options.repo ?? (options.db ? new LedgerRepository(options.db, config.defaultPlanId) : undefined);
+  const reports = options.reports ?? (options.db ? new ReportService(options.db) : undefined);
+  if (!repo || !reports) {
+    throw new Error("createHandler requires either db or both repo and reports");
+  }
 
   return async function handle(request: Request): Promise<Response> {
     try {
@@ -49,7 +56,7 @@ export function createHandler({ db, config }: HandlerOptions): (request: Request
   };
 }
 
-async function handleV1(request: Request, url: URL, segments: string[], repo: LedgerRepository): Promise<Response> {
+async function handleV1(request: Request, url: URL, segments: string[], repo: LedgerStore): Promise<Response> {
   const method = request.method.toUpperCase();
 
   if (segments.length === 2 && segments[1] === "user" && method === "GET") {
@@ -63,27 +70,27 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
 
   const isBudgetAlias = collection === "budgets";
   if (segments.length === 2 && method === "GET") {
-    const plans = repo.listPlans();
+    const plans = await repo.listPlans();
     return json({ data: isBudgetAlias ? { budgets: plans } : { plans } });
   }
 
   const planId = segments[2];
-  repo.ensurePlan(planId);
+  await repo.ensurePlan(planId);
 
   if (segments.length === 3 && method === "GET") {
-    const plan = repo.getPlan(planId);
+    const plan = await repo.getPlan(planId);
     return json({ data: isBudgetAlias ? { budget: plan } : { plan } });
   }
 
   const resource = segments[3];
 
   if (resource === "settings" && segments.length === 4 && method === "GET") {
-    return json({ data: { settings: repo.getSettings(planId) } });
+    return json({ data: { settings: await repo.getSettings(planId) } });
   }
 
   if (resource === "accounts") {
     if (segments.length === 4 && method === "GET") {
-      return json({ data: { accounts: repo.listAccounts(planId), server_knowledge: repo.getServerKnowledge(planId) } });
+      return json({ data: { accounts: await repo.listAccounts(planId), server_knowledge: await repo.getServerKnowledge(planId) } });
     }
     if (segments.length === 4 && method === "POST") {
       const body = await readJson(request);
@@ -91,33 +98,33 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
       if (!payload || (!payload.id && !payload.name)) {
         return apiError(400, "bad_request", "account requires a name");
       }
-      const account = repo.createAccount(planId, payload);
-      return json({ data: { account, server_knowledge: repo.getServerKnowledge(planId) } }, 201);
+      const account = await repo.createAccount(planId, payload);
+      return json({ data: { account, server_knowledge: await repo.getServerKnowledge(planId) } }, 201);
     }
     const accountId = segments[4];
     if (segments.length === 5 && method === "GET") {
-      return json({ data: { account: repo.getAccount(planId, accountId) } });
+      return json({ data: { account: await repo.getAccount(planId, accountId) } });
     }
     if (segments.length === 6 && segments[5] === "transactions" && method === "GET") {
       return json({
         data: {
-          transactions: repo.listTransactions(planId, queryFilters(url, { accountId })),
-          server_knowledge: repo.getServerKnowledge(planId),
+          transactions: await repo.listTransactions(planId, queryFilters(url, { accountId })),
+          server_knowledge: await repo.getServerKnowledge(planId),
         },
       });
     }
   }
 
   if (resource === "categories" && segments.length === 4 && method === "GET") {
-    return json({ data: { category_groups: repo.listCategoryGroups(planId), server_knowledge: repo.getServerKnowledge(planId) } });
+    return json({ data: { category_groups: await repo.listCategoryGroups(planId), server_knowledge: await repo.getServerKnowledge(planId) } });
   }
   if (resource === "categories") {
     const categoryId = segments[4];
     if (segments.length === 6 && segments[5] === "transactions" && method === "GET") {
       return json({
         data: {
-          transactions: repo.listTransactions(planId, queryFilters(url, { categoryId })),
-          server_knowledge: repo.getServerKnowledge(planId),
+          transactions: await repo.listTransactions(planId, queryFilters(url, { categoryId })),
+          server_knowledge: await repo.getServerKnowledge(planId),
         },
       });
     }
@@ -125,19 +132,19 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
 
   if (resource === "payees") {
     if (segments.length === 4 && method === "GET") {
-      return json({ data: { payees: repo.listPayees(planId), server_knowledge: repo.getServerKnowledge(planId) } });
+      return json({ data: { payees: await repo.listPayees(planId), server_knowledge: await repo.getServerKnowledge(planId) } });
     }
     if (segments.length === 4 && method === "POST") {
       const body = await readJson(request);
-      const payee = repo.createPayee(planId, body.payee?.name ?? body.name);
-      return json({ data: { payee, server_knowledge: repo.getServerKnowledge(planId) } }, 201);
+      const payee = await repo.createPayee(planId, body.payee?.name ?? body.name);
+      return json({ data: { payee, server_knowledge: await repo.getServerKnowledge(planId) } }, 201);
     }
     const payeeId = segments[4];
     if (segments.length === 6 && segments[5] === "transactions" && method === "GET") {
       return json({
         data: {
-          transactions: repo.listTransactions(planId, queryFilters(url, { payeeId })),
-          server_knowledge: repo.getServerKnowledge(planId),
+          transactions: await repo.listTransactions(planId, queryFilters(url, { payeeId })),
+          server_knowledge: await repo.getServerKnowledge(planId),
         },
       });
     }
@@ -146,13 +153,13 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
   if (resource === "months") {
     const month = segments[4];
     if (segments.length === 5 && method === "GET") {
-      return json({ data: { month: repo.getMonth(planId, month), server_knowledge: repo.getServerKnowledge(planId) } });
+      return json({ data: { month: await repo.getMonth(planId, month), server_knowledge: await repo.getServerKnowledge(planId) } });
     }
     if (segments.length === 6 && segments[5] === "transactions" && method === "GET") {
       return json({
         data: {
-          transactions: repo.listTransactions(planId, queryFilters(url, { month })),
-          server_knowledge: repo.getServerKnowledge(planId),
+          transactions: await repo.listTransactions(planId, queryFilters(url, { month })),
+          server_knowledge: await repo.getServerKnowledge(planId),
         },
       });
     }
@@ -162,8 +169,8 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
     if (segments.length === 4 && method === "GET") {
       return json({
         data: {
-          transactions: repo.listTransactions(planId, queryFilters(url)),
-          server_knowledge: repo.getServerKnowledge(planId),
+          transactions: await repo.listTransactions(planId, queryFilters(url)),
+          server_knowledge: await repo.getServerKnowledge(planId),
         },
       });
     }
@@ -173,23 +180,23 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
       if (!input) {
         return apiError(400, "bad_request", "transaction is required");
       }
-      const duplicate = input?.import_id ? repo.findDuplicateTransaction(planId, input) : null;
+      const duplicate = input?.import_id ? await repo.findDuplicateTransaction(planId, input) : null;
       if (duplicate) {
         return json({
           data: {
             transaction: duplicate,
             transaction_ids: [duplicate.id],
             duplicate_import_ids: [input.import_id],
-            server_knowledge: repo.getServerKnowledge(planId),
+            server_knowledge: await repo.getServerKnowledge(planId),
           },
         });
       }
-      const created = repo.createTransaction(planId, input);
-      return json({ data: { transaction: created, transaction_ids: [created.id], server_knowledge: repo.getServerKnowledge(planId) } }, 201);
+      const created = await repo.createTransaction(planId, input);
+      return json({ data: { transaction: created, transaction_ids: [created.id], server_knowledge: await repo.getServerKnowledge(planId) } }, 201);
     }
     if (segments.length === 5 && segments[4] === "import" && method === "POST") {
       const body = await readJson(request);
-      const result = repo.importTransactions(
+      const result = await repo.importTransactions(
         planId,
         (body.transactions ?? []).map((transaction: any) => transaction.transaction ?? transaction),
       );
@@ -198,16 +205,16 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
 
     const transactionId = segments[4];
     if (segments.length === 5 && method === "GET") {
-      return json({ data: { transaction: repo.getTransaction(planId, transactionId), server_knowledge: repo.getServerKnowledge(planId) } });
+      return json({ data: { transaction: await repo.getTransaction(planId, transactionId), server_knowledge: await repo.getServerKnowledge(planId) } });
     }
     if (segments.length === 5 && (method === "PUT" || method === "PATCH")) {
       const body = await readJson(request);
-      const updated = repo.updateTransaction(planId, transactionId, body.transaction ?? body);
-      return json({ data: { transaction: updated, server_knowledge: repo.getServerKnowledge(planId) } });
+      const updated = await repo.updateTransaction(planId, transactionId, body.transaction ?? body);
+      return json({ data: { transaction: updated, server_knowledge: await repo.getServerKnowledge(planId) } });
     }
     if (segments.length === 5 && method === "DELETE") {
-      const deleted = repo.deleteTransaction(planId, transactionId);
-      return json({ data: { transaction: deleted, server_knowledge: repo.getServerKnowledge(planId) } });
+      const deleted = await repo.deleteTransaction(planId, transactionId);
+      return json({ data: { transaction: deleted, server_knowledge: await repo.getServerKnowledge(planId) } });
     }
   }
 
@@ -218,26 +225,26 @@ async function handleNative(
   request: Request,
   url: URL,
   segments: string[],
-  repo: LedgerRepository,
-  reports: ReportService,
+  repo: LedgerStore,
+  reports: ReportStore,
 ): Promise<Response> {
   const method = request.method.toUpperCase();
-  const planId = url.searchParams.get("plan_id") ?? repo.getDefaultPlanId();
-  repo.ensurePlan(planId);
+  const planId = url.searchParams.get("plan_id") ?? await repo.getDefaultPlanId();
+  await repo.ensurePlan(planId);
 
   if (segments[1] === "reports" && method === "GET") {
     const filters = reportFilters(url);
     if (segments[2] === "spending-breakdown") {
-      return json({ data: reports.spendingBreakdown(planId, filters) });
+      return json({ data: await reports.spendingBreakdown(planId, filters) });
     }
     if (segments[2] === "income-vs-spending") {
-      return json({ data: reports.incomeVsSpending(planId, filters) });
+      return json({ data: await reports.incomeVsSpending(planId, filters) });
     }
     if (segments[2] === "net-worth") {
-      return json({ data: reports.netWorth(planId, filters) });
+      return json({ data: await reports.netWorth(planId, filters) });
     }
     if (segments[2] === "age-of-money") {
-      return json({ data: reports.ageOfMoney(planId, filters) });
+      return json({ data: await reports.ageOfMoney(planId, filters) });
     }
   }
 
@@ -253,7 +260,7 @@ async function handleNative(
           memo: sub.memo ?? null,
         }))
       : undefined;
-    const transaction = repo.createTransaction(planId, {
+    const transaction = await repo.createTransaction(planId, {
       id: body.client_id,
       account_id: body.account_id,
       date: body.date ?? new Date().toISOString().slice(0, 10),
@@ -267,12 +274,12 @@ async function handleNative(
       source_ref: body.client_id ?? null,
       subtransactions,
     });
-    return json({ data: { transaction, server_knowledge: repo.getServerKnowledge(planId) } }, 201);
+    return json({ data: { transaction, server_knowledge: await repo.getServerKnowledge(planId) } }, 201);
   }
 
   if (segments[1] === "import" && segments[2] === "csv" && method === "POST") {
     const body = await readJson(request);
-    const result = importCsvRows(repo, body.plan_id ?? planId, body.account_id, body.rows ?? []);
+    const result = await importCsvRows(repo, body.plan_id ?? planId, body.account_id, body.rows ?? []);
     return json({ data: result }, 201);
   }
 

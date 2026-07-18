@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { createId } from "./ids";
+import { SqliteRepositoryDatabase, type RepositoryDatabase } from "./repository-db";
 import type { ClearedState, TransactionFilters, TransactionInput } from "./types";
 
 type Row = Record<string, any>;
@@ -21,17 +22,18 @@ export class LedgerRepository {
    */
   private touchedTransactionIds: Set<string> | null = null;
 
-  constructor(
-    private readonly db: Database,
-    private readonly defaultPlanId: string,
-  ) {}
+  private readonly db: RepositoryDatabase;
+
+  constructor(db: Database | RepositoryDatabase, private readonly defaultPlanId: string) {
+    this.db = "run" in db ? new SqliteRepositoryDatabase(db) : db;
+  }
 
   getDefaultPlanId(): string {
     return this.defaultPlanId;
   }
 
-  ensurePlan(planId = this.defaultPlanId, name = "HowMuch"): void {
-    this.db
+  async ensurePlan(planId = this.defaultPlanId, name = "HowMuch"): Promise<void> {
+    await this.db
       .query(
         `INSERT INTO plans (id, name, external_ynab_id, first_month, last_month)
          VALUES (?, ?, ?, strftime('%Y-%m', 'now'), strftime('%Y-%m', 'now'))
@@ -40,9 +42,9 @@ export class LedgerRepository {
       .run(planId, name, planId);
   }
 
-  touchPlan(planId: string): number {
-    this.ensurePlan(planId);
-    const row = this.db
+  async touchPlan(planId: string): Promise<number> {
+    await this.ensurePlan(planId);
+    const row = await this.db
       .query(
         `UPDATE plans
          SET server_knowledge = server_knowledge + 1, updated_at = CURRENT_TIMESTAMP
@@ -53,27 +55,27 @@ export class LedgerRepository {
     return Number(row.server_knowledge);
   }
 
-  getServerKnowledge(planId: string): number {
-    this.ensurePlan(planId);
-    const row = this.db.query("SELECT server_knowledge FROM plans WHERE id = ?").get(planId) as Row;
+  async getServerKnowledge(planId: string): Promise<number> {
+    await this.ensurePlan(planId);
+    const row = await this.db.query("SELECT server_knowledge FROM plans WHERE id = ?").get(planId) as Row;
     return Number(row.server_knowledge);
   }
 
-  listPlans(): any[] {
-    return this.db.query("SELECT * FROM plans WHERE deleted = 0 ORDER BY name").all().map(formatPlan);
+  async listPlans(): Promise<any[]> {
+    return (await this.db.query("SELECT * FROM plans WHERE deleted = 0 ORDER BY name").all()).map(formatPlan);
   }
 
-  getPlan(planId: string): any {
-    this.ensurePlan(planId);
-    const row = this.db.query("SELECT * FROM plans WHERE id = ?").get(planId) as Row;
+  async getPlan(planId: string): Promise<any> {
+    await this.ensurePlan(planId);
+    const row = await this.db.query("SELECT * FROM plans WHERE id = ?").get(planId) as Row;
     return formatPlan(row);
   }
 
-  upsertPlan(planId: string, plan: any, settings?: any): void {
-    this.ensurePlan(planId, plan.name ?? "HowMuch");
-    const existing = this.db.query("SELECT * FROM plans WHERE id = ?").get(planId) as Row;
+  async upsertPlan(planId: string, plan: any, settings?: any): Promise<void> {
+    await this.ensurePlan(planId, plan.name ?? "HowMuch");
+    const existing = await this.db.query("SELECT * FROM plans WHERE id = ?").get(planId) as Row;
 
-    this.db
+    await this.db
       .query(
         `UPDATE plans
          SET name = ?,
@@ -100,9 +102,9 @@ export class LedgerRepository {
       );
   }
 
-  getSettings(planId: string): any {
-    this.ensurePlan(planId);
-    const row = this.db.query("SELECT * FROM plans WHERE id = ?").get(planId) as Row;
+  async getSettings(planId: string): Promise<any> {
+    await this.ensurePlan(planId);
+    const row = await this.db.query("SELECT * FROM plans WHERE id = ?").get(planId) as Row;
     return {
       date_format: JSON.parse(row.date_format_json),
       currency_format: JSON.parse(row.currency_format_json),
@@ -112,30 +114,30 @@ export class LedgerRepository {
     };
   }
 
-  ensureAccount(planId: string, accountId: string, name?: string): void {
-    this.ensurePlan(planId);
-    this.db
+  async ensureAccount(planId: string, accountId: string, name?: string): Promise<void> {
+    await this.ensurePlan(planId);
+    await this.db
       .query(
         `INSERT INTO accounts (id, plan_id, name, external_ynab_id)
          VALUES (?, ?, ?, ?)
          ON CONFLICT(id) DO NOTHING`,
       )
       .run(accountId, planId, name ?? `Imported account ${accountId.slice(0, 8)}`, accountId);
-    this.ensureTransferPayee(planId, accountId);
+    await this.ensureTransferPayee(planId, accountId);
   }
 
-  createAccount(planId: string, account: any): any {
+  async createAccount(planId: string, account: any): Promise<any> {
     const accountId = account.id ?? createId("acct");
     if (account.id) {
       // Pre-existing reseed shape: `balance` stays a transient snapshot that
       // transaction recalculation owns; only an explicit opening_balance
       // persists. Folding balance in here would double-count ledgers that
       // POST accounts and then import their starting-balance transactions.
-      this.upsertAccount(planId, account);
+      await this.upsertAccount(planId, account);
     } else {
       // YNAB's create-account body carries the starting balance in `balance`.
       const openingBalance = account.opening_balance ?? account.balance ?? 0;
-      this.upsertAccount(planId, {
+      await this.upsertAccount(planId, {
         ...account,
         id: accountId,
         opening_balance: openingBalance,
@@ -143,7 +145,7 @@ export class LedgerRepository {
         cleared_balance: account.cleared_balance ?? account.balance ?? openingBalance,
       });
     }
-    this.touchPlan(planId);
+    await this.touchPlan(planId);
     return this.getAccount(planId, accountId);
   }
 
@@ -152,27 +154,27 @@ export class LedgerRepository {
    * can record transfers by picking a payee. Provisions the payee when
    * missing and keeps its label in step with account renames.
    */
-  ensureTransferPayee(planId: string, accountId: string): { id: string; name: string } | null {
-    const account = this.db
+  async ensureTransferPayee(planId: string, accountId: string): Promise<{ id: string; name: string } | null> {
+    const account = await this.db
       .query("SELECT * FROM accounts WHERE id = ? AND plan_id = ?")
       .get(accountId, planId) as Row | null;
     if (!account || toBoolean(account.deleted)) {
       return null;
     }
 
-    let payee = this.db
+    let payee = await this.db
       .query("SELECT * FROM payees WHERE plan_id = ? AND transfer_account_id = ? AND deleted = 0")
       .get(planId, accountId) as Row | null;
 
     if (!payee && account.transfer_payee_id) {
-      const byId = this.db.query("SELECT * FROM payees WHERE id = ?").get(account.transfer_payee_id) as Row | null;
+      const byId = await this.db.query("SELECT * FROM payees WHERE id = ?").get(account.transfer_payee_id) as Row | null;
       if (!byId) {
         // Mid-import: the account references a payee that arrives later
         // (YNAB imports write accounts before payees). Leave it alone.
         return null;
       }
       if (byId.transfer_account_id == null) {
-        this.db
+        await this.db
           .query("UPDATE payees SET transfer_account_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
           .run(accountId, byId.id);
         byId.transfer_account_id = accountId;
@@ -184,19 +186,19 @@ export class LedgerRepository {
     if (!payee) {
       const payeeId = createId("payee");
       try {
-        this.db
+        await this.db
           .query("INSERT INTO payees (id, plan_id, name, transfer_account_id, external_ynab_id) VALUES (?, ?, ?, ?, ?)")
           .run(payeeId, planId, expectedName, accountId, payeeId);
       } catch {
         // Duplicate account names collide on the payee name; disambiguate.
-        this.db
+        await this.db
           .query("INSERT INTO payees (id, plan_id, name, transfer_account_id, external_ynab_id) VALUES (?, ?, ?, ?, ?)")
           .run(payeeId, planId, `${expectedName} (${accountId.slice(-4)})`, accountId, payeeId);
       }
-      payee = this.db.query("SELECT * FROM payees WHERE id = ?").get(payeeId) as Row;
+      payee = await this.db.query("SELECT * FROM payees WHERE id = ?").get(payeeId) as Row;
     } else if (payee.name !== expectedName && String(payee.name ?? "").startsWith("Transfer : ")) {
       try {
-        this.db
+        await this.db
           .query("UPDATE payees SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
           .run(expectedName, payee.id);
         payee.name = expectedName;
@@ -206,16 +208,16 @@ export class LedgerRepository {
     }
 
     if (account.transfer_payee_id !== payee.id) {
-      this.db
+      await this.db
         .query("UPDATE accounts SET transfer_payee_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
         .run(payee.id, accountId);
     }
     return { id: payee.id, name: payee.name };
   }
 
-  upsertAccount(planId: string, account: any): void {
-    this.ensurePlan(planId);
-    this.db
+  async upsertAccount(planId: string, account: any): Promise<void> {
+    await this.ensurePlan(planId);
+    await this.db
       .query(
         `INSERT INTO accounts (
            id, plan_id, name, type, on_budget, closed, opening_balance_milli,
@@ -257,26 +259,25 @@ export class LedgerRepository {
         account.external_ynab_id ?? account.id,
         bool(account.deleted),
       );
-    this.ensureTransferPayee(planId, account.id);
+    await this.ensureTransferPayee(planId, account.id);
   }
 
-  listAccounts(planId: string): any[] {
-    this.ensurePlan(planId);
-    return this.db
+  async listAccounts(planId: string): Promise<any[]> {
+    await this.ensurePlan(planId);
+    return (await this.db
       .query("SELECT * FROM accounts WHERE plan_id = ? AND deleted = 0 ORDER BY closed, name")
-      .all(planId)
-      .map(formatAccount);
+      .all(planId)).map(formatAccount);
   }
 
-  getAccount(planId: string, accountId: string): any {
-    this.ensureAccount(planId, accountId);
-    const row = this.db.query("SELECT * FROM accounts WHERE id = ? AND plan_id = ?").get(accountId, planId) as Row;
+  async getAccount(planId: string, accountId: string): Promise<any> {
+    await this.ensureAccount(planId, accountId);
+    const row = await this.db.query("SELECT * FROM accounts WHERE id = ? AND plan_id = ?").get(accountId, planId) as Row;
     return formatAccount(row);
   }
 
-  createPayee(planId: string, name: string, id = createId("payee")): any {
-    this.ensurePlan(planId);
-    const existing = this.db
+  async createPayee(planId: string, name: string, id = createId("payee")): Promise<any> {
+    await this.ensurePlan(planId);
+    const existing = await this.db
       .query("SELECT * FROM payees WHERE plan_id = ? AND lower(name) = lower(?) AND deleted = 0")
       .get(planId, name) as Row | null;
 
@@ -284,16 +285,16 @@ export class LedgerRepository {
       return formatPayee(existing);
     }
 
-    this.db
+    await this.db
       .query("INSERT INTO payees (id, plan_id, name, external_ynab_id) VALUES (?, ?, ?, ?)")
       .run(id, planId, name, id);
-    this.touchPlan(planId);
-    return formatPayee(this.db.query("SELECT * FROM payees WHERE id = ?").get(id) as Row);
+    await this.touchPlan(planId);
+    return formatPayee(await this.db.query("SELECT * FROM payees WHERE id = ?").get(id) as Row);
   }
 
-  ensurePayee(planId: string, payeeId: string, name?: string): void {
-    this.ensurePlan(planId);
-    this.db
+  async ensurePayee(planId: string, payeeId: string, name?: string): Promise<void> {
+    await this.ensurePlan(planId);
+    await this.db
       .query(
         `INSERT INTO payees (id, plan_id, name, external_ynab_id)
          VALUES (?, ?, ?, ?)
@@ -302,9 +303,9 @@ export class LedgerRepository {
       .run(payeeId, planId, name ?? `Imported payee ${payeeId.slice(0, 8)}`, payeeId);
   }
 
-  upsertPayee(planId: string, payee: any): void {
-    this.ensurePlan(planId);
-    this.db
+  async upsertPayee(planId: string, payee: any): Promise<void> {
+    await this.ensurePlan(planId);
+    await this.db
       .query(
         `INSERT INTO payees (id, plan_id, name, transfer_account_id, external_ynab_id, deleted, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -325,18 +326,17 @@ export class LedgerRepository {
       );
   }
 
-  listPayees(planId: string): any[] {
-    this.ensurePlan(planId);
-    return this.db
+  async listPayees(planId: string): Promise<any[]> {
+    await this.ensurePlan(planId);
+    return (await this.db
       .query("SELECT * FROM payees WHERE plan_id = ? AND deleted = 0 ORDER BY name")
-      .all(planId)
-      .map(formatPayee);
+      .all(planId)).map(formatPayee);
   }
 
-  ensureCategory(planId: string, categoryId: string, name?: string, groupId?: string | null): void {
-    this.ensurePlan(planId);
+  async ensureCategory(planId: string, categoryId: string, name?: string, groupId?: string | null): Promise<void> {
+    await this.ensurePlan(planId);
     const resolvedGroupId = groupId ?? "uncategorized-group";
-    this.db
+    await this.db
       .query(
         `INSERT INTO category_groups (id, plan_id, name)
          VALUES (?, ?, ?)
@@ -344,7 +344,7 @@ export class LedgerRepository {
       )
       .run(resolvedGroupId, planId, resolvedGroupId === "uncategorized-group" ? "Uncategorised" : "Imported");
 
-    this.db
+    await this.db
       .query(
         `INSERT INTO categories (id, plan_id, category_group_id, name, external_ynab_id)
          VALUES (?, ?, ?, ?, ?)
@@ -353,9 +353,9 @@ export class LedgerRepository {
       .run(categoryId, planId, resolvedGroupId, name ?? `Imported category ${categoryId.slice(0, 8)}`, categoryId);
   }
 
-  upsertCategoryGroup(planId: string, group: any): void {
-    this.ensurePlan(planId);
-    this.db
+  async upsertCategoryGroup(planId: string, group: any): Promise<void> {
+    await this.ensurePlan(planId);
+    await this.db
       .query(
         `INSERT INTO category_groups (id, plan_id, name, hidden, internal, external_ynab_id, deleted, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -378,9 +378,9 @@ export class LedgerRepository {
       );
   }
 
-  upsertCategory(planId: string, category: any, groupId?: string | null): void {
-    this.ensureCategory(planId, category.id, category.name, groupId);
-    this.db
+  async upsertCategory(planId: string, category: any, groupId?: string | null): Promise<void> {
+    await this.ensureCategory(planId, category.id, category.name, groupId);
+    await this.db
       .query(
         `UPDATE categories
          SET name = ?, category_group_id = ?, hidden = ?, internal = ?, external_ynab_id = ?, deleted = ?, updated_at = CURRENT_TIMESTAMP
@@ -398,12 +398,12 @@ export class LedgerRepository {
       );
   }
 
-  listCategoryGroups(planId: string): any[] {
-    this.ensurePlan(planId);
-    const groups = this.db
+  async listCategoryGroups(planId: string): Promise<any[]> {
+    await this.ensurePlan(planId);
+    const groups = await this.db
       .query("SELECT * FROM category_groups WHERE plan_id = ? AND deleted = 0 ORDER BY name")
       .all(planId) as Row[];
-    const categories = this.db
+    const categories = await this.db
       .query("SELECT * FROM categories WHERE plan_id = ? AND deleted = 0 ORDER BY name")
       .all(planId) as Row[];
 
@@ -416,22 +416,22 @@ export class LedgerRepository {
     }));
   }
 
-  createTransaction(planId: string, input: TransactionInput, options: TransactionWriteOptions = {}): any {
-    this.ensurePlan(planId);
+  async createTransaction(planId: string, input: TransactionInput, options: TransactionWriteOptions = {}): Promise<any> {
+    await this.ensurePlan(planId);
     const autoLink = options.autoLink ?? true;
     validateTransactionInput(input, autoLink);
     const transactionId = input.id ?? createId("txn");
     const ownsTouched = this.beginTouched();
 
     try {
-      this.db.transaction(() => {
-      this.ensureAccount(planId, input.account_id);
+      await this.db.transaction(async () => {
+      await this.ensureAccount(planId, input.account_id);
       // The upsert path must respect what the row already carries, or a
       // retried create would mint a second linked side and strand the first.
-      const existingRow = this.db
+      const existingRow = await this.db
         .query("SELECT * FROM transactions WHERE id = ? AND plan_id = ?")
         .get(transactionId, planId) as Row | null;
-      const refs = this.resolveTransactionRefs(planId, input);
+      const refs = await this.resolveTransactionRefs(planId, input);
 
       let payeeId = refs.payeeId;
       let payeeName = refs.payeeName;
@@ -452,7 +452,7 @@ export class LedgerRepository {
       // imports) must not start minting mirrors on unrelated edits.
       let createLinkedSide = false;
       if (autoLink && !transferTransactionId) {
-        const targetAccountId = (payeeId ? this.payeeTransferTarget(planId, payeeId) : null) ?? transferAccountId;
+        const targetAccountId = (payeeId ? await this.payeeTransferTarget(planId, payeeId) : null) ?? transferAccountId;
         const payeeUnchanged = existingRow != null && existingRow.payee_id === payeeId;
         if (targetAccountId && !payeeUnchanged) {
           if (input.subtransactions?.length) {
@@ -460,9 +460,9 @@ export class LedgerRepository {
               "A split transaction cannot itself be a transfer; use a transfer subtransaction instead",
             );
           }
-          const target = this.requireTransferTarget(planId, input.account_id, targetAccountId);
+          const target = await this.requireTransferTarget(planId, input.account_id, targetAccountId);
           transferAccountId = target.id;
-          const targetPayee = this.ensureTransferPayee(planId, target.id);
+          const targetPayee = await this.ensureTransferPayee(planId, target.id);
           if (targetPayee) {
             payeeId = targetPayee.id;
             payeeName = targetPayee.name;
@@ -470,7 +470,7 @@ export class LedgerRepository {
           createLinkedSide = true;
         }
       }
-      if (autoLink && transferAccountId && this.accountsBothOnBudget(planId, input.account_id, transferAccountId)) {
+      if (autoLink && transferAccountId && await this.accountsBothOnBudget(planId, input.account_id, transferAccountId)) {
         // Transfers between two budget accounts carry no category in YNAB;
         // only transfers to tracking accounts count as categorised spending.
         categoryId = null;
@@ -482,7 +482,7 @@ export class LedgerRepository {
         categoryName = null;
       }
 
-      this.db
+      await this.db
         .query(
           `INSERT INTO transactions (
              id, plan_id, account_id, date, amount_milli, memo, cleared, approved,
@@ -544,16 +544,16 @@ export class LedgerRepository {
           bool(input.deleted),
         );
 
-      const previousSubs = this.db
+      const previousSubs = await this.db
         .query("SELECT id, transfer_transaction_id FROM subtransactions WHERE transaction_id = ?")
         .all(transactionId) as Row[];
-      this.db.query("DELETE FROM subtransactions WHERE transaction_id = ?").run(transactionId);
+      await this.db.query("DELETE FROM subtransactions WHERE transaction_id = ?").run(transactionId);
       const keptSubIds = new Set<string>();
       const keptLinkIds = new Set<string>();
       for (const sub of input.subtransactions ?? []) {
         const subId = sub.id ?? createId("sub");
         keptSubIds.add(subId);
-        const subRefs = this.resolveTransactionRefs(planId, {
+        const subRefs = await this.resolveTransactionRefs(planId, {
           account_id: input.account_id,
           date: input.date,
           amount: sub.amount,
@@ -575,7 +575,7 @@ export class LedgerRepository {
             throw new ValidationError("Transfer target must be a different account");
           }
           // The split line already owns a linked side: keep it in step.
-          this.syncLinkedTransaction(planId, subTransferTransactionId, {
+          await this.syncLinkedTransaction(planId, subTransferTransactionId, {
             date: input.date,
             amount: -sub.amount,
             memo: sub.memo ?? null,
@@ -584,20 +584,20 @@ export class LedgerRepository {
           });
         } else if (autoLink) {
           const targetAccountId =
-            (subPayeeId ? this.payeeTransferTarget(planId, subPayeeId) : null) ?? subTransferAccountId;
+            (subPayeeId ? await this.payeeTransferTarget(planId, subPayeeId) : null) ?? subTransferAccountId;
           if (targetAccountId) {
-            const target = this.requireTransferTarget(planId, input.account_id, targetAccountId);
+            const target = await this.requireTransferTarget(planId, input.account_id, targetAccountId);
             subTransferAccountId = target.id;
-            const targetPayee = this.ensureTransferPayee(planId, target.id);
+            const targetPayee = await this.ensureTransferPayee(planId, target.id);
             if (targetPayee) {
               subPayeeId = targetPayee.id;
               subPayeeName = targetPayee.name;
             }
-            if (this.accountsBothOnBudget(planId, input.account_id, target.id)) {
+            if (await this.accountsBothOnBudget(planId, input.account_id, target.id)) {
               subCategoryId = null;
               subCategoryName = null;
             }
-            subTransferTransactionId = this.insertLinkedTransaction(planId, {
+            subTransferTransactionId = await this.insertLinkedTransaction(planId, {
               accountId: target.id,
               date: input.date,
               amount: -sub.amount,
@@ -613,7 +613,7 @@ export class LedgerRepository {
           keptLinkIds.add(subTransferTransactionId);
         }
 
-        this.db
+        await this.db
           .query(
             `INSERT INTO subtransactions (
                id, transaction_id, amount_milli, memo, payee_id, payee_name_snapshot,
@@ -645,12 +645,12 @@ export class LedgerRepository {
           previous.transfer_transaction_id &&
           !keptLinkIds.has(previous.transfer_transaction_id)
         ) {
-          this.softDeleteLinkedTransaction(planId, previous.transfer_transaction_id);
+          await this.softDeleteLinkedTransaction(planId, previous.transfer_transaction_id);
         }
       }
 
       if (input.source_kind || input.source_ref) {
-        this.db
+        await this.db
           .query(
             `INSERT INTO source_events (id, plan_id, transaction_id, source_kind, source_ref, payload_json)
              VALUES (?, ?, ?, ?, ?, ?)`,
@@ -659,7 +659,7 @@ export class LedgerRepository {
       }
 
       if (createLinkedSide && transferAccountId) {
-        const linkedId = this.insertLinkedTransaction(planId, {
+        const linkedId = await this.insertLinkedTransaction(planId, {
           accountId: transferAccountId,
           date: input.date,
           amount: -input.amount,
@@ -668,13 +668,13 @@ export class LedgerRepository {
           sourceAccountId: input.account_id,
           linkId: transactionId,
         });
-        this.db
+        await this.db
           .query("UPDATE transactions SET transfer_transaction_id = ? WHERE id = ?")
           .run(linkedId, transactionId);
       } else if (autoLink && transferTransactionId && !input.subtransactions?.length) {
         // A re-created or edited row that already owns a linked side keeps
         // that side in step instead of minting a new one.
-        this.syncLinkedTransaction(planId, transferTransactionId, {
+        await this.syncLinkedTransaction(planId, transferTransactionId, {
           date: input.date,
           amount: -input.amount,
           memo: input.memo ?? null,
@@ -683,13 +683,13 @@ export class LedgerRepository {
         });
       }
 
-      this.recalculateAccount(input.account_id);
+      await this.recalculateAccount(input.account_id);
       if (existingRow && existingRow.account_id !== input.account_id) {
-        this.recalculateAccount(existingRow.account_id);
+        await this.recalculateAccount(existingRow.account_id);
       }
       this.markTouched(transactionId);
       if (ownsTouched) {
-        this.commitTouched(planId);
+        await this.commitTouched(planId);
       }
       })();
     } finally {
@@ -698,20 +698,20 @@ export class LedgerRepository {
       }
     }
 
-    return this.getTransaction(planId, transactionId, bool(input.deleted));
+    return this.getTransaction(planId, transactionId, bool(input.deleted) === 1);
   }
 
-  updateTransaction(planId: string, transactionId: string, patch: Partial<TransactionInput>): any {
-    const existing = this.getTransactionRow(planId, transactionId);
+  async updateTransaction(planId: string, transactionId: string, patch: Partial<TransactionInput>): Promise<any> {
+    const existing = await this.getTransactionRow(planId, transactionId);
     if (!existing) {
       throw new NotFoundError("Transaction not found");
     }
-    const existingTransaction = this.getTransaction(planId, transactionId);
+    const existingTransaction = await this.getTransaction(planId, transactionId);
 
     // The linked side of a split line cannot restate the transfer itself —
     // its amount/date/accounts live on the split. Cosmetic edits are fine.
-    if (existing.transfer_transaction_id && !this.getTransactionRow(planId, existing.transfer_transaction_id)) {
-      const linkedSub = this.db
+    if (existing.transfer_transaction_id && !await this.getTransactionRow(planId, existing.transfer_transaction_id)) {
+      const linkedSub = await this.db
         .query("SELECT id FROM subtransactions WHERE id = ? AND deleted = 0")
         .get(existing.transfer_transaction_id) as Row | null;
       if (linkedSub) {
@@ -770,18 +770,18 @@ export class LedgerRepository {
 
     const ownsTouched = this.beginTouched();
     try {
-      this.db.transaction(() => {
+      await this.db.transaction(async () => {
         // Transfer link management (YNAB): changing the payee can break or
         // move the linked side; every other edit keeps both sides in step
         // (createTransaction syncs a kept link itself).
         const linkedRow = existing.transfer_transaction_id
-          ? this.getTransactionRow(planId, existing.transfer_transaction_id)
+          ? await this.getTransactionRow(planId, existing.transfer_transaction_id)
           : null;
         if (linkedRow && patch.payee_id !== undefined) {
-          const nextTarget = patch.payee_id ? this.payeeTransferTarget(planId, patch.payee_id) : null;
+          const nextTarget = patch.payee_id ? await this.payeeTransferTarget(planId, patch.payee_id) : null;
           if (!nextTarget || nextTarget === next.account_id) {
             // No longer a transfer: the linked side goes away.
-            this.softDeleteLinkedTransaction(planId, linkedRow.id);
+            await this.softDeleteLinkedTransaction(planId, linkedRow.id);
             next.transfer_account_id = null;
             next.transfer_transaction_id = null;
           } else {
@@ -789,12 +789,12 @@ export class LedgerRepository {
           }
         }
 
-        this.createTransaction(planId, next);
+        await this.createTransaction(planId, next);
         if (existing.account_id !== next.account_id) {
-          this.recalculateAccount(existing.account_id);
+          await this.recalculateAccount(existing.account_id);
         }
         if (ownsTouched) {
-          this.commitTouched(planId);
+          await this.commitTouched(planId);
         }
       })();
     } finally {
@@ -805,20 +805,20 @@ export class LedgerRepository {
     return this.getTransaction(planId, transactionId);
   }
 
-  deleteTransaction(planId: string, transactionId: string): any {
-    const existing = this.getTransactionRow(planId, transactionId);
+  async deleteTransaction(planId: string, transactionId: string): Promise<any> {
+    const existing = await this.getTransactionRow(planId, transactionId);
     if (!existing) {
       throw new NotFoundError("Transaction not found");
     }
 
-    this.db.transaction(() => {
+    await this.db.transaction(async () => {
       const removeIds = new Set<string>([transactionId]);
       const stampIds = new Set<string>([transactionId]);
       const accountIds = new Set<string>([existing.account_id]);
 
       // Deleting one side of a transfer deletes the other (YNAB behaviour)...
       if (existing.transfer_transaction_id) {
-        const linked = this.getTransactionRow(planId, existing.transfer_transaction_id);
+        const linked = await this.getTransactionRow(planId, existing.transfer_transaction_id);
         if (linked) {
           removeIds.add(linked.id);
           stampIds.add(linked.id);
@@ -826,11 +826,11 @@ export class LedgerRepository {
         } else {
           // ...unless the link points at a split line on the other side:
           // that line stays and simply forgets the link.
-          const sub = this.db
+          const sub = await this.db
             .query("SELECT id, transaction_id FROM subtransactions WHERE id = ?")
             .get(existing.transfer_transaction_id) as Row | null;
           if (sub) {
-            this.db
+            await this.db
               .query(
                 `UPDATE subtransactions
                  SET transfer_account_id = NULL, transfer_transaction_id = NULL, updated_at = CURRENT_TIMESTAMP
@@ -843,13 +843,13 @@ export class LedgerRepository {
       }
 
       // Linked sides born from this row's own split lines go too.
-      const subLinks = this.db
+      const subLinks = await this.db
         .query(
           "SELECT transfer_transaction_id FROM subtransactions WHERE transaction_id = ? AND deleted = 0 AND transfer_transaction_id IS NOT NULL",
         )
         .all(transactionId) as Row[];
       for (const link of subLinks) {
-        const linked = this.getTransactionRow(planId, link.transfer_transaction_id);
+        const linked = await this.getTransactionRow(planId, link.transfer_transaction_id);
         if (linked) {
           removeIds.add(linked.id);
           stampIds.add(linked.id);
@@ -858,16 +858,16 @@ export class LedgerRepository {
       }
 
       for (const id of removeIds) {
-        this.db
+        await this.db
           .query("UPDATE transactions SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
           .run(id, planId);
       }
       for (const accountId of accountIds) {
-        this.recalculateAccount(accountId);
+        await this.recalculateAccount(accountId);
       }
-      const serverKnowledge = this.touchPlan(planId);
+      const serverKnowledge = await this.touchPlan(planId);
       for (const id of stampIds) {
-        this.db
+        await this.db
           .query("UPDATE transactions SET server_knowledge = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
           .run(serverKnowledge, id, planId);
       }
@@ -876,18 +876,18 @@ export class LedgerRepository {
     return this.getTransaction(planId, transactionId, true);
   }
 
-  importTransactions(planId: string, inputs: TransactionInput[]): {
+  async importTransactions(planId: string, inputs: TransactionInput[]): Promise<{
     transaction_ids: string[];
     duplicate_import_ids: string[];
     duplicate_transaction_ids: string[];
     server_knowledge: number;
-  } {
+  }> {
     const transactionIds: string[] = [];
     const duplicateImportIds = new Set<string>();
     const duplicateTransactionIds = new Set<string>();
 
     for (const input of inputs) {
-      const duplicate = this.findDuplicateTransaction(planId, input);
+      const duplicate = await this.findDuplicateTransaction(planId, input);
       if (duplicate) {
         if (input.import_id) {
           duplicateImportIds.add(input.import_id);
@@ -896,7 +896,7 @@ export class LedgerRepository {
         continue;
       }
 
-      const created = this.createTransaction(planId, input);
+      const created = await this.createTransaction(planId, input);
       transactionIds.push(created.id);
     }
 
@@ -904,12 +904,12 @@ export class LedgerRepository {
       transaction_ids: transactionIds,
       duplicate_import_ids: [...duplicateImportIds],
       duplicate_transaction_ids: [...duplicateTransactionIds],
-      server_knowledge: this.getServerKnowledge(planId),
+      server_knowledge: await this.getServerKnowledge(planId),
     };
   }
 
-  listTransactions(planId: string, filters: TransactionFilters = {}): any[] {
-    this.ensurePlan(planId);
+  async listTransactions(planId: string, filters: TransactionFilters = {}): Promise<any[]> {
+    await this.ensurePlan(planId);
     const clauses = ["t.plan_id = ?"];
     const params: any[] = [planId];
 
@@ -955,7 +955,7 @@ export class LedgerRepository {
       params.push(filters.lastKnowledgeOfServer);
     }
 
-    const rows = this.db
+    const rows = await this.db
       .query(
         `SELECT
            t.*,
@@ -971,21 +971,21 @@ export class LedgerRepository {
       )
       .all(...params) as Row[];
 
-    return rows.map((row) => this.formatTransaction(row));
+    return this.formatTransactions(rows);
   }
 
-  getTransaction(planId: string, transactionId: string, includeDeleted = false): any {
-    const row = this.getTransactionRow(planId, transactionId, includeDeleted);
+  async getTransaction(planId: string, transactionId: string, includeDeleted = false): Promise<any> {
+    const row = await this.getTransactionRow(planId, transactionId, includeDeleted);
     if (!row) {
       throw new NotFoundError("Transaction not found");
     }
     return this.formatTransaction(row);
   }
 
-  getMonth(planId: string, month: string): any {
-    this.ensurePlan(planId);
+  async getMonth(planId: string, month: string): Promise<any> {
+    await this.ensurePlan(planId);
     const start = month.length === 7 ? `${month}-01` : month;
-    const categoryRows = this.db
+    const categoryRows = await this.db
       .query(
         `WITH lines AS (
            SELECT
@@ -1033,25 +1033,25 @@ export class LedgerRepository {
     };
   }
 
-  createImportSession(planId: string | null, source: string): string {
+  async createImportSession(planId: string | null, source: string): Promise<string> {
     const id = createId("imp");
     if (planId) {
-      this.ensurePlan(planId);
+      await this.ensurePlan(planId);
     }
-    this.db
+    await this.db
       .query("INSERT INTO import_sessions (id, plan_id, source) VALUES (?, ?, ?)")
       .run(id, planId, source);
     return id;
   }
 
-  finishImportSession(id: string, status: string, summary: unknown): void {
-    this.db
+  async finishImportSession(id: string, status: string, summary: unknown): Promise<void> {
+    await this.db
       .query("UPDATE import_sessions SET status = ?, finished_at = CURRENT_TIMESTAMP, summary_json = ? WHERE id = ?")
       .run(status, JSON.stringify(summary), id);
   }
 
-  listYnabTransactionFingerprints(planId: string): Array<{ external_ynab_id: string; date: string; amount_milli: number }> {
-    return this.db
+  async listYnabTransactionFingerprints(planId: string): Promise<Array<{ external_ynab_id: string; date: string; amount_milli: number }>> {
+    return await this.db
       .query(
         `SELECT external_ynab_id, date, amount_milli
          FROM transactions
@@ -1060,8 +1060,8 @@ export class LedgerRepository {
       .all(planId) as Array<{ external_ynab_id: string; date: string; amount_milli: number }>;
   }
 
-  recordImportRow(sessionId: string, rowIndex: number, status: string, payload: unknown, error?: string, transactionId?: string): void {
-    this.db
+  async recordImportRow(sessionId: string, rowIndex: number, status: string, payload: unknown, error?: string, transactionId?: string): Promise<void> {
+    await this.db
       .query(
         `INSERT INTO import_rows (id, import_session_id, row_index, status, payload_json, error, transaction_id)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -1069,18 +1069,18 @@ export class LedgerRepository {
       .run(createId("row"), sessionId, rowIndex, status, JSON.stringify(payload), error ?? null, transactionId ?? null);
   }
 
-  private payeeTransferTarget(planId: string, payeeId: string): string | null {
-    const row = this.db
+  private async payeeTransferTarget(planId: string, payeeId: string): Promise<string | null> {
+    const row = await this.db
       .query("SELECT transfer_account_id FROM payees WHERE id = ? AND plan_id = ? AND deleted = 0")
       .get(payeeId, planId) as Row | null;
     return row?.transfer_account_id ?? null;
   }
 
-  private requireTransferTarget(planId: string, sourceAccountId: string, targetAccountId: string): Row {
+  private async requireTransferTarget(planId: string, sourceAccountId: string, targetAccountId: string): Promise<Row> {
     if (targetAccountId === sourceAccountId) {
       throw new ValidationError("Transfer target must be a different account");
     }
-    const target = this.db
+    const target = await this.db
       .query("SELECT * FROM accounts WHERE id = ? AND plan_id = ? AND deleted = 0")
       .get(targetAccountId, planId) as Row | null;
     if (!target) {
@@ -1089,8 +1089,8 @@ export class LedgerRepository {
     return target;
   }
 
-  private accountsBothOnBudget(planId: string, firstAccountId: string, secondAccountId: string): boolean {
-    const row = this.db
+  private async accountsBothOnBudget(planId: string, firstAccountId: string, secondAccountId: string): Promise<boolean> {
+    const row = await this.db
       .query(
         `SELECT COUNT(*) AS on_budget_count FROM accounts
          WHERE plan_id = ? AND id IN (?, ?) AND on_budget = 1`,
@@ -1100,7 +1100,7 @@ export class LedgerRepository {
   }
 
   /** Creates the other side of a transfer and returns its id. */
-  private insertLinkedTransaction(
+  private async insertLinkedTransaction(
     planId: string,
     opts: {
       accountId: string;
@@ -1111,11 +1111,11 @@ export class LedgerRepository {
       sourceAccountId: string;
       linkId: string;
     },
-  ): string {
-    this.ensureAccount(planId, opts.accountId);
-    const payee = this.ensureTransferPayee(planId, opts.sourceAccountId);
+  ): Promise<string> {
+    await this.ensureAccount(planId, opts.accountId);
+    const payee = await this.ensureTransferPayee(planId, opts.sourceAccountId);
     const id = createId("txn");
-    this.db
+    await this.db
       .query(
         `INSERT INTO transactions (
            id, plan_id, account_id, date, amount_milli, memo, cleared, approved,
@@ -1136,13 +1136,13 @@ export class LedgerRepository {
         opts.sourceAccountId,
         opts.linkId,
       );
-    this.recalculateAccount(opts.accountId);
+    await this.recalculateAccount(opts.accountId);
     this.markTouched(id);
     return id;
   }
 
   /** Keeps the other side of a transfer in step after an edit. */
-  private syncLinkedTransaction(
+  private async syncLinkedTransaction(
     planId: string,
     linkedTransactionId: string,
     opts: {
@@ -1152,14 +1152,14 @@ export class LedgerRepository {
       sourceAccountId: string;
       accountId?: string;
     },
-  ): void {
-    const linked = this.getTransactionRow(planId, linkedTransactionId);
+  ): Promise<void> {
+    const linked = await this.getTransactionRow(planId, linkedTransactionId);
     if (!linked) {
       return;
     }
     const nextAccountId = opts.accountId ?? linked.account_id;
-    const payee = this.ensureTransferPayee(planId, opts.sourceAccountId);
-    this.db
+    const payee = await this.ensureTransferPayee(planId, opts.sourceAccountId);
+    await this.db
       .query(
         `UPDATE transactions
          SET account_id = ?, date = ?, amount_milli = ?, memo = ?,
@@ -1178,22 +1178,22 @@ export class LedgerRepository {
         linkedTransactionId,
         planId,
       );
-    this.recalculateAccount(linked.account_id);
+    await this.recalculateAccount(linked.account_id);
     if (nextAccountId !== linked.account_id) {
-      this.recalculateAccount(nextAccountId);
+      await this.recalculateAccount(nextAccountId);
     }
     this.markTouched(linkedTransactionId);
   }
 
-  private softDeleteLinkedTransaction(planId: string, linkedTransactionId: string): void {
-    const linked = this.getTransactionRow(planId, linkedTransactionId);
+  private async softDeleteLinkedTransaction(planId: string, linkedTransactionId: string): Promise<void> {
+    const linked = await this.getTransactionRow(planId, linkedTransactionId);
     if (!linked) {
       return;
     }
-    this.db
+    await this.db
       .query("UPDATE transactions SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
       .run(linkedTransactionId, planId);
-    this.recalculateAccount(linked.account_id);
+    await this.recalculateAccount(linked.account_id);
     this.markTouched(linkedTransactionId);
   }
 
@@ -1211,49 +1211,49 @@ export class LedgerRepository {
   }
 
   /** Stamps every touched row with a single fresh server_knowledge. */
-  private commitTouched(planId: string): void {
+  private async commitTouched(planId: string): Promise<void> {
     const touched = this.touchedTransactionIds;
     if (!touched?.size) {
       return;
     }
-    const serverKnowledge = this.touchPlan(planId);
+    const serverKnowledge = await this.touchPlan(planId);
     for (const id of touched) {
-      this.db
+      await this.db
         .query("UPDATE transactions SET server_knowledge = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
         .run(serverKnowledge, id, planId);
     }
   }
 
-  private resolveTransactionRefs(planId: string, input: TransactionInput): {
+  private async resolveTransactionRefs(planId: string, input: TransactionInput): Promise<{
     payeeId: string | null;
     payeeName: string | null;
     categoryId: string | null;
     categoryName: string | null;
-  } {
+  }> {
     let payeeId = input.payee_id ?? null;
     let payeeName = input.payee_name ?? null;
     if (payeeId) {
-      this.ensurePayee(planId, payeeId, payeeName ?? undefined);
-      const row = this.db.query("SELECT name FROM payees WHERE id = ?").get(payeeId) as Row;
+      await this.ensurePayee(planId, payeeId, payeeName ?? undefined);
+      const row = await this.db.query("SELECT name FROM payees WHERE id = ?").get(payeeId) as Row;
       payeeName = row?.name ?? payeeName;
     } else if (payeeName) {
-      payeeId = this.createPayee(planId, payeeName).id;
+      payeeId = (await this.createPayee(planId, payeeName)).id;
     }
 
     let categoryName: string | null = null;
     const categoryId = input.category_id ?? null;
     if (categoryId) {
-      this.ensureCategory(planId, categoryId);
-      const row = this.db.query("SELECT name FROM categories WHERE id = ?").get(categoryId) as Row;
+      await this.ensureCategory(planId, categoryId);
+      const row = await this.db.query("SELECT name FROM categories WHERE id = ?").get(categoryId) as Row;
       categoryName = row?.name ?? null;
     }
 
     return { payeeId, payeeName, categoryId, categoryName };
   }
 
-  findDuplicateTransaction(planId: string, input: TransactionInput): any | null {
+  async findDuplicateTransaction(planId: string, input: TransactionInput): Promise<any | null> {
     if (input.import_id) {
-      const importMatch = this.findTransactionByImportId(planId, input.import_id);
+      const importMatch = await this.findTransactionByImportId(planId, input.import_id);
       if (importMatch) {
         return importMatch;
       }
@@ -1285,7 +1285,7 @@ export class LedgerRepository {
       return null;
     }
 
-    const row = this.db
+    const row = await this.db
       .query(
         `SELECT
            t.*,
@@ -1302,11 +1302,11 @@ export class LedgerRepository {
       )
       .get(...params) as Row | null;
 
-    return row ? this.formatTransaction(row) : null;
+    return row ? await this.formatTransaction(row) : null;
   }
 
-  findTransactionByImportId(planId: string, importId: string): any | null {
-    const row = this.db
+  async findTransactionByImportId(planId: string, importId: string): Promise<any | null> {
+    const row = await this.db
       .query(
         `SELECT
            t.*,
@@ -1323,15 +1323,15 @@ export class LedgerRepository {
       )
       .get(planId, importId) as Row | null;
 
-    return row ? this.formatTransaction(row) : null;
+    return row ? await this.formatTransaction(row) : null;
   }
 
-  private getTransactionRow(planId: string, transactionId: string, includeDeleted = false): Row | null {
+  private async getTransactionRow(planId: string, transactionId: string, includeDeleted = false): Promise<Row | null> {
     const clauses = ["t.plan_id = ?", "t.id = ?"];
     if (!includeDeleted) {
       clauses.push("t.deleted = 0");
     }
-    return this.db
+    return await this.db
       .query(
         `SELECT
            t.*,
@@ -1348,8 +1348,8 @@ export class LedgerRepository {
       .get(planId, transactionId) as Row | null;
   }
 
-  private formatTransaction(row: Row): any {
-    const subtransactions = this.db
+  private async formatTransaction(row: Row): Promise<any> {
+    const subtransactions = await this.db
       .query(
         `SELECT
            st.*,
@@ -1363,6 +1363,40 @@ export class LedgerRepository {
       )
       .all(row.id) as Row[];
 
+    return this.formatTransactionRow(row, subtransactions);
+  }
+
+  /** Loads split lines in bounded batches so a full ledger list is not N+1 queries. */
+  private async formatTransactions(rows: Row[]): Promise<any[]> {
+    if (rows.length === 0) return [];
+    const byTransaction = new Map<string, Row[]>();
+    const batchSize = 500;
+    for (let offset = 0; offset < rows.length; offset += batchSize) {
+      const ids = rows.slice(offset, offset + batchSize).map((row) => row.id);
+      const placeholders = ids.map(() => "?").join(", ");
+      const subtransactions = await this.db
+        .query(
+          `SELECT
+             st.*,
+             p.name AS payee_name,
+             c.name AS category_name
+           FROM subtransactions st
+           LEFT JOIN payees p ON p.id = st.payee_id
+           LEFT JOIN categories c ON c.id = st.category_id
+           WHERE st.transaction_id IN (${placeholders}) AND st.deleted = 0
+           ORDER BY st.transaction_id, st.created_at, st.id`,
+        )
+        .all(...ids) as Row[];
+      for (const subtransaction of subtransactions) {
+        const existing = byTransaction.get(subtransaction.transaction_id) ?? [];
+        existing.push(subtransaction);
+        byTransaction.set(subtransaction.transaction_id, existing);
+      }
+    }
+    return rows.map((row) => this.formatTransactionRow(row, byTransaction.get(row.id) ?? []));
+  }
+
+  private formatTransactionRow(row: Row, subtransactions: Row[]): any {
     return {
       id: row.id,
       date: row.date,
@@ -1402,8 +1436,8 @@ export class LedgerRepository {
     };
   }
 
-  private recalculateAccount(accountId: string): void {
-    const row = this.db
+  private async recalculateAccount(accountId: string): Promise<void> {
+    const row = await this.db
       .query(
         `SELECT
            a.opening_balance_milli +
@@ -1422,7 +1456,7 @@ export class LedgerRepository {
       return;
     }
 
-    this.db
+    await this.db
       .query(
         `UPDATE accounts
          SET balance_milli = ?, cleared_balance_milli = ?, uncleared_balance_milli = ?, updated_at = CURRENT_TIMESTAMP

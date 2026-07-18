@@ -10,11 +10,28 @@
     "demo:seed": "bun scripts/seed-demo.ts",
     "import:ynab": "bun scripts/import-ynab.ts",
     "import:ynab-export": "bun scripts/import-ynab-export.ts",
+    "migrate:neon": "bun scripts/migrate-sqlite-to-postgres.ts",
     "dev": "bun run dev:stack",
     "dev:stack": "./scripts/dev-stack.sh",
     "api:dev": "bun --hot apps/api/src/server.ts",
     "api:migrate": "bun apps/api/src/migrate.ts",
+    "api:migrate:postgres": "bun apps/api/src/postgres-migrate.ts",
+    "baseline:sqlite": "bun scripts/ledger-baseline.ts",
     "smoke": "bun scripts/smoke.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "verify:postgres-api": "bun scripts/verify-postgres-api.ts",
+    "verify:postgres-reports": "bun scripts/verify-postgres-reports.ts",
+    "verify:scheduled-sync": "bun scripts/verify-scheduled-sync.ts"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260718.1",
+    "@types/bun": "^1.3.14",
+    "@types/pg": "^8.20.0",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.112.0"
   }
 }

@@ -1,0 +1,316 @@
+import type { AsyncSqlDatabase } from "./postgres";
+import type { ReportFilters } from "./types";
+
+type Row = Record<string, any>;
+
+export class PostgresReportService {
+  constructor(private readonly db: AsyncSqlDatabase) {}
+
+  async spendingBreakdown(planId: string, filters: ReportFilters = {}): Promise<any> {
+    const { where, params } = this.lineFilters(planId, filters);
+    const rows = await this.db.all<Row>(
+      `WITH lines AS (${lineItemsSql()})
+       SELECT
+         COALESCE(c.id, 'uncategorised') AS category_id,
+         COALESCE(c.name, 'Uncategorised') AS category_name,
+         COALESCE(cg.id, 'uncategorised-group') AS category_group_id,
+         COALESCE(cg.name, 'Uncategorised') AS category_group_name,
+         SUM(ABS(lines.amount_milli)) AS amount,
+         COUNT(*) AS transaction_count
+       FROM lines
+       LEFT JOIN categories c ON c.id = lines.category_id
+       LEFT JOIN category_groups cg ON cg.id = c.category_group_id
+       WHERE ${where} AND lines.amount_milli < 0
+       GROUP BY 1, 2, 3, 4
+       ORDER BY amount DESC`,
+      params,
+    );
+    const limit = bind(params, filters.topPayeesLimit ?? 5);
+    const topPayeeRows = await this.db.all<Row>(
+      `WITH lines AS (${lineItemsSql()})
+       SELECT
+         COALESCE(lines.payee_id, 'unknown-payee') AS payee_id,
+         COALESCE(p.name, lines.payee_name_snapshot, 'Unknown') AS payee_name,
+         SUM(ABS(lines.amount_milli)) AS amount
+       FROM lines
+       LEFT JOIN payees p ON p.id = lines.payee_id
+       WHERE ${where} AND lines.amount_milli < 0
+       GROUP BY 1, 2
+       ORDER BY amount DESC
+       LIMIT ${limit}`,
+      params,
+    );
+
+    const total = rows.reduce((sum, row) => sum + Number(row.amount), 0);
+    return {
+      total,
+      groups: rows.map((row) => ({
+        category_id: row.category_id,
+        category_name: row.category_name,
+        category_group_id: row.category_group_id,
+        category_group_name: row.category_group_name,
+        amount: Number(row.amount),
+        share: total > 0 ? Number(row.amount) / total : 0,
+        transaction_count: Number(row.transaction_count),
+      })),
+      top_payees: topPayeeRows.map((row) => ({
+        payee_id: row.payee_id === "unknown-payee" ? null : row.payee_id,
+        payee_name: row.payee_name,
+        amount: Number(row.amount),
+        share: total > 0 ? Number(row.amount) / total : 0,
+      })),
+    };
+  }
+
+  async incomeVsSpending(planId: string, filters: ReportFilters = {}): Promise<any> {
+    const { where, params } = this.lineFilters(planId, filters);
+    const interval = filters.interval ?? "month";
+    const rows = await this.db.all<Row>(
+      `WITH lines AS (${lineItemsSql()})
+       SELECT
+         ${periodSql(interval)} AS period,
+         SUM(CASE WHEN lines.amount_milli > 0 THEN lines.amount_milli ELSE 0 END) AS income,
+         SUM(CASE WHEN lines.amount_milli < 0 THEN ABS(lines.amount_milli) ELSE 0 END) AS spending
+       FROM lines
+       WHERE ${where}
+       GROUP BY period
+       ORDER BY period`,
+      params,
+    );
+
+    let cumulativeNet = 0;
+    return {
+      interval,
+      periods: rows.map((row) => {
+        const income = Number(row.income ?? 0);
+        const spending = Number(row.spending ?? 0);
+        const net = income - spending;
+        cumulativeNet += net;
+        return { period: row.period, income, spending, net, cumulative_net: cumulativeNet };
+      }),
+    };
+  }
+
+  async netWorth(planId: string, filters: ReportFilters = {}): Promise<any> {
+    const from = filters.from ?? (await earliestDate(this.db, planId)) ?? todayIso();
+    const to = filters.to ?? todayIso();
+    const periods = buildPeriods(from, to, filters.interval ?? "month");
+    if (periods.length === 0) return { periods: [] };
+
+    const params: any[] = [];
+    const periodValues = periods.map((period) => `(${bind(params, period.label)}, ${bind(params, period.end)})`).join(", ");
+    const plan = bind(params, planId);
+    const includeClosed = bind(params, filters.includeClosedAccounts === true ? 1 : 0);
+    let accountFilter = "";
+    if (filters.accountIds?.length) {
+      accountFilter = `AND a.id IN (${filters.accountIds.map((id) => bind(params, id)).join(", ")})`;
+    }
+    const rows = await this.db.all<Row>(
+      `WITH periods(label, end_date) AS (VALUES ${periodValues}),
+       selected_accounts AS (
+         SELECT a.* FROM accounts a
+         WHERE a.plan_id = ${plan}
+           AND a.deleted = 0
+           AND a.include_in_net_worth = 1
+           AND (${includeClosed} = 1 OR a.closed = 0)
+           ${accountFilter}
+       )
+       SELECT
+         periods.label AS period,
+         periods.end_date,
+         accounts.id AS account_id,
+         accounts.name AS account_name,
+         accounts.closed,
+         accounts.opening_balance_milli + COALESCE(SUM(CASE WHEN transactions.deleted = 0 THEN transactions.amount_milli ELSE 0 END), 0) AS balance
+       FROM periods
+       CROSS JOIN selected_accounts accounts
+       LEFT JOIN transactions
+         ON transactions.plan_id = ${plan}
+        AND transactions.account_id = accounts.id
+        AND transactions.date <= periods.end_date
+       GROUP BY periods.label, periods.end_date, accounts.id, accounts.name, accounts.closed, accounts.opening_balance_milli
+       ORDER BY periods.end_date, accounts.name`,
+      params,
+    );
+
+    const grouped = new Map<string, Row[]>();
+    for (const row of rows) grouped.set(row.period, [...(grouped.get(row.period) ?? []), row]);
+    let previousNetWorth: number | null = null;
+    return {
+      periods: periods.map((period) => {
+        const accounts = (grouped.get(period.label) ?? []).map((row) => ({
+          account_id: row.account_id,
+          account_name: row.account_name,
+          closed: Number(row.closed) === 1,
+          balance: Number(row.balance ?? 0),
+        }));
+        const netWorth = accounts.reduce((sum, account) => sum + account.balance, 0);
+        const delta = previousNetWorth == null ? null : netWorth - previousNetWorth;
+        previousNetWorth = netWorth;
+        return { period: period.label, end_date: period.end, net_worth: netWorth, delta, accounts };
+      }),
+    };
+  }
+
+  async ageOfMoney(planId: string, filters: ReportFilters = {}): Promise<any> {
+    const from = filters.from ?? (await earliestDate(this.db, planId)) ?? todayIso();
+    const to = filters.to ?? todayIso();
+    const { where, params } = this.lineFilters(planId, filters, true);
+    const rows = await this.db.all<Row>(
+      `WITH lines AS (${lineItemsSql()})
+       SELECT date, amount_milli FROM lines
+       WHERE ${where}
+       ORDER BY date ASC, ledger_sequence ASC, line_sequence ASC`,
+      params,
+    );
+
+    const lots: Array<{ date: string; amount: number }> = [];
+    const interval = filters.interval ?? "month";
+    const buckets = new Map<string, { weightedAge: number; spent: number; unmatched: number }>(
+      buildPeriods(from, to, interval).map((period) => [period.label, { weightedAge: 0, spent: 0, unmatched: 0 }]),
+    );
+
+    for (const row of rows) {
+      const amount = Number(row.amount_milli);
+      if (amount > 0) {
+        lots.push({ date: row.date, amount });
+        continue;
+      }
+      if (amount >= 0) continue;
+
+      let remaining = Math.abs(amount);
+      const period = periodLabel(row.date, interval);
+      const bucket = buckets.get(period) ?? { weightedAge: 0, spent: 0, unmatched: 0 };
+      while (remaining > 0 && lots.length > 0) {
+        const lot = lots[0];
+        const used = Math.min(remaining, lot.amount);
+        bucket.weightedAge += daysBetween(lot.date, row.date) * used;
+        bucket.spent += used;
+        remaining -= used;
+        lot.amount -= used;
+        if (lot.amount === 0) lots.shift();
+      }
+      if (remaining > 0) bucket.unmatched += remaining;
+      buckets.set(period, bucket);
+    }
+
+    return {
+      interval,
+      periods: [...buckets.entries()].map(([period, bucket]) => ({
+        period,
+        age_of_money_days: bucket.spent > 0 ? bucket.weightedAge / bucket.spent : null,
+        spent: bucket.spent,
+        unmatched_spending: bucket.unmatched,
+      })),
+    };
+  }
+
+  private lineFilters(planId: string, filters: ReportFilters, includeTransfers = false) {
+    const params: any[] = [];
+    const clauses = [`lines.plan_id = ${bind(params, planId)}`, "lines.deleted = 0"];
+    if (filters.from) clauses.push(`lines.date >= ${bind(params, filters.from)}`);
+    if (filters.to) clauses.push(`lines.date <= ${bind(params, filters.to)}`);
+    if (!includeTransfers && filters.includeTransfers !== true) {
+      clauses.push("(lines.category_id IS NOT NULL OR (lines.transfer_transaction_id IS NULL AND lines.transfer_account_id IS NULL))");
+    }
+    appendInFilter(clauses, params, "lines.account_id", filters.accountIds);
+    appendCategoryFilter(clauses, params, filters.categoryIds);
+    appendInFilter(clauses, params, "lines.category_group_id", filters.categoryGroupIds);
+    appendInFilter(clauses, params, "lines.payee_id", filters.payeeIds);
+    return { where: clauses.join(" AND "), params };
+  }
+}
+
+function lineItemsSql(): string {
+  return `
+    SELECT t.id AS transaction_id, t.ledger_sequence, COALESCE(st.ledger_sequence, 0) AS line_sequence,
+      t.plan_id, t.account_id, t.date,
+      COALESCE(st.amount_milli, t.amount_milli) AS amount_milli,
+      COALESCE(st.payee_id, t.payee_id) AS payee_id,
+      COALESCE(st.payee_name_snapshot, t.payee_name_snapshot) AS payee_name_snapshot,
+      COALESCE(st.category_id, t.category_id) AS category_id,
+      c.category_group_id,
+      COALESCE(st.transfer_transaction_id, t.transfer_transaction_id) AS transfer_transaction_id,
+      COALESCE(st.transfer_account_id, t.transfer_account_id) AS transfer_account_id,
+      t.deleted
+    FROM transactions t
+    LEFT JOIN subtransactions st ON st.transaction_id = t.id AND st.deleted = 0
+    LEFT JOIN categories c ON c.id = COALESCE(st.category_id, t.category_id)
+    WHERE NOT EXISTS (
+      SELECT 1 FROM subtransactions existing WHERE existing.transaction_id = t.id AND existing.deleted = 0
+    ) OR st.id IS NOT NULL`;
+}
+
+const UNCATEGORISED_ID = "uncategorised";
+
+function appendCategoryFilter(clauses: string[], params: any[], values?: string[]): void {
+  if (!values?.length) return;
+  const ids = values.filter((value) => value !== UNCATEGORISED_ID);
+  if (ids.length === values.length) appendInFilter(clauses, params, "lines.category_id", ids);
+  else if (!ids.length) clauses.push("lines.category_id IS NULL");
+  else clauses.push(`(lines.category_id IN (${ids.map((id) => bind(params, id)).join(", ")}) OR lines.category_id IS NULL)`);
+}
+
+function appendInFilter(clauses: string[], params: any[], column: string, values?: string[]): void {
+  if (!values?.length) return;
+  clauses.push(`${column} IN (${values.map((value) => bind(params, value)).join(", ")})`);
+}
+
+function bind(params: any[], value: any): string {
+  params.push(value);
+  return `$${params.length}`;
+}
+
+function periodSql(interval: string): string {
+  if (interval === "day") return "lines.date";
+  if (interval === "year") return "left(lines.date, 4)";
+  if (interval === "week") {
+    return `left(lines.date, 4) || '-W' || lpad(floor((extract(doy from lines.date::date) + 7 - extract(isodow from lines.date::date)) / 7)::text, 2, '0')`;
+  }
+  return "left(lines.date, 7)";
+}
+
+function periodLabel(date: string, interval: string): string {
+  if (interval === "day") return date;
+  if (interval === "year") return date.slice(0, 4);
+  if (interval === "week") {
+    const d = new Date(`${date}T00:00:00Z`);
+    const start = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    const week = Math.floor((Number(d) - Number(start)) / (7 * 86400000));
+    return `${d.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+  }
+  return date.slice(0, 7);
+}
+
+async function earliestDate(db: AsyncSqlDatabase, planId: string): Promise<string | null> {
+  const row = await db.get<Row>("SELECT MIN(date) AS date FROM transactions WHERE plan_id = $1 AND deleted = 0", [planId]);
+  return row?.date ?? null;
+}
+
+function buildPeriods(from: string, to: string, interval: string): Array<{ label: string; end: string }> {
+  const periods: Array<{ label: string; end: string }> = [];
+  const cursor = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  while (cursor <= end) {
+    const label = periodLabel(cursor.toISOString().slice(0, 10), interval);
+    const periodEnd = new Date(cursor);
+    if (interval === "year") periodEnd.setUTCMonth(11, 31);
+    else if (interval === "week") periodEnd.setUTCDate(periodEnd.getUTCDate() + 6);
+    else if (interval !== "day") periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1, 0);
+    if (periodEnd > end) periodEnd.setTime(end.getTime());
+    periods.push({ label, end: periodEnd.toISOString().slice(0, 10) });
+    if (interval === "year") cursor.setUTCFullYear(cursor.getUTCFullYear() + 1, 0, 1);
+    else if (interval === "week") cursor.setUTCDate(cursor.getUTCDate() + 7);
+    else if (interval === "day") cursor.setUTCDate(cursor.getUTCDate() + 1);
+    else cursor.setUTCMonth(cursor.getUTCMonth() + 1, 1);
+  }
+  return periods;
+}
+
+function daysBetween(from: string, to: string): number {
+  return Math.max(0, Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000));
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}

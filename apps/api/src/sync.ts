@@ -1,6 +1,6 @@
 import { DEFAULT_YNAB_MIN_SIMILARITY, DEFAULT_YNAB_SYNC_INTERVAL_MS, type ApiConfig } from "./config";
 import { importYnabFromApi, listYnabPlans, YnabRateLimitError, type YnabImportResult } from "./importers/ynab";
-import type { LedgerRepository } from "./repository";
+import type { LedgerStore } from "./storage";
 
 // YNAB's request quota is a rolling hour, so after a 429 every request made
 // before the rejection has expired once a full hour has passed.
@@ -22,7 +22,7 @@ export type YnabSyncHandle = {
  * `ynabMinSimilarity` similar to what was previously imported.
  */
 export function startYnabSync(
-  repo: LedgerRepository,
+  repo: LedgerStore,
   config: ApiConfig,
   logger: YnabSyncLogger = console,
 ): YnabSyncHandle | null {

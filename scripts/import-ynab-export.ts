@@ -29,7 +29,7 @@ const db = openDatabase(options.dbPath);
 const repo = new LedgerRepository(db, options.planId);
 
 try {
-  const result = importYnabExport(repo, {
+  const result = await importYnabExport(repo, {
     planId: options.planId,
     planName: options.planName ?? input.planName,
     registerCsv: input.registerCsv,

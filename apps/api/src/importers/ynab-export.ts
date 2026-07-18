@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { LedgerRepository } from "../repository";
+import type { LedgerStore } from "../storage";
 import type { ClearedState, TransactionInput } from "../types";
 
 export type YnabExportImportOptions = {
@@ -31,11 +31,11 @@ export type YnabExportImportResult = {
   payees: number;
 };
 
-export function importYnabExport(
-  repo: LedgerRepository,
+export async function importYnabExport(
+  repo: LedgerStore,
   options: YnabExportImportOptions,
-): YnabExportImportResult {
-  const sessionId = repo.createImportSession(options.planId, "ynab-web-export");
+): Promise<YnabExportImportResult> {
+  const sessionId = await repo.createImportSession(options.planId, "ynab-web-export");
   const dateFormat = options.dateFormat ?? "dmy";
   const registerRows = parseDelimited(options.registerCsv);
   const planRows = options.planCsv ? parseDelimited(options.planCsv) : [];
@@ -51,7 +51,7 @@ export function importYnabExport(
 
   try {
     const months = planRows.map((row) => normaliseMonth(row.Month)).filter(Boolean) as string[];
-    repo.upsertPlan(
+    await repo.upsertPlan(
       options.planId,
       {
         id: options.planId,
@@ -80,12 +80,12 @@ export function importYnabExport(
       if (!category) {
         continue;
       }
-      repo.upsertCategoryGroup(options.planId, {
+      await repo.upsertCategoryGroup(options.planId, {
         id: category.groupId,
         name: category.groupName,
         external_ynab_id: category.groupId,
       });
-      repo.upsertCategory(
+      await repo.upsertCategory(
         options.planId,
         {
           id: category.categoryId,
@@ -98,7 +98,7 @@ export function importYnabExport(
       categoryIds.add(category.categoryId);
     }
 
-    registerRows.forEach((row, index) => {
+    for (const [index, row] of registerRows.entries()) {
       try {
         const accountName = clean(row.Account);
         if (!accountName) {
@@ -107,7 +107,7 @@ export function importYnabExport(
 
         const accountId = stableId("ynab-export-account", accountName);
         accountIds.add(accountId);
-        repo.upsertAccount(options.planId, {
+        await repo.upsertAccount(options.planId, {
           id: accountId,
           name: accountName,
           external_ynab_id: accountId,
@@ -115,12 +115,12 @@ export function importYnabExport(
 
         const category = categoryFromRow(options.planId, row);
         if (category) {
-          repo.upsertCategoryGroup(options.planId, {
+          await repo.upsertCategoryGroup(options.planId, {
             id: category.groupId,
             name: category.groupName,
             external_ynab_id: category.groupId,
           });
-          repo.upsertCategory(
+          await repo.upsertCategory(
             options.planId,
             {
               id: category.categoryId,
@@ -174,9 +174,9 @@ export function importYnabExport(
         preparedTransactions.push({ row, index, input });
       } catch (error) {
         failed += 1;
-        repo.recordImportRow(sessionId, index, "failed", row, error instanceof Error ? error.message : String(error));
+        await repo.recordImportRow(sessionId, index, "failed", row, error instanceof Error ? error.message : String(error));
       }
-    });
+    }
 
     const transferPayees = markTransferPayees(preparedTransactions);
     const transferPairs = inferTransferPairs(preparedTransactions);
@@ -184,21 +184,21 @@ export function importYnabExport(
     for (const prepared of preparedTransactions) {
       try {
         const existing = prepared.input.import_id
-          ? repo.findTransactionByImportId(options.planId, prepared.input.import_id)
+          ? await repo.findTransactionByImportId(options.planId, prepared.input.import_id)
           : null;
         if (existing) {
-          repo.recordImportRow(sessionId, prepared.index, "duplicate", prepared.row, undefined, existing.id);
+          await repo.recordImportRow(sessionId, prepared.index, "duplicate", prepared.row, undefined, existing.id);
           duplicate += 1;
           continue;
         }
 
         // Both sides of a transfer exist as rows in the export; never mirror.
-        const transaction = repo.createTransaction(options.planId, prepared.input, { autoLink: false });
-        repo.recordImportRow(sessionId, prepared.index, "imported", prepared.row, undefined, transaction.id);
+        const transaction = await repo.createTransaction(options.planId, prepared.input, { autoLink: false });
+        await repo.recordImportRow(sessionId, prepared.index, "imported", prepared.row, undefined, transaction.id);
         imported += 1;
       } catch (error) {
         failed += 1;
-        repo.recordImportRow(
+        await repo.recordImportRow(
           sessionId,
           prepared.index,
           "failed",
@@ -219,10 +219,10 @@ export function importYnabExport(
       categories: categoryIds.size,
       payees: payeeNames.size,
     };
-    repo.finishImportSession(sessionId, failed > 0 ? "completed_with_errors" : "completed", summary);
+    await repo.finishImportSession(sessionId, failed > 0 ? "completed_with_errors" : "completed", summary);
     return { import_session_id: sessionId, ...summary };
   } catch (error) {
-    repo.finishImportSession(sessionId, "failed", { error: error instanceof Error ? error.message : String(error) });
+    await repo.finishImportSession(sessionId, "failed", { error: error instanceof Error ? error.message : String(error) });
     throw error;
   }
 }

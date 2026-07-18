@@ -41,22 +41,22 @@ export function seedDemoLedger(options?: {
   const repo = new LedgerRepository(db, planId);
 
   try {
-    repo.ensurePlan(planId, fixture.plan.name);
+    await repo.ensurePlan(planId, fixture.plan.name);
 
     for (const account of fixture.accounts) {
-      repo.upsertAccount(planId, account);
+      await repo.upsertAccount(planId, account);
     }
 
     for (const group of fixture.category_groups) {
-      repo.upsertCategoryGroup(planId, group);
+      await repo.upsertCategoryGroup(planId, group);
     }
 
     for (const category of fixture.categories) {
-      repo.upsertCategory(planId, category, category.group_id);
+      await repo.upsertCategory(planId, category, category.group_id);
     }
 
     for (const transaction of fixture.transactions) {
-      repo.createTransaction(planId, transaction as any);
+      await repo.createTransaction(planId, transaction as any);
     }
   } finally {
     db.close();

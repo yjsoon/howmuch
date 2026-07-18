@@ -1,4 +1,4 @@
-import type { LedgerRepository } from "../repository";
+import type { LedgerStore } from "../storage";
 
 export type YnabImportOptions = {
   token: string;
@@ -14,6 +14,8 @@ export type YnabImportOptions = {
    * YNAB import are never blocked by this check.
    */
   minSimilarity?: number;
+  /** YNAB delta cursor. Omit for the initial full-history import. */
+  lastKnowledgeOfServer?: number;
   /** Receives non-fatal warnings, e.g. the token nearing its rate limit. */
   warn?: (message: string) => void;
 };
@@ -23,6 +25,7 @@ export type YnabImportResult = {
   imported_transactions: number;
   skipped?: boolean;
   similarity?: number;
+  server_knowledge?: number;
 };
 
 export type YnabPlanSummary = {
@@ -34,32 +37,38 @@ export type YnabPlanSummary = {
 const DEFAULT_YNAB_BASE_URL = "https://api.ynab.com/v1";
 
 export async function importYnabFromApi(
-  repo: LedgerRepository,
+  repo: LedgerStore,
   options: YnabImportOptions,
 ): Promise<YnabImportResult> {
   const baseUrl = options.baseUrl ?? DEFAULT_YNAB_BASE_URL;
   const sinceDate = options.sinceDate ?? "1900-01-01";
-  const sessionId = repo.createImportSession(options.planId, "ynab-api");
+  const sessionId = await repo.createImportSession(options.planId, "ynab-api");
   const warn = dedupedWarn(options.warn);
 
   try {
+    const delta = options.lastKnowledgeOfServer == null
+      ? ""
+      : `?last_knowledge_of_server=${encodeURIComponent(String(options.lastKnowledgeOfServer))}`;
+    const transactionQuery = options.lastKnowledgeOfServer == null
+      ? `?since_date=${encodeURIComponent(sinceDate)}`
+      : delta;
     const [plan, settings, accounts, categories, payees, transactions] = await Promise.all([
       ynabFetch(baseUrl, options.token, `/plans/${options.planId}`, warn),
       ynabFetch(baseUrl, options.token, `/plans/${options.planId}/settings`, warn),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/accounts`, warn),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/categories`, warn),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/payees`, warn),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/transactions?since_date=${sinceDate}`, warn),
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/accounts${delta}`, warn),
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/categories${delta}`, warn),
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/payees${delta}`, warn),
+      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/transactions${transactionQuery}`, warn),
     ]);
 
     const fetchedTransactions = transactions.data.transactions ?? [];
 
-    if (options.minSimilarity !== undefined) {
-      const existing = repo.listYnabTransactionFingerprints(options.planId);
+    if (options.minSimilarity !== undefined && options.lastKnowledgeOfServer == null) {
+      const existing = await repo.listYnabTransactionFingerprints(options.planId);
       if (existing.length > 0) {
         const similarity = ynabSimilarity(existing, fetchedTransactions);
         if (similarity < options.minSimilarity) {
-          repo.finishImportSession(sessionId, "skipped", {
+          await repo.finishImportSession(sessionId, "skipped", {
             reason: "similarity_below_threshold",
             similarity,
             min_similarity: options.minSimilarity,
@@ -71,27 +80,27 @@ export async function importYnabFromApi(
       }
     }
 
-    repo.upsertPlan(options.planId, plan.data.plan ?? plan.data.budget ?? { id: options.planId }, settings.data.settings);
+    await repo.upsertPlan(options.planId, plan.data.plan ?? plan.data.budget ?? { id: options.planId }, settings.data.settings);
 
     for (const account of accounts.data.accounts ?? []) {
-      repo.upsertAccount(options.planId, account);
+      await repo.upsertAccount(options.planId, account);
     }
 
     for (const group of categories.data.category_groups ?? []) {
-      repo.upsertCategoryGroup(options.planId, group);
+      await repo.upsertCategoryGroup(options.planId, group);
       for (const category of group.categories ?? []) {
-        repo.upsertCategory(options.planId, category, group.id);
+        await repo.upsertCategory(options.planId, category, group.id);
       }
     }
 
     for (const payee of payees.data.payees ?? []) {
-      repo.upsertPayee(options.planId, payee);
+      await repo.upsertPayee(options.planId, payee);
     }
 
     let imported = 0;
     for (const transaction of fetchedTransactions) {
       // YNAB data already contains both sides of every transfer.
-      repo.createTransaction(options.planId, {
+      await repo.createTransaction(options.planId, {
         id: transaction.id,
         account_id: transaction.account_id,
         date: transaction.date,
@@ -126,16 +135,24 @@ export async function importYnabFromApi(
           external_ynab_id: sub.id,
         })),
       }, { autoLink: false });
-      repo.recordImportRow(sessionId, imported, "imported", transaction, undefined, transaction.id);
+      await repo.recordImportRow(sessionId, imported, "imported", transaction, undefined, transaction.id);
       imported += 1;
     }
 
-    repo.finishImportSession(sessionId, "completed", { imported_transactions: imported });
-    return { import_session_id: sessionId, imported_transactions: imported };
+    const serverKnowledge = minimumServerKnowledge(accounts, categories, payees, transactions);
+    await repo.finishImportSession(sessionId, "completed", { imported_transactions: imported, server_knowledge: serverKnowledge });
+    return { import_session_id: sessionId, imported_transactions: imported, server_knowledge: serverKnowledge };
   } catch (error) {
-    repo.finishImportSession(sessionId, "failed", { error: error instanceof Error ? error.message : String(error) });
+    await repo.finishImportSession(sessionId, "failed", { error: error instanceof Error ? error.message : String(error) });
     throw error;
   }
+}
+
+function minimumServerKnowledge(...responses: any[]): number | undefined {
+  const values = responses
+    .map((response) => Number(response?.data?.server_knowledge))
+    .filter((value) => Number.isSafeInteger(value) && value >= 0);
+  return values.length === responses.length ? Math.min(...values) : undefined;
 }
 
 export async function listYnabPlans(options: {

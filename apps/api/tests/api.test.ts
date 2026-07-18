@@ -482,7 +482,7 @@ describe("transfers and splits", () => {
 
     // A web-export import can leave a one-sided transfer: transfer payee and
     // target set, but no linked row because the pair fell outside the export.
-    repo.createTransaction(
+    await repo.createTransaction(
       "plan-test",
       {
         id: "txn-one-sided",
@@ -938,7 +938,7 @@ describe("native reports and imports", () => {
 "Current","","11/06/2026","Salary","","","","","", "$1,000.00","Uncleared"
 `;
 
-    const result = importYnabExport(repo, {
+    const result = await importYnabExport(repo, {
       planId: "plan-test",
       planName: "Actual Budget",
       registerCsv,
@@ -951,7 +951,7 @@ describe("native reports and imports", () => {
     expect(result.transfer_pairs).toBe(1);
     expect(result.transfer_payees).toBe(1);
 
-    const transactions = repo.listTransactions("plan-test", { includeDeleted: true });
+    const transactions = await repo.listTransactions("plan-test", { includeDeleted: true });
     expect(transactions).toHaveLength(7);
     const cafeTransactions = transactions.filter((transaction) => transaction.payee_name === "Cafe");
     expect(cafeTransactions).toHaveLength(2);
@@ -968,7 +968,7 @@ describe("native reports and imports", () => {
     expect(report.data.groups.find((group: any) => group.category_name === "Groceries")?.amount).toBe(24680);
     expect(report.data.groups.find((group: any) => group.category_name === "Uncategorised")?.amount).toBe(7000);
 
-    const duplicateResult = importYnabExport(repo, {
+    const duplicateResult = await importYnabExport(repo, {
       planId: "plan-test",
       planName: "Actual Budget",
       registerCsv,

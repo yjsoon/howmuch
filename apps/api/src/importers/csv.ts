@@ -1,5 +1,5 @@
-import type { LedgerRepository } from "../repository";
 import { csvRowToMilliunits } from "../money";
+import type { LedgerStore } from "../storage";
 
 export type CsvImportRow = {
   date: string;
@@ -19,18 +19,18 @@ export type CsvImportRow = {
   flag_name?: string | null;
 };
 
-export function importCsvRows(
-  repo: LedgerRepository,
+export async function importCsvRows(
+  repo: LedgerStore,
   planId: string,
   accountId: string,
   rows: CsvImportRow[],
-): { import_session_id: string; imported: number; duplicate: number; failed: number } {
-  const sessionId = repo.createImportSession(planId, "csv");
+): Promise<{ import_session_id: string; imported: number; duplicate: number; failed: number }> {
+  const sessionId = await repo.createImportSession(planId, "csv");
   let imported = 0;
   let duplicate = 0;
   let failed = 0;
 
-  rows.forEach((row, index) => {
+  for (const [index, row] of rows.entries()) {
     try {
       const resolvedAccountId = row.account_id ?? accountId;
       if (!resolvedAccountId) {
@@ -53,23 +53,23 @@ export function importCsvRows(
         source_kind: "csv",
         source_ref: sessionId,
       } as const;
-      const existing = repo.findDuplicateTransaction(planId, input);
+      const existing = await repo.findDuplicateTransaction(planId, input);
       if (existing) {
-        repo.recordImportRow(sessionId, index, "duplicate", row, undefined, existing.id);
+        await repo.recordImportRow(sessionId, index, "duplicate", row, undefined, existing.id);
         duplicate += 1;
-        return;
+        continue;
       }
 
       // Bank feeds carry each side separately; never mirror on import.
-      const transaction = repo.createTransaction(planId, input, { autoLink: false });
-      repo.recordImportRow(sessionId, index, "imported", row, undefined, transaction.id);
+      const transaction = await repo.createTransaction(planId, input, { autoLink: false });
+      await repo.recordImportRow(sessionId, index, "imported", row, undefined, transaction.id);
       imported += 1;
     } catch (error) {
       failed += 1;
-      repo.recordImportRow(sessionId, index, "failed", row, error instanceof Error ? error.message : String(error));
+      await repo.recordImportRow(sessionId, index, "failed", row, error instanceof Error ? error.message : String(error));
     }
-  });
+  }
 
-  repo.finishImportSession(sessionId, failed > 0 ? "completed_with_errors" : "completed", { imported, duplicate, failed });
+  await repo.finishImportSession(sessionId, failed > 0 ? "completed_with_errors" : "completed", { imported, duplicate, failed });
   return { import_session_id: sessionId, imported, duplicate, failed };
 }
