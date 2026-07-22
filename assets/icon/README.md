@@ -19,6 +19,11 @@ warm amber light.
   `2-back-ridge`, `3-front-ridge`, `4-marker`) for each variant, for import
   into Apple's Icon Composer as a layered icon with depth/specular effects.
   Layers composite back to the exact master image.
+- `HowMuch.icon` — a ready-made Icon Composer document: the warm sky as the
+  icon fill (with a near-black dark-appearance override), and glow, ridges,
+  and marker as stacked layers, the marker with Liquid Glass + specular
+  enabled. Open in Icon Composer to fine-tune appearances, then export or
+  reference from Xcode 26.
 
 ## Where it's used
 

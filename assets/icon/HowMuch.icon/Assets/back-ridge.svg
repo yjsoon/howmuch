@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<defs>
+<linearGradient id="backL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a6648"/>
+      <stop offset="1" stop-color="#235741"/>
+    </linearGradient>
+<radialGradient id="poolL" gradientUnits="userSpaceOnUse" cx="715" cy="500" r="330">
+      <stop offset="0" stop-color="#ffd98c" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#ffd98c" stop-opacity="0"/>
+    </radialGradient>
+<linearGradient id="crestL" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1024" y2="0">
+      <stop offset="0" stop-color="#f7f5ef"/>
+      <stop offset="0.5" stop-color="#f9eed6"/>
+      <stop offset="0.7" stop-color="#ffd98c"/>
+      <stop offset="0.88" stop-color="#f6e3b8"/>
+      <stop offset="1" stop-color="#f7f5ef"/>
+    </linearGradient>
+</defs>
+<path d="M0 664 C110 646 196 606 296 612 C396 618 452 546 556 524 C656 502 724 470 822 444 C898 424 962 434 1024 402 L1024 1024 L0 1024 Z" fill="url(#backL)"/>
+<path d="M0 664 C110 646 196 606 296 612 C396 618 452 546 556 524 C656 502 724 470 822 444 C898 424 962 434 1024 402 L1024 1024 L0 1024 Z" fill="url(#poolL)"/>
+<path d="M0 664 C110 646 196 606 296 612 C396 618 452 546 556 524 C656 502 724 470 822 444 C898 424 962 434 1024 402" fill="none" stroke="url(#crestL)" stroke-width="6" opacity="0.55"/>
+</svg>
