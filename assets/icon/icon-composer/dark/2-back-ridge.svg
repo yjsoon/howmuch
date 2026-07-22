@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<defs>
+<linearGradient id="backD" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b5c42"/>
+      <stop offset="1" stop-color="#1f4230"/>
+    </linearGradient>
+<radialGradient id="poolD" gradientUnits="userSpaceOnUse" cx="715" cy="500" r="330">
+      <stop offset="0" stop-color="#ffca75" stop-opacity="0.38"/>
+      <stop offset="1" stop-color="#ffca75" stop-opacity="0"/>
+    </radialGradient>
+<linearGradient id="crestD" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1024" y2="0">
+      <stop offset="0" stop-color="#e6c98c"/>
+      <stop offset="0.5" stop-color="#eccf92"/>
+      <stop offset="0.7" stop-color="#ffd98c"/>
+      <stop offset="0.88" stop-color="#efce8e"/>
+      <stop offset="1" stop-color="#e6c98c"/>
+    </linearGradient>
+</defs>
+<path d="M0 664 C110 646 196 606 296 612 C396 618 452 546 556 524 C656 502 724 470 822 444 C898 424 962 434 1024 402 L1024 1024 L0 1024 Z" fill="url(#backD)"/>
+<path d="M0 664 C110 646 196 606 296 612 C396 618 452 546 556 524 C656 502 724 470 822 444 C898 424 962 434 1024 402 L1024 1024 L0 1024 Z" fill="url(#poolD)"/>
+<path d="M0 664 C110 646 196 606 296 612 C396 618 452 546 556 524 C656 502 724 470 822 444 C898 424 962 434 1024 402" fill="none" stroke="url(#crestD)" stroke-width="6" opacity="0.55"/>
+</svg>

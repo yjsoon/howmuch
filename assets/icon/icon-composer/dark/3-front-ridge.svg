@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<defs>
+<linearGradient id="frontD" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#152b20"/>
+      <stop offset="1" stop-color="#0b1710"/>
+    </linearGradient>
+<radialGradient id="poolFD" gradientUnits="userSpaceOnUse" cx="715" cy="660" r="380">
+      <stop offset="0" stop-color="#ffca75" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#ffca75" stop-opacity="0"/>
+    </radialGradient>
+<linearGradient id="crestD" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1024" y2="0">
+      <stop offset="0" stop-color="#e6c98c"/>
+      <stop offset="0.5" stop-color="#eccf92"/>
+      <stop offset="0.7" stop-color="#ffd98c"/>
+      <stop offset="0.88" stop-color="#efce8e"/>
+      <stop offset="1" stop-color="#e6c98c"/>
+    </linearGradient>
+</defs>
+<path d="M0 820 C96 806 176 782 258 792 C336 801 372 738 462 722 C534 709 574 748 648 728 C758 698 818 634 898 612 C950 598 988 602 1024 584 L1024 1024 L0 1024 Z" fill="url(#frontD)"/>
+<path d="M0 820 C96 806 176 782 258 792 C336 801 372 738 462 722 C534 709 574 748 648 728 C758 698 818 634 898 612 C950 598 988 602 1024 584 L1024 1024 L0 1024 Z" fill="url(#poolFD)"/>
+<path d="M0 820 C96 806 176 782 258 792 C336 801 372 738 462 722 C534 709 574 748 648 728 C758 698 818 634 898 612 C950 598 988 602 1024 584" fill="none" stroke="url(#crestD)" stroke-width="9" stroke-linecap="round" opacity="0.9"/>
+<line x1="715" y1="480" x2="715" y2="988" stroke="#f3e2b2" stroke-width="4" stroke-linecap="round" opacity="0.15"/>
+</svg>
