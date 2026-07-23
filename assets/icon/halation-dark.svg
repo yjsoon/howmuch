@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Halation (dark) — HowMuch app icon.
+       The scrub-point sun on the net-worth ridgeline at night, its stepped
+       glow breaking the dark sky into rings. Edge-to-edge; the OS masks corners. -->
+  <defs>
+    <linearGradient id="skyD" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#10140c"/>
+      <stop offset="0.45" stop-color="#1c2013"/>
+      <stop offset="1" stop-color="#332f1d"/>
+    </linearGradient>
+    <radialGradient id="bandD" gradientUnits="userSpaceOnUse" cx="715" cy="477" r="580">
+      <stop offset="0" stop-color="#ffc670" stop-opacity="0.42"/>
+      <stop offset="0.24" stop-color="#ffc670" stop-opacity="0.37"/>
+      <stop offset="0.38" stop-color="#ffc670" stop-opacity="0.19"/>
+      <stop offset="0.56" stop-color="#ffc670" stop-opacity="0.16"/>
+      <stop offset="0.72" stop-color="#ffc670" stop-opacity="0.06"/>
+      <stop offset="0.9" stop-color="#ffc670" stop-opacity="0.03"/>
+      <stop offset="1" stop-color="#ffc670" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="coreD" gradientUnits="userSpaceOnUse" cx="715" cy="477" r="215">
+      <stop offset="0" stop-color="#ffd98c" stop-opacity="0.6"/>
+      <stop offset="0.55" stop-color="#ffd98c" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#ffd98c" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="poolD" gradientUnits="userSpaceOnUse" cx="715" cy="500" r="330">
+      <stop offset="0" stop-color="#ffca75" stop-opacity="0.38"/>
+      <stop offset="1" stop-color="#ffca75" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="poolFD" gradientUnits="userSpaceOnUse" cx="715" cy="660" r="380">
+      <stop offset="0" stop-color="#ffca75" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#ffca75" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="crestD" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1024" y2="0">
+      <stop offset="0" stop-color="#e6c98c"/>
+      <stop offset="0.5" stop-color="#eccf92"/>
+      <stop offset="0.7" stop-color="#ffd98c"/>
+      <stop offset="0.88" stop-color="#efce8e"/>
+      <stop offset="1" stop-color="#e6c98c"/>
+    </linearGradient>
+    <linearGradient id="backD" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b5c42"/>
+      <stop offset="1" stop-color="#1f4230"/>
+    </linearGradient>
+    <linearGradient id="frontD" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#152b20"/>
+      <stop offset="1" stop-color="#0b1710"/>
+    </linearGradient>
+    <linearGradient id="discD" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fdf3d6"/>
+      <stop offset="1" stop-color="#eccd93"/>
+    </linearGradient>
+    <radialGradient id="haloD" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#f4b96a" stop-opacity="0.5"/>
+      <stop offset="0.55" stop-color="#f4b96a" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#f4b96a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#skyD)"/>
+  <rect width="1024" height="1024" fill="url(#bandD)"/>
+  <circle cx="715" cy="477" r="215" fill="url(#coreD)"/>
+  <line x1="715" y1="168" x2="715" y2="368" stroke="#e8b06a" stroke-width="4" stroke-linecap="round" opacity="0.4"/>
+  <path d="M0 664 C110 646 196 606 296 612 C396 618 452 546 556 524 C656 502 724 470 822 444 C898 424 962 434 1024 402 L1024 1024 L0 1024 Z" fill="url(#backD)"/>
+  <path d="M0 664 C110 646 196 606 296 612 C396 618 452 546 556 524 C656 502 724 470 822 444 C898 424 962 434 1024 402 L1024 1024 L0 1024 Z" fill="url(#poolD)"/>
+  <path d="M0 664 C110 646 196 606 296 612 C396 618 452 546 556 524 C656 502 724 470 822 444 C898 424 962 434 1024 402" fill="none" stroke="url(#crestD)" stroke-width="6" opacity="0.55"/>
+  <path d="M0 820 C96 806 176 782 258 792 C336 801 372 738 462 722 C534 709 574 748 648 728 C758 698 818 634 898 612 C950 598 988 602 1024 584 L1024 1024 L0 1024 Z" fill="url(#frontD)"/>
+  <path d="M0 820 C96 806 176 782 258 792 C336 801 372 738 462 722 C534 709 574 748 648 728 C758 698 818 634 898 612 C950 598 988 602 1024 584 L1024 1024 L0 1024 Z" fill="url(#poolFD)"/>
+  <path d="M0 820 C96 806 176 782 258 792 C336 801 372 738 462 722 C534 709 574 748 648 728 C758 698 818 634 898 612 C950 598 988 602 1024 584" fill="none" stroke="url(#crestD)" stroke-width="9" stroke-linecap="round" opacity="0.9"/>
+  <line x1="715" y1="480" x2="715" y2="988" stroke="#f3e2b2" stroke-width="4" stroke-linecap="round" opacity="0.15"/>
+  <circle cx="715" cy="477" r="185" fill="url(#haloD)"/>
+  <circle cx="715" cy="477" r="94" fill="none" stroke="#d99a4e" stroke-width="4" opacity="0.55"/>
+  <circle cx="715" cy="477" r="62" fill="url(#discD)" stroke="#d99a4e" stroke-width="7"/>
+</svg>

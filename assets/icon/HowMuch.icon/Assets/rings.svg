@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<defs>
+<radialGradient id="ring1" gradientUnits="userSpaceOnUse" cx="715" cy="477" r="490">
+  <stop offset="0" stop-color="#ffe3ac" stop-opacity="0.16"/>
+  <stop offset="0.95" stop-color="#ffe3ac" stop-opacity="0.16"/>
+  <stop offset="1" stop-color="#ffe3ac" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="ring2" gradientUnits="userSpaceOnUse" cx="715" cy="477" r="365">
+  <stop offset="0" stop-color="#ffe0a2" stop-opacity="0.3"/>
+  <stop offset="0.93" stop-color="#ffe0a2" stop-opacity="0.3"/>
+  <stop offset="1" stop-color="#ffe0a2" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="ring3" gradientUnits="userSpaceOnUse" cx="715" cy="477" r="250">
+  <stop offset="0" stop-color="#ffdd9a" stop-opacity="0.34"/>
+  <stop offset="0.9" stop-color="#ffdd9a" stop-opacity="0.34"/>
+  <stop offset="1" stop-color="#ffdd9a" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="ring4" gradientUnits="userSpaceOnUse" cx="715" cy="477" r="158">
+  <stop offset="0" stop-color="#ffd88e" stop-opacity="0.42"/>
+  <stop offset="0.85" stop-color="#ffd88e" stop-opacity="0.42"/>
+  <stop offset="1" stop-color="#ffd88e" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="coreL" gradientUnits="userSpaceOnUse" cx="715" cy="477" r="122">
+  <stop offset="0" stop-color="#ffd382" stop-opacity="0.8"/>
+  <stop offset="0.6" stop-color="#ffda92" stop-opacity="0.32"/>
+  <stop offset="1" stop-color="#ffda92" stop-opacity="0"/>
+</radialGradient>
+</defs>
+<circle cx="715" cy="477" r="490" fill="url(#ring1)"/>
+<circle cx="715" cy="477" r="365" fill="url(#ring2)"/>
+<circle cx="715" cy="477" r="250" fill="url(#ring3)"/>
+<circle cx="715" cy="477" r="158" fill="url(#ring4)"/>
+<circle cx="715" cy="477" r="122" fill="url(#coreL)"/>
+<line x1="715" y1="168" x2="715" y2="368" stroke="#c9853f" stroke-width="4" stroke-linecap="round" opacity="0.42"/>
+</svg>
