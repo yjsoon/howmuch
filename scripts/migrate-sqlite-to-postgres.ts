@@ -31,7 +31,7 @@ try {
   await assertTargetSchema();
   if (!options.verifyOnly) await assertSafeTarget();
 
-  const results: Record<string, { rows: number; source_sha256: string; target_sha256: string; matches: boolean }> = {};
+  const results: Record<string, { source_rows: number; target_rows: number; source_sha256: string; target_sha256: string; matches: boolean }> = {};
   for (const table of TABLES) {
     if (!sqliteTableExists(table)) continue;
     const columns = sqlite.query(`PRAGMA table_info(${quoteIdentifier(table)})`).all() as Column[];
@@ -63,7 +63,8 @@ try {
     const targetHash = hashRows(targetRows, columns);
     const matches = sourceRows.length === targetRows.length && sourceHash === targetHash;
     results[table] = {
-      rows: sourceRows.length,
+      source_rows: sourceRows.length,
+      target_rows: targetRows.length,
       source_sha256: sourceHash,
       target_sha256: targetHash,
       matches,

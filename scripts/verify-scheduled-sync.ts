@@ -95,6 +95,7 @@ try {
   console.log(JSON.stringify({ ok: true, checked: ["initial-full-sync", "cursor-advance", "duplicate-retry", "incremental-delta", "overlap-lease", "failure-release"] }, null, 2));
 } finally {
   globalThis.fetch = originalFetch;
+  await client.query("DELETE FROM import_sessions WHERE plan_id = $1", [planId]);
   await client.query("DELETE FROM plans WHERE id = $1", [planId]);
   await client.end();
 }

@@ -101,6 +101,7 @@ try {
 
   console.log(JSON.stringify({ ok: true, plan_id: planId, checked: ["auth", "transfers", "splits", "idempotency", "csv", "offline-entry", "reports", "balances", "incremental-delete"] }, null, 2));
 } finally {
+  await client.query("DELETE FROM import_sessions WHERE plan_id = $1", [planId]);
   await client.query("DELETE FROM plans WHERE id = $1", [planId]);
   await client.end();
 }
