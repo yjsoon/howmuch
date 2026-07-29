@@ -9,7 +9,7 @@ in Neon Postgres. Local development continues to use Bun and SQLite.
 | Environment | Worker | Neon branch | Scheduled YNAB sync |
 | --- | --- | --- | --- |
 | Preview | `howmuch-preview` | `preview` | Disabled |
-| Production | `howmuch` | Default protected branch | Hourly |
+| Production | [`howmuch.soon.sg`](https://howmuch.soon.sg) | Default protected branch | Hourly |
 
 Use Neon's Singapore region (`aws-ap-southeast-1`). Keep preview and production
 in the same project so the preview branch can be recreated without copying data

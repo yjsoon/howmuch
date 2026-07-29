@@ -2,6 +2,7 @@
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "howmuch",
   "main": "src/index.ts",
+  "workers_dev": true,
   "compatibility_date": "2026-07-18",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
@@ -18,6 +19,12 @@
   "triggers": {
     "crons": ["0 * * * *"]
   },
+  "routes": [
+    {
+      "pattern": "howmuch.soon.sg",
+      "custom_domain": true
+    }
+  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
