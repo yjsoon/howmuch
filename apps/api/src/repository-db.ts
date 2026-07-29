@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import type { AsyncSqlDatabase } from "./postgres";
 
 type Row = Record<string, any>;
+const sqliteTransactionTails = new WeakMap<Database, Promise<void>>();
 
 export type RepositoryStatement = {
   get(...values: any[]): Promise<Row | null>;
@@ -15,8 +16,6 @@ export interface RepositoryDatabase {
 }
 
 export class SqliteRepositoryDatabase implements RepositoryDatabase {
-  private transactionDepth = 0;
-
   constructor(private readonly db: Database) {}
 
   query(sql: string): RepositoryStatement {
@@ -33,19 +32,22 @@ export class SqliteRepositoryDatabase implements RepositoryDatabase {
 
   transaction<Result>(callback: () => Promise<Result>): () => Promise<Result> {
     return async () => {
-      const depth = this.transactionDepth;
-      const savepoint = `howmuch_${depth}`;
-      this.db.run(depth === 0 ? "BEGIN IMMEDIATE" : `SAVEPOINT ${savepoint}`);
-      this.transactionDepth += 1;
+      const previous = sqliteTransactionTails.get(this.db) ?? Promise.resolve();
+      let release!: () => void;
+      sqliteTransactionTails.set(this.db, new Promise<void>((resolve) => { release = resolve; }));
+      await previous;
+      let began = false;
       try {
+        this.db.run("BEGIN IMMEDIATE");
+        began = true;
         const result = await callback();
-        this.transactionDepth -= 1;
-        this.db.run(depth === 0 ? "COMMIT" : `RELEASE SAVEPOINT ${savepoint}`);
+        this.db.run("COMMIT");
         return result;
       } catch (error) {
-        this.transactionDepth -= 1;
-        this.db.run(depth === 0 ? "ROLLBACK" : `ROLLBACK TO SAVEPOINT ${savepoint}`);
+        if (began && this.db.inTransaction) this.db.run("ROLLBACK");
         throw error;
+      } finally {
+        release();
       }
     };
   }

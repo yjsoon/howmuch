@@ -4,7 +4,7 @@ import type { ReportFilters } from "./types";
 type Row = Record<string, any>;
 
 export class PostgresReportService {
-  constructor(private readonly db: AsyncSqlDatabase) {}
+  constructor(private readonly db: AsyncSqlDatabase, private readonly dialect: "postgres" | "sqlite" = "postgres") {}
 
   async spendingBreakdown(planId: string, filters: ReportFilters = {}): Promise<any> {
     const { where, params } = this.lineFilters(planId, filters);
@@ -22,7 +22,7 @@ export class PostgresReportService {
        LEFT JOIN category_groups cg ON cg.id = c.category_group_id
        WHERE ${where} AND lines.amount_milli < 0
        GROUP BY 1, 2, 3, 4
-       ORDER BY amount DESC`,
+       ORDER BY amount DESC, category_group_id, category_id`,
       params,
     );
     const limit = bind(params, filters.topPayeesLimit ?? 5);
@@ -36,7 +36,7 @@ export class PostgresReportService {
        LEFT JOIN payees p ON p.id = lines.payee_id
        WHERE ${where} AND lines.amount_milli < 0
        GROUP BY 1, 2
-       ORDER BY amount DESC
+       ORDER BY amount DESC, payee_id, payee_name
        LIMIT ${limit}`,
       params,
     );
@@ -68,7 +68,7 @@ export class PostgresReportService {
     const rows = await this.db.all<Row>(
       `WITH lines AS (${lineItemsSql()})
        SELECT
-         ${periodSql(interval)} AS period,
+         ${periodSql(interval, this.dialect)} AS period,
          SUM(CASE WHEN lines.amount_milli > 0 THEN lines.amount_milli ELSE 0 END) AS income,
          SUM(CASE WHEN lines.amount_milli < 0 THEN ABS(lines.amount_milli) ELSE 0 END) AS spending
        FROM lines
@@ -129,7 +129,7 @@ export class PostgresReportService {
         AND transactions.account_id = accounts.id
         AND transactions.date <= periods.end_date
        GROUP BY periods.label, periods.end_date, accounts.id, accounts.name, accounts.closed, accounts.opening_balance_milli
-       ORDER BY periods.end_date, accounts.name`,
+       ORDER BY periods.end_date, accounts.name, accounts.id`,
       params,
     );
 
@@ -261,8 +261,13 @@ function bind(params: any[], value: any): string {
   return `$${params.length}`;
 }
 
-function periodSql(interval: string): string {
+function periodSql(interval: string, dialect: "postgres" | "sqlite"): string {
   if (interval === "day") return "lines.date";
+  if (dialect === "sqlite") {
+    if (interval === "year") return "substr(lines.date, 1, 4)";
+    if (interval === "week") return "strftime('%Y-W%W', lines.date)";
+    return "substr(lines.date, 1, 7)";
+  }
   if (interval === "year") return "left(lines.date, 4)";
   if (interval === "week") {
     return `left(lines.date, 4) || '-W' || lpad(floor((extract(doy from lines.date::date) + 7 - extract(isodow from lines.date::date)) / 7)::text, 2, '0')`;

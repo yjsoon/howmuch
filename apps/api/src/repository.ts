@@ -14,14 +14,17 @@ export type TransactionWriteOptions = {
   autoLink?: boolean;
 };
 
-export class LedgerRepository {
-  /**
-   * Transaction ids touched by the current write operation. The outermost
-   * write stamps them all with one final server_knowledge so incremental
-   * clients always receive every side of a transfer in the same delta.
-   */
-  private touchedTransactionIds: Set<string> | null = null;
+/** Operation-local effects accumulated while a transaction graph is written. */
+type TransactionMutationPlan = {
+  touchedTransactionIds: Set<string>;
+  accountIdsToRecalculate: Set<string>;
+};
 
+function newTransactionMutationPlan(): TransactionMutationPlan {
+  return { touchedTransactionIds: new Set(), accountIdsToRecalculate: new Set() };
+}
+
+export class LedgerRepository {
   private readonly db: RepositoryDatabase;
 
   constructor(db: Database | RepositoryDatabase, private readonly defaultPlanId: string) {
@@ -421,10 +424,22 @@ export class LedgerRepository {
     const autoLink = options.autoLink ?? true;
     validateTransactionInput(input, autoLink);
     const transactionId = input.id ?? createId("txn");
-    const ownsTouched = this.beginTouched();
+    const plan = newTransactionMutationPlan();
+    await this.db.transaction(async () => {
+      await this.executeTransactionWrite(planId, { ...input, id: transactionId }, autoLink, plan);
+      await this.executeMutationPlan(planId, plan);
+    })();
+    return this.getTransaction(planId, transactionId, bool(input.deleted) === 1);
+  }
 
-    try {
-      await this.db.transaction(async () => {
+  /** Executes the transaction graph body inside the caller's single transaction. */
+  private async executeTransactionWrite(
+    planId: string,
+    input: TransactionInput,
+    autoLink: boolean,
+    plan: TransactionMutationPlan,
+  ): Promise<void> {
+      const transactionId = input.id!;
       await this.ensureAccount(planId, input.account_id);
       // The upsert path must respect what the row already carries, or a
       // retried create would mint a second linked side and strand the first.
@@ -581,7 +596,7 @@ export class LedgerRepository {
             memo: sub.memo ?? null,
             sourceAccountId: input.account_id,
             accountId: subTransferAccountId ?? undefined,
-          });
+          }, plan);
         } else if (autoLink) {
           const targetAccountId =
             (subPayeeId ? await this.payeeTransferTarget(planId, subPayeeId) : null) ?? subTransferAccountId;
@@ -605,7 +620,7 @@ export class LedgerRepository {
               approved: input.approved,
               sourceAccountId: input.account_id,
               linkId: subId,
-            });
+            }, plan);
           }
         }
 
@@ -645,7 +660,7 @@ export class LedgerRepository {
           previous.transfer_transaction_id &&
           !keptLinkIds.has(previous.transfer_transaction_id)
         ) {
-          await this.softDeleteLinkedTransaction(planId, previous.transfer_transaction_id);
+          await this.softDeleteLinkedTransaction(planId, previous.transfer_transaction_id, plan);
         }
       }
 
@@ -667,7 +682,7 @@ export class LedgerRepository {
           approved: input.approved,
           sourceAccountId: input.account_id,
           linkId: transactionId,
-        });
+        }, plan);
         await this.db
           .query("UPDATE transactions SET transfer_transaction_id = ? WHERE id = ?")
           .run(linkedId, transactionId);
@@ -680,25 +695,14 @@ export class LedgerRepository {
           memo: input.memo ?? null,
           sourceAccountId: input.account_id,
           accountId: transferAccountId ?? undefined,
-        });
+        }, plan);
       }
 
-      await this.recalculateAccount(input.account_id);
+      plan.accountIdsToRecalculate.add(input.account_id);
       if (existingRow && existingRow.account_id !== input.account_id) {
-        await this.recalculateAccount(existingRow.account_id);
+        plan.accountIdsToRecalculate.add(existingRow.account_id);
       }
-      this.markTouched(transactionId);
-      if (ownsTouched) {
-        await this.commitTouched(planId);
-      }
-      })();
-    } finally {
-      if (ownsTouched) {
-        this.touchedTransactionIds = null;
-      }
-    }
-
-    return this.getTransaction(planId, transactionId, bool(input.deleted) === 1);
+      plan.touchedTransactionIds.add(transactionId);
   }
 
   async updateTransaction(planId: string, transactionId: string, patch: Partial<TransactionInput>): Promise<any> {
@@ -768,9 +772,9 @@ export class LedgerRepository {
           : patch.subtransactions,
     };
 
-    const ownsTouched = this.beginTouched();
-    try {
-      await this.db.transaction(async () => {
+    validateTransactionInput(next, true);
+    const plan = newTransactionMutationPlan();
+    await this.db.transaction(async () => {
         // Transfer link management (YNAB): changing the payee can break or
         // move the linked side; every other edit keeps both sides in step
         // (createTransaction syncs a kept link itself).
@@ -781,7 +785,7 @@ export class LedgerRepository {
           const nextTarget = patch.payee_id ? await this.payeeTransferTarget(planId, patch.payee_id) : null;
           if (!nextTarget || nextTarget === next.account_id) {
             // No longer a transfer: the linked side goes away.
-            await this.softDeleteLinkedTransaction(planId, linkedRow.id);
+            await this.softDeleteLinkedTransaction(planId, linkedRow.id, plan);
             next.transfer_account_id = null;
             next.transfer_transaction_id = null;
           } else {
@@ -789,19 +793,12 @@ export class LedgerRepository {
           }
         }
 
-        await this.createTransaction(planId, next);
+        await this.executeTransactionWrite(planId, next, true, plan);
         if (existing.account_id !== next.account_id) {
-          await this.recalculateAccount(existing.account_id);
+          plan.accountIdsToRecalculate.add(existing.account_id);
         }
-        if (ownsTouched) {
-          await this.commitTouched(planId);
-        }
-      })();
-    } finally {
-      if (ownsTouched) {
-        this.touchedTransactionIds = null;
-      }
-    }
+        await this.executeMutationPlan(planId, plan);
+    })();
     return this.getTransaction(planId, transactionId);
   }
 
@@ -811,9 +808,9 @@ export class LedgerRepository {
       throw new NotFoundError("Transaction not found");
     }
 
+    const plan = newTransactionMutationPlan();
     await this.db.transaction(async () => {
       const removeIds = new Set<string>([transactionId]);
-      const stampIds = new Set<string>([transactionId]);
       const accountIds = new Set<string>([existing.account_id]);
 
       // Deleting one side of a transfer deletes the other (YNAB behaviour)...
@@ -821,7 +818,6 @@ export class LedgerRepository {
         const linked = await this.getTransactionRow(planId, existing.transfer_transaction_id);
         if (linked) {
           removeIds.add(linked.id);
-          stampIds.add(linked.id);
           accountIds.add(linked.account_id);
         } else {
           // ...unless the link points at a split line on the other side:
@@ -837,7 +833,7 @@ export class LedgerRepository {
                  WHERE id = ?`,
               )
               .run(sub.id);
-            stampIds.add(sub.transaction_id);
+            plan.touchedTransactionIds.add(sub.transaction_id);
           }
         }
       }
@@ -852,7 +848,6 @@ export class LedgerRepository {
         const linked = await this.getTransactionRow(planId, link.transfer_transaction_id);
         if (linked) {
           removeIds.add(linked.id);
-          stampIds.add(linked.id);
           accountIds.add(linked.account_id);
         }
       }
@@ -861,16 +856,12 @@ export class LedgerRepository {
         await this.db
           .query("UPDATE transactions SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
           .run(id, planId);
+        plan.touchedTransactionIds.add(id);
       }
       for (const accountId of accountIds) {
-        await this.recalculateAccount(accountId);
+        plan.accountIdsToRecalculate.add(accountId);
       }
-      const serverKnowledge = await this.touchPlan(planId);
-      for (const id of stampIds) {
-        await this.db
-          .query("UPDATE transactions SET server_knowledge = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
-          .run(serverKnowledge, id, planId);
-      }
+      await this.executeMutationPlan(planId, plan);
     })();
 
     return this.getTransaction(planId, transactionId, true);
@@ -1111,6 +1102,7 @@ export class LedgerRepository {
       sourceAccountId: string;
       linkId: string;
     },
+    plan: TransactionMutationPlan,
   ): Promise<string> {
     await this.ensureAccount(planId, opts.accountId);
     const payee = await this.ensureTransferPayee(planId, opts.sourceAccountId);
@@ -1136,8 +1128,8 @@ export class LedgerRepository {
         opts.sourceAccountId,
         opts.linkId,
       );
-    await this.recalculateAccount(opts.accountId);
-    this.markTouched(id);
+    plan.accountIdsToRecalculate.add(opts.accountId);
+    plan.touchedTransactionIds.add(id);
     return id;
   }
 
@@ -1152,6 +1144,7 @@ export class LedgerRepository {
       sourceAccountId: string;
       accountId?: string;
     },
+    plan: TransactionMutationPlan,
   ): Promise<void> {
     const linked = await this.getTransactionRow(planId, linkedTransactionId);
     if (!linked) {
@@ -1178,14 +1171,18 @@ export class LedgerRepository {
         linkedTransactionId,
         planId,
       );
-    await this.recalculateAccount(linked.account_id);
+    plan.accountIdsToRecalculate.add(linked.account_id);
     if (nextAccountId !== linked.account_id) {
-      await this.recalculateAccount(nextAccountId);
+      plan.accountIdsToRecalculate.add(nextAccountId);
     }
-    this.markTouched(linkedTransactionId);
+    plan.touchedTransactionIds.add(linkedTransactionId);
   }
 
-  private async softDeleteLinkedTransaction(planId: string, linkedTransactionId: string): Promise<void> {
+  private async softDeleteLinkedTransaction(
+    planId: string,
+    linkedTransactionId: string,
+    plan: TransactionMutationPlan,
+  ): Promise<void> {
     const linked = await this.getTransactionRow(planId, linkedTransactionId);
     if (!linked) {
       return;
@@ -1193,34 +1190,33 @@ export class LedgerRepository {
     await this.db
       .query("UPDATE transactions SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
       .run(linkedTransactionId, planId);
-    await this.recalculateAccount(linked.account_id);
-    this.markTouched(linkedTransactionId);
+    plan.accountIdsToRecalculate.add(linked.account_id);
+    plan.touchedTransactionIds.add(linkedTransactionId);
   }
 
-  /** Starts a touched-ids collection unless a caller already owns one. */
-  private beginTouched(): boolean {
-    if (this.touchedTransactionIds) {
-      return false;
+  /** Executes operation-local final mutations; each item can become a D1 batch statement. */
+  private async executeMutationPlan(planId: string, plan: TransactionMutationPlan): Promise<void> {
+    for (const accountId of plan.accountIdsToRecalculate) {
+      await this.recalculateAccount(accountId);
     }
-    this.touchedTransactionIds = new Set();
-    return true;
-  }
-
-  private markTouched(transactionId: string): void {
-    this.touchedTransactionIds?.add(transactionId);
-  }
-
-  /** Stamps every touched row with a single fresh server_knowledge. */
-  private async commitTouched(planId: string): Promise<void> {
-    const touched = this.touchedTransactionIds;
-    if (!touched?.size) {
+    if (!plan.touchedTransactionIds.size) {
       return;
     }
-    const serverKnowledge = await this.touchPlan(planId);
-    for (const id of touched) {
+    await this.db
+      .query(
+        `UPDATE plans
+         SET server_knowledge = server_knowledge + 1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+      )
+      .run(planId);
+    for (const id of plan.touchedTransactionIds) {
       await this.db
-        .query("UPDATE transactions SET server_knowledge = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
-        .run(serverKnowledge, id, planId);
+        .query(
+          `UPDATE transactions
+           SET server_knowledge = (SELECT server_knowledge FROM plans WHERE id = ?), updated_at = CURRENT_TIMESTAMP
+           WHERE id = ? AND plan_id = ?`,
+        )
+        .run(planId, id, planId);
     }
   }
 
