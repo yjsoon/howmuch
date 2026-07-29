@@ -18,6 +18,8 @@ export type YnabImportOptions = {
   lastKnowledgeOfServer?: number;
   /** Receives non-fatal warnings, e.g. the token nearing its rate limit. */
   warn?: (message: string) => void;
+  /** Internal hosted-storage hook used to renew a scheduler lease during long imports. */
+  progress?: () => Promise<void>;
 };
 
 export type YnabImportResult = {
@@ -81,20 +83,25 @@ export async function importYnabFromApi(
     }
 
     await repo.upsertPlan(options.planId, plan.data.plan ?? plan.data.budget ?? { id: options.planId }, settings.data.settings);
+    await options.progress?.();
 
     for (const account of accounts.data.accounts ?? []) {
       await repo.upsertAccount(options.planId, account);
+      await options.progress?.();
     }
 
     for (const group of categories.data.category_groups ?? []) {
       await repo.upsertCategoryGroup(options.planId, group);
       for (const category of group.categories ?? []) {
         await repo.upsertCategory(options.planId, category, group.id);
+        await options.progress?.();
       }
+      await options.progress?.();
     }
 
     for (const payee of payees.data.payees ?? []) {
       await repo.upsertPayee(options.planId, payee);
+      await options.progress?.();
     }
 
     let imported = 0;
@@ -137,6 +144,7 @@ export async function importYnabFromApi(
       }, { autoLink: false });
       await repo.recordImportRow(sessionId, imported, "imported", transaction, undefined, transaction.id);
       imported += 1;
+      await options.progress?.();
     }
 
     const serverKnowledge = minimumServerKnowledge(accounts, categories, payees, transactions);

@@ -23,7 +23,7 @@ export class ReportService {
          LEFT JOIN category_groups cg ON cg.id = c.category_group_id
          WHERE ${where} AND lines.amount_milli < 0
          GROUP BY 1, 2, 3, 4
-         ORDER BY amount DESC`,
+         ORDER BY amount DESC, category_group_id, category_id`,
       )
       .all(...params) as Row[];
     const topPayeeRows = this.db
@@ -37,7 +37,7 @@ export class ReportService {
          LEFT JOIN payees p ON p.id = lines.payee_id
          WHERE ${where} AND lines.amount_milli < 0
          GROUP BY 1, 2
-         ORDER BY amount DESC
+         ORDER BY amount DESC, payee_id, payee_name
          LIMIT ?`,
       )
       .all(...params, filters.topPayeesLimit ?? 5) as Row[];
@@ -111,7 +111,7 @@ export class ReportService {
            AND deleted = 0
            AND include_in_net_worth = 1
            AND (? = 1 OR closed = 0)
-         ORDER BY name`,
+         ORDER BY name, id`,
       )
       .all(planId, filters.includeClosedAccounts === true ? 1 : 0) as Row[];
 
@@ -159,7 +159,7 @@ export class ReportService {
          SELECT date, amount_milli
          FROM lines
          WHERE ${where}
-         ORDER BY date ASC`,
+         ORDER BY date ASC, ledger_sequence ASC, line_sequence ASC`,
       )
       .all(...params) as Row[];
 
@@ -245,6 +245,8 @@ function lineItemsSql(): string {
   return `
     SELECT
       t.id AS transaction_id,
+      t.rowid AS ledger_sequence,
+      COALESCE(st.rowid, 0) AS line_sequence,
       t.plan_id,
       t.account_id,
       t.date,

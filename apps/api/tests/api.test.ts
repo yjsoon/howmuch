@@ -91,6 +91,35 @@ describe("YNAB-compatible API", () => {
     expect(listed.data.transactions).toHaveLength(1);
   });
 
+  test("serializes concurrent local SQLite transaction writes", async () => {
+    const responses = await Promise.all([
+      request("/v1/plans/plan-test/transactions", {
+        method: "POST",
+        body: { transaction: { id: "concurrent-1", account_id: "acct-1", date: "2026-06-10", amount: -1000 } },
+      }),
+      request("/v1/plans/plan-test/transactions", {
+        method: "POST",
+        body: { transaction: { id: "concurrent-2", account_id: "acct-1", date: "2026-06-11", amount: -2000 } },
+      }),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([201, 201]);
+    expect(db.query("SELECT COUNT(*) AS count FROM transactions").get()).toEqual({ count: 2 });
+    expect(db.query("SELECT balance_milli FROM accounts WHERE id = 'acct-1'").get()).toEqual({ balance_milli: -3000 });
+
+    const firstRepository = new LedgerRepository(db, "plan-test");
+    const secondRepository = new LedgerRepository(db, "plan-test");
+    await Promise.all([
+      firstRepository.createTransaction("plan-test", {
+        id: "concurrent-3", account_id: "acct-1", date: "2026-06-12", amount: -4000,
+      }),
+      secondRepository.createTransaction("plan-test", {
+        id: "concurrent-4", account_id: "acct-1", date: "2026-06-13", amount: -8000,
+      }),
+    ]);
+    expect(db.query("SELECT COUNT(*) AS count FROM transactions").get()).toEqual({ count: 4 });
+    expect(db.query("SELECT balance_milli FROM accounts WHERE id = 'acct-1'").get()).toEqual({ balance_milli: -15000 });
+  });
+
   test("returns YNAB-shaped errors", async () => {
     const response = await handler(new Request("http://howmuch.test/v1/user"));
     const body = await response.json();
@@ -131,6 +160,33 @@ describe("YNAB-compatible API", () => {
     const patched = await patchResponse.json();
     expect(patched.data.transaction.memo).toBe("CLAIMED: receipt");
     expect(patched.data.transaction.flag_color).toBe("green");
+  });
+
+  test("rejects invalid transaction patches without mutating the ledger", async () => {
+    const created = await (await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: { transaction: { account_id: "acct-1", date: "2026-06-10", amount: -5000 } },
+    })).json();
+    const transactionId = created.data.transaction.id;
+    const knowledge = (db.query("SELECT server_knowledge FROM plans WHERE id = 'plan-test'").get() as { server_knowledge: number }).server_knowledge;
+    const invalidPatches = [
+      { date: "10/06/2026" },
+      { amount: -1.5 },
+      { cleared: "invalid" },
+      { amount: -5000, subtransactions: [{ amount: -4000 }, { amount: -500 }] },
+    ];
+
+    for (const transaction of invalidPatches) {
+      const response = await request(`/v1/plans/plan-test/transactions/${transactionId}`, {
+        method: "PATCH",
+        body: { transaction },
+      });
+      expect(response.status).toBe(400);
+    }
+
+    const stored = db.query("SELECT date, amount_milli, cleared FROM transactions WHERE id = ?").get(transactionId);
+    expect(stored).toEqual({ date: "2026-06-10", amount_milli: -5000, cleared: "uncleared" });
+    expect(db.query("SELECT server_knowledge FROM plans WHERE id = 'plan-test'").get()).toEqual({ server_knowledge: knowledge });
   });
 
   test("preserves split subtransactions when patching other fields", async () => {
@@ -600,6 +656,13 @@ describe("transfers and splits", () => {
     ).json();
     expect(delta.data.transactions).toHaveLength(2);
     expect(delta.data.transactions.map((txn: any) => txn.amount).sort()).toEqual([-50000, 50000]);
+    expect(delta.data.server_knowledge).toBe(knowledgeBefore + 1);
+    const stampedRows = db.query("SELECT server_knowledge FROM transactions ORDER BY id").all() as Array<{
+      server_knowledge: number;
+    }>;
+    expect(new Set(stampedRows.map((txn) => txn.server_knowledge))).toEqual(
+      new Set([knowledgeBefore + 1]),
+    );
   });
 
   test("records quick-entry transfers and splits", async () => {

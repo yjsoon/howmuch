@@ -29,6 +29,9 @@
     "enabled": true,
     "head_sampling_rate": 1
   },
+  // Intentionally no DB binding yet. Add the reviewed inactive D1 database ID
+  // here only after creation/import/reconciliation; production remains on Neon
+  // unless HOWMUCH_DATABASE_BACKEND is explicitly set to "d1".
   "env": {
     "preview": {
       "name": "howmuch-preview",
