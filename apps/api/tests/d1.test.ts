@@ -8,12 +8,89 @@ import { D1TransactionRepository } from "../src/d1-transaction-repository";
 import { D1MetadataRepository } from "../src/d1-metadata-repository";
 import { D1LedgerRepository } from "../src/d1-ledger-repository";
 import { ReportService } from "../src/reports";
+import worker from "../../worker/src/index";
 
 const databases: Database[] = [];
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch=originalFetch; for (const db of databases.splice(0)) db.close(); });
 
 describe("D1 foundation", () => {
+  test("canonical schema applies cleanly with auth constraints and cascades", async () => {
+    const db = sqlite();
+    db.exec(await Bun.file(new URL("../d1-migrations/0001_initial.sql", import.meta.url)).text());
+    const objects = db.query("SELECT name,type FROM sqlite_master WHERE type IN ('table','index','trigger')").all() as Array<{name:string;type:string}>;
+    const names = new Set(objects.map((row) => row.name));
+    for (const name of ["plans","import_sessions","import_rows","users","auth_identities","sessions","plan_memberships","sync_runs","sync_attempts","sync_transition_receipts","audit_events","write_state","write_commands","write_assertions","idx_sessions_user","idx_sessions_expiry","idx_plan_memberships_user_plan","transactions_assign_ledger_sequence","accounts_transfer_payee_plan_guard"]) expect(names.has(name)).toBeTrue();
+    expect(names.has("schema_migrations")).toBeFalse();
+    expect(names.has("migration_runs")).toBeFalse();
+    expect(names.has("migration_chunks")).toBeFalse();
+    expect(db.query("SELECT write_version FROM write_state WHERE singleton=1").get()).toEqual({write_version:0});
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+
+    db.exec("INSERT INTO plans(id,name) VALUES ('p1','One'),('p2','Two'); INSERT INTO users(id) VALUES ('u1'),('u2')");
+    db.run("INSERT INTO auth_identities(id,user_id,provider,issuer,provider_subject) VALUES ('i1','u1','oidc','issuer-a','subject')");
+    expect(() => db.run("INSERT INTO auth_identities(id,user_id,provider,issuer,provider_subject) VALUES ('i2','u2','oidc','issuer-a','subject')")).toThrow();
+    expect(() => db.run("INSERT INTO auth_identities(id,user_id,provider,issuer,provider_subject) VALUES ('i2','u2','oidc','issuer-b','subject')")).not.toThrow();
+    expect(() => db.run("INSERT INTO plan_memberships VALUES ('p1','u1','admin',unixepoch())")).toThrow();
+    expect(() => db.run("INSERT INTO plan_memberships VALUES ('missing','u1','viewer',unixepoch())")).toThrow();
+    db.exec("INSERT INTO plan_memberships(plan_id,user_id,role) VALUES ('p1','u1','owner'),('p2','u1','viewer')");
+    const hash = "a".repeat(64);
+    db.run("INSERT INTO sessions(id,user_id,token_hash,expires_at) VALUES ('s1','u1',?,9999999999)", [hash]);
+    expect(() => db.run("INSERT INTO sessions(id,user_id,token_hash,expires_at) VALUES ('s2','u2',?,9999999999)", [hash])).toThrow();
+    expect(() => db.run("INSERT INTO sessions(id,user_id,token_hash,expires_at) VALUES ('s3','u2',?,9999999999)", ["A".repeat(64)])).toThrow();
+    db.run("DELETE FROM users WHERE id='u1'");
+    expect(db.query("SELECT id FROM sessions WHERE user_id='u1'").get()).toBeNull();
+    expect(db.query("SELECT plan_id FROM plan_memberships WHERE user_id='u1'").get()).toBeNull();
+    expect(db.query("SELECT id FROM auth_identities WHERE user_id='u1'").get()).toBeNull();
+  });
+
+  test("Worker composition is D1-only, serves API writes, delegates assets, and blocks deployment", async () => {
+    const db = await ledgerSqlite();
+    const assetRequests: string[] = [];
+    const env = {
+      ASSETS: { fetch: async (request: Request) => { assetRequests.push(request.url); return new Response("asset"); } },
+      DB: fakeD1(db),
+      HOWMUCH_API_TOKEN: "worker-token",
+      HOWMUCH_DEFAULT_PLAN_ID: "p",
+      HOWMUCH_YNAB_PLAN_ID: "p",
+      HOWMUCH_YNAB_MIN_SIMILARITY: "0.95",
+    };
+    const headers = { authorization: "Bearer worker-token", "content-type": "application/json" };
+
+    const plans = await worker.fetch(new Request("https://howmuch.test/v1/plans", { headers }), env as any);
+    expect(plans.status).toBe(200);
+    const planBody = await plans.json() as { data: { plans: Array<{ id: string }> } };
+    expect(planBody.data.plans.map((plan) => plan.id)).toEqual(["p"]);
+    const versionBeforeRead = db.query("SELECT write_version FROM write_state").get();
+    const accounts = await worker.fetch(new Request("https://howmuch.test/v1/plans/p/accounts", { headers }), env as any);
+    expect(accounts.status).toBe(200);
+    expect(db.query("SELECT write_version FROM write_state").get()).toEqual(versionBeforeRead);
+    const account = await worker.fetch(new Request("https://howmuch.test/v1/plans/p/accounts", {
+      method: "POST", headers, body: JSON.stringify({ account: { id: "worker-account", name: "Worker account" } }),
+    }), env as any);
+    expect(account.status).toBe(201);
+    expect(db.query("SELECT name FROM accounts WHERE id='worker-account'").get()).toEqual({ name: "Worker account" });
+
+    const asset = await worker.fetch(new Request("https://howmuch.test/dashboard"), env as any);
+    expect(await asset.text()).toBe("asset");
+    expect(assetRequests).toEqual(["https://howmuch.test/dashboard"]);
+    await expect(worker.scheduled({ scheduledTime: Date.now() } as any, env as any)).rejects.toThrow("HOWMUCH_YNAB_TOKEN");
+
+    const workerSource = await Bun.file(new URL("../../worker/src/index.ts", import.meta.url)).text();
+    expect(workerSource).not.toContain("@neondatabase");
+    expect(workerSource).not.toContain("DATABASE_URL");
+    expect(workerSource).not.toContain("HOWMUCH_DATABASE_BACKEND");
+    const rootPackage = await Bun.file(new URL("../../../package.json", import.meta.url)).json();
+    expect(rootPackage.dependencies).toBeUndefined();
+    const workerPackage = await Bun.file(new URL("../../worker/package.json", import.meta.url)).json();
+    expect(workerPackage.scripts.deploy).toContain("Deployment blocked");
+    expect(workerPackage.scripts["deploy:preview"]).toContain("Deployment blocked");
+    const wranglerConfig = JSON.parse((await Bun.file(new URL("../../worker/wrangler.jsonc", import.meta.url)).text()).replace(/^\s*\/\/.*$/gm, ""));
+    expect(wranglerConfig.d1_databases[0].database_id).toBe("local");
+    expect(wranglerConfig.env.preview.d1_databases[0].database_id).toBe("local");
+    expect(await Bun.file(new URL("../../../bun.lock", import.meta.url)).text()).not.toContain("@neondatabase/serverless");
+  });
+
   test("LedgerStore facade supports HTTP, CSV, metadata, imports, and lease fencing", async () => {
     const db = await ledgerSqlite();
     const d1 = new D1Database(fakeD1(db));
@@ -62,9 +139,7 @@ describe("D1 foundation", () => {
 
   test("D1 async reports match local SQLite reports", async () => {
     const db = sqlite();
-    db.exec(await Bun.file(new URL("../migrations/001_initial.sql", import.meta.url)).text());
-    db.exec(await Bun.file(new URL("../migrations/002_transaction_server_knowledge.sql", import.meta.url)).text());
-    db.exec("ALTER TABLE transactions ADD COLUMN ledger_sequence INTEGER; ALTER TABLE subtransactions ADD COLUMN ledger_sequence INTEGER");
+    db.exec(await Bun.file(new URL("../d1-migrations/0001_initial.sql", import.meta.url)).text());
     db.run("INSERT INTO plans (id, name) VALUES ('p', 'Plan')");
     db.run("INSERT INTO accounts (id, plan_id, name) VALUES ('a', 'p', 'Cash')");
     db.run("INSERT INTO transactions (id, ledger_sequence, plan_id, account_id, date, amount_milli, payee_name_snapshot) VALUES ('t', 1, 'p', 'a', '2026-01-02', -1200, 'Shop')");
@@ -77,12 +152,18 @@ describe("D1 foundation", () => {
     expect(await actual.ageOfMoney("p", { from: "2026-01-01", to: "2026-01-31" })).toEqual(expected.ageOfMoney("p", { from: "2026-01-01", to: "2026-01-31" }));
   });
 
+  test("D1 net-worth reports stay below the binding cap across long daily ranges", async () => {
+    const db = await ledgerSqlite();
+    db.run("INSERT INTO transactions(id,plan_id,account_id,date,amount_milli) VALUES('long-range-row','p','a','2026-01-02',100)");
+    const reports = new D1ReportService(fakeD1(db, { maxBindings: 100 }));
+    const result = await reports.netWorth("p", { from: "2026-01-01", to: "2026-04-30", interval: "day" });
+    expect(result.periods).toHaveLength(120);
+    expect(result.periods.at(-1).net_worth).toBe(100);
+  });
+
   test("scheduled sync atomically acquires, deduplicates, fences, and completes leases", async () => {
     const db = sqlite();
-    db.exec(await Bun.file(new URL("../migrations/001_initial.sql", import.meta.url)).text());
-    db.exec(await Bun.file(new URL("../migrations/002_transaction_server_knowledge.sql", import.meta.url)).text());
-    db.exec(await Bun.file(new URL("../migrations/003_transfer_payees.sql", import.meta.url)).text());
-    db.exec(await Bun.file(new URL("../d1-migrations/004_d1_hosted_foundation.sql", import.meta.url)).text());
+    db.exec(await Bun.file(new URL("../d1-migrations/0001_initial.sql", import.meta.url)).text());
     db.run("INSERT INTO plans (id, name) VALUES ('p', 'Plan')");
     const state = new D1ScheduledSyncState(new D1Database(fakeD1(db)));
 
@@ -169,10 +250,7 @@ describe("D1 foundation", () => {
 
   test("write commands bind exactly one version increment and reject stale batches", async () => {
     const db = sqlite();
-    db.exec(await Bun.file(new URL("../migrations/001_initial.sql", import.meta.url)).text());
-    db.exec(await Bun.file(new URL("../migrations/002_transaction_server_knowledge.sql", import.meta.url)).text());
-    db.exec(await Bun.file(new URL("../migrations/003_transfer_payees.sql", import.meta.url)).text());
-    db.exec(await Bun.file(new URL("../d1-migrations/004_d1_hosted_foundation.sql", import.meta.url)).text());
+    db.exec(await Bun.file(new URL("../d1-migrations/0001_initial.sql", import.meta.url)).text());
     const d1 = new D1Database(fakeD1(db));
 
     await d1.atomicBatch([
@@ -455,6 +533,10 @@ describe("D1 foundation", () => {
     ]);
     await writer.create("p", { id:"left",account_id:"a",date:"2026-07-01",amount:-30,payee_id:"to-b",category_id:"tracking",transfer_account_id:"b",transfer_transaction_id:"right" }, { operationId:"import-left-delta" }, { autoLink:false,upsert:true });
     expect(db.query("SELECT id,amount_milli FROM transactions ORDER BY id").all()).toEqual([{id:"left",amount_milli:-30},{id:"right",amount_milli:25}]);
+
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    const deleted = await repo.createTransaction("p", { id:"deleted-import",account_id:"a",date:"2026-07-02",amount:0,deleted:true }, { autoLink:false });
+    expect(deleted.deleted).toBe(true);
   });
 
   test("D1 split IDs cannot be stolen by another parent in the same plan", async () => {
@@ -466,7 +548,7 @@ describe("D1 foundation", () => {
 
   test("versioned D1 metadata and import-session writes replay and reject collisions", async () => {
     const db = sqlite();
-    for (const path of ["../migrations/001_initial.sql", "../migrations/002_transaction_server_knowledge.sql", "../migrations/003_transfer_payees.sql", "../d1-migrations/004_d1_hosted_foundation.sql"]) {
+    for (const path of ["../d1-migrations/0001_initial.sql"]) {
       db.exec(await Bun.file(new URL(path, import.meta.url)).text());
     }
     const metadata = new D1MetadataRepository(new D1Database(fakeD1(db)));
@@ -507,7 +589,7 @@ describe("D1 foundation", () => {
 
 async function ledgerSqlite(): Promise<Database> {
   const db = sqlite();
-  for (const path of ["../migrations/001_initial.sql", "../migrations/002_transaction_server_knowledge.sql", "../migrations/003_transfer_payees.sql", "../d1-migrations/004_d1_hosted_foundation.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
+  for (const path of ["../d1-migrations/0001_initial.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
   db.run("INSERT INTO plans (id, name) VALUES ('p', 'Plan')");
   db.run("INSERT INTO accounts (id, plan_id, name) VALUES ('a', 'p', 'Cash')");
   return db;
@@ -515,13 +597,16 @@ async function ledgerSqlite(): Promise<Database> {
 
 function sqlite(): Database { const db = new Database(":memory:", { strict: true }); databases.push(db); return db; }
 
-function fakeD1(db: Database, faults: { commitThenThrowOnce?: boolean; commitThenThrowSql?: RegExp; beforeWriteBatch?: (db: Database) => void } = {}): D1Binding {
+function fakeD1(db: Database, faults: { commitThenThrowOnce?: boolean; commitThenThrowSql?: RegExp; beforeWriteBatch?: (db: Database) => void; maxBindings?: number } = {}): D1Binding {
   let commitThenThrow = faults.commitThenThrowOnce ?? Boolean(faults.commitThenThrowSql);
   let mutateBeforeWrite = faults.beforeWriteBatch;
   class Statement implements D1Statement {
     values: unknown[] = [];
     constructor(readonly sql: string) {}
-    bind(...values: unknown[]) { this.values = values; return this; }
+    bind(...values: unknown[]) {
+      if (faults.maxBindings != null && values.length > faults.maxBindings) throw new Error("too many SQL parameters");
+      this.values = values; return this;
+    }
     async all<Row>(): Promise<D1Result<Row>> { return { success: true, results: db.query(this.sql).all(...this.values as any[]) as Row[] }; }
     async first<Row>(): Promise<Row | null> { return db.query(this.sql).get(...this.values as any[]) as Row | null; }
     async run(): Promise<D1Result> { const result = db.query(this.sql).run(...this.values as any[]); return { success: true, meta: { changes: Number(result.changes) } }; }

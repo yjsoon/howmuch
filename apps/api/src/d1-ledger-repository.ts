@@ -27,7 +27,10 @@ export class D1LedgerRepository extends LedgerRepository {
     return { operationId: this.options.operationId?.(kind, planId, resourceId) ?? createId("op"), ...(lease ? { lease } : {}) };
   }
 
-  override async ensurePlan(planId = this.getDefaultPlanId(), name = "HowMuch"): Promise<void> { await this.metadata.ensurePlan(planId, name, this.context("plan.ensure",planId,planId)); }
+  override async ensurePlan(planId = this.getDefaultPlanId(), name = "HowMuch"): Promise<void> {
+    if (await this.d1.get("SELECT 1 FROM plans WHERE id=? AND deleted=0", [planId])) return;
+    await this.metadata.ensurePlan(planId, name, this.context("plan.ensure",planId,planId));
+  }
   override async touchPlan(planId: string): Promise<number> { return this.metadata.touchPlan(planId, this.context("plan.touch",planId,planId)); }
   override async upsertPlan(planId:string,plan:any,settings?:any):Promise<void>{await this.metadata.upsertPlan(planId,plan,settings,this.context("plan.upsert",planId,planId));}
   override async ensureAccount(planId:string,accountId:string,name?:string):Promise<void>{await this.metadata.ensureAccount(planId,accountId,name,this.context("account.ensure",planId,accountId));}
@@ -53,7 +56,7 @@ export class D1LedgerRepository extends LedgerRepository {
   override async createTransaction(planId:string,input:TransactionInput,options:TransactionWriteOptions={}):Promise<any>{
     const autoLink=options.autoLink??true;
     const row=await this.transactions.create(planId,input,this.context("transaction.create",planId,input.id??createId("transaction-operation")),{autoLink,upsert:!autoLink});
-    return this.getTransaction(planId,row.id);
+    return this.getTransaction(planId,row.id,Boolean(input.deleted));
   }
   override async updateTransaction(planId:string,id:string,patch:Partial<TransactionInput>):Promise<any>{await this.transactions.update(planId,id,patch,this.context("transaction.update",planId,id));return this.getTransaction(planId,id);}
   override async deleteTransaction(planId:string,id:string):Promise<any>{await this.transactions.delete(planId,id,this.context("transaction.delete",planId,id));return this.getTransaction(planId,id,true);}

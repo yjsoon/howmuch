@@ -1,4 +1,4 @@
-import type { AsyncSqlDatabase, SqlValues } from "./postgres";
+import type { AsyncSqlDatabase, SqlValues } from "./async-sql";
 import type { RepositoryDatabase, RepositoryStatement } from "./repository-db";
 
 export type D1Result<Row = Record<string, unknown>> = {

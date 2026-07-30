@@ -5,7 +5,7 @@ export type Awaitable<T> = T | Promise<T>;
 
 /**
  * Public storage boundary used by HTTP, import, and scheduled-sync code.
- * SQLite satisfies it synchronously today; remote Postgres implementations
+ * SQLite satisfies it synchronously today; asynchronous D1 implementations
  * return promises. Callers must always await it so runtime choice is invisible.
  */
 export type AwaitableMethods<T> = {

@@ -37,6 +37,10 @@ export function applyMigrations(db: Database): void {
       version: "003_transfer_payees",
       path: join(migrationsDir, "003_transfer_payees.sql"),
     },
+    {
+      version: "004_auth_foundation",
+      path: join(migrationsDir, "004_auth_foundation.sql"),
+    },
   ];
 
   for (const migration of migrations) {
