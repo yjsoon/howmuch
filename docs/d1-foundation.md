@@ -4,4 +4,4 @@ Fresh D1 databases apply only `apps/api/d1-migrations/0001_initial.sql`. It dire
 
 The account/transfer-payee relationship deliberately uses ordered creation plus ownership triggers rather than immediate cyclic foreign keys. Ledger sequence triggers and unique indexes preserve deterministic ordering. D1 writes remain complete atomic batches with write-version, receipt, assertion, and lease checks.
 
-Wrangler currently has local-only ID-less bindings. No remote D1 is available and deployment is blocked until reviewed IDs are checked in.
+Wrangler binds the reviewed `howmuch-production` and `howmuch-preview` D1 databases. Both are clean-slate databases; no legacy ledger is copied into them.

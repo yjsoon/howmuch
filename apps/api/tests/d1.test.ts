@@ -44,7 +44,7 @@ describe("D1 foundation", () => {
     expect(db.query("SELECT id FROM auth_identities WHERE user_id='u1'").get()).toBeNull();
   });
 
-  test("Worker composition is D1-only, serves API writes, delegates assets, and blocks deployment", async () => {
+  test("Worker composition is D1-only, serves API writes, delegates assets, and binds reviewed databases", async () => {
     const db = await ledgerSqlite();
     const assetRequests: string[] = [];
     const env = {
@@ -83,11 +83,13 @@ describe("D1 foundation", () => {
     const rootPackage = await Bun.file(new URL("../../../package.json", import.meta.url)).json();
     expect(rootPackage.dependencies).toBeUndefined();
     const workerPackage = await Bun.file(new URL("../../worker/package.json", import.meta.url)).json();
-    expect(workerPackage.scripts.deploy).toContain("Deployment blocked");
-    expect(workerPackage.scripts["deploy:preview"]).toContain("Deployment blocked");
+    expect(workerPackage.scripts.deploy).toBe("wrangler deploy");
+    expect(workerPackage.scripts["deploy:preview"]).toBe("wrangler deploy --env preview");
     const wranglerConfig = JSON.parse((await Bun.file(new URL("../../worker/wrangler.jsonc", import.meta.url)).text()).replace(/^\s*\/\/.*$/gm, ""));
-    expect(wranglerConfig.d1_databases[0].database_id).toBe("local");
-    expect(wranglerConfig.env.preview.d1_databases[0].database_id).toBe("local");
+    expect(wranglerConfig.d1_databases[0]).toMatchObject({ database_name: "howmuch-production", database_id: "57dc5569-d639-44c1-bb9d-6214f43a43b8" });
+    expect(wranglerConfig.env.preview.d1_databases[0]).toMatchObject({ database_name: "howmuch-preview", database_id: "7ca818bd-7f04-4b9b-8a84-8c8f84a6a272" });
+    expect(wranglerConfig.env.preview.routes).toEqual([]);
+    expect(wranglerConfig.env.preview.triggers.crons).toEqual([]);
     expect(await Bun.file(new URL("../../../bun.lock", import.meta.url)).text()).not.toContain("@neondatabase/serverless");
   });
 

@@ -31,13 +31,15 @@
   },
   "d1_databases": [{
     "binding": "DB",
-    "database_name": "howmuch-local-unbound",
-    "database_id": "local",
+    "database_name": "howmuch-production",
+    "database_id": "57dc5569-d639-44c1-bb9d-6214f43a43b8",
     "migrations_dir": "../api/d1-migrations"
   }],
   "env": {
     "preview": {
       "name": "howmuch-preview",
+      "routes": [],
+      "triggers": { "crons": [] },
       "vars": {
         "HOWMUCH_DEFAULT_PLAN_ID": "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
         "HOWMUCH_YNAB_PLAN_ID": "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
@@ -45,8 +47,8 @@
       },
       "d1_databases": [{
         "binding": "DB",
-        "database_name": "howmuch-preview-local-unbound",
-        "database_id": "local",
+        "database_name": "howmuch-preview",
+        "database_id": "7ca818bd-7f04-4b9b-8a84-8c8f84a6a272",
         "migrations_dir": "../api/d1-migrations"
       }]
     }
