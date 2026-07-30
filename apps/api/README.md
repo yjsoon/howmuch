@@ -1,28 +1,10 @@
 # HowMuch API
 
-This package contains the shared HowMuch API handlers and ledger domain. It has
-two runtime/storage combinations:
-
-- Bun with local SQLite for development and imports.
-- Cloudflare Workers with Neon Postgres for hosted preview and production.
-
-It exposes two route families:
-
-- `/v1`: a narrow YNAB-compatible API for existing tools.
-- `/api`: native reports, imports, and mobile quick entry.
-
-Run locally:
+Shared ledger, import, report, and HTTP code for two runtimes: local Bun/SQLite and hosted Cloudflare Worker/D1. `/v1` is the YNAB-compatible surface; `/api` provides reports, imports, and quick entry.
 
 ```sh
 bun run api:dev
+bun test apps/api/tests
 ```
 
-The local server creates the SQLite database and applies migrations on startup.
-Postgres migrations are explicit:
-
-```sh
-DATABASE_URL='<Neon connection string>' bun run api:migrate:postgres
-```
-
-See [the deployment runbook](../../docs/deployment.md) for migration,
-reconciliation, secrets, preview, and production procedures.
+SQLite applies `migrations/001`–`004`. A fresh D1 applies only `d1-migrations/0001_initial.sql`. Authentication still uses a static bearer token, while users, identities, sessions, and plan memberships are ready in both schemas.

@@ -1,5 +1,4 @@
 import type { Database } from "bun:sqlite";
-import type { AsyncSqlDatabase } from "./postgres";
 
 type Row = Record<string, any>;
 const sqliteTransactionTails = new WeakMap<Database, Promise<void>>();
@@ -51,30 +50,4 @@ export class SqliteRepositoryDatabase implements RepositoryDatabase {
       }
     };
   }
-}
-
-export class PostgresRepositoryDatabase implements RepositoryDatabase {
-  constructor(private readonly db: AsyncSqlDatabase) {}
-
-  query(sql: string): RepositoryStatement {
-    const translated = translateSql(sql);
-    return {
-      get: (...values) => this.db.get(translated, values),
-      all: (...values) => this.db.all(translated, values),
-      run: async (...values) => ({ changes: (await this.db.run(translated, values)).rowCount }),
-    };
-  }
-
-  transaction<Result>(callback: () => Promise<Result>): () => Promise<Result> {
-    return () => this.db.transaction(callback);
-  }
-}
-
-export function translateSql(sql: string): string {
-  let parameter = 0;
-  return sql
-    .replace(/CURRENT_TIMESTAMP/g, "to_char(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')")
-    .replace(/strftime\('%Y-%m',\s*'now'\)/g, "to_char(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM')")
-    .replace(/\?/g, () => `$${++parameter}`)
-    .replace(/date\((\$\d+),\s*'\+1 month'\)/g, "(($1::date + INTERVAL '1 month')::date)::text");
 }

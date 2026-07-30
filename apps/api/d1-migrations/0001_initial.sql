@@ -1,9 +1,181 @@
--- Apply after the SQLite migrations 001-003 when creating a NEW, inactive D1 database.
--- This migration is intentionally not referenced by the production Worker.
 PRAGMA foreign_keys = ON;
 
-ALTER TABLE transactions ADD COLUMN ledger_sequence INTEGER;
-ALTER TABLE subtransactions ADD COLUMN ledger_sequence INTEGER;
+CREATE TABLE IF NOT EXISTS plans (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  first_month TEXT,
+  last_month TEXT,
+  date_format_json TEXT NOT NULL DEFAULT '{"format":"DD/MM/YYYY"}',
+  currency_format_json TEXT NOT NULL DEFAULT '{"iso_code":"SGD","example_format":"$123,456.78","decimal_digits":2,"decimal_separator":".","symbol_first":true,"group_separator":",","currency_symbol":"$","display_symbol":true}',
+  flag_names_json TEXT NOT NULL DEFAULT '{}',
+  server_knowledge INTEGER NOT NULL DEFAULT 1,
+  external_ynab_id TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS accounts (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'checking',
+  on_budget INTEGER NOT NULL DEFAULT 1,
+  closed INTEGER NOT NULL DEFAULT 0,
+  opening_balance_milli INTEGER NOT NULL DEFAULT 0,
+  balance_milli INTEGER NOT NULL DEFAULT 0,
+  cleared_balance_milli INTEGER NOT NULL DEFAULT 0,
+  uncleared_balance_milli INTEGER NOT NULL DEFAULT 0,
+  transfer_payee_id TEXT,
+  direct_import_linked INTEGER NOT NULL DEFAULT 0,
+  direct_import_in_error INTEGER NOT NULL DEFAULT 0,
+  include_in_net_worth INTEGER NOT NULL DEFAULT 1,
+  external_ynab_id TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_accounts_plan_id ON accounts(plan_id);
+
+CREATE TABLE IF NOT EXISTS category_groups (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  internal INTEGER NOT NULL DEFAULT 0,
+  external_ynab_id TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_category_groups_plan_id ON category_groups(plan_id);
+
+CREATE TABLE IF NOT EXISTS categories (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  category_group_id TEXT REFERENCES category_groups(id),
+  name TEXT NOT NULL,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  internal INTEGER NOT NULL DEFAULT 0,
+  external_ynab_id TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_categories_plan_id ON categories(plan_id);
+CREATE INDEX IF NOT EXISTS idx_categories_group_id ON categories(category_group_id);
+
+CREATE TABLE IF NOT EXISTS payees (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  transfer_account_id TEXT,
+  external_ynab_id TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(plan_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_payees_plan_id ON payees(plan_id);
+
+CREATE TABLE IF NOT EXISTS transactions (
+  id TEXT PRIMARY KEY,
+  ledger_sequence INTEGER,
+  plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  account_id TEXT NOT NULL REFERENCES accounts(id),
+  date TEXT NOT NULL,
+  amount_milli INTEGER NOT NULL,
+  memo TEXT,
+  cleared TEXT NOT NULL DEFAULT 'uncleared',
+  approved INTEGER NOT NULL DEFAULT 0,
+  flag_color TEXT,
+  flag_name TEXT,
+  payee_id TEXT REFERENCES payees(id),
+  payee_name_snapshot TEXT,
+  category_id TEXT REFERENCES categories(id),
+  category_name_snapshot TEXT,
+  transfer_account_id TEXT,
+  transfer_transaction_id TEXT,
+  matched_transaction_id TEXT,
+  import_id TEXT,
+  import_payee_name TEXT,
+  import_payee_name_original TEXT,
+  source_kind TEXT,
+  source_ref TEXT,
+  external_ynab_id TEXT,
+  server_knowledge INTEGER NOT NULL DEFAULT 1,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_transactions_plan_date ON transactions(plan_id, date);
+CREATE INDEX IF NOT EXISTS idx_transactions_account_date ON transactions(account_id, date);
+CREATE INDEX IF NOT EXISTS idx_transactions_payee_id ON transactions(payee_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_category_id ON transactions(category_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_import_id ON transactions(plan_id, import_id);
+
+CREATE TABLE IF NOT EXISTS subtransactions (
+  id TEXT PRIMARY KEY,
+  ledger_sequence INTEGER,
+  transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  amount_milli INTEGER NOT NULL,
+  memo TEXT,
+  payee_id TEXT REFERENCES payees(id),
+  payee_name_snapshot TEXT,
+  category_id TEXT REFERENCES categories(id),
+  category_name_snapshot TEXT,
+  transfer_account_id TEXT,
+  transfer_transaction_id TEXT,
+  external_ynab_id TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_subtransactions_transaction_id ON subtransactions(transaction_id);
+
+CREATE TABLE IF NOT EXISTS source_events (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  transaction_id TEXT REFERENCES transactions(id) ON DELETE SET NULL,
+  source_kind TEXT NOT NULL,
+  source_ref TEXT,
+  source_provider TEXT,
+  payload_json TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_events_transaction_id ON source_events(transaction_id);
+
+CREATE TABLE IF NOT EXISTS import_sessions (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT REFERENCES plans(id) ON DELETE SET NULL,
+  source TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'running',
+  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  finished_at TEXT,
+  summary_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS import_rows (
+  id TEXT PRIMARY KEY,
+  import_session_id TEXT NOT NULL REFERENCES import_sessions(id) ON DELETE CASCADE,
+  row_index INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  error TEXT,
+  transaction_id TEXT REFERENCES transactions(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE INDEX IF NOT EXISTS idx_transactions_plan_server_knowledge ON transactions(plan_id, server_knowledge);
+CREATE INDEX IF NOT EXISTS idx_import_rows_session ON import_rows(import_session_id, row_index);
 
 CREATE TRIGGER transactions_assign_ledger_sequence
 AFTER INSERT ON transactions WHEN NEW.ledger_sequence IS NULL
@@ -19,59 +191,6 @@ BEGIN
 END;
 CREATE UNIQUE INDEX idx_transactions_ledger_sequence ON transactions(ledger_sequence);
 CREATE UNIQUE INDEX idx_subtransactions_ledger_sequence ON subtransactions(ledger_sequence);
-
--- Import receipts are part of the inactive target schema. Each generated data
--- chunk and its receipt execute in one D1 transaction; receipts are never
--- reused for different source bytes or row boundaries.
-CREATE TABLE migration_runs (
-  id TEXT PRIMARY KEY,
-  source_sha256 TEXT NOT NULL,
-  source_bytes INTEGER NOT NULL,
-  expected_chunk_count INTEGER NOT NULL CHECK (expected_chunk_count >= 0),
-  status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'complete')),
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  completed_at TEXT,
-  UNIQUE(source_sha256),
-  UNIQUE(id, source_sha256)
-);
-CREATE TABLE migration_chunks (
-  run_id TEXT NOT NULL REFERENCES migration_runs(id) ON DELETE RESTRICT,
-  source_sha256 TEXT NOT NULL,
-  table_name TEXT NOT NULL,
-  chunk_number INTEGER NOT NULL CHECK (chunk_number >= 0),
-  row_count INTEGER NOT NULL CHECK (row_count > 0),
-  chunk_sha256 TEXT NOT NULL,
-  first_stable_key TEXT NOT NULL,
-  last_stable_key TEXT NOT NULL,
-  applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (run_id, table_name, chunk_number),
-  FOREIGN KEY (run_id, source_sha256) REFERENCES migration_runs(id, source_sha256)
-);
-CREATE UNIQUE INDEX idx_migration_chunk_identity ON migration_chunks(
-  source_sha256, table_name, chunk_number, row_count, chunk_sha256,
-  first_stable_key, last_stable_key
-);
-CREATE TRIGGER migration_chunks_no_update BEFORE UPDATE ON migration_chunks
-BEGIN
-  SELECT RAISE(ABORT, 'migration chunk receipts are immutable');
-END;
-CREATE TRIGGER migration_chunks_no_delete BEFORE DELETE ON migration_chunks
-BEGIN
-  SELECT RAISE(ABORT, 'migration chunk receipts are immutable');
-END;
-CREATE TRIGGER migration_runs_identity_immutable BEFORE UPDATE OF id, source_sha256, source_bytes, expected_chunk_count ON migration_runs
-BEGIN
-  SELECT RAISE(ABORT, 'migration run identity is immutable');
-END;
-CREATE TRIGGER migration_runs_complete_immutable BEFORE UPDATE ON migration_runs
-WHEN OLD.status = 'complete'
-BEGIN
-  SELECT RAISE(ABORT, 'completed migration runs are immutable');
-END;
-CREATE TRIGGER migration_runs_no_delete BEFORE DELETE ON migration_runs
-BEGIN
-  SELECT RAISE(ABORT, 'migration run receipts are immutable');
-END;
 
 -- D1 metadata writers rely on these relationships being enforced at execution
 -- time, not merely observed during planning.
@@ -375,3 +494,40 @@ WHEN (NEW.kind = 'account' AND NOT EXISTS (SELECT 1 FROM accounts WHERE id = NEW
 BEGIN
   SELECT RAISE(ABORT, 'write precondition failed');
 END;
+
+
+CREATE TABLE users (
+  id TEXT PRIMARY KEY,
+  display_name TEXT,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE TABLE auth_identities (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  issuer TEXT NOT NULL,
+  provider_subject TEXT NOT NULL,
+  email TEXT,
+  profile_json TEXT,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  UNIQUE(issuer, provider_subject)
+);
+CREATE INDEX idx_auth_identities_user ON auth_identities(user_id);
+CREATE TABLE sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE CHECK (length(token_hash)=64 AND token_hash=lower(token_hash) AND token_hash NOT GLOB '*[^0-9a-f]*'),
+  expires_at INTEGER NOT NULL,
+  revoked_at INTEGER,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX idx_sessions_user ON sessions(user_id);
+CREATE INDEX idx_sessions_expiry ON sessions(expires_at);
+CREATE TABLE plan_memberships (
+  plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK (role IN ('owner','editor','viewer')),
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  PRIMARY KEY(plan_id,user_id)
+);
+CREATE INDEX idx_plan_memberships_user_plan ON plan_memberships(user_id,plan_id);

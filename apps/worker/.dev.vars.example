@@ -1,3 +1,2 @@
-DATABASE_URL=postgresql://user:password@host/database?sslmode=require
-HOWMUCH_API_TOKEN=replace-with-a-long-random-token
-HOWMUCH_YNAB_TOKEN=replace-with-your-ynab-personal-access-token
+HOWMUCH_API_TOKEN=replace-with-a-local-development-token
+HOWMUCH_YNAB_TOKEN=optional-local-ynab-token

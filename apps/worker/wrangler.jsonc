@@ -29,9 +29,12 @@
     "enabled": true,
     "head_sampling_rate": 1
   },
-  // Intentionally no DB binding yet. Add the reviewed inactive D1 database ID
-  // here only after creation/import/reconciliation; production remains on Neon
-  // unless HOWMUCH_DATABASE_BACKEND is explicitly set to "d1".
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "howmuch-local-unbound",
+    "database_id": "local",
+    "migrations_dir": "../api/d1-migrations"
+  }],
   "env": {
     "preview": {
       "name": "howmuch-preview",
@@ -39,7 +42,13 @@
         "HOWMUCH_DEFAULT_PLAN_ID": "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
         "HOWMUCH_YNAB_PLAN_ID": "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
         "HOWMUCH_YNAB_MIN_SIMILARITY": "0.95"
-      }
+      },
+      "d1_databases": [{
+        "binding": "DB",
+        "database_name": "howmuch-preview-local-unbound",
+        "database_id": "local",
+        "migrations_dir": "../api/d1-migrations"
+      }]
     }
   }
 }

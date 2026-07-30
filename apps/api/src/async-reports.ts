@@ -1,10 +1,10 @@
-import type { AsyncSqlDatabase } from "./postgres";
+import type { AsyncSqlDatabase } from "./async-sql";
 import type { ReportFilters } from "./types";
 
 type Row = Record<string, any>;
 
-export class PostgresReportService {
-  constructor(private readonly db: AsyncSqlDatabase, private readonly dialect: "postgres" | "sqlite" = "postgres") {}
+export class AsyncReportService {
+  constructor(private readonly db: AsyncSqlDatabase) {}
 
   async spendingBreakdown(planId: string, filters: ReportFilters = {}): Promise<any> {
     const { where, params } = this.lineFilters(planId, filters);
@@ -68,7 +68,7 @@ export class PostgresReportService {
     const rows = await this.db.all<Row>(
       `WITH lines AS (${lineItemsSql()})
        SELECT
-         ${periodSql(interval, this.dialect)} AS period,
+         ${periodSql(interval)} AS period,
          SUM(CASE WHEN lines.amount_milli > 0 THEN lines.amount_milli ELSE 0 END) AS income,
          SUM(CASE WHEN lines.amount_milli < 0 THEN ABS(lines.amount_milli) ELSE 0 END) AS spending
        FROM lines
@@ -261,18 +261,11 @@ function bind(params: any[], value: any): string {
   return `$${params.length}`;
 }
 
-function periodSql(interval: string, dialect: "postgres" | "sqlite"): string {
+function periodSql(interval: string): string {
   if (interval === "day") return "lines.date";
-  if (dialect === "sqlite") {
-    if (interval === "year") return "substr(lines.date, 1, 4)";
-    if (interval === "week") return "strftime('%Y-W%W', lines.date)";
-    return "substr(lines.date, 1, 7)";
-  }
-  if (interval === "year") return "left(lines.date, 4)";
-  if (interval === "week") {
-    return `left(lines.date, 4) || '-W' || lpad(floor((extract(doy from lines.date::date) + 7 - extract(isodow from lines.date::date)) / 7)::text, 2, '0')`;
-  }
-  return "left(lines.date, 7)";
+  if (interval === "year") return "substr(lines.date, 1, 4)";
+  if (interval === "week") return "strftime('%Y-W%W', lines.date)";
+  return "substr(lines.date, 1, 7)";
 }
 
 function periodLabel(date: string, interval: string): string {

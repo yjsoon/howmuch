@@ -1,7 +1,7 @@
 import { createId } from "./ids";
 import type { TransactionInput } from "./types";
 import type { D1Database } from "./d1";
-import type { SqlValues } from "./postgres";
+import type { SqlValues } from "./async-sql";
 import { createHash } from "node:crypto";
 
 export type PlannedStatement = Readonly<{ sql: string; values: Readonly<SqlValues> }>;

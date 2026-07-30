@@ -5,7 +5,7 @@ import { importYnabFromApi } from "./importers/ynab";
 import { D1Database } from "./d1";
 import { D1LedgerRepository } from "./d1-ledger-repository";
 import { D1ScheduledSyncState } from "./d1-scheduled-sync";
-import type { ScheduledSyncResult } from "./scheduled-sync";
+import type { ScheduledSyncResult } from "./scheduled-sync-result";
 
 /** Runs one YNAB delta using D1's fenced lease and guarded ledger commands. */
 export async function runD1ScheduledYnabSync(options: {
