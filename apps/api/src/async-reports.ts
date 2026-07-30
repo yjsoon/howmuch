@@ -97,57 +97,49 @@ export class AsyncReportService {
     const periods = buildPeriods(from, to, filters.interval ?? "month");
     if (periods.length === 0) return { periods: [] };
 
-    const params: any[] = [];
-    const periodValues = periods.map((period) => `(${bind(params, period.label)}, ${bind(params, period.end)})`).join(", ");
-    const plan = bind(params, planId);
-    const includeClosed = bind(params, filters.includeClosedAccounts === true ? 1 : 0);
-    let accountFilter = "";
-    if (filters.accountIds?.length) {
-      accountFilter = `AND a.id IN (${filters.accountIds.map((id) => bind(params, id)).join(", ")})`;
-    }
-    const rows = await this.db.all<Row>(
-      `WITH periods(label, end_date) AS (VALUES ${periodValues}),
-       selected_accounts AS (
-         SELECT a.* FROM accounts a
-         WHERE a.plan_id = ${plan}
-           AND a.deleted = 0
-           AND a.include_in_net_worth = 1
-           AND (${includeClosed} = 1 OR a.closed = 0)
-           ${accountFilter}
-       )
-       SELECT
-         periods.label AS period,
-         periods.end_date,
-         accounts.id AS account_id,
-         accounts.name AS account_name,
-         accounts.closed,
-         accounts.opening_balance_milli + COALESCE(SUM(CASE WHEN transactions.deleted = 0 THEN transactions.amount_milli ELSE 0 END), 0) AS balance
-       FROM periods
-       CROSS JOIN selected_accounts accounts
-       LEFT JOIN transactions
-         ON transactions.plan_id = ${plan}
-        AND transactions.account_id = accounts.id
-        AND transactions.date <= periods.end_date
-       GROUP BY periods.label, periods.end_date, accounts.id, accounts.name, accounts.closed, accounts.opening_balance_milli
-       ORDER BY periods.end_date, accounts.name, accounts.id`,
-      params,
+    const requestedAccounts = filters.accountIds?.length ? new Set(filters.accountIds) : null;
+    const accounts = (await this.db.all<Row>(
+      `SELECT id,name,closed,opening_balance_milli FROM accounts
+       WHERE plan_id=$1 AND deleted=0 AND include_in_net_worth=1
+         AND ($2=1 OR closed=0)
+       ORDER BY name,id`,
+      [planId, filters.includeClosedAccounts === true ? 1 : 0],
+    )).filter((account) => !requestedAccounts || requestedAccounts.has(account.id));
+    const selectedIds = new Set(accounts.map((account) => account.id));
+    const movements = await this.db.all<Row>(
+      `SELECT account_id,date,amount_milli FROM transactions
+       WHERE plan_id=$1 AND deleted=0 AND date<=$2
+       ORDER BY account_id,date,ledger_sequence,id`,
+      [planId, to],
     );
-
-    const grouped = new Map<string, Row[]>();
-    for (const row of rows) grouped.set(row.period, [...(grouped.get(row.period) ?? []), row]);
+    const byAccount = new Map<string, Row[]>();
+    for (const movement of movements) {
+      if (!selectedIds.has(movement.account_id)) continue;
+      const existing = byAccount.get(movement.account_id);
+      if (existing) existing.push(movement);
+      else byAccount.set(movement.account_id, [movement]);
+    }
+    const balances = new Map(accounts.map((account) => [account.id, Number(account.opening_balance_milli)]));
+    const positions = new Map(accounts.map((account) => [account.id, 0]));
     let previousNetWorth: number | null = null;
     return {
       periods: periods.map((period) => {
-        const accounts = (grouped.get(period.label) ?? []).map((row) => ({
-          account_id: row.account_id,
-          account_name: row.account_name,
-          closed: Number(row.closed) === 1,
-          balance: Number(row.balance ?? 0),
-        }));
-        const netWorth = accounts.reduce((sum, account) => sum + account.balance, 0);
+        const accountRows = accounts.map((account) => {
+          const accountMovements = byAccount.get(account.id) ?? [];
+          let position = positions.get(account.id) ?? 0;
+          let balance = balances.get(account.id) ?? 0;
+          while (position < accountMovements.length && accountMovements[position]!.date <= period.end) {
+            balance += Number(accountMovements[position]!.amount_milli);
+            position++;
+          }
+          positions.set(account.id, position);
+          balances.set(account.id, balance);
+          return { account_id: account.id, account_name: account.name, closed: Number(account.closed) === 1, balance };
+        });
+        const netWorth = accountRows.reduce((sum, account) => sum + account.balance, 0);
         const delta = previousNetWorth == null ? null : netWorth - previousNetWorth;
         previousNetWorth = netWorth;
-        return { period: period.label, end_date: period.end, net_worth: netWorth, delta, accounts };
+        return { period: period.label, end_date: period.end, net_worth: netWorth, delta, accounts: accountRows };
       }),
     };
   }

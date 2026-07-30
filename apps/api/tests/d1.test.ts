@@ -61,6 +61,10 @@ describe("D1 foundation", () => {
     expect(plans.status).toBe(200);
     const planBody = await plans.json() as { data: { plans: Array<{ id: string }> } };
     expect(planBody.data.plans.map((plan) => plan.id)).toEqual(["p"]);
+    const versionBeforeRead = db.query("SELECT write_version FROM write_state").get();
+    const accounts = await worker.fetch(new Request("https://howmuch.test/v1/plans/p/accounts", { headers }), env as any);
+    expect(accounts.status).toBe(200);
+    expect(db.query("SELECT write_version FROM write_state").get()).toEqual(versionBeforeRead);
     const account = await worker.fetch(new Request("https://howmuch.test/v1/plans/p/accounts", {
       method: "POST", headers, body: JSON.stringify({ account: { id: "worker-account", name: "Worker account" } }),
     }), env as any);
@@ -146,6 +150,15 @@ describe("D1 foundation", () => {
     expect(await actual.incomeVsSpending("p", { interval: "week" })).toEqual(expected.incomeVsSpending("p", { interval: "week" }));
     expect(await actual.netWorth("p", { from: "2026-01-01", to: "2026-01-31" })).toEqual(expected.netWorth("p", { from: "2026-01-01", to: "2026-01-31" }));
     expect(await actual.ageOfMoney("p", { from: "2026-01-01", to: "2026-01-31" })).toEqual(expected.ageOfMoney("p", { from: "2026-01-01", to: "2026-01-31" }));
+  });
+
+  test("D1 net-worth reports stay below the binding cap across long daily ranges", async () => {
+    const db = await ledgerSqlite();
+    db.run("INSERT INTO transactions(id,plan_id,account_id,date,amount_milli) VALUES('long-range-row','p','a','2026-01-02',100)");
+    const reports = new D1ReportService(fakeD1(db, { maxBindings: 100 }));
+    const result = await reports.netWorth("p", { from: "2026-01-01", to: "2026-04-30", interval: "day" });
+    expect(result.periods).toHaveLength(120);
+    expect(result.periods.at(-1).net_worth).toBe(100);
   });
 
   test("scheduled sync atomically acquires, deduplicates, fences, and completes leases", async () => {
@@ -520,6 +533,10 @@ describe("D1 foundation", () => {
     ]);
     await writer.create("p", { id:"left",account_id:"a",date:"2026-07-01",amount:-30,payee_id:"to-b",category_id:"tracking",transfer_account_id:"b",transfer_transaction_id:"right" }, { operationId:"import-left-delta" }, { autoLink:false,upsert:true });
     expect(db.query("SELECT id,amount_milli FROM transactions ORDER BY id").all()).toEqual([{id:"left",amount_milli:-30},{id:"right",amount_milli:25}]);
+
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    const deleted = await repo.createTransaction("p", { id:"deleted-import",account_id:"a",date:"2026-07-02",amount:0,deleted:true }, { autoLink:false });
+    expect(deleted.deleted).toBe(true);
   });
 
   test("D1 split IDs cannot be stolen by another parent in the same plan", async () => {
@@ -580,13 +597,16 @@ async function ledgerSqlite(): Promise<Database> {
 
 function sqlite(): Database { const db = new Database(":memory:", { strict: true }); databases.push(db); return db; }
 
-function fakeD1(db: Database, faults: { commitThenThrowOnce?: boolean; commitThenThrowSql?: RegExp; beforeWriteBatch?: (db: Database) => void } = {}): D1Binding {
+function fakeD1(db: Database, faults: { commitThenThrowOnce?: boolean; commitThenThrowSql?: RegExp; beforeWriteBatch?: (db: Database) => void; maxBindings?: number } = {}): D1Binding {
   let commitThenThrow = faults.commitThenThrowOnce ?? Boolean(faults.commitThenThrowSql);
   let mutateBeforeWrite = faults.beforeWriteBatch;
   class Statement implements D1Statement {
     values: unknown[] = [];
     constructor(readonly sql: string) {}
-    bind(...values: unknown[]) { this.values = values; return this; }
+    bind(...values: unknown[]) {
+      if (faults.maxBindings != null && values.length > faults.maxBindings) throw new Error("too many SQL parameters");
+      this.values = values; return this;
+    }
     async all<Row>(): Promise<D1Result<Row>> { return { success: true, results: db.query(this.sql).all(...this.values as any[]) as Row[] }; }
     async first<Row>(): Promise<Row | null> { return db.query(this.sql).get(...this.values as any[]) as Row | null; }
     async run(): Promise<D1Result> { const result = db.query(this.sql).run(...this.values as any[]); return { success: true, meta: { changes: Number(result.changes) } }; }
