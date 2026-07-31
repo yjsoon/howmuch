@@ -13,8 +13,6 @@ import type {
   Transaction,
 } from "./types";
 
-const TOKEN_KEY = "howmuch.api-token";
-
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -24,19 +22,12 @@ export class ApiError extends Error {
   }
 }
 
-export function setApiToken(token: string): void {
-  const trimmed = token.trim();
-  if (trimmed) sessionStorage.setItem(TOKEN_KEY, trimmed);
-  else sessionStorage.removeItem(TOKEN_KEY);
-}
-
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
   const response = await fetch(path, {
     ...init,
+    credentials: "same-origin",
     headers: {
       "content-type": "application/json",
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...init?.headers,
     },
   });
@@ -75,7 +66,31 @@ export interface ReportQuery {
   interval?: string;
 }
 
+export interface AuthUser {
+  id: string;
+  username: string;
+}
+
+export interface AuthStatus {
+  setup_required: boolean;
+  bootstrap_required: boolean;
+  user: AuthUser | null;
+}
+
 export const api = {
+  authStatus: () => request<AuthStatus>("/api/auth/status"),
+  setup: (username: string, password: string, bootstrapToken: string) =>
+    request<{ user: AuthUser }>("/api/auth/setup", {
+      method: "POST",
+      headers: bootstrapToken ? { authorization: `Bearer ${bootstrapToken}` } : undefined,
+      body: JSON.stringify({ username, password }),
+    }).then((data) => data.user),
+  login: (username: string, password: string) =>
+    request<{ user: AuthUser }>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }).then((data) => data.user),
+  logout: () => request<{ ok: true }>("/api/auth/logout", { method: "POST", body: "{}" }),
   plans: () => request<{ plans: Plan[] }>("/v1/plans").then((d) => d.plans),
   settings: (planId: string) =>
     request<{ settings: PlanSettings }>(`/v1/plans/${planId}/settings`).then((d) => d.settings),

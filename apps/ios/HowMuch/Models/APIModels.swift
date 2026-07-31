@@ -11,14 +11,16 @@ struct ServerErrorEnvelope: Decodable {
 
 struct ServerError: Decodable {
   let id: String
-  let message: String
+  let detail: String
 }
 
 struct APISettings: Codable, Equatable {
   static let userDefaultsKey = "HowMuch.APISettings"
 
   var baseURLString = "http://127.0.0.1:8787"
-  var bearerToken = ""
+  var username = ""
+  var sessionToken = ""
+  var authenticatedUserID = ""
   var planID = "local-plan"
 
   var trimmedBaseURL: String {
@@ -26,11 +28,15 @@ struct APISettings: Codable, Equatable {
   }
 
   var connectionFingerprint: String {
-    [trimmedBaseURL, planID, bearerToken].joined(separator: "|")
+    [trimmedBaseURL, planID, authenticatedUserID].joined(separator: "|")
   }
 
   var isConfigured: Bool {
     URL(string: trimmedBaseURL) != nil
+  }
+
+  var isAuthenticated: Bool {
+    !sessionToken.isEmpty && !authenticatedUserID.isEmpty
   }
 
   static func load(from defaults: UserDefaults = .standard) -> APISettings {
@@ -39,23 +45,20 @@ struct APISettings: Codable, Equatable {
       let decoded = try? JSONDecoder().decode(APISettings.self, from: data)
     else {
       var settings = APISettings()
-      settings.bearerToken = CredentialStore.load() ?? ""
+      settings.sessionToken = CredentialStore.load() ?? ""
       return settings
     }
     var settings = decoded
     if let token = CredentialStore.load() {
-      settings.bearerToken = token
-    } else if !decoded.bearerToken.isEmpty {
-      // One-time migration from versions that stored the token in UserDefaults.
-      CredentialStore.save(decoded.bearerToken)
+      settings.sessionToken = token
     }
     return settings
   }
 
   func save(to defaults: UserDefaults = .standard) {
-    CredentialStore.save(bearerToken)
+    CredentialStore.save(sessionToken)
     var publicSettings = self
-    publicSettings.bearerToken = ""
+    publicSettings.sessionToken = ""
     guard let data = try? JSONEncoder().encode(publicSettings) else {
       return
     }
@@ -65,7 +68,7 @@ struct APISettings: Codable, Equatable {
 
 private enum CredentialStore {
   private static let service = Bundle.main.bundleIdentifier ?? "HowMuch"
-  private static let account = "api-bearer-token"
+  private static let account = "session-token"
 
   static func load() -> String? {
     let query: [String: Any] = [
@@ -134,6 +137,21 @@ struct UserPayload: Decodable {
 }
 
 struct APIUser: Decodable {
+  let id: String
+  let username: String?
+}
+
+struct AuthTokenPayload: Decodable {
+  let token: String
+  let expiresAt: Int
+  let user: APIUser
+}
+
+struct PlansPayload: Decodable {
+  let plans: [PlanSummary]
+}
+
+struct PlanSummary: Decodable {
   let id: String
 }
 

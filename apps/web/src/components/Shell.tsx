@@ -1,5 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { usePlan } from "../state/plan";
 
 const TABS = [
   { to: "/spending", label: "Spending" },
@@ -11,6 +12,8 @@ const TABS = [
 
 export function Shell() {
   const location = useLocation();
+  const { logout } = usePlan();
+  const [logoutError, setLogoutError] = useState<string | null>(null);
   useEffect(() => {
     const tab = TABS.find((entry) => entry.to === location.pathname);
     document.title = tab ? `${tab.label} · HowMuch` : "HowMuch";
@@ -33,6 +36,21 @@ export function Shell() {
         <NavLink to="/add" className="add-button">
           + Add
         </NavLink>
+        <button
+          type="button"
+          className="sign-out-button"
+          onClick={async () => {
+            setLogoutError(null);
+            try {
+              await logout();
+            } catch (cause) {
+              setLogoutError(cause instanceof Error ? cause.message : String(cause));
+            }
+          }}
+        >
+          Sign out
+        </button>
+        {logoutError && <span className="masthead-error" role="alert">{logoutError}</span>}
       </header>
       <main className="report-body">
         <Outlet />

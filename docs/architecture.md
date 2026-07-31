@@ -6,4 +6,4 @@
 
 Local development remains Bun/SQLite. Hosted storage is D1 only. D1 mutations are preplanned atomic batches guarded by write versions, immutable command receipts, SQL assertions, and scheduler lease fencing; interactive asynchronous transactions are rejected.
 
-Static bearer authentication remains the active request gate. The schema now includes auth-ready users, external identities, hashed sessions, and many-to-many plan memberships, but no runtime identity/session flow is enabled yet.
+First-party username/password authentication uses scrypt password hashes and opaque, hashed sessions. Browsers receive a secure `HttpOnly` cookie; iOS stores its session token in Keychain. Session requests are scoped by owner/editor/viewer plan membership. The static API bearer remains a default-plan integration credential and authorizes one-time first-owner setup.

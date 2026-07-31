@@ -29,6 +29,23 @@ enum APIClientError: LocalizedError {
 struct APIClient {
   let settings: APISettings
 
+  func login(username: String, password: String) async throws -> AuthTokenPayload {
+    let response: APIEnvelope<AuthTokenPayload> = try await request(
+      path: "/api/auth/token",
+      method: "POST",
+      body: LoginRequest(username: username, password: password)
+    )
+    return response.data
+  }
+
+  func logout() async throws {
+    let _: APIEnvelope<LogoutPayload> = try await request(
+      path: "/api/auth/logout",
+      method: "POST",
+      body: EmptyRequest()
+    )
+  }
+
   func fetchReferenceData(planID: String) async throws -> ReferenceData {
     async let planSettings = fetchPlanSettings(planID: planID)
     async let accounts = fetchAccounts(planID: planID)
@@ -47,6 +64,11 @@ struct APIClient {
   func fetchUser() async throws -> APIUser {
     let response: APIEnvelope<UserPayload> = try await request(path: "/v1/user")
     return response.data.user
+  }
+
+  func fetchPlans() async throws -> [PlanSummary] {
+    let response: APIEnvelope<PlansPayload> = try await request(path: "/v1/plans")
+    return response.data.plans
   }
 
   func fetchPlanSettings(planID: String) async throws -> PlanSettings {
@@ -209,7 +231,7 @@ struct APIClient {
     request.httpMethod = method
     request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-    let trimmedToken = settings.bearerToken.trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmedToken = settings.sessionToken.trimmingCharacters(in: .whitespacesAndNewlines)
     if !trimmedToken.isEmpty {
       request.setValue("Bearer \(trimmedToken)", forHTTPHeaderField: "Authorization")
     }
@@ -226,7 +248,7 @@ struct APIClient {
 
     guard (200 ..< 300).contains(httpResponse.statusCode) else {
       if let serverError = try? decoder.decode(ServerErrorEnvelope.self, from: data) {
-        throw APIClientError.server(serverError.error.message)
+        throw APIClientError.server(serverError.error.detail)
       }
       throw APIClientError.httpStatus(httpResponse.statusCode)
     }
@@ -263,6 +285,17 @@ struct APIClient {
     encoder.keyEncodingStrategy = .convertToSnakeCase
     return encoder
   }
+}
+
+private struct LoginRequest: Encodable {
+  let username: String
+  let password: String
+}
+
+private struct EmptyRequest: Encodable {}
+
+private struct LogoutPayload: Decodable {
+  let ok: Bool
 }
 
 extension Error {
