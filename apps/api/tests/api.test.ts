@@ -1087,7 +1087,11 @@ describe("password authentication", () => {
 
   test("sets up exactly once without storing the password", async () => {
     const before = await handler(new Request("https://howmuch.test/api/auth/status"));
-    expect((await before.json()).data).toEqual({ setup_required: true, user: null });
+    expect((await before.json()).data).toEqual({
+      setup_required: true,
+      bootstrap_required: true,
+      user: null,
+    });
 
     const setup = await authRequest(
       "/api/auth/setup",
@@ -1108,6 +1112,25 @@ describe("password authentication", () => {
     );
     expect(repeated.status).toBe(409);
     expect(db.query("SELECT COUNT(*) AS count FROM users").get()).toEqual({ count: 1 });
+  });
+
+  test("allows tokenless local setup without an Authorization header", async () => {
+    const localHandler = createHandler({
+      db,
+      config: {
+        dbPath: ":memory:",
+        port: 0,
+        defaultPlanId: "plan-test",
+      },
+    });
+    const status = await localHandler(new Request("http://localhost:8787/api/auth/status"));
+    expect((await status.json()).data.bootstrap_required).toBeFalse();
+    const setup = await localHandler(new Request("http://localhost:8787/api/auth/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost:8787" },
+      body: JSON.stringify({ username: "owner", password }),
+    }));
+    expect(setup.status).toBe(200);
   });
 
   test("logs in with browser cookie and native token, then revokes logout", async () => {

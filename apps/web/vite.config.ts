@@ -2,14 +2,23 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 const apiTarget = process.env.HOWMUCH_API_URL ?? "http://localhost:8787";
+const apiOrigin = new URL(apiTarget).origin;
+
+const apiProxy = {
+  target: apiTarget,
+  changeOrigin: true,
+  configure(proxy: { on: (event: string, handler: (request: { setHeader: (name: string, value: string) => void }) => void) => void }) {
+    proxy.on("proxyReq", (request) => request.setHeader("origin", apiOrigin));
+  },
+};
 
 export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
     proxy: {
-      "/api": { target: apiTarget, changeOrigin: true },
-      "/v1": { target: apiTarget, changeOrigin: true },
+      "/api": apiProxy,
+      "/v1": apiProxy,
     },
   },
 });

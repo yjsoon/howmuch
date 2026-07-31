@@ -4,6 +4,8 @@ struct SettingsView: View {
   @Environment(\.dismiss) private var dismiss
   @State private var draft: APISettings
   @State private var password = ""
+  @State private var authenticatedBaseURL: String
+  @State private var authenticatedUsername: String
   @State private var isSaving = false
   @State private var testResult: TestResult?
   @State private var isTesting = false
@@ -18,6 +20,14 @@ struct SettingsView: View {
   init(settings: APISettings, onSave: @escaping @MainActor (APISettings) async -> Void) {
     self.onSave = onSave
     self.draft = settings
+    self.authenticatedBaseURL = settings.trimmedBaseURL
+    self.authenticatedUsername = settings.username
+  }
+
+  private var sessionMatchesDraft: Bool {
+    draft.isAuthenticated
+      && draft.trimmedBaseURL == authenticatedBaseURL
+      && draft.username == authenticatedUsername
   }
 
   var body: some View {
@@ -48,7 +58,7 @@ struct SettingsView: View {
         } header: {
           Text("Access")
         } footer: {
-          Text(draft.isAuthenticated ? "Signed in as \(draft.username)." : "Sign in stores an opaque session in this device's Keychain. Your password is never saved.")
+          Text(sessionMatchesDraft ? "Signed in as \(draft.username)." : "Sign in stores an opaque session in this device's Keychain. Your password is never saved.")
         }
 
         Section {
@@ -56,7 +66,7 @@ struct SettingsView: View {
             signIn()
           } label: {
             HStack {
-              Text(draft.isAuthenticated ? "Sign in again" : "Sign in")
+              Text(sessionMatchesDraft ? "Sign in again" : "Sign in")
               Spacer()
               if isTesting {
                 ProgressView()
@@ -74,7 +84,7 @@ struct SettingsView: View {
           }
           .disabled(isTesting || draft.username.isEmpty || password.isEmpty)
 
-          if draft.isAuthenticated {
+          if sessionMatchesDraft {
             Button("Sign out", role: .destructive) {
               signOut()
             }
@@ -106,7 +116,7 @@ struct SettingsView: View {
               dismiss()
             }
           }
-          .disabled(isSaving || !draft.isConfigured || !draft.isAuthenticated)
+          .disabled(isSaving || !draft.isConfigured || !sessionMatchesDraft)
         }
       }
     }
@@ -117,10 +127,15 @@ struct SettingsView: View {
     testResult = nil
     Task {
       do {
-        let session = try await APIClient(settings: draft).login(username: draft.username, password: password)
+        var loginSettings = draft
+        loginSettings.sessionToken = ""
+        loginSettings.authenticatedUserID = ""
+        let session = try await APIClient(settings: loginSettings).login(username: draft.username, password: password)
         draft.sessionToken = session.token
         draft.authenticatedUserID = session.user.id
         draft.username = session.user.username ?? draft.username
+        authenticatedBaseURL = draft.trimmedBaseURL
+        authenticatedUsername = draft.username
         if let plan = try await APIClient(settings: draft).fetchPlans().first {
           draft.planID = plan.id
         }

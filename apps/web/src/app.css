@@ -150,6 +150,13 @@ select:focus-visible {
   text-underline-offset: 2px;
 }
 
+.masthead-error {
+  color: var(--red);
+  flex-basis: 100%;
+  font-size: 12px;
+  text-align: right;
+}
+
 .report-body {
   padding-top: 14px;
   min-width: 0;

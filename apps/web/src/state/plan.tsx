@@ -27,6 +27,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
   const [value, setValue] = useState<PlanContextValue | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<"checking" | "setup" | "login" | "ready">("checking");
+  const [bootstrapRequired, setBootstrapRequired] = useState(true);
   const [generation, setGeneration] = useState(0);
 
   useEffect(() => {
@@ -35,6 +36,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
       try {
         const status = await api.authStatus();
         if (cancelled) return;
+        setBootstrapRequired(status.bootstrap_required);
         if (!status.user) {
           setValue(null);
           setError(null);
@@ -65,13 +67,10 @@ export function PlanProvider({ children }: { children: ReactNode }) {
           categoryNames: new Map(categories.map((category) => [category.id, category.name])),
           reload: () => setGeneration((n) => n + 1),
           logout: async () => {
-            try {
-              await api.logout();
-            } finally {
-              setValue(null);
-              setError(null);
-              setAuthMode("login");
-            }
+            await api.logout();
+            setValue(null);
+            setError(null);
+            setAuthMode("login");
           },
         });
       } catch (cause) {
@@ -93,6 +92,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
     return (
       <AuthForm
         mode={authMode}
+        bootstrapRequired={bootstrapRequired}
         error={error}
         onSuccess={() => {
           setError(null);
@@ -123,11 +123,13 @@ export function PlanProvider({ children }: { children: ReactNode }) {
 
 function AuthForm({
   mode,
+  bootstrapRequired,
   error,
   onSuccess,
   onError,
 }: {
   mode: "setup" | "login";
+  bootstrapRequired: boolean;
   error: string | null;
   onSuccess: () => void;
   onError: (message: string) => void;
@@ -185,7 +187,7 @@ function AuthForm({
           required
         />
       </label>
-      {setup && (
+      {setup && bootstrapRequired && (
         <label>
           <span>Bootstrap token</span>
           <input
@@ -197,10 +199,15 @@ function AuthForm({
           />
         </label>
       )}
-      <button type="submit" disabled={submitting || !username || password.length < 15 || (setup && !bootstrapToken)}>
+      <button
+        type="submit"
+        disabled={submitting || !username || password.length < 15 || (setup && bootstrapRequired && !bootstrapToken)}
+      >
         {submitting ? "Please wait…" : setup ? "Create account" : "Sign in"}
       </button>
-      {setup && <p className="boot-hint">The bootstrap token is used once and is never stored in this browser.</p>}
+      {setup && bootstrapRequired && (
+        <p className="boot-hint">The bootstrap token is used once and is never stored in this browser.</p>
+      )}
       {error && <p className="boot-detail" role="alert">{error}</p>}
     </form>
   );

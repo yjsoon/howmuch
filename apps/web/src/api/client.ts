@@ -73,6 +73,7 @@ export interface AuthUser {
 
 export interface AuthStatus {
   setup_required: boolean;
+  bootstrap_required: boolean;
   user: AuthUser | null;
 }
 
@@ -81,7 +82,7 @@ export const api = {
   setup: (username: string, password: string, bootstrapToken: string) =>
     request<{ user: AuthUser }>("/api/auth/setup", {
       method: "POST",
-      headers: { authorization: `Bearer ${bootstrapToken}` },
+      headers: bootstrapToken ? { authorization: `Bearer ${bootstrapToken}` } : undefined,
       body: JSON.stringify({ username, password }),
     }).then((data) => data.user),
   login: (username: string, password: string) =>

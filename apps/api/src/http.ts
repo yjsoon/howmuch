@@ -416,7 +416,13 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
     const user = principal?.kind === "session"
       ? { id: principal.id, username: principal.username }
       : null;
-    return authJson({ data: { setup_required: await store.setupRequired(), user } });
+    return authJson({
+      data: {
+        setup_required: await store.setupRequired(),
+        bootstrap_required: !!config.apiToken,
+        user,
+      },
+    });
   }
 
   if (path === "/api/auth/setup" && method === "POST") {
