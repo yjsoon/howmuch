@@ -13,13 +13,13 @@ This contract is intentionally smaller than the full YNAB API. It covers the end
 
 ## Authentication
 
-Request:
+Browser clients authenticate with `POST /api/auth/login` and receive an `HttpOnly`, `Secure`, same-origin session cookie. Native clients exchange the same username/password credentials at `POST /api/auth/token`, then send the returned opaque session as:
 
 ```http
 Authorization: Bearer <token>
 ```
 
-For local development, the API may allow all requests if no token is configured. Production should set `HOWMUCH_API_TOKEN`.
+The first owner is created once with `POST /api/auth/setup`, authorized by `HOWMUCH_API_TOKEN`. That static token remains valid for integrations, but only against `HOWMUCH_DEFAULT_PLAN_ID`. Session users can access only plans where they hold an owner, editor, or viewer membership; viewers cannot mutate data.
 
 Error responses follow the YNAB wrapper shape:
 
@@ -28,7 +28,7 @@ Error responses follow the YNAB wrapper shape:
   "error": {
     "id": "401",
     "name": "not_authorized",
-    "detail": "Invalid bearer token"
+    "detail": "Invalid credentials"
   }
 }
 ```

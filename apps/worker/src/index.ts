@@ -4,6 +4,7 @@ import { D1LedgerRepository } from "../../api/src/d1-ledger-repository";
 import { D1ReportService } from "../../api/src/d1-reports";
 import { runD1ScheduledYnabSync } from "../../api/src/d1-scheduled-sync-runner";
 import { createHandler } from "../../api/src/http";
+import { D1AuthStore } from "../../api/src/auth-store";
 
 interface Env {
   ASSETS: Fetcher;
@@ -24,7 +25,7 @@ export default {
 
     const config = workerConfig(env);
     const database = new HowMuchD1Database(requiredBinding(env.DB, "DB"));
-    return createHandler({ repo: new D1LedgerRepository(database, config.defaultPlanId), reports: new D1ReportService(database.binding), config })(request);
+    return createHandler({ repo: new D1LedgerRepository(database, config.defaultPlanId), reports: new D1ReportService(database.binding), auth: new D1AuthStore(database), config })(request);
   },
 
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {

@@ -128,7 +128,7 @@ describe("YNAB-compatible API", () => {
     expect(body.error).toEqual({
       id: "401",
       name: "not_authorized",
-      detail: "Invalid bearer token",
+      detail: "Invalid credentials",
     });
   });
 
@@ -759,33 +759,26 @@ describe("native reports and imports", () => {
     expect(quickEntry.data.transaction.source_kind).toBeUndefined();
   });
 
-  test("honours the mobile quick-entry plan id when it differs from the configured default", async () => {
+  test("rejects API-token access to non-default quick-entry plans", async () => {
     const alternatePlanId = "quick-entry-alternate-plan";
     const accountResponse = await request(`/v1/plans/${alternatePlanId}/accounts`, {
       method: "POST",
       body: { account: { name: "Alternate checking" } },
     });
-    expect(accountResponse.status).toBe(201);
-    const alternateAccount = (await accountResponse.json()).data.account;
-
+    expect(accountResponse.status).toBe(404);
     const response = await request("/api/mobile/quick-entry", {
       method: "POST",
       body: {
         plan_id: alternatePlanId,
         client_id: "alternate-offline-entry",
-        account_id: alternateAccount.id,
+        account_id: "alternate-account",
         date: "2026-07-18",
         amount_milli: -4321,
         payee_name: "Alternate cafe",
       },
     });
 
-    expect(response.status).toBe(201);
-    expect((await response.json()).data.transaction.id).toBe("alternate-offline-entry");
-    const alternateTransactions = (await (await request(`/v1/plans/${alternatePlanId}/transactions`)).json()).data.transactions;
-    const defaultTransactions = (await (await request("/v1/plans/plan-test/transactions")).json()).data.transactions;
-    expect(alternateTransactions.map((transaction: any) => transaction.id)).toContain("alternate-offline-entry");
-    expect(defaultTransactions.map((transaction: any) => transaction.id)).not.toContain("alternate-offline-entry");
+    expect(response.status).toBe(404);
   });
 
   test("imports YNAB CSV-shaped rows and reports spending", async () => {
@@ -1078,6 +1071,142 @@ describe("native reports and imports", () => {
     expect(parseMoneyToMilliunits("$1,234.56")).toBe(1234560);
     expect(parseMoneyToMilliunits("−$1,234.56")).toBe(-1234560);
     expect(parseMoneyToMilliunits("($1,234.56)")).toBe(-1234560);
+  });
+});
+
+describe("password authentication", () => {
+  const password = ["ledger", "test", "passphrase", "2026"].join("-");
+  const wrongPassword = ["incorrect", "test", "passphrase", "2026"].join("-");
+  const authRequest = (path: string, body: unknown, headers: Record<string, string> = {}) => handler(
+    new Request(`https://howmuch.test${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://howmuch.test", ...headers },
+      body: JSON.stringify(body),
+    }),
+  );
+
+  test("sets up exactly once without storing the password", async () => {
+    const before = await handler(new Request("https://howmuch.test/api/auth/status"));
+    expect((await before.json()).data).toEqual({ setup_required: true, user: null });
+
+    const setup = await authRequest(
+      "/api/auth/setup",
+      { username: "Owner.Name", password },
+      { authorization: "Bearer test-token" },
+    );
+    expect(setup.status).toBe(200);
+    expect(setup.headers.get("set-cookie")).toContain("__Host-howmuch_session=");
+    expect(setup.headers.get("set-cookie")).toContain("HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=");
+    expect(JSON.stringify(db.query("SELECT * FROM password_credentials").get())).not.toContain(password);
+    expect(db.query("SELECT COUNT(*) AS count FROM users").get()).toEqual({ count: 1 });
+    expect(db.query("SELECT role FROM plan_memberships").get()).toEqual({ role: "owner" });
+
+    const repeated = await authRequest(
+      "/api/auth/setup",
+      { username: "other", password },
+      { authorization: "Bearer test-token" },
+    );
+    expect(repeated.status).toBe(409);
+    expect(db.query("SELECT COUNT(*) AS count FROM users").get()).toEqual({ count: 1 });
+  });
+
+  test("logs in with browser cookie and native token, then revokes logout", async () => {
+    const setup = await authRequest(
+      "/api/auth/setup",
+      { username: "Owner.Name", password },
+      { authorization: "Bearer test-token" },
+    );
+    const cookie = setup.headers.get("set-cookie")!.split(";", 1)[0];
+
+    expect((await authRequest("/api/auth/login", { username: "owner.name", password: wrongPassword })).status).toBe(401);
+    const login = await authRequest("/api/auth/login", { username: "OWNER.NAME", password });
+    expect(login.status).toBe(200);
+
+    const cookieRead = await handler(new Request("https://howmuch.test/v1/user", { headers: { cookie } }));
+    expect(cookieRead.status).toBe(200);
+    const badHeader = await handler(new Request("https://howmuch.test/v1/user", {
+      headers: { cookie, authorization: "Bearer invalid" },
+    }));
+    expect(badHeader.status).toBe(401);
+
+    const tokenResponse = await authRequest("/api/auth/token", { username: "owner.name", password });
+    expect(tokenResponse.status).toBe(200);
+    const token = (await tokenResponse.json()).data.token;
+    expect(db.query("SELECT token_hash FROM sessions WHERE token_hash = ?").get(token)).toBeNull();
+    expect((await handler(new Request("https://howmuch.test/v1/user", {
+      headers: { authorization: `Bearer ${token}` },
+    }))).status).toBe(200);
+    expect((await handler(new Request("https://howmuch.test/api/auth/logout", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+    }))).status).toBe(200);
+    expect((await handler(new Request("https://howmuch.test/v1/user", {
+      headers: { authorization: `Bearer ${token}` },
+    }))).status).toBe(401);
+  });
+
+  test("enforces cookie CSRF and membership roles before plan access", async () => {
+    const setup = await authRequest(
+      "/api/auth/setup",
+      { username: "owner", password },
+      { authorization: "Bearer test-token" },
+    );
+    const cookie = setup.headers.get("set-cookie")!.split(";", 1)[0];
+    const user = db.query("SELECT id FROM users").get() as { id: string };
+    db.run("INSERT INTO plans(id,name) VALUES ('viewer-plan','Viewer'),('private-plan','Private')");
+    db.run("INSERT INTO plan_memberships(plan_id,user_id,role) VALUES ('viewer-plan',?,'viewer')", [user.id]);
+
+    const plans = await handler(new Request("https://howmuch.test/v1/plans", { headers: { cookie } }));
+    expect((await plans.json()).data.plans.map((plan: { id: string }) => plan.id).sort()).toEqual(["plan-test", "viewer-plan"]);
+
+    const missingOrigin = await handler(new Request("https://howmuch.test/v1/plans/plan-test/accounts", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ account: { name: "Cash" } }),
+    }));
+    expect(missingOrigin.status).toBe(403);
+
+    const viewerWrite = await handler(new Request("https://howmuch.test/v1/plans/viewer-plan/accounts", {
+      method: "POST",
+      headers: { cookie, origin: "https://howmuch.test", "content-type": "application/json" },
+      body: JSON.stringify({ account: { name: "Cash" } }),
+    }));
+    expect(viewerWrite.status).toBe(403);
+
+    const privateRead = await handler(new Request("https://howmuch.test/v1/plans/private-plan", { headers: { cookie } }));
+    expect(privateRead.status).toBe(404);
+    const prototypePlan = await handler(new Request("https://howmuch.test/v1/plans/constructor", { headers: { cookie } }));
+    expect(prototypePlan.status).toBe(404);
+    const prototypeOverride = await handler(new Request("https://howmuch.test/api/mobile/quick-entry", {
+      method: "POST",
+      headers: { cookie, origin: "https://howmuch.test", "content-type": "application/json" },
+      body: JSON.stringify({ plan_id: "__proto__", account_id: "cash", amount_milli: -100 }),
+    }));
+    expect(prototypeOverride.status).toBe(404);
+    expect(db.query("SELECT id FROM plans WHERE id IN ('constructor','__proto__')").all()).toEqual([]);
+    expect(db.query("SELECT COUNT(*) AS count FROM accounts WHERE plan_id IN ('viewer-plan','private-plan')").get()).toEqual({ count: 0 });
+  });
+
+  test("expires sessions and throttles malformed login attempts", async () => {
+    await authRequest(
+      "/api/auth/setup",
+      { username: "owner", password },
+      { authorization: "Bearer test-token" },
+    );
+    const tokenResponse = await authRequest("/api/auth/token", { username: "owner", password });
+    const token = (await tokenResponse.json()).data.token;
+    db.run("UPDATE sessions SET expires_at = unixepoch() - 1");
+    expect((await handler(new Request("https://howmuch.test/v1/user", {
+      headers: { authorization: `Bearer ${token}` },
+    }))).status).toBe(401);
+
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      const response = await authRequest("/api/auth/token", { username: "missing", password: "short" });
+      expect(response.status).toBe(401);
+    }
+    const throttled = await authRequest("/api/auth/token", { username: "missing", password: "short" });
+    expect(throttled.status).toBe(429);
+    expect(throttled.headers.get("retry-after")).toBe("900");
   });
 });
 

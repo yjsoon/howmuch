@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { usePlan } from "../state/plan";
 
 const TABS = [
   { to: "/spending", label: "Spending" },
@@ -11,6 +12,7 @@ const TABS = [
 
 export function Shell() {
   const location = useLocation();
+  const { logout } = usePlan();
   useEffect(() => {
     const tab = TABS.find((entry) => entry.to === location.pathname);
     document.title = tab ? `${tab.label} · HowMuch` : "HowMuch";
@@ -33,6 +35,9 @@ export function Shell() {
         <NavLink to="/add" className="add-button">
           + Add
         </NavLink>
+        <button type="button" className="sign-out-button" onClick={() => void logout()}>
+          Sign out
+        </button>
       </header>
       <main className="report-body">
         <Outlet />

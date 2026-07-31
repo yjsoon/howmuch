@@ -7,6 +7,8 @@ import { runD1ScheduledYnabSync } from "../src/d1-scheduled-sync-runner";
 import { D1TransactionRepository } from "../src/d1-transaction-repository";
 import { D1MetadataRepository } from "../src/d1-metadata-repository";
 import { D1LedgerRepository } from "../src/d1-ledger-repository";
+import { D1AuthStore } from "../src/auth-store";
+import { newSession } from "../src/password-auth";
 import { ReportService } from "../src/reports";
 import worker from "../../worker/src/index";
 
@@ -17,10 +19,10 @@ afterEach(() => { globalThis.fetch=originalFetch; for (const db of databases.spl
 describe("D1 foundation", () => {
   test("canonical schema applies cleanly with auth constraints and cascades", async () => {
     const db = sqlite();
-    db.exec(await Bun.file(new URL("../d1-migrations/0001_initial.sql", import.meta.url)).text());
+    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
     const objects = db.query("SELECT name,type FROM sqlite_master WHERE type IN ('table','index','trigger')").all() as Array<{name:string;type:string}>;
     const names = new Set(objects.map((row) => row.name));
-    for (const name of ["plans","import_sessions","import_rows","users","auth_identities","sessions","plan_memberships","sync_runs","sync_attempts","sync_transition_receipts","audit_events","write_state","write_commands","write_assertions","idx_sessions_user","idx_sessions_expiry","idx_plan_memberships_user_plan","transactions_assign_ledger_sequence","accounts_transfer_payee_plan_guard"]) expect(names.has(name)).toBeTrue();
+    for (const name of ["plans","import_sessions","import_rows","users","auth_identities","sessions","plan_memberships","password_credentials","auth_setup","login_rate_limits","sync_runs","sync_attempts","sync_transition_receipts","audit_events","write_state","write_commands","write_assertions","idx_sessions_user","idx_sessions_expiry","idx_plan_memberships_user_plan","transactions_assign_ledger_sequence","accounts_transfer_payee_plan_guard"]) expect(names.has(name)).toBeTrue();
     expect(names.has("schema_migrations")).toBeFalse();
     expect(names.has("migration_runs")).toBeFalse();
     expect(names.has("migration_chunks")).toBeFalse();
@@ -42,6 +44,37 @@ describe("D1 foundation", () => {
     expect(db.query("SELECT id FROM sessions WHERE user_id='u1'").get()).toBeNull();
     expect(db.query("SELECT plan_id FROM plan_memberships WHERE user_id='u1'").get()).toBeNull();
     expect(db.query("SELECT id FROM auth_identities WHERE user_id='u1'").get()).toBeNull();
+  });
+
+  test("D1 auth setup is atomic, one-time, and uses returning rate counters", async () => {
+    const db = await ledgerSqlite();
+    const auth = new D1AuthStore(new D1Database(fakeD1(db)));
+    const session = newSession(1_800_000_000);
+    const input = {
+      userId: "owner-user",
+      username: "owner",
+      credential: {
+        kdf: "scrypt",
+        kdf_version: 1,
+        cost_n: 16_384,
+        block_size: 8,
+        parallelization: 5,
+        salt_hex: "ab".repeat(16),
+        hash_hex: "cd".repeat(32),
+      },
+      session,
+      planId: "p",
+    };
+
+    expect(await auth.setupRequired()).toBeTrue();
+    expect(await auth.setup(input)).toBeTrue();
+    expect(await auth.setupRequired()).toBeFalse();
+    expect(await auth.setup({ ...input, userId: "other-user", username: "other", session: newSession() })).toBeFalse();
+    expect(db.query("SELECT COUNT(*) AS count FROM users").get()).toEqual({ count: 1 });
+    expect(db.query("SELECT role FROM plan_memberships WHERE user_id='owner-user'").get()).toEqual({ role: "owner" });
+    expect((await auth.authenticateSession(session.tokenHash, 1_800_000_001))?.username).toBe("owner");
+    expect(await auth.rateAttempt("username", "ef".repeat(32), 1_800_000_000)).toBe(1);
+    expect(await auth.rateAttempt("username", "ef".repeat(32), 1_800_000_000)).toBe(2);
   });
 
   test("Worker composition is D1-only, serves API writes, delegates assets, and binds reviewed databases", async () => {
@@ -550,7 +583,7 @@ describe("D1 foundation", () => {
 
   test("versioned D1 metadata and import-session writes replay and reject collisions", async () => {
     const db = sqlite();
-    for (const path of ["../d1-migrations/0001_initial.sql"]) {
+    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql"]) {
       db.exec(await Bun.file(new URL(path, import.meta.url)).text());
     }
     const metadata = new D1MetadataRepository(new D1Database(fakeD1(db)));
@@ -591,7 +624,7 @@ describe("D1 foundation", () => {
 
 async function ledgerSqlite(): Promise<Database> {
   const db = sqlite();
-  for (const path of ["../d1-migrations/0001_initial.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
+  for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
   db.run("INSERT INTO plans (id, name) VALUES ('p', 'Plan')");
   db.run("INSERT INTO accounts (id, plan_id, name) VALUES ('a', 'p', 'Cash')");
   return db;

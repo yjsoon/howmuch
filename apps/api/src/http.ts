@@ -6,11 +6,23 @@ import { decimalToMilliunits } from "./money";
 import { importCsvRows } from "./importers/csv";
 import { importYnabFromApi } from "./importers/ynab";
 import type { LedgerStore, ReportStore } from "./storage";
+import { SQLiteAuthStore, type AuthStore, type AuthUser } from "./auth-store";
+import {
+  canonicalUsername,
+  newSession,
+  passwordCredential,
+  safeTokenEqual,
+  sha256,
+  validPassword,
+  verifyPassword,
+} from "./password-auth";
+import { randomBytes } from "node:crypto";
 
 type HandlerOptions = {
   db?: Database;
   repo?: LedgerStore;
   reports?: ReportStore;
+  auth?: AuthStore;
   config: ApiConfig;
 };
 
@@ -18,16 +30,13 @@ export function createHandler(options: HandlerOptions): (request: Request) => Pr
   const { config } = options;
   const repo = options.repo ?? (options.db ? new LedgerRepository(options.db, config.defaultPlanId) : undefined);
   const reports = options.reports ?? (options.db ? new ReportService(options.db) : undefined);
-  if (!repo || !reports) {
-    throw new Error("createHandler requires either db or both repo and reports");
+  const auth = options.auth ?? (options.db ? new SQLiteAuthStore(options.db) : undefined);
+  if (!repo || !reports || !auth) {
+    throw new Error("createHandler requires either db or repo, reports, and auth");
   }
 
   return async function handle(request: Request): Promise<Response> {
     try {
-      if (!isAuthorised(request, config.apiToken)) {
-        return apiError(401, "not_authorized", "Invalid bearer token");
-      }
-
       const url = new URL(request.url);
       const segments = url.pathname.split("/").filter(Boolean);
 
@@ -35,12 +44,26 @@ export function createHandler(options: HandlerOptions): (request: Request) => Pr
         return json({ ok: true });
       }
 
+      if (url.pathname.startsWith("/api/auth/")) {
+        return await handleAuth(request, url, auth, config);
+      }
+      const principal = await authenticate(request, auth, config.apiToken);
+      if (!principal) {
+        return apiError(401, "not_authorized", "Invalid credentials");
+      }
+      if (principal.kind === "session"
+        && principal.transport === "cookie"
+        && isUnsafeMethod(request.method)
+        && !sameOrigin(request, url)) {
+        return apiError(403, "forbidden", "CSRF validation failed");
+      }
+
       if (segments[0] === "v1") {
-        return await handleV1(request, url, segments, repo);
+        return await handleV1(request, url, segments, repo, principal, config.defaultPlanId);
       }
 
       if (segments[0] === "api") {
-        return await handleNative(request, url, segments, repo, reports);
+        return await handleNative(request, url, segments, repo, reports, principal, config.defaultPlanId);
       }
 
       return apiError(404, "not_found", "Route not found");
@@ -51,16 +74,29 @@ export function createHandler(options: HandlerOptions): (request: Request) => Pr
       if (error instanceof ValidationError) {
         return apiError(400, "bad_request", error.message);
       }
-      return apiError(500, "internal_server_error", error instanceof Error ? error.message : String(error));
+      console.error("Unhandled API error", error);
+      return apiError(500, "internal_server_error", "An internal error occurred");
     }
   };
 }
 
-async function handleV1(request: Request, url: URL, segments: string[], repo: LedgerStore): Promise<Response> {
+type Principal = { kind: "api-token" } | ({ kind: "session"; transport: "cookie" | "bearer" } & AuthUser);
+
+async function handleV1(
+  request: Request,
+  url: URL,
+  segments: string[],
+  repo: LedgerStore,
+  principal: Principal,
+  defaultPlanId: string,
+): Promise<Response> {
   const method = request.method.toUpperCase();
 
   if (segments.length === 2 && segments[1] === "user" && method === "GET") {
-    return json({ data: { user: { id: "local-user" } } });
+    const user = principal.kind === "session"
+      ? { id: principal.id, username: principal.username }
+      : { id: "local-user" };
+    return json({ data: { user } });
   }
 
   const collection = segments[1];
@@ -70,11 +106,13 @@ async function handleV1(request: Request, url: URL, segments: string[], repo: Le
 
   const isBudgetAlias = collection === "budgets";
   if (segments.length === 2 && method === "GET") {
-    const plans = await repo.listPlans();
+    const plans = (await repo.listPlans()).filter((plan: { id: string }) => canRead(principal, plan.id, defaultPlanId));
     return json({ data: isBudgetAlias ? { budgets: plans } : { plans } });
   }
 
   const planId = segments[2];
+  const denied = authorizePlan(principal, planId, defaultPlanId, method);
+  if (denied) return denied;
   await repo.ensurePlan(planId);
 
   if (segments.length === 3 && method === "GET") {
@@ -227,12 +265,16 @@ async function handleNative(
   segments: string[],
   repo: LedgerStore,
   reports: ReportStore,
+  principal: Principal,
+  defaultPlanId: string,
 ): Promise<Response> {
   const method = request.method.toUpperCase();
-  const planId = url.searchParams.get("plan_id") ?? await repo.getDefaultPlanId();
-  await repo.ensurePlan(planId);
+  const planId = url.searchParams.get("plan_id") ?? defaultPlanId;
 
   if (segments[1] === "reports" && method === "GET") {
+    const denied = authorizePlan(principal, planId, defaultPlanId, method);
+    if (denied) return denied;
+    await repo.ensurePlan(planId);
     const filters = reportFilters(url);
     if (segments[2] === "spending-breakdown") {
       return json({ data: await reports.spendingBreakdown(planId, filters) });
@@ -251,6 +293,8 @@ async function handleNative(
   if (segments[1] === "mobile" && segments[2] === "quick-entry" && method === "POST") {
     const body = await readJson(request);
     const targetPlanId = body.plan_id ?? planId;
+    const denied = authorizePlan(principal, targetPlanId, defaultPlanId, method);
+    if (denied) return denied;
     await repo.ensurePlan(targetPlanId);
     const amount = body.amount_milli ?? decimalToMilliunits(body.amount);
     const subtransactions = Array.isArray(body.subtransactions)
@@ -281,15 +325,23 @@ async function handleNative(
 
   if (segments[1] === "import" && segments[2] === "csv" && method === "POST") {
     const body = await readJson(request);
-    const result = await importCsvRows(repo, body.plan_id ?? planId, body.account_id, body.rows ?? []);
+    const targetPlanId = body.plan_id ?? planId;
+    const denied = authorizePlan(principal, targetPlanId, defaultPlanId, method);
+    if (denied) return denied;
+    await repo.ensurePlan(targetPlanId);
+    const result = await importCsvRows(repo, targetPlanId, body.account_id, body.rows ?? []);
     return json({ data: result }, 201);
   }
 
   if (segments[1] === "import" && segments[2] === "ynab" && method === "POST") {
     const body = await readJson(request);
+    const targetPlanId = body.plan_id ?? planId;
+    const denied = authorizePlan(principal, targetPlanId, defaultPlanId, method);
+    if (denied) return denied;
+    await repo.ensurePlan(targetPlanId);
     const result = await importYnabFromApi(repo, {
       token: body.token,
-      planId: body.plan_id ?? planId,
+      planId: targetPlanId,
       baseUrl: body.base_url,
       sinceDate: body.since_date,
     });
@@ -355,11 +407,187 @@ async function readJson(request: Request): Promise<any> {
   }
 }
 
-function isAuthorised(request: Request, token?: string): boolean {
-  if (!token) {
-    return true;
+async function handleAuth(request: Request, url: URL, store: AuthStore, config: ApiConfig): Promise<Response> {
+  const path = url.pathname;
+  const method = request.method.toUpperCase();
+
+  if (path === "/api/auth/status" && method === "GET") {
+    const principal = await authenticate(request, store, config.apiToken);
+    const user = principal?.kind === "session"
+      ? { id: principal.id, username: principal.username }
+      : null;
+    return authJson({ data: { setup_required: await store.setupRequired(), user } });
   }
-  return request.headers.get("authorization") === `Bearer ${token}`;
+
+  if (path === "/api/auth/setup" && method === "POST") {
+    if (!sameOrigin(request, url)) {
+      return authError(403, "forbidden", "Origin validation failed");
+    }
+    const authorization = request.headers.get("authorization");
+    const validBootstrap = config.apiToken
+      ? authorization?.startsWith("Bearer ") && safeTokenEqual(authorization.slice(7), config.apiToken)
+      : authorization === null;
+    if (!validBootstrap) {
+      return authError(401, "not_authorized", "Invalid bootstrap token");
+    }
+
+    const body = await readJson(request);
+    const username = canonicalUsername(body.username);
+    if (!username || !validPassword(body.password)) {
+      return authError(400, "bad_request", "Username or password does not meet the requirements");
+    }
+
+    const userId = randomBytes(16).toString("hex");
+    const session = newSession();
+    const credential = await passwordCredential(body.password);
+    const created = await store.setup({
+      userId,
+      username,
+      credential,
+      session,
+      planId: config.defaultPlanId,
+    });
+    if (!created) {
+      return authError(409, "setup_complete", "Setup has already completed");
+    }
+    return sessionResponse({ data: { user: { id: userId, username } } }, session.token, session.expiresAt);
+  }
+
+  if ((path === "/api/auth/login" || path === "/api/auth/token") && method === "POST") {
+    const browserLogin = path === "/api/auth/login";
+    if (browserLogin && !sameOrigin(request, url)) {
+      return authError(403, "forbidden", "Origin validation failed");
+    }
+
+    const body = await readJson(request);
+    const username = canonicalUsername(body.username);
+    const suppliedPassword = typeof body.password === "string" ? body.password : "";
+    const windowStart = Math.floor(Date.now() / 1_000 / 900) * 900;
+    const clientIp = request.headers.get("cf-connecting-ip") ?? "unknown";
+    const usernameAttempts = await store.rateAttempt("username", sha256(username ?? "invalid"), windowStart);
+    const ipAttempts = await store.rateAttempt("ip", sha256(clientIp), windowStart);
+    if (usernameAttempts > 10 || ipAttempts > 50) {
+      return authError(429, "rate_limited", "Too many login attempts", { "retry-after": "900" });
+    }
+
+    const credential = username ? await store.credential(username) : null;
+    const valid = validPassword(suppliedPassword) && await verifyPassword(suppliedPassword, credential);
+    if (!valid || !credential) {
+      return authError(401, "invalid_credentials", "Invalid username or password");
+    }
+
+    const session = newSession();
+    await store.createSession(credential.user_id, session);
+    const user = { id: credential.user_id, username: credential.username };
+    return browserLogin
+      ? sessionResponse({ data: { user } }, session.token, session.expiresAt)
+      : authJson({ data: { token: session.token, expires_at: session.expiresAt, user } });
+  }
+
+  if (path === "/api/auth/logout" && method === "POST") {
+    const principal = await authenticate(request, store, config.apiToken);
+    if (!principal || principal.kind !== "session") {
+      return authError(401, "not_authorized", "Invalid session");
+    }
+    if (principal.transport === "cookie" && !sameOrigin(request, url)) {
+      return authError(403, "forbidden", "CSRF validation failed");
+    }
+    const token = principal.transport === "bearer"
+      ? request.headers.get("authorization")!.slice(7)
+      : cookieToken(request)!;
+    await store.revokeSession(sha256(token), Math.floor(Date.now() / 1_000));
+    return clearSessionResponse({ data: { ok: true } });
+  }
+
+  return authError(404, "not_found", "Route not found");
+}
+
+async function authenticate(request: Request, store: AuthStore, apiToken?: string): Promise<Principal | null> {
+  const authorization = request.headers.get("authorization");
+  if (authorization !== null) {
+    if (!authorization.startsWith("Bearer ")) return null;
+    const token = authorization.slice(7);
+    if (apiToken && safeTokenEqual(token, apiToken)) return { kind: "api-token" };
+    const user = await store.authenticateSession(sha256(token), Math.floor(Date.now() / 1_000));
+    return user ? { kind: "session", transport: "bearer", ...user } : null;
+  }
+
+  const token = cookieToken(request);
+  if (!token) return null;
+  const user = await store.authenticateSession(sha256(token), Math.floor(Date.now() / 1_000));
+  return user ? { kind: "session", transport: "cookie", ...user } : null;
+}
+
+function cookieToken(request: Request): string | null {
+  const match = request.headers.get("cookie")?.match(/(?:^|;\s*)__Host-howmuch_session=([^;]+)/);
+  return match?.[1] ?? null;
+}
+
+function sameOrigin(request: Request, url: URL): boolean {
+  const fetchSite = request.headers.get("sec-fetch-site");
+  if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") return false;
+  const origin = request.headers.get("origin");
+  if (origin) return origin !== "null" && origin === url.origin;
+  const referer = request.headers.get("referer");
+  if (!referer) return false;
+  try {
+    return new URL(referer).origin === url.origin;
+  } catch {
+    return false;
+  }
+}
+
+function isUnsafeMethod(method: string): boolean {
+  return !["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase());
+}
+
+function canRead(principal: Principal, planId: string, defaultPlanId: string): boolean {
+  return principal.kind === "api-token"
+    ? planId === defaultPlanId
+    : Object.prototype.hasOwnProperty.call(principal.roles, planId);
+}
+
+function authorizePlan(principal: Principal, planId: string, defaultPlanId: string, method: string): Response | null {
+  if (!canRead(principal, planId, defaultPlanId)) {
+    return apiError(404, "resource_not_found", "Plan not found", "404.2");
+  }
+  if (principal.kind === "session" && isUnsafeMethod(method) && principal.roles[planId] === "viewer") {
+    return apiError(403, "forbidden", "Plan is read-only");
+  }
+  return null;
+}
+
+function authJson(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
+  const response = json(body, status);
+  response.headers.set("cache-control", "no-store");
+  for (const [key, value] of Object.entries(headers)) response.headers.set(key, value);
+  return response;
+}
+
+function authError(status: number, name: string, detail: string, headers: Record<string, string> = {}): Response {
+  const response = apiError(status, name, detail);
+  response.headers.set("cache-control", "no-store");
+  for (const [key, value] of Object.entries(headers)) response.headers.set(key, value);
+  return response;
+}
+
+function sessionResponse(body: unknown, token: string, expiresAt: number): Response {
+  const response = authJson(body);
+  const maxAge = Math.max(0, expiresAt - Math.floor(Date.now() / 1_000));
+  response.headers.set(
+    "set-cookie",
+    `__Host-howmuch_session=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${maxAge}`,
+  );
+  return response;
+}
+
+function clearSessionResponse(body: unknown): Response {
+  const response = authJson(body);
+  response.headers.set(
+    "set-cookie",
+    "__Host-howmuch_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
+  );
+  return response;
 }
 
 function json(body: unknown, status = 200): Response {
