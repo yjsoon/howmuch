@@ -1,60 +1,140 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { formatMoney } from "../lib/money";
+import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
 
-const TABS = [
-  { to: "/spending", label: "Spending" },
+const REPORTS = [
   { to: "/income", label: "Income v Spending" },
   { to: "/net-worth", label: "Net Worth" },
   { to: "/age-of-money", label: "Age of Money" },
-  { to: "/transactions", label: "Transactions" },
 ];
 
 export function Shell() {
   const location = useLocation();
-  const { logout } = usePlan();
+  const { accounts, logout } = usePlan();
+  const { filters } = useFilters();
   const [logoutError, setLogoutError] = useState<string | null>(null);
+  const openAccounts = useMemo(() => accounts.filter((account) => !account.closed), [accounts]);
+  const accountGroups = useMemo(
+    () => [
+      { label: "Budget", accounts: openAccounts.filter((account) => account.on_budget) },
+      { label: "Tracking", accounts: openAccounts.filter((account) => !account.on_budget) },
+    ].filter((group) => group.accounts.length > 0),
+    [openAccounts],
+  );
+  const selectedAccount = location.pathname === "/transactions" && filters.accountIds.length === 1
+    ? accounts.find((account) => account.id === filters.accountIds[0])
+    : undefined;
+  const registerLabel = filters.accountIds.length === 0
+    ? "All Accounts"
+    : selectedAccount?.name ?? (filters.accountIds.length === 1 ? "Account unavailable" : "Selected Accounts");
+  const handleLogout = async () => {
+    setLogoutError(null);
+    try {
+      await logout();
+    } catch (cause) {
+      setLogoutError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
   useEffect(() => {
-    const tab = TABS.find((entry) => entry.to === location.pathname);
-    document.title = tab ? `${tab.label} · HowMuch` : "HowMuch";
-  }, [location.pathname]);
+    const report = REPORTS.find((entry) => entry.to === location.pathname);
+    const label = (location.pathname === "/transactions" ? registerLabel : null)
+      ?? (location.pathname === "/spending" ? "Plan" : null)
+      ?? report?.label;
+    document.title = label ? `${label} · HowMuch` : "HowMuch";
+  }, [location.pathname, registerLabel]);
+
   return (
     <div className="shell">
-      <header className="masthead">
-        <span className="masthead-title">HowMuch</span>
-        <nav className="masthead-nav">
-          {TABS.map((tab) => (
+      <aside className="sidebar">
+        <div className="sidebar-brand">
+          <span className="brand-mark" aria-hidden="true">H</span>
+          <span>
+            <strong>HowMuch</strong>
+            <small>Your money, clearly</small>
+          </span>
+        </div>
+
+        <nav className="sidebar-nav" aria-label="Primary navigation">
+          <NavLink
+            to={{ pathname: "/spending", search: location.search }}
+            className={({ isActive }) => isActive ? "sidebar-primary-link sidebar-link-active" : "sidebar-primary-link"}
+          >
+            <span aria-hidden="true">▦</span> Plan
+          </NavLink>
+          <div className="sidebar-section-label">Reflect</div>
+          {REPORTS.map((report) => (
             <NavLink
-              key={tab.to}
-              to={{ pathname: tab.to, search: location.search }}
-              className={({ isActive }) => (isActive ? "tab tab-active" : "tab")}
+              key={report.to}
+              to={{ pathname: report.to, search: location.search }}
+              className={({ isActive }) => (isActive ? "sidebar-report-link sidebar-link-active" : "sidebar-report-link")}
             >
-              {tab.label}
+              {report.label}
             </NavLink>
           ))}
-        </nav>
-        <NavLink to="/add" className="add-button">
-          + Add
-        </NavLink>
-        <button
-          type="button"
-          className="sign-out-button"
-          onClick={async () => {
-            setLogoutError(null);
-            try {
-              await logout();
-            } catch (cause) {
-              setLogoutError(cause instanceof Error ? cause.message : String(cause));
+          <NavLink
+            to="/transactions?range=all&accounts=all"
+            className={({ isActive }) =>
+              isActive && filters.accountIds.length === 0
+                ? "sidebar-primary-link sidebar-link-active"
+                : "sidebar-primary-link"
             }
-          }}
-        >
-          Sign out
-        </button>
-        {logoutError && <span className="masthead-error" role="alert">{logoutError}</span>}
-      </header>
-      <main className="report-body">
-        <Outlet />
-      </main>
+          >
+            <span aria-hidden="true">▤</span> All Accounts
+            <span className="sidebar-balance">{formatMoney(openAccounts.reduce((sum, account) => sum + account.balance, 0))}</span>
+          </NavLink>
+        </nav>
+
+        <div className="account-list">
+          {accountGroups.map((group) => (
+            <section key={group.label} className="account-group">
+              <div className="account-group-heading">
+                <span>{group.label}</span>
+                <span>{formatMoney(group.accounts.reduce((sum, account) => sum + account.balance, 0))}</span>
+              </div>
+              {group.accounts.map((account) => (
+                <NavLink
+                  key={account.id}
+                  to={`/transactions?range=all&accounts=${encodeURIComponent(account.id)}`}
+                  className={selectedAccount?.id === account.id ? "account-link sidebar-link-active" : "account-link"}
+                >
+                  <span className="account-name" title={account.name}>{account.name}</span>
+                  <span className={account.balance < 0 ? "sidebar-balance sidebar-balance-negative" : "sidebar-balance"}>
+                    {formatMoney(account.balance)}
+                  </span>
+                </NavLink>
+              ))}
+            </section>
+          ))}
+        </div>
+
+        <div className="sidebar-footer">
+          <NavLink to="/add" className="add-button">+ Add transaction</NavLink>
+          <button
+            type="button"
+            className="sign-out-button"
+            onClick={handleLogout}
+          >
+            Sign out
+          </button>
+          {logoutError && <span className="masthead-error" role="alert">{logoutError}</span>}
+        </div>
+      </aside>
+      <div className="workspace">
+        <header className="mobile-masthead">
+          <span className="masthead-title">HowMuch</span>
+          <div className="mobile-actions">
+            <NavLink to="/add" className="add-button">+ Add</NavLink>
+            <button type="button" className="sign-out-button" onClick={handleLogout}>Sign out</button>
+          </div>
+          {logoutError && <span className="mobile-masthead-error" role="alert">{logoutError}</span>}
+        </header>
+        <main className="report-body">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }

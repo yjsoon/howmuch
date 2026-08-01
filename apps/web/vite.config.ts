@@ -16,6 +16,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    allowedHosts: [".e2b.app", ".onamp.dev"],
     proxy: {
       "/api": apiProxy,
       "/v1": apiProxy,
