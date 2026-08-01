@@ -1,5 +1,5 @@
 import { startTransition, useDeferredValue, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { NavLink, useSearchParams } from "react-router-dom";
 import { api, useApi } from "../api/client";
 import type { Transaction } from "../api/types";
 import { FilterRail } from "../components/FilterRail";
@@ -19,11 +19,33 @@ function hasUncategorisedLine(txn: Transaction): boolean {
 
 export function TransactionsPage() {
   const { filters, setFilters } = useFilters();
-  const { planId } = usePlan();
+  const { accounts, planId } = usePlan();
   const [params] = useSearchParams();
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const flow = params.get("flow");
+  const selectedAccount = filters.accountIds.length === 1
+    ? accounts.find((account) => account.id === filters.accountIds[0])
+    : undefined;
+  const visibleAccounts = useMemo(
+    () => filters.accountIds.length
+      ? accounts.filter((account) => filters.accountIds.includes(account.id))
+      : accounts.filter((account) => !account.closed),
+    [accounts, filters.accountIds],
+  );
+  const registerAccountIds = useMemo(() => new Set(visibleAccounts.map((account) => account.id)), [visibleAccounts]);
+  const registerLabel = filters.accountIds.length === 0
+    ? "All Accounts"
+    : selectedAccount?.name
+      ?? (filters.accountIds.length === 1 ? "Account unavailable" : "Selected Accounts");
+  const balances = visibleAccounts.reduce(
+    (summary, account) => ({
+      cleared: summary.cleared + account.cleared_balance,
+      uncleared: summary.uncleared + account.uncleared_balance,
+      working: summary.working + account.balance,
+    }),
+    { cleared: 0, uncleared: 0, working: 0 },
+  );
 
   const listKey = JSON.stringify({ planId, from: filters.from, to: filters.to });
   const result = useApi(listKey, () =>
@@ -31,7 +53,6 @@ export function TransactionsPage() {
   );
 
   const wantsUncategorised = filters.categoryIds.includes(UNCATEGORISED_CATEGORY_ID);
-  const accountIds = useMemo(() => new Set(filters.accountIds), [filters.accountIds]);
   const categoryIds = useMemo(
     () => new Set(filters.categoryIds.filter((categoryId) => categoryId !== UNCATEGORISED_CATEGORY_ID)),
     [filters.categoryIds],
@@ -41,8 +62,8 @@ export function TransactionsPage() {
     () =>
       (result.data ?? [])
         .filter((txn) => !txn.deleted)
-        .filter((txn) => !accountIds.size || accountIds.has(txn.account_id)),
-    [accountIds, result.data],
+        .filter((txn) => registerAccountIds.has(txn.account_id)),
+    [registerAccountIds, result.data],
   );
 
   const uncategorisedCount = useMemo(() => inScope.filter(hasUncategorisedLine).length, [inScope]);
@@ -114,7 +135,33 @@ export function TransactionsPage() {
     <>
       <FilterRail filters={filters} setFilters={setFilters} busy={result.loading} />
       <div className="report-header">
-        <h1>Transactions</h1>
+        <div>
+          <span className="page-eyebrow">Account register</span>
+          <h1>{registerLabel}</h1>
+        </div>
+        <div className="headline-row register-balances">
+          <div className="headline-figure">
+            <span className="figure-value">{formatMoney(balances.cleared)}</span>
+            <span className="figure-label">Cleared balance</span>
+          </div>
+          <span className="balance-operator" aria-hidden="true">+</span>
+          <div className="headline-figure">
+            <span className={balances.uncleared >= 0 ? "figure-value figure-positive" : "figure-value figure-negative"}>
+              {formatMoney(balances.uncleared)}
+            </span>
+            <span className="figure-label">Uncleared balance</span>
+          </div>
+          <span className="balance-operator" aria-hidden="true">=</span>
+          <div className="headline-figure">
+            <span className={balances.working >= 0 ? "figure-value figure-positive" : "figure-value figure-negative"}>
+              {formatMoney(balances.working)}
+            </span>
+            <span className="figure-label">Working balance</span>
+          </div>
+        </div>
+      </div>
+      <div className="register-toolbar">
+        <NavLink to="/add" className="register-add-link">+ Add transaction</NavLink>
         <div className="headline-row">
           {uncategorisedCount > 0 && !wantsUncategorised && (
             <button
@@ -144,20 +191,6 @@ export function TransactionsPage() {
               Showing {rows.length} of {scopedRows.length} filtered entries
             </span>
           </div>
-          <div className="headline-figure">
-            <span className="figure-label">Money in</span>
-            <span className="figure-value figure-positive">{formatMoney(totals.inflow)}</span>
-          </div>
-          <div className="headline-figure">
-            <span className="figure-label">Money out</span>
-            <span className="figure-value figure-negative">{formatMoney(totals.outflow)}</span>
-          </div>
-          <div className="headline-figure">
-            <span className="figure-label">{rows.length} transactions · net</span>
-            <span className={totals.net >= 0 ? "figure-value figure-positive" : "figure-value figure-negative"}>
-              {formatMoney(totals.net, { sign: true })}
-            </span>
-          </div>
         </div>
       </div>
 
@@ -177,7 +210,9 @@ export function TransactionsPage() {
         <section className="report-section">
           <div className="section-heading">
             <span className="section-title">Register</span>
-            <span className="section-meta">Newest entries first</span>
+            <span className="section-meta">
+              {rows.length} transactions · {formatMoney(totals.inflow)} in · {formatMoney(totals.outflow)} out · {formatMoney(totals.net, { sign: true })} net
+            </span>
           </div>
           {rows.length > 0 ? (
             <div className="table-wrap table-wrap-wide">

@@ -10,7 +10,7 @@ const dbPath = join(tempDir, "howmuch.sqlite");
 const planId = "local-plan";
 const token = "smoke-token";
 
-seedDemoLedger({ dbPath, planId });
+await seedDemoLedger({ dbPath, planId });
 
 const db = openDatabase(dbPath);
 const handler = createHandler({

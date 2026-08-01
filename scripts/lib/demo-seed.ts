@@ -27,11 +27,11 @@ export function loadDemoFixture(path = defaultFixturePath): DemoFixture {
   return JSON.parse(readFileSync(path, "utf8")) as DemoFixture;
 }
 
-export function seedDemoLedger(options?: {
+export async function seedDemoLedger(options?: {
   dbPath?: string;
   fixturePath?: string;
   planId?: string;
-}): { dbPath: string; fixturePath: string; planId: string } {
+}): Promise<{ dbPath: string; fixturePath: string; planId: string }> {
   const fixturePath = resolveFixturePath(options?.fixturePath);
   const fixture = loadDemoFixture(fixturePath);
   const dbPath = options?.dbPath ?? "data/howmuch.sqlite";

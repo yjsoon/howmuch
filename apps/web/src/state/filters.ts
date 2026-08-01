@@ -134,7 +134,7 @@ export function transactionsLink(filters: Filters, categoryId?: string): string 
   if (filters.from) params.set("from", filters.from);
   if (filters.to) params.set("to", filters.to);
   if (!filters.from && !filters.to) params.set("range", "all");
-  if (filters.accountIds.length) params.set("accounts", filters.accountIds.join(","));
+  params.set("accounts", filters.accountIds.join(",") || "all");
   if (categoryId) {
     params.set("categories", categoryId);
     params.set("flow", "outflow");
