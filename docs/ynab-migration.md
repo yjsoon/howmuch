@@ -65,3 +65,35 @@ bun run import:ynab-export -- --zip "/path/to/YNAB Export - Actual Budget as of 
 The command reads the `Register.csv` and `Plan.csv` files from the zip, creates a backup before overwriting an existing SQLite file, infers blank-category transfer pairs from equal/opposite transactions within three days, marks YNAB `Transfer : ...` payee rows as transfers, and prints account, payee, category, transaction, duplicate, failed-row, and inferred-transfer counts.
 
 Do not commit the downloaded YNAB export zip, extracted CSV/TSV files, or imported SQLite databases.
+
+## Cloudflare D1 full-history bootstrap
+
+Do **not** use the Worker/Cron `/api/import/ynab` route for the initial full history. Generate server-side bulk SQL offline from a dedicated, fresh API import database:
+
+```sh
+bun run bootstrap:ynab-d1 --db data/howmuch-real.sqlite --out data/ynab-d1-bootstrap.sql
+```
+
+The generator rejects ambiguous or contaminated databases (anything other than one pristine, completed YNAB API session and one plan), validates source provenance and the complete generated D1 ledger, and writes an SQL file plus a content-minimized manifest/SHA-256 with no names, payees, memos, or raw payloads. The SQL's first statement aborts unless every application, import, sync, audit, auth, and guard table is empty and `write_state` is exactly its migration default. It contains no transaction wrapper because `wrangler d1 execute --file` handles the atomic server-side upload/execution.
+
+Keep the target quiescent for the entire bootstrap: do not configure the YNAB secret, complete first-owner setup, or allow any other writes until the import and verification finish. The emptiness check runs before the data statements, not as a lock against concurrent Worker traffic. If remote execution fails partway through, reset or recreate the target from the canonical migrations before retrying; never rerun the same file against a partially populated database.
+
+Cloudflare **Workers Paid is a bootstrap prerequisite**. The current Free allowance is 100,000 row writes/day; canonical indexes make roughly 52,000 transactions exceed that allowance. Log in through a browser, then deploy to preview first:
+
+```sh
+bunx wrangler login
+cd apps/worker
+bunx wrangler d1 migrations apply DB --remote --env preview
+bunx wrangler d1 execute DB --remote --env preview --file ../../data/ynab-d1-bootstrap.sql
+```
+
+If there is any doubt about the database binding or whether it is empty, stop: the emptiness guard intentionally fails rather than merge. Verify remotely without selecting names or memos:
+
+```sh
+bunx wrangler d1 execute DB --remote --env preview --command "SELECT count(*) transactions, sum(deleted=0) active, sum(deleted=1) deleted FROM transactions"
+bunx wrangler d1 execute DB --remote --env preview --command "PRAGMA foreign_key_check"
+bunx wrangler d1 execute DB --remote --env preview --command "SELECT plan_id,server_knowledge,lease_id,lease_until FROM ynab_sync_state"
+bunx wrangler d1 execute DB --remote --env preview --command "SELECT singleton,write_version,last_command_id FROM write_state"
+```
+
+Compare counts/cursor with the manifest. Production execution and Worker deployment remain approval-gated remote operations; this generator never logs in, deploys, or contacts Cloudflare.

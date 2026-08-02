@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+node_version="v22.23.2"
+node_archive="node-${node_version}-linux-x64.tar.xz"
+node_sha256="d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"
+node_prefix="$HOME/.local/lib/node-${node_version}-linux-x64"
+
+if ! command -v node >/dev/null || [[ "$(node --version)" != v2[2-9].* ]]; then
+  echo "Installing Node.js ${node_version} for Wrangler"
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"' EXIT
+  curl -fsSLo "$tmp_dir/$node_archive" "https://nodejs.org/dist/${node_version}/${node_archive}"
+  echo "$node_sha256  $tmp_dir/$node_archive" | sha256sum -c -
+  mkdir -p "$HOME/.local/lib" "$HOME/.local/bin"
+  rm -rf "$node_prefix"
+  tar -xJf "$tmp_dir/$node_archive" -C "$HOME/.local/lib"
+  ln -sfn "$node_prefix/bin/node" "$HOME/.local/bin/node"
+  ln -sfn "$node_prefix/bin/npm" "$HOME/.local/bin/npm"
+  ln -sfn "$node_prefix/bin/npx" "$HOME/.local/bin/npx"
+fi
+
+echo "Installing Bun dependencies"
+bun install --frozen-lockfile

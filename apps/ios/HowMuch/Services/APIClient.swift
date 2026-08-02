@@ -29,6 +29,11 @@ enum APIClientError: LocalizedError {
 struct APIClient {
   let settings: APISettings
 
+  func fetchAuthStatus() async throws -> AuthStatusPayload {
+    let response: APIEnvelope<AuthStatusPayload> = try await request(path: "/api/auth/status")
+    return response.data
+  }
+
   func login(username: String, password: String) async throws -> AuthTokenPayload {
     let response: APIEnvelope<AuthTokenPayload> = try await request(
       path: "/api/auth/token",
@@ -261,7 +266,9 @@ struct APIClient {
   }
 
   private func makeURL(path: String, queryItems: [URLQueryItem]) throws -> URL {
-    guard var components = URLComponents(string: settings.trimmedBaseURL) else {
+    guard let baseURL = settings.baseURL,
+          var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+    else {
       throw APIClientError.invalidBaseURL
     }
 

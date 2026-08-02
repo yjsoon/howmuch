@@ -16,8 +16,10 @@ struct ServerError: Decodable {
 
 struct APISettings: Codable, Equatable {
   static let userDefaultsKey = "HowMuch.APISettings"
+  static let productionBaseURL = "https://howmuch.soon.sg"
+  private static let legacyBaseURL = "http://127.0.0.1:8787"
 
-  var baseURLString = "http://127.0.0.1:8787"
+  var baseURLString = productionBaseURL
   var username = ""
   var sessionToken = ""
   var authenticatedUserID = ""
@@ -31,8 +33,33 @@ struct APISettings: Codable, Equatable {
     [trimmedBaseURL, planID, authenticatedUserID].joined(separator: "|")
   }
 
+  var baseURL: URL? {
+    guard
+      let components = URLComponents(string: trimmedBaseURL),
+      components.scheme == "http" || components.scheme == "https",
+      components.host?.isEmpty == false,
+      components.user == nil,
+      components.password == nil,
+      components.query == nil,
+      components.fragment == nil
+    else {
+      return nil
+    }
+    return components.url
+  }
+
+  var browserSetupURL: URL? {
+    guard let baseURL, baseURL.scheme == "https",
+          var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+    else {
+      return nil
+    }
+    components.path = "/"
+    return components.url
+  }
+
   var isConfigured: Bool {
-    URL(string: trimmedBaseURL) != nil
+    baseURL != nil
   }
 
   var isAuthenticated: Bool {
@@ -44,13 +71,19 @@ struct APISettings: Codable, Equatable {
       let data = defaults.data(forKey: userDefaultsKey),
       let decoded = try? JSONDecoder().decode(APISettings.self, from: data)
     else {
-      var settings = APISettings()
-      settings.sessionToken = CredentialStore.load() ?? ""
-      return settings
+      return APISettings()
     }
     var settings = decoded
-    if let token = CredentialStore.load() {
+    if settings.baseURLString == legacyBaseURL {
+      settings.baseURLString = productionBaseURL
+      settings.sessionToken = ""
+      settings.authenticatedUserID = ""
+    }
+    if decoded.baseURLString != legacyBaseURL, let token = CredentialStore.load() {
       settings.sessionToken = token
+    }
+    if decoded.baseURLString == legacyBaseURL {
+      settings.save(to: defaults)
     }
     return settings
   }
@@ -145,6 +178,12 @@ struct AuthTokenPayload: Decodable {
   let token: String
   let expiresAt: Int
   let user: APIUser
+}
+
+struct AuthStatusPayload: Decodable {
+  let setupRequired: Bool
+  let bootstrapRequired: Bool
+  let user: APIUser?
 }
 
 struct PlansPayload: Decodable {

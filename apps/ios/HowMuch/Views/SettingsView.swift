@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.openURL) private var openURL
   @State private var draft: APISettings
   @State private var password = ""
   @State private var authenticatedBaseURL: String
@@ -9,11 +10,20 @@ struct SettingsView: View {
   @State private var isSaving = false
   @State private var testResult: TestResult?
   @State private var isTesting = false
+  @State private var setupState: SetupState = .idle
 
   let onSave: @MainActor (APISettings) async -> Void
 
   private enum TestResult: Equatable {
     case success
+    case failure(String)
+  }
+
+  private enum SetupState: Equatable {
+    case idle
+    case checking
+    case ready
+    case required
     case failure(String)
   }
 
@@ -41,7 +51,46 @@ struct SettingsView: View {
         } header: {
           Text("Server")
         } footer: {
-          Text("Use the deployed HowMuch URL, or your computer's LAN address for local development. 127.0.0.1 on a physical device points to the phone itself.")
+          if !draft.trimmedBaseURL.isEmpty && !draft.isConfigured {
+            Text("Enter a complete HTTP or HTTPS URL with a host.")
+              .foregroundStyle(Theme.outflow)
+          } else {
+            Text("New installs use the production service. You can enter an HTTP LAN address for local development, but first-owner setup can only be opened from an HTTPS site.")
+          }
+        }
+        .disabled(isTesting)
+
+        if setupState == .required {
+          Section {
+            Text("This HowMuch server does not have an owner yet. Finish first-owner setup securely in the HowMuch website, then return here and retry before signing in.")
+
+            if let setupURL = draft.browserSetupURL {
+              Button {
+                openURL(setupURL)
+              } label: {
+                Label("Open HowMuch Setup in Browser", systemImage: "safari")
+              }
+            } else {
+              Text("Enter the server's HTTPS URL above to open setup in your browser.")
+                .foregroundStyle(.secondary)
+            }
+
+            Button("Retry Setup Check") {
+              checkSetupStatus()
+            }
+          } header: {
+            Text("First-owner setup required")
+          }
+        } else if case .failure(let message) = setupState {
+          Section {
+            Text(message)
+              .foregroundStyle(Theme.outflow)
+            Button("Retry Server Check") {
+              checkSetupStatus()
+            }
+          } header: {
+            Text("Server check")
+          }
         }
 
         Section {
@@ -60,6 +109,7 @@ struct SettingsView: View {
         } footer: {
           Text(sessionMatchesDraft ? "Signed in as \(draft.username)." : "Sign in stores an opaque session in this device's Keychain. Your password is never saved.")
         }
+        .disabled(isTesting)
 
         Section {
           Button {
@@ -82,7 +132,7 @@ struct SettingsView: View {
               }
             }
           }
-          .disabled(isTesting || draft.username.isEmpty || password.isEmpty)
+          .disabled(isTesting || setupState == .checking || setupState == .required || !draft.isConfigured || draft.username.isEmpty || password.isEmpty)
 
           if sessionMatchesDraft {
             Button("Sign out", role: .destructive) {
@@ -100,6 +150,13 @@ struct SettingsView: View {
       }
       .navigationTitle("Connection")
       .navigationBarTitleDisplayMode(.inline)
+      .task {
+        checkSetupStatus()
+      }
+      .onChange(of: draft.baseURLString) {
+        setupState = .idle
+        testResult = nil
+      }
       .toolbar {
         ToolbarItem(placement: .topBarLeading) {
           Button("Cancel") {
@@ -116,7 +173,7 @@ struct SettingsView: View {
               dismiss()
             }
           }
-          .disabled(isSaving || !draft.isConfigured || !sessionMatchesDraft)
+          .disabled(isSaving || isTesting || !draft.isConfigured || !sessionMatchesDraft)
         }
       }
     }
@@ -130,7 +187,16 @@ struct SettingsView: View {
         var loginSettings = draft
         loginSettings.sessionToken = ""
         loginSettings.authenticatedUserID = ""
-        let session = try await APIClient(settings: loginSettings).login(username: draft.username, password: password)
+        let client = APIClient(settings: loginSettings)
+        let status = try await client.fetchAuthStatus()
+        guard !status.setupRequired else {
+          setupState = .required
+          testResult = .failure("Complete first-owner setup in the website before signing in.")
+          isTesting = false
+          return
+        }
+        setupState = .ready
+        let session = try await client.login(username: draft.username, password: password)
         draft.sessionToken = session.token
         draft.authenticatedUserID = session.user.id
         draft.username = session.user.username ?? draft.username
@@ -145,6 +211,32 @@ struct SettingsView: View {
         testResult = .failure(error.localizedDescription)
       }
       isTesting = false
+    }
+  }
+
+  private func checkSetupStatus() {
+    guard draft.isConfigured else {
+      setupState = .idle
+      return
+    }
+    setupState = .checking
+    let checkedBaseURL = draft.trimmedBaseURL
+    var statusSettings = draft
+    statusSettings.sessionToken = ""
+    statusSettings.authenticatedUserID = ""
+    Task {
+      do {
+        let status = try await APIClient(settings: statusSettings).fetchAuthStatus()
+        guard draft.trimmedBaseURL == checkedBaseURL else {
+          return
+        }
+        setupState = status.setupRequired ? .required : .ready
+      } catch {
+        guard draft.trimmedBaseURL == checkedBaseURL else {
+          return
+        }
+        setupState = .failure(error.localizedDescription)
+      }
     }
   }
 

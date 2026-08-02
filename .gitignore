@@ -11,4 +11,5 @@ dist/
 coverage/
 data/
 apps/ios/build/
+apps/worker/.wrangler/
 *.log
