@@ -5,6 +5,7 @@ import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
 
 const REPORTS = [
+  { to: "/spending", label: "Spending breakdown" },
   { to: "/income", label: "Income v Spending" },
   { to: "/net-worth", label: "Net Worth" },
   { to: "/age-of-money", label: "Age of Money" },
@@ -41,7 +42,8 @@ export function Shell() {
   useEffect(() => {
     const report = REPORTS.find((entry) => entry.to === location.pathname);
     const label = (location.pathname === "/transactions" ? registerLabel : null)
-      ?? (location.pathname === "/spending" ? "Plan" : null)
+      ?? (location.pathname === "/plan" ? "Plan" : null)
+      ?? (location.pathname === "/scheduled" ? "Scheduled transactions" : null)
       ?? report?.label;
     document.title = label ? `${label} · HowMuch` : "HowMuch";
   }, [location.pathname, registerLabel]);
@@ -59,10 +61,16 @@ export function Shell() {
 
         <nav className="sidebar-nav" aria-label="Primary navigation">
           <NavLink
-            to={{ pathname: "/spending", search: location.search }}
+            to={{ pathname: "/plan", search: location.search }}
             className={({ isActive }) => isActive ? "sidebar-primary-link sidebar-link-active" : "sidebar-primary-link"}
           >
             <span aria-hidden="true">▦</span> Plan
+          </NavLink>
+          <NavLink
+            to={{ pathname: "/scheduled", search: location.search }}
+            className={({ isActive }) => isActive ? "sidebar-primary-link sidebar-link-active" : "sidebar-primary-link"}
+          >
+            <span aria-hidden="true">◷</span> Scheduled
           </NavLink>
           <div className="sidebar-section-label">Reflect</div>
           {REPORTS.map((report) => (
@@ -83,7 +91,7 @@ export function Shell() {
             }
           >
             <span aria-hidden="true">▤</span> All Accounts
-            <span className="sidebar-balance">{formatMoney(openAccounts.reduce((sum, account) => sum + account.balance, 0))}</span>
+            <span className="sidebar-balance" title="Open-account working balance">{formatMoney(openAccounts.reduce((sum, account) => sum + account.balance, 0))}</span>
           </NavLink>
         </nav>
 

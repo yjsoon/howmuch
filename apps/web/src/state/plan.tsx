@@ -168,7 +168,7 @@ function AuthForm({
           value={username}
           onChange={(event) => setUsername(event.target.value)}
           autoComplete="username"
-          pattern="[A-Za-z0-9._-]{3,64}"
+          pattern={"[A-Za-z0-9._\\-]{3,64}"}
           minLength={3}
           maxLength={64}
           autoCapitalize="none"

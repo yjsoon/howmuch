@@ -1,22 +1,32 @@
 import { useEffect, useRef, useState } from "react";
 import type {
   Account,
+  AccountReconciliationPreview,
+  AccountReconciliationResult,
   AgeOfMoneyReport,
   CategoryGroup,
   IncomeVsSpendingReport,
   NetWorthReport,
   Payee,
   Plan,
+  PlanMonth,
   PlanSettings,
   QuickEntryInput,
+  ReconciliationMismatchDetail,
+  ScheduledTransaction,
+  ScheduledTransactionInput,
+  ScheduledOccurrenceResult,
   SpendingBreakdownReport,
   Transaction,
+  TransactionUpdateInput,
 } from "./types";
 
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly code?: string,
+    readonly detail?: unknown,
   ) {
     super(message);
   }
@@ -31,25 +41,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init?.headers,
     },
   });
-  if (!response.ok) {
-    let message = `${response.status} ${response.statusText}`;
-    try {
-      const body = await response.json();
-      message = body?.error?.detail ?? body?.error?.message ?? message;
-    } catch {
-      // keep the status message
-    }
-    throw new ApiError(message, response.status);
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    body = undefined;
   }
-  const body = await response.json();
-  return body.data as T;
+  if (!response.ok) {
+    const detail = (body && typeof body === "object" && "error" in body ? (body as { error?: Record<string, unknown> }).error : undefined) as (ReconciliationMismatchDetail & { detail?: string }) | undefined;
+    const message = detail?.detail ?? `${response.status} ${response.statusText}`;
+    throw new ApiError(message, response.status, typeof detail?.name === "string" ? detail.name : undefined, detail);
+  }
+  return (body as { data: T }).data;
 }
 
-function query(params: Record<string, string | undefined>): string {
+function query(params: Record<string, string | number | undefined>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value) {
-      search.set(key, value);
+    if (value !== undefined && value !== "") {
+      search.set(key, String(value));
     }
   }
   const text = search.toString();
@@ -77,6 +87,12 @@ export interface AuthStatus {
   user: AuthUser | null;
 }
 
+export interface TransactionPage {
+  transactions: Transaction[];
+  has_more: boolean;
+  next_offset: number | null;
+}
+
 export const api = {
   authStatus: () => request<AuthStatus>("/api/auth/status"),
   setup: (username: string, password: string, bootstrapToken: string) =>
@@ -102,10 +118,80 @@ export const api = {
     ),
   payees: (planId: string) =>
     request<{ payees: Payee[] }>(`/v1/plans/${planId}/payees`).then((d) => d.payees),
-  transactions: (planId: string, params: { since_date?: string; until_date?: string }) =>
-    request<{ transactions: Transaction[] }>(
+  scheduledTransactions: (planId: string) =>
+    request<{ scheduled_transactions: ScheduledTransaction[] }>(`/v1/plans/${planId}/scheduled_transactions`).then(
+      (d) => d.scheduled_transactions,
+    ),
+  createScheduledTransaction: (planId: string, scheduledTransaction: ScheduledTransactionInput, idempotencyKey: string) =>
+    request<{ scheduled_transaction: ScheduledTransaction }>(
+      `/v1/plans/${planId}/scheduled_transactions`,
+      { method: "POST", headers: { "idempotency-key": idempotencyKey }, body: JSON.stringify({ scheduled_transaction: scheduledTransaction }) },
+    ).then((data) => data.scheduled_transaction),
+  updateScheduledTransaction: (planId: string, scheduledTransactionId: string, scheduledTransaction: ScheduledTransactionInput, idempotencyKey: string) =>
+    request<{ scheduled_transaction: ScheduledTransaction }>(
+      `/v1/plans/${planId}/scheduled_transactions/${encodeURIComponent(scheduledTransactionId)}`,
+      { method: "PATCH", headers: { "idempotency-key": idempotencyKey }, body: JSON.stringify({ scheduled_transaction: scheduledTransaction }) },
+    ).then((data) => data.scheduled_transaction),
+  deleteScheduledTransaction: (planId: string, scheduledTransactionId: string, idempotencyKey: string) =>
+    request<{ scheduled_transaction: ScheduledTransaction }>(
+      `/v1/plans/${planId}/scheduled_transactions/${encodeURIComponent(scheduledTransactionId)}`,
+      { method: "DELETE", headers: { "idempotency-key": idempotencyKey } },
+    ).then((data) => data.scheduled_transaction),
+  materializeScheduledTransaction: (planId: string, scheduledTransactionId: string, occurrenceDate: string, date: string, idempotencyKey: string) =>
+    request<ScheduledOccurrenceResult>(
+      `/v1/plans/${planId}/scheduled_transactions/${encodeURIComponent(scheduledTransactionId)}/materialize`,
+      { method: "POST", headers: { "idempotency-key": idempotencyKey }, body: JSON.stringify({ occurrence_date: occurrenceDate, date }) },
+    ),
+  accountReconciliation: (planId: string, accountId: string, statementDate: string) =>
+    request<AccountReconciliationPreview>(
+      `/v1/plans/${planId}/accounts/${encodeURIComponent(accountId)}/reconciliation${query({ statement_date: statementDate })}`,
+    ),
+  reconcileAccount: (planId: string, accountId: string, statementDate: string, statementBalance: number, idempotencyKey: string) =>
+    request<AccountReconciliationResult>(
+      `/v1/plans/${planId}/accounts/${encodeURIComponent(accountId)}/reconcile`,
+      {
+        method: "POST",
+        headers: { "idempotency-key": idempotencyKey },
+        body: JSON.stringify({ statement_date: statementDate, statement_balance: statementBalance }),
+      },
+    ),
+  month: (planId: string, month: string) =>
+    request<{ month: PlanMonth }>(`/v1/plans/${planId}/months/${encodeURIComponent(month)}`).then(
+      (d) => d.month,
+    ),
+  setMonthCategoryAssignment: (planId: string, month: string, categoryId: string, budgeted: number) =>
+    request<{ month: PlanMonth }>(
+      `/v1/plans/${planId}/months/${encodeURIComponent(month)}/categories/${encodeURIComponent(categoryId)}`,
+      { method: "PATCH", body: JSON.stringify({ category: { budgeted } }) },
+    ).then((d) => d.month),
+  setMonthCategoryTarget: (planId: string, month: string, categoryId: string, target: { goal_type: string; goal_target: number; goal_target_month?: string | null } | null) =>
+    request<{ month: PlanMonth }>(
+      `/v1/plans/${planId}/months/${encodeURIComponent(month)}/categories/${encodeURIComponent(categoryId)}`,
+      { method: "PATCH", body: JSON.stringify({ category: { target } }) },
+    ).then((d) => d.month),
+  restoreMonthCategoryTarget: (planId: string, month: string, categoryId: string) =>
+    request<{ month: PlanMonth }>(
+      `/v1/plans/${planId}/months/${encodeURIComponent(month)}/categories/${encodeURIComponent(categoryId)}`,
+      { method: "PATCH", body: JSON.stringify({ category: { restore_target: true } }) },
+    ).then((d) => d.month),
+  transactions: (planId: string, params: { since_date?: string; until_date?: string; limit?: number; offset?: number }) =>
+    request<TransactionPage>(
       `/v1/plans/${planId}/transactions${query(params)}`,
-    ).then((d) => d.transactions),
+    ),
+  accountTransactions: (planId: string, accountId: string, params: { since_date?: string; until_date?: string; limit?: number; offset?: number }) =>
+    request<TransactionPage>(
+      `/v1/plans/${planId}/accounts/${encodeURIComponent(accountId)}/transactions${query(params)}`,
+    ),
+  updateTransaction: (planId: string, transactionId: string, transaction: TransactionUpdateInput) =>
+    request<{ transaction: Transaction }>(
+      `/v1/plans/${planId}/transactions/${encodeURIComponent(transactionId)}`,
+      { method: "PATCH", body: JSON.stringify({ transaction }) },
+    ).then((data) => data.transaction),
+  deleteTransaction: (planId: string, transactionId: string) =>
+    request<{ transaction: Transaction }>(
+      `/v1/plans/${planId}/transactions/${encodeURIComponent(transactionId)}`,
+      { method: "DELETE" },
+    ).then((data) => data.transaction),
   spendingBreakdown: (params: ReportQuery) =>
     request<SpendingBreakdownReport>(`/api/reports/spending-breakdown${query({ ...params })}`),
   incomeVsSpending: (params: ReportQuery) =>

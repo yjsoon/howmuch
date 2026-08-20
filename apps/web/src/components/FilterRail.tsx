@@ -27,9 +27,17 @@ export function FilterRail({ filters, setFilters, intervals, showCategories = tr
   const activePreset = matchPreset(filters.from, filters.to);
   const month = calendarMonthOf(filters.from, filters.to);
 
-  const accountOptions = accounts
-    .filter((account) => !account.closed)
-    .map((account) => ({ id: account.id, label: account.name }));
+  // Closed accounts remain part of the migrated ledger. Keep them available
+  // for historical registers and report drill-downs without mixing them into
+  // the active-account presentation elsewhere in the shell.
+  const accountOptions: MultiSelectOption[] = [
+    ...accounts
+      .filter((account) => !account.closed)
+      .map((account) => ({ id: account.id, label: account.name, group: "Open accounts" })),
+    ...accounts
+      .filter((account) => account.closed)
+      .map((account) => ({ id: account.id, label: account.name, group: "Closed accounts" })),
+  ];
 
   const { primary, quiet } = splitCategoryGroups(categoryGroups);
   const categoryOptions: MultiSelectOption[] = [
