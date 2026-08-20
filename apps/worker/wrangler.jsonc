@@ -9,15 +9,20 @@
     "directory": "../web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/v1/*", "/health"]
+    "run_worker_first": [
+      "/api/*",
+      "/v1/*",
+      "/health",
+      "/.well-known/apple-app-site-association",
+      "/apple-app-site-association"
+    ]
   },
   "vars": {
     "HOWMUCH_DEFAULT_PLAN_ID": "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
-    "HOWMUCH_YNAB_PLAN_ID": "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
-    "HOWMUCH_YNAB_MIN_SIMILARITY": "0.95"
+    "HOWMUCH_TIME_ZONE": "Asia/Singapore"
   },
   "triggers": {
-    "crons": ["0 * * * *"]
+    "crons": ["5 16 * * *"]
   },
   "routes": [
     {
@@ -38,12 +43,13 @@
   "env": {
     "preview": {
       "name": "howmuch-preview",
+      "workers_dev": true,
+      "preview_urls": true,
       "routes": [],
       "triggers": { "crons": [] },
       "vars": {
         "HOWMUCH_DEFAULT_PLAN_ID": "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
-        "HOWMUCH_YNAB_PLAN_ID": "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
-        "HOWMUCH_YNAB_MIN_SIMILARITY": "0.95"
+        "HOWMUCH_TIME_ZONE": "Asia/Singapore"
       },
       "d1_databases": [{
         "binding": "DB",
