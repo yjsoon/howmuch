@@ -608,8 +608,9 @@ struct PlansPayload: Decodable {
   let plans: [PlanSummary]
 }
 
-struct PlanSummary: Decodable {
+struct PlanSummary: Decodable, Equatable, Identifiable {
   let id: String
+  let name: String
 }
 
 struct ReferenceData {

@@ -561,7 +561,9 @@ final class AppModel {
   }
 
   func refreshAll(quiet: Bool = false) async {
-    await resolvePlanSelectionIfNeeded()
+    guard await resolvePlanSelection() else {
+      return
+    }
 
     // Replay offline captures alongside the fetches rather than before them:
     // an unreachable server must not stall the refresh for a full request
@@ -575,29 +577,44 @@ final class AppModel {
     _ = await (outbox, reference, ledger, schedules, reports)
   }
 
-  /// A fresh app has no local plan identifier. Once an authenticated server
-  /// proves that there is exactly one accessible plan, remember it before any
-  /// plan-scoped requests begin. This also repairs older installs that kept
-  /// the former `local-plan` development default. Multiple accessible plans
-  /// are deliberately not guessed: the Connection screen remains the user's
-  /// explicit selector in that case.
-  private func resolvePlanSelectionIfNeeded() async {
+  /// Validates the saved plan against the authenticated plan list before any
+  /// plan-scoped request begins. A sole plan is adopted automatically;
+  /// ambiguous, empty, and unavailable lists return to Connection instead.
+  private func resolvePlanSelection() async -> Bool {
     guard settings.isAuthenticated else {
-      return
+      return false
     }
 
+    let connectionFingerprint = settings.connectionFingerprint
+    let client = apiClient
     do {
-      let plans = try await apiClient.fetchPlans()
-      guard let selectedPlanID = settings.resolvedPlanID(from: plans), selectedPlanID != settings.planID else {
-        return
+      let plans = try await client.fetchPlans()
+      guard !Task.isCancelled, settings.connectionFingerprint == connectionFingerprint else {
+        return false
       }
-      clearConnectionOwnedState()
-      settings.planID = selectedPlanID
-      settings.save()
-      switchViewPrefsScope()
+      guard let selectedPlanID = settings.resolvedPlanID(from: plans) else {
+        if !settings.planID.isEmpty {
+          clearConnectionOwnedState()
+          settings.planID = ""
+          settings.save()
+          switchViewPrefsScope()
+        }
+        isShowingSettings = true
+        return false
+      }
+      if selectedPlanID != settings.planID {
+        clearConnectionOwnedState()
+        settings.planID = selectedPlanID
+        settings.save()
+        switchViewPrefsScope()
+      }
+      return true
     } catch {
-      // The normal surface requests retain their own error states. Do not
-      // make a transient plan-list failure block an existing saved plan.
+      guard !Task.isCancelled, settings.connectionFingerprint == connectionFingerprint else {
+        return false
+      }
+      isShowingSettings = true
+      return false
     }
   }
 

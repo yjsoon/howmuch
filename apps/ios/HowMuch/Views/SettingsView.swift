@@ -11,6 +11,8 @@ struct SettingsView: View {
   @State private var testResult: TestResult?
   @State private var isTesting = false
   @State private var setupState: SetupState = .idle
+  @State private var planState: PlanState = .idle
+  @State private var planRequestID = UUID()
   private let wasInitiallyAuthenticated: Bool
 
   let onSave: @MainActor (APISettings) async -> Void
@@ -28,6 +30,13 @@ struct SettingsView: View {
     case failure(String)
   }
 
+  private enum PlanState: Equatable {
+    case idle
+    case loading
+    case loaded([PlanSummary])
+    case failure(String)
+  }
+
   init(settings: APISettings, onSave: @escaping @MainActor (APISettings) async -> Void) {
     self.onSave = onSave
     self.draft = settings
@@ -40,6 +49,13 @@ struct SettingsView: View {
     draft.isAuthenticated
       && draft.trimmedBaseURL == authenticatedBaseURL
       && draft.username == authenticatedUsername
+  }
+
+  private var hasValidPlanSelection: Bool {
+    guard case .loaded(let plans) = planState else {
+      return false
+    }
+    return plans.contains { $0.id == draft.planID }
   }
 
   var body: some View {
@@ -102,16 +118,16 @@ struct SettingsView: View {
 
           SecureField("Password", text: $password)
             .textContentType(.password)
-
-          TextField("Plan ID", text: $draft.planID)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
         } header: {
           Text("Access")
         } footer: {
           Text(sessionMatchesDraft ? "Signed in as \(draft.username)." : "Sign in stores an opaque session in this device's Keychain. Your password is never saved.")
         }
         .disabled(isTesting)
+
+        if sessionMatchesDraft {
+          planSection
+        }
 
         Section {
           Button {
@@ -137,9 +153,10 @@ struct SettingsView: View {
           .disabled(isTesting || setupState == .checking || setupState == .required || !draft.isConfigured || draft.username.isEmpty || password.isEmpty)
 
           if sessionMatchesDraft {
-            Button("Sign out", role: .destructive) {
+            Button("Sign out / Use another account", role: .destructive) {
               signOut()
             }
+            .disabled(isSaving || isTesting)
           }
         } footer: {
           if case .failure(let message) = testResult {
@@ -154,17 +171,30 @@ struct SettingsView: View {
       .navigationBarTitleDisplayMode(.inline)
       .task {
         checkSetupStatus()
+        if sessionMatchesDraft {
+          loadPlans()
+        }
       }
       .onChange(of: draft.baseURLString) {
         setupState = .idle
         testResult = nil
+        planState = .idle
+        planRequestID = UUID()
+      }
+      .onChange(of: draft.username) {
+        testResult = nil
+        planState = .idle
+        planRequestID = UUID()
+        if !isTesting && sessionMatchesDraft {
+          loadPlans()
+        }
       }
       .toolbar {
         ToolbarItem(placement: .topBarLeading) {
           Button("Cancel") {
             dismiss()
           }
-          .disabled(!wasInitiallyAuthenticated)
+          .disabled(!wasInitiallyAuthenticated || !draft.isAuthenticated)
         }
 
         ToolbarItem(placement: .topBarTrailing) {
@@ -176,15 +206,99 @@ struct SettingsView: View {
               dismiss()
             }
           }
-          .disabled(isSaving || isTesting || !draft.isConfigured || !sessionMatchesDraft)
+          .disabled(isSaving || isTesting || !draft.isConfigured || !sessionMatchesDraft || !hasValidPlanSelection)
         }
       }
     }
   }
 
+  @ViewBuilder
+  private var planSection: some View {
+    switch planState {
+    case .idle, .loading:
+      Section("Plan") {
+        HStack {
+          Text("Finding your plans…")
+          Spacer()
+          ProgressView()
+        }
+      }
+    case .loaded(let plans) where plans.isEmpty:
+      Section("Plan") {
+        Text("No plans available")
+          .font(.headline)
+        Text("This account doesn’t have access to a plan yet. Ask the server owner to add access, then try again.")
+          .foregroundStyle(.secondary)
+        Button("Try Again") {
+          loadPlans()
+        }
+      }
+    case .loaded(let plans) where plans.count == 1:
+      Section {
+        Text(plans[0].name)
+      } header: {
+        Text("Plan")
+      } footer: {
+        Text("Selected automatically.")
+      }
+    case .loaded(let plans):
+      Section {
+        ForEach(plans) { plan in
+          Button {
+            draft.planID = plan.id
+          } label: {
+            HStack {
+              VStack(alignment: .leading) {
+                Text(plan.name)
+                  .foregroundStyle(Theme.textPrimary)
+                if hasDuplicateName(plan, in: plans) {
+                  Text(plan.id)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+              }
+              Spacer()
+              if draft.planID == plan.id {
+                Image(systemName: "checkmark")
+              }
+            }
+          }
+          .accessibilityLabel(hasDuplicateName(plan, in: plans) ? "\(plan.name), plan ID \(plan.id)" : plan.name)
+          .accessibilityAddTraits(draft.planID == plan.id ? [.isSelected] : [])
+        }
+      } header: {
+        Text("Choose a plan")
+      } footer: {
+        if draft.planID.isEmpty {
+          Text("Choose a plan to continue.")
+            .foregroundStyle(Theme.outflow)
+        } else {
+          Text("You have access to more than one plan. Choose which plan to use on this device.")
+        }
+      }
+    case .failure(let message):
+      Section("Couldn’t load plans") {
+        Text("You’re signed in, but HowMuch couldn’t load your plans. Check the connection and try again.")
+          .foregroundStyle(.secondary)
+        Text(message)
+          .font(.caption)
+          .foregroundStyle(Theme.outflow)
+        Button("Try Again") {
+          loadPlans()
+        }
+      }
+    }
+  }
+
+  private func hasDuplicateName(_ plan: PlanSummary, in plans: [PlanSummary]) -> Bool {
+    plans.contains { $0.id != plan.id && $0.name == plan.name }
+  }
+
   private func signIn() {
     isTesting = true
     testResult = nil
+    planState = .idle
+    planRequestID = UUID()
     Task {
       do {
         var loginSettings = draft
@@ -205,17 +319,62 @@ struct SettingsView: View {
         draft.username = session.user.username ?? draft.username
         authenticatedBaseURL = draft.trimmedBaseURL
         authenticatedUsername = draft.username
-        let plans = try await APIClient(settings: draft).fetchPlans()
-        if let selectedPlanID = draft.resolvedPlanID(from: plans) {
-          draft.planID = selectedPlanID
-        }
         password = ""
         testResult = .success
+        let requestID = UUID()
+        planRequestID = requestID
+        planState = .loading
+        do {
+          let plans = try await APIClient(settings: draft).fetchPlans()
+          guard planRequestID == requestID, sessionMatchesDraft else {
+            isTesting = false
+            return
+          }
+          applyDiscoveredPlans(plans)
+        } catch {
+          guard planRequestID == requestID, sessionMatchesDraft else {
+            isTesting = false
+            return
+          }
+          planState = .failure(error.localizedDescription)
+        }
       } catch {
         testResult = .failure(error.localizedDescription)
       }
       isTesting = false
     }
+  }
+
+  private func loadPlans() {
+    guard sessionMatchesDraft else {
+      planState = .idle
+      return
+    }
+    let requestID = UUID()
+    planRequestID = requestID
+    planState = .loading
+    let expectedBaseURL = draft.trimmedBaseURL
+    let expectedUsername = draft.username
+    let settings = draft
+    Task {
+      do {
+        let plans = try await APIClient(settings: settings).fetchPlans()
+        guard planRequestID == requestID, draft.trimmedBaseURL == expectedBaseURL, draft.username == expectedUsername, sessionMatchesDraft else {
+          return
+        }
+        applyDiscoveredPlans(plans)
+      } catch {
+        guard planRequestID == requestID, draft.trimmedBaseURL == expectedBaseURL, draft.username == expectedUsername, sessionMatchesDraft else {
+          return
+        }
+        planState = .failure(error.localizedDescription)
+      }
+    }
+  }
+
+  private func applyDiscoveredPlans(_ plans: [PlanSummary]) {
+    draft.planID = draft.resolvedPlanID(from: plans) ?? ""
+    planState = .loaded(plans)
   }
 
   private func checkSetupStatus() {
@@ -248,13 +407,16 @@ struct SettingsView: View {
     let current = draft
     draft.sessionToken = ""
     draft.authenticatedUserID = ""
+    draft.planID = ""
+    password = ""
     testResult = nil
+    planState = .idle
+    planRequestID = UUID()
     isSaving = true
     Task {
       await onSave(draft)
       try? await APIClient(settings: current).logout()
       isSaving = false
-      dismiss()
     }
   }
 }
