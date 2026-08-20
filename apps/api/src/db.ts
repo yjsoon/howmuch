@@ -24,7 +24,7 @@ export function applyMigrations(db: Database): void {
     "CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
   );
 
-  const migrations = [
+  const migrations: Array<{ version: string; path: string; rebuildsForeignKeyTarget?: boolean }> = [
     {
       version: "001_initial",
       path: join(migrationsDir, "001_initial.sql"),
@@ -45,6 +45,35 @@ export function applyMigrations(db: Database): void {
       version: "005_password_auth",
       path: join(migrationsDir, "005_password_auth.sql"),
     },
+    {
+      version: "006_allow_duplicate_payee_names",
+      path: join(migrationsDir, "006_allow_duplicate_payee_names.sql"),
+      rebuildsForeignKeyTarget: true,
+    },
+    {
+      version: "007_ynab_raw_objects",
+      path: join(migrationsDir, "007_ynab_raw_objects.sql"),
+    },
+    {
+      version: "008_plan_month_assignments",
+      path: join(migrationsDir, "008_plan_month_assignments.sql"),
+    },
+    {
+      version: "009_plan_month_category_targets",
+      path: join(migrationsDir, "009_plan_month_category_targets.sql"),
+    },
+    {
+      version: "010_scheduled_transaction_edits",
+      path: join(migrationsDir, "010_scheduled_transaction_edits.sql"),
+    },
+    {
+      version: "011_scheduled_transaction_snapshot_assertions",
+      path: join(migrationsDir, "011_scheduled_transaction_snapshot_assertions.sql"),
+    },
+    {
+      version: "012_account_reconciliation_assertions",
+      path: join(migrationsDir, "012_account_reconciliation_assertions.sql"),
+    },
   ];
 
   for (const migration of migrations) {
@@ -57,9 +86,18 @@ export function applyMigrations(db: Database): void {
     }
 
     const sql = readFileSync(migration.path, "utf8");
-    db.transaction(() => {
-      db.run(sql);
-      db.query("INSERT INTO schema_migrations (version) VALUES (?)").run(migration.version);
-    })();
+    if (migration.rebuildsForeignKeyTarget) db.run("PRAGMA foreign_keys = OFF");
+    try {
+      db.transaction(() => {
+        db.run(sql);
+        db.query("INSERT INTO schema_migrations (version) VALUES (?)").run(migration.version);
+      })();
+    } finally {
+      if (migration.rebuildsForeignKeyTarget) db.run("PRAGMA foreign_keys = ON");
+    }
+
+    if (migration.rebuildsForeignKeyTarget && db.query("PRAGMA foreign_key_check").all().length) {
+      throw new Error(`Migration ${migration.version} introduced foreign-key violations`);
+    }
   }
 }

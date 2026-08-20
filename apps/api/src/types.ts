@@ -48,6 +48,117 @@ export type TransactionFilters = {
   type?: string | null;
   lastKnowledgeOfServer?: number | null;
   includeDeleted?: boolean;
+  limit?: number | null;
+  offset?: number | null;
+};
+
+export const DEFAULT_TRANSACTION_PAGE_SIZE = 100;
+export const MAX_TRANSACTION_PAGE_SIZE = 250;
+
+export type TransactionPage = {
+  transactions: any[];
+  has_more: boolean;
+  next_offset: number | null;
+};
+
+/**
+ * A HowMuch-owned monthly target. `null` removes the imported target from the
+ * response projection; omitting a row restores the exact imported target.
+ */
+export type MonthCategoryTargetInput = {
+  goal_type: "TB" | "TBD" | "MF" | "NEED" | "DEBT" | null;
+  goal_target?: number | null;
+  goal_target_month?: string | null;
+};
+
+export type ScheduledSubtransactionInput = {
+  id?: string;
+  amount: number;
+  payee_id?: string | null;
+  payee_name?: string | null;
+  category_id?: string | null;
+  category_name?: string | null;
+  memo?: string | null;
+  transfer_account_id?: string | null;
+};
+
+export type ScheduledTransactionInput = {
+  id?: string;
+  account_id: string;
+  account_name?: string | null;
+  date_first: string;
+  date_next?: string | null;
+  frequency: string;
+  amount: number;
+  payee_id?: string | null;
+  payee_name?: string | null;
+  category_id?: string | null;
+  category_name?: string | null;
+  transfer_account_id?: string | null;
+  memo?: string | null;
+  flag_color?: string | null;
+  subtransactions?: ScheduledSubtransactionInput[];
+};
+
+export type ScheduledWriteOptions = {
+  /** Stable per-client mutation key used by D1's immutable command receipt. */
+  operationId?: string;
+  /** Optional compare-and-set guard used while advancing a materialised occurrence. */
+  expected?: {
+    date_first: string;
+    date_next: string;
+    frequency: string;
+  };
+};
+
+export type ScheduledOccurrenceResult = {
+  transaction: any;
+  scheduled_transaction: any;
+  occurrence_date: string;
+  entered_date: string;
+  completed: boolean;
+  replayed: boolean;
+};
+
+export type ScheduledMaterializationResult = {
+  through_date: string;
+  occurrences: ScheduledOccurrenceResult[];
+  skipped_closed_schedule_ids: string[];
+};
+
+/** Count-only result for the private, bounded daily scheduler. */
+export type ScheduledCronMaterializationResult = {
+  through_date: string;
+  occurrence_count: number;
+  skipped_closed_schedule_count: number;
+  failure_count: number;
+  has_more: boolean;
+};
+
+export type AccountReconciliationOptions = {
+  operationId: string;
+};
+
+export type AccountReconciliationPreview = {
+  account: any;
+  statement_date: string;
+  current_reconciled_balance: number;
+  projected_reconciled_balance: number;
+  candidate_transaction_ids: string[];
+  candidate_transaction_count: number;
+  server_knowledge: number;
+};
+
+export type AccountReconciliationResult = {
+  account: any;
+  reconciled_transaction_ids: string[];
+  reconciled_transaction_count: number;
+  statement_date: string;
+  statement_balance: number;
+  prior_reconciled_balance: number;
+  final_reconciled_balance: number;
+  replayed: boolean;
+  server_knowledge: number;
 };
 
 export type ReportFilters = {

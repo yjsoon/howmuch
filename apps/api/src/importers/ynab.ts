@@ -25,6 +25,7 @@ export type YnabImportOptions = {
 export type YnabImportResult = {
   import_session_id: string;
   imported_transactions: number;
+  raw_objects?: Record<string, number>;
   skipped?: boolean;
   similarity?: number;
   server_knowledge?: number;
@@ -54,16 +55,66 @@ export async function importYnabFromApi(
     const transactionQuery = options.lastKnowledgeOfServer == null
       ? `?since_date=${encodeURIComponent(sinceDate)}`
       : delta;
-    const [plan, settings, accounts, categories, payees, transactions] = await Promise.all([
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}`, warn),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/settings`, warn),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/accounts${delta}`, warn),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/categories${delta}`, warn),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/payees${delta}`, warn),
-      ynabFetch(baseUrl, options.token, `/plans/${options.planId}/transactions${transactionQuery}`, warn),
-    ]);
+    // A plan detail response is YNAB's full export and, when asked with a
+    // cursor, its delta export.  Older test doubles and private API proxies
+    // may only implement the legacy collection endpoints, so retain a narrow
+    // fallback without making the production import lossy.
+    const full = await ynabFetchOptional(baseUrl, options.token, `/plans/${options.planId}${delta}`, warn);
+    const fullPlan = full?.data?.plan ?? full?.data?.budget;
+    let plan: any;
+    let settings: any;
+    let accounts: any;
+    let categories: any;
+    let payees: any;
+    let transactions: any;
+    let moneyMovements: any = null;
+    let moneyMovementGroups: any = null;
+    if (hasFullPlanCollections(fullPlan)) {
+      [settings, moneyMovements, moneyMovementGroups] = await Promise.all([
+        ynabFetchOptional(baseUrl, options.token, `/plans/${options.planId}/settings`, warn),
+        // These endpoints have no cursor, so refresh their small full lists
+        // on every pass.  Keeping an old movement list would silently lose
+        // data created after the first migration.
+        ynabFetchOptional(baseUrl, options.token, `/plans/${options.planId}/money_movements`, warn),
+        ynabFetchOptional(baseUrl, options.token, `/plans/${options.planId}/money_movement_groups`, warn),
+      ]);
+      plan = { data: { plan: fullPlan, server_knowledge: full?.data?.server_knowledge } };
+      accounts = { data: { accounts: fullPlan.accounts ?? [], server_knowledge: full?.data?.server_knowledge } };
+      categories = { data: { category_groups: fullPlan.category_groups ?? [], ...(Array.isArray(fullPlan.categories) ? { categories: fullPlan.categories } : {}), server_knowledge: full?.data?.server_knowledge } };
+      payees = { data: { payees: fullPlan.payees ?? [], server_knowledge: full?.data?.server_knowledge } };
+      transactions = { data: { transactions: fullPlan.transactions ?? [], subtransactions: fullPlan.subtransactions ?? [], server_knowledge: full?.data?.server_knowledge } };
+    } else {
+      const legacy = await Promise.all([
+        ynabFetch(baseUrl, options.token, `/plans/${options.planId}`, warn),
+        ynabFetch(baseUrl, options.token, `/plans/${options.planId}/settings`, warn),
+        ynabFetch(baseUrl, options.token, `/plans/${options.planId}/accounts${delta}`, warn),
+        ynabFetch(baseUrl, options.token, `/plans/${options.planId}/categories${delta}`, warn),
+        ynabFetch(baseUrl, options.token, `/plans/${options.planId}/payees${delta}`, warn),
+        ynabFetch(baseUrl, options.token, `/plans/${options.planId}/transactions${transactionQuery}`, warn),
+      ]);
+      [plan, settings, accounts, categories, payees, transactions] = legacy;
+      [moneyMovements, moneyMovementGroups] = await Promise.all([
+        ynabFetchOptional(baseUrl, options.token, `/plans/${options.planId}/money_movements`, warn),
+        ynabFetchOptional(baseUrl, options.token, `/plans/${options.planId}/money_movement_groups`, warn),
+      ]);
+    }
 
     const fetchedTransactions = transactions.data.transactions ?? [];
+    const fetchedSubtransactions = transactions.data.subtransactions ?? flatten(fetchedTransactions, "subtransactions");
+    const fetchedScheduledTransactions = fullPlan?.scheduled_transactions ?? [];
+    const fetchedScheduledSubtransactions = fullPlan?.scheduled_subtransactions ?? flatten(fetchedScheduledTransactions, "subtransactions");
+    const fetchedMonths = fullPlan?.months ?? [];
+    const fetchedCategories = categories.data.categories ?? flatten(categories.data.category_groups ?? [], "categories");
+    const rawCounts: Record<string, number> = {};
+    const record = async (type: string, id: string, payload: any, knowledge?: number) => {
+      await repo.upsertYnabRawObject(options.planId, type, id, payload, knowledge);
+      rawCounts[type] = (rawCounts[type] ?? 0) + 1;
+      await options.progress?.();
+    };
+    // Settings and legacy plan detail responses do not carry the cursor.
+    // The mutable collection responses (or their full-export equivalents)
+    // are the authoritative delta cursor set.
+    const serverKnowledge = minimumServerKnowledge(accounts, categories, payees, transactions);
 
     if (options.minSimilarity !== undefined && options.lastKnowledgeOfServer == null) {
       const existing = await repo.listYnabTransactionFingerprints(options.planId);
@@ -82,30 +133,51 @@ export async function importYnabFromApi(
       }
     }
 
-    await repo.upsertPlan(options.planId, plan.data.plan ?? plan.data.budget ?? { id: options.planId }, settings.data.settings);
+    const importedPlan = plan.data.plan ?? plan.data.budget ?? { id: options.planId };
+    await repo.upsertPlan(options.planId, importedPlan, settings?.data?.settings);
     await options.progress?.();
 
-    for (const account of accounts.data.accounts ?? []) {
-      await repo.upsertAccount(options.planId, account);
-      await options.progress?.();
-    }
+    await record("plan", String(importedPlan.id ?? options.planId), withoutArrays(importedPlan), serverKnowledge);
+    if (settings?.data?.settings) await record("settings", "settings", settings.data.settings, settings.data.server_knowledge ?? serverKnowledge);
 
     for (const group of categories.data.category_groups ?? []) {
+      await record("category_group", String(group.id), withoutArrays(group), categories.data.server_knowledge ?? serverKnowledge);
       await repo.upsertCategoryGroup(options.planId, group);
-      for (const category of group.categories ?? []) {
-        await repo.upsertCategory(options.planId, category, group.id);
-        await options.progress?.();
-      }
       await options.progress?.();
     }
-
+    for (const category of fetchedCategories) {
+      await record("category", String(category.id), category, categories.data.server_knowledge ?? serverKnowledge);
+      await repo.upsertCategory(options.planId, category, category.category_group_id ?? findCategoryGroupId(categories.data.category_groups ?? [], category.id));
+      await options.progress?.();
+    }
     for (const payee of payees.data.payees ?? []) {
+      await record("payee", String(payee.id), payee, payees.data.server_knowledge ?? serverKnowledge);
       await repo.upsertPayee(options.planId, payee);
       await options.progress?.();
     }
+    // Transfer payees must exist before the accounts that reference them.
+    for (const account of accounts.data.accounts ?? []) {
+      await record("account", String(account.id), account, accounts.data.server_knowledge ?? serverKnowledge);
+      await repo.upsertAccount(options.planId, account);
+      await options.progress?.();
+    }
+    for (const location of fullPlan?.payee_locations ?? []) await record("payee_location", String(location.id), location, serverKnowledge);
+    for (const month of fetchedMonths) {
+      const monthId = String(month.month ?? month.id);
+      await record("month", monthId, withoutArrays(month), serverKnowledge);
+      for (const category of month.categories ?? []) await record("month_category", compositeId(monthId, String(category.id)), category, serverKnowledge);
+    }
+    for (const scheduled of fetchedScheduledTransactions) await record("scheduled_transaction", String(scheduled.id), scheduled, serverKnowledge);
+    for (const subtransaction of fetchedScheduledSubtransactions) await record("scheduled_subtransaction", compositeId(String(subtransaction.scheduled_transaction_id ?? "unknown"), String(subtransaction.id)), subtransaction, serverKnowledge);
+    for (const movement of moneyMovements?.data?.money_movements ?? []) await record("money_movement", String(movement.id), movement, moneyMovements?.data?.server_knowledge);
+    for (const group of moneyMovementGroups?.data?.money_movement_groups ?? []) await record("money_movement_group", String(group.id), group, moneyMovementGroups?.data?.server_knowledge);
 
     let imported = 0;
     for (const transaction of fetchedTransactions) {
+      await record("transaction", String(transaction.id), withoutArrays(transaction), transactions.data.server_knowledge ?? serverKnowledge);
+      const transactionSubtransactions = fetchedSubtransactions.filter((sub: any) => sub.transaction_id === transaction.id);
+      const resolvedSubtransactions = transactionSubtransactions.length ? transactionSubtransactions : transaction.subtransactions ?? [];
+      for (const sub of resolvedSubtransactions) await record("subtransaction", compositeId(String(transaction.id), String(sub.id)), sub, transactions.data.server_knowledge ?? serverKnowledge);
       // YNAB data already contains both sides of every transfer.
       await repo.createTransaction(options.planId, {
         id: transaction.id,
@@ -115,7 +187,11 @@ export async function importYnabFromApi(
         deleted: transaction.deleted,
         payee_id: transaction.payee_id,
         payee_name: transaction.payee_name,
-        category_id: transaction.category_id,
+        // YNAB can retain a legacy category ID on a split parent even though
+        // its categorisation lives exclusively on the split lines. Passing it
+        // into the normalised resolver would create an unused synthetic
+        // category, so keep it only in the raw source mirror above.
+        category_id: resolvedSubtransactions.length ? null : transaction.category_id,
         memo: transaction.memo,
         cleared: transaction.cleared,
         approved: transaction.approved,
@@ -130,7 +206,7 @@ export async function importYnabFromApi(
         external_ynab_id: transaction.id,
         source_kind: "ynab-import",
         source_ref: sessionId,
-        subtransactions: (transaction.subtransactions ?? []).map((sub: any) => ({
+        subtransactions: resolvedSubtransactions.map((sub: any) => ({
           id: sub.id,
           amount: sub.amount,
           payee_id: sub.payee_id,
@@ -147,9 +223,8 @@ export async function importYnabFromApi(
       await options.progress?.();
     }
 
-    const serverKnowledge = minimumServerKnowledge(accounts, categories, payees, transactions);
-    await repo.finishImportSession(sessionId, "completed", { imported_transactions: imported, server_knowledge: serverKnowledge });
-    return { import_session_id: sessionId, imported_transactions: imported, server_knowledge: serverKnowledge };
+    await repo.finishImportSession(sessionId, "completed", { imported_transactions: imported, raw_objects: rawCounts, server_knowledge: serverKnowledge });
+    return { import_session_id: sessionId, imported_transactions: imported, raw_objects: rawCounts, server_knowledge: serverKnowledge };
   } catch (error) {
     await repo.finishImportSession(sessionId, "failed", { error: error instanceof Error ? error.message : String(error) });
     throw error;
@@ -226,6 +301,45 @@ async function ynabFetch(
     throw new Error(`YNAB fetch failed for ${path}: ${response.status} ${await response.text()}`);
   }
   return response.json();
+}
+
+/** A compatibility fallback is allowed only for an endpoint absence (404). */
+async function ynabFetchOptional(
+  baseUrl: string,
+  token: string,
+  path: string,
+  warn?: (message: string) => void,
+): Promise<any | null> {
+  const response = await fetch(`${baseUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  const rateLimit = response.headers.get("x-rate-limit");
+  if (rateLimit && warn) {
+    const [used, limit] = rateLimit.split("/").map(Number);
+    if (Number.isFinite(used) && Number.isFinite(limit) && limit > 0 && used / limit >= RATE_LIMIT_WARN_RATIO) warn(`YNAB token has used ${used}/${limit} requests in the current hour; other apps sharing it may be starved`);
+  }
+  if (response.status === 404) return null;
+  if (response.status === 429) throw new YnabRateLimitError(`YNAB rate limit exceeded for ${path}`);
+  if (!response.ok) throw new Error(`YNAB fetch failed for ${path}: ${response.status} ${await response.text()}`);
+  return response.json();
+}
+
+function hasFullPlanCollections(plan: any): boolean {
+  return Boolean(plan) && ["accounts", "categories", "category_groups", "payees", "months", "transactions"].some((key) => Array.isArray(plan[key]));
+}
+
+function withoutArrays(value: any): any {
+  return Object.fromEntries(Object.entries(value ?? {}).filter(([, entry]) => !Array.isArray(entry)));
+}
+
+function flatten(values: any[], key: string): any[] {
+  return values.flatMap((value) => Array.isArray(value?.[key]) ? value[key] : []);
+}
+
+function compositeId(parentId: string, childId: string): string {
+  return `${parentId}\u001f${childId}`;
+}
+
+function findCategoryGroupId(groups: any[], categoryId: string): string | undefined {
+  return groups.find((group) => Array.isArray(group.categories) && group.categories.some((category: any) => category.id === categoryId))?.id;
 }
 
 // Six parallel requests all read the same quota header; report it once.

@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { ApiConfig } from "./config";
-import { LedgerRepository, NotFoundError, ValidationError } from "./repository";
+import { LedgerRepository, NotFoundError, ReconciliationMismatchError, ValidationError } from "./repository";
+import { DEFAULT_TRANSACTION_PAGE_SIZE, MAX_TRANSACTION_PAGE_SIZE, type TransactionFilters } from "./types";
 import { ReportService } from "./reports";
 import { decimalToMilliunits } from "./money";
 import { importCsvRows } from "./importers/csv";
@@ -17,6 +18,7 @@ import {
   verifyPassword,
 } from "./password-auth";
 import { randomBytes } from "node:crypto";
+import { ScheduledTransactionValidationError } from "./scheduled-transactions";
 
 type HandlerOptions = {
   db?: Database;
@@ -73,6 +75,31 @@ export function createHandler(options: HandlerOptions): (request: Request) => Pr
       }
       if (error instanceof ValidationError) {
         return apiError(400, "bad_request", error.message);
+      }
+      if (error instanceof ScheduledTransactionValidationError) {
+        return apiError(400, "bad_request", error.message);
+      }
+      if (error instanceof ReconciliationMismatchError) {
+        return json({
+          error: {
+            id: "409",
+            name: "reconciliation_mismatch",
+            detail: error.message,
+            current_reconciled_balance: error.currentReconciledBalance,
+            projected_reconciled_balance: error.projectedReconciledBalance,
+            statement_balance: error.statementBalance,
+            difference: error.difference,
+          },
+        }, 409);
+      }
+      if (error instanceof Error && error.message === "idempotency-key reuse") {
+        return apiError(409, "conflict", error.message);
+      }
+      if (error instanceof Error && error.message.includes("stale account reconciliation")) {
+        return apiError(409, "conflict", "The account changed while it was being reconciled");
+      }
+      if (error instanceof Error && (error.message === "stale scheduled occurrence" || error.message.includes("stale scheduled transaction"))) {
+        return apiError(409, "conflict", "The scheduled transaction changed while its occurrence was being entered");
       }
       console.error("Unhandled API error", error);
       return apiError(500, "internal_server_error", "An internal error occurred");
@@ -140,16 +167,27 @@ async function handleV1(
       return json({ data: { account, server_knowledge: await repo.getServerKnowledge(planId) } }, 201);
     }
     const accountId = segments[4];
+    if (segments.length === 6 && segments[5] === "reconciliation" && method === "GET") {
+      const statementDate = url.searchParams.get("statement_date");
+      if (!statementDate) throw new ValidationError("statement_date is required");
+      return json({ data: await repo.getAccountReconciliation(planId, accountId, statementDate) });
+    }
+    if (segments.length === 6 && segments[5] === "reconcile" && method === "POST") {
+      const operationId = requireIdempotencyKey(request);
+      const body = await readJson(request);
+      if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.statement_date !== "string") {
+        throw new ValidationError("statement_date is required");
+      }
+      if (!Number.isSafeInteger(body.statement_balance)) {
+        throw new ValidationError("statement_balance must be integer milliunits");
+      }
+      return json({ data: await repo.reconcileAccount(planId, accountId, body.statement_date, body.statement_balance, { operationId }) });
+    }
     if (segments.length === 5 && method === "GET") {
       return json({ data: { account: await repo.getAccount(planId, accountId) } });
     }
     if (segments.length === 6 && segments[5] === "transactions" && method === "GET") {
-      return json({
-        data: {
-          transactions: await repo.listTransactions(planId, queryFilters(url, { accountId })),
-          server_knowledge: await repo.getServerKnowledge(planId),
-        },
-      });
+      return transactionListResponse(repo, planId, queryFilters(url, { accountId }));
     }
   }
 
@@ -159,12 +197,7 @@ async function handleV1(
   if (resource === "categories") {
     const categoryId = segments[4];
     if (segments.length === 6 && segments[5] === "transactions" && method === "GET") {
-      return json({
-        data: {
-          transactions: await repo.listTransactions(planId, queryFilters(url, { categoryId })),
-          server_knowledge: await repo.getServerKnowledge(planId),
-        },
-      });
+      return transactionListResponse(repo, planId, queryFilters(url, { categoryId }));
     }
   }
 
@@ -179,13 +212,77 @@ async function handleV1(
     }
     const payeeId = segments[4];
     if (segments.length === 6 && segments[5] === "transactions" && method === "GET") {
-      return json({
-        data: {
-          transactions: await repo.listTransactions(planId, queryFilters(url, { payeeId })),
-          server_knowledge: await repo.getServerKnowledge(planId),
-        },
-      });
+      return transactionListResponse(repo, planId, queryFilters(url, { payeeId }));
     }
+  }
+
+  if (resource === "scheduled_transactions") {
+    if (segments.length === 4 && method === "GET") {
+      return json({ data: { scheduled_transactions: await repo.listScheduledTransactions(planId), server_knowledge: await repo.getServerKnowledge(planId) } });
+    }
+    if (segments.length === 4 && method === "POST") {
+      const body = await readJson(request);
+      if (!body.scheduled_transaction || typeof body.scheduled_transaction !== "object" || Array.isArray(body.scheduled_transaction)) {
+        throw new ValidationError("scheduled_transaction is required");
+      }
+      const scheduledTransaction = await repo.createScheduledTransaction(planId, body.scheduled_transaction, scheduledWriteOptions(request));
+      return json({ data: { scheduled_transaction: scheduledTransaction, server_knowledge: await repo.getServerKnowledge(planId) } }, 201);
+    }
+    if (segments.length === 5 && segments[4] === "materialize" && method === "POST") {
+      const administrationDenied = authorizePlanAdministration(principal, planId);
+      if (administrationDenied) return administrationDenied;
+      const requestOperationId = requireIdempotencyKey(request);
+      const body = await readJson(request);
+      if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.through_date !== "string") {
+        throw new ValidationError("through_date is required");
+      }
+      const result = await repo.materializeScheduledTransactions(planId, body.through_date, body.maximum ?? 5_000, requestOperationId);
+      return json({ data: { ...result, server_knowledge: await repo.getServerKnowledge(planId) } });
+    }
+    const scheduledTransactionId = segments[4];
+    if (segments.length === 5 && method === "GET") {
+      return json({ data: { scheduled_transaction: await repo.getScheduledTransaction(planId, scheduledTransactionId), server_knowledge: await repo.getServerKnowledge(planId) } });
+    }
+    if (segments.length === 5 && (method === "PATCH" || method === "PUT")) {
+      const body = await readJson(request);
+      const patch = body.scheduled_transaction ?? body;
+      if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new ValidationError("scheduled_transaction is required");
+      const scheduledTransaction = await repo.updateScheduledTransaction(planId, scheduledTransactionId, patch, scheduledWriteOptions(request));
+      return json({ data: { scheduled_transaction: scheduledTransaction, server_knowledge: await repo.getServerKnowledge(planId) } });
+    }
+    if (segments.length === 5 && method === "DELETE") {
+      const scheduledTransaction = await repo.deleteScheduledTransaction(planId, scheduledTransactionId, scheduledWriteOptions(request));
+      return json({ data: { scheduled_transaction: scheduledTransaction, server_knowledge: await repo.getServerKnowledge(planId) } });
+    }
+    if (segments.length === 6 && segments[5] === "materialize" && method === "POST") {
+      const administrationDenied = authorizePlanAdministration(principal, planId);
+      if (administrationDenied) return administrationDenied;
+      const requestOperationId = requireIdempotencyKey(request);
+      const body = await readJson(request);
+      if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.occurrence_date !== "string" || typeof body.date !== "string") {
+        throw new ValidationError("occurrence_date and date are required");
+      }
+      const result = await repo.materializeScheduledOccurrence(planId, scheduledTransactionId, body.occurrence_date, body.date, { allowClosedAccount: true, requestOperationId });
+      return json({ data: { ...result, server_knowledge: await repo.getServerKnowledge(planId) } });
+    }
+  }
+
+  if (resource === "scheduled_subtransactions" && segments.length === 4 && method === "GET") {
+    return json({ data: { scheduled_subtransactions: await repo.listScheduledSubtransactions(planId), server_knowledge: await repo.getServerKnowledge(planId) } });
+  }
+
+  // These source-only YNAB resources have no normalised write model yet. The
+  // raw mirror makes them safely available for clients switching over without
+  // discarding their existing scheduled/payee-location/movement data.
+  const sourceOnlyCollections: Record<string, { type: string; field: string }> = {
+    payee_locations: { type: "payee_location", field: "payee_locations" },
+    money_movements: { type: "money_movement", field: "money_movements" },
+    money_movement_groups: { type: "money_movement_group", field: "money_movement_groups" },
+  };
+  const sourceOnly = sourceOnlyCollections[resource];
+  if (sourceOnly && segments.length === 4 && method === "GET") {
+    const sourceObjects = await repo.listYnabRawObjects(planId, sourceOnly.type);
+    return json({ data: { [sourceOnly.field]: sourceObjects, server_knowledge: await repo.getServerKnowledge(planId) } });
   }
 
   if (resource === "months") {
@@ -193,24 +290,50 @@ async function handleV1(
     if (segments.length === 5 && method === "GET") {
       return json({ data: { month: await repo.getMonth(planId, month), server_knowledge: await repo.getServerKnowledge(planId) } });
     }
+    if (segments.length === 7 && segments[5] === "categories" && method === "PATCH") {
+      const body = await readJson(request);
+      if (!body || typeof body !== "object" || Array.isArray(body) || !body.category || typeof body.category !== "object" || Array.isArray(body.category)) {
+        throw new ValidationError("category with budgeted is required");
+      }
+      const category = body.category as Record<string, unknown>;
+      let updated: any;
+      if (Object.hasOwn(category, "target") || Object.hasOwn(category, "restore_target")) {
+        if (Object.hasOwn(category, "budgeted")) throw new ValidationError("Update either budgeted or target, not both");
+        if (category.restore_target === true) {
+          if (Object.hasOwn(category, "target")) throw new ValidationError("restore_target cannot be combined with target");
+          updated = await repo.restoreMonthCategoryTarget(planId, month, segments[6]);
+        } else if (Object.hasOwn(category, "target")) {
+          const target = category.target;
+          if (target !== null && (typeof target !== "object" || Array.isArray(target))) throw new ValidationError("target must be an object or null");
+          updated = await repo.setMonthCategoryTarget(planId, month, segments[6], target === null
+            ? { goal_type: null }
+            : target as { goal_type: "TB" | "TBD" | "MF" | "NEED" | "DEBT" | null; goal_target?: number | null; goal_target_month?: string | null });
+        } else {
+          throw new ValidationError("restore_target must be true");
+        }
+      } else {
+        const budgeted = category.budgeted;
+        if (typeof budgeted !== "number" || !Number.isSafeInteger(budgeted)) throw new ValidationError("budgeted must be integer milliunits");
+        updated = await repo.setMonthCategoryAssignment(planId, month, segments[6], budgeted);
+      }
+      return json({ data: { category: updated.categories.find((category: { id: string }) => category.id === segments[6]), month: updated, server_knowledge: await repo.getServerKnowledge(planId) } });
+    }
     if (segments.length === 6 && segments[5] === "transactions" && method === "GET") {
-      return json({
-        data: {
-          transactions: await repo.listTransactions(planId, queryFilters(url, { month })),
-          server_knowledge: await repo.getServerKnowledge(planId),
-        },
-      });
+      return transactionListResponse(repo, planId, queryFilters(url, { month }));
+    }
+    if (segments.length === 6 && method === "GET" && (segments[5] === "money_movements" || segments[5] === "money_movement_groups")) {
+      const mapping = segments[5] === "money_movements"
+        ? { type: "money_movement", field: "money_movements" }
+        : { type: "money_movement_group", field: "money_movement_groups" };
+      const objects = await repo.listYnabRawObjects(planId, mapping.type);
+      const monthStart = month.length === 7 ? `${month}-01` : month;
+      return json({ data: { [mapping.field]: objects.filter((object: any) => object.month === monthStart), server_knowledge: await repo.getServerKnowledge(planId) } });
     }
   }
 
   if (resource === "transactions") {
     if (segments.length === 4 && method === "GET") {
-      return json({
-        data: {
-          transactions: await repo.listTransactions(planId, queryFilters(url)),
-          server_knowledge: await repo.getServerKnowledge(planId),
-        },
-      });
+      return transactionListResponse(repo, planId, queryFilters(url));
     }
     if (segments.length === 4 && method === "POST") {
       const body = await readJson(request);
@@ -351,7 +474,7 @@ async function handleNative(
   return apiError(404, "not_found", "Route not found");
 }
 
-function queryFilters(url: URL, overrides: Record<string, string | null> = {}) {
+function queryFilters(url: URL, overrides: Record<string, string | null> = {}): TransactionFilters {
   return {
     sinceDate: url.searchParams.get("since_date"),
     untilDate: url.searchParams.get("until_date"),
@@ -361,7 +484,37 @@ function queryFilters(url: URL, overrides: Record<string, string | null> = {}) {
     categoryId: overrides.categoryId ?? null,
     month: overrides.month ? normaliseMonthStart(overrides.month) : null,
     lastKnowledgeOfServer: parseNumber(url.searchParams.get("last_knowledge_of_server")) ?? null,
+    limit: parseTransactionPageNumber(url.searchParams.get("limit"), "limit", DEFAULT_TRANSACTION_PAGE_SIZE, 1, MAX_TRANSACTION_PAGE_SIZE),
+    offset: parseTransactionPageNumber(url.searchParams.get("offset"), "offset", 0, 0),
   };
+}
+
+async function transactionListResponse(repo: LedgerStore, planId: string, filters: TransactionFilters): Promise<Response> {
+  const page = await repo.listTransactionsPage(planId, filters);
+  return json({
+    data: {
+      transactions: page.transactions,
+      server_knowledge: await repo.getServerKnowledge(planId),
+      has_more: page.has_more,
+      next_offset: page.next_offset,
+    },
+  });
+}
+
+function parseTransactionPageNumber(
+  value: string | null,
+  name: "limit" | "offset",
+  fallback: number,
+  minimum: number,
+  maximum = Number.MAX_SAFE_INTEGER,
+): number {
+  if (value == null) return fallback;
+  if (!/^\d+$/.test(value)) throw new ValidationError(`${name} must be a whole number`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new ValidationError(`${name} must be between ${minimum} and ${maximum}`);
+  }
+  return parsed;
 }
 
 function reportFilters(url: URL) {
@@ -405,6 +558,21 @@ async function readJson(request: Request): Promise<any> {
   } catch {
     throw new ValidationError("Request body is not valid JSON");
   }
+}
+
+function scheduledWriteOptions(request: Request): { operationId?: string } {
+  const key = request.headers.get("idempotency-key");
+  if (key == null) return {};
+  if (!/^[A-Za-z0-9._:-]{8,128}$/.test(key)) {
+    throw new ValidationError("Idempotency-Key must be 8-128 letters, numbers, dots, underscores, colons, or hyphens");
+  }
+  return { operationId: `http_${sha256(key)}` };
+}
+
+function requireIdempotencyKey(request: Request): string {
+  const options = scheduledWriteOptions(request);
+  if (!options.operationId) throw new ValidationError("Idempotency-Key is required");
+  return options.operationId;
 }
 
 async function handleAuth(request: Request, url: URL, store: AuthStore, config: ApiConfig): Promise<Response> {
@@ -559,6 +727,13 @@ function authorizePlan(principal: Principal, planId: string, defaultPlanId: stri
   }
   if (principal.kind === "session" && isUnsafeMethod(method) && principal.roles[planId] === "viewer") {
     return apiError(403, "forbidden", "Plan is read-only");
+  }
+  return null;
+}
+
+function authorizePlanAdministration(principal: Principal, planId: string): Response | null {
+  if (principal.kind === "session" && principal.roles[planId] !== "owner") {
+    return apiError(403, "forbidden", "Plan owner access is required");
   }
   return null;
 }

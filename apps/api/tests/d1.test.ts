@@ -4,12 +4,14 @@ import { D1Database, type D1Binding, type D1Result, type D1Statement } from "../
 import { D1ReportService } from "../src/d1-reports";
 import { D1ScheduledSyncState } from "../src/d1-scheduled-sync";
 import { runD1ScheduledYnabSync } from "../src/d1-scheduled-sync-runner";
+import { runDailyScheduledMaterialization, scheduledLocalDate, scheduledMaterializationOperationId } from "../src/scheduled-materialization-runner";
 import { D1TransactionRepository } from "../src/d1-transaction-repository";
 import { D1MetadataRepository } from "../src/d1-metadata-repository";
 import { D1LedgerRepository } from "../src/d1-ledger-repository";
 import { D1AuthStore } from "../src/auth-store";
 import { newSession } from "../src/password-auth";
 import { ReportService } from "../src/reports";
+import { importYnabFromApi } from "../src/importers/ynab";
 import worker from "../../worker/src/index";
 
 const databases: Database[] = [];
@@ -19,10 +21,10 @@ afterEach(() => { globalThis.fetch=originalFetch; for (const db of databases.spl
 describe("D1 foundation", () => {
   test("canonical schema applies cleanly with auth constraints and cascades", async () => {
     const db = sqlite();
-    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
+    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
     const objects = db.query("SELECT name,type FROM sqlite_master WHERE type IN ('table','index','trigger')").all() as Array<{name:string;type:string}>;
     const names = new Set(objects.map((row) => row.name));
-    for (const name of ["plans","import_sessions","import_rows","users","auth_identities","sessions","plan_memberships","password_credentials","auth_setup","login_rate_limits","sync_runs","sync_attempts","sync_transition_receipts","audit_events","write_state","write_commands","write_assertions","idx_sessions_user","idx_sessions_expiry","idx_plan_memberships_user_plan","transactions_assign_ledger_sequence","accounts_transfer_payee_plan_guard"]) expect(names.has(name)).toBeTrue();
+    for (const name of ["plans","import_sessions","import_rows","ynab_raw_objects","plan_month_assignments","plan_month_category_targets","scheduled_transaction_edits","scheduled_subtransaction_edits","scheduled_transaction_snapshot_assertions","account_reconciliation_assertions","users","auth_identities","sessions","plan_memberships","password_credentials","auth_setup","login_rate_limits","sync_runs","sync_attempts","sync_transition_receipts","audit_events","write_state","write_commands","write_assertions","idx_sessions_user","idx_sessions_expiry","idx_plan_memberships_user_plan","transactions_assign_ledger_sequence","accounts_transfer_payee_plan_guard"]) expect(names.has(name)).toBeTrue();
     expect(names.has("schema_migrations")).toBeFalse();
     expect(names.has("migration_runs")).toBeFalse();
     expect(names.has("migration_chunks")).toBeFalse();
@@ -44,6 +46,9 @@ describe("D1 foundation", () => {
     expect(db.query("SELECT id FROM sessions WHERE user_id='u1'").get()).toBeNull();
     expect(db.query("SELECT plan_id FROM plan_memberships WHERE user_id='u1'").get()).toBeNull();
     expect(db.query("SELECT id FROM auth_identities WHERE user_id='u1'").get()).toBeNull();
+
+    db.run("INSERT INTO payees(id,plan_id,name) VALUES ('same-a','p1','Same'),('same-b','p1','Same')");
+    expect(db.query("SELECT id FROM payees WHERE plan_id='p1' AND name='Same' ORDER BY id").all()).toEqual([{ id: "same-a" }, { id: "same-b" }]);
   });
 
   test("D1 auth setup is atomic, one-time, and uses returning rate counters", async () => {
@@ -85,8 +90,7 @@ describe("D1 foundation", () => {
       DB: fakeD1(db),
       HOWMUCH_API_TOKEN: "worker-token",
       HOWMUCH_DEFAULT_PLAN_ID: "p",
-      HOWMUCH_YNAB_PLAN_ID: "p",
-      HOWMUCH_YNAB_MIN_SIMILARITY: "0.95",
+      HOWMUCH_TIME_ZONE: "Asia/Singapore",
     };
     const headers = { authorization: "Bearer worker-token", "content-type": "application/json" };
 
@@ -107,7 +111,7 @@ describe("D1 foundation", () => {
     const asset = await worker.fetch(new Request("https://howmuch.test/dashboard"), env as any);
     expect(await asset.text()).toBe("asset");
     expect(assetRequests).toEqual(["https://howmuch.test/dashboard"]);
-    await expect(worker.scheduled({ scheduledTime: Date.now() } as any, env as any)).rejects.toThrow("HOWMUCH_YNAB_TOKEN");
+    await expect(worker.scheduled({ scheduledTime: Date.UTC(2026, 7, 20, 16, 5) } as any, env as any)).resolves.toBeUndefined();
 
     const workerSource = await Bun.file(new URL("../../worker/src/index.ts", import.meta.url)).text();
     expect(workerSource).not.toContain("@neondatabase");
@@ -121,9 +125,49 @@ describe("D1 foundation", () => {
     const wranglerConfig = JSON.parse((await Bun.file(new URL("../../worker/wrangler.jsonc", import.meta.url)).text()).replace(/^\s*\/\/.*$/gm, ""));
     expect(wranglerConfig.d1_databases[0]).toMatchObject({ database_name: "howmuch-production", database_id: "57dc5569-d639-44c1-bb9d-6214f43a43b8" });
     expect(wranglerConfig.env.preview.d1_databases[0]).toMatchObject({ database_name: "howmuch-preview", database_id: "7ca818bd-7f04-4b9b-8a84-8c8f84a6a272" });
+    expect(wranglerConfig.vars).toEqual({ HOWMUCH_DEFAULT_PLAN_ID: "80bc6db0-d926-4635-a37a-1ba0787c4c4e", HOWMUCH_TIME_ZONE: "Asia/Singapore" });
+    expect(wranglerConfig.triggers.crons).toEqual(["5 16 * * *"]);
     expect(wranglerConfig.env.preview.routes).toEqual([]);
     expect(wranglerConfig.env.preview.triggers.crons).toEqual([]);
+    expect(wranglerConfig.env.preview.vars).toEqual({ HOWMUCH_DEFAULT_PLAN_ID: "80bc6db0-d926-4635-a37a-1ba0787c4c4e", HOWMUCH_TIME_ZONE: "Asia/Singapore" });
+    expect(workerSource).not.toContain("HOWMUCH_YNAB");
+    expect(workerSource).not.toContain("runD1ScheduledYnabSync");
     expect(await Bun.file(new URL("../../../bun.lock", import.meta.url)).text()).not.toContain("@neondatabase/serverless");
+  });
+
+  test("Worker cron logs a count-only failure summary after materialising valid schedules", async () => {
+    const db = await ledgerSqlite();
+    const setup = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await setup.upsertPayee("p", { id: "cron-deleted-payee", name: "Temporary" });
+    await setup.createScheduledTransaction("p", {
+      id: "cron-bad", account_id: "a", payee_id: "cron-deleted-payee", date_first: "2026-08-21", frequency: "never", amount: -100,
+    });
+    await setup.createScheduledTransaction("p", {
+      id: "cron-good", account_id: "a", date_first: "2026-08-21", frequency: "never", amount: -200,
+    });
+    db.run("UPDATE payees SET deleted=1 WHERE plan_id='p' AND id='cron-deleted-payee'");
+    const env = {
+      ASSETS: { fetch: async () => new Response("asset") }, DB: fakeD1(db), HOWMUCH_API_TOKEN: "worker-token",
+      HOWMUCH_DEFAULT_PLAN_ID: "p", HOWMUCH_TIME_ZONE: "Asia/Singapore",
+    };
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (value: string) => { logs.push(value); };
+    try {
+      await expect(worker.scheduled({ scheduledTime: Date.UTC(2026, 7, 20, 16, 5) } as any, env as any))
+        .rejects.toThrow("Scheduled materialisation completed with schedule failures");
+    } finally {
+      console.log = originalLog;
+    }
+
+    expect(db.query("SELECT COUNT(*) count FROM transactions WHERE source_kind='scheduled-transaction'").get()).toEqual({ count: 1 });
+    const event = JSON.parse(logs[0]);
+    expect(event).toEqual({
+      event: "scheduled_materialization", through_date: "2026-08-21", occurrence_count: 1,
+      skipped_closed_schedule_count: 0, failure_count: 1, has_more: true,
+    });
+    expect(JSON.stringify(event)).not.toContain("cron-bad");
+    expect(JSON.stringify(event)).not.toContain("cron-good");
   });
 
   test("LedgerStore facade supports HTTP, CSV, metadata, imports, and lease fencing", async () => {
@@ -161,6 +205,555 @@ describe("D1 foundation", () => {
     const fenced = new D1LedgerRepository(d1, "p", { lease: (planId) => ({ planId, attemptId: "stale" }) });
     await expect(fenced.upsertPayee("p", { id: "blocked", name: "Blocked" })).rejects.toThrow("stale write command");
     expect(db.query("SELECT id FROM payees WHERE id='blocked'").get()).toBeNull();
+  });
+
+  test("D1 schedule writes overlay imported rows, replay safely, and retain transfer and split references", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await repo.upsertAccount("p", { id: "b", name: "Savings" });
+    await repo.upsertCategoryGroup("p", { id: "living", name: "Living" });
+    await repo.upsertCategory("p", { id: "food", category_group_id: "living", name: "Food" });
+    await repo.upsertPayee("p", { id: "merchant", name: "Merchant" });
+    const transferPayee = db.query("SELECT id FROM payees WHERE plan_id='p' AND transfer_account_id='b'").get() as { id: string };
+    const source = {
+      id: "source-schedule", account_id: "a", account_name: "Cash", date_first: "2026-08-01",
+      date_next: "2026-09-01", frequency: "monthly", amount: -1000, payee_id: "merchant",
+      category_id: "food", memo: "source", source_marker: "immutable", deleted: false,
+    };
+    await repo.upsertYnabRawObject("p", "scheduled_transaction", source.id, source);
+    const rawBefore = db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='scheduled_transaction' AND object_id=?").get(source.id);
+    const versionBefore = (db.query("SELECT write_version FROM write_state").get() as { write_version: number }).write_version;
+
+    const updated = await repo.updateScheduledTransaction("p", source.id, { date_next: "2026-10-01", memo: "edited" }, { operationId: "schedule-update-once" });
+    const replayedUpdate = await repo.updateScheduledTransaction("p", source.id, { date_next: "2026-10-01", memo: "edited" }, { operationId: "schedule-update-once" });
+    expect(replayedUpdate).toEqual(updated);
+    expect(updated).toMatchObject({ id: source.id, date_next: "2026-10-01", memo: "edited", source_marker: "immutable" });
+    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='scheduled_transaction' AND object_id=?").get(source.id)).toEqual(rawBefore);
+    expect(db.query("SELECT origin FROM scheduled_transaction_edits WHERE id=?").get(source.id)).toEqual({ origin: "ynab-overlay" });
+    expect(db.query("SELECT write_version FROM write_state").get()).toEqual({ write_version: versionBefore + 1 });
+
+    const splitInput = {
+      account_id: "a", date_first: "2026-08-15", frequency: "monthly", amount: -3000,
+      subtransactions: [
+        { amount: -1000, category_id: "food", memo: "food" },
+        { amount: -2000, payee_id: transferPayee.id, transfer_account_id: "b", memo: "save" },
+      ],
+    };
+    const created = await repo.createScheduledTransaction("p", splitInput, { operationId: "schedule-create-once" });
+    const replayedCreate = await repo.createScheduledTransaction("p", splitInput, { operationId: "schedule-create-once" });
+    expect(replayedCreate).toEqual(created);
+    expect(created).toMatchObject({ account_id: "a", date_next: "2026-08-15", amount: -3000 });
+    expect(created.subtransactions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ amount: -1000, category_id: "food" }),
+      expect.objectContaining({ amount: -2000, payee_id: transferPayee.id, transfer_account_id: "b" }),
+    ]));
+    expect(db.query("SELECT COUNT(*) AS count FROM scheduled_subtransaction_edits WHERE scheduled_transaction_id=?").get(created.id)).toEqual({ count: 2 });
+    expect(db.query("SELECT COUNT(*) AS count FROM audit_events WHERE action='scheduled_transaction.create'").get()).toEqual({ count: 1 });
+    await expect(repo.createScheduledTransaction("p", { ...splitInput, memo: "different request" }, { operationId: "schedule-create-once" })).rejects.toThrow("idempotency-key reuse");
+    expect((await repo.listScheduledSubtransactions("p")).map((row) => row.id)).toEqual(created.subtransactions.map((row: any) => row.id));
+
+    const deleted = await repo.deleteScheduledTransaction("p", source.id, { operationId: "schedule-delete-once" });
+    const replayedDelete = await repo.deleteScheduledTransaction("p", source.id, { operationId: "schedule-delete-once" });
+    expect(replayedDelete).toEqual(deleted);
+    expect(deleted.deleted).toBeTrue();
+    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='scheduled_transaction' AND object_id=?").get(source.id)).toEqual(rawBefore);
+    expect((await repo.listScheduledTransactions("p")).map((row) => row.id)).toEqual([created.id]);
+  });
+
+  test("D1 materialisation pairs explicit transfers, applies cash clearing per leg, and replays exactly", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await repo.upsertAccount("p", { id: "a", name: "Cash", type: "checking" });
+    await repo.upsertAccount("p", { id: "wallet", name: "Wallet", type: "cash" });
+    await repo.upsertCategoryGroup("p", { id: "living", name: "Living" });
+    await repo.upsertCategory("p", { id: "food", name: "Food" }, "living");
+    await repo.createScheduledTransaction("p", {
+      id: "cash-to-bank", account_id: "wallet", date_first: "2026-01-31", date_next: "2026-01-31",
+      frequency: "monthly", amount: -1000, transfer_account_id: "a",
+    });
+
+    const first = await repo.materializeScheduledOccurrence("p", "cash-to-bank", "2026-01-31", "2026-01-20", { requestOperationId: "d1-enter-cash" });
+    expect(first).toMatchObject({ replayed: false, transaction: { account_id: "wallet", cleared: "cleared", approved: false }, scheduled_transaction: { date_next: "2026-02-28" } });
+    expect(db.query("SELECT account_id,cleared,approved,amount_milli FROM transactions WHERE transfer_transaction_id=?").get(first.transaction.id)).toEqual({ account_id: "a", cleared: "uncleared", approved: 0, amount_milli: 1000 });
+    const replay = await repo.materializeScheduledOccurrence("p", "cash-to-bank", "2026-01-31", "2026-01-20", { requestOperationId: "d1-enter-cash" });
+    expect(replay).toMatchObject({ replayed: true, transaction: { id: first.transaction.id }, scheduled_transaction: { date_next: "2026-02-28" } });
+    expect(db.query("SELECT COUNT(*) count FROM transactions").get()).toEqual({ count: 2 });
+
+    await repo.createScheduledTransaction("p", {
+      id: "split-to-cash", account_id: "a", date_first: "2026-08-24", frequency: "never", amount: -3000,
+      subtransactions: [{ amount: -1000, category_id: "food" }, { amount: -2000, transfer_account_id: "wallet" }],
+    });
+    const split = await repo.materializeScheduledOccurrence("p", "split-to-cash", "2026-08-24", "2026-08-20", { requestOperationId: "d1-enter-split" });
+    expect(split).toMatchObject({ completed: true, scheduled_transaction: { deleted: true } });
+    expect(split.transaction.subtransactions).toEqual(expect.arrayContaining([expect.objectContaining({ transfer_account_id: "wallet", amount: -2000 })]));
+    expect(db.query("SELECT cleared,approved,amount_milli FROM transactions WHERE account_id='wallet' AND id<>?").get(first.transaction.id)).toEqual({ cleared: "cleared", approved: 0, amount_milli: 2000 });
+  });
+
+  test("D1 reconciliation is account-scoped, handles large candidate sets, and replays exactly", async () => {
+    const db = await ledgerSqlite();
+    db.run("UPDATE accounts SET opening_balance_milli=1000 WHERE id='a'");
+    db.run("INSERT INTO accounts(id,plan_id,name) VALUES ('other','p','Other')");
+    db.run("INSERT INTO transactions(id,plan_id,account_id,date,amount_milli,cleared) VALUES ('prior','p','a','2026-07-01',100,'reconciled')");
+    for (let index = 0; index < 101; index += 1) {
+      db.run(
+        "INSERT INTO transactions(id,plan_id,account_id,date,amount_milli,cleared) VALUES (?,?,?,?,?,'cleared')",
+        [`eligible-${String(index).padStart(3, "0")}`, "p", "a", "2026-08-20", -1],
+      );
+    }
+    db.run("INSERT INTO transactions(id,plan_id,account_id,date,amount_milli,cleared) VALUES ('future','p','a','2026-09-01',-300,'cleared')");
+    db.run("INSERT INTO transactions(id,plan_id,account_id,date,amount_milli,cleared) VALUES ('uncleared','p','a','2026-08-01',-400,'uncleared')");
+    db.run("INSERT INTO transactions(id,plan_id,account_id,date,amount_milli,cleared,deleted) VALUES ('deleted','p','a','2026-08-01',-500,'cleared',1)");
+    db.run("INSERT INTO transactions(id,plan_id,account_id,date,amount_milli,cleared) VALUES ('other-row','p','other','2026-08-01',700,'cleared')");
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db, { maxBindings: 50 })), "p");
+
+    const preview = await repo.getAccountReconciliation("p", "a", "2026-08-31");
+    expect(preview).toMatchObject({
+      account: { id: "a" }, statement_date: "2026-08-31",
+      current_reconciled_balance: 1100, projected_reconciled_balance: 999,
+      candidate_transaction_count: 101,
+    });
+    expect(preview.candidate_transaction_ids[0]).toBe("eligible-000");
+    expect(preview.candidate_transaction_ids.at(-1)).toBe("eligible-100");
+    expect(db.query("SELECT write_version FROM write_state").get()).toEqual({ write_version: 0 });
+    await expect(repo.reconcileAccount("p", "a", "2026-08-31", 1000, { operationId: "d1-reconcile-mismatch" }))
+      .rejects.toMatchObject({ currentReconciledBalance: 1100, projectedReconciledBalance: 999, difference: 1 });
+    const versionBefore = (db.query("SELECT write_version FROM write_state").get() as { write_version: number }).write_version;
+    const first = await repo.reconcileAccount("p", "a", "2026-08-31", 999, { operationId: "d1-reconcile-august" });
+    expect(first).toMatchObject({
+      account: { id: "a" }, reconciled_transaction_count: 101,
+      statement_date: "2026-08-31", statement_balance: 999,
+      prior_reconciled_balance: 1100, final_reconciled_balance: 999,
+      replayed: false,
+    });
+    expect(first.reconciled_transaction_ids[0]).toBe("eligible-000");
+    expect(first.reconciled_transaction_ids.at(-1)).toBe("eligible-100");
+    expect(db.query("SELECT COUNT(*) count FROM transactions WHERE account_id='a' AND cleared='reconciled'").get()).toEqual({ count: 102 });
+    expect(db.query("SELECT id,cleared,deleted FROM transactions WHERE id IN ('future','uncleared','deleted','other-row') ORDER BY id").all()).toEqual([
+      { id: "deleted", cleared: "cleared", deleted: 1 },
+      { id: "future", cleared: "cleared", deleted: 0 },
+      { id: "other-row", cleared: "cleared", deleted: 0 },
+      { id: "uncleared", cleared: "uncleared", deleted: 0 },
+    ]);
+    expect(db.query("SELECT write_version FROM write_state").get()).toEqual({ write_version: versionBefore + 1 });
+
+    const replay = await repo.reconcileAccount("p", "a", "2026-08-31", 999, { operationId: "d1-reconcile-august" });
+    expect(replay).toMatchObject({ ...first, replayed: true });
+    expect(db.query("SELECT write_version FROM write_state").get()).toEqual({ write_version: versionBefore + 1 });
+    expect(db.query("SELECT COUNT(*) count FROM audit_events WHERE action='account.reconcile'").get()).toEqual({ count: 1 });
+    await expect(repo.reconcileAccount("p", "a", "2026-08-31", 998, { operationId: "d1-reconcile-august" })).rejects.toThrow("idempotency-key reuse");
+  });
+
+  test("D1 reconciliation aborts the whole batch when an eligible row changes after preflight", async () => {
+    const db = await ledgerSqlite();
+    db.run("INSERT INTO transactions(id,plan_id,account_id,date,amount_milli,cleared) VALUES ('racing-cleared','p','a','2026-08-01',-100,'cleared')");
+    const knowledgeBefore = db.query("SELECT server_knowledge FROM plans WHERE id='p'").get();
+    const versionBefore = db.query("SELECT write_version FROM write_state").get();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db, { beforeWriteBatch: (database) => {
+      database.run("UPDATE transactions SET cleared='uncleared' WHERE id='racing-cleared'");
+    } })), "p");
+
+    await expect(repo.reconcileAccount("p", "a", "2026-08-31", -100, { operationId: "d1-reconcile-race" }))
+      .rejects.toThrow("stale account reconciliation");
+    expect(db.query("SELECT cleared FROM transactions WHERE id='racing-cleared'").get()).toEqual({ cleared: "uncleared" });
+    expect(db.query("SELECT server_knowledge FROM plans WHERE id='p'").get()).toEqual(knowledgeBefore);
+    expect(db.query("SELECT write_version FROM write_state").get()).toEqual(versionBefore);
+    expect(db.query("SELECT id FROM write_commands WHERE id='d1-reconcile-race'").get()).toBeNull();
+    expect(db.query("SELECT COUNT(*) count FROM audit_events WHERE action='account.reconcile'").get()).toEqual({ count: 0 });
+  });
+
+  test("D1 reconciliation is isolated by plan and recovers an ambiguous committed batch", async () => {
+    const db = await ledgerSqlite();
+    const setup = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await setup.ensurePlan("other", "Other");
+    await setup.createAccount("other", { id: "other-account", name: "Other account" });
+    await setup.createTransaction("other", { id: "other-cleared", account_id: "other-account", date: "2026-08-01", amount: 75, cleared: "cleared" });
+    const versionBefore = (db.query("SELECT write_version FROM write_state").get() as { write_version: number }).write_version;
+
+    await expect(setup.reconcileAccount("p", "other-account", "2026-08-31", 75, { operationId: "wrong-plan-reconcile" }))
+      .rejects.toThrow("Account not found");
+    expect(db.query("SELECT cleared FROM transactions WHERE id='other-cleared'").get()).toEqual({ cleared: "cleared" });
+    expect(db.query("SELECT write_version FROM write_state").get()).toEqual({ write_version: versionBefore });
+
+    db.run("INSERT INTO transactions(id,plan_id,account_id,date,amount_milli,cleared) VALUES ('ambiguous-cleared','p','a','2026-08-01',-100,'cleared')");
+    const ambiguous = new D1LedgerRepository(new D1Database(fakeD1(db, { commitThenThrowOnce: true })), "p");
+    const first = await ambiguous.reconcileAccount("p", "a", "2026-08-31", -100, { operationId: "ambiguous-reconcile" });
+    expect(first).toMatchObject({ reconciled_transaction_ids: ["ambiguous-cleared"], replayed: false });
+    expect(db.query("SELECT cleared FROM transactions WHERE id='ambiguous-cleared'").get()).toEqual({ cleared: "reconciled" });
+    expect(db.query("SELECT COUNT(*) count FROM audit_events WHERE action='account.reconcile' AND resource_id='a'").get()).toEqual({ count: 1 });
+    const replay = await ambiguous.reconcileAccount("p", "a", "2026-08-31", -100, { operationId: "ambiguous-reconcile" });
+    expect(replay).toMatchObject({ reconciled_transaction_ids: ["ambiguous-cleared"], replayed: true });
+    expect(db.query("SELECT COUNT(*) count FROM audit_events WHERE action='account.reconcile' AND resource_id='a'").get()).toEqual({ count: 1 });
+  });
+
+  test("D1 materialisation preserves a concurrent schedule edit and cannot post a second occurrence", async () => {
+    const db = await ledgerSqlite();
+    const setup = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await setup.createScheduledTransaction("p", {
+      id: "racing", account_id: "a", date_first: "2026-08-24", date_next: "2026-08-24", frequency: "monthly", amount: -100,
+    });
+    const racing = new D1LedgerRepository(new D1Database(fakeD1(db, { beforeWriteBatch: (database) => {
+      const row = database.query("SELECT payload_json FROM scheduled_transaction_edits WHERE plan_id='p' AND id='racing'").get() as { payload_json: string };
+      const payload = { ...JSON.parse(row.payload_json), date_next: "2026-09-15", memo: "user edit" };
+      database.query("UPDATE scheduled_transaction_edits SET payload_json=?,date_next=? WHERE plan_id='p' AND id='racing'").run(JSON.stringify(payload), payload.date_next);
+    } })), "p");
+
+    await expect(racing.materializeScheduledOccurrence("p", "racing", "2026-08-24", "2026-08-24")).rejects.toThrow("stale scheduled occurrence");
+    expect(await racing.getScheduledTransaction("p", "racing")).toMatchObject({ date_next: "2026-09-15", memo: "user edit" });
+    expect(db.query("SELECT COUNT(*) count FROM transactions WHERE source_kind='scheduled-transaction'").get()).toEqual({ count: 1 });
+    const replay = await racing.materializeScheduledOccurrence("p", "racing", "2026-08-24", "2026-08-24");
+    expect(replay).toMatchObject({ replayed: true, scheduled_transaction: { date_next: "2026-09-15", memo: "user edit" } });
+    expect(db.query("SELECT COUNT(*) count FROM transactions WHERE source_kind='scheduled-transaction'").get()).toEqual({ count: 1 });
+  });
+
+  test("D1 manual catch-up materialises every missed anchored date and completes one-off schedules", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await repo.createScheduledTransaction("p", {
+      id: "month-end", account_id: "a", date_first: "2026-01-31", date_next: "2026-01-31", frequency: "monthly", amount: -100,
+    });
+    await repo.createScheduledTransaction("p", {
+      id: "one-off", account_id: "a", date_first: "2026-02-10", frequency: "never", amount: -50,
+    });
+
+    const result = await repo.materializeScheduledTransactions("p", "2026-03-31", 20, "d1-catch-up");
+    expect(result.occurrences.map((row) => `${row.scheduled_transaction.id}:${row.occurrence_date}`)).toEqual([
+      "month-end:2026-01-31", "month-end:2026-02-28", "month-end:2026-03-31", "one-off:2026-02-10",
+    ]);
+    expect(await repo.getScheduledTransaction("p", "month-end")).toMatchObject({ date_next: "2026-04-30" });
+    await expect(repo.getScheduledTransaction("p", "one-off")).rejects.toThrow("not found");
+    expect(db.query("SELECT COUNT(*) count FROM transactions WHERE source_kind='scheduled-transaction'").get()).toEqual({ count: 4 });
+  });
+
+  test("daily materialisation derives the Singapore date and handles zero due, due, retry, and closed skips", async () => {
+    expect(scheduledLocalDate(Date.UTC(2026, 7, 20, 15, 59), "Asia/Singapore")).toBe("2026-08-20");
+    expect(scheduledLocalDate(Date.UTC(2026, 7, 20, 16, 5), "Asia/Singapore")).toBe("2026-08-21");
+    expect(scheduledMaterializationOperationId("p", "2026-08-21")).toBe(scheduledMaterializationOperationId("p", "2026-08-21"));
+
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    const scheduledTime = Date.UTC(2026, 7, 20, 16, 5);
+    expect(await runDailyScheduledMaterialization({ repo, planId: "p", timeZone: "Asia/Singapore", scheduledTime })).toEqual({
+      through_date: "2026-08-21", occurrence_count: 0, skipped_closed_schedule_count: 0, failure_count: 0, has_more: false,
+    });
+
+    await repo.createScheduledTransaction("p", {
+      id: "cron-due", account_id: "a", date_first: "2026-08-21", frequency: "never", amount: -100,
+    });
+    await repo.upsertAccount("p", { id: "closed", name: "Closed", closed: true });
+    await repo.createScheduledTransaction("p", {
+      id: "cron-closed", account_id: "closed", date_first: "2026-08-21", frequency: "monthly", amount: -200,
+    });
+    const first = await runDailyScheduledMaterialization({ repo, planId: "p", timeZone: "Asia/Singapore", scheduledTime });
+    expect(first).toEqual({ through_date: "2026-08-21", occurrence_count: 1, skipped_closed_schedule_count: 1, failure_count: 0, has_more: false });
+    expect(db.query("SELECT COUNT(*) count FROM transactions WHERE source_kind='scheduled-transaction'").get()).toEqual({ count: 1 });
+
+    const retry = await runDailyScheduledMaterialization({ repo, planId: "p", timeZone: "Asia/Singapore", scheduledTime });
+    expect(retry).toEqual({ through_date: "2026-08-21", occurrence_count: 0, skipped_closed_schedule_count: 1, failure_count: 0, has_more: false });
+    expect(db.query("SELECT COUNT(*) count FROM transactions WHERE source_kind='scheduled-transaction'").get()).toEqual({ count: 1 });
+  });
+
+  test("daily materialisation propagates failure and reuses its operation seed for recovery", async () => {
+    const operationIds: string[] = [];
+    let attempt = 0;
+    const repo = {
+      materializeScheduledTransactionsForCron(_planId: string, throughDate: string, _maximum: number, operationId?: string) {
+        operationIds.push(String(operationId));
+        attempt += 1;
+        if (attempt === 1) throw new Error("partial materialisation failure");
+        return {
+          through_date: throughDate,
+          occurrence_count: 1,
+          skipped_closed_schedule_count: 0,
+          failure_count: 0,
+          has_more: false,
+        };
+      },
+    };
+    const options = { repo, planId: "p", timeZone: "Asia/Singapore", scheduledTime: Date.UTC(2026, 7, 20, 16, 5) };
+    await expect(runDailyScheduledMaterialization(options)).rejects.toThrow("partial materialisation failure");
+    expect(await runDailyScheduledMaterialization(options)).toEqual({
+      through_date: "2026-08-21", occurrence_count: 1, skipped_closed_schedule_count: 0, failure_count: 0, has_more: false,
+    });
+    expect(operationIds).toEqual([operationIds[0], operationIds[0]]);
+    expect(operationIds[0]).toBe(scheduledMaterializationOperationId("p", "2026-08-21"));
+  });
+
+  test("D1 cron materialisation isolates a transient schedule failure and a same-day retry recovers without duplicates", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await repo.createScheduledTransaction("p", {
+      id: "cron-first", account_id: "a", date_first: "2026-08-20", frequency: "daily", amount: -100,
+    });
+    await repo.createScheduledTransaction("p", {
+      id: "cron-second", account_id: "a", date_first: "2026-08-21", frequency: "never", amount: -200,
+    });
+    const materialize = repo.materializeScheduledOccurrence.bind(repo);
+    let failOnce = true;
+    repo.materializeScheduledOccurrence = async (...args) => {
+      if (args[1] === "cron-second" && failOnce) {
+        failOnce = false;
+        throw new Error("temporary D1 command failure");
+      }
+      return materialize(...args);
+    };
+
+    const first = await repo.materializeScheduledTransactionsForCron("p", "2026-08-21", 5, "cron-run");
+    expect(first).toEqual({
+      through_date: "2026-08-21", occurrence_count: 2, skipped_closed_schedule_count: 0, failure_count: 1, has_more: true,
+    });
+    expect(db.query("SELECT COUNT(*) count FROM transactions WHERE source_kind='scheduled-transaction'").get()).toEqual({ count: 2 });
+
+    const retry = await repo.materializeScheduledTransactionsForCron("p", "2026-08-21", 5, "cron-run");
+    expect(retry).toEqual({
+      through_date: "2026-08-21", occurrence_count: 1, skipped_closed_schedule_count: 0, failure_count: 0, has_more: false,
+    });
+    expect(db.query("SELECT COUNT(*) count FROM transactions WHERE source_kind='scheduled-transaction'").get()).toEqual({ count: 3 });
+    expect(await repo.materializeScheduledTransactionsForCron("p", "2026-08-21", 5, "cron-run")).toMatchObject({
+      occurrence_count: 0, failure_count: 0, has_more: false,
+    });
+  });
+
+  test("D1 cron materialisation continues past an invalid schedule and reports only counts", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await repo.upsertPayee("p", { id: "bad-payee", name: "Will be deleted" });
+    await repo.createScheduledTransaction("p", {
+      id: "bad-schedule", account_id: "a", payee_id: "bad-payee", date_first: "2026-08-21", frequency: "never", amount: -100,
+    });
+    await repo.createScheduledTransaction("p", {
+      id: "valid-schedule", account_id: "a", date_first: "2026-08-21", frequency: "never", amount: -200,
+    });
+    db.run("UPDATE payees SET deleted=1 WHERE plan_id='p' AND id='bad-payee'");
+
+    expect(await repo.materializeScheduledTransactionsForCron("p", "2026-08-21", 5, "cron-invalid")).toEqual({
+      through_date: "2026-08-21", occurrence_count: 1, skipped_closed_schedule_count: 0, failure_count: 1, has_more: true,
+    });
+    expect(db.query("SELECT COUNT(*) count FROM transactions WHERE source_kind='scheduled-transaction'").get()).toEqual({ count: 1 });
+  });
+
+  test("D1 cron materialisation is fair across a backlog, caps each run, and resumes deterministically", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    for (const id of ["cron-a", "cron-b"]) {
+      await repo.createScheduledTransaction("p", {
+        id, account_id: "a", date_first: "2026-08-01", frequency: "daily", amount: -100,
+      });
+    }
+
+    const first = await repo.materializeScheduledTransactionsForCron("p", "2026-08-03", 3, "cron-fair");
+    expect(first).toEqual({
+      through_date: "2026-08-03", occurrence_count: 3, skipped_closed_schedule_count: 0, failure_count: 0, has_more: true,
+    });
+    expect(await repo.getScheduledTransaction("p", "cron-a")).toMatchObject({ date_next: "2026-08-03" });
+    expect(await repo.getScheduledTransaction("p", "cron-b")).toMatchObject({ date_next: "2026-08-02" });
+
+    const retry = await repo.materializeScheduledTransactionsForCron("p", "2026-08-03", 3, "cron-fair");
+    expect(retry).toEqual({
+      through_date: "2026-08-03", occurrence_count: 3, skipped_closed_schedule_count: 0, failure_count: 0, has_more: false,
+    });
+    expect(db.query("SELECT COUNT(*) count FROM transactions WHERE source_kind='scheduled-transaction'").get()).toEqual({ count: 6 });
+  });
+
+  test("D1 schedule patches retry a stale snapshot without losing an unrelated patch", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    const source = {
+      id: "race-schedule", account_id: "a", account_name: "Cash", date_first: "2026-08-01",
+      date_next: "2026-09-01", frequency: "monthly", amount: -1000, memo: "before", deleted: false,
+    };
+    await repo.upsertYnabRawObject("p", "scheduled_transaction", source.id, source);
+
+    await Promise.all([
+      repo.updateScheduledTransaction("p", source.id, { memo: "memo changed" }, { operationId: "schedule-race-memo" }),
+      repo.updateScheduledTransaction("p", source.id, { amount: -2000 }, { operationId: "schedule-race-amount" }),
+    ]);
+
+    expect(await repo.getScheduledTransaction("p", source.id)).toMatchObject({
+      memo: "memo changed", amount: -2000, date_next: "2026-09-01",
+    });
+    expect(db.query("SELECT COUNT(*) AS count FROM scheduled_transaction_snapshot_assertions WHERE scheduled_transaction_id=?").get(source.id)).toEqual({ count: 2 });
+  });
+
+  test("D1 schedule patches preserve concurrent split allocation changes", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await repo.upsertCategoryGroup("p", { id: "living", name: "Living" });
+    await repo.upsertCategory("p", { id: "food", category_group_id: "living", name: "Food" });
+    const source = {
+      id: "race-split-schedule", account_id: "a", account_name: "Cash", date_first: "2026-08-01",
+      date_next: "2026-09-01", frequency: "monthly", amount: -3000, memo: "before", deleted: false,
+    };
+    const sourceSubtransactions = [
+      { id: "race-split-one", scheduled_transaction_id: source.id, amount: -1000, category_id: "food", memo: "one" },
+      { id: "race-split-two", scheduled_transaction_id: source.id, amount: -2000, category_id: "food", memo: "two" },
+    ];
+    await repo.upsertYnabRawObject("p", "scheduled_transaction", source.id, source);
+    for (const subtransaction of sourceSubtransactions) {
+      await repo.upsertYnabRawObject("p", "scheduled_subtransaction", `${source.id}\u001f${subtransaction.id}`, subtransaction);
+    }
+
+    await Promise.all([
+      repo.updateScheduledTransaction("p", source.id, { subtransactions: [
+        { ...sourceSubtransactions[0], amount: -1500 },
+        { ...sourceSubtransactions[1], amount: -1500 },
+      ] }, { operationId: "schedule-race-splits" }),
+      repo.updateScheduledTransaction("p", source.id, { memo: "parent changed" }, { operationId: "schedule-race-parent" }),
+    ]);
+
+    expect(await repo.getScheduledTransaction("p", source.id)).toMatchObject({
+      memo: "parent changed",
+      subtransactions: [
+        expect.objectContaining({ id: "race-split-one", amount: -1500 }),
+        expect.objectContaining({ id: "race-split-two", amount: -1500 }),
+      ],
+    });
+  });
+
+  test("D1 transaction pages keep split-line lookups below the binding limit", async () => {
+    const db = await ledgerSqlite();
+    for (let index = 0; index < 101; index += 1) {
+      db.run(
+        "INSERT INTO transactions(id,plan_id,account_id,date,amount_milli) VALUES(?,?,?,?,?)",
+        [`page-${String(index).padStart(3, "0")}`, "p", "a", "2026-08-20", -index],
+      );
+    }
+
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db, { maxBindings: 100 })), "p");
+    const page = await repo.listTransactionsPage("p");
+
+    expect(page.transactions).toHaveLength(100);
+    expect(page.has_more).toBeTrue();
+    expect(page.next_offset).toBe(100);
+  });
+
+  test("D1 assignment writes are guarded, retain raw source rows, and carry availability forward", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p", {
+      operationId: (kind, _planId, resourceId) => `assignment-${kind}-${resourceId.replaceAll("\u001f", "-")}`,
+    });
+    await repo.upsertCategoryGroup("p", { id: "food", name: "Food" });
+    await repo.upsertCategory("p", { id: "groceries", category_group_id: "food", name: "Groceries" });
+    for (const month of ["2026-06-01", "2026-07-01"]) {
+      await repo.upsertYnabRawObject("p", "month", month, { month, budgeted: 5000, to_be_budgeted: 4000, activity: 0 });
+      await repo.upsertYnabRawObject("p", "month_category", `${month}\u001fgroceries`, {
+        id: "groceries", category_group_id: "food", name: "Groceries", budgeted: 5000, activity: 0, balance: 5000, deleted: false,
+      });
+    }
+    const rawBefore = db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category' AND object_id='2026-06-01\u001fgroceries'").get();
+    const versionBefore = db.query("SELECT write_version FROM write_state").get() as { write_version: number };
+
+    const june = await repo.setMonthCategoryAssignment("p", "2026-06", "groceries", 7000);
+    expect(june).toMatchObject({ budgeted: 7000, to_be_budgeted: 2000 });
+    expect(june.categories).toEqual([expect.objectContaining({ id: "groceries", budgeted: 7000, balance: 7000 })]);
+    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category' AND object_id='2026-06-01\u001fgroceries'").get()).toEqual(rawBefore);
+    expect(db.query("SELECT budgeted_milli FROM plan_month_assignments WHERE plan_id='p' AND month='2026-06-01' AND category_id='groceries'").get()).toEqual({ budgeted_milli: 7000 });
+    expect(db.query("SELECT write_version FROM write_state").get()).toEqual({ write_version: versionBefore.write_version + 1 });
+    expect(db.query("SELECT status FROM write_commands WHERE kind='plan.assignment.set'").get()).toEqual({ status: "applied" });
+
+    const july = await repo.getMonth("p", "2026-07");
+    expect(july).toMatchObject({ budgeted: 5000, to_be_budgeted: 4000 });
+    expect(july.categories).toEqual([expect.objectContaining({ id: "groceries", budgeted: 5000, balance: 7000 })]);
+    await expect(repo.setMonthCategoryAssignment("p", "2026-08", "groceries", 8000)).rejects.toThrow("Imported month not found");
+    await expect(repo.setMonthCategoryAssignment("p", "2026-06", "missing", 8000)).rejects.toThrow("Imported month category not found");
+  });
+
+  test("D1 category resolution avoids a fallback group for existing categories", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    db.exec("INSERT INTO category_groups(id,plan_id,name) VALUES ('source-group','p','Source group'); INSERT INTO categories(id,plan_id,category_group_id,name) VALUES ('source-category','p','source-group','Source category')");
+
+    await repo.ensureCategory("p", "source-category");
+    expect(db.query("SELECT id FROM category_groups WHERE plan_id='p' ORDER BY id").all()).toEqual([{ id: "source-group" }]);
+
+    await repo.ensureCategory("p", "missing-category", "Missing category");
+    expect(db.query("SELECT id FROM category_groups WHERE plan_id='p' ORDER BY id").all()).toEqual([
+      { id: "source-group" },
+      { id: "uncategorized-group" },
+    ]);
+    expect(db.query("SELECT category_group_id FROM categories WHERE id='missing-category'").get()).toEqual({ category_group_id: "uncategorized-group" });
+  });
+
+  test("D1 preserves duplicate YNAB payee names as ID-distinct transaction references", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+
+    await repo.upsertPayee("p", { id: "ynab-payee-a", name: "Same merchant", external_ynab_id: "ynab-payee-a" });
+    await repo.upsertPayee("p", { id: "ynab-payee-b", name: "Same merchant", external_ynab_id: "ynab-payee-b" });
+    await repo.createTransaction("p", { id: "ynab-txn-a", account_id: "a", date: "2026-08-01", amount: -1000, payee_id: "ynab-payee-a" }, { autoLink: false });
+    await repo.createTransaction("p", { id: "ynab-txn-b", account_id: "a", date: "2026-08-02", amount: -2000, payee_id: "ynab-payee-b" }, { autoLink: false });
+
+    expect(db.query("SELECT id,name,external_ynab_id FROM payees WHERE id LIKE 'ynab-payee-%' ORDER BY id").all()).toEqual([
+      { id: "ynab-payee-a", name: "Same merchant", external_ynab_id: "ynab-payee-a" },
+      { id: "ynab-payee-b", name: "Same merchant", external_ynab_id: "ynab-payee-b" },
+    ]);
+    expect(db.query("SELECT id,payee_id,payee_name_snapshot FROM transactions WHERE id LIKE 'ynab-txn-%' ORDER BY id").all()).toEqual([
+      { id: "ynab-txn-a", payee_id: "ynab-payee-a", payee_name_snapshot: "Same merchant" },
+      { id: "ynab-txn-b", payee_id: "ynab-payee-b", payee_name_snapshot: "Same merchant" },
+    ]);
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  test("D1 assignment writes are guarded, replayable, and preserve the YNAB source rows", async () => {
+    const db = await ledgerSqlite();
+    db.exec("INSERT INTO category_groups(id,plan_id,name) VALUES('food-group','p','Food'); INSERT INTO categories(id,plan_id,category_group_id,name) VALUES('food','p','food-group','Groceries')");
+    const sourceMonth = { month: "2026-06-01", budgeted: 5000, to_be_budgeted: 4000, activity: 0 };
+    const sourceCategory = { id: "food", category_group_id: "food-group", name: "Groceries", budgeted: 5000, activity: 0, balance: 5000, deleted: false };
+    db.run("INSERT INTO ynab_raw_objects(plan_id,object_type,object_id,payload_json) VALUES('p','month','2026-06-01',?),('p','month_category','2026-06-01\u001ffood',?)", [JSON.stringify(sourceMonth), JSON.stringify(sourceCategory)]);
+    const rawBefore = db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category'").get();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p", {
+      operationId: (kind) => kind === "plan.assignment.set" ? "assignment-once" : `op-${kind}`,
+    });
+
+    const first = await repo.setMonthCategoryAssignment("p", "2026-06", "food", 7000);
+    const second = await repo.setMonthCategoryAssignment("p", "2026-06", "food", 7000);
+    expect(first).toMatchObject({ budgeted: 7000, to_be_budgeted: 2000, categories: [expect.objectContaining({ id: "food", budgeted: 7000, balance: 7000, source_budgeted: 5000 })] });
+    expect(second).toEqual(first);
+    expect(db.query("SELECT budgeted_milli,source FROM plan_month_assignments").get()).toEqual({ budgeted_milli: 7000, source: "howmuch-local" });
+    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category'").get()).toEqual(rawBefore);
+    expect(db.query("SELECT COUNT(*) AS count FROM audit_events WHERE action='plan_assignment.set'").get()).toEqual({ count: 1 });
+    expect(db.query("SELECT COUNT(*) AS count FROM write_commands WHERE kind='plan.assignment.set' AND status='applied'").get()).toEqual({ count: 1 });
+  });
+
+  test("D1 target writes are guarded, replayable, and preserve the YNAB source rows", async () => {
+    const db = await ledgerSqlite();
+    db.exec("INSERT INTO category_groups(id,plan_id,name) VALUES('food-group','p','Food'); INSERT INTO categories(id,plan_id,category_group_id,name) VALUES('food','p','food-group','Groceries')");
+    const sourceMonth = { month: "2026-06-01", budgeted: 0, to_be_budgeted: 0, activity: 0 };
+    const sourceCategory = { id: "food", category_group_id: "food-group", name: "Groceries", budgeted: 0, activity: 0, balance: 5000, goal_type: "NEED", goal_target: 9000, deleted: false };
+    db.run("INSERT INTO ynab_raw_objects(plan_id,object_type,object_id,payload_json) VALUES('p','month','2026-06-01',?),('p','month_category','2026-06-01\u001ffood',?)", [JSON.stringify(sourceMonth), JSON.stringify(sourceCategory)]);
+    const rawBefore = db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category'").get();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p", { operationId: (kind) => kind === "plan.target.set" ? "target-once" : `op-${kind}` });
+
+    const target = { goal_type: "TB" as const, goal_target: 7000, goal_target_month: "2026-12" };
+    const first = await repo.setMonthCategoryTarget("p", "2026-06", "food", target);
+    const second = await repo.setMonthCategoryTarget("p", "2026-06", "food", target);
+    expect(first.categories).toEqual([expect.objectContaining({ id: "food", goal_type: "TB", goal_target: 7000, goal_target_month: "2026-12-01", target_source: "howmuch-local" })]);
+    expect(second).toEqual(first);
+    expect(db.query("SELECT goal_type,goal_target_milli FROM plan_month_category_targets").get()).toEqual({ goal_type: "TB", goal_target_milli: 7000 });
+    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category'").get()).toEqual(rawBefore);
+    expect(db.query("SELECT COUNT(*) AS count FROM write_commands WHERE kind='plan.target.set' AND status='applied'").get()).toEqual({ count: 1 });
+  });
+
+  test("D1 imports reciprocal transfer payees before their accounts", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const pathname = new URL(String(input)).pathname;
+      if (pathname === "/v1/plans/p") {
+        return new Response(JSON.stringify({ data: { server_knowledge: 9, plan: {
+          id: "p", name: "Plan", accounts: [{ id: "ynab-account", name: "Savings", type: "savings", on_budget: true, transfer_payee_id: "ynab-transfer" }],
+          category_groups: [], categories: [], payees: [{ id: "ynab-transfer", name: "Transfer : Savings", transfer_account_id: "ynab-account", deleted: false }],
+          months: [], transactions: [], scheduled_transactions: [], scheduled_subtransactions: [], payee_locations: [],
+        } } }), { headers: { "content-type": "application/json" } });
+      }
+      if (pathname === "/v1/plans/p/settings") return new Response(JSON.stringify({ data: { settings: {} } }), { headers: { "content-type": "application/json" } });
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "p" });
+
+    expect(db.query("SELECT transfer_payee_id FROM accounts WHERE id='ynab-account'").get()).toEqual({ transfer_payee_id: "ynab-transfer" });
+    expect(db.query("SELECT name,transfer_account_id FROM payees WHERE id='ynab-transfer'").get()).toEqual({ name: "Transfer : Savings", transfer_account_id: "ynab-account" });
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
   test("ordinary statements work and interactive transactions fail closed", async () => {
@@ -583,7 +1176,7 @@ describe("D1 foundation", () => {
 
   test("versioned D1 metadata and import-session writes replay and reject collisions", async () => {
     const db = sqlite();
-    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql"]) {
+    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql"]) {
       db.exec(await Bun.file(new URL(path, import.meta.url)).text());
     }
     const metadata = new D1MetadataRepository(new D1Database(fakeD1(db)));
@@ -596,6 +1189,9 @@ describe("D1 foundation", () => {
     await metadata.upsertAccount("p", { id: "a", name: "Cash", balance: 100 }, { operationId: "account-a" });
     const account = db.query("SELECT transfer_payee_id FROM accounts WHERE id = 'a'").get() as { transfer_payee_id: string };
     expect(db.query("SELECT transfer_account_id FROM payees WHERE id = ?").get(account.transfer_payee_id)).toEqual({ transfer_account_id: "a" });
+    await metadata.upsertYnabRawObject("p", "month", "2026-06-01", { month: "2026-06-01", budgeted: 42, deleted: false }, 9, { operationId: "raw-month" });
+    await metadata.upsertYnabRawObject("p", "month", "2026-06-01", { month: "2026-06-01", budgeted: 43, deleted: true }, 10, { operationId: "raw-month-update" });
+    expect(db.query("SELECT payload_json,deleted,server_knowledge FROM ynab_raw_objects").get()).toEqual({ payload_json: '{"month":"2026-06-01","budgeted":43,"deleted":true}', deleted: 1, server_knowledge: 10 });
     await metadata.upsertCategoryGroup("p", { id: "group", name: "Living" }, { operationId: "group" });
     await metadata.upsertCategory("p", { id: "category", name: "Food" }, "group", { operationId: "category" });
     expect(db.query("SELECT category_group_id FROM categories WHERE id = 'category'").get()).toEqual({ category_group_id: "group" });
@@ -624,7 +1220,7 @@ describe("D1 foundation", () => {
 
 async function ledgerSqlite(): Promise<Database> {
   const db = sqlite();
-  for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
+  for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
   db.run("INSERT INTO plans (id, name) VALUES ('p', 'Plan')");
   db.run("INSERT INTO accounts (id, plan_id, name) VALUES ('a', 'p', 'Cash')");
   return db;
@@ -635,6 +1231,9 @@ function sqlite(): Database { const db = new Database(":memory:", { strict: true
 function fakeD1(db: Database, faults: { commitThenThrowOnce?: boolean; commitThenThrowSql?: RegExp; beforeWriteBatch?: (db: Database) => void; maxBindings?: number } = {}): D1Binding {
   let commitThenThrow = faults.commitThenThrowOnce ?? Boolean(faults.commitThenThrowSql);
   let mutateBeforeWrite = faults.beforeWriteBatch;
+  // D1 serialises atomic batches.  Keep the fake faithful while still letting
+  // callers race their reads before either guarded batch starts.
+  let batchTail = Promise.resolve();
   class Statement implements D1Statement {
     values: unknown[] = [];
     constructor(readonly sql: string) {}
@@ -652,12 +1251,20 @@ function fakeD1(db: Database, faults: { commitThenThrowOnce?: boolean; commitThe
   return {
     prepare: (sql) => new Statement(sql),
     batch: async <Row>(statements: D1Statement[]) => {
-      if (mutateBeforeWrite && statements.some((item) => /^INSERT INTO write_commands/i.test((item as Statement).sql))) {
-        const mutate = mutateBeforeWrite; mutateBeforeWrite = undefined; mutate(db);
+      const previous = batchTail;
+      let release!: () => void;
+      batchTail = new Promise<void>((resolve) => { release = resolve; });
+      await previous;
+      try {
+        if (mutateBeforeWrite && statements.some((item) => /^INSERT INTO write_commands/i.test((item as Statement).sql))) {
+          const mutate = mutateBeforeWrite; mutateBeforeWrite = undefined; mutate(db);
+        }
+        db.exec("BEGIN IMMEDIATE");
+        try { const results = []; for (const statement of statements) results.push(await (statement as Statement).execute<Row>()); db.exec("COMMIT"); if (commitThenThrow && statements.some((item) => (faults.commitThenThrowSql ?? /^INSERT INTO write_commands/i).test((item as Statement).sql))) { commitThenThrow = false; throw new Error("ambiguous committed batch"); } return results as D1Result<Row>[]; }
+        catch (error) { if (db.inTransaction) db.exec("ROLLBACK"); throw error; }
+      } finally {
+        release();
       }
-      db.exec("BEGIN IMMEDIATE");
-      try { const results = []; for (const statement of statements) results.push(await (statement as Statement).execute<Row>()); db.exec("COMMIT"); if (commitThenThrow && statements.some((item) => (faults.commitThenThrowSql ?? /^INSERT INTO write_commands/i).test((item as Statement).sql))) { commitThenThrow = false; throw new Error("ambiguous committed batch"); } return results as D1Result<Row>[]; }
-      catch (error) { if (db.inTransaction) db.exec("ROLLBACK"); throw error; }
     },
   };
 }

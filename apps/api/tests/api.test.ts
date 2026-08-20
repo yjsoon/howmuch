@@ -4,6 +4,7 @@ import { applyMigrations } from "../src/db";
 import { createHandler } from "../src/http";
 import { importYnabExport, parseExportDate, parseMoneyToMilliunits } from "../src/importers/ynab-export";
 import { LedgerRepository } from "../src/repository";
+import { nextScheduledOccurrence, scheduledOccurrencesThrough } from "../src/scheduled-transactions";
 
 let db: Database;
 let handler: (request: Request) => Promise<Response>;
@@ -27,6 +28,508 @@ afterEach(() => {
 });
 
 describe("YNAB-compatible API", () => {
+  test("reads mirrored scheduled transactions, payee locations, and month-filtered money movements", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await repo.upsertYnabRawObject("plan-test", "scheduled_transaction", "scheduled-1", { id: "scheduled-1", date_next: "2026-07-01" });
+    await repo.upsertYnabRawObject("plan-test", "scheduled_subtransaction", "scheduled-1\u001fsub-1", { id: "sub-1", scheduled_transaction_id: "scheduled-1", amount: -100 });
+    await repo.upsertYnabRawObject("plan-test", "payee_location", "location-1", { id: "location-1", payee_id: "payee-1", latitude: "1.2" });
+    await repo.upsertYnabRawObject("plan-test", "money_movement", "movement-1", { id: "movement-1", month: "2026-06-01", amount: 100 });
+
+    const scheduled = await (await request("/v1/plans/plan-test/scheduled_transactions")).json();
+    expect(scheduled.data.scheduled_transactions).toEqual([{ id: "scheduled-1", date_next: "2026-07-01", subtransactions: [{ id: "sub-1", scheduled_transaction_id: "scheduled-1", amount: -100 }] }]);
+    const locations = await (await request("/v1/plans/plan-test/payee_locations")).json();
+    expect(locations.data.payee_locations).toEqual([{ id: "location-1", payee_id: "payee-1", latitude: "1.2" }]);
+    const movements = await (await request("/v1/plans/plan-test/months/2026-06/money_movements")).json();
+    expect(movements.data.money_movements).toEqual([{ id: "movement-1", month: "2026-06-01", amount: 100 }]);
+  });
+
+  test("creates, overlays, and deletes schedules without mutating imported YNAB rows", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await repo.upsertAccount("plan-test", { id: "cash", name: "Cash" });
+    await repo.upsertCategoryGroup("plan-test", { id: "living", name: "Living" });
+    await repo.upsertCategory("plan-test", { id: "food", category_group_id: "living", name: "Food" });
+    await repo.upsertPayee("plan-test", { id: "merchant", name: "Merchant" });
+    const source = { id: "source-schedule", account_id: "cash", account_name: "Cash", date_first: "2026-08-01", date_next: "2026-09-01", frequency: "monthly", amount: -1000, payee_id: "merchant", category_id: "food", memo: "source", source_marker: "preserve-me", deleted: false };
+    await repo.upsertYnabRawObject("plan-test", "scheduled_transaction", source.id, source);
+    const rawBefore = db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='scheduled_transaction' AND object_id=?").get(source.id);
+
+    const updated = await request(`/v1/plans/plan-test/scheduled_transactions/${source.id}`, {
+      method: "PATCH", headers: { "idempotency-key": "schedule-update-1" },
+      body: { scheduled_transaction: { date_next: "2026-10-01", memo: "local edit" } },
+    });
+    expect(updated.status).toBe(200);
+    expect((await updated.json()).data.scheduled_transaction).toMatchObject({
+      id: source.id, date_next: "2026-10-01", memo: "local edit", source_marker: "preserve-me", deleted: false,
+    });
+    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='scheduled_transaction' AND object_id=?").get(source.id)).toEqual(rawBefore);
+    expect(db.query("SELECT origin FROM scheduled_transaction_edits WHERE id=?").get(source.id)).toEqual({ origin: "ynab-overlay" });
+
+    const createBody = { scheduled_transaction: {
+      account_id: "cash", date_first: "2026-08-15", frequency: "monthly", amount: -3000, memo: "split",
+      subtransactions: [
+        { amount: -1000, category_id: "food", memo: "first" },
+        { amount: -2000, category_id: "food", memo: "second" },
+      ],
+    } };
+    const firstCreate = await request("/v1/plans/plan-test/scheduled_transactions", { method: "POST", headers: { "idempotency-key": "schedule-create-1" }, body: createBody });
+    const replayedCreate = await request("/v1/plans/plan-test/scheduled_transactions", { method: "POST", headers: { "idempotency-key": "schedule-create-1" }, body: createBody });
+    expect(firstCreate.status).toBe(201);
+    expect(replayedCreate.status).toBe(201);
+    const created = (await firstCreate.json()).data.scheduled_transaction;
+    expect((await replayedCreate.json()).data.scheduled_transaction).toEqual(created);
+    expect(created).toMatchObject({ account_id: "cash", date_first: "2026-08-15", date_next: "2026-08-15", frequency: "monthly", amount: -3000, deleted: false });
+    expect(created.subtransactions).toHaveLength(2);
+    expect(db.query("SELECT COUNT(*) count FROM audit_events WHERE action='scheduled_transaction.create'").get()).toEqual({ count: 1 });
+
+    const all = await (await request("/v1/plans/plan-test/scheduled_transactions")).json();
+    expect(all.data.scheduled_transactions.map((transaction: any) => transaction.id).sort()).toEqual([created.id, source.id].sort());
+    const subs = await (await request("/v1/plans/plan-test/scheduled_subtransactions")).json();
+    expect(subs.data.scheduled_subtransactions).toEqual(created.subtransactions);
+
+    const deleted = await request(`/v1/plans/plan-test/scheduled_transactions/${source.id}`, { method: "DELETE", headers: { "idempotency-key": "schedule-delete-1" } });
+    expect(deleted.status).toBe(200);
+    expect((await deleted.json()).data.scheduled_transaction).toMatchObject({ id: source.id, deleted: true });
+    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='scheduled_transaction' AND object_id=?").get(source.id)).toEqual(rawBefore);
+    const remaining = await (await request("/v1/plans/plan-test/scheduled_transactions")).json();
+    expect(remaining.data.scheduled_transactions.map((transaction: any) => transaction.id)).toEqual([created.id]);
+  });
+
+  test("serialises concurrent local SQLite schedule patches without dropping fields", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await repo.upsertAccount("plan-test", { id: "cash", name: "Cash" });
+    await repo.upsertYnabRawObject("plan-test", "scheduled_transaction", "sqlite-race", {
+      id: "sqlite-race", account_id: "cash", date_first: "2026-08-01", date_next: "2026-09-01",
+      frequency: "monthly", amount: -1000, memo: "before", deleted: false,
+    });
+
+    await Promise.all([
+      repo.updateScheduledTransaction("plan-test", "sqlite-race", { memo: "memo changed" }, { operationId: "sqlite-schedule-memo" }),
+      repo.updateScheduledTransaction("plan-test", "sqlite-race", { amount: -2000 }, { operationId: "sqlite-schedule-amount" }),
+    ]);
+
+    expect(await repo.getScheduledTransaction("plan-test", "sqlite-race")).toMatchObject({
+      memo: "memo changed", amount: -2000, date_next: "2026-09-01",
+    });
+  });
+
+  test("validates scheduled writes and protects them with auth, membership, and idempotency keys", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await repo.upsertAccount("plan-test", { id: "cash", name: "Cash" });
+    const base = { account_id: "cash", date_first: "2026-08-01", frequency: "monthly", amount: -1000 };
+
+    expect((await handler(new Request("http://howmuch.test/v1/plans/plan-test/scheduled_transactions", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scheduled_transaction: base }),
+    }))).status).toBe(401);
+    expect((await request("/v1/plans/plan-test/scheduled_transactions", { method: "POST", headers: { "idempotency-key": "short" }, body: { scheduled_transaction: base } })).status).toBe(400);
+    expect((await request("/v1/plans/plan-test/scheduled_transactions", { method: "POST", body: { scheduled_transaction: { ...base, account_id: "missing" } } })).status).toBe(400);
+    expect((await request("/v1/plans/plan-test/scheduled_transactions", { method: "POST", body: { scheduled_transaction: { ...base, date_first: "2026-02-30" } } })).status).toBe(400);
+    expect((await request("/v1/plans/plan-test/scheduled_transactions", { method: "POST", body: { scheduled_transaction: { ...base, frequency: "whenever" } } })).status).toBe(400);
+    expect((await request("/v1/plans/plan-test/scheduled_transactions", { method: "POST", body: { scheduled_transaction: { ...base, date_next: "2026-07-31" } } })).status).toBe(400);
+    expect((await request("/v1/plans/plan-test/scheduled_transactions", { method: "POST", body: { scheduled_transaction: { ...base, subtransactions: [{ amount: -500 }, { amount: -400 }] } } })).status).toBe(400);
+
+    const created = await request("/v1/plans/plan-test/scheduled_transactions", { method: "POST", headers: { "idempotency-key": "same-key-different-payload" }, body: { scheduled_transaction: base } });
+    expect(created.status).toBe(201);
+    const conflict = await request("/v1/plans/plan-test/scheduled_transactions", { method: "POST", headers: { "idempotency-key": "same-key-different-payload" }, body: { scheduled_transaction: { ...base, amount: -2000 } } });
+    expect(conflict.status).toBe(409);
+    expect((await conflict.json()).error.detail).toBe("idempotency-key reuse");
+  });
+
+  test("reconciles only eligible cleared account rows with exact retry receipts", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await repo.upsertAccount("plan-test", { id: "bank", name: "Bank", opening_balance: 1000 });
+    await repo.upsertAccount("plan-test", { id: "other", name: "Other" });
+    await repo.createTransaction("plan-test", { id: "prior", account_id: "bank", date: "2026-07-01", amount: 100, cleared: "reconciled" });
+    await repo.createTransaction("plan-test", { id: "eligible", account_id: "bank", date: "2026-08-20", amount: -200, cleared: "cleared" });
+    await repo.createTransaction("plan-test", { id: "future", account_id: "bank", date: "2026-09-01", amount: -300, cleared: "cleared" });
+    await repo.createTransaction("plan-test", { id: "uncleared", account_id: "bank", date: "2026-08-10", amount: -400, cleared: "uncleared" });
+    await repo.createTransaction("plan-test", { id: "deleted", account_id: "bank", date: "2026-08-10", amount: -500, cleared: "cleared" });
+    await repo.deleteTransaction("plan-test", "deleted");
+    await repo.createTransaction("plan-test", { id: "other-row", account_id: "other", date: "2026-08-10", amount: 700, cleared: "cleared" });
+    const route = "/v1/plans/plan-test/accounts/bank/reconcile";
+
+    expect((await handler(new Request(`http://howmuch.test${route}`, {
+      method: "POST", headers: { "content-type": "application/json", "idempotency-key": "reconcile-no-auth" },
+      body: JSON.stringify({ statement_date: "2026-08-31", statement_balance: 900 }),
+    }))).status).toBe(401);
+    expect((await handler(new Request("http://howmuch.test/v1/plans/plan-test/accounts/bank/reconciliation?statement_date=2026-08-31"))).status).toBe(401);
+    expect((await request("/v1/plans/plan-test/accounts/bank/reconciliation")).status).toBe(400);
+    const preview = await request("/v1/plans/plan-test/accounts/bank/reconciliation?statement_date=2026-08-31");
+    expect(preview.status).toBe(200);
+    expect((await preview.json()).data).toMatchObject({
+      account: { id: "bank" }, statement_date: "2026-08-31",
+      current_reconciled_balance: 1100, projected_reconciled_balance: 900,
+      candidate_transaction_ids: ["eligible"], candidate_transaction_count: 1,
+    });
+    expect(db.query("SELECT cleared FROM transactions WHERE id='eligible'").get()).toEqual({ cleared: "cleared" });
+    expect((await request(route, { method: "POST", body: { statement_date: "2026-08-31", statement_balance: 900 } })).status).toBe(400);
+    expect((await request(route, { method: "POST", headers: { "idempotency-key": "reconcile-invalid-date" }, body: { statement_date: "2026-02-30", statement_balance: 900 } })).status).toBe(400);
+    expect((await request(route, { method: "POST", headers: { "idempotency-key": "reconcile-invalid-value" }, body: { statement_date: "2026-08-31", statement_balance: 9.5 } })).status).toBe(400);
+
+    const mismatch = await request(route, {
+      method: "POST", headers: { "idempotency-key": "reconcile-mismatch" },
+      body: { statement_date: "2026-08-31", statement_balance: 950 },
+    });
+    expect(mismatch.status).toBe(409);
+    expect((await mismatch.json()).error).toMatchObject({
+      name: "reconciliation_mismatch", current_reconciled_balance: 1100,
+      projected_reconciled_balance: 900, statement_balance: 950, difference: 50,
+    });
+    expect(db.query("SELECT cleared FROM transactions WHERE id='eligible'").get()).toEqual({ cleared: "cleared" });
+
+    const knowledgeBefore = (db.query("SELECT server_knowledge FROM plans WHERE id='plan-test'").get() as { server_knowledge: number }).server_knowledge;
+    const first = await request(route, {
+      method: "POST", headers: { "idempotency-key": "reconcile-bank-august" },
+      body: { statement_date: "2026-08-31", statement_balance: 900 },
+    });
+    expect(first.status).toBe(200);
+    const firstData = (await first.json()).data;
+    expect(firstData).toMatchObject({
+      account: { id: "bank" }, reconciled_transaction_ids: ["eligible"], reconciled_transaction_count: 1,
+      statement_date: "2026-08-31", statement_balance: 900,
+      prior_reconciled_balance: 1100, final_reconciled_balance: 900,
+      replayed: false, server_knowledge: knowledgeBefore + 1,
+    });
+    expect(db.query("SELECT id,cleared FROM transactions WHERE id IN ('eligible','future','uncleared','deleted','other-row') ORDER BY id").all()).toEqual([
+      { id: "deleted", cleared: "cleared" },
+      { id: "eligible", cleared: "reconciled" },
+      { id: "future", cleared: "cleared" },
+      { id: "other-row", cleared: "cleared" },
+      { id: "uncleared", cleared: "uncleared" },
+    ]);
+
+    const replay = await request(route, {
+      method: "POST", headers: { "idempotency-key": "reconcile-bank-august" },
+      body: { statement_date: "2026-08-31", statement_balance: 900 },
+    });
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).data).toMatchObject({ ...firstData, replayed: true });
+    expect(db.query("SELECT server_knowledge FROM plans WHERE id='plan-test'").get()).toEqual({ server_knowledge: knowledgeBefore + 1 });
+    expect(db.query("SELECT COUNT(*) count FROM audit_events WHERE action='account.reconcile'").get()).toEqual({ count: 1 });
+    expect((await request(route, {
+      method: "POST", headers: { "idempotency-key": "reconcile-bank-august" },
+      body: { statement_date: "2026-08-31", statement_balance: 901 },
+    })).status).toBe(409);
+    expect((await (await request("/v1/plans/plan-test/accounts/bank/reconciliation?statement_date=2026-08-31")).json()).data).toMatchObject({
+      current_reconciled_balance: 900, projected_reconciled_balance: 900,
+      candidate_transaction_ids: [], candidate_transaction_count: 0,
+    });
+  });
+
+  test("rejects a stale SQLite reconciliation snapshot before any workflow mutation", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertAccount("plan-test", { id: "race-account", name: "Before" });
+    await repo.createTransaction("plan-test", {
+      id: "race-cleared", account_id: "race-account", date: "2026-08-01", amount: -100, cleared: "cleared",
+    });
+    db.run("UPDATE transactions SET cleared='uncleared' WHERE id='race-cleared'");
+    const staleBatch = db.transaction(() => {
+      db.run(
+        `INSERT INTO account_reconciliation_assertions
+          (command_id,plan_id,account_id,statement_date,prior_reconciled_balance_milli,projected_reconciled_balance_milli,candidate_ids_json)
+         VALUES ('stale-local-reconcile','plan-test','race-account','2026-08-31',0,-100,'[\"race-cleared\"]')`,
+      );
+      db.run("UPDATE accounts SET name='After' WHERE id='race-account'");
+    });
+
+    expect(staleBatch).toThrow("stale account reconciliation");
+    expect(db.query("SELECT name FROM accounts WHERE id='race-account'").get()).toEqual({ name: "Before" });
+    expect(db.query("SELECT COUNT(*) count FROM account_reconciliation_assertions WHERE command_id='stale-local-reconcile'").get()).toEqual({ count: 0 });
+  });
+
+  test("materialises one occurrence early, advances from the anchored date, and replays without duplicates", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await repo.upsertAccount("plan-test", { id: "wallet", name: "Wallet", type: "cash" });
+    await repo.upsertAccount("plan-test", { id: "bank", name: "Bank", type: "checking" });
+    await repo.createScheduledTransaction("plan-test", {
+      id: "cash-transfer", account_id: "wallet", date_first: "2026-01-31", date_next: "2026-01-31",
+      frequency: "monthly", amount: -1000, transfer_account_id: "bank",
+    });
+
+    const route = "/v1/plans/plan-test/scheduled_transactions/cash-transfer/materialize";
+    const body = { occurrence_date: "2026-01-31", date: "2026-01-20" };
+    expect((await request(route, { method: "POST", body })).status).toBe(400);
+    const first = await request(route, { method: "POST", headers: { "idempotency-key": "enter-cash-transfer" }, body });
+    expect(first.status).toBe(200);
+    const result = (await first.json()).data;
+    expect(result).toMatchObject({ occurrence_date: "2026-01-31", entered_date: "2026-01-20", completed: false, replayed: false });
+    expect(result.transaction).toMatchObject({ account_id: "wallet", date: "2026-01-20", cleared: "cleared", approved: false, transfer_account_id: "bank" });
+    expect(result.scheduled_transaction.date_next).toBe("2026-02-28");
+    const mirror = db.query("SELECT account_id,cleared,approved,amount_milli FROM transactions WHERE transfer_transaction_id=?").get(result.transaction.id);
+    expect(mirror).toEqual({ account_id: "bank", cleared: "uncleared", approved: 0, amount_milli: 1000 });
+
+    const replay = await request(route, { method: "POST", headers: { "idempotency-key": "enter-cash-transfer" }, body });
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).data).toMatchObject({ transaction: { id: result.transaction.id }, replayed: true, scheduled_transaction: { date_next: "2026-02-28" } });
+    expect(db.query("SELECT COUNT(*) count FROM transactions").get()).toEqual({ count: 2 });
+
+    const february = await request(route, {
+      method: "POST", headers: { "idempotency-key": "enter-cash-transfer-feb" },
+      body: { occurrence_date: "2026-02-28", date: "2026-02-28" },
+    });
+    expect((await february.json()).data.scheduled_transaction.date_next).toBe("2026-03-31");
+  });
+
+  test("materialises split transfer lines with an explicit target and no payee", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await repo.upsertAccount("plan-test", { id: "bank", name: "Bank", type: "checking" });
+    await repo.upsertAccount("plan-test", { id: "wallet", name: "Wallet", type: "cash" });
+    await repo.upsertCategoryGroup("plan-test", { id: "living", name: "Living" });
+    await repo.upsertCategory("plan-test", { id: "food", category_group_id: "living", name: "Food" });
+    await repo.createScheduledTransaction("plan-test", {
+      id: "split-transfer", account_id: "bank", date_first: "2026-08-24", frequency: "never", amount: -3000,
+      subtransactions: [
+        { amount: -1000, category_id: "food" },
+        { amount: -2000, transfer_account_id: "wallet" },
+      ],
+    });
+    const response = await request("/v1/plans/plan-test/scheduled_transactions/split-transfer/materialize", {
+      method: "POST", headers: { "idempotency-key": "enter-split-transfer" },
+      body: { occurrence_date: "2026-08-24", date: "2026-08-20" },
+    });
+    expect(response.status).toBe(200);
+    const result = (await response.json()).data;
+    expect(result).toMatchObject({ completed: true, scheduled_transaction: { id: "split-transfer", deleted: true } });
+    expect(result.transaction.subtransactions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ amount: -1000, category_id: "food" }),
+      expect.objectContaining({ amount: -2000, transfer_account_id: "wallet" }),
+    ]));
+    const mirror = db.query("SELECT account_id,cleared,approved,amount_milli FROM transactions WHERE account_id='wallet'").get();
+    expect(mirror).toEqual({ account_id: "wallet", cleared: "cleared", approved: 0, amount_milli: 2000 });
+    expect((await request("/v1/plans/plan-test/scheduled_transactions/split-transfer")).status).toBe(404);
+  });
+
+  test("expands missed dates with YNAB month anchors and twice-monthly cadence", () => {
+    expect(scheduledOccurrencesThrough("2024-01-31", "2024-01-31", "monthly", "2024-04-30")).toEqual({
+      dates: ["2024-01-31", "2024-02-29", "2024-03-31", "2024-04-30"], nextDate: "2024-05-31",
+    });
+    expect(nextScheduledOccurrence("2026-01-05", "2026-01-05", "twiceAMonth")).toBe("2026-01-20");
+    expect(nextScheduledOccurrence("2026-01-05", "2026-01-20", "twiceAMonth")).toBe("2026-02-05");
+  });
+
+  test("never overwrites a schedule edited after its deterministic occurrence was posted", async () => {
+    let race = true;
+    class RacingRepository extends LedgerRepository {
+      override async createTransaction(planId: string, input: any, options: any = {}) {
+        const transaction = await super.createTransaction(planId, input, options);
+        if (race) {
+          race = false;
+          await super.updateScheduledTransaction(planId, "racing", { date_next: "2026-09-15", memo: "user edit" }, { operationId: "concurrent-user-edit" });
+        }
+        return transaction;
+      }
+    }
+    const repo = new RacingRepository(db, "plan-test");
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await repo.upsertAccount("plan-test", { id: "bank", name: "Bank" });
+    await repo.createScheduledTransaction("plan-test", {
+      id: "racing", account_id: "bank", date_first: "2026-08-24", date_next: "2026-08-24", frequency: "monthly", amount: -100,
+    });
+
+    await expect(repo.materializeScheduledOccurrence("plan-test", "racing", "2026-08-24", "2026-08-24")).rejects.toThrow("stale scheduled occurrence");
+    expect(await repo.getScheduledTransaction("plan-test", "racing")).toMatchObject({ date_next: "2026-09-15", memo: "user edit" });
+    expect(db.query("SELECT COUNT(*) count FROM transactions WHERE source_kind='scheduled-transaction'").get()).toEqual({ count: 1 });
+    const retry = await repo.materializeScheduledOccurrence("plan-test", "racing", "2026-08-24", "2026-08-24");
+    expect(retry).toMatchObject({ replayed: true, scheduled_transaction: { date_next: "2026-09-15", memo: "user edit" } });
+    expect(db.query("SELECT COUNT(*) count FROM transactions WHERE source_kind='scheduled-transaction'").get()).toEqual({ count: 1 });
+  });
+
+  test("overlays a local category assignment without mutating the YNAB month mirror", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await repo.upsertCategoryGroup("plan-test", { id: "group-food", name: "Food" });
+    await repo.upsertCategory("plan-test", { id: "category-food", category_group_id: "group-food", name: "Groceries" });
+    const sourceMonth = { month: "2026-06-01", budgeted: 5000, to_be_budgeted: 4000, activity: -1200, categories: [] };
+    const sourceCategory = { id: "category-food", category_group_id: "group-food", name: "Groceries", budgeted: 5000, activity: -1200, balance: 3800, deleted: false };
+    await repo.upsertYnabRawObject("plan-test", "month", "2026-06-01", sourceMonth);
+    await repo.upsertYnabRawObject("plan-test", "month_category", "2026-06-01\u001fcategory-food", sourceCategory);
+    await repo.upsertYnabRawObject("plan-test", "transaction", "source-spend", { id: "source-spend", date: "2026-06-05", amount: -1200, category_id: "category-food", deleted: false });
+    await repo.createTransaction("plan-test", {
+      id: "source-spend", account_id: "cash", date: "2026-06-05", amount: -1200, category_id: "category-food",
+      source_kind: "ynab-import", external_ynab_id: "source-spend",
+    });
+    const rawBefore = db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category' AND object_id='2026-06-01\u001fcategory-food'").get() as { payload_json: string };
+
+    const assigned = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", {
+      method: "PATCH",
+      body: { category: { budgeted: 7000 } },
+    });
+    expect(assigned.status).toBe(200);
+    const assignedMonth = (await assigned.json()).data.month;
+    expect(assignedMonth).toMatchObject({ budgeted: 7000, to_be_budgeted: 2000 });
+    expect(assignedMonth.categories).toEqual([expect.objectContaining({
+      id: "category-food", budgeted: 7000, balance: 5800, source_budgeted: 5000, assignment_source: "howmuch-local",
+    })]);
+    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category' AND object_id='2026-06-01\u001fcategory-food'").get()).toEqual(rawBefore);
+    expect(db.query("SELECT budgeted_milli,source FROM plan_month_assignments").get()).toEqual({ budgeted_milli: 7000, source: "howmuch-local" });
+
+    // A later source sync changes the raw baseline but retains the local
+    // decision and recalculates availability/Ready to assign from that base.
+    await repo.upsertYnabRawObject("plan-test", "month", "2026-06-01", { ...sourceMonth, budgeted: 6000, to_be_budgeted: 3000 });
+    await repo.upsertYnabRawObject("plan-test", "month_category", "2026-06-01\u001fcategory-food", { ...sourceCategory, budgeted: 6000, balance: 4800 });
+    const afterSync = await (await request("/v1/plans/plan-test/months/2026-06")).json();
+    expect(afterSync.data.month).toMatchObject({ budgeted: 7000, to_be_budgeted: 2000 });
+    expect(afterSync.data.month.categories).toEqual([expect.objectContaining({ id: "category-food", budgeted: 7000, balance: 5800, source_budgeted: 6000 })]);
+
+    // A new local transaction immediately changes the effective Plan activity
+    // and Available amount, while both imported source rows stay untouched.
+    await repo.createTransaction("plan-test", { id: "new-spend", account_id: "cash", date: "2026-06-10", amount: -800, category_id: "category-food" });
+    const afterLocalSpend = await (await request("/v1/plans/plan-test/months/2026-06")).json();
+    expect(afterLocalSpend.data.month).toMatchObject({ activity: -2000 });
+    expect(afterLocalSpend.data.month.categories).toEqual([expect.objectContaining({ id: "category-food", activity: -2000, balance: 5000 })]);
+    await repo.deleteTransaction("plan-test", "new-spend");
+    const afterDelete = await (await request("/v1/plans/plan-test/months/2026-06")).json();
+    expect(afterDelete.data.month).toMatchObject({ activity: -1200 });
+    expect(afterDelete.data.month.categories).toEqual([expect.objectContaining({ id: "category-food", activity: -1200, balance: 5800 })]);
+  });
+
+  test("carries local assignment deltas into a later month's Available amount", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await repo.upsertCategoryGroup("plan-test", { id: "group-food", name: "Food" });
+    await repo.upsertCategory("plan-test", { id: "category-food", category_group_id: "group-food", name: "Groceries" });
+    for (const month of ["2026-06-01", "2026-07-01"]) {
+      await repo.upsertYnabRawObject("plan-test", "month", month, { month, budgeted: 5000, to_be_budgeted: 4000, activity: 0, categories: [] });
+      await repo.upsertYnabRawObject("plan-test", "month_category", `${month}\u001fcategory-food`, {
+        id: "category-food", category_group_id: "group-food", name: "Groceries", budgeted: 5000, activity: 0, balance: 5000, deleted: false,
+      });
+    }
+
+    const assigned = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", {
+      method: "PATCH",
+      body: { category: { budgeted: 7000 } },
+    });
+    expect(assigned.status).toBe(200);
+    const july = await (await request("/v1/plans/plan-test/months/2026-07")).json();
+    expect(july.data.month).toMatchObject({ budgeted: 5000, to_be_budgeted: 4000 });
+    expect(july.data.month.categories).toEqual([expect.objectContaining({ id: "category-food", budgeted: 5000, balance: 7000 })]);
+  });
+
+  test("overlays, clears, and restores a local target without changing the YNAB mirror", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await repo.upsertCategoryGroup("plan-test", { id: "group-food", name: "Food" });
+    await repo.upsertCategory("plan-test", { id: "category-food", category_group_id: "group-food", name: "Groceries" });
+    const source = { id: "category-food", category_group_id: "group-food", name: "Groceries", budgeted: 0, activity: 0, balance: 1200, goal_type: "NEED", goal_target: 5000, goal_target_month: "2026-07-01", deleted: false };
+    await repo.upsertYnabRawObject("plan-test", "month", "2026-06-01", { month: "2026-06-01", budgeted: 0, to_be_budgeted: 0, activity: 0 });
+    await repo.upsertYnabRawObject("plan-test", "month_category", "2026-06-01\u001fcategory-food", source);
+    const rawBefore = db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category'").get();
+
+    const updated = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", {
+      method: "PATCH", body: { category: { target: { goal_type: "TB", goal_target: 9000, goal_target_month: "2026-12" } } },
+    });
+    expect(updated.status).toBe(200);
+    expect((await updated.json()).data.category).toMatchObject({ goal_type: "TB", goal_target: 9000, goal_target_month: "2026-12-01", target_source: "howmuch-local" });
+    expect(db.query("SELECT goal_type,goal_target_milli,goal_target_month FROM plan_month_category_targets").get()).toEqual({ goal_type: "TB", goal_target_milli: 9000, goal_target_month: "2026-12-01" });
+    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category'").get()).toEqual(rawBefore);
+
+    const cleared = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", { method: "PATCH", body: { category: { target: null } } });
+    expect(cleared.status).toBe(200);
+    expect((await cleared.json()).data.category).toMatchObject({ goal_type: null, goal_target: null, target_source: "howmuch-local" });
+
+    const restored = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", { method: "PATCH", body: { category: { restore_target: true } } });
+    expect(restored.status).toBe(200);
+    expect((await restored.json()).data.category).toMatchObject({ goal_type: "NEED", goal_target: 5000, goal_target_month: "2026-07-01" });
+    expect(db.query("SELECT COUNT(*) AS count FROM plan_month_category_targets").get()).toEqual({ count: 0 });
+    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category'").get()).toEqual(rawBefore);
+  });
+
+  test("keeps YNAB activity rounding while applying local deltas to the imported Uncategorized category", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await repo.upsertCategoryGroup("plan-test", { id: "group-food", name: "Food" });
+    await repo.upsertCategory("plan-test", { id: "meals", category_group_id: "group-food", name: "Meals" });
+    await repo.upsertCategory("plan-test", { id: "ynab-uncategorized", category_group_id: "group-food", name: "Uncategorized", internal: true });
+    await repo.upsertYnabRawObject("plan-test", "month", "2026-08-01", {
+      month: "2026-08-01", budgeted: 0, to_be_budgeted: 0, activity: -2004,
+    });
+    await repo.upsertYnabRawObject("plan-test", "month_category", "2026-08-01\u001fmeals", {
+      id: "meals", category_group_id: "group-food", name: "Meals", budgeted: 0, activity: -1004, balance: -1004, deleted: false,
+    });
+    await repo.upsertYnabRawObject("plan-test", "month_category", "2026-08-01\u001fynab-uncategorized", {
+      id: "ynab-uncategorized", category_group_id: "group-food", name: "Uncategorized", budgeted: 0, activity: -1000, balance: -1000, deleted: false,
+    });
+    for (const transaction of [
+      { id: "source-meals", amount: -1000, category_id: "meals" },
+      { id: "source-uncategorized", amount: -1000, category_id: null },
+    ]) {
+      await repo.upsertYnabRawObject("plan-test", "transaction", transaction.id, { ...transaction, date: "2026-08-05", deleted: false });
+      await repo.createTransaction("plan-test", {
+        ...transaction, account_id: "cash", date: "2026-08-05", source_kind: "ynab-import", external_ynab_id: transaction.id,
+      });
+    }
+
+    // YNAB's -1004 Meals activity intentionally differs from its source
+    // transaction sum. A read with no local change must return it exactly.
+    const baseline = await repo.getMonth("plan-test", "2026-08");
+    expect(baseline).toMatchObject({ activity: -2004 });
+    expect(baseline.categories).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "meals", activity: -1004 }),
+      expect.objectContaining({ id: "ynab-uncategorized", activity: -1000 }),
+    ]));
+
+    await repo.createTransaction("plan-test", { id: "local-uncategorized", account_id: "cash", date: "2026-08-10", amount: -200 });
+    const afterLocalEntry = await repo.getMonth("plan-test", "2026-08");
+    expect(afterLocalEntry).toMatchObject({ activity: -2204 });
+    expect(afterLocalEntry.categories).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "meals", activity: -1004, balance: -1004 }),
+      expect.objectContaining({ id: "ynab-uncategorized", activity: -1200, balance: -1200 }),
+    ]));
+  });
+
+  test("rejects invalid plan assignments without creating an overlay", async () => {
+    const response = await request("/v1/plans/plan-test/months/not-a-month/categories/missing", {
+      method: "PATCH",
+      body: { category: { budgeted: 1.25 } },
+    });
+    expect(response.status).toBe(400);
+    expect(db.query("SELECT COUNT(*) AS count FROM plan_month_assignments").get()).toEqual({ count: 0 });
+  });
+
+  test("requires a source month, owned category, exact PATCH body, and authentication", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await repo.upsertCategoryGroup("plan-test", { id: "group-food", name: "Food" });
+    await repo.upsertCategory("plan-test", { id: "category-food", category_group_id: "group-food", name: "Groceries" });
+    await repo.upsertYnabRawObject("plan-test", "month_category", "2026-06-01\u001fcategory-food", { id: "category-food", budgeted: 5000, balance: 5000, deleted: false });
+
+    const missingMonth = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", {
+      method: "PATCH", body: { category: { budgeted: 7000 } },
+    });
+    expect(missingMonth.status).toBe(404);
+    const wrongBody = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", {
+      method: "PUT", body: { budgeted: 7000 },
+    });
+    expect(wrongBody.status).toBe(404);
+    const malformedBody = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", {
+      method: "PATCH", body: { budgeted: 7000 },
+    });
+    expect(malformedBody.status).toBe(400);
+    const unauthorised = await handler(new Request("http://howmuch.test/v1/plans/plan-test/months/2026-06/categories/category-food", {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ category: { budgeted: 7000 } }),
+    }));
+    expect(unauthorised.status).toBe(401);
+    expect(db.query("SELECT COUNT(*) AS count FROM plan_month_assignments").get()).toEqual({ count: 0 });
+  });
+
+  test("rejects invalid or unauthenticated target writes without an overlay", async () => {
+    const invalid = await request("/v1/plans/plan-test/months/2026-06/categories/missing", {
+      method: "PATCH", body: { category: { target: { goal_type: "TB", goal_target: 1.25 } } },
+    });
+    expect(invalid.status).toBe(400);
+    const unauthorised = await handler(new Request("http://howmuch.test/v1/plans/plan-test/months/2026-06/categories/missing", {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ category: { target: { goal_type: "TB", goal_target: 1000 } } }),
+    }));
+    expect(unauthorised.status).toBe(401);
+    expect(db.query("SELECT COUNT(*) AS count FROM plan_month_category_targets").get()).toEqual({ count: 0 });
+  });
+
   test("does not create default plans on handler boot or plan list reads", async () => {
     const before = db.query("SELECT COUNT(*) AS count FROM plans").get() as { count: number };
     expect(before.count).toBe(0);
@@ -66,6 +569,35 @@ describe("YNAB-compatible API", () => {
     const listJson = await listResponse.json();
     expect(listJson.data.transactions).toHaveLength(1);
     expect(listJson.data.transactions[0].memo).toBe("FairPrice Group");
+  });
+
+  test("paginates every transaction list newest-first with bounded offsets", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    for (const transaction of [
+      { id: "page-a", date: "2026-06-01" },
+      { id: "page-b", date: "2026-06-02" },
+      { id: "page-c", date: "2026-06-03" },
+      { id: "page-d", date: "2026-06-03" },
+    ]) {
+      await repo.createTransaction("plan-test", { ...transaction, account_id: "acct-1", amount: -100 });
+    }
+
+    const first = await (await request("/v1/plans/plan-test/transactions?limit=2")).json();
+    expect(first.data.transactions.map((transaction: { id: string }) => transaction.id)).toEqual(["page-d", "page-c"]);
+    expect(first.data.has_more).toBeTrue();
+    expect(first.data.next_offset).toBe(2);
+
+    const second = await (await request("/v1/plans/plan-test/transactions?limit=2&offset=2")).json();
+    expect(second.data.transactions.map((transaction: { id: string }) => transaction.id)).toEqual(["page-b", "page-a"]);
+    expect(second.data.has_more).toBeFalse();
+    expect(second.data.next_offset).toBeNull();
+
+    const scoped = await (await request("/v1/plans/plan-test/accounts/acct-1/transactions?limit=1")).json();
+    expect(scoped.data.transactions).toHaveLength(1);
+    expect(scoped.data.has_more).toBeTrue();
+
+    const invalid = await request("/v1/plans/plan-test/transactions?limit=251");
+    expect(invalid.status).toBe(400);
   });
 
   test("treats repeated single-transaction import ids as idempotent", async () => {
@@ -1195,6 +1727,16 @@ describe("password authentication", () => {
       body: JSON.stringify({ account: { name: "Cash" } }),
     }));
     expect(viewerWrite.status).toBe(403);
+    const viewerReconcile = await handler(new Request("https://howmuch.test/v1/plans/viewer-plan/accounts/cash/reconcile", {
+      method: "POST",
+      headers: { cookie, origin: "https://howmuch.test", "content-type": "application/json", "idempotency-key": "viewer-reconcile" },
+      body: JSON.stringify({ statement_date: "2026-08-31", statement_balance: 0 }),
+    }));
+    expect(viewerReconcile.status).toBe(403);
+    const viewerPreview = await handler(new Request("https://howmuch.test/v1/plans/viewer-plan/accounts/cash/reconciliation?statement_date=2026-08-31", {
+      headers: { cookie },
+    }));
+    expect(viewerPreview.status).toBe(404);
 
     const privateRead = await handler(new Request("https://howmuch.test/v1/plans/private-plan", { headers: { cookie } }));
     expect(privateRead.status).toBe(404);
@@ -1233,13 +1775,14 @@ describe("password authentication", () => {
   });
 });
 
-function request(path: string, init: { method?: string; body?: unknown } = {}): Promise<Response> {
+function request(path: string, init: { method?: string; body?: unknown; headers?: Record<string, string> } = {}): Promise<Response> {
   return handler(
     new Request(`http://howmuch.test${path}`, {
       method: init.method ?? "GET",
       headers: {
         authorization: "Bearer test-token",
         "content-type": "application/json",
+        ...init.headers,
       },
       body: init.body ? JSON.stringify(init.body) : undefined,
     }),

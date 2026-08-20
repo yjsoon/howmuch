@@ -1,10 +1,12 @@
 import { createId } from "./ids";
-import { LedgerRepository, type TransactionWriteOptions } from "./repository";
+import { createHash } from "node:crypto";
+import { LedgerRepository, NotFoundError, ReconciliationMismatchError, ValidationError, type TransactionWriteOptions } from "./repository";
 import type { LedgerStore } from "./storage";
-import type { TransactionInput } from "./types";
+import type { AccountReconciliationOptions, AccountReconciliationPreview, AccountReconciliationResult, MonthCategoryTargetInput, ScheduledTransactionInput, ScheduledWriteOptions, TransactionInput } from "./types";
 import { D1Database } from "./d1";
-import { D1MetadataRepository } from "./d1-metadata-repository";
+import { D1MetadataRepository, type AccountReconciliationSnapshot, type ScheduledMutationSnapshot } from "./d1-metadata-repository";
 import { D1TransactionRepository, type D1WriteContext } from "./d1-transaction-repository";
+import { scheduledTransactionMutation, type EffectiveScheduledTransaction } from "./scheduled-transactions";
 
 export type D1LedgerRepositoryOptions = Readonly<{
   lease?: (planId: string) => D1WriteContext["lease"] | undefined;
@@ -22,9 +24,9 @@ export class D1LedgerRepository extends LedgerRepository {
     this.transactions = new D1TransactionRepository(d1);
   }
 
-  private context(kind: string, planId: string | undefined, resourceId: string): D1WriteContext {
+  private context(kind: string, planId: string | undefined, resourceId: string, operationId?: string): D1WriteContext {
     const lease = planId ? this.options.lease?.(planId) : undefined;
-    return { operationId: this.options.operationId?.(kind, planId, resourceId) ?? createId("op"), ...(lease ? { lease } : {}) };
+    return { operationId: operationId ?? this.options.operationId?.(kind, planId, resourceId) ?? createId("op"), ...(lease ? { lease } : {}) };
   }
 
   override async ensurePlan(planId = this.getDefaultPlanId(), name = "HowMuch"): Promise<void> {
@@ -40,6 +42,78 @@ export class D1LedgerRepository extends LedgerRepository {
     await this.metadata.upsertAccount(planId,{...account,id,...(!account.id?{opening_balance:opening,balance:account.balance??opening,cleared_balance:account.cleared_balance??account.balance??opening}: {})},this.context("account.create",planId,id),false,true);
     return this.getAccount(planId,id);
   }
+  override async getAccountReconciliation(planId: string, accountId: string, statementDate: string): Promise<AccountReconciliationPreview> {
+    const date = normaliseReconciliationDate(statementDate);
+    const { account, snapshot } = await this.readAccountReconciliationSnapshot(planId, accountId, date);
+    const formattedAccount = (await this.listAccounts(planId)).find((candidate: { id: string }) => candidate.id === account.id);
+    if (!formattedAccount) throw new NotFoundError("Account not found");
+    return {
+      account: formattedAccount,
+      statement_date: date,
+      current_reconciled_balance: snapshot.priorReconciledBalance,
+      projected_reconciled_balance: snapshot.projectedReconciledBalance,
+      candidate_transaction_ids: snapshot.candidateIds,
+      candidate_transaction_count: snapshot.candidateIds.length,
+      server_knowledge: await this.getServerKnowledge(planId),
+    };
+  }
+  override async reconcileAccount(
+    planId: string,
+    accountId: string,
+    statementDate: string,
+    statementBalance: number,
+    options: AccountReconciliationOptions,
+  ): Promise<AccountReconciliationResult> {
+    const date = normaliseReconciliationDate(statementDate);
+    if (!Number.isSafeInteger(statementBalance)) throw new ValidationError("statement_balance must be integer milliunits");
+    if (!accountId || typeof accountId !== "string") throw new ValidationError("account_id is required");
+    if (!options?.operationId) throw new ValidationError("operationId is required");
+    const context = this.context("account.reconcile", planId, accountId, options.operationId);
+    const receipt = await this.d1.get("SELECT 1 FROM write_commands WHERE id=?", [context.operationId]);
+    const { snapshot } = await this.readAccountReconciliationSnapshot(planId, accountId, date);
+    if (!receipt && snapshot.projectedReconciledBalance !== statementBalance) {
+      throw new ReconciliationMismatchError(snapshot.priorReconciledBalance, snapshot.projectedReconciledBalance, statementBalance);
+    }
+    const result = await this.metadata.reconcileAccount(planId, accountId, date, statementBalance, snapshot, context);
+    const reconciledAccount = (await this.listAccounts(planId)).find((candidate: { id: string }) => candidate.id === accountId);
+    if (!reconciledAccount) throw new NotFoundError("Account not found");
+    return {
+      ...result,
+      account: reconciledAccount,
+      replayed: Boolean(receipt),
+      server_knowledge: await this.getServerKnowledge(planId),
+    };
+  }
+  private async readAccountReconciliationSnapshot(
+    planId: string,
+    accountId: string,
+    statementDate: string,
+  ): Promise<{ account: Record<string, any>; snapshot: AccountReconciliationSnapshot }> {
+    const account = await this.d1.get<Record<string, any>>(
+      "SELECT * FROM accounts WHERE id=? AND plan_id=? AND deleted=0",
+      [accountId, planId],
+    );
+    if (!account) throw new NotFoundError("Account not found");
+    const balances = await this.d1.get<Record<string, any>>(
+      `SELECT
+         ? + COALESCE(SUM(CASE WHEN deleted=0 AND cleared='reconciled' THEN amount_milli ELSE 0 END),0) current_reconciled,
+         ? + COALESCE(SUM(CASE WHEN deleted=0 AND (cleared='reconciled' OR (cleared='cleared' AND date<=?)) THEN amount_milli ELSE 0 END),0) projected_reconciled
+       FROM transactions WHERE plan_id=? AND account_id=?`,
+      [account.opening_balance_milli, account.opening_balance_milli, statementDate, planId, accountId],
+    );
+    const candidates = await this.d1.all<{ id: string }>(
+      "SELECT id FROM transactions WHERE plan_id=? AND account_id=? AND deleted=0 AND cleared='cleared' AND date<=? ORDER BY id",
+      [planId, accountId, statementDate],
+    );
+    return {
+      account,
+      snapshot: {
+        priorReconciledBalance: Number(balances?.current_reconciled),
+        projectedReconciledBalance: Number(balances?.projected_reconciled),
+        candidateIds: candidates.map((row) => String(row.id)),
+      },
+    };
+  }
   override async ensureTransferPayee():Promise<{id:string;name:string}|null>{throw new Error("D1LedgerRepository.ensureTransferPayee is unsupported; use ensureAccount/upsertAccount for atomic provisioning");}
   override async createPayee(planId:string,name:string,id=createId("payee")):Promise<any>{
     const existing=await this.d1.get<Record<string,any>>("SELECT id FROM payees WHERE plan_id=? AND lower(name)=lower(?) AND deleted=0",[planId,name]);
@@ -49,13 +123,186 @@ export class D1LedgerRepository extends LedgerRepository {
   }
   override async ensurePayee(planId:string,payeeId:string,name?:string):Promise<void>{await this.metadata.upsertPayee(planId,{id:payeeId,name:name??`Imported payee ${payeeId.slice(0,8)}`},this.context("payee.ensure",planId,payeeId));}
   override async upsertPayee(planId:string,payee:any):Promise<void>{await this.metadata.upsertPayee(planId,payee,this.context("payee.upsert",planId,payee.id));}
+  override async upsertYnabRawObject(planId:string,objectType:string,objectId:string,payload:unknown,serverKnowledge?:number):Promise<void>{await this.metadata.upsertYnabRawObject(planId,objectType,objectId,payload,serverKnowledge,this.context("ynab-raw.upsert",planId,`${objectType}:${objectId}`));}
   override async ensureCategory(planId:string,categoryId:string,name?:string,groupId?:string|null):Promise<void>{await this.metadata.ensureCategory(planId,categoryId,name,groupId??"uncategorized-group",this.context("category.ensure",planId,categoryId));}
   override async upsertCategoryGroup(planId:string,group:any):Promise<void>{await this.metadata.upsertCategoryGroup(planId,group,this.context("category-group.upsert",planId,group.id));}
   override async upsertCategory(planId:string,category:any,groupId?:string|null):Promise<void>{await this.metadata.upsertCategory(planId,category,groupId,this.context("category.upsert",planId,category.id));}
+  override async setMonthCategoryAssignment(planId: string, month: string, categoryId: string, budgetedMilli: number): Promise<any> {
+    if (!Number.isSafeInteger(budgetedMilli)) throw new ValidationError("budgeted must be integer milliunits");
+    const start = normaliseBudgetMonth(month);
+    await this.ensurePlan(planId);
+    const sourceMonth = await this.d1.get(
+      "SELECT 1 FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month' AND object_id = ?",
+      [planId, start],
+    );
+    if (!sourceMonth) throw new NotFoundError("Imported month not found");
+    const source = await this.d1.get<{ payload_json: string }>(
+      "SELECT payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month_category' AND object_id = ?",
+      [planId, `${start}\u001f${categoryId}`],
+    );
+    if (!source) throw new NotFoundError("Imported month category not found");
+    const category = JSON.parse(source.payload_json) as { budgeted?: unknown; deleted?: unknown };
+    if (category.deleted) throw new ValidationError("Deleted categories cannot be assigned");
+    const ownedCategory = await this.d1.get(
+      "SELECT 1 FROM categories WHERE id = ? AND plan_id = ? AND deleted = 0",
+      [categoryId, planId],
+    );
+    if (!ownedCategory) throw new NotFoundError("Category not found");
+    const sourceBudgeted = integerMilliunits(category.budgeted, "source category budgeted");
+    await this.metadata.setMonthCategoryAssignment(
+      planId, start, categoryId, budgetedMilli, sourceBudgeted,
+      this.context("plan.assignment.set", planId, `${start}\u001f${categoryId}`),
+    );
+    return this.getMonth(planId, start);
+  }
+  override async setMonthCategoryTarget(planId: string, month: string, categoryId: string, target: MonthCategoryTargetInput): Promise<any> {
+    const start = normaliseBudgetMonth(month);
+    const normalised = normaliseTarget(target);
+    await this.ensurePlan(planId);
+    const sourceMonth = await this.d1.get("SELECT 1 FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month' AND object_id = ?", [planId, start]);
+    if (!sourceMonth) throw new NotFoundError("Imported month not found");
+    const source = await this.d1.get<{ payload_json: string }>("SELECT payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month_category' AND object_id = ?", [planId, `${start}\u001f${categoryId}`]);
+    if (!source) throw new NotFoundError("Imported month category not found");
+    if ((JSON.parse(source.payload_json) as { deleted?: unknown }).deleted) throw new ValidationError("Deleted categories cannot have targets");
+    const ownedCategory = await this.d1.get("SELECT 1 FROM categories WHERE id = ? AND plan_id = ? AND deleted = 0", [categoryId, planId]);
+    if (!ownedCategory) throw new NotFoundError("Category not found");
+    await this.metadata.setMonthCategoryTarget(planId, start, categoryId, normalised, this.context("plan.target.set", planId, `${start}\u001f${categoryId}`));
+    return this.getMonth(planId, start);
+  }
+  override async restoreMonthCategoryTarget(planId: string, month: string, categoryId: string): Promise<any> {
+    const start = normaliseBudgetMonth(month);
+    await this.ensurePlan(planId);
+    const sourceMonth = await this.d1.get("SELECT 1 FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month' AND object_id = ?", [planId, start]);
+    if (!sourceMonth) throw new NotFoundError("Imported month not found");
+    const source = await this.d1.get<{ payload_json: string }>("SELECT payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month_category' AND object_id = ?", [planId, `${start}\u001f${categoryId}`]);
+    if (!source) throw new NotFoundError("Imported month category not found");
+    const ownedCategory = await this.d1.get("SELECT 1 FROM categories WHERE id = ? AND plan_id = ? AND deleted = 0", [categoryId, planId]);
+    if (!ownedCategory) throw new NotFoundError("Category not found");
+    await this.metadata.restoreMonthCategoryTarget(planId, start, categoryId, this.context("plan.target.restore", planId, `${start}\u001f${categoryId}`));
+    return this.getMonth(planId, start);
+  }
+
+  override async createScheduledTransaction(planId: string, input: ScheduledTransactionInput, options: ScheduledWriteOptions = {}): Promise<any> {
+    await this.ensurePlan(planId);
+    const id = input.id ?? (options.operationId ? `scheduled_${scheduleId(`${planId}:${options.operationId}`)}` : createId("scheduled"));
+    const context = this.context("scheduled_transaction.create", planId, id, options.operationId);
+    const receipt = options.operationId ? await this.d1.get("SELECT 1 FROM write_commands WHERE id=?", [context.operationId]) : null;
+    if (!receipt) {
+      const collision = await this.d1.get(
+        `SELECT 1 FROM scheduled_transaction_edits WHERE plan_id=? AND id=?
+         UNION ALL SELECT 1 FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_transaction' AND object_id=? LIMIT 1`,
+        [planId, id, planId, id],
+      );
+      if (collision) throw new ValidationError("Scheduled transaction already exists");
+    }
+    const transaction = scheduledTransactionMutation(id, input as Record<string, unknown>, null, [], options.operationId);
+    await this.validateD1ScheduledReferences(planId, transaction);
+    await this.metadata.mutateScheduledTransaction(planId, transaction, "howmuch-local", "scheduled_transaction.create", context);
+    return this.getScheduledTransaction(planId, id);
+  }
+
+  override async updateScheduledTransaction(planId: string, id: string, patch: Partial<ScheduledTransactionInput>, options: ScheduledWriteOptions = {}): Promise<any> {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const current = await this.readD1ScheduleForMutation(planId, id);
+      assertExpectedD1Schedule(current.payload, options.expected);
+      const transaction = scheduledTransactionMutation(id, patch as Record<string, unknown>, current.payload, current.subtransactions, options.operationId);
+      await this.validateD1ScheduledReferences(planId, transaction);
+      try {
+        await this.metadata.mutateScheduledTransaction(planId, transaction, current.origin, "scheduled_transaction.update", this.context("scheduled_transaction.update", planId, id, options.operationId), current.snapshot);
+        return this.getScheduledTransaction(planId, id);
+      } catch (error) {
+        if (!isStaleScheduledTransaction(error) || options.expected || attempt === 3) throw error;
+      }
+    }
+    throw new Error("Unable to update scheduled transaction");
+  }
+
+  override async deleteScheduledTransaction(planId: string, id: string, options: ScheduledWriteOptions = {}): Promise<any> {
+    const context = this.context("scheduled_transaction.delete", planId, id, options.operationId);
+    const receipt = options.operationId ? await this.d1.get("SELECT 1 FROM write_commands WHERE id=?", [context.operationId]) : null;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const current = await this.readD1ScheduleForMutation(planId, id, Boolean(receipt));
+      assertExpectedD1Schedule(current.payload, options.expected);
+      if (current.payload.deleted && !receipt) throw new NotFoundError("Scheduled transaction not found");
+      const transaction = {
+        ...current.payload,
+        deleted: true,
+        subtransactions: current.subtransactions,
+      } as unknown as EffectiveScheduledTransaction;
+      try {
+        await this.metadata.mutateScheduledTransaction(planId, transaction, current.origin, "scheduled_transaction.delete", context, current.snapshot);
+        return { ...transaction, subtransactions: current.subtransactions };
+      } catch (error) {
+        if (!isStaleScheduledTransaction(error) || options.expected || attempt === 3) throw error;
+      }
+    }
+    throw new Error("Unable to delete scheduled transaction");
+  }
+
+  private async readD1ScheduleForMutation(planId: string, id: string, includeDeleted = false): Promise<{ payload: Record<string, any>; subtransactions: Record<string, any>[]; origin: "howmuch-local" | "ynab-overlay"; snapshot: ScheduledMutationSnapshot }> {
+    const edit = await this.d1.get<Record<string, any>>("SELECT origin,payload_json,deleted FROM scheduled_transaction_edits WHERE plan_id=? AND id=?", [planId, id]);
+    if (edit) {
+      if (Boolean(edit.deleted) && !includeDeleted) throw new NotFoundError("Scheduled transaction not found");
+      const subs = await this.d1.all<Record<string, any>>("SELECT payload_json FROM scheduled_subtransaction_edits WHERE plan_id=? AND scheduled_transaction_id=? ORDER BY id", [planId, id]);
+      return {
+        payload: { ...JSON.parse(edit.payload_json), deleted: Boolean(edit.deleted) },
+        subtransactions: subs.map((row) => JSON.parse(row.payload_json)),
+        origin: edit.origin,
+        snapshot: {
+          source: "edit",
+          payloadJson: String(edit.payload_json),
+          subtransactionsJson: JSON.stringify(subs.map((row) => String(row.payload_json))),
+          deleted: Number(Boolean(edit.deleted)),
+        },
+      };
+    }
+    const source = await this.d1.get<Record<string, any>>("SELECT payload_json,deleted FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_transaction' AND object_id=?", [planId, id]);
+    if (!source || (Boolean(source.deleted) && !includeDeleted)) throw new NotFoundError("Scheduled transaction not found");
+    const rawSubs = await this.d1.all<Record<string, any>>("SELECT payload_json FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_subtransaction' ORDER BY object_id", [planId]);
+    const sourceSubtransactions = rawSubs.filter((row) => {
+      const subtransaction = JSON.parse(row.payload_json) as Record<string, any>;
+      return subtransaction.scheduled_transaction_id === id && !subtransaction.deleted;
+    });
+    return {
+      payload: { ...JSON.parse(source.payload_json), deleted: Boolean(source.deleted) },
+      subtransactions: sourceSubtransactions.map((row) => JSON.parse(row.payload_json)),
+      origin: "ynab-overlay",
+      snapshot: {
+        source: "raw",
+        payloadJson: String(source.payload_json),
+        subtransactionsJson: JSON.stringify(sourceSubtransactions.map((row) => String(row.payload_json))),
+        deleted: Number(Boolean(source.deleted)),
+      },
+    };
+  }
+
+  private async validateD1ScheduledReferences(planId: string, transaction: EffectiveScheduledTransaction): Promise<void> {
+    const requireReference = async (table: "accounts" | "payees" | "categories", id: unknown, label: string) => {
+      if (id == null) return null;
+      const row = await this.d1.get<Record<string, any>>(`SELECT name FROM ${table} WHERE id=? AND plan_id=? AND deleted=0`, [id, planId]);
+      if (!row) throw new ValidationError(`${label} not found`);
+      return row;
+    };
+    const account = await requireReference("accounts", transaction.account_id, "Account");
+    transaction.account_name = account?.name ?? transaction.account_name ?? null;
+    const payee = await requireReference("payees", transaction.payee_id, "Payee");
+    if (payee) transaction.payee_name = payee.name;
+    const category = await requireReference("categories", transaction.category_id, "Category");
+    if (category) transaction.category_name = category.name;
+    await requireReference("accounts", transaction.transfer_account_id, "Transfer account");
+    for (const subtransaction of transaction.subtransactions) {
+      const subPayee = await requireReference("payees", subtransaction.payee_id, "Subtransaction payee");
+      if (subPayee) subtransaction.payee_name = subPayee.name;
+      const subCategory = await requireReference("categories", subtransaction.category_id, "Subtransaction category");
+      if (subCategory) subtransaction.category_name = subCategory.name;
+      await requireReference("accounts", subtransaction.transfer_account_id, "Subtransaction transfer account");
+    }
+  }
 
   override async createTransaction(planId:string,input:TransactionInput,options:TransactionWriteOptions={}):Promise<any>{
     const autoLink=options.autoLink??true;
-    const row=await this.transactions.create(planId,input,this.context("transaction.create",planId,input.id??createId("transaction-operation")),{autoLink,upsert:!autoLink});
+    const id=input.id??(options.operationId?`txn_${scheduleId(`${planId}:${options.operationId}`)}`:createId("txn"));
+    const row=await this.transactions.create(planId,{...input,id},this.context("transaction.create",planId,id,options.operationId),{autoLink,upsert:!autoLink});
     return this.getTransaction(planId,row.id,Boolean(input.deleted));
   }
   override async updateTransaction(planId:string,id:string,patch:Partial<TransactionInput>):Promise<any>{await this.transactions.update(planId,id,patch,this.context("transaction.update",planId,id));return this.getTransaction(planId,id);}
@@ -72,3 +319,56 @@ export class D1LedgerRepository extends LedgerRepository {
 
 const _d1LedgerStoreTypecheck: LedgerStore = null as unknown as D1LedgerRepository;
 void _d1LedgerStoreTypecheck;
+
+function normaliseBudgetMonth(month: string): string {
+  const start = month.length === 7 ? `${month}-01` : month;
+  if (!/^\d{4}-(0[1-9]|1[0-2])-01$/.test(start)) throw new ValidationError("month must be YYYY-MM");
+  return start;
+}
+
+function normaliseReconciliationDate(date: string): string {
+  if (typeof date !== "string" || !/^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(date)) {
+    throw new ValidationError("statement_date must be an ISO date (YYYY-MM-DD)");
+  }
+  const parsed = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
+    throw new ValidationError("statement_date must be a valid ISO date");
+  }
+  return date;
+}
+
+function integerMilliunits(value: unknown, label: string): number {
+  const number = value == null ? 0 : Number(value);
+  if (!Number.isSafeInteger(number)) throw new ValidationError(`${label} must be integer milliunits`);
+  return number;
+}
+
+function scheduleId(seed: string): string {
+  return createHash("sha256").update(seed).digest("hex").slice(0, 24);
+}
+
+function assertExpectedD1Schedule(payload: Record<string, any>, expected: ScheduledWriteOptions["expected"]): void {
+  if (!expected) return;
+  if (payload.date_first !== expected.date_first || payload.date_next !== expected.date_next || payload.frequency !== expected.frequency) {
+    throw new Error("stale scheduled occurrence");
+  }
+}
+
+function isStaleScheduledTransaction(error: unknown): boolean {
+  return String(error).includes("stale scheduled transaction");
+}
+
+function normaliseTarget(target: MonthCategoryTargetInput): { goal_type: string | null; goal_target: number | null; goal_target_month: string | null } {
+  if (!target || typeof target !== "object" || Array.isArray(target)) throw new ValidationError("target must be an object or null");
+  if (target.goal_type === null) {
+    if (target.goal_target != null || target.goal_target_month != null) throw new ValidationError("Cleared targets cannot include an amount or target month");
+    return { goal_type: null, goal_target: null, goal_target_month: null };
+  }
+  if (!["TB", "TBD", "MF", "NEED", "DEBT"].includes(String(target.goal_type))) throw new ValidationError("goal_type must be TB, TBD, MF, NEED, or DEBT");
+  if (!Number.isSafeInteger(target.goal_target) || Number(target.goal_target) <= 0) throw new ValidationError("goal_target must be a positive integer milliunits");
+  return {
+    goal_type: target.goal_type,
+    goal_target: Number(target.goal_target),
+    goal_target_month: target.goal_target_month == null ? null : normaliseBudgetMonth(target.goal_target_month),
+  };
+}

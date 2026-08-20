@@ -52,7 +52,7 @@ function ynabTransaction(id: string, overrides: Record<string, unknown> = {}) {
 
 function stubYnabApi(
   transactions: unknown[],
-  options: { plans?: unknown[]; onFetch?: (url: string) => void; rateLimitHeader?: string } = {},
+  options: { plans?: unknown[]; accounts?: unknown[]; payees?: unknown[]; onFetch?: (url: string) => void; rateLimitHeader?: string } = {},
 ) {
   const headers = options.rateLimitHeader ? { "x-rate-limit": options.rateLimitHeader } : undefined;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -69,7 +69,7 @@ function stubYnabApi(
     }
     if (url.endsWith("/plans/plan-test/accounts")) {
       return jsonResponse(
-        { data: { accounts: [{ id: "acct-1", name: "Checking", type: "checking", on_budget: true }] } },
+        { data: { accounts: options.accounts ?? [{ id: "acct-1", name: "Checking", type: "checking", on_budget: true }] } },
         headers,
       );
     }
@@ -77,7 +77,7 @@ function stubYnabApi(
       return jsonResponse({ data: { category_groups: [] } }, headers);
     }
     if (url.endsWith("/plans/plan-test/payees")) {
-      return jsonResponse({ data: { payees: [] } }, headers);
+      return jsonResponse({ data: { payees: options.payees ?? [] } }, headers);
     }
     if (url.includes("/plans/plan-test/transactions")) {
       return jsonResponse({ data: { transactions } }, headers);
@@ -98,6 +98,107 @@ async function seedLedgerFromYnab(transactions: unknown[]): Promise<void> {
 }
 
 describe("YNAB similarity guard", () => {
+  test("preserves a full-plan export losslessly, including months, schedules, locations, and movements", async () => {
+    const fullPlan = {
+      id: "plan-test", name: "Complete plan", first_month: "2026-01", last_month: "2026-12",
+      accounts: [{ id: "acct-1", name: "Checking", type: "checking", on_budget: true, balance: 1250, transfer_payee_id: "transfer-1", note: "account note", deleted: false }],
+      category_groups: [{ id: "group-1", name: "Everyday", hidden: false }],
+      categories: [{ id: "category-1", category_group_id: "group-1", name: "Food", note: "category note", deleted: false }],
+      payees: [{ id: "transfer-1", name: "Transfer: Checking", transfer_account_id: "acct-1", deleted: false }, { id: "payee-1", name: "Shop", deleted: false }],
+      payee_locations: [{ id: "location-1", payee_id: "payee-1", latitude: "1.2", longitude: "3.4", deleted: false }],
+      months: [{ month: "2026-06-01", note: "month note", income: 9000, budgeted: 5000, activity: -1200, to_be_budgeted: 4000, age_of_money: 21, deleted: false, categories: [{ id: "category-1", category_group_id: "group-1", name: "Food", budgeted: 5000, activity: -1200, balance: 3800, goal_type: "TB", goal_target: 10000, goal_target_month: "2026-07-01", deleted: false }] }],
+      transactions: [{ ...ynabTransaction("transaction-1", { account_id: "acct-1", payee_id: "payee-1", category_id: "legacy-split-parent-category", amount: -1200, account_note: "discarded by ledger but raw", subtransactions: undefined }) }],
+      subtransactions: [{ id: "sub-1", transaction_id: "transaction-1", amount: -1200, payee_id: "payee-1", category_id: "category-1", memo: "split note", deleted: false }],
+      scheduled_transactions: [{ id: "scheduled-1", account_id: "acct-1", date_first: "2026-06-10", date_next: "2026-07-10", frequency: "monthly", amount: -500, payee_id: "payee-1", category_id: "category-1", deleted: false }],
+      scheduled_subtransactions: [{ id: "scheduled-sub-1", scheduled_transaction_id: "scheduled-1", amount: -500, payee_id: "payee-1", category_id: "category-1", deleted: false }],
+    };
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/settings")) return jsonResponse({ data: { settings: { date_format: { format: "YYYY-MM-DD" }, currency_format: { iso_code: "USD" }, display: { flag_names: { blue: "Follow up" } } } } });
+      if (url.includes("/money_movements")) return jsonResponse({ data: { money_movements: [{ id: "movement-1", month: "2026-06-01", from_category_id: "category-1", to_category_id: "category-1", amount: 100, note: "move", deleted: false }] } });
+      if (url.includes("/money_movement_groups")) return jsonResponse({ data: { money_movement_groups: [{ id: "movement-group-1", month: "2026-06-01", note: "group", deleted: false }] } });
+      if (url.endsWith("/plans/plan-test")) return jsonResponse({ data: { plan: fullPlan, server_knowledge: 88 } });
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+
+    const result = await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test" });
+    expect(result.raw_objects).toMatchObject({ account: 1, month: 1, month_category: 1, scheduled_transaction: 1, scheduled_subtransaction: 1, payee_location: 1, money_movement: 1, money_movement_group: 1, transaction: 1, subtransaction: 1 });
+    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE plan_id='plan-test' AND object_type='account' AND object_id='acct-1'").get()).toEqual({ payload_json: JSON.stringify(fullPlan.accounts[0]) });
+    expect(db.query("SELECT category_id FROM transactions WHERE id='transaction-1'").get()).toEqual({ category_id: null });
+    expect(db.query("SELECT category_id FROM subtransactions WHERE id='sub-1'").get()).toEqual({ category_id: "category-1" });
+    expect(db.query("SELECT id FROM categories WHERE plan_id='plan-test' ORDER BY id").all()).toEqual([{ id: "category-1" }]);
+    expect(db.query("SELECT id FROM category_groups WHERE plan_id='plan-test' ORDER BY id").all()).toEqual([{ id: "group-1" }]);
+    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='transaction' AND object_id='transaction-1'").get()).toEqual({ payload_json: JSON.stringify(fullPlan.transactions[0]) });
+    expect(await repo.getMonth("plan-test", "2026-06")).toEqual(fullPlan.months[0]);
+    expect(await repo.listYnabRawObjects("plan-test", "scheduled_subtransaction")).toEqual(fullPlan.scheduled_subtransactions);
+  });
+
+  test("updates raw tombstones and full-list money movement data on a cursor delta", async () => {
+    const deltaPlan = { id: "plan-test", name: "Test Plan", accounts: [], category_groups: [], categories: [], payees: [], payee_locations: [], months: [], transactions: [{ ...ynabTransaction("deleted-transaction", { account_id: "acct-1", deleted: true }) }], subtransactions: [], scheduled_transactions: [], scheduled_subtransactions: [] };
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/settings")) return jsonResponse({ data: { settings: {} } });
+      if (url.includes("/money_movement_groups")) return jsonResponse({ data: { money_movement_groups: [{ id: "group-delta", month: "2026-06-01", deleted: true }] } });
+      if (url.includes("/money_movements")) return jsonResponse({ data: { money_movements: [{ id: "movement-delta", month: "2026-06-01", deleted: true }] } });
+      if (url.includes("/plans/plan-test?last_knowledge_of_server=7")) return jsonResponse({ data: { plan: deltaPlan, server_knowledge: 9 } });
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Test Plan" });
+    await repo.upsertPayee("plan-test", { id: "payee-1", name: "Payee" });
+    await repo.upsertAccount("plan-test", { id: "acct-1", name: "Checking" });
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test", lastKnowledgeOfServer: 7 });
+    expect(db.query("SELECT deleted FROM ynab_raw_objects WHERE object_type='transaction' AND object_id='deleted-transaction'").get()).toEqual({ deleted: 1 });
+    expect(db.query("SELECT deleted FROM ynab_raw_objects WHERE object_type='money_movement' AND object_id='movement-delta'").get()).toEqual({ deleted: 1 });
+    expect(db.query("SELECT deleted FROM ynab_raw_objects WHERE object_type='money_movement_group' AND object_id='group-delta'").get()).toEqual({ deleted: 1 });
+  });
+
+  test("imports reciprocal transfer payees before their accounts", async () => {
+    stubYnabApi([], {
+      accounts: [{
+        id: "acct-transfer",
+        name: "Savings",
+        type: "savings",
+        on_budget: true,
+        transfer_payee_id: "payee-transfer",
+      }],
+      payees: [{
+        id: "payee-transfer",
+        name: "Transfer : Savings",
+        transfer_account_id: "acct-transfer",
+        deleted: false,
+      }],
+    });
+
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test" });
+
+    expect(db.query("SELECT transfer_payee_id FROM accounts WHERE id='acct-transfer'").get()).toEqual({ transfer_payee_id: "payee-transfer" });
+    expect(db.query("SELECT name,transfer_account_id FROM payees WHERE id='payee-transfer'").get()).toEqual({ name: "Transfer : Savings", transfer_account_id: "acct-transfer" });
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  test("imports duplicate-name YNAB payees as distinct IDs with their transactions", async () => {
+    stubYnabApi([
+      ynabTransaction("transaction-a", { payee_id: "payee-a", payee_name: "Same merchant" }),
+      ynabTransaction("transaction-b", { payee_id: "payee-b", payee_name: "Same merchant" }),
+    ], {
+      payees: [
+        { id: "payee-a", name: "Same merchant", deleted: false },
+        { id: "payee-b", name: "Same merchant", deleted: false },
+      ],
+    });
+
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test" });
+
+    expect(db.query("SELECT id,name,external_ynab_id FROM payees WHERE id IN ('payee-a','payee-b') ORDER BY id").all()).toEqual([
+      { id: "payee-a", name: "Same merchant", external_ynab_id: "payee-a" },
+      { id: "payee-b", name: "Same merchant", external_ynab_id: "payee-b" },
+    ]);
+    expect(db.query("SELECT id,payee_id,payee_name_snapshot FROM transactions WHERE id IN ('transaction-a','transaction-b') ORDER BY id").all()).toEqual([
+      { id: "transaction-a", payee_id: "payee-a", payee_name_snapshot: "Same merchant" },
+      { id: "transaction-b", payee_id: "payee-b", payee_name_snapshot: "Same merchant" },
+    ]);
+  });
+
   test("first sync into an empty ledger is never blocked", async () => {
     stubYnabApi([ynabTransaction("txn-1"), ynabTransaction("txn-2")]);
 
