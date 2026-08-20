@@ -89,6 +89,21 @@ struct APISettings: Codable, Equatable {
     [trimmedBaseURL, planID, authenticatedUserID].joined(separator: "|")
   }
 
+  /// Account presentation preferences belong to one authenticated plan.
+  /// Canonicalising the endpoint prevents harmless URL spelling differences
+  /// from creating or, worse, sharing the wrong preference scope.
+  var viewPrefsScopeKey: String? {
+    guard
+      isAuthenticated,
+      let endpoint = normalizedBaseURLString,
+      !authenticatedUserID.isEmpty,
+      !planID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else {
+      return nil
+    }
+    return [endpoint, authenticatedUserID, planID].joined(separator: "|")
+  }
+
   var baseURL: URL? {
     guard
       let components = URLComponents(string: trimmedBaseURL),
@@ -293,6 +308,8 @@ private enum CredentialStore {
 /// View options remembered across launches, persisted like the connection
 /// settings. Defaults apply whenever a stored blob is missing or unreadable.
 struct ViewPrefs: Codable, Equatable {
+  /// Legacy unscoped key. It remains readable for one-time migration but all
+  /// new writes go through the scoped preference store.
   static let userDefaultsKey = "HowMuch.ViewPrefs"
 
   var lastUsedAccountID: String?
@@ -303,25 +320,42 @@ struct ViewPrefs: Codable, Equatable {
   /// account payload is an immutable source list, so these IDs are deliberately
   /// not sent back to the API.
   var favouriteAccountIDs: [String] = []
+  /// Legacy global order retained so existing installs can seed every new
+  /// group's manual order deterministically.
   var accountOrder: [String] = []
+  /// Manual order is now specific to the displayed group. This lets, for
+  /// example, a favourite account sit first in Favourites without moving the
+  /// same account within Cash.
+  var accountOrderByGroup: [String: [String]] = [:]
+  var accountGroupSorts: [String: AccountGroupSort] = [:]
+  var customAccountGroups: [CustomAccountGroup] = []
 
   private enum CodingKeys: String, CodingKey {
     case lastUsedAccountID
     case includeQuietSpending
     case favouriteAccountIDs
     case accountOrder
+    case accountOrderByGroup
+    case accountGroupSorts
+    case customAccountGroups
   }
 
   init(
     lastUsedAccountID: String? = nil,
     includeQuietSpending: Bool? = nil,
     favouriteAccountIDs: [String] = [],
-    accountOrder: [String] = []
+    accountOrder: [String] = [],
+    accountOrderByGroup: [String: [String]] = [:],
+    accountGroupSorts: [String: AccountGroupSort] = [:],
+    customAccountGroups: [CustomAccountGroup] = []
   ) {
     self.lastUsedAccountID = lastUsedAccountID
     self.includeQuietSpending = includeQuietSpending
     self.favouriteAccountIDs = favouriteAccountIDs
     self.accountOrder = accountOrder
+    self.accountOrderByGroup = accountOrderByGroup
+    self.accountGroupSorts = accountGroupSorts
+    self.customAccountGroups = customAccountGroups
   }
 
   init(from decoder: Decoder) throws {
@@ -330,6 +364,10 @@ struct ViewPrefs: Codable, Equatable {
     includeQuietSpending = try container.decodeIfPresent(Bool.self, forKey: .includeQuietSpending)
     favouriteAccountIDs = try container.decodeIfPresent([String].self, forKey: .favouriteAccountIDs) ?? []
     accountOrder = try container.decodeIfPresent([String].self, forKey: .accountOrder) ?? []
+    accountOrderByGroup = try container.decodeIfPresent([String: [String]].self, forKey: .accountOrderByGroup) ?? [:]
+    accountGroupSorts = try container.decodeIfPresent([String: AccountGroupSort].self, forKey: .accountGroupSorts) ?? [:]
+    customAccountGroups = try container.decodeIfPresent([CustomAccountGroup].self, forKey: .customAccountGroups) ?? []
+    self = structurallyNormalised()
   }
 
   static func load(from defaults: UserDefaults = .standard) -> ViewPrefs {
@@ -347,6 +385,201 @@ struct ViewPrefs: Codable, Equatable {
       return
     }
     defaults.set(data, forKey: Self.userDefaultsKey)
+  }
+
+  /// Normalises persisted structure without deciding whether an account ID is
+  /// still valid. Account membership is pruned only after an authoritative
+  /// reference refresh succeeds.
+  func structurallyNormalised() -> ViewPrefs {
+    var result = self
+    result.favouriteAccountIDs = result.favouriteAccountIDs.uniqueNonEmptyStrings
+    result.accountOrder = result.accountOrder.uniqueNonEmptyStrings
+    result.accountOrderByGroup = result.accountOrderByGroup.reduce(into: [:]) { output, item in
+      guard !item.key.isEmpty else { return }
+      output[item.key] = item.value.uniqueNonEmptyStrings
+    }
+
+    var usedIDs: Set<String> = []
+    var usedNames: Set<String> = []
+    result.customAccountGroups = result.customAccountGroups.compactMap { group in
+      let id = group.id.trimmingCharacters(in: .whitespacesAndNewlines)
+      let name = group.name.trimmingCharacters(in: .whitespacesAndNewlines)
+      let nameKey = CustomAccountGroup.normalisedNameKey(name)
+      guard
+        !id.isEmpty,
+        !CustomAccountGroup.reservedIDs.contains(id.lowercased()),
+        !name.isEmpty,
+        !CustomAccountGroup.reservedNameKeys.contains(nameKey),
+        usedIDs.insert(id).inserted,
+        usedNames.insert(nameKey).inserted
+      else {
+        return nil
+      }
+      return CustomAccountGroup(id: id, name: name, accountIDs: group.accountIDs.uniqueNonEmptyStrings)
+    }
+
+    let validGroupIDs = CustomAccountGroup.reservedIDs.union(result.customAccountGroups.map(\.id))
+    result.accountGroupSorts = result.accountGroupSorts.filter { validGroupIDs.contains($0.key) }
+    result.accountOrderByGroup = result.accountOrderByGroup.filter { validGroupIDs.contains($0.key) }
+    return result
+  }
+}
+
+private extension Array where Element == String {
+  var uniqueNonEmptyStrings: [String] {
+    var seen: Set<String> = []
+    return compactMap { value in
+      let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !trimmed.isEmpty, seen.insert(trimmed).inserted else {
+        return nil
+      }
+      return trimmed
+    }
+  }
+}
+
+/// Versioned, connection/user/plan-scoped preference envelope.
+struct ScopedViewPrefsStore: Codable, Equatable {
+  static let userDefaultsKey = "HowMuch.ViewPrefsByScope"
+
+  var scopes: [String: ViewPrefs] = [:]
+  var didMigrateLegacy = false
+
+  private enum CodingKeys: String, CodingKey {
+    case scopes
+    case didMigrateLegacy
+  }
+
+  init(scopes: [String: ViewPrefs] = [:], didMigrateLegacy: Bool = false) {
+    self.scopes = scopes.mapValues { $0.structurallyNormalised() }
+    self.didMigrateLegacy = didMigrateLegacy
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    if let scopeContainer = try? container.nestedContainer(
+      keyedBy: ViewPrefsScopeCodingKey.self,
+      forKey: .scopes
+    ) {
+      scopes = scopeContainer.allKeys.reduce(into: [:]) { decoded, key in
+        guard let preferences = try? scopeContainer.decode(ViewPrefs.self, forKey: key) else {
+          return
+        }
+        decoded[key.stringValue] = preferences.structurallyNormalised()
+      }
+    } else {
+      scopes = [:]
+    }
+    didMigrateLegacy = try container.decodeIfPresent(Bool.self, forKey: .didMigrateLegacy) ?? false
+  }
+
+  static func load(from defaults: UserDefaults = .standard) -> ScopedViewPrefsStore {
+    guard
+      let data = defaults.data(forKey: userDefaultsKey),
+      let decoded = try? JSONDecoder().decode(ScopedViewPrefsStore.self, from: data)
+    else {
+      return ScopedViewPrefsStore()
+    }
+    return decoded
+  }
+
+  mutating func activate(scope: String, legacy: ViewPrefs) -> ViewPrefs {
+    if let existing = scopes[scope] {
+      if !didMigrateLegacy {
+        didMigrateLegacy = true
+        save()
+      }
+      return existing.structurallyNormalised()
+    }
+    if !didMigrateLegacy {
+      let migrated = legacy.structurallyNormalised()
+      scopes[scope] = migrated
+      didMigrateLegacy = true
+      save()
+      return migrated
+    }
+    return ViewPrefs()
+  }
+
+  /// An unscoped legacy blob cannot safely be assigned to a user who signs in
+  /// later: that user may not be the person who created it. Authenticated cold
+  /// launches migrate above; signed-out cold launches deliberately discard the
+  /// migration opportunity while leaving any already-scoped preferences intact.
+  mutating func discardUnscopedLegacyMigration() {
+    guard !didMigrateLegacy else { return }
+    didMigrateLegacy = true
+    save()
+  }
+
+  mutating func set(_ preferences: ViewPrefs, for scope: String) {
+    scopes[scope] = preferences.structurallyNormalised()
+    save()
+  }
+
+  func save(to defaults: UserDefaults = .standard) {
+    guard let data = try? JSONEncoder().encode(self) else {
+      return
+    }
+    defaults.set(data, forKey: Self.userDefaultsKey)
+  }
+}
+
+private struct ViewPrefsScopeCodingKey: CodingKey {
+  let stringValue: String
+  let intValue: Int? = nil
+
+  init?(stringValue: String) {
+    self.stringValue = stringValue
+  }
+
+  init?(intValue: Int) {
+    return nil
+  }
+}
+
+/// Sorting is intentionally local to an account group. Names and manual order
+/// stay useful offline, while usage is refreshed from the ledger when needed.
+enum AccountGroupSort: String, Codable, CaseIterable, Identifiable {
+  case manual
+  case alphabetical
+  case mostUsedLast30Days
+
+  var id: String { rawValue }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    self = AccountGroupSort(rawValue: (try? container.decode(String.self)) ?? "") ?? .manual
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(rawValue)
+  }
+
+  var title: String {
+    switch self {
+    case .manual: "Manual"
+    case .alphabetical: "Alphabetical"
+    case .mostUsedLast30Days: "Most used (30 days)"
+    }
+  }
+}
+
+/// A device-local account collection. Membership is deliberately represented
+/// by IDs so account balances and names remain authoritative API data.
+struct CustomAccountGroup: Codable, Equatable, Hashable, Identifiable {
+  static let reservedIDs: Set<String> = ["favourites", "cash", "credit", "tracking", "closed"]
+  static let reservedNameKeys: Set<String> = Set(["Favourites", "Cash", "Credit", "Tracking", "Closed"].map(normalisedNameKey))
+
+  var id: String
+  var name: String
+  var accountIDs: [String]
+
+  static func normalisedNameKey(_ name: String) -> String {
+    name
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+      .lowercased()
   }
 }
 
@@ -556,6 +789,7 @@ struct TransactionPage {
   let transactions: [Transaction]
   let hasMore: Bool
   let nextOffset: Int?
+  let serverKnowledge: Int?
 }
 
 struct TransactionPayload: Decodable {

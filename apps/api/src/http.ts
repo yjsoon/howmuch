@@ -490,15 +490,25 @@ function queryFilters(url: URL, overrides: Record<string, string | null> = {}): 
 }
 
 async function transactionListResponse(repo: LedgerStore, planId: string, filters: TransactionFilters): Promise<Response> {
-  const page = await repo.listTransactionsPage(planId, filters);
-  return json({
-    data: {
-      transactions: page.transactions,
-      server_knowledge: await repo.getServerKnowledge(planId),
-      has_more: page.has_more,
-      next_offset: page.next_offset,
-    },
-  });
+  // The client uses server_knowledge to detect offset shifts while walking
+  // pages. Read it on both sides of the page query so rows are never labelled
+  // with a knowledge value from a concurrent write they do not contain.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const before = await repo.getServerKnowledge(planId);
+    const page = await repo.listTransactionsPage(planId, filters);
+    const after = await repo.getServerKnowledge(planId);
+    if (before === after) {
+      return json({
+        data: {
+          transactions: page.transactions,
+          server_knowledge: after,
+          has_more: page.has_more,
+          next_offset: page.next_offset,
+        },
+      });
+    }
+  }
+  return apiError(409, "ledger_changed", "Transactions changed while this page was loading. Try again.");
 }
 
 function parseTransactionPageNumber(

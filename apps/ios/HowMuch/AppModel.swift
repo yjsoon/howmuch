@@ -19,6 +19,14 @@ enum LoadPhase: Equatable {
   }
 }
 
+private enum AccountUsageScanError: LocalizedError {
+  case ledgerChanged
+
+  var errorDescription: String? {
+    "Transactions changed while usage was loading. Try again."
+  }
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -36,6 +44,14 @@ final class AppModel {
   private(set) var nextTransactionOffset: Int?
   private(set) var isLoadingOlderTransactions = false
   private(set) var olderTransactionsError: String?
+  /// Transaction-frequency counts for the inclusive trailing 30-day window.
+  /// This is separate from `transactions`, which is intentionally paged for
+  /// the register and may not contain every transaction in that window.
+  private(set) var accountUsageLast30Days: [String: Int] = [:]
+  private(set) var accountUsagePhase: LoadPhase = .idle
+  /// Invalidates the Accounts view's usage task after a ledger or connection
+  /// refresh, so a loaded 30-day ranking never survives changed source data.
+  private(set) var accountUsageGeneration = 0
 
   var spendingBreakdown: SpendingBreakdownReport?
   var incomeVsSpending: IncomeVsSpendingReport?
@@ -59,13 +75,28 @@ final class AppModel {
   /// card drives its spinner from this rather than view-local state.
   var isSyncingOutbox = false
   private var viewPrefs: ViewPrefs
+  private let legacyViewPrefs: ViewPrefs
+  private var scopedViewPrefsStore: ScopedViewPrefsStore
+  private var activeViewPrefsScope: String?
   private var saveMessageToken = 0
   /// Invalidates an in-flight older-page response when the first page reloads.
   private var ledgerPageGeneration = 0
+  private var referenceGeneration = 0
+  private var scheduledTransactionsGeneration = 0
+  private var reportsGeneration = 0
 
   init(settings: APISettings = .load(), viewPrefs: ViewPrefs = .load()) {
+    var scopedStore = ScopedViewPrefsStore.load()
+    let scope = settings.viewPrefsScopeKey
+    if scope == nil {
+      scopedStore.discardUnscopedLegacyMigration()
+    }
     self.settings = settings
-    self.viewPrefs = viewPrefs
+    self.legacyViewPrefs = viewPrefs
+    self.scopedViewPrefsStore = scopedStore
+    self.activeViewPrefsScope = scope
+    self.viewPrefs = scope.map { scopedStore.activate(scope: $0, legacy: viewPrefs) } ?? ViewPrefs()
+    self.scopedViewPrefsStore = scopedStore
     // A revoked session is persisted as signed out. Do not let a cold launch
     // fall back to tabs that can only render tokenless API errors.
     self.isShowingSettings = !settings.isAuthenticated
@@ -92,6 +123,7 @@ final class AppModel {
     settings.sessionToken = ""
     settings.authenticatedUserID = ""
     settings.save()
+    switchViewPrefsScope()
     planSettings = nil
     accounts = []
     categoryGroups = []
@@ -102,6 +134,7 @@ final class AppModel {
     incomeVsSpending = nil
     netWorth = nil
     ageOfMoney = nil
+    invalidateAccountUsage()
     referencePhase = .idle
     ledgerPhase = .idle
     scheduledTransactionsPhase = .idle
@@ -121,7 +154,7 @@ final class AppModel {
 
   func setIncludeQuietSpending(_ include: Bool) {
     viewPrefs.includeQuietSpending = include
-    viewPrefs.save()
+    saveViewPrefs()
   }
 
   var apiClient: APIClient {
@@ -146,14 +179,117 @@ final class AppModel {
     } else {
       viewPrefs.favouriteAccountIDs.append(accountID)
     }
-    viewPrefs.save()
+    saveViewPrefs()
   }
 
-  /// Applies the device's manual order while keeping the API's stable name/id
-  /// order as the deterministic fallback for accounts not yet moved locally.
-  func orderedAccounts(_ source: [Account]) -> [Account] {
+  var customAccountGroups: [CustomAccountGroup] {
+    viewPrefs.customAccountGroups
+  }
+
+  func sortForAccountGroup(_ groupID: String) -> AccountGroupSort {
+    viewPrefs.accountGroupSorts[groupID] ?? .manual
+  }
+
+  func setSort(_ sort: AccountGroupSort, forAccountGroup groupID: String) {
+    viewPrefs.accountGroupSorts[groupID] = sort
+    saveViewPrefs()
+  }
+
+  func customAccountGroupNameError(_ name: String, excluding groupID: String? = nil) -> String? {
+    let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedName.isEmpty else {
+      return "Enter a group name."
+    }
+    let nameKey = CustomAccountGroup.normalisedNameKey(trimmedName)
+    if CustomAccountGroup.reservedNameKeys.contains(nameKey) {
+      return "That name is reserved for a built-in group."
+    }
+    if viewPrefs.customAccountGroups.contains(where: {
+      $0.id != groupID && CustomAccountGroup.normalisedNameKey($0.name) == nameKey
+    }) {
+      return "A custom group already uses that name."
+    }
+    return nil
+  }
+
+  @discardableResult
+  func addCustomAccountGroup(named name: String) -> Bool {
+    let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard customAccountGroupNameError(trimmedName) == nil else {
+      return false
+    }
+    var groupID: String
+    repeat {
+      groupID = "custom-\(UUID().uuidString)"
+    } while viewPrefs.customAccountGroups.contains(where: { $0.id == groupID })
+    viewPrefs.customAccountGroups.append(
+      CustomAccountGroup(id: groupID, name: trimmedName, accountIDs: [])
+    )
+    saveViewPrefs()
+    return true
+  }
+
+  @discardableResult
+  func updateCustomAccountGroup(_ group: CustomAccountGroup) -> Bool {
+    guard let index = viewPrefs.customAccountGroups.firstIndex(where: { $0.id == group.id }) else {
+      return false
+    }
+    let name = group.name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard customAccountGroupNameError(name, excluding: group.id) == nil else {
+      return false
+    }
+    var uniqueIDs: [String] = []
+    for id in group.accountIDs where !id.isEmpty && !uniqueIDs.contains(id) {
+      uniqueIDs.append(id)
+    }
+    viewPrefs.customAccountGroups[index] = CustomAccountGroup(id: group.id, name: name, accountIDs: uniqueIDs)
+    saveViewPrefs()
+    return true
+  }
+
+  func deleteCustomAccountGroup(id: String) {
+    viewPrefs.customAccountGroups.removeAll { $0.id == id }
+    viewPrefs.accountGroupSorts[id] = nil
+    viewPrefs.accountOrderByGroup[id] = nil
+    saveViewPrefs()
+  }
+
+  func moveCustomAccountGroup(id: String, by offset: Int) {
+    guard let current = viewPrefs.customAccountGroups.firstIndex(where: { $0.id == id }) else {
+      return
+    }
+    let destination = current + offset
+    guard viewPrefs.customAccountGroups.indices.contains(destination) else {
+      return
+    }
+    viewPrefs.customAccountGroups.swapAt(current, destination)
+    saveViewPrefs()
+  }
+
+  /// Applies a group's selected sort while retaining the old global order as
+  /// the backward-compatible fallback for pre-groups installs.
+  func orderedAccounts(_ source: [Account], inGroup groupID: String) -> [Account] {
+    switch sortForAccountGroup(groupID) {
+    case .manual:
+      return manualOrderedAccounts(source, groupID: groupID)
+    case .alphabetical:
+      return source.sorted(by: accountNameOrder)
+    case .mostUsedLast30Days:
+      return source.sorted { first, second in
+        let firstUsage = accountUsageLast30Days[first.id, default: 0]
+        let secondUsage = accountUsageLast30Days[second.id, default: 0]
+        if firstUsage != secondUsage {
+          return firstUsage > secondUsage
+        }
+        return accountNameOrder(first, second)
+      }
+    }
+  }
+
+  private func manualOrderedAccounts(_ source: [Account], groupID: String) -> [Account] {
+    let order = viewPrefs.accountOrderByGroup[groupID] ?? viewPrefs.accountOrder
     var ranks: [String: Int] = [:]
-    for (index, accountID) in viewPrefs.accountOrder.enumerated() {
+    for (index, accountID) in order.enumerated() {
       ranks[accountID] = ranks[accountID] ?? index
     }
     return source.sorted { first, second in
@@ -165,16 +301,20 @@ final class AppModel {
       case (nil, _?):
         return false
       default:
-        let nameOrder = first.name.localizedStandardCompare(second.name)
-        return nameOrder == .orderedSame ? first.id < second.id : nameOrder == .orderedAscending
+        return accountNameOrder(first, second)
       }
     }
   }
 
-  /// Moves an account one position within its current account group. The
-  /// resulting order is shared by all account groups and the Favourites view.
-  func moveAccount(_ accountID: String, in group: [Account], by offset: Int) {
-    let orderedGroup = orderedAccounts(group)
+  private func accountNameOrder(_ first: Account, _ second: Account) -> Bool {
+    let nameOrder = first.name.localizedStandardCompare(second.name)
+    return nameOrder == .orderedSame ? first.id < second.id : nameOrder == .orderedAscending
+  }
+
+  /// Moves an account within only the displayed group, leaving every other
+  /// group's manual order intact.
+  func moveAccount(_ accountID: String, in group: [Account], groupID: String, by offset: Int) {
+    let orderedGroup = manualOrderedAccounts(group, groupID: groupID)
     guard
       let currentIndex = orderedGroup.firstIndex(where: { $0.id == accountID })
     else {
@@ -186,18 +326,182 @@ final class AppModel {
       return
     }
 
-    let otherID = orderedGroup[destination].id
-    guard otherID != accountID else {
-      return
-    }
+    var order = orderedGroup.map(\.id)
+    order.swapAt(currentIndex, destination)
+    viewPrefs.accountOrderByGroup[groupID] = order
+    saveViewPrefs()
+  }
 
-    var globalOrder = orderedAccounts(accounts).map(\.id)
-    guard let firstIndex = globalOrder.firstIndex(of: accountID), let secondIndex = globalOrder.firstIndex(of: otherID) else {
+  private func saveViewPrefs() {
+    guard let scope = activeViewPrefsScope else {
       return
     }
-    globalOrder.swapAt(firstIndex, secondIndex)
-    viewPrefs.accountOrder = globalOrder
-    viewPrefs.save()
+    viewPrefs = viewPrefs.structurallyNormalised()
+    scopedViewPrefsStore.set(viewPrefs, for: scope)
+  }
+
+  /// Switches the in-memory preference view whenever endpoint, user, or plan
+  /// changes. Signed-out state is deliberately blank while saved scopes stay
+  /// in the store for the next authenticated session.
+  private func switchViewPrefsScope() {
+    let nextScope = settings.viewPrefsScopeKey
+    guard nextScope != activeViewPrefsScope else {
+      return
+    }
+    invalidateAccountUsage()
+    activeViewPrefsScope = nextScope
+    if let nextScope {
+      viewPrefs = scopedViewPrefsStore.activate(scope: nextScope, legacy: legacyViewPrefs)
+    } else {
+      viewPrefs = ViewPrefs()
+    }
+  }
+
+  /// Removes stale account references only after the API has authoritatively
+  /// returned the complete account list for the active scope.
+  private func pruneViewPrefs(using authoritativeAccounts: [Account]) {
+    let validIDs = Set(authoritativeAccounts.map(\.id))
+    let original = viewPrefs
+    viewPrefs.favouriteAccountIDs.removeAll { !validIDs.contains($0) }
+    viewPrefs.accountOrder.removeAll { !validIDs.contains($0) }
+    viewPrefs.accountOrderByGroup = viewPrefs.accountOrderByGroup.mapValues { order in
+      order.filter(validIDs.contains)
+    }
+    viewPrefs.customAccountGroups = viewPrefs.customAccountGroups.map { group in
+      CustomAccountGroup(
+        id: group.id,
+        name: group.name,
+        accountIDs: group.accountIDs.filter(validIDs.contains)
+      )
+    }
+    if let lastUsed = viewPrefs.lastUsedAccountID, !validIDs.contains(lastUsed) {
+      viewPrefs.lastUsedAccountID = nil
+    }
+    viewPrefs = viewPrefs.structurallyNormalised()
+    if viewPrefs != original {
+      saveViewPrefs()
+    }
+  }
+
+  /// Reads every page for the date-filtered ledger instead of using the
+  /// register cache. The progress guard turns a malformed cursor into a
+  /// recoverable error rather than an endless request loop.
+  func refreshAccountUsageLast30Days() async {
+    guard !accountUsagePhase.isLoading else {
+      return
+    }
+    let planID = settings.planID
+    let scope = activeViewPrefsScope
+    let generation = accountUsageGeneration
+    let calendar = Calendar.current
+    let now = Date.now
+    let today = now.isoDateString
+    let from = (calendar.date(byAdding: .day, value: -29, to: now) ?? now).isoDateString
+    let client = apiClient
+    accountUsagePhase = .loading
+
+    do {
+      var counts: [String: Int]?
+      for attempt in 0 ... 1 {
+        do {
+          counts = try await scanAccountUsage(
+            client: client,
+            planID: planID,
+            sinceDate: from,
+            untilDate: today,
+            generation: generation,
+            scope: scope
+          )
+          break
+        } catch AccountUsageScanError.ledgerChanged where attempt == 0 {
+          continue
+        }
+      }
+      guard
+        let counts,
+        planID == settings.planID,
+        scope == activeViewPrefsScope,
+        generation == accountUsageGeneration
+      else {
+        return
+      }
+      accountUsageLast30Days = counts
+      accountUsagePhase = .loaded
+    } catch {
+      guard
+        planID == settings.planID,
+        scope == activeViewPrefsScope,
+        generation == accountUsageGeneration
+      else {
+        return
+      }
+      accountUsagePhase = .failed(error.localizedDescription)
+    }
+  }
+
+  private func scanAccountUsage(
+    client: APIClient,
+    planID: String,
+    sinceDate: String,
+    untilDate: String,
+    generation: Int,
+    scope: String?
+  ) async throws -> [String: Int] {
+    var counts: [String: Int] = [:]
+    var transactionIDs: Set<String> = []
+    var offset = 0
+    var requestedOffsets: Set<Int> = []
+    var expectedKnowledge: Int?
+    var hasExpectedKnowledge = false
+    let maximumPages = 250
+
+    while true {
+      guard
+        planID == settings.planID,
+        scope == activeViewPrefsScope,
+        generation == accountUsageGeneration
+      else {
+        throw CancellationError()
+      }
+      guard requestedOffsets.insert(offset).inserted else {
+        throw APIClientError.decoding("The transaction usage cursor repeated.")
+      }
+      guard requestedOffsets.count <= maximumPages else {
+        throw APIClientError.decoding("The transaction usage scan exceeded its safe page limit.")
+      }
+      let page = try await client.fetchTransactions(
+        planID: planID,
+        offset: offset,
+        sinceDate: sinceDate,
+        untilDate: untilDate
+      )
+      if hasExpectedKnowledge, page.serverKnowledge != expectedKnowledge {
+        throw AccountUsageScanError.ledgerChanged
+      }
+      expectedKnowledge = page.serverKnowledge
+      hasExpectedKnowledge = true
+
+      if page.hasMore, page.serverKnowledge == nil {
+        throw AccountUsageScanError.ledgerChanged
+      }
+
+      for transaction in page.transactions
+      where transaction.date >= sinceDate
+        && transaction.date <= untilDate
+        && transactionIDs.insert(transaction.id).inserted {
+        counts[transaction.accountID, default: 0] += 1
+      }
+      guard page.hasMore else {
+        return counts
+      }
+      guard !page.transactions.isEmpty else {
+        throw APIClientError.decoding("The transaction usage page was empty before the final page.")
+      }
+      guard let next = page.nextOffset, next > offset else {
+        throw APIClientError.decoding("The transaction usage cursor did not advance.")
+      }
+      offset = next
+    }
   }
 
   var flattenedCategories: [Category] {
@@ -246,8 +550,13 @@ final class AppModel {
   }
 
   func applySettings(_ nextSettings: APISettings) async {
+    let scopeChanged = nextSettings.viewPrefsScopeKey != activeViewPrefsScope
     settings = nextSettings
     settings.save()
+    if scopeChanged {
+      clearConnectionOwnedState()
+    }
+    switchViewPrefsScope()
     await refreshAll()
   }
 
@@ -282,8 +591,10 @@ final class AppModel {
       guard let selectedPlanID = settings.resolvedPlanID(from: plans), selectedPlanID != settings.planID else {
         return
       }
+      clearConnectionOwnedState()
       settings.planID = selectedPlanID
       settings.save()
+      switchViewPrefsScope()
     } catch {
       // The normal surface requests retain their own error states. Do not
       // make a transient plan-list failure block an existing saved plan.
@@ -291,22 +602,37 @@ final class AppModel {
   }
 
   func refreshReferenceData(quiet: Bool = false) async {
+    referenceGeneration &+= 1
+    let generation = referenceGeneration
+    let planID = settings.planID
+    let scope = activeViewPrefsScope
     if !quiet {
       referencePhase = .loading
     }
     do {
-      let reference = try await apiClient.fetchReferenceData(planID: settings.planID)
+      let reference = try await apiClient.fetchReferenceData(planID: planID)
+      guard generation == referenceGeneration, planID == settings.planID, scope == activeViewPrefsScope else {
+        return
+      }
+      if Set(accounts.map(\.id)) != Set(reference.accounts.map(\.id)) {
+        invalidateAccountUsage()
+      }
       planSettings = reference.planSettings
       accounts = reference.accounts
       categoryGroups = reference.categoryGroups
       payees = reference.payees
+      pruneViewPrefs(using: reference.accounts)
       referencePhase = .loaded
     } catch {
+      guard generation == referenceGeneration, planID == settings.planID, scope == activeViewPrefsScope else {
+        return
+      }
       referencePhase = .failed(error.localizedDescription)
     }
   }
 
   func refreshLedger(quiet: Bool = false) async {
+    invalidateAccountUsage()
     ledgerPageGeneration += 1
     let generation = ledgerPageGeneration
     let planID = settings.planID
@@ -334,20 +660,68 @@ final class AppModel {
     }
   }
 
+  private func invalidateAccountUsage() {
+    guard accountUsagePhase != .idle || !accountUsageLast30Days.isEmpty else {
+      return
+    }
+    accountUsageLast30Days = [:]
+    accountUsagePhase = .idle
+    accountUsageGeneration &+= 1
+  }
+
+  /// Prevents one server, user, or plan from remaining visible while a newly
+  /// selected connection is loading or has failed to load.
+  private func clearConnectionOwnedState() {
+    planSettings = nil
+    accounts = []
+    categoryGroups = []
+    payees = []
+    transactions = []
+    scheduledTransactions = []
+    spendingBreakdown = nil
+    incomeVsSpending = nil
+    netWorth = nil
+    ageOfMoney = nil
+    hasMoreTransactions = false
+    nextTransactionOffset = nil
+    isLoadingOlderTransactions = false
+    olderTransactionsError = nil
+    referencePhase = .idle
+    ledgerPhase = .idle
+    scheduledTransactionsPhase = .idle
+    reportsPhase = .idle
+    ledgerPageGeneration &+= 1
+    referenceGeneration &+= 1
+    scheduledTransactionsGeneration &+= 1
+    reportsGeneration &+= 1
+    planRefreshGeneration &+= 1
+    invalidateAccountUsage()
+  }
+
   func refreshScheduledTransactions(quiet: Bool = false) async {
+    scheduledTransactionsGeneration &+= 1
+    let generation = scheduledTransactionsGeneration
     let planID = settings.planID
+    let scope = activeViewPrefsScope
+    let client = apiClient
     if !quiet {
       scheduledTransactionsPhase = .loading
     }
     do {
-      let schedules = try await apiClient.fetchScheduledTransactions(planID: planID)
-      guard planID == settings.planID else {
+      let schedules = try await client.fetchScheduledTransactions(planID: planID)
+      guard generation == scheduledTransactionsGeneration,
+            planID == settings.planID,
+            scope == activeViewPrefsScope
+      else {
         return
       }
       scheduledTransactions = schedules.sorted { ($0.dateNext, $0.id) < ($1.dateNext, $1.id) }
       scheduledTransactionsPhase = .loaded
     } catch {
-      guard planID == settings.planID else {
+      guard generation == scheduledTransactionsGeneration,
+            planID == settings.planID,
+            scope == activeViewPrefsScope
+      else {
         return
       }
       scheduledTransactionsPhase = .failed(error.localizedDescription)
@@ -505,6 +879,11 @@ final class AppModel {
   /// Reflect overview: current month for the spending breakdown, trailing
   /// twelve months by month for the trend reports.
   func refreshReflectOverview(quiet: Bool = false) async {
+    reportsGeneration &+= 1
+    let generation = reportsGeneration
+    let planID = settings.planID
+    let scope = activeViewPrefsScope
+    let client = apiClient
     if !quiet {
       reportsPhase = .loading
     }
@@ -514,24 +893,36 @@ final class AppModel {
       let yearStart = Calendar.current.date(byAdding: .month, value: -11, to: monthStart) ?? monthStart
       let today = now.isoDateString
 
-      async let spending = apiClient.fetchSpendingBreakdown(
-        planID: settings.planID, from: monthStart.isoDateString, to: today
+      async let spending = client.fetchSpendingBreakdown(
+        planID: planID, from: monthStart.isoDateString, to: today
       )
-      async let income = apiClient.fetchIncomeVsSpending(
-        planID: settings.planID, from: yearStart.isoDateString, to: today, interval: .month
+      async let income = client.fetchIncomeVsSpending(
+        planID: planID, from: yearStart.isoDateString, to: today, interval: .month
       )
-      async let worth = apiClient.fetchNetWorth(
-        planID: settings.planID, from: yearStart.isoDateString, to: today, interval: .month
+      async let worth = client.fetchNetWorth(
+        planID: planID, from: yearStart.isoDateString, to: today, interval: .month
       )
-      async let age = apiClient.fetchAgeOfMoney(planID: settings.planID, interval: .month)
+      async let age = client.fetchAgeOfMoney(planID: planID, interval: .month)
 
       let (spendingReport, incomeReport, worthReport, ageReport) = try await (spending, income, worth, age)
+      guard generation == reportsGeneration,
+            planID == settings.planID,
+            scope == activeViewPrefsScope
+      else {
+        return
+      }
       spendingBreakdown = spendingReport
       incomeVsSpending = incomeReport
       netWorth = worthReport
       ageOfMoney = ageReport
       reportsPhase = .loaded
     } catch {
+      guard generation == reportsGeneration,
+            planID == settings.planID,
+            scope == activeViewPrefsScope
+      else {
+        return
+      }
       reportsPhase = .failed(error.localizedDescription)
     }
   }
@@ -567,7 +958,7 @@ final class AppModel {
     transactions.sort { ($0.date, $0.id) > ($1.date, $1.id) }
 
     viewPrefs.lastUsedAccountID = request.accountID
-    viewPrefs.save()
+    saveViewPrefs()
     showSaveMessage("Saved \(MoneyCodec.displayString(for: saved.amount, currencyFormat: currencyFormat)) — \(saved.payeeName ?? "transaction")")
     Task { await refreshAll(quiet: true) }
     return saved
@@ -579,7 +970,7 @@ final class AppModel {
     pendingTransactions.append(PendingTransaction(request: request, connectionFingerprint: settings.connectionFingerprint))
     OutboxStore.save(pendingTransactions)
     viewPrefs.lastUsedAccountID = request.accountID
-    viewPrefs.save()
+    saveViewPrefs()
     showSaveMessage("Saved offline — will sync on next refresh")
   }
 
@@ -598,16 +989,22 @@ final class AppModel {
 
     var syncedCount = 0
     for item in pendingTransactions {
-      guard item.connectionFingerprint == settings.connectionFingerprint else {
+      let connectionFingerprint = settings.connectionFingerprint
+      guard item.connectionFingerprint == connectionFingerprint else {
         continue
       }
       guard manual || item.lastSyncError == nil else {
         continue
       }
       do {
-        let saved = try await apiClient.createTransaction(planID: settings.planID, request: item.request)
+        let planID = settings.planID
+        let client = apiClient
+        let saved = try await client.createTransaction(planID: planID, request: item.request)
         pendingTransactions.removeAll { $0.id == item.id }
         OutboxStore.save(pendingTransactions)
+        guard connectionFingerprint == settings.connectionFingerprint else {
+          continue
+        }
         if !transactions.contains(where: { $0.id == saved.id }) {
           transactions.insert(saved, at: 0)
         }
@@ -621,6 +1018,7 @@ final class AppModel {
     }
     if syncedCount > 0 {
       transactions.sort { ($0.date, $0.id) > ($1.date, $1.id) }
+      invalidateAccountUsage()
       showSaveMessage(syncedCount == 1 ? "Synced 1 offline transaction" : "Synced \(syncedCount) offline transactions")
     } else if manual, !pendingTransactions.isEmpty {
       showSaveMessage("Couldn’t sync — will retry on the next refresh")

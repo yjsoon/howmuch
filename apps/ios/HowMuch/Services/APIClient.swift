@@ -154,18 +154,31 @@ struct APIClient {
     return response.data.month
   }
 
-  func fetchTransactions(planID: String, offset: Int = 0) async throws -> TransactionPage {
+  func fetchTransactions(
+    planID: String,
+    offset: Int = 0,
+    sinceDate: String? = nil,
+    untilDate: String? = nil
+  ) async throws -> TransactionPage {
+    var queryItems = [
+      URLQueryItem(name: "limit", value: String(Self.transactionPageSize)),
+      URLQueryItem(name: "offset", value: String(offset)),
+    ]
+    if let sinceDate {
+      queryItems.append(URLQueryItem(name: "since_date", value: sinceDate))
+    }
+    if let untilDate {
+      queryItems.append(URLQueryItem(name: "until_date", value: untilDate))
+    }
     let response: APIEnvelope<TransactionsPayload> = try await request(
       path: "/v1/plans/\(planID)/transactions",
-      queryItems: [
-        URLQueryItem(name: "limit", value: String(Self.transactionPageSize)),
-        URLQueryItem(name: "offset", value: String(offset)),
-      ]
+      queryItems: queryItems
     )
     return TransactionPage(
       transactions: response.data.transactions.filter { !$0.deleted },
       hasMore: response.data.hasMore ?? false,
-      nextOffset: response.data.nextOffset
+      nextOffset: response.data.nextOffset,
+      serverKnowledge: response.data.serverKnowledge
     )
   }
 

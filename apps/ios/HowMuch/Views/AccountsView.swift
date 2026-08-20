@@ -3,7 +3,7 @@ import SwiftUI
 struct AccountsView: View {
   @Environment(AppModel.self) private var model
   @State private var collapsedGroups: Set<String> = ["closed"]
-  @State private var isEditingAccounts = false
+  @State private var isShowingAccountManager = false
 
   var body: some View {
     ScrollView {
@@ -91,12 +91,11 @@ struct AccountsView: View {
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
       ToolbarItem(placement: .topBarLeading) {
-        Button(isEditingAccounts ? "Done" : "Edit") {
-          withAnimation(.snappy) {
-            isEditingAccounts.toggle()
-          }
+        Button("Edit") {
+          isShowingAccountManager = true
         }
-        .accessibilityHint(isEditingAccounts ? "Finish changing account favourites and order" : "Show controls to favourite and reorder accounts")
+        .accessibilityLabel("Manage accounts")
+        .accessibilityHint("Manage favourites, account groups, and sorting")
       }
       ToolbarItem(placement: .topBarTrailing) {
         Button {
@@ -110,134 +109,130 @@ struct AccountsView: View {
     .refreshable {
       await model.refreshAll()
     }
+    .task(id: accountUsageTaskID) {
+      guard usesMostUsedSort, model.accountUsagePhase != .loaded else {
+        return
+      }
+      await model.refreshAccountUsageLast30Days()
+    }
+    .sheet(isPresented: $isShowingAccountManager) {
+      AccountManagementSheet()
+    }
   }
 
   private func accountGroupSection(_ group: AccountGroup) -> some View {
     let isCollapsed = collapsedGroups.contains(group.id)
     return VStack(alignment: .leading, spacing: 8) {
-      Button {
-        withAnimation(.snappy) {
-          if isCollapsed {
-            collapsedGroups.remove(group.id)
-          } else {
-            collapsedGroups.insert(group.id)
-          }
-        }
-      } label: {
-        HStack {
-          Image(systemName: "chevron.down")
-            .font(.caption.weight(.bold))
-            .foregroundStyle(.secondary)
-            .rotationEffect(.degrees(isCollapsed ? -90 : 0))
-          Text(group.title)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Theme.textPrimary)
-          Spacer()
-          Text(MoneyCodec.displayString(for: group.total, currencyFormat: model.currencyFormat))
-            .font(.subheadline.weight(.semibold))
-            .monospacedDigit()
-            .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 4)
-        .contentShape(Rectangle())
-      }
-      .buttonStyle(.plain)
-
-      if !isCollapsed {
-        VStack(spacing: 0) {
-          ForEach(group.accounts.enumerated(), id: \.element.id) { index, account in
-            accountRow(account, index: index, in: group.accounts)
-
-            if index < group.accounts.count - 1 {
-              Divider().padding(.leading, 16)
+      HStack(spacing: 8) {
+        Button {
+          withAnimation(.snappy) {
+            if isCollapsed {
+              collapsedGroups.remove(group.id)
+            } else {
+              collapsedGroups.insert(group.id)
             }
           }
+        } label: {
+          HStack {
+            Image(systemName: "chevron.down")
+              .font(.caption.weight(.bold))
+              .foregroundStyle(.secondary)
+              .rotationEffect(.degrees(isCollapsed ? -90 : 0))
+            Text(group.title)
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(Theme.textPrimary)
+            Spacer()
+            Text(MoneyCodec.displayString(for: group.total, currencyFormat: model.currencyFormat))
+              .font(.subheadline.weight(.semibold))
+              .monospacedDigit()
+              .foregroundStyle(.secondary)
+          }
+          .padding(.horizontal, 4)
+          .contentShape(Rectangle())
         }
-        .ynabCard()
+        .buttonStyle(.plain)
+
+        Menu {
+          Picker("Sort \(group.title)", selection: groupSortBinding(group.id)) {
+            ForEach(AccountGroupSort.allCases) { sort in
+              Text(sort.title).tag(sort)
+            }
+          }
+        } label: {
+          Image(systemName: "line.3.horizontal.decrease.circle")
+            .font(.title3)
+            .foregroundStyle(.secondary)
+        }
+        .accessibilityLabel("Sort \(group.title)")
+      }
+
+      if model.sortForAccountGroup(group.id) == .mostUsedLast30Days,
+         case .failed(let message) = model.accountUsagePhase
+      {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          Text("30-day usage unavailable: \(message)")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+          Spacer()
+          Button("Retry") {
+            Task { await model.refreshAccountUsageLast30Days() }
+          }
+        }
+        .padding(.horizontal, 4)
+      }
+
+      if !isCollapsed {
+        if group.accounts.isEmpty {
+          Text("No accounts in this group")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+            .ynabCard()
+        } else {
+          VStack(spacing: 0) {
+            ForEach(group.accounts.enumerated(), id: \.element.id) { index, account in
+              accountRow(account)
+
+              if index < group.accounts.count - 1 {
+                Divider().padding(.leading, 16)
+              }
+            }
+          }
+          .ynabCard()
+        }
       }
     }
   }
 
   private var favouriteAccounts: [Account] {
-    model.orderedAccounts(model.openAccounts.filter { model.isAccountFavourite($0.id) })
+    model.orderedAccounts(model.openAccounts.filter { model.isAccountFavourite($0.id) }, inGroup: "favourites")
   }
 
-  @ViewBuilder
-  private func accountRow(_ account: Account, index: Int, in group: [Account]) -> some View {
-    HStack(spacing: 8) {
-      if isEditingAccounts {
-        accountActionButton(
-          systemImage: model.isAccountFavourite(account.id) ? "star.fill" : "star",
-          label: model.isAccountFavourite(account.id) ? "Remove \(account.name) from favourites" : "Favourite \(account.name)",
-          tint: model.isAccountFavourite(account.id) ? Theme.accent : .secondary
-        ) {
-          model.toggleAccountFavourite(account.id)
-        }
-      }
-
-      if isEditingAccounts {
-        VStack(alignment: .leading, spacing: 2) {
-          Text(account.name)
-            .foregroundStyle(Theme.textPrimary)
-          Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
-            .font(.footnote)
-            .monospacedDigit()
-            .foregroundStyle(account.balance == 0 ? .secondary : Theme.amountColour(account.balance))
-        }
+  private func accountRow(_ account: Account) -> some View {
+    NavigationLink {
+      RegisterView(scope: .account(account.id))
+    } label: {
+      HStack {
+        Text(account.name)
+          .foregroundStyle(Theme.textPrimary)
         Spacer()
-        HStack(spacing: 2) {
-          accountActionButton(systemImage: "chevron.up", label: "Move \(account.name) up", tint: .secondary) {
-            model.moveAccount(account.id, in: group, by: -1)
-          }
-          .disabled(index == 0)
-          accountActionButton(systemImage: "chevron.down", label: "Move \(account.name) down", tint: .secondary) {
-            model.moveAccount(account.id, in: group, by: 1)
-          }
-          .disabled(index == group.count - 1)
-        }
-      } else {
-        NavigationLink {
-          RegisterView(scope: .account(account.id))
-        } label: {
-          HStack {
-            Text(account.name)
-              .foregroundStyle(Theme.textPrimary)
-            Spacer()
-            Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
-              .monospacedDigit()
-              .foregroundStyle(account.balance == 0 ? .secondary : Theme.amountColour(account.balance))
-          }
-          .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        accountActionButton(
-          systemImage: model.isAccountFavourite(account.id) ? "star.fill" : "star",
-          label: model.isAccountFavourite(account.id) ? "Remove \(account.name) from favourites" : "Favourite \(account.name)",
-          tint: model.isAccountFavourite(account.id) ? Theme.accent : .secondary
-        ) {
-          model.toggleAccountFavourite(account.id)
-        }
+        Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
+          .monospacedDigit()
+          .foregroundStyle(account.balance == 0 ? .secondary : Theme.amountColour(account.balance))
       }
+      .contentShape(Rectangle())
     }
+    .buttonStyle(.plain)
     .padding(.horizontal, 16)
     .padding(.vertical, 10)
   }
 
-  private func accountActionButton(
-    systemImage: String,
-    label: String,
-    tint: Color,
-    action: @escaping () -> Void
-  ) -> some View {
-    Button(action: action) {
-      Image(systemName: systemImage)
-        .font(.subheadline.weight(.semibold))
-        .foregroundStyle(tint)
-        .frame(width: 36, height: 36)
-        .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .accessibilityLabel(label)
+  private func groupSortBinding(_ groupID: String) -> Binding<AccountGroupSort> {
+    Binding(
+      get: { model.sortForAccountGroup(groupID) },
+      set: { model.setSort($0, forAccountGroup: groupID) }
+    )
   }
 
   /// Offline captures waiting to reach the server, with retry and discard.
@@ -370,16 +365,411 @@ struct AccountsView: View {
     let creditTypes: Set<String> = ["creditCard", "lineOfCredit"]
 
     let open = live.filter { !$0.closed }
-    let groups: [AccountGroup] = [
-      AccountGroup(id: "cash", title: "Cash", accounts: model.orderedAccounts(open.filter { cashTypes.contains($0.type) })),
-      AccountGroup(id: "credit", title: "Credit", accounts: model.orderedAccounts(open.filter { creditTypes.contains($0.type) })),
+    let systemGroups: [AccountGroup] = [
+      AccountGroup(id: "cash", title: "Cash", accounts: model.orderedAccounts(open.filter { cashTypes.contains($0.type) }, inGroup: "cash")),
+      AccountGroup(id: "credit", title: "Credit", accounts: model.orderedAccounts(open.filter { creditTypes.contains($0.type) }, inGroup: "credit")),
       AccountGroup(
         id: "tracking",
         title: "Tracking",
-        accounts: model.orderedAccounts(open.filter { !cashTypes.contains($0.type) && !creditTypes.contains($0.type) })
+        accounts: model.orderedAccounts(open.filter { !cashTypes.contains($0.type) && !creditTypes.contains($0.type) }, inGroup: "tracking")
       ),
-      AccountGroup(id: "closed", title: "Closed", accounts: model.orderedAccounts(live.filter(\.closed))),
+      AccountGroup(id: "closed", title: "Closed", accounts: model.orderedAccounts(live.filter(\.closed), inGroup: "closed")),
     ]
-    return groups.filter { !$0.accounts.isEmpty }
+    let customGroups = model.customAccountGroups.map { group in
+      AccountGroup(
+        id: group.id,
+        title: group.name,
+        accounts: model.orderedAccounts(live.filter { group.accountIDs.contains($0.id) }, inGroup: group.id)
+      )
+    }
+    return systemGroups.filter { !$0.accounts.isEmpty } + customGroups
+  }
+
+  private var groupManagementItems: [AccountGroupManagementItem] {
+    [
+      AccountGroupManagementItem(id: "favourites", title: "Favourites", isCustom: false),
+      AccountGroupManagementItem(id: "cash", title: "Cash", isCustom: false),
+      AccountGroupManagementItem(id: "credit", title: "Credit", isCustom: false),
+      AccountGroupManagementItem(id: "tracking", title: "Tracking", isCustom: false),
+      AccountGroupManagementItem(id: "closed", title: "Closed", isCustom: false),
+    ] + model.customAccountGroups.map { group in
+      AccountGroupManagementItem(id: group.id, title: group.name, isCustom: true)
+    }
+  }
+
+  private var usesMostUsedSort: Bool {
+    groupManagementItems.contains { model.sortForAccountGroup($0.id) == .mostUsedLast30Days }
+  }
+
+  private var accountUsageTaskID: String {
+    "\(usesMostUsedSort)-\(model.accountUsageGeneration)"
+  }
+}
+
+private struct AccountGroupManagementItem: Identifiable {
+  let id: String
+  let title: String
+  let isCustom: Bool
+}
+
+private struct AccountManagementSheet: View {
+  @Environment(AppModel.self) private var model
+  @Environment(\.dismiss) private var dismiss
+  @State private var newGroupName = ""
+
+  var body: some View {
+    NavigationStack {
+      Form {
+        Section("Favourites") {
+          Text("Favourites are always shown first on Accounts.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+          ForEach(model.openAccounts.sorted(by: nameOrder)) { account in
+            Toggle(account.name, isOn: favouriteBinding(account.id))
+          }
+        }
+
+        Section("Group sorting") {
+          ForEach(groups) { group in
+            NavigationLink {
+              AccountGroupSortingEditor(group: group)
+            } label: {
+              LabeledContent(group.title, value: model.sortForAccountGroup(group.id).title)
+            }
+          }
+          if usesMostUsedSort, model.accountUsagePhase.isLoading {
+            LabeledContent("Most-used sorting") { ProgressView() }
+          } else if usesMostUsedSort, case .failed(let message) = model.accountUsagePhase {
+            VStack(alignment: .leading, spacing: 8) {
+              Text("Most-used sorting will use alphabetical tie-breaks until usage can be refreshed: \(message)")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+              Button("Retry Usage Refresh") {
+                Task { await model.refreshAccountUsageLast30Days() }
+              }
+            }
+          }
+        }
+
+        Section("Custom groups") {
+          if model.customAccountGroups.isEmpty {
+            Text("Create groups such as Travel or Shared accounts, then choose their members.")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+          }
+          ForEach(model.customAccountGroups) { group in
+            HStack {
+              NavigationLink {
+                CustomAccountGroupEditor(group: group)
+              } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                  Text(group.name)
+                  Text("\(group.accountIDs.count) account\(group.accountIDs.count == 1 ? "" : "s")")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
+              }
+              Spacer()
+              HStack(spacing: 0) {
+                Button {
+                  model.moveCustomAccountGroup(id: group.id, by: -1)
+                } label: {
+                  Image(systemName: "chevron.up")
+                    .frame(width: 44, height: 44)
+                }
+                .disabled(model.customAccountGroups.first?.id == group.id)
+                .accessibilityLabel("Move \(group.name) up")
+                Button {
+                  model.moveCustomAccountGroup(id: group.id, by: 1)
+                } label: {
+                  Image(systemName: "chevron.down")
+                    .frame(width: 44, height: 44)
+                }
+                .disabled(model.customAccountGroups.last?.id == group.id)
+                .accessibilityLabel("Move \(group.name) down")
+              }
+              .buttonStyle(.borderless)
+              .foregroundStyle(Theme.accent)
+            }
+          }
+        }
+
+        Section("New custom group") {
+          TextField("Group name", text: $newGroupName)
+          if let newGroupNameError {
+            Text(newGroupNameError)
+              .font(.footnote)
+              .foregroundStyle(.red)
+          } else {
+            Text("Names must be unique and cannot use a built-in group name.")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+          }
+          Button("Add Group") {
+            if model.addCustomAccountGroup(named: newGroupName) {
+              newGroupName = ""
+            }
+          }
+          .disabled(newGroupNameError != nil)
+        }
+      }
+      .navigationTitle("Manage Accounts")
+      .toolbar {
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Done") { dismiss() }
+        }
+      }
+      .task(id: accountUsageTaskID) {
+        guard usesMostUsedSort, model.accountUsagePhase != .loaded else {
+          return
+        }
+        await model.refreshAccountUsageLast30Days()
+      }
+    }
+  }
+
+  private var groups: [AccountGroupManagementItem] {
+    [
+      AccountGroupManagementItem(id: "favourites", title: "Favourites", isCustom: false),
+      AccountGroupManagementItem(id: "cash", title: "Cash", isCustom: false),
+      AccountGroupManagementItem(id: "credit", title: "Credit", isCustom: false),
+      AccountGroupManagementItem(id: "tracking", title: "Tracking", isCustom: false),
+      AccountGroupManagementItem(id: "closed", title: "Closed", isCustom: false),
+    ] + model.customAccountGroups.map { group in
+      AccountGroupManagementItem(id: group.id, title: group.name, isCustom: true)
+    }
+  }
+
+  private var newGroupNameError: String? {
+    model.customAccountGroupNameError(newGroupName)
+  }
+
+  private var usesMostUsedSort: Bool {
+    groups.contains { model.sortForAccountGroup($0.id) == .mostUsedLast30Days }
+  }
+
+  private var accountUsageTaskID: String {
+    "\(usesMostUsedSort)-\(model.accountUsageGeneration)"
+  }
+
+  private func favouriteBinding(_ accountID: String) -> Binding<Bool> {
+    Binding(
+      get: { model.isAccountFavourite(accountID) },
+      set: { selected in
+        if selected != model.isAccountFavourite(accountID) {
+          model.toggleAccountFavourite(accountID)
+        }
+      }
+    )
+  }
+
+  private func nameOrder(_ first: Account, _ second: Account) -> Bool {
+    let comparison = first.name.localizedStandardCompare(second.name)
+    return comparison == .orderedSame ? first.id < second.id : comparison == .orderedAscending
+  }
+}
+
+private struct AccountGroupSortingEditor: View {
+  @Environment(AppModel.self) private var model
+  let group: AccountGroupManagementItem
+
+  var body: some View {
+    Form {
+      Section("Sorting") {
+        Picker("Order", selection: sortBinding) {
+          ForEach(AccountGroupSort.allCases) { sort in
+            Text(sort.title).tag(sort)
+          }
+        }
+      }
+
+      if model.sortForAccountGroup(group.id) == .manual {
+        Section("Manual order") {
+          if accounts.isEmpty {
+            Text("No accounts in this group")
+              .foregroundStyle(.secondary)
+          }
+          ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
+            HStack {
+              Text(account.name)
+              Spacer()
+              Button {
+                model.moveAccount(account.id, in: accounts, groupID: group.id, by: -1)
+              } label: {
+                Image(systemName: "chevron.up")
+                  .frame(width: 44, height: 44)
+              }
+              .disabled(index == 0)
+              .accessibilityLabel("Move \(account.name) up")
+              Button {
+                model.moveAccount(account.id, in: accounts, groupID: group.id, by: 1)
+              } label: {
+                Image(systemName: "chevron.down")
+                  .frame(width: 44, height: 44)
+              }
+              .disabled(index == accounts.count - 1)
+              .accessibilityLabel("Move \(account.name) down")
+            }
+            .buttonStyle(.borderless)
+          }
+        }
+      } else if model.sortForAccountGroup(group.id) == .mostUsedLast30Days {
+        Section {
+          if model.accountUsagePhase.isLoading {
+            LabeledContent("Refreshing 30-day usage") { ProgressView() }
+          } else if case .failed(let message) = model.accountUsagePhase {
+            VStack(alignment: .leading, spacing: 8) {
+              Text("Usage could not be refreshed: \(message)")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+              Button("Retry") {
+                Task { await model.refreshAccountUsageLast30Days() }
+              }
+            }
+          } else {
+            Text("Counts every transaction in the last 30 days, including pages not loaded in the register.")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+          }
+        }
+      }
+    }
+    .navigationTitle("Sort \(group.title)")
+    .task(id: model.sortForAccountGroup(group.id)) {
+      guard model.sortForAccountGroup(group.id) == .mostUsedLast30Days,
+            model.accountUsagePhase != .loaded
+      else {
+        return
+      }
+      await model.refreshAccountUsageLast30Days()
+    }
+  }
+
+  private var sortBinding: Binding<AccountGroupSort> {
+    Binding(
+      get: { model.sortForAccountGroup(group.id) },
+      set: { model.setSort($0, forAccountGroup: group.id) }
+    )
+  }
+
+  private var accounts: [Account] {
+    let all = model.accounts
+    let open = model.openAccounts
+    let cashTypes: Set<String> = ["checking", "savings", "cash"]
+    let creditTypes: Set<String> = ["creditCard", "lineOfCredit"]
+    let source: [Account]
+    switch group.id {
+    case "favourites":
+      source = open.filter { model.isAccountFavourite($0.id) }
+    case "cash":
+      source = open.filter { cashTypes.contains($0.type) }
+    case "credit":
+      source = open.filter { creditTypes.contains($0.type) }
+    case "tracking":
+      source = open.filter { !cashTypes.contains($0.type) && !creditTypes.contains($0.type) }
+    case "closed":
+      source = all.filter(\.closed)
+    default:
+      let ids = Set(model.customAccountGroups.first(where: { $0.id == group.id })?.accountIDs ?? [])
+      source = all.filter { ids.contains($0.id) }
+    }
+    return model.orderedAccounts(source, inGroup: group.id)
+  }
+}
+
+private struct CustomAccountGroupEditor: View {
+  @Environment(AppModel.self) private var model
+  @Environment(\.dismiss) private var dismiss
+  let group: CustomAccountGroup
+  @State private var name: String
+  @State private var accountIDs: Set<String>
+  @State private var isConfirmingDelete = false
+
+  init(group: CustomAccountGroup) {
+    self.group = group
+    _name = State(initialValue: group.name)
+    _accountIDs = State(initialValue: Set(group.accountIDs))
+  }
+
+  var body: some View {
+    Form {
+      Section("Group") {
+        TextField("Name", text: $name)
+        if let nameError {
+          Text(nameError)
+            .font(.footnote)
+            .foregroundStyle(.red)
+        } else {
+          Text("Names must be unique and cannot use a built-in group name.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        }
+      }
+      Section("Accounts") {
+        ForEach(model.accounts.sorted(by: nameOrder)) { account in
+          Toggle(account.name, isOn: membershipBinding(account.id))
+        }
+      }
+      Section {
+        Button("Delete Group", role: .destructive) {
+          isConfirmingDelete = true
+        }
+      }
+    }
+    .navigationTitle("Edit Group")
+    .toolbar {
+      ToolbarItem(placement: .confirmationAction) {
+        Button("Save") {
+          if model.updateCustomAccountGroup(
+            CustomAccountGroup(id: group.id, name: name, accountIDs: orderedAccountIDs)
+          ) {
+            dismiss()
+          }
+        }
+        .disabled(nameError != nil)
+      }
+    }
+    .confirmationDialog(
+      "Delete \(group.name)?",
+      isPresented: $isConfirmingDelete,
+      titleVisibility: .visible
+    ) {
+      Button("Delete Group", role: .destructive) {
+        model.deleteCustomAccountGroup(id: group.id)
+        dismiss()
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("The accounts and their transactions will not be deleted.")
+    }
+  }
+
+  private var orderedAccountIDs: [String] {
+    let availableIDs = Set(model.accounts.map(\.id))
+    let currentGroupIDs = model.customAccountGroups.first(where: { $0.id == group.id })?.accountIDs ?? []
+    let unavailableIDs = currentGroupIDs.filter { !availableIDs.contains($0) }
+    return unavailableIDs + model.accounts.map(\.id).filter(accountIDs.contains)
+  }
+
+  private var nameError: String? {
+    model.customAccountGroupNameError(name, excluding: group.id)
+  }
+
+  private func membershipBinding(_ accountID: String) -> Binding<Bool> {
+    Binding(
+      get: { accountIDs.contains(accountID) },
+      set: { included in
+        if included {
+          accountIDs.insert(accountID)
+        } else {
+          accountIDs.remove(accountID)
+        }
+      }
+    )
+  }
+
+  private func nameOrder(_ first: Account, _ second: Account) -> Bool {
+    let comparison = first.name.localizedStandardCompare(second.name)
+    return comparison == .orderedSame ? first.id < second.id : comparison == .orderedAscending
   }
 }
