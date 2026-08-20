@@ -3,6 +3,7 @@ import SwiftUI
 struct AccountsView: View {
   @Environment(AppModel.self) private var model
   @State private var collapsedGroups: Set<String> = ["closed"]
+  @State private var isEditingAccounts = false
 
   var body: some View {
     ScrollView {
@@ -36,6 +37,48 @@ struct AccountsView: View {
           }
           .buttonStyle(.plain)
 
+          NavigationLink {
+            ScheduledTransactionsView()
+          } label: {
+            HStack(spacing: 12) {
+              Image(systemName: "calendar.badge.clock")
+                .font(.title3)
+                .foregroundStyle(Theme.accent)
+                .frame(width: 28)
+              VStack(alignment: .leading, spacing: 2) {
+                Text("Scheduled Transactions")
+                  .foregroundStyle(Theme.textPrimary)
+                if model.scheduledTransactionsPhase == .loaded {
+                  let count = model.scheduledTransactions.count
+                  Text(count == 1 ? "1 upcoming transaction" : "\(count) upcoming transactions")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                } else if model.scheduledTransactionsPhase.isLoading {
+                  Text("Loading upcoming transactions")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
+              }
+              Spacer()
+              if model.scheduledTransactionsPhase.isLoading {
+                ProgressView()
+              } else {
+                Image(systemName: "chevron.right")
+                  .font(.footnote.weight(.semibold))
+                  .foregroundStyle(.tertiary)
+              }
+            }
+            .padding(16)
+            .ynabCard()
+          }
+          .buttonStyle(.plain)
+
+          if !favouriteAccounts.isEmpty {
+            accountGroupSection(
+              AccountGroup(id: "favourites", title: "Favourites", accounts: favouriteAccounts)
+            )
+          }
+
           ForEach(accountGroups) { group in
             accountGroupSection(group)
           }
@@ -47,6 +90,14 @@ struct AccountsView: View {
     .background(Theme.canvas)
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
+      ToolbarItem(placement: .topBarLeading) {
+        Button(isEditingAccounts ? "Done" : "Edit") {
+          withAnimation(.snappy) {
+            isEditingAccounts.toggle()
+          }
+        }
+        .accessibilityHint(isEditingAccounts ? "Finish changing account favourites and order" : "Show controls to favourite and reorder accounts")
+      }
       ToolbarItem(placement: .topBarTrailing) {
         Button {
           model.isShowingSettings = true
@@ -95,22 +146,7 @@ struct AccountsView: View {
       if !isCollapsed {
         VStack(spacing: 0) {
           ForEach(group.accounts.enumerated(), id: \.element.id) { index, account in
-            NavigationLink {
-              RegisterView(scope: .account(account.id))
-            } label: {
-              HStack {
-                Text(account.name)
-                  .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
-                  .monospacedDigit()
-                  .foregroundStyle(account.balance == 0 ? .secondary : Theme.amountColour(account.balance))
-              }
-              .padding(.horizontal, 16)
-              .padding(.vertical, 13)
-              .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            accountRow(account, index: index, in: group.accounts)
 
             if index < group.accounts.count - 1 {
               Divider().padding(.leading, 16)
@@ -120,6 +156,88 @@ struct AccountsView: View {
         .ynabCard()
       }
     }
+  }
+
+  private var favouriteAccounts: [Account] {
+    model.orderedAccounts(model.openAccounts.filter { model.isAccountFavourite($0.id) })
+  }
+
+  @ViewBuilder
+  private func accountRow(_ account: Account, index: Int, in group: [Account]) -> some View {
+    HStack(spacing: 8) {
+      if isEditingAccounts {
+        accountActionButton(
+          systemImage: model.isAccountFavourite(account.id) ? "star.fill" : "star",
+          label: model.isAccountFavourite(account.id) ? "Remove \(account.name) from favourites" : "Favourite \(account.name)",
+          tint: model.isAccountFavourite(account.id) ? Theme.accent : .secondary
+        ) {
+          model.toggleAccountFavourite(account.id)
+        }
+      }
+
+      if isEditingAccounts {
+        VStack(alignment: .leading, spacing: 2) {
+          Text(account.name)
+            .foregroundStyle(Theme.textPrimary)
+          Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
+            .font(.footnote)
+            .monospacedDigit()
+            .foregroundStyle(account.balance == 0 ? .secondary : Theme.amountColour(account.balance))
+        }
+        Spacer()
+        HStack(spacing: 2) {
+          accountActionButton(systemImage: "chevron.up", label: "Move \(account.name) up", tint: .secondary) {
+            model.moveAccount(account.id, in: group, by: -1)
+          }
+          .disabled(index == 0)
+          accountActionButton(systemImage: "chevron.down", label: "Move \(account.name) down", tint: .secondary) {
+            model.moveAccount(account.id, in: group, by: 1)
+          }
+          .disabled(index == group.count - 1)
+        }
+      } else {
+        NavigationLink {
+          RegisterView(scope: .account(account.id))
+        } label: {
+          HStack {
+            Text(account.name)
+              .foregroundStyle(Theme.textPrimary)
+            Spacer()
+            Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
+              .monospacedDigit()
+              .foregroundStyle(account.balance == 0 ? .secondary : Theme.amountColour(account.balance))
+          }
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        accountActionButton(
+          systemImage: model.isAccountFavourite(account.id) ? "star.fill" : "star",
+          label: model.isAccountFavourite(account.id) ? "Remove \(account.name) from favourites" : "Favourite \(account.name)",
+          tint: model.isAccountFavourite(account.id) ? Theme.accent : .secondary
+        ) {
+          model.toggleAccountFavourite(account.id)
+        }
+      }
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 10)
+  }
+
+  private func accountActionButton(
+    systemImage: String,
+    label: String,
+    tint: Color,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      Image(systemName: systemImage)
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(tint)
+        .frame(width: 36, height: 36)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(label)
   }
 
   /// Offline captures waiting to reach the server, with retry and discard.
@@ -253,14 +371,14 @@ struct AccountsView: View {
 
     let open = live.filter { !$0.closed }
     let groups: [AccountGroup] = [
-      AccountGroup(id: "cash", title: "Cash", accounts: open.filter { cashTypes.contains($0.type) }),
-      AccountGroup(id: "credit", title: "Credit", accounts: open.filter { creditTypes.contains($0.type) }),
+      AccountGroup(id: "cash", title: "Cash", accounts: model.orderedAccounts(open.filter { cashTypes.contains($0.type) })),
+      AccountGroup(id: "credit", title: "Credit", accounts: model.orderedAccounts(open.filter { creditTypes.contains($0.type) })),
       AccountGroup(
         id: "tracking",
         title: "Tracking",
-        accounts: open.filter { !cashTypes.contains($0.type) && !creditTypes.contains($0.type) }
+        accounts: model.orderedAccounts(open.filter { !cashTypes.contains($0.type) && !creditTypes.contains($0.type) })
       ),
-      AccountGroup(id: "closed", title: "Closed", accounts: live.filter(\.closed)),
+      AccountGroup(id: "closed", title: "Closed", accounts: model.orderedAccounts(live.filter(\.closed))),
     ]
     return groups.filter { !$0.accounts.isEmpty }
   }

@@ -20,7 +20,7 @@ struct HowMuchApp: App {
 /// from build settings — and the scene delegate relays taps into SwiftUI.
 @MainActor
 enum QuickAction {
-  static let addExpenseType = "local.howmuch.ios.add-expense"
+  static let addExpenseType = "sg.soon.howmuch.add-expense"
   static let notification = Notification.Name("HowMuch.QuickAction.addExpense")
 
   /// Set when the app is cold-launched from the shortcut, before any SwiftUI
@@ -85,7 +85,7 @@ final class QuickActionSceneDelegate: NSObject, UIWindowSceneDelegate {
 
 enum AppTab: Hashable {
   case accounts
-  case categories
+  case plan
   case reflect
   case transaction
 }
@@ -118,7 +118,7 @@ private struct RootView: View {
         }
       }
 
-      Tab("Categories", systemImage: "square.grid.2x2", value: AppTab.categories) {
+      Tab("Plan", systemImage: "square.grid.2x2", value: AppTab.plan) {
         NavigationStack {
           CategoriesView()
         }
@@ -161,6 +161,7 @@ private struct RootView: View {
       SettingsView(settings: model.settings) { nextSettings in
         await model.applySettings(nextSettings)
       }
+      .interactiveDismissDisabled(!model.settings.isAuthenticated)
       // Runs once the dismissal has completed, so swapping to the capture
       // sheet cannot race the settings sheet's teardown.
       .onDisappear {

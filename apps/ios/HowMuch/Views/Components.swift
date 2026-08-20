@@ -186,24 +186,44 @@ struct ColumnChart: View {
 /// Paired income/spending columns per period.
 struct PairedColumnChart: View {
   let pairs: [(income: Double, spending: Double)]
+  var labels: [String] = []
   var height: CGFloat = 90
 
   var body: some View {
     let magnitude = max(pairs.flatMap { [$0.income, $0.spending] }.max() ?? 1, 1)
-    HStack(alignment: .bottom, spacing: 6) {
-      ForEach(pairs.enumerated(), id: \.offset) { _, pair in
-        HStack(alignment: .bottom, spacing: 2) {
-          Capsule()
-            .fill(Theme.inflow)
-            .frame(height: max(3, height * pair.income / magnitude))
-          Capsule()
-            .fill(Theme.outflow)
-            .frame(height: max(3, height * pair.spending / magnitude))
+    let labelStride = max(1, Int(ceil(Double(labels.count) / 12)))
+
+    VStack(spacing: 6) {
+      HStack(alignment: .bottom, spacing: 6) {
+        ForEach(pairs.enumerated(), id: \.offset) { _, pair in
+          HStack(alignment: .bottom, spacing: 2) {
+            Capsule()
+              .fill(Theme.inflow)
+              .frame(height: max(3, height * pair.income / magnitude))
+            Capsule()
+              .fill(Theme.outflow)
+              .frame(height: max(3, height * pair.spending / magnitude))
+          }
+          .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity)
+      }
+      .frame(height: height)
+
+      if labels.count == pairs.count, !labels.isEmpty {
+        HStack(alignment: .top, spacing: 6) {
+          ForEach(labels.indices, id: \.self) { index in
+            let isVisible = index.isMultiple(of: labelStride) || index == labels.index(before: labels.endIndex)
+            Text(isVisible ? labels[index] : " ")
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .minimumScaleFactor(0.65)
+              .frame(maxWidth: .infinity)
+              .accessibilityHidden(!isVisible)
+          }
+        }
       }
     }
-    .frame(height: height)
   }
 }
 

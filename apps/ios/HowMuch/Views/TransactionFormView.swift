@@ -149,6 +149,7 @@ struct TransactionFormView: View {
   @State private var isKeypadVisible: Bool
   @State private var errorMessage: String?
   @State private var isConfirmingDelete = false
+  @State private var isConfirmingSplitRemoval = false
   @State private var isAutoAdvancingToPayee = false
   private let isEditing: Bool
 
@@ -258,6 +259,13 @@ struct TransactionFormView: View {
           deleteTransaction()
         }
       }
+      .confirmationDialog("Remove split allocations?", isPresented: $isConfirmingSplitRemoval, titleVisibility: .visible) {
+        Button("Remove Split", role: .destructive) {
+          draft.disableSplit()
+        }
+      } message: {
+        Text("The split lines will be replaced with their total. Their payees, categories and memos will be removed.")
+      }
       .onChange(of: keypad) {
         draft.amountMagnitudeMilli = keypad.display
       }
@@ -303,7 +311,7 @@ struct TransactionFormView: View {
           .monospacedDigit()
           .contentTransition(.numericText(value: Double(displayedSignedAmount)))
           .animation(.snappy, value: displayedSignedAmount)
-          .foregroundStyle(draft.direction == .outflow ? Theme.outflow : Theme.textPrimary)
+          .foregroundStyle(displayedSignedAmount < 0 ? Theme.outflow : Theme.textPrimary)
           .lineLimit(1)
           .minimumScaleFactor(0.5)
       }
@@ -313,7 +321,7 @@ struct TransactionFormView: View {
     .padding(.vertical, 16)
     .padding(.horizontal, 12)
     .background(
-      draft.direction == .inflow ? Theme.lime : Color.clear,
+      displayedSignedAmount > 0 ? Theme.lime : Color.clear,
       in: RoundedRectangle(cornerRadius: 14, style: .continuous)
     )
     .sensoryFeedback(.selection, trigger: draft.direction)
@@ -321,6 +329,9 @@ struct TransactionFormView: View {
 
   /// Signed milliunits behind the header, driving the rolling-digit motion.
   private var displayedSignedAmount: Int {
+    if draft.isSplit {
+      return draft.signedMilliunits
+    }
     let magnitude = isKeypadVisible ? keypad.display : draft.amountMagnitudeMilli
     return draft.direction == .outflow ? -magnitude : magnitude
   }
@@ -329,7 +340,7 @@ struct TransactionFormView: View {
     let signed = displayedSignedAmount
     let text = MoneyCodec.displayString(for: signed, currencyFormat: model.currencyFormat)
     // YNAB shows the minus even at zero while in outflow mode.
-    if draft.direction == .outflow, signed == 0 {
+    if !draft.isSplit, draft.direction == .outflow, signed == 0 {
       return "−\(text)"
     }
     return text
@@ -370,34 +381,59 @@ struct TransactionFormView: View {
 
   private var detailCard: some View {
     VStack(spacing: 0) {
-      NavigationLink {
-        PayeePickerView(draft: $draft)
-      } label: {
+      if draft.isSplit {
         DisclosureValueRow(
           icon: "person.crop.circle",
           caption: "Payee",
-          value: draft.payeeName,
-          placeholder: "Choose Payee"
+          value: "Set on each split line",
+          placeholder: ""
         )
+      } else {
+        NavigationLink {
+          PayeePickerView(draft: $draft)
+        } label: {
+          DisclosureValueRow(
+            icon: "person.crop.circle",
+            caption: "Payee",
+            value: draft.payeeName,
+            placeholder: "Choose Payee"
+          )
+        }
+        .buttonStyle(.plain)
       }
-      .buttonStyle(.plain)
       CardDivider()
 
-      if !hidesCategory {
+      if draft.isSplit {
+        DisclosureValueRow(
+          icon: "tray.full",
+          caption: "Category",
+          value: "Split (\(draft.subtransactions.count))",
+          placeholder: ""
+        )
+        CardDivider()
+      } else if !hidesCategory {
         NavigationLink {
           CategoryPickerView(draft: $draft)
         } label: {
           DisclosureValueRow(
             icon: "tray.full",
             caption: "Category",
-            value: draft.isSplit ? "Split (\(draft.subtransactions.count))" : model.categoryName(forID: draft.categoryID),
+            value: model.categoryName(forID: draft.categoryID),
             placeholder: "Choose Category"
           )
         }
         .buttonStyle(.plain)
-        .disabled(draft.isSplit)
         CardDivider()
       }
+
+      Toggle("Split transaction", isOn: Binding(
+        get: { draft.isSplit },
+        set: setSplit
+      ))
+      .tint(Theme.accent)
+      .padding(.horizontal, 16)
+      .padding(.vertical, 10)
+      CardDivider()
 
       NavigationLink {
         AccountPickerView(draft: $draft)
@@ -433,52 +469,107 @@ struct TransactionFormView: View {
     draft.isTransfer && model.accountsBothOnBudget(draft.accountID, draft.transferAccountID)
   }
 
-  /// Read-only view of the split lines. Amounts stay locked so the lines
-  /// keep summing to the transaction total; other fields remain editable.
   private var splitCard: some View {
     VStack(spacing: 0) {
-      ForEach(draft.subtransactions, id: \.id) { line in
-        HStack(spacing: 12) {
-          Image(systemName: line.transferAccountID != nil ? "arrow.left.arrow.right" : "tray.full")
-            .foregroundStyle(.secondary)
-            .frame(width: 28)
-          VStack(alignment: .leading, spacing: 2) {
-            Text(splitLineTitle(line))
-              .foregroundStyle(Theme.textPrimary)
-            if let memo = line.memo, !memo.isEmpty {
-              Text(memo)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+      ForEach(draft.subtransactions.indices, id: \.self) { index in
+        NavigationLink {
+          TransactionSplitLineEditor(
+            line: $draft.subtransactions[index],
+            parentAccountID: draft.accountID,
+            canRemove: draft.subtransactions.count > 2,
+            onRemove: { removeSplitLine(at: index) }
+          )
+        } label: {
+          HStack(spacing: 12) {
+            Image(systemName: draft.subtransactions[index].transferAccountID != nil ? "arrow.left.arrow.right" : "tray.full")
+              .foregroundStyle(.secondary)
+              .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+              Text(splitLineTitle(draft.subtransactions[index]))
+                .foregroundStyle(Theme.textPrimary)
+              if let memo = draft.subtransactions[index].memo.trimmedNil {
+                Text(memo)
+                  .font(.footnote)
+                  .foregroundStyle(.secondary)
+              }
             }
+            Spacer()
+            Text(splitLineAmountLabel(draft.subtransactions[index]))
+              .monospacedDigit()
+              .foregroundStyle((draft.subtransactions[index].amount ?? 0) < 0 ? Theme.outflow : Theme.textPrimary)
+            Image(systemName: "chevron.right")
+              .font(.footnote.weight(.semibold))
+              .foregroundStyle(.tertiary)
           }
-          Spacer()
-          Text(MoneyCodec.displayString(for: line.amount, currencyFormat: model.currencyFormat))
-            .monospacedDigit()
-            .foregroundStyle(line.amount < 0 ? Theme.outflow : Theme.textPrimary)
+          .padding(.horizontal, 16)
+          .padding(.vertical, 10)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        if line.id != draft.subtransactions.last?.id {
+        .buttonStyle(.plain)
+        if index < draft.subtransactions.count - 1 {
           CardDivider()
         }
       }
 
       CardDivider()
-      Text("Split lines keep the total; edit payee, date, memo and flag here.")
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
+      Button {
+        draft.subtransactions.append(TransactionSubtransactionDraft())
+      } label: {
+        Label("Add Split Line", systemImage: "plus")
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .padding(.horizontal, 16)
+      .padding(.vertical, 11)
+      CardDivider()
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Split total: \(MoneyCodec.displayString(for: draft.signedMilliunits, currencyFormat: model.currencyFormat))")
+          .font(.footnote.weight(.semibold))
+        Text("Enter a signed amount on every line. Transfers pair with the selected account when saved.")
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+        if let message = draft.splitValidationMessage {
+          Text(message)
+            .font(.footnote)
+            .foregroundStyle(Theme.outflow)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
     }
     .ynabCard()
   }
 
-  private func splitLineTitle(_ line: Subtransaction) -> String {
-    if line.transferAccountID != nil {
-      return line.payeeName ?? "Transfer"
+  private func splitLineTitle(_ line: TransactionSubtransactionDraft) -> String {
+    if let transferAccountID = line.transferAccountID {
+      return model.account(withID: transferAccountID)?.name ?? "Transfer"
     }
-    return line.categoryName ?? "Uncategorised"
+    if let category = model.categoryName(forID: line.categoryID) {
+      return category
+    }
+    if let payee = line.payeeName.trimmedNil {
+      return payee
+    }
+    return "Uncategorised"
+  }
+
+  private func splitLineAmountLabel(_ line: TransactionSubtransactionDraft) -> String {
+    guard let amount = line.amount else { return "Enter amount" }
+    return MoneyCodec.displayString(for: amount, currencyFormat: model.currencyFormat)
+  }
+
+  private func setSplit(_ shouldSplit: Bool) {
+    if shouldSplit {
+      draft.enableSplit()
+    } else if draft.isSplit {
+      isConfirmingSplitRemoval = true
+    }
+  }
+
+  private func removeSplitLine(at index: Int) {
+    guard draft.subtransactions.count > 2, draft.subtransactions.indices.contains(index) else {
+      return
+    }
+    draft.subtransactions.remove(at: index)
   }
 
   private var extrasCard: some View {
@@ -552,6 +643,10 @@ struct TransactionFormView: View {
     guard !model.isSubmitting else {
       return
     }
+    guard draft.splitValidationMessage == nil else {
+      errorMessage = draft.splitValidationMessage
+      return
+    }
     draft.amountMagnitudeMilli = keypad.commitValue()
     if hidesCategory {
       // The row is hidden, so a category left over from an earlier account
@@ -580,6 +675,276 @@ struct TransactionFormView: View {
         dismiss()
       } catch {
         errorMessage = error.localizedDescription
+      }
+    }
+  }
+}
+
+/// Editor for one signed allocation. A split transfer is represented by its
+/// target account rather than a parent-level transfer payee, which lets the
+/// server create and keep the mirrored transaction paired.
+private struct TransactionSplitLineEditor: View {
+  @Environment(AppModel.self) private var model
+  @Environment(\.dismiss) private var dismiss
+  @Binding var line: TransactionSubtransactionDraft
+  let parentAccountID: String
+  let canRemove: Bool
+  let onRemove: () -> Void
+
+  var body: some View {
+    Form {
+      Section("Amount") {
+        TextField("Signed amount", text: $line.amountText)
+          .keyboardType(.numbersAndPunctuation)
+          .monospacedDigit()
+        Text("Use − for spending and + for income. The parent amount is the sum of all lines.")
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+        if line.amount == nil {
+          Text("Enter a valid signed amount.")
+            .font(.footnote)
+            .foregroundStyle(Theme.outflow)
+        }
+      }
+
+      Section("Details") {
+        NavigationLink {
+          TransactionSplitPayeePicker(line: $line, parentAccountID: parentAccountID)
+        } label: {
+          splitDisclosureRow(
+            icon: "person.crop.circle",
+            caption: "Payee",
+            value: line.transferAccountID == nil ? line.payeeName.trimmedNil : "Transfer",
+            placeholder: "Choose Payee"
+          )
+        }
+
+        if let transferAccountID = line.transferAccountID {
+          splitDisclosureRow(
+            icon: "arrow.left.arrow.right",
+            caption: "Transfer",
+            value: model.account(withID: transferAccountID)?.name ?? "Transfer",
+            placeholder: ""
+          )
+        } else {
+          NavigationLink {
+            TransactionSplitCategoryPicker(line: $line)
+          } label: {
+            splitDisclosureRow(
+              icon: "tray.full",
+              caption: "Category",
+              value: model.categoryName(forID: line.categoryID),
+              placeholder: "Choose Category"
+            )
+          }
+        }
+
+        TextField("Memo", text: $line.memo, axis: .vertical)
+          .lineLimit(1 ... 3)
+      }
+
+      Section {
+        Button("Remove Split Line", role: .destructive) {
+          onRemove()
+          dismiss()
+        }
+        .disabled(!canRemove)
+      } footer: {
+        if !canRemove {
+          Text("A split transaction needs at least two lines.")
+        }
+      }
+    }
+    .scrollContentBackground(.hidden)
+    .background(Theme.canvas)
+    .navigationTitle("Split Line")
+    .navigationBarTitleDisplayMode(.inline)
+  }
+
+  private func splitDisclosureRow(icon: String, caption: String, value: String?, placeholder: String) -> some View {
+    HStack(spacing: 12) {
+      Image(systemName: icon)
+        .foregroundStyle(Theme.accent)
+        .frame(width: 24)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(caption)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Text(value ?? placeholder)
+          .foregroundStyle(value == nil ? .secondary : Theme.textPrimary)
+      }
+    }
+  }
+}
+
+private struct TransactionSplitPayeePicker: View {
+  @Environment(AppModel.self) private var model
+  @Environment(\.dismiss) private var dismiss
+  @Binding var line: TransactionSubtransactionDraft
+  let parentAccountID: String
+  @State private var searchText = ""
+
+  var body: some View {
+    List {
+      if trimmedSearch.isEmpty {
+        Button {
+          line.payeeID = nil
+          line.payeeName = ""
+          line.transferAccountID = nil
+          dismiss()
+        } label: {
+          selectionRow("No Payee", selected: line.payeeID == nil && line.payeeName.trimmedNil == nil && line.transferAccountID == nil, secondary: true)
+        }
+      }
+
+      if !trimmedSearch.isEmpty, !hasExactMatch {
+        Button {
+          line.payeeID = nil
+          line.payeeName = trimmedSearch
+          line.transferAccountID = nil
+          dismiss()
+        } label: {
+          Label("Create payee “\(trimmedSearch)”", systemImage: "plus.circle.fill")
+            .foregroundStyle(Theme.accent)
+        }
+      }
+
+      if !matchingPayees.isEmpty {
+        Section("Payees") {
+          ForEach(matchingPayees) { payee in
+            Button {
+              line.payeeID = payee.id
+              line.payeeName = payee.name
+              line.transferAccountID = nil
+              dismiss()
+            } label: {
+              selectionRow(payee.name, selected: line.payeeID == payee.id)
+            }
+          }
+        }
+      }
+
+      if !matchingTransferAccounts.isEmpty {
+        Section("Transfers") {
+          ForEach(matchingTransferAccounts) { account in
+            Button {
+              line.payeeID = nil
+              line.payeeName = ""
+              line.categoryID = nil
+              line.transferAccountID = account.id
+              dismiss()
+            } label: {
+              selectionRow(account.name, selected: line.transferAccountID == account.id)
+            }
+          }
+        }
+      }
+    }
+    .listStyle(.insetGrouped)
+    .scrollContentBackground(.hidden)
+    .background(Theme.canvas)
+    .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search or add a payee")
+    .navigationTitle("Payee")
+    .navigationBarTitleDisplayMode(.inline)
+  }
+
+  private var trimmedSearch: String {
+    searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private var matchingPayees: [Payee] {
+    model.payees
+      .filter { !$0.isTransferPayee }
+      .filter { trimmedSearch.isEmpty || $0.name.localizedStandardContains(trimmedSearch) }
+      .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+  }
+
+  private var matchingTransferAccounts: [Account] {
+    model.openAccounts
+      .filter { $0.id != parentAccountID }
+      .filter { trimmedSearch.isEmpty || $0.name.localizedStandardContains(trimmedSearch) }
+      .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+  }
+
+  private var hasExactMatch: Bool {
+    model.payees.contains { !$0.isTransferPayee && $0.name.localizedCaseInsensitiveCompare(trimmedSearch) == .orderedSame }
+  }
+
+  private func selectionRow(_ title: String, selected: Bool, secondary: Bool = false) -> some View {
+    HStack {
+      Text(title)
+        .foregroundStyle(secondary ? Color.secondary : Theme.textPrimary)
+      Spacer()
+      if selected {
+        Image(systemName: "checkmark")
+          .foregroundStyle(Theme.accent)
+      }
+    }
+  }
+}
+
+private struct TransactionSplitCategoryPicker: View {
+  @Environment(AppModel.self) private var model
+  @Environment(\.dismiss) private var dismiss
+  @Binding var line: TransactionSubtransactionDraft
+  @State private var searchText = ""
+
+  var body: some View {
+    List {
+      if trimmedSearch.isEmpty {
+        Button {
+          line.categoryID = nil
+          dismiss()
+        } label: {
+          selectionRow("No Category", selected: line.categoryID == nil, secondary: true)
+        }
+      }
+
+      ForEach(visibleGroups) { group in
+        Section(group.name) {
+          ForEach(group.categories.filter(categoryMatches)) { category in
+            Button {
+              line.categoryID = category.id
+              line.transferAccountID = nil
+              dismiss()
+            } label: {
+              selectionRow(category.name, selected: line.categoryID == category.id)
+            }
+          }
+        }
+      }
+    }
+    .listStyle(.insetGrouped)
+    .scrollContentBackground(.hidden)
+    .background(Theme.canvas)
+    .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search categories")
+    .navigationTitle("Category")
+    .navigationBarTitleDisplayMode(.inline)
+  }
+
+  private var trimmedSearch: String {
+    searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private var visibleGroups: [CategoryGroup] {
+    let live = model.categoryGroups.filter { group in
+      !group.deleted && group.categories.contains { !$0.deleted && categoryMatches($0) }
+    }
+    return live.filter { !$0.isQuiet } + live.filter(\.isQuiet)
+  }
+
+  private func categoryMatches(_ category: Category) -> Bool {
+    !category.deleted && (trimmedSearch.isEmpty || category.name.localizedStandardContains(trimmedSearch))
+  }
+
+  private func selectionRow(_ title: String, selected: Bool, secondary: Bool = false) -> some View {
+    HStack {
+      Text(title)
+        .foregroundStyle(secondary ? Color.secondary : Theme.textPrimary)
+      Spacer()
+      if selected {
+        Image(systemName: "checkmark")
+          .foregroundStyle(Theme.accent)
       }
     }
   }

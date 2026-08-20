@@ -16,6 +16,11 @@ enum MoneyCodec {
 
     let wholePart = String(parts.first ?? "0")
     let fractionalPart = parts.count == 2 ? String(parts[1]) : ""
+    // Milliunits are the storage precision. Reject extra digits rather than
+    // silently rounding or truncating a split allocation on save.
+    guard fractionalPart.count <= 3 else {
+      return nil
+    }
     let paddedFraction = String(fractionalPart.padding(toLength: 3, withPad: "0", startingAt: 0).prefix(3))
 
     guard
@@ -83,6 +88,21 @@ enum LedgerDate {
     return raw
   }
 
+  /// Compact label for a report chart's horizontal axis.
+  static func periodAxisLabel(_ raw: String) -> String {
+    let parts = raw.split(separator: "-")
+    if parts.count == 3, let date = parser.date(from: raw) {
+      return axisDayDisplay.string(from: date)
+    }
+    if parts.count == 2, parts[1].hasPrefix("W") {
+      return String(parts[1])
+    }
+    if parts.count == 2, let month = Int(parts[1]), (1 ... 12).contains(month) {
+      return Calendar.current.shortMonthSymbols[month - 1]
+    }
+    return raw
+  }
+
   private static let parser: DateFormatter = {
     let formatter = DateFormatter()
     formatter.calendar = Calendar(identifier: .iso8601)
@@ -94,6 +114,12 @@ enum LedgerDate {
   private static let display: DateFormatter = {
     let formatter = DateFormatter()
     formatter.dateFormat = "EEE d MMM yyyy"
+    return formatter
+  }()
+
+  private static let axisDayDisplay: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "d MMM"
     return formatter
   }()
 }

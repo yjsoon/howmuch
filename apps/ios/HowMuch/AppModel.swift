@@ -27,8 +27,15 @@ final class AppModel {
   var accounts: [Account] = []
   var categoryGroups: [CategoryGroup] = []
   var payees: [Payee] = []
-  /// Full ledger, newest first. The local API is fast enough to keep it whole.
+  /// Loaded portion of the ledger, newest first. Older pages append on demand.
   var transactions: [Transaction] = []
+  /// Imported YNAB schedules remain an immutable source mirror; local edits
+  /// and entered occurrences are reflected through HowMuch overlays.
+  var scheduledTransactions: [ScheduledTransaction] = []
+  private(set) var hasMoreTransactions = false
+  private(set) var nextTransactionOffset: Int?
+  private(set) var isLoadingOlderTransactions = false
+  private(set) var olderTransactionsError: String?
 
   var spendingBreakdown: SpendingBreakdownReport?
   var incomeVsSpending: IncomeVsSpendingReport?
@@ -37,6 +44,10 @@ final class AppModel {
 
   var referencePhase: LoadPhase = .idle
   var ledgerPhase: LoadPhase = .idle
+  var scheduledTransactionsPhase: LoadPhase = .idle
+  /// Increments after mutations that affect a plan month, so the Plan tab
+  /// reloads its locally held monthly snapshot when it becomes visible.
+  private(set) var planRefreshGeneration = 0
   var reportsPhase: LoadPhase = .idle
   var isSubmitting = false
   var lastSaveMessage: String?
@@ -49,10 +60,54 @@ final class AppModel {
   var isSyncingOutbox = false
   private var viewPrefs: ViewPrefs
   private var saveMessageToken = 0
+  /// Invalidates an in-flight older-page response when the first page reloads.
+  private var ledgerPageGeneration = 0
 
   init(settings: APISettings = .load(), viewPrefs: ViewPrefs = .load()) {
     self.settings = settings
     self.viewPrefs = viewPrefs
+    // A revoked session is persisted as signed out. Do not let a cold launch
+    // fall back to tabs that can only render tokenless API errors.
+    self.isShowingSettings = !settings.isAuthenticated
+    NotificationCenter.default.addObserver(
+      forName: .howMuchAuthenticationExpired,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor [weak self] in
+        self?.handleAuthenticationExpiry()
+      }
+    }
+  }
+
+  /// Clears all authenticated and cached state after a server-side session
+  /// revocation. Keeping stale accounts visible while another request reports
+  /// "Invalid credentials" is misleading and can invite writes with a dead
+  /// session, so the connection screen is made the single next step.
+  private func handleAuthenticationExpiry() {
+    guard settings.isAuthenticated else {
+      return
+    }
+
+    settings.sessionToken = ""
+    settings.authenticatedUserID = ""
+    settings.save()
+    planSettings = nil
+    accounts = []
+    categoryGroups = []
+    payees = []
+    transactions = []
+    scheduledTransactions = []
+    spendingBreakdown = nil
+    incomeVsSpending = nil
+    netWorth = nil
+    ageOfMoney = nil
+    referencePhase = .idle
+    ledgerPhase = .idle
+    scheduledTransactionsPhase = .idle
+    reportsPhase = .idle
+    ledgerPageGeneration += 1
+    isShowingSettings = true
   }
 
   var lastUsedAccountID: String? {
@@ -77,6 +132,74 @@ final class AppModel {
     accounts.filter { !$0.closed }
   }
 
+  var favouriteAccountIDs: Set<String> {
+    Set(viewPrefs.favouriteAccountIDs)
+  }
+
+  func isAccountFavourite(_ accountID: String) -> Bool {
+    favouriteAccountIDs.contains(accountID)
+  }
+
+  func toggleAccountFavourite(_ accountID: String) {
+    if let index = viewPrefs.favouriteAccountIDs.firstIndex(of: accountID) {
+      viewPrefs.favouriteAccountIDs.remove(at: index)
+    } else {
+      viewPrefs.favouriteAccountIDs.append(accountID)
+    }
+    viewPrefs.save()
+  }
+
+  /// Applies the device's manual order while keeping the API's stable name/id
+  /// order as the deterministic fallback for accounts not yet moved locally.
+  func orderedAccounts(_ source: [Account]) -> [Account] {
+    var ranks: [String: Int] = [:]
+    for (index, accountID) in viewPrefs.accountOrder.enumerated() {
+      ranks[accountID] = ranks[accountID] ?? index
+    }
+    return source.sorted { first, second in
+      switch (ranks[first.id], ranks[second.id]) {
+      case let (firstRank?, secondRank?) where firstRank != secondRank:
+        return firstRank < secondRank
+      case (_?, nil):
+        return true
+      case (nil, _?):
+        return false
+      default:
+        let nameOrder = first.name.localizedStandardCompare(second.name)
+        return nameOrder == .orderedSame ? first.id < second.id : nameOrder == .orderedAscending
+      }
+    }
+  }
+
+  /// Moves an account one position within its current account group. The
+  /// resulting order is shared by all account groups and the Favourites view.
+  func moveAccount(_ accountID: String, in group: [Account], by offset: Int) {
+    let orderedGroup = orderedAccounts(group)
+    guard
+      let currentIndex = orderedGroup.firstIndex(where: { $0.id == accountID })
+    else {
+      return
+    }
+
+    let destination = currentIndex + offset
+    guard destination >= orderedGroup.startIndex, destination < orderedGroup.endIndex else {
+      return
+    }
+
+    let otherID = orderedGroup[destination].id
+    guard otherID != accountID else {
+      return
+    }
+
+    var globalOrder = orderedAccounts(accounts).map(\.id)
+    guard let firstIndex = globalOrder.firstIndex(of: accountID), let secondIndex = globalOrder.firstIndex(of: otherID) else {
+      return
+    }
+    globalOrder.swapAt(firstIndex, secondIndex)
+    viewPrefs.accountOrder = globalOrder
+    viewPrefs.save()
+  }
+
   var flattenedCategories: [Category] {
     categoryGroups
       .flatMap(\.categories)
@@ -89,7 +212,7 @@ final class AppModel {
 
   /// The first failure across surfaces, for connection banners.
   var connectionProblem: String? {
-    referencePhase.errorMessage ?? ledgerPhase.errorMessage ?? reportsPhase.errorMessage
+    referencePhase.errorMessage ?? ledgerPhase.errorMessage ?? scheduledTransactionsPhase.errorMessage ?? reportsPhase.errorMessage
   }
 
   func account(withID id: String) -> Account? {
@@ -129,6 +252,8 @@ final class AppModel {
   }
 
   func refreshAll(quiet: Bool = false) async {
+    await resolvePlanSelectionIfNeeded()
+
     // Replay offline captures alongside the fetches rather than before them:
     // an unreachable server must not stall the refresh for a full request
     // timeout. Inserts dedupe by id, so a capture the ledger fetch already
@@ -136,8 +261,33 @@ final class AppModel {
     async let outbox: Int = syncOutbox()
     async let reference: Void = refreshReferenceData(quiet: quiet)
     async let ledger: Void = refreshLedger(quiet: quiet)
+    async let schedules: Void = refreshScheduledTransactions(quiet: quiet)
     async let reports: Void = refreshReflectOverview(quiet: quiet)
-    _ = await (outbox, reference, ledger, reports)
+    _ = await (outbox, reference, ledger, schedules, reports)
+  }
+
+  /// A fresh app has no local plan identifier. Once an authenticated server
+  /// proves that there is exactly one accessible plan, remember it before any
+  /// plan-scoped requests begin. This also repairs older installs that kept
+  /// the former `local-plan` development default. Multiple accessible plans
+  /// are deliberately not guessed: the Connection screen remains the user's
+  /// explicit selector in that case.
+  private func resolvePlanSelectionIfNeeded() async {
+    guard settings.isAuthenticated else {
+      return
+    }
+
+    do {
+      let plans = try await apiClient.fetchPlans()
+      guard let selectedPlanID = settings.resolvedPlanID(from: plans), selectedPlanID != settings.planID else {
+        return
+      }
+      settings.planID = selectedPlanID
+      settings.save()
+    } catch {
+      // The normal surface requests retain their own error states. Do not
+      // make a transient plan-list failure block an existing saved plan.
+    }
   }
 
   func refreshReferenceData(quiet: Bool = false) async {
@@ -157,16 +307,199 @@ final class AppModel {
   }
 
   func refreshLedger(quiet: Bool = false) async {
+    ledgerPageGeneration += 1
+    let generation = ledgerPageGeneration
+    let planID = settings.planID
+    hasMoreTransactions = false
+    nextTransactionOffset = nil
+    isLoadingOlderTransactions = false
+    olderTransactionsError = nil
     if !quiet {
       ledgerPhase = .loading
     }
     do {
-      let fetched = try await apiClient.fetchTransactions(planID: settings.planID)
-      transactions = fetched.sorted { ($0.date, $0.id) > ($1.date, $1.id) }
+      let page = try await apiClient.fetchTransactions(planID: planID)
+      guard generation == ledgerPageGeneration, planID == settings.planID else {
+        return
+      }
+      transactions = sortedUniqueTransactions(page.transactions)
+      hasMoreTransactions = page.hasMore && page.nextOffset != nil
+      nextTransactionOffset = hasMoreTransactions ? page.nextOffset : nil
       ledgerPhase = .loaded
     } catch {
+      guard generation == ledgerPageGeneration, planID == settings.planID else {
+        return
+      }
       ledgerPhase = .failed(error.localizedDescription)
     }
+  }
+
+  func refreshScheduledTransactions(quiet: Bool = false) async {
+    let planID = settings.planID
+    if !quiet {
+      scheduledTransactionsPhase = .loading
+    }
+    do {
+      let schedules = try await apiClient.fetchScheduledTransactions(planID: planID)
+      guard planID == settings.planID else {
+        return
+      }
+      scheduledTransactions = schedules.sorted { ($0.dateNext, $0.id) < ($1.dateNext, $1.id) }
+      scheduledTransactionsPhase = .loaded
+    } catch {
+      guard planID == settings.planID else {
+        return
+      }
+      scheduledTransactionsPhase = .failed(error.localizedDescription)
+    }
+  }
+
+  func saveScheduledTransaction(_ draft: ScheduledTransactionDraft) async throws {
+    guard let request = draft.writeRequest() else {
+      throw APIClientError.validation("Choose an account, enter an amount, and keep the next date on or after the first date.")
+    }
+    isSubmitting = true
+    defer { isSubmitting = false }
+
+    let saved: ScheduledTransaction
+    let idempotencyKey = draft.idempotencyKey(for: request)
+    if let id = draft.id {
+      saved = try await apiClient.updateScheduledTransaction(planID: settings.planID, scheduleID: id, idempotencyKey: idempotencyKey, request: request)
+    } else {
+      saved = try await apiClient.createScheduledTransaction(planID: settings.planID, idempotencyKey: idempotencyKey, request: request)
+    }
+    scheduledTransactions.removeAll { $0.id == saved.id }
+    if !saved.deleted {
+      scheduledTransactions.append(saved)
+      scheduledTransactions.sort { ($0.dateNext, $0.id) < ($1.dateNext, $1.id) }
+    }
+    scheduledTransactionsPhase = .loaded
+    showSaveMessage(draft.id == nil ? "Added scheduled transaction" : "Saved scheduled transaction")
+  }
+
+  func deleteScheduledTransaction(id: String, idempotencyKey: String) async throws {
+    isSubmitting = true
+    defer { isSubmitting = false }
+
+    _ = try await apiClient.deleteScheduledTransaction(planID: settings.planID, scheduleID: id, idempotencyKey: idempotencyKey)
+    scheduledTransactions.removeAll { $0.id == id }
+    scheduledTransactionsPhase = .loaded
+    showSaveMessage("Deleted scheduled transaction")
+  }
+
+  func enterScheduledOccurrence(
+    scheduleID: String,
+    occurrenceDate: String,
+    enteredDate: String,
+    idempotencyKey: String
+  ) async throws -> ScheduledOccurrencePayload {
+    isSubmitting = true
+    defer { isSubmitting = false }
+
+    let result = try await apiClient.materializeScheduledOccurrence(
+      planID: settings.planID,
+      scheduleID: scheduleID,
+      idempotencyKey: idempotencyKey,
+      occurrenceDate: occurrenceDate,
+      enteredDate: enteredDate
+    )
+
+    // A materialised occurrence affects the register, account balances,
+    // category activity, and the schedule's next date in one server-side
+    // operation. Re-fetch rather than trying to reconstruct those effects.
+    async let reference: Void = refreshReferenceData(quiet: true)
+    async let ledger: Void = refreshLedger(quiet: true)
+    async let schedules: Void = refreshScheduledTransactions(quiet: true)
+    _ = await (reference, ledger, schedules)
+    planRefreshGeneration &+= 1
+    showSaveMessage(result.completed ? "Entered final scheduled transaction" : "Entered scheduled transaction")
+    return result
+  }
+
+  func reconcileAccount(
+    accountID: String,
+    statementDate: String,
+    statementBalance: Int,
+    idempotencyKey: String
+  ) async throws -> AccountReconciliationPayload {
+    isSubmitting = true
+    defer { isSubmitting = false }
+
+    let result = try await apiClient.reconcileAccount(
+      planID: settings.planID,
+      accountID: accountID,
+      idempotencyKey: idempotencyKey,
+      statementDate: statementDate,
+      statementBalance: statementBalance
+    )
+
+    async let reference: Void = refreshReferenceData(quiet: true)
+    async let ledger: Void = refreshLedger(quiet: true)
+    _ = await (reference, ledger)
+
+    let accountName = result.account.name
+    let count = result.reconciledTransactionCount
+    showSaveMessage("\(accountName) reconciled through \(LedgerDate.friendlyString(fromISO: result.statementDate)). \(count) cleared transaction\(count == 1 ? "" : "s") matched \(MoneyCodec.displayString(for: result.statementBalance, currencyFormat: currencyFormat)).")
+    return result
+  }
+
+  func fetchAccountReconciliation(accountID: String, statementDate: String) async throws -> AccountReconciliationPreview {
+    try await apiClient.fetchAccountReconciliation(
+      planID: settings.planID,
+      accountID: accountID,
+      statementDate: statementDate
+    )
+  }
+
+  /// Appends one older page to the current, unfiltered ledger cursor. Register
+  /// scopes and drill-downs filter this common ordered page locally, so their
+  /// navigation cannot leave a separate filter-specific offset behind.
+  func loadOlderTransactions() async {
+    guard
+      ledgerPhase == .loaded,
+      hasMoreTransactions,
+      let offset = nextTransactionOffset,
+      !isLoadingOlderTransactions
+    else {
+      return
+    }
+
+    let generation = ledgerPageGeneration
+    let planID = settings.planID
+    isLoadingOlderTransactions = true
+    olderTransactionsError = nil
+    defer {
+      if generation == ledgerPageGeneration, planID == settings.planID {
+        isLoadingOlderTransactions = false
+      }
+    }
+
+    do {
+      let page = try await apiClient.fetchTransactions(planID: planID, offset: offset)
+      guard
+        generation == ledgerPageGeneration,
+        planID == settings.planID,
+        nextTransactionOffset == offset
+      else {
+        return
+      }
+      transactions = sortedUniqueTransactions(transactions + page.transactions)
+      hasMoreTransactions = page.hasMore && page.nextOffset != nil
+      nextTransactionOffset = hasMoreTransactions ? page.nextOffset : nil
+    } catch {
+      guard generation == ledgerPageGeneration, planID == settings.planID else {
+        return
+      }
+      olderTransactionsError = error.localizedDescription
+    }
+  }
+
+  private func sortedUniqueTransactions(_ rows: [Transaction]) -> [Transaction] {
+    var byID: [String: Transaction] = [:]
+    for transaction in rows where byID[transaction.id] == nil {
+      byID[transaction.id] = transaction
+    }
+    return byID.values.sorted { ($0.date, $0.id) > ($1.date, $1.id) }
   }
 
   /// Reflect overview: current month for the spending breakdown, trailing

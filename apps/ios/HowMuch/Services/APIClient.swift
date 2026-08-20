@@ -1,10 +1,19 @@
 import Foundation
 
+extension Notification.Name {
+  /// Posted when a request made with a saved session proves that the session
+  /// is no longer accepted by the server. AppModel owns the transition back
+  /// to the connection screen; the client remains usable by sign-in flows.
+  static let howMuchAuthenticationExpired = Notification.Name("HowMuch.AuthenticationExpired")
+}
+
 enum APIClientError: LocalizedError {
   case invalidBaseURL
   case invalidResponse
   case server(String)
+  case reconciliationMismatch(ReconciliationMismatchDetail)
   case httpStatus(Int)
+  case authenticationExpired
   case decoding(String)
   case validation(String)
 
@@ -16,8 +25,12 @@ enum APIClientError: LocalizedError {
       return "The API returned an invalid response."
     case .server(let message):
       return message
+    case .reconciliationMismatch(let detail):
+      return detail.message
     case .httpStatus(let code):
       return "The API request failed with status \(code)."
+    case .authenticationExpired:
+      return "Your session has expired. Sign in again."
     case .decoding(let message):
       return "Could not decode API data: \(message)"
     case .validation(let message):
@@ -28,6 +41,7 @@ enum APIClientError: LocalizedError {
 
 struct APIClient {
   let settings: APISettings
+  private static let transactionPageSize = 100
 
   func fetchAuthStatus() async throws -> AuthStatusPayload {
     let response: APIEnvelope<AuthStatusPayload> = try await request(path: "/api/auth/status")
@@ -96,9 +110,143 @@ struct APIClient {
     return response.data.payees.filter { $0.deleted != true }
   }
 
-  func fetchTransactions(planID: String) async throws -> [Transaction] {
-    let response: APIEnvelope<TransactionsPayload> = try await request(path: "/v1/plans/\(planID)/transactions")
-    return response.data.transactions.filter { !$0.deleted }
+  func fetchPlanMonth(planID: String, month: String) async throws -> PlanMonth {
+    let response: APIEnvelope<PlanMonthPayload> = try await request(
+      path: "/v1/plans/\(planID)/months/\(month)"
+    )
+    return response.data.month
+  }
+
+  func setPlanMonthCategoryAssignment(
+    planID: String,
+    month: String,
+    categoryID: String,
+    budgeted: Int,
+  ) async throws -> PlanMonth {
+    let response: APIEnvelope<PlanMonthPayload> = try await request(
+      path: "/v1/plans/\(planID)/months/\(month)/categories/\(categoryID)",
+      method: "PATCH",
+      body: PlanAssignmentRequest(budgeted: budgeted)
+    )
+    return response.data.month
+  }
+
+  func setPlanMonthCategoryTarget(
+    planID: String,
+    month: String,
+    categoryID: String,
+    target: PlanTargetPayload?
+  ) async throws -> PlanMonth {
+    let response: APIEnvelope<PlanMonthPayload> = try await request(
+      path: "/v1/plans/\(planID)/months/\(month)/categories/\(categoryID)",
+      method: "PATCH",
+      body: PlanTargetRequest(target: target)
+    )
+    return response.data.month
+  }
+
+  func restorePlanMonthCategoryTarget(planID: String, month: String, categoryID: String) async throws -> PlanMonth {
+    let response: APIEnvelope<PlanMonthPayload> = try await request(
+      path: "/v1/plans/\(planID)/months/\(month)/categories/\(categoryID)",
+      method: "PATCH",
+      body: PlanTargetRestoreRequest()
+    )
+    return response.data.month
+  }
+
+  func fetchTransactions(planID: String, offset: Int = 0) async throws -> TransactionPage {
+    let response: APIEnvelope<TransactionsPayload> = try await request(
+      path: "/v1/plans/\(planID)/transactions",
+      queryItems: [
+        URLQueryItem(name: "limit", value: String(Self.transactionPageSize)),
+        URLQueryItem(name: "offset", value: String(offset)),
+      ]
+    )
+    return TransactionPage(
+      transactions: response.data.transactions.filter { !$0.deleted },
+      hasMore: response.data.hasMore ?? false,
+      nextOffset: response.data.nextOffset
+    )
+  }
+
+  func fetchScheduledTransactions(planID: String) async throws -> [ScheduledTransaction] {
+    let response: APIEnvelope<ScheduledTransactionsPayload> = try await request(
+      path: "/v1/plans/\(planID)/scheduled_transactions"
+    )
+    return response.data.scheduledTransactions.filter { !$0.deleted }
+  }
+
+  func createScheduledTransaction(planID: String, idempotencyKey: String, request scheduledTransaction: ScheduledTransactionWriteRequest) async throws -> ScheduledTransaction {
+    let response: APIEnvelope<ScheduledTransactionPayload> = try await request(
+      path: "/v1/plans/\(planID)/scheduled_transactions",
+      method: "POST",
+      headers: ["Idempotency-Key": idempotencyKey],
+      body: ScheduledTransactionWriteEnvelope(scheduledTransaction: scheduledTransaction)
+    )
+    return response.data.scheduledTransaction
+  }
+
+  func updateScheduledTransaction(planID: String, scheduleID: String, idempotencyKey: String, request scheduledTransaction: ScheduledTransactionWriteRequest) async throws -> ScheduledTransaction {
+    let response: APIEnvelope<ScheduledTransactionPayload> = try await request(
+      path: "/v1/plans/\(planID)/scheduled_transactions/\(scheduleID)",
+      method: "PATCH",
+      headers: ["Idempotency-Key": idempotencyKey],
+      body: ScheduledTransactionWriteEnvelope(scheduledTransaction: scheduledTransaction)
+    )
+    return response.data.scheduledTransaction
+  }
+
+  func deleteScheduledTransaction(planID: String, scheduleID: String, idempotencyKey: String) async throws -> ScheduledTransaction {
+    let response: APIEnvelope<ScheduledTransactionPayload> = try await request(
+      path: "/v1/plans/\(planID)/scheduled_transactions/\(scheduleID)",
+      method: "DELETE",
+      headers: ["Idempotency-Key": idempotencyKey]
+    )
+    return response.data.scheduledTransaction
+  }
+
+  func materializeScheduledOccurrence(
+    planID: String,
+    scheduleID: String,
+    idempotencyKey: String,
+    occurrenceDate: String,
+    enteredDate: String
+  ) async throws -> ScheduledOccurrencePayload {
+    let response: APIEnvelope<ScheduledOccurrencePayload> = try await request(
+      path: "/v1/plans/\(planID)/scheduled_transactions/\(scheduleID)/materialize",
+      method: "POST",
+      headers: ["Idempotency-Key": idempotencyKey],
+      body: ScheduledOccurrenceRequest(occurrenceDate: occurrenceDate, date: enteredDate)
+    )
+    return response.data
+  }
+
+  func reconcileAccount(
+    planID: String,
+    accountID: String,
+    idempotencyKey: String,
+    statementDate: String,
+    statementBalance: Int
+  ) async throws -> AccountReconciliationPayload {
+    let response: APIEnvelope<AccountReconciliationPayload> = try await request(
+      path: "/v1/plans/\(planID)/accounts/\(accountID)/reconcile",
+      method: "POST",
+      headers: ["Idempotency-Key": idempotencyKey],
+      body: AccountReconciliationRequest(statementDate: statementDate, statementBalance: statementBalance)
+    )
+    return response.data
+  }
+
+  func fetchAccountReconciliation(
+    planID: String,
+    accountID: String,
+    statementDate: String
+  ) async throws -> AccountReconciliationPreview {
+    let response: APIEnvelope<AccountReconciliationPreview> = try await request(
+      path: "/v1/plans/\(planID)/accounts/\(accountID)/reconciliation",
+      queryItems: [URLQueryItem(name: "statement_date", value: statementDate)]
+    )
+    return response.data
   }
 
   func fetchSpendingBreakdown(
@@ -211,32 +359,39 @@ struct APIClient {
   private func request<Payload: Decodable>(
     path: String,
     queryItems: [URLQueryItem] = [],
-    method: String = "GET"
+    method: String = "GET",
+    headers: [String: String] = [:]
   ) async throws -> Payload {
-    try await executeRequest(path: path, queryItems: queryItems, method: method, bodyData: nil)
+    try await executeRequest(path: path, queryItems: queryItems, method: method, headers: headers, bodyData: nil)
   }
 
   private func request<Payload: Decodable, Body: Encodable>(
     path: String,
     queryItems: [URLQueryItem] = [],
     method: String = "GET",
+    headers: [String: String] = [:],
     body: Body
   ) async throws -> Payload {
-    try await executeRequest(path: path, queryItems: queryItems, method: method, bodyData: try encoder.encode(body))
+    try await executeRequest(path: path, queryItems: queryItems, method: method, headers: headers, bodyData: try encoder.encode(body))
   }
 
   private func executeRequest<Payload: Decodable>(
     path: String,
     queryItems: [URLQueryItem] = [],
     method: String = "GET",
+    headers: [String: String] = [:],
     bodyData: Data?
   ) async throws -> Payload {
     let url = try makeURL(path: path, queryItems: queryItems)
     var request = URLRequest(url: url)
     request.httpMethod = method
     request.setValue("application/json", forHTTPHeaderField: "Accept")
+    for (name, value) in headers {
+      request.setValue(value, forHTTPHeaderField: name)
+    }
 
     let trimmedToken = settings.sessionToken.trimmingCharacters(in: .whitespacesAndNewlines)
+    let requestHasSession = !trimmedToken.isEmpty
     if !trimmedToken.isEmpty {
       request.setValue("Bearer \(trimmedToken)", forHTTPHeaderField: "Authorization")
     }
@@ -253,7 +408,37 @@ struct APIClient {
 
     guard (200 ..< 300).contains(httpResponse.statusCode) else {
       if let serverError = try? decoder.decode(ServerErrorEnvelope.self, from: data) {
+        // Login failures are intentionally not treated as session expiry: the
+        // settings sheet uses a tokenless client to authenticate. For an
+        // already-authenticated request, 401 (or the API's auth-shaped 403)
+        // means every surface must return to sign-in together.
+        let authFailure = requestHasSession &&
+          (httpResponse.statusCode == 401 ||
+           (httpResponse.statusCode == 403 && serverError.error.name == "not_authorized"))
+        if authFailure {
+          NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: nil)
+          throw APIClientError.authenticationExpired
+        }
+        if serverError.error.name == "reconciliation_mismatch",
+           let current = serverError.error.currentReconciledBalance,
+           let projected = serverError.error.projectedReconciledBalance,
+           let statement = serverError.error.statementBalance,
+           let difference = serverError.error.difference {
+          throw APIClientError.reconciliationMismatch(
+            ReconciliationMismatchDetail(
+              currentReconciledBalance: current,
+              projectedReconciledBalance: projected,
+              statementBalance: statement,
+              difference: difference,
+              message: serverError.error.detail
+            )
+          )
+        }
         throw APIClientError.server(serverError.error.detail)
+      }
+      if requestHasSession && httpResponse.statusCode == 401 {
+        NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: nil)
+        throw APIClientError.authenticationExpired
       }
       throw APIClientError.httpStatus(httpResponse.statusCode)
     }

@@ -26,6 +26,7 @@ struct RegisterView: View {
   @State private var uncategorisedOnly = false
   @State private var editingTransaction: Transaction?
   @State private var duplicatingDraft: DuplicateDraft?
+  @State private var isShowingReconciliation = false
 
   /// Identifiable box so sheet(item:) can present a prefilled capture form.
   private struct DuplicateDraft: Identifiable {
@@ -113,14 +114,10 @@ struct RegisterView: View {
                   } label: {
                     Label("Edit", systemImage: "pencil")
                   }
-                  // Splits are not duplicated: the app's write request has no
-                  // subtransactions, so the copy would flatten to its total.
-                  if !transaction.isSplit {
-                    Button {
-                      duplicatingDraft = DuplicateDraft(draft: TransactionDraft(duplicating: transaction))
-                    } label: {
-                      Label("Duplicate for Today", systemImage: "plus.square.on.square")
-                    }
+                  Button {
+                    duplicatingDraft = DuplicateDraft(draft: TransactionDraft(duplicating: transaction))
+                  } label: {
+                    Label("Duplicate for Today", systemImage: "plus.square.on.square")
                   }
                 }
 
@@ -131,6 +128,14 @@ struct RegisterView: View {
             }
             .ynabCard()
           }
+        }
+
+        if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+          Text("Searches the \(model.transactions.count) transactions loaded on this device.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("Searches the \(model.transactions.count) transactions loaded on this device. Load older transactions to extend the search.")
         }
 
         if visibleTransactions.isEmpty, model.ledgerPhase == .loaded {
@@ -144,6 +149,41 @@ struct RegisterView: View {
             ContentUnavailableView.search
           }
         }
+
+        if let error = model.olderTransactionsError {
+          VStack(alignment: .leading, spacing: 8) {
+            Text("Couldn’t load older transactions")
+              .font(.subheadline.weight(.semibold))
+            Text(error)
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+            Button("Try Again") {
+              Task { await model.loadOlderTransactions() }
+            }
+            .buttonStyle(.bordered)
+          }
+          .padding(16)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .ynabCard()
+          .accessibilityElement(children: .combine)
+        }
+
+        if model.hasMoreTransactions {
+          Button {
+            Task { await model.loadOlderTransactions() }
+          } label: {
+            HStack(spacing: 8) {
+              if model.isLoadingOlderTransactions {
+                ProgressView()
+              }
+              Text(model.isLoadingOlderTransactions ? "Loading older transactions…" : "Load older transactions")
+            }
+            .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(.borderedProminent)
+          .disabled(model.isLoadingOlderTransactions)
+          .accessibilityHint("Loads the next 100 older transactions into this register.")
+        }
       }
       .padding(.horizontal, 16)
       .padding(.bottom, 24)
@@ -151,9 +191,22 @@ struct RegisterView: View {
     .background(Theme.canvas)
     .navigationTitle(title)
     .navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      ToolbarItem(placement: .topBarTrailing) {
+        if !model.accounts.isEmpty {
+          Button("Reconcile") {
+            isShowingReconciliation = true
+          }
+          .accessibilityHint("Choose an account, statement date, and statement balance before confirming a reconciliation.")
+        }
+      }
+    }
     .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search Transactions")
     .refreshable {
       await model.refreshAll()
+    }
+    .sheet(isPresented: $isShowingReconciliation) {
+      AccountReconciliationSheet(preferredAccountID: scope.accountID)
     }
     .sheet(item: $editingTransaction) { transaction in
       TransactionEditorSheet(transaction: transaction)
@@ -309,6 +362,311 @@ struct RegisterView: View {
     return grouped.keys.sorted(by: >).map { date in
       (date: date, transactions: grouped[date] ?? [])
     }
+  }
+}
+
+private struct AccountReconciliationSheet: View {
+  @Environment(AppModel.self) private var model
+  @Environment(\.dismiss) private var dismiss
+
+  @State private var accountID: String
+  @State private var statementDate: String
+  @State private var statementBalanceText: String
+  @State private var preview: AccountReconciliationPreview?
+  @State private var isLoadingPreview = false
+  @State private var previewError: String?
+  @State private var previewGeneration = 0
+  @State private var confirmationChecked = false
+  @State private var mismatch: ReconciliationMismatchDetail?
+  @State private var errorMessage: String?
+  @State private var operationSeed: String
+
+  init(preferredAccountID: String?) {
+    _accountID = State(initialValue: preferredAccountID ?? "")
+    _statementDate = State(initialValue: Date.now.isoDateString)
+    _statementBalanceText = State(initialValue: "")
+    _operationSeed = State(initialValue: UUID().uuidString.lowercased())
+  }
+
+  var body: some View {
+    NavigationStack {
+      Form {
+        Section("Statement") {
+          Picker("Account", selection: Binding(get: { accountID }, set: { value in
+            markEdited(refreshingPreview: true) {
+              accountID = value
+            }
+          })) {
+            Text("Choose account").tag("")
+            ForEach(model.accounts.sorted(by: accountSort), id: \.id) { account in
+              Text(account.closed ? "\(account.name) (Closed)" : account.name).tag(account.id)
+            }
+          }
+          DatePicker(
+            "Statement date",
+            selection: Binding(
+              get: { Date(isoDateString: statementDate) ?? .now },
+              set: { updateStatementDate($0.isoDateString) }
+            ),
+            displayedComponents: .date
+          )
+          TextField("Statement balance", text: Binding(get: { statementBalanceText }, set: { value in
+            markEdited {
+              statementBalanceText = value
+            }
+          }))
+            .keyboardType(.decimalPad)
+            .textInputAutocapitalization(.never)
+          Text("Enter the exact currency balance shown on your statement, for example 123.45.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        }
+
+        Section {
+          Text("Every cleared transaction dated on or before \(LedgerDate.friendlyString(fromISO: statementDate)) becomes reconciled. Uncleared transactions and later cleared transactions stay unchanged.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        }
+
+        Section("Review") {
+          if isLoadingPreview {
+            HStack(spacing: 10) {
+              ProgressView()
+              Text("Checking cleared transactions…")
+                .foregroundStyle(.secondary)
+            }
+          } else if let preview {
+            LabeledContent("Account", value: selectedAccount?.name ?? "Choose account")
+            LabeledContent("Statement date", value: LedgerDate.friendlyString(fromISO: statementDate))
+            LabeledContent("Current reconciled", value: MoneyCodec.signedDisplayString(for: preview.currentReconciledBalance, currencyFormat: model.currencyFormat))
+            LabeledContent("Cleared to add", value: MoneyCodec.signedDisplayString(for: preview.projectedReconciledBalance - preview.currentReconciledBalance, currencyFormat: model.currencyFormat))
+            LabeledContent("Projected balance", value: MoneyCodec.signedDisplayString(for: preview.projectedReconciledBalance, currencyFormat: model.currencyFormat))
+            LabeledContent("Cleared candidates", value: "\(preview.candidateTransactionCount)")
+            LabeledContent("Statement balance", value: reviewBalanceText)
+            LabeledContent("Difference", value: reviewDifferenceText)
+              .foregroundStyle(isPreviewExact ? AnyShapeStyle(.primary) : AnyShapeStyle(Theme.outflow))
+            Toggle(isOn: $confirmationChecked) {
+              Text("I understand that cleared transactions through this date will be locked in as reconciled.")
+                .font(.subheadline)
+            }
+            .disabled(!isPreviewExact)
+            if !isPreviewExact {
+              Text(reviewRequirement)
+                .font(.footnote)
+                .foregroundStyle(Theme.outflow)
+            }
+            Button("Refresh review") {
+              Task { await fetchPreview() }
+            }
+            .disabled(model.isSubmitting)
+          } else {
+            Text(previewError ?? "Choose an account and statement date to load the server reconciliation review.")
+              .font(.footnote)
+              .foregroundStyle(previewError == nil ? .secondary : Theme.outflow)
+            Button("Review reconciliation") {
+              Task { await fetchPreview() }
+            }
+            .disabled(accountID.isEmpty || isLoadingPreview || model.isSubmitting)
+          }
+        }
+
+        if let mismatch {
+          Section("Mismatch") {
+            Text("Dismiss this sheet or update the statement details, then correct cleared transactions on or before \(LedgerDate.friendlyString(fromISO: statementDate)) before trying again.")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+            LabeledContent("Already reconciled", value: MoneyCodec.displayString(for: mismatch.currentReconciledBalance, currencyFormat: model.currencyFormat))
+            LabeledContent("Projected after this reconciliation", value: MoneyCodec.signedDisplayString(for: mismatch.projectedReconciledBalance, currencyFormat: model.currencyFormat))
+            LabeledContent("Statement balance", value: MoneyCodec.signedDisplayString(for: mismatch.statementBalance, currencyFormat: model.currencyFormat))
+            LabeledContent("Off by", value: MoneyCodec.signedDisplayString(for: mismatch.difference, currencyFormat: model.currencyFormat))
+              .foregroundStyle(mismatch.difference == 0 ? AnyShapeStyle(.primary) : AnyShapeStyle(Theme.outflow))
+          }
+        }
+
+        if let errorMessage {
+          Section {
+            Text(errorMessage)
+              .font(.footnote)
+              .foregroundStyle(Theme.outflow)
+          }
+        }
+
+        Section {
+          Button(model.isSubmitting ? "Reconciling…" : "Confirm reconciliation") {
+            Task { await confirm() }
+          }
+          .disabled(model.isSubmitting || !confirmationChecked || !isPreviewExact)
+        }
+      }
+      .navigationTitle("Reconcile")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Cancel") {
+            dismiss()
+          }
+          .disabled(model.isSubmitting)
+        }
+      }
+      .task(id: previewRequestKey) {
+        await fetchPreview()
+      }
+    }
+  }
+
+  private var selectedAccount: Account? {
+    model.accounts.first { $0.id == accountID }
+  }
+
+  private var reviewBalanceText: String {
+    let amount = MoneyCodec.milliunits(from: statementBalanceText) ?? 0
+    return MoneyCodec.signedDisplayString(for: amount, currencyFormat: model.currencyFormat)
+  }
+
+  private var reviewDifference: Int? {
+    guard let preview, let statementBalance = MoneyCodec.milliunits(from: statementBalanceText) else {
+      return nil
+    }
+    return statementBalance - preview.projectedReconciledBalance
+  }
+
+  private var reviewDifferenceText: String {
+    guard let reviewDifference else { return "Enter statement balance" }
+    return MoneyCodec.signedDisplayString(for: reviewDifference, currencyFormat: model.currencyFormat)
+  }
+
+  private var isPreviewExact: Bool {
+    preview != nil && !isLoadingPreview && previewError == nil && reviewDifference == 0
+  }
+
+  private var reviewRequirement: String {
+    if MoneyCodec.milliunits(from: statementBalanceText) == nil {
+      return "Enter a statement balance with no more than three decimal places."
+    }
+    return "The statement balance must exactly match the projected balance before confirmation."
+  }
+
+  /// Account/date plus the fields that can change the server's candidate set.
+  /// Editing a transaction's cleared state (or amount/date) while this sheet
+  /// is open therefore replaces the review before it can be confirmed.
+  private var previewRequestKey: String {
+    let candidateState = model.transactions
+      .filter { $0.accountID == accountID }
+      .map { "\($0.id):\($0.date):\($0.amount):\($0.cleared.rawValue):\($0.deleted)" }
+      .sorted()
+      .joined(separator: "|")
+    return "\(accountID)#\(statementDate)#\(candidateState)"
+  }
+
+  private func updateStatementDate(_ value: String) {
+    markEdited(refreshingPreview: true) {
+      statementDate = value
+    }
+  }
+
+  private func markEdited(refreshingPreview: Bool = false, _ updates: () -> Void) {
+    updates()
+    if refreshingPreview {
+      preview = nil
+      previewError = nil
+    }
+    confirmationChecked = false
+    mismatch = nil
+    errorMessage = nil
+  }
+
+  private func fetchPreview() async {
+    guard !accountID.isEmpty else {
+      preview = nil
+      previewError = nil
+      return
+    }
+    guard Date(isoDateString: statementDate) != nil else {
+      preview = nil
+      previewError = "Choose a valid statement date."
+      return
+    }
+    previewGeneration &+= 1
+    let generation = previewGeneration
+    let requestedAccountID = accountID
+    let requestedStatementDate = statementDate
+    isLoadingPreview = true
+    previewError = nil
+    defer {
+      if generation == previewGeneration {
+        isLoadingPreview = false
+      }
+    }
+
+    do {
+      let response = try await model.fetchAccountReconciliation(
+        accountID: requestedAccountID,
+        statementDate: requestedStatementDate
+      )
+      guard generation == previewGeneration,
+            requestedAccountID == accountID,
+            requestedStatementDate == statementDate else {
+        return
+      }
+      preview = response
+    } catch {
+      guard generation == previewGeneration else { return }
+      preview = nil
+      previewError = error.localizedDescription
+    }
+  }
+
+  private func confirm() async {
+    guard isPreviewExact, confirmationChecked else {
+      errorMessage = "Wait for an exact server review, then confirm the reconciliation."
+      return
+    }
+    guard let statementBalance = MoneyCodec.milliunits(from: statementBalanceText) else {
+      errorMessage = "Enter the exact statement balance with no more than three decimal places."
+      return
+    }
+
+    do {
+      _ = try await model.reconcileAccount(
+        accountID: accountID,
+        statementDate: statementDate,
+        statementBalance: statementBalance,
+        idempotencyKey: reconciliationKey(accountID: accountID, statementDate: statementDate, statementBalance: statementBalance)
+      )
+      dismiss()
+    } catch let error as APIClientError {
+      switch error {
+      case .reconciliationMismatch(let detail):
+        mismatch = detail
+        errorMessage = nil
+        confirmationChecked = false
+        await fetchPreview()
+      default:
+        errorMessage = error.localizedDescription
+      }
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+  }
+
+  private func reconciliationKey(accountID: String, statementDate: String, statementBalance: Int) -> String {
+    "reconcile-\(operationSeed)-\(stableHash("\(accountID):\(statementDate):\(statementBalance)"))"
+  }
+
+  private func stableHash(_ value: String) -> String {
+    var hash: UInt32 = 2166136261
+    for byte in value.utf8 {
+      hash ^= UInt32(byte)
+      hash = hash &* 16777619
+    }
+    return String(hash, radix: 36)
+  }
+
+  private func accountSort(_ left: Account, _ right: Account) -> Bool {
+    if left.closed != right.closed {
+      return !left.closed && right.closed
+    }
+    return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending
   }
 }
 

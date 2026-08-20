@@ -824,6 +824,7 @@ struct IncomeVsSpendingDetailView: View {
 
       PairedColumnChart(
         pairs: report.periods.map { (Double($0.income), Double(abs($0.spending))) },
+        labels: report.periods.map { LedgerDate.periodAxisLabel($0.period) },
         height: 120
       )
       HStack(spacing: 16) {

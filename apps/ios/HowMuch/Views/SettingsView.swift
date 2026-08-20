@@ -11,6 +11,7 @@ struct SettingsView: View {
   @State private var testResult: TestResult?
   @State private var isTesting = false
   @State private var setupState: SetupState = .idle
+  private let wasInitiallyAuthenticated: Bool
 
   let onSave: @MainActor (APISettings) async -> Void
 
@@ -32,6 +33,7 @@ struct SettingsView: View {
     self.draft = settings
     self.authenticatedBaseURL = settings.trimmedBaseURL
     self.authenticatedUsername = settings.username
+    self.wasInitiallyAuthenticated = settings.isAuthenticated
   }
 
   private var sessionMatchesDraft: Bool {
@@ -162,6 +164,7 @@ struct SettingsView: View {
           Button("Cancel") {
             dismiss()
           }
+          .disabled(!wasInitiallyAuthenticated)
         }
 
         ToolbarItem(placement: .topBarTrailing) {
@@ -202,8 +205,9 @@ struct SettingsView: View {
         draft.username = session.user.username ?? draft.username
         authenticatedBaseURL = draft.trimmedBaseURL
         authenticatedUsername = draft.username
-        if let plan = try await APIClient(settings: draft).fetchPlans().first {
-          draft.planID = plan.id
+        let plans = try await APIClient(settings: draft).fetchPlans()
+        if let selectedPlanID = draft.resolvedPlanID(from: plans) {
+          draft.planID = selectedPlanID
         }
         password = ""
         testResult = .success

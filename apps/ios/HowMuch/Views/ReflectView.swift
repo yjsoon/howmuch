@@ -183,7 +183,8 @@ struct ReflectView: View {
           .foregroundStyle(Theme.amountColour(latest.net))
 
         PairedColumnChart(
-          pairs: report.periods.map { (Double($0.income), Double(abs($0.spending))) }
+          pairs: report.periods.map { (Double($0.income), Double(abs($0.spending))) },
+          labels: report.periods.map { LedgerDate.periodAxisLabel($0.period) }
         )
 
         HStack(spacing: 16) {
