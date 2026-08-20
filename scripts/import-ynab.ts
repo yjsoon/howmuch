@@ -68,6 +68,9 @@ try {
   }
   console.log(`Import session: ${result.import_session_id}`);
   console.log(`Imported transactions: ${result.imported_transactions}`);
+  console.log(`YNAB raw objects: ${summary.raw_objects}`);
+  console.log(`YNAB raw objects by type: ${formatCounts(summary.raw_object_types)}`);
+  console.log(`YNAB server knowledge: ${result.server_knowledge ?? "n/a"}`);
   console.log(`Accounts: ${summary.accounts}`);
   console.log(`Payees: ${summary.payees}`);
   console.log(`Categories: ${summary.categories}`);
@@ -247,6 +250,10 @@ function queryImportSummary(db: ReturnType<typeof openDatabase>, planId: string)
     planId,
     planId,
   );
+  const rawObjects = singleNumber(db, "SELECT COUNT(*) AS value FROM ynab_raw_objects WHERE plan_id = ?", planId);
+  const rawObjectTypes = Object.fromEntries((db.query(
+    "SELECT object_type, COUNT(*) AS value FROM ynab_raw_objects WHERE plan_id = ? GROUP BY object_type ORDER BY object_type",
+  ).all(planId) as Array<{ object_type: string; value: number | bigint }>).map((row) => [row.object_type, Number(row.value)]));
 
   return {
     accounts,
@@ -257,12 +264,19 @@ function queryImportSummary(db: ReturnType<typeof openDatabase>, planId: string)
     first_date: range.first_date,
     last_date: range.last_date,
     balance_mismatches: balanceMismatches,
+    raw_objects: rawObjects,
+    raw_object_types: rawObjectTypes,
   };
 }
 
 function singleNumber(db: ReturnType<typeof openDatabase>, sql: string, ...params: string[]): number {
   const row = db.query(sql).get(...params) as { value: number | bigint };
   return Number(row.value ?? 0);
+}
+
+function formatCounts(counts: Record<string, number>): string {
+  const entries = Object.entries(counts);
+  return entries.length ? entries.map(([type, count]) => `${type}=${count}`).join(", ") : "none";
 }
 
 function printHelp(): void {
