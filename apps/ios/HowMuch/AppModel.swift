@@ -213,7 +213,7 @@ final class AppModel {
   }
 
   @discardableResult
-  func addCustomAccountGroup(named name: String) -> Bool {
+  func addCustomAccountGroup(named name: String, accountIDs: [String] = []) -> Bool {
     let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
     guard customAccountGroupNameError(trimmedName) == nil else {
       return false
@@ -223,7 +223,7 @@ final class AppModel {
       groupID = "custom-\(UUID().uuidString)"
     } while viewPrefs.customAccountGroups.contains(where: { $0.id == groupID })
     viewPrefs.customAccountGroups.append(
-      CustomAccountGroup(id: groupID, name: trimmedName, accountIDs: [])
+      CustomAccountGroup(id: groupID, name: trimmedName, accountIDs: uniqueAccountIDs(accountIDs))
     )
     saveViewPrefs()
     return true
@@ -238,13 +238,32 @@ final class AppModel {
     guard customAccountGroupNameError(name, excluding: group.id) == nil else {
       return false
     }
-    var uniqueIDs: [String] = []
-    for id in group.accountIDs where !id.isEmpty && !uniqueIDs.contains(id) {
-      uniqueIDs.append(id)
-    }
-    viewPrefs.customAccountGroups[index] = CustomAccountGroup(id: group.id, name: name, accountIDs: uniqueIDs)
+    viewPrefs.customAccountGroups[index] = CustomAccountGroup(
+      id: group.id,
+      name: name,
+      accountIDs: uniqueAccountIDs(group.accountIDs)
+    )
     saveViewPrefs()
     return true
+  }
+
+  func setAccount(_ accountID: String, included: Bool, inCustomGroup groupID: String) {
+    guard
+      !accountID.isEmpty,
+      let index = viewPrefs.customAccountGroups.firstIndex(where: { $0.id == groupID })
+    else {
+      return
+    }
+    var group = viewPrefs.customAccountGroups[index]
+    if included {
+      if !group.accountIDs.contains(accountID) {
+        group.accountIDs.append(accountID)
+      }
+    } else {
+      group.accountIDs.removeAll { $0 == accountID }
+    }
+    viewPrefs.customAccountGroups[index] = group
+    saveViewPrefs()
   }
 
   func deleteCustomAccountGroup(id: String) {
@@ -254,15 +273,12 @@ final class AppModel {
     saveViewPrefs()
   }
 
-  func moveCustomAccountGroup(id: String, by offset: Int) {
-    guard let current = viewPrefs.customAccountGroups.firstIndex(where: { $0.id == id }) else {
+  func moveCustomAccountGroups(fromOffsets source: IndexSet, toOffset destination: Int) {
+    let current = viewPrefs.customAccountGroups
+    guard !source.isEmpty, source.allSatisfy(current.indices.contains) else {
       return
     }
-    let destination = current + offset
-    guard viewPrefs.customAccountGroups.indices.contains(destination) else {
-      return
-    }
-    viewPrefs.customAccountGroups.swapAt(current, destination)
+    viewPrefs.customAccountGroups = moving(current, fromOffsets: source, toOffset: destination)
     saveViewPrefs()
   }
 
@@ -311,25 +327,32 @@ final class AppModel {
     return nameOrder == .orderedSame ? first.id < second.id : nameOrder == .orderedAscending
   }
 
-  /// Moves an account within only the displayed group, leaving every other
+  /// Moves accounts within only the displayed group, leaving every other
   /// group's manual order intact.
-  func moveAccount(_ accountID: String, in group: [Account], groupID: String, by offset: Int) {
+  func moveAccounts(in group: [Account], groupID: String, fromOffsets source: IndexSet, toOffset destination: Int) {
     let orderedGroup = manualOrderedAccounts(group, groupID: groupID)
-    guard
-      let currentIndex = orderedGroup.firstIndex(where: { $0.id == accountID })
-    else {
+    guard !source.isEmpty, source.allSatisfy(orderedGroup.indices.contains) else {
       return
     }
-
-    let destination = currentIndex + offset
-    guard destination >= orderedGroup.startIndex, destination < orderedGroup.endIndex else {
-      return
-    }
-
-    var order = orderedGroup.map(\.id)
-    order.swapAt(currentIndex, destination)
-    viewPrefs.accountOrderByGroup[groupID] = order
+    let moved = moving(orderedGroup, fromOffsets: source, toOffset: destination)
+    viewPrefs.accountOrderByGroup[groupID] = moved.map(\.id)
     saveViewPrefs()
+  }
+
+  private func uniqueAccountIDs(_ source: [String]) -> [String] {
+    var result: [String] = []
+    for id in source where !id.isEmpty && !result.contains(id) {
+      result.append(id)
+    }
+    return result
+  }
+
+  private func moving<Element>(_ source: [Element], fromOffsets offsets: IndexSet, toOffset destination: Int) -> [Element] {
+    let moving = offsets.sorted().map { source[$0] }
+    let remaining = source.enumerated().compactMap { offsets.contains($0.offset) ? nil : $0.element }
+    let removedBeforeDestination = offsets.filter { $0 < destination }.count
+    let insertion = min(max(0, destination - removedBeforeDestination), remaining.count)
+    return Array(remaining[..<insertion]) + moving + Array(remaining[insertion...])
   }
 
   private func saveViewPrefs() {
