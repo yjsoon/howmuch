@@ -3,8 +3,12 @@ import { D1Database as HowMuchD1Database, type D1Binding } from "../../api/src/d
 import { D1LedgerRepository } from "../../api/src/d1-ledger-repository";
 import { D1ReportService } from "../../api/src/d1-reports";
 import { runDailyScheduledMaterialization } from "../../api/src/scheduled-materialization-runner";
+import { runD1ScheduledYnabSync } from "../../api/src/d1-scheduled-sync-runner";
 import { createHandler } from "../../api/src/http";
 import { D1AuthStore } from "../../api/src/auth-store";
+
+const YNAB_TRANSITION_CRON = "10 16 * * *";
+const SCHEDULED_MATERIALIZATION_CRON = "5 16 * * *";
 
 interface Env {
   ASSETS: Fetcher;
@@ -12,6 +16,9 @@ interface Env {
   HOWMUCH_API_TOKEN: string;
   HOWMUCH_DEFAULT_PLAN_ID: string;
   HOWMUCH_TIME_ZONE: string;
+  HOWMUCH_YNAB_TOKEN?: string;
+  HOWMUCH_YNAB_PLAN_ID?: string;
+  HOWMUCH_TRANSITION_READ_ONLY?: string;
 }
 
 const APP_SITE_ASSOCIATION = JSON.stringify({
@@ -43,6 +50,25 @@ export default {
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     const config = workerConfig(env);
     const database = new HowMuchD1Database(requiredBinding(env.DB, "DB"));
+    assertCronMatchesMode(controller.cron, config.transitionReadOnly);
+
+    if (config.transitionReadOnly) {
+      const result = await runD1ScheduledYnabSync({
+        db: database,
+        config,
+        scheduledTime: controller.scheduledTime,
+      });
+      console.log(JSON.stringify({
+        event: "ynab_delta_sync",
+        status: result.status,
+        run_id: result.run_id,
+        imported_transaction_count: result.result?.imported_transactions ?? 0,
+        raw_object_counts: result.result?.raw_objects ?? {},
+        cursor: result.result?.server_knowledge ?? null,
+      }));
+      return;
+    }
+
     const result = await runDailyScheduledMaterialization({
       repo: new D1LedgerRepository(database, config.defaultPlanId),
       planId: config.defaultPlanId,
@@ -65,14 +91,32 @@ function workerConfig(env: Env): ApiConfig & { timeZone: string } {
     port: 0,
     apiToken: required(env.HOWMUCH_API_TOKEN, "HOWMUCH_API_TOKEN"),
     defaultPlanId: required(env.HOWMUCH_DEFAULT_PLAN_ID, "HOWMUCH_DEFAULT_PLAN_ID"),
+    transitionReadOnly: env.HOWMUCH_TRANSITION_READ_ONLY === "true",
+    ynabToken: optional(env.HOWMUCH_YNAB_TOKEN),
+    ynabPlanId: optional(env.HOWMUCH_YNAB_PLAN_ID),
     timeZone: required(env.HOWMUCH_TIME_ZONE, "HOWMUCH_TIME_ZONE"),
   };
+}
+
+function assertCronMatchesMode(cron: string | undefined, transitionReadOnly: boolean): void {
+  if (cron !== YNAB_TRANSITION_CRON && cron !== SCHEDULED_MATERIALIZATION_CRON) {
+    throw new Error(`Unknown scheduled cron: ${cron ?? "missing"}`);
+  }
+  const expected = transitionReadOnly ? YNAB_TRANSITION_CRON : SCHEDULED_MATERIALIZATION_CRON;
+  if (cron !== expected) {
+    throw new Error(`Scheduled cron ${cron} does not match transition read-only mode`);
+  }
 }
 
 function required(value: string | undefined, name: string): string {
   const trimmed = value?.trim();
   if (!trimmed) throw new Error(`${name} is required`);
   return trimmed;
+}
+
+function optional(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
 }
 
 function requiredBinding(value: D1Binding | undefined, name: string): D1Binding {

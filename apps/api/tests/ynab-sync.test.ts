@@ -404,6 +404,13 @@ describe("YNAB rate limit safety", () => {
     expect(loadConfig({ HOWMUCH_YNAB_SYNC_INTERVAL_MS: "7200000" }).ynabSyncIntervalMs).toBe(7200000);
   });
 
+  test("enables transition read-only mode only for the literal value true", () => {
+    expect(loadConfig({ HOWMUCH_TRANSITION_READ_ONLY: "true" }).transitionReadOnly).toBeTrue();
+    for (const value of [undefined, "false", "TRUE", " true", "true "]) {
+      expect(loadConfig({ HOWMUCH_TRANSITION_READ_ONLY: value }).transitionReadOnly).toBeFalse();
+    }
+  });
+
   test("pauses for an hour after YNAB returns 429, then resumes", async () => {
     let fetchCalls = 0;
     let warned = 0;
@@ -481,6 +488,7 @@ function baseConfig(overrides: Record<string, unknown>) {
     dbPath: ":memory:",
     port: 0,
     defaultPlanId: "plan-test",
+    transitionReadOnly: false,
     ...overrides,
   } as any;
 }

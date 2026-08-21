@@ -9,6 +9,7 @@ export type ApiConfig = {
   port: number;
   apiToken?: string;
   defaultPlanId: string;
+  transitionReadOnly: boolean;
   ynabToken?: string;
   ynabPlanId?: string;
   ynabSyncIntervalMs?: number;
@@ -21,6 +22,7 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env): A
     port: Number(env.PORT ?? env.HOWMUCH_PORT ?? "8787"),
     apiToken: env.HOWMUCH_API_TOKEN,
     defaultPlanId: env.HOWMUCH_DEFAULT_PLAN_ID ?? "local-plan",
+    transitionReadOnly: env.HOWMUCH_TRANSITION_READ_ONLY === "true",
     ynabToken: emptyToUndefined(env.HOWMUCH_YNAB_TOKEN),
     ynabPlanId: emptyToUndefined(env.HOWMUCH_YNAB_PLAN_ID),
     ynabSyncIntervalMs: Math.max(

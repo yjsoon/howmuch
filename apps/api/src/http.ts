@@ -59,6 +59,13 @@ export function createHandler(options: HandlerOptions): (request: Request) => Pr
         && !sameOrigin(request, url)) {
         return apiError(403, "forbidden", "CSRF validation failed");
       }
+      if (config.transitionReadOnly && isTransitionFinancialWrite(request.method, segments)) {
+        return apiError(
+          423,
+          "transition_read_only",
+          "Financial changes are temporarily locked while YNAB is the source of truth",
+        );
+      }
 
       if (segments[0] === "v1") {
         return await handleV1(request, url, segments, repo, principal, config.defaultPlanId);
@@ -723,6 +730,44 @@ function sameOrigin(request: Request, url: URL): boolean {
 
 function isUnsafeMethod(method: string): boolean {
   return !["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase());
+}
+
+function isTransitionFinancialWrite(methodValue: string, segments: string[]): boolean {
+  const method = methodValue.toUpperCase();
+
+  if (segments[0] === "api" && segments.length === 3 && method === "POST") {
+    return (segments[1] === "mobile" && segments[2] === "quick-entry")
+      || (segments[1] === "import" && (segments[2] === "csv" || segments[2] === "ynab"));
+  }
+
+  if (segments[0] !== "v1" || (segments[1] !== "plans" && segments[1] !== "budgets")) {
+    return false;
+  }
+
+  const resource = segments[3];
+  if ((resource === "accounts" || resource === "payees") && segments.length === 4) {
+    return method === "POST";
+  }
+  if (resource === "accounts" && segments.length === 6 && segments[5] === "reconcile") {
+    return method === "POST";
+  }
+  if (resource === "transactions") {
+    if (segments.length === 4) return method === "POST";
+    if (segments.length === 5 && segments[4] === "import") return method === "POST";
+    if (segments.length === 5) return method === "PUT" || method === "PATCH" || method === "DELETE";
+    return false;
+  }
+  if (resource === "scheduled_transactions") {
+    if (segments.length === 4) return method === "POST";
+    if (segments.length === 5 && segments[4] === "materialize") return method === "POST";
+    if (segments.length === 5) return method === "PUT" || method === "PATCH" || method === "DELETE";
+    if (segments.length === 6 && segments[5] === "materialize") return method === "POST";
+    return false;
+  }
+  return resource === "months"
+    && segments.length === 7
+    && segments[5] === "categories"
+    && method === "PATCH";
 }
 
 function canRead(principal: Principal, planId: string, defaultPlanId: string): boolean {

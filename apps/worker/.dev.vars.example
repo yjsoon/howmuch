@@ -1,1 +1,2 @@
 HOWMUCH_API_TOKEN=replace-with-a-local-development-token
+HOWMUCH_TRANSITION_READ_ONLY=false

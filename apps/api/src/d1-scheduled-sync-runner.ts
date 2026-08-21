@@ -58,16 +58,15 @@ export async function runD1ScheduledYnabSync(options: {
     }
     if (result.server_knowledge == null) throw new Error("YNAB delta responses did not include a consistent server_knowledge cursor");
     await state.complete(planId, acquisition.runId, attemptId, result.server_knowledge, result);
-    logger.log(`YNAB scheduled sync completed at knowledge ${result.server_knowledge}`);
     return { status: "completed", run_id: acquisition.runId, result };
   } catch (error) {
     try {
-      await state.fail(planId, acquisition.runId, attemptId, error instanceof Error ? error.message : String(error));
-    } catch (transitionError) {
-      logger.error(`D1 scheduled-sync failure transition was rejected: ${transitionError instanceof Error ? transitionError.message : String(transitionError)}`);
+      await state.fail(planId, acquisition.runId, attemptId, "YNAB scheduled sync failed");
+    } catch {
+      logger.error(JSON.stringify({ event: "ynab_delta_sync", status: "failure_transition_rejected" }));
     }
-    logger.error(`YNAB scheduled sync failed: ${error instanceof Error ? error.message : String(error)}`);
-    throw error;
+    logger.error(JSON.stringify({ event: "ynab_delta_sync", status: "failed" }));
+    throw new Error("YNAB scheduled sync failed");
   }
 }
 

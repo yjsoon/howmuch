@@ -298,7 +298,7 @@ async function ynabFetch(
     throw new YnabRateLimitError(`YNAB rate limit exceeded for ${path}`);
   }
   if (!response.ok) {
-    throw new Error(`YNAB fetch failed for ${path}: ${response.status} ${await response.text()}`);
+    throw new Error(`YNAB fetch failed for ${path}: ${response.status}`);
   }
   return response.json();
 }
@@ -318,7 +318,7 @@ async function ynabFetchOptional(
   }
   if (response.status === 404) return null;
   if (response.status === 429) throw new YnabRateLimitError(`YNAB rate limit exceeded for ${path}`);
-  if (!response.ok) throw new Error(`YNAB fetch failed for ${path}: ${response.status} ${await response.text()}`);
+  if (!response.ok) throw new Error(`YNAB fetch failed for ${path}: ${response.status}`);
   return response.json();
 }
 

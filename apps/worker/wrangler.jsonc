@@ -19,10 +19,12 @@
   },
   "vars": {
     "HOWMUCH_DEFAULT_PLAN_ID": "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
-    "HOWMUCH_TIME_ZONE": "Asia/Singapore"
+    "HOWMUCH_TIME_ZONE": "Asia/Singapore",
+    "HOWMUCH_YNAB_PLAN_ID": "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
+    "HOWMUCH_TRANSITION_READ_ONLY": "true"
   },
   "triggers": {
-    "crons": ["5 16 * * *"]
+    "crons": ["10 16 * * *"]
   },
   "routes": [
     {
@@ -49,7 +51,9 @@
       "triggers": { "crons": [] },
       "vars": {
         "HOWMUCH_DEFAULT_PLAN_ID": "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
-        "HOWMUCH_TIME_ZONE": "Asia/Singapore"
+        "HOWMUCH_TIME_ZONE": "Asia/Singapore",
+        "HOWMUCH_YNAB_PLAN_ID": "",
+        "HOWMUCH_TRANSITION_READ_ONLY": "false"
       },
       "d1_databases": [{
         "binding": "DB",
