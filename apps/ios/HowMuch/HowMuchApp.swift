@@ -154,8 +154,9 @@ private struct RootView: View {
       guard generation > appliedReportsGeneration else {
         return
       }
-      await model.refreshReflectOverview(quiet: true)
-      appliedReportsGeneration = generation
+      if await model.refreshReflectOverview(quiet: true) {
+        appliedReportsGeneration = generation
+      }
     }
     .sheet(isPresented: $model.isShowingSettings) {
       SettingsView(settings: model.settings) { nextSettings in

@@ -617,7 +617,7 @@ final class AppModel {
     async let reference: Void = refreshReferenceData(quiet: quiet)
     async let ledger: Void = refreshLedger(quiet: quiet)
     async let schedules: Void = refreshScheduledTransactions(quiet: quiet)
-    async let reports: Void = refreshReflectOverview(quiet: quiet)
+    async let reports = refreshReflectOverview(quiet: quiet)
     _ = await (outbox, reference, ledger, schedules, reports)
   }
 
@@ -932,7 +932,8 @@ final class AppModel {
 
   /// Reflect overview: current month for the spending breakdown, trailing
   /// twelve months by month for the trend reports.
-  func refreshReflectOverview(quiet: Bool = false) async {
+  @discardableResult
+  func refreshReflectOverview(quiet: Bool = false) async -> Bool {
     reportsGeneration &+= 1
     let generation = reportsGeneration
     let planID = settings.planID
@@ -963,21 +964,23 @@ final class AppModel {
             planID == settings.planID,
             scope == activeViewPrefsScope
       else {
-        return
+        return false
       }
       spendingBreakdown = spendingReport
       incomeVsSpending = incomeReport
       netWorth = worthReport
       ageOfMoney = ageReport
       reportsPhase = .loaded
+      return true
     } catch {
       guard generation == reportsGeneration,
             planID == settings.planID,
             scope == activeViewPrefsScope
       else {
-        return
+        return false
       }
       reportsPhase = .failed(error.localizedDescription)
+      return false
     }
   }
 
