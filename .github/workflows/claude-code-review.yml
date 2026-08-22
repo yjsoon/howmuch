@@ -42,6 +42,9 @@ jobs:
           # --comment posts findings as inline PR comments; without it the
           # review's output never leaves the action log.
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment'
+          # Cursor cloud agents open and push these PRs as cursor[bot].
+          # Without this the action fails before it reviews anything.
+          allowed_bots: cursor
           # The review reads the PR and diff through gh; without these
           # allowances the agent's tool calls are denied and the run
           # "succeeds" having reviewed nothing.
