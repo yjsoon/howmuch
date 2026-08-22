@@ -14,7 +14,7 @@ struct AccountsView: View {
 
         // Offline captures outrank everything else here: they are the user's
         // money data that has not reached the server yet.
-        if !model.pendingTransactions.isEmpty {
+        if !model.visiblePendingTransactions.isEmpty {
           OutboxCard()
         }
 
@@ -419,8 +419,7 @@ struct AccountsView: View {
           Button {
             Task {
               if await model.syncOutbox(manual: true) > 0 {
-                // Bring the balances under this card back in line.
-                await model.refreshAll(quiet: true)
+                await model.refreshAfterLedgerMutation()
               }
             }
           } label: {
@@ -437,7 +436,7 @@ struct AccountsView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
 
-        ForEach(model.pendingTransactions) { item in
+        ForEach(model.visiblePendingTransactions) { item in
           Divider().padding(.leading, 16)
           pendingRow(item)
         }
@@ -467,7 +466,7 @@ struct AccountsView: View {
     }
 
     private var title: String {
-      let count = model.pendingTransactions.count
+      let count = model.visiblePendingTransactions.count
       return count == 1 ? "1 transaction waiting to sync" : "\(count) transactions waiting to sync"
     }
 
@@ -480,11 +479,7 @@ struct AccountsView: View {
           Text(LedgerDate.friendlyString(fromISO: item.request.date))
             .font(.footnote)
             .foregroundStyle(.secondary)
-          if item.connectionFingerprint != model.settings.connectionFingerprint {
-            Text("Captured against a different connection")
-              .font(.footnote)
-              .foregroundStyle(.secondary)
-          } else if let error = item.lastSyncError {
+          if let error = item.lastSyncError {
             Text(error)
               .font(.footnote)
               .foregroundStyle(Theme.outflow)

@@ -30,10 +30,46 @@ enum MoneyCodec {
       return nil
     }
 
-    return sign * ((whole * 1000) + fraction)
+    let scaled = whole.multipliedReportingOverflow(by: 1000)
+    guard !scaled.overflow else {
+      return nil
+    }
+    let total = scaled.partialValue.addingReportingOverflow(fraction)
+    guard !total.overflow else {
+      return nil
+    }
+    if sign == -1 {
+      let negated = total.partialValue.multipliedReportingOverflow(by: -1)
+      return negated.overflow ? nil : negated.partialValue
+    }
+    return total.partialValue
   }
 
   static func displayString(for milliunits: Int, currencyFormat: CurrencyFormat?) -> String {
+    let formatter = formatter(for: currencyFormat)
+    let decimalValue = Decimal(milliunits) / 1000
+    return formatter.string(from: decimalValue as NSDecimalNumber)
+      ?? decimalValue.formatted(.number.precision(.fractionLength(2)))
+  }
+
+  private static let formatterLock = NSLock()
+  private static var formatters: [String: NumberFormatter] = [:]
+
+  private static func formatter(for currencyFormat: CurrencyFormat?) -> NumberFormatter {
+    let key = [
+      String(currencyFormat?.decimalDigits ?? 2),
+      currencyFormat?.currencySymbol ?? Locale.current.currencySymbol ?? "$",
+      currencyFormat?.decimalSeparator ?? "",
+      currencyFormat?.groupSeparator ?? "",
+    ].joined(separator: "\u{1f}")
+
+    formatterLock.lock()
+    if let cached = formatters[key] {
+      formatterLock.unlock()
+      return cached
+    }
+    formatterLock.unlock()
+
     let formatter = NumberFormatter()
     formatter.numberStyle = .currency
     formatter.minimumFractionDigits = currencyFormat?.decimalDigits ?? 2
@@ -46,9 +82,10 @@ enum MoneyCodec {
       formatter.groupingSeparator = groupSeparator
     }
 
-    let decimalValue = Decimal(milliunits) / 1000
-    return formatter.string(from: decimalValue as NSDecimalNumber)
-      ?? decimalValue.formatted(.number.precision(.fractionLength(2)))
+    formatterLock.lock()
+    formatters[key] = formatter
+    formatterLock.unlock()
+    return formatter
   }
 
   /// Signed display with an explicit plus on inflows, for ledger-style rows.

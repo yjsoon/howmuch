@@ -71,9 +71,17 @@ final class AppModel {
   var isShowingCapture = false
   /// Captures made while the server was unreachable, oldest first.
   var pendingTransactions: [PendingTransaction] = OutboxStore.load()
+  /// Captures stamped for the live connection. Other fingerprints stay queued
+  /// but are not shown, so a second account on this device cannot read them.
+  var visiblePendingTransactions: [PendingTransaction] {
+    pendingTransactions.filter { settings.matchesOutboxFingerprint($0.connectionFingerprint) }
+  }
   /// True while a replay pass is running, whoever started it — the outbox
   /// card drives its spinner from this rather than view-local state.
   var isSyncingOutbox = false
+  private var accountsByID: [String: Account] = [:]
+  private var categoriesByID: [String: Category] = [:]
+  private var payeesByID: [String: Payee] = [:]
   private var viewPrefs: ViewPrefs
   private let legacyViewPrefs: ViewPrefs
   private var scopedViewPrefsStore: ScopedViewPrefsStore
@@ -135,6 +143,7 @@ final class AppModel {
     netWorth = nil
     ageOfMoney = nil
     invalidateAccountUsage()
+    rebuildLookups()
     referencePhase = .idle
     ledgerPhase = .idle
     scheduledTransactionsPhase = .idle
@@ -533,6 +542,15 @@ final class AppModel {
       .filter { !$0.deleted }
   }
 
+  private func rebuildLookups() {
+    accountsByID = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0) })
+    categoriesByID = Dictionary(
+      flattenedCategories.map { ($0.id, $0) },
+      uniquingKeysWith: { first, _ in first }
+    )
+    payeesByID = Dictionary(uniqueKeysWithValues: payees.map { ($0.id, $0) })
+  }
+
   var currencyFormat: CurrencyFormat? {
     planSettings?.currencyFormat
   }
@@ -543,14 +561,18 @@ final class AppModel {
   }
 
   func account(withID id: String) -> Account? {
-    accounts.first { $0.id == id }
+    accountsByID[id]
   }
 
   func categoryName(forID id: String?) -> String? {
     guard let id else {
       return nil
     }
-    return flattenedCategories.first { $0.id == id }?.name
+    return categoriesByID[id]?.name
+  }
+
+  func payee(withID id: String) -> Payee? {
+    payeesByID[id]
   }
 
   /// True when both ids resolve to on-budget accounts; such transfers carry
@@ -661,6 +683,7 @@ final class AppModel {
       accounts = reference.accounts
       categoryGroups = reference.categoryGroups
       payees = reference.payees
+      rebuildLookups()
       pruneViewPrefs(using: reference.accounts)
       referencePhase = .loaded
     } catch {
@@ -730,6 +753,7 @@ final class AppModel {
     ledgerPhase = .idle
     scheduledTransactionsPhase = .idle
     reportsPhase = .idle
+    rebuildLookups()
     ledgerPageGeneration &+= 1
     referenceGeneration &+= 1
     scheduledTransactionsGeneration &+= 1
@@ -850,6 +874,7 @@ final class AppModel {
     async let reference: Void = refreshReferenceData(quiet: true)
     async let ledger: Void = refreshLedger(quiet: true)
     _ = await (reference, ledger)
+    planRefreshGeneration &+= 1
 
     let accountName = result.account.name
     let count = result.reconciledTransactionCount
@@ -972,6 +997,9 @@ final class AppModel {
   /// changes made from elsewhere while this device was offline.
   @discardableResult
   func saveTransaction(_ draft: TransactionDraft) async throws -> Transaction? {
+    guard !isSubmitting else {
+      throw APIClientError.validation("A save is already in progress.")
+    }
     isSubmitting = true
     defer { isSubmitting = false }
 
@@ -979,7 +1007,7 @@ final class AppModel {
       throw APIClientError.validation("Enter an amount and pick an account.")
     }
 
-    let request = draft.writeRequest()
+    var request = draft.writeRequest()
     let saved: Transaction
     if let id = draft.id {
       saved = try await apiClient.updateTransaction(planID: settings.planID, transactionID: id, request: request)
@@ -987,6 +1015,9 @@ final class AppModel {
         transactions[index] = saved
       }
     } else {
+      if request.importID == nil {
+        request.importID = UUID().uuidString.lowercased()
+      }
       do {
         saved = try await apiClient.createTransaction(planID: settings.planID, request: request)
       } catch let error where error.isOfflineError {
@@ -1000,8 +1031,18 @@ final class AppModel {
     viewPrefs.lastUsedAccountID = request.accountID
     saveViewPrefs()
     showSaveMessage("Saved \(MoneyCodec.displayString(for: saved.amount, currencyFormat: currencyFormat)) — \(saved.payeeName ?? "transaction")")
-    Task { await refreshAll(quiet: true) }
+    Task { await refreshAfterLedgerMutation() }
     return saved
+  }
+
+  /// Reference, ledger, and schedules after a money write. Reports wait for
+  /// the Reflect tab. The Plan tab's month snapshot reloads via generation.
+  func refreshAfterLedgerMutation() async {
+    async let reference: Void = refreshReferenceData(quiet: true)
+    async let ledger: Void = refreshLedger(quiet: true)
+    async let schedules: Void = refreshScheduledTransactions(quiet: true)
+    _ = await (reference, ledger, schedules)
+    planRefreshGeneration &+= 1
   }
 
   /// The server never saw this capture; keep it locally and replay it once a
@@ -1030,7 +1071,7 @@ final class AppModel {
     var syncedCount = 0
     for item in pendingTransactions {
       let connectionFingerprint = settings.connectionFingerprint
-      guard item.connectionFingerprint == connectionFingerprint else {
+      guard settings.matchesOutboxFingerprint(item.connectionFingerprint) else {
         continue
       }
       guard manual || item.lastSyncError == nil else {
@@ -1039,7 +1080,11 @@ final class AppModel {
       do {
         let planID = settings.planID
         let client = apiClient
-        let saved = try await client.createTransaction(planID: planID, request: item.request)
+        var request = item.request
+        if request.importID == nil {
+          request.importID = item.id.uuidString.lowercased()
+        }
+        let saved = try await client.createTransaction(planID: planID, request: request)
         pendingTransactions.removeAll { $0.id == item.id }
         OutboxStore.save(pendingTransactions)
         guard connectionFingerprint == settings.connectionFingerprint else {
@@ -1059,8 +1104,9 @@ final class AppModel {
     if syncedCount > 0 {
       transactions.sort { ($0.date, $0.id) > ($1.date, $1.id) }
       invalidateAccountUsage()
+      planRefreshGeneration &+= 1
       showSaveMessage(syncedCount == 1 ? "Synced 1 offline transaction" : "Synced \(syncedCount) offline transactions")
-    } else if manual, !pendingTransactions.isEmpty {
+    } else if manual, !visiblePendingTransactions.isEmpty {
       showSaveMessage("Couldn’t sync — will retry on the next refresh")
     }
     return syncedCount
@@ -1084,7 +1130,7 @@ final class AppModel {
     _ = try await apiClient.deleteTransaction(planID: settings.planID, transactionID: transaction.id)
     transactions.removeAll { $0.id == transaction.id }
     showSaveMessage("Deleted \(transaction.payeeName ?? "transaction")")
-    Task { await refreshAll(quiet: true) }
+    Task { await refreshAfterLedgerMutation() }
   }
 
   private func showSaveMessage(_ message: String) {

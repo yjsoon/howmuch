@@ -430,6 +430,10 @@ describe("YNAB-compatible API", () => {
     expect(db.query("SELECT goal_type,goal_target_milli,goal_target_month FROM plan_month_category_targets").get()).toEqual({ goal_type: "TB", goal_target_milli: 9000, goal_target_month: "2026-12-01" });
     expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category'").get()).toEqual(rawBefore);
 
+    const omittedTarget = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", { method: "PATCH", body: { category: {} } });
+    expect(omittedTarget.status).toBe(400);
+    expect((await omittedTarget.json()).error.detail).toBe("budgeted must be integer milliunits");
+
     const cleared = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", { method: "PATCH", body: { category: { target: null } } });
     expect(cleared.status).toBe(200);
     expect((await cleared.json()).data.category).toMatchObject({ goal_type: null, goal_target: null, target_source: "howmuch-local" });

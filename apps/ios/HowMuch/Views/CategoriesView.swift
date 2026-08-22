@@ -196,11 +196,22 @@ struct CategoriesView: View {
   private var quietGroups: [PlanCategoryGroup] { groups.filter(\.isQuiet) }
 
   private func fetch() async {
+    let month = monthKey
+    let generation = model.planRefreshGeneration
     phase = .loading
     do {
-      planMonth = try await model.apiClient.fetchPlanMonth(planID: model.settings.planID, month: monthKey)
+      let snapshot = try await model.apiClient.fetchPlanMonth(planID: model.settings.planID, month: month)
+      guard month == monthKey, generation == model.planRefreshGeneration else {
+        return
+      }
+      planMonth = snapshot
       phase = .loaded
+    } catch is CancellationError {
+      return
     } catch {
+      guard month == monthKey, generation == model.planRefreshGeneration else {
+        return
+      }
       phase = .failed(error.localizedDescription)
     }
   }

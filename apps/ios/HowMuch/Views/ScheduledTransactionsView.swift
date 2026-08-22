@@ -145,7 +145,7 @@ private struct ScheduledTransactionRow: View {
 
   private var payeeLabel: String {
     if let payeeID = schedule.payeeID,
-       let payee = model.payees.first(where: { $0.id == payeeID })?.name,
+       let payee = model.payee(withID: payeeID)?.name,
        !payee.isEmpty {
       return payee
     }

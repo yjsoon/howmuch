@@ -488,7 +488,7 @@ struct ScheduledTransactionEditorView: View {
       return model.account(withID: transferAccountID).map { "Transfer to \($0.name)" } ?? "Transfer"
     }
     guard let payeeID = draft.payeeID else { return nil }
-    return model.payees.first(where: { $0.id == payeeID })?.name
+    return model.payee(withID: payeeID)?.name
   }
 
   private func save() {
@@ -563,7 +563,7 @@ struct ScheduledTransactionEditorView: View {
     if let categoryName = model.categoryName(forID: line.categoryID) {
       return categoryName
     }
-    if let payeeID = line.payeeID, let payee = model.payees.first(where: { $0.id == payeeID }) {
+    if let payeeID = line.payeeID, let payee = model.payee(withID: payeeID) {
       return payee.name
     }
     return "Uncategorised"
@@ -659,7 +659,7 @@ private struct ScheduledSplitLineEditor: View {
       return model.account(withID: transferAccountID).map { "Transfer to \($0.name)" } ?? "Transfer"
     }
     guard let payeeID = line.payeeID else { return nil }
-    return model.payees.first(where: { $0.id == payeeID })?.name
+    return model.payee(withID: payeeID)?.name
   }
 }
 

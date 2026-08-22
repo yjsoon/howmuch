@@ -59,6 +59,7 @@ struct APISettings: Codable, Equatable {
       scheme == "http" || scheme == "https",
       let host = components.host?.lowercased(),
       !host.isEmpty,
+      Self.scheme(scheme, allowsHost: host),
       components.user == nil,
       components.password == nil,
       components.query == nil,
@@ -86,7 +87,13 @@ struct APISettings: Codable, Equatable {
   }
 
   var connectionFingerprint: String {
-    [trimmedBaseURL, planID, authenticatedUserID].joined(separator: "|")
+    [normalizedBaseURLString ?? trimmedBaseURL, planID, authenticatedUserID].joined(separator: "|")
+  }
+
+  /// Outbox rows captured before the fingerprint used the normalised URL.
+  func matchesOutboxFingerprint(_ stamp: String) -> Bool {
+    stamp == connectionFingerprint
+      || stamp == [trimmedBaseURL, planID, authenticatedUserID].joined(separator: "|")
   }
 
   /// Account presentation preferences belong to one authenticated plan.
@@ -107,8 +114,11 @@ struct APISettings: Codable, Equatable {
   var baseURL: URL? {
     guard
       let components = URLComponents(string: trimmedBaseURL),
-      components.scheme == "http" || components.scheme == "https",
-      components.host?.isEmpty == false,
+      let scheme = components.scheme?.lowercased(),
+      scheme == "http" || scheme == "https",
+      let host = components.host,
+      !host.isEmpty,
+      Self.scheme(scheme, allowsHost: host),
       components.user == nil,
       components.password == nil,
       components.query == nil,
@@ -117,6 +127,36 @@ struct APISettings: Codable, Equatable {
       return nil
     }
     return components.url
+  }
+
+  /// HTTPS may point anywhere. HTTP is only for this device or this LAN so a
+  /// bearer token cannot be typed toward a public cleartext host.
+  static func scheme(_ scheme: String, allowsHost host: String) -> Bool {
+    scheme == "https" || (scheme == "http" && isLocalNetworkHost(host))
+  }
+
+  static func isLocalNetworkHost(_ host: String) -> Bool {
+    let host = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+    if host == "localhost" {
+      return true
+    }
+    if host.contains(":") {
+      return host == "::1" || host.hasPrefix("fe80:") || host.hasPrefix("fc") || host.hasPrefix("fd")
+    }
+    let parts = host.split(separator: ".").compactMap { UInt8(String($0)) }
+    guard parts.count == 4 else {
+      return false
+    }
+    if parts[0] == 127 || parts[0] == 10 || parts[0] == 169 && parts[1] == 254 {
+      return true
+    }
+    if parts[0] == 192 && parts[1] == 168 {
+      return true
+    }
+    if parts[0] == 172 && (16 ... 31).contains(parts[1]) {
+      return true
+    }
+    return false
   }
 
   var browserSetupURL: URL? {
@@ -662,6 +702,15 @@ struct PlanTargetRequest: Encodable {
 
   private struct Category: Encodable {
     let target: PlanTargetPayload?
+
+    func encode(to encoder: Encoder) throws {
+      var container = encoder.container(keyedBy: CodingKeys.self)
+      try container.encode(target, forKey: .target)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+      case target
+    }
   }
 }
 
@@ -1293,6 +1342,9 @@ struct TransactionWriteRequest: Codable, Equatable {
   let approved: Bool
   let flagColor: String?
   let subtransactions: [TransactionSubtransactionWriteRequest]
+  /// Client-minted create identity. The server returns the existing row when
+  /// this value is replayed, so a lost response cannot double-post money.
+  var importID: String?
 
   private enum CodingKeys: String, CodingKey {
     case accountID
@@ -1306,6 +1358,7 @@ struct TransactionWriteRequest: Codable, Equatable {
     case approved
     case flagColor
     case subtransactions
+    case importID
   }
 
   init(
@@ -1319,7 +1372,8 @@ struct TransactionWriteRequest: Codable, Equatable {
     cleared: ClearedState,
     approved: Bool,
     flagColor: String?,
-    subtransactions: [TransactionSubtransactionWriteRequest]
+    subtransactions: [TransactionSubtransactionWriteRequest],
+    importID: String? = nil
   ) {
     self.accountID = accountID
     self.date = date
@@ -1332,6 +1386,7 @@ struct TransactionWriteRequest: Codable, Equatable {
     self.approved = approved
     self.flagColor = flagColor
     self.subtransactions = subtransactions
+    self.importID = importID
   }
 
   func encode(to encoder: Encoder) throws {
@@ -1347,6 +1402,7 @@ struct TransactionWriteRequest: Codable, Equatable {
     try container.encode(approved, forKey: .approved)
     try container.encode(flagColor, forKey: .flagColor)
     try container.encode(subtransactions, forKey: .subtransactions)
+    try container.encodeIfPresent(importID, forKey: .importID)
   }
 
   /// Captures made before split support did not persist this key. Keep those
@@ -1365,6 +1421,7 @@ struct TransactionWriteRequest: Codable, Equatable {
     approved = try container.decode(Bool.self, forKey: .approved)
     flagColor = try container.decodeIfPresent(String.self, forKey: .flagColor)
     subtransactions = try container.decodeIfPresent([TransactionSubtransactionWriteRequest].self, forKey: .subtransactions) ?? []
+    importID = try container.decodeIfPresent(String.self, forKey: .importID)
   }
 }
 
@@ -1382,6 +1439,10 @@ struct PendingTransaction: Codable, Equatable, Identifiable {
 
   init(request: TransactionWriteRequest, connectionFingerprint: String, capturedAt: Date = .now) {
     id = UUID()
+    var request = request
+    if request.importID == nil {
+      request.importID = id.uuidString.lowercased()
+    }
     self.request = request
     self.connectionFingerprint = connectionFingerprint
     self.capturedAt = capturedAt
