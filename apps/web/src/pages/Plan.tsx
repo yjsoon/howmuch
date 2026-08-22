@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, useApi } from "../api/client";
 import type { CategoryGroup, PlanMonthCategory } from "../api/types";
@@ -24,6 +24,12 @@ export function PlanPage() {
   const [savingCategoryId, setSavingCategoryId] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const result = useApi(`${planId}:${month}:${revision}`, () => api.month(planId, month));
+
+  useEffect(() => {
+    setEditing(null);
+    setEditingTarget(null);
+    setPlanError(null);
+  }, [month]);
 
   const groups = useMemo(() => groupMonth(result.data?.categories ?? [], categoryGroups), [result.data, categoryGroups]);
   const primaryGroups = groups.filter((group) => !group.quiet);

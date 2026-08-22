@@ -19,11 +19,13 @@ export function configureMoney(format?: CurrencyFormat): void {
  * values such as 1.135 cannot be represented in binary floating point.
  */
 export function parseMilliunits(value: string): number | null {
-  const match = value.trim().match(/^([+-]?)(\d+)(?:\.(\d{1,3}))?$/);
+  const match = value.trim().match(/^([+-]?)(?:(\d+)(?:\.(\d{0,3}))?|\.(\d{1,3}))$/);
   if (!match) {
     return null;
   }
-  const amount = Number(match[2]) * 1_000 + Number((match[3] ?? "").padEnd(3, "0"));
+  const whole = match[2] === undefined ? 0 : Number(match[2]);
+  const fractionDigits = match[2] === undefined ? (match[4] ?? "") : (match[3] ?? "");
+  const amount = whole * 1_000 + Number(fractionDigits.padEnd(3, "0"));
   const signed = match[1] === "-" ? -amount : amount;
   return Number.isSafeInteger(signed) ? signed : null;
 }

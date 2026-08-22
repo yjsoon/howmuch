@@ -8,12 +8,15 @@ describe("parseMilliunits", () => {
     expect(parseMilliunits("12.34")).toBe(12_340);
     expect(parseMilliunits("12.345")).toBe(12_345);
     expect(parseMilliunits("-0.29")).toBe(-290);
+    expect(parseMilliunits(".5")).toBe(500);
+    expect(parseMilliunits("-.29")).toBe(-290);
+    expect(parseMilliunits("1.")).toBe(1_000);
     expect(parseMilliunits("+1.135")).toBe(1_135);
   });
 
   test("rejects scientific notation, extra decimals, and empty values", () => {
     expect(parseMilliunits("")).toBeNull();
-    expect(parseMilliunits("1.")).toBeNull();
+    expect(parseMilliunits(".")).toBeNull();
     expect(parseMilliunits("1.2345")).toBeNull();
     expect(parseMilliunits("1e3")).toBeNull();
     expect(parseMilliunits("12.34.5")).toBeNull();

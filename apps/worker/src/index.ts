@@ -40,6 +40,8 @@ export default {
       });
     }
     if (!pathname.startsWith("/api/") && !pathname.startsWith("/v1/") && pathname !== "/health") {
+      // SPA documents are usually served by Assets directly. `_headers` in
+      // `apps/web/public` is the production policy; this wrap covers Worker-first fetches.
       return withDocumentSecurityHeaders(await env.ASSETS.fetch(request));
     }
 

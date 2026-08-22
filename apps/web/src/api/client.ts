@@ -33,10 +33,21 @@ export class ApiError extends Error {
 }
 
 let onUnauthorized: (() => void) | null = null;
+let requestEpoch = 0;
 
 /** Register a handler for expired sessions on authenticated endpoints. */
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
   onUnauthorized = handler;
+}
+
+/** Invalidate in-flight 401s from a previous session after login or reload. */
+export function bumpRequestEpoch(): number {
+  requestEpoch += 1;
+  return requestEpoch;
+}
+
+export function shouldHandleUnauthorized(path: string, startedEpoch: number, currentEpoch = requestEpoch): boolean {
+  return !path.startsWith("/api/auth/") && startedEpoch === currentEpoch;
 }
 
 function planUrl(planId: string, ...segments: string[]): string {
@@ -52,6 +63,7 @@ function requestHeaders(init?: RequestInit): Headers {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const startedEpoch = requestEpoch;
   const response = await fetch(path, {
     ...init,
     credentials: "same-origin",
@@ -64,7 +76,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     body = undefined;
   }
   if (!response.ok) {
-    if (response.status === 401 && !path.startsWith("/api/auth/")) {
+    if (response.status === 401 && shouldHandleUnauthorized(path, startedEpoch)) {
+      bumpRequestEpoch();
       onUnauthorized?.();
     }
     const detail = (body && typeof body === "object" && "error" in body ? (body as { error?: Record<string, unknown> }).error : undefined) as (ReconciliationMismatchDetail & { detail?: string }) | undefined;
