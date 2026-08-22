@@ -64,6 +64,7 @@ final class AppModel {
   /// Increments after mutations that affect a plan month, so the Plan tab
   /// reloads its locally held monthly snapshot when it becomes visible.
   private(set) var planRefreshGeneration = 0
+  private(set) var reportsRefreshGeneration = 0
   var reportsPhase: LoadPhase = .idle
   var isSubmitting = false
   var lastSaveMessage: String?
@@ -1019,7 +1020,11 @@ final class AppModel {
         queueOfflineCapture(request)
         return nil
       }
-      transactions.insert(saved, at: 0)
+      if let index = transactions.firstIndex(where: { $0.id == saved.id }) {
+        transactions[index] = saved
+      } else {
+        transactions.insert(saved, at: 0)
+      }
     }
     transactions.sort { ($0.date, $0.id) > ($1.date, $1.id) }
 
@@ -1036,6 +1041,7 @@ final class AppModel {
     async let schedules: Void = refreshScheduledTransactions(quiet: true)
     _ = await (reference, ledger, schedules)
     planRefreshGeneration &+= 1
+    reportsRefreshGeneration &+= 1
   }
 
   /// The server never saw this capture; keep it locally and replay it once a

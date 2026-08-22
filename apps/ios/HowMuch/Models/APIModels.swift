@@ -137,6 +137,10 @@ struct APISettings: Codable, Equatable {
     if host == "localhost" {
       return true
     }
+    if host.hasSuffix(".local") {
+      let prefix = host.dropLast(6)
+      return !prefix.isEmpty && prefix.last != "."
+    }
     if host.contains(":") {
       return host == "::1" || host.hasPrefix("fe80:") || host.hasPrefix("fc") || host.hasPrefix("fd")
     }
@@ -177,6 +181,18 @@ struct APISettings: Codable, Equatable {
 
   var isConfigured: Bool {
     baseURL != nil
+  }
+
+  var refusesPublicHTTP: Bool {
+    guard
+      let components = URLComponents(string: trimmedBaseURL),
+      components.scheme?.lowercased() == "http",
+      let host = components.host,
+      !host.isEmpty
+    else {
+      return false
+    }
+    return !Self.isLocalNetworkHost(host)
   }
 
   var isAuthenticated: Bool {

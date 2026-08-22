@@ -70,7 +70,9 @@ struct SettingsView: View {
           Text("Server")
         } footer: {
           if !draft.trimmedBaseURL.isEmpty && !draft.isConfigured {
-            Text("Enter a complete HTTP or HTTPS URL with a host.")
+            Text(draft.refusesPublicHTTP
+              ? "HTTP is only for this device or this LAN."
+              : "Enter a complete HTTP or HTTPS URL with a host.")
               .foregroundStyle(Theme.outflow)
           } else {
             Text("New installs use the production service. HTTP is allowed only for this device or this LAN. First-owner setup can only be opened from an HTTPS site.")

@@ -206,9 +206,10 @@ struct CategoriesView: View {
       }
       planMonth = snapshot
       phase = .loaded
-    } catch is CancellationError {
-      return
     } catch {
+      if error is CancellationError || (error as? URLError)?.code == .cancelled {
+        return
+      }
       guard month == monthKey, generation == model.planRefreshGeneration else {
         return
       }

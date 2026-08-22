@@ -56,6 +56,12 @@ struct ReflectView: View {
     .refreshable {
       await model.refreshAll()
     }
+    .task(id: model.reportsRefreshGeneration) {
+      guard model.reportsRefreshGeneration > 0 else {
+        return
+      }
+      await model.refreshReflectOverview(quiet: true)
+    }
   }
 
   // MARK: Spending Breakdown
