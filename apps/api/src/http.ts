@@ -348,7 +348,9 @@ async function handleV1(
       if (!input) {
         return apiError(400, "bad_request", "transaction is required");
       }
-      const existing = input?.import_id ? await repo.findTransactionByImportId(planId, input.import_id) : null;
+      const existing = input?.import_id && input?.account_id
+        ? await repo.findTransactionByImportId(planId, input.import_id, input.account_id)
+        : null;
       if (existing) {
         return json({
           data: {
@@ -363,7 +365,9 @@ async function handleV1(
         const created = await repo.createTransaction(planId, input);
         return json({ data: { transaction: created, transaction_ids: [created.id], server_knowledge: await repo.getServerKnowledge(planId) } }, 201);
       } catch (error) {
-        const raced = input?.import_id ? await repo.findTransactionByImportId(planId, input.import_id) : null;
+        const raced = input?.import_id && input?.account_id
+          ? await repo.findTransactionByImportId(planId, input.import_id, input.account_id)
+          : null;
         if (raced) {
           return json({
             data: {

@@ -26,15 +26,26 @@ describe("D1 foundation", () => {
     }
     db.run("INSERT INTO plans (id, name) VALUES ('p', 'Plan')");
     db.run("INSERT INTO accounts (id, plan_id, name, opening_balance_milli, balance_milli, cleared_balance_milli, uncleared_balance_milli) VALUES ('a', 'p', 'Cash', 1000, -8000, -9000, 1000)");
+    db.run("INSERT INTO accounts (id, plan_id, name, opening_balance_milli, balance_milli, cleared_balance_milli, uncleared_balance_milli) VALUES ('b', 'p', 'Card', 0, -9990, -9990, 0)");
     db.run("INSERT INTO transactions (id, plan_id, account_id, date, amount_milli, import_id, cleared, updated_at) VALUES ('old', 'p', 'a', '2026-01-01', -5000, 'dup', 'cleared', '2026-01-01T00:00:00Z')");
     db.run("INSERT INTO transactions (id, plan_id, account_id, date, amount_milli, import_id, cleared, updated_at) VALUES ('new', 'p', 'a', '2026-01-02', -4000, 'dup', 'uncleared', '2026-01-02T00:00:00Z')");
+    db.run("INSERT INTO transactions (id, plan_id, account_id, date, amount_milli, import_id, cleared, updated_at) VALUES ('other', 'p', 'b', '2026-01-01', -9990, 'dup', 'cleared', '2026-01-01T00:00:00Z')");
     db.exec(await Bun.file(new URL("../d1-migrations/0010_unique_live_import_id.sql", import.meta.url)).text());
-    expect(db.query("SELECT id, amount_milli FROM transactions ORDER BY id").all()).toEqual([{ id: "new", amount_milli: -4000 }]);
+    expect(db.query("SELECT id, account_id, amount_milli FROM transactions ORDER BY id").all()).toEqual([
+      { id: "new", account_id: "a", amount_milli: -4000 },
+      { id: "other", account_id: "b", amount_milli: -9990 },
+    ]);
     expect(db.query("SELECT balance_milli, cleared_balance_milli, uncleared_balance_milli FROM accounts WHERE id = 'a'").get()).toEqual({
       balance_milli: -3000,
       cleared_balance_milli: 1000,
       uncleared_balance_milli: -4000,
     });
+    expect(db.query("SELECT balance_milli FROM accounts WHERE id = 'b'").get()).toEqual({ balance_milli: -9990 });
+    expect(db.query("SELECT name FROM pragma_index_info('idx_transactions_live_import_id') ORDER BY seqno").all()).toEqual([
+      { name: "plan_id" },
+      { name: "account_id" },
+      { name: "import_id" },
+    ]);
   });
 
   test("canonical schema applies cleanly with auth constraints and cascades", async () => {

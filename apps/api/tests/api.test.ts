@@ -680,6 +680,38 @@ describe("YNAB-compatible API", () => {
     expect(db.query("SELECT name FROM sqlite_master WHERE name='idx_transactions_live_import_id'").get()).toEqual({
       name: "idx_transactions_live_import_id",
     });
+    expect(db.query("SELECT name FROM pragma_index_info('idx_transactions_live_import_id') ORDER BY seqno").all()).toEqual([
+      { name: "plan_id" },
+      { name: "account_id" },
+      { name: "import_id" },
+    ]);
+  });
+
+  test("keeps the same import id on two accounts", async () => {
+    const shared = {
+      date: "2026-06-10",
+      amount: -9990,
+      payee_name: "Same day charge",
+      import_id: "YNAB:-9990:2026-06-10:1",
+    };
+
+    const first = await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: { transaction: { ...shared, account_id: "acct-1" } },
+    });
+    const second = await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: { transaction: { ...shared, account_id: "acct-2" } },
+    });
+    const firstJson = await first.json();
+    const secondJson = await second.json();
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(secondJson.data.transaction.id).not.toBe(firstJson.data.transaction.id);
+
+    const listed = await (await request("/v1/plans/plan-test/transactions")).json();
+    expect(listed.data.transactions).toHaveLength(2);
   });
 
   test("serializes concurrent local SQLite transaction writes", async () => {
