@@ -1556,6 +1556,7 @@ struct TransactionSubtransactionDraft: Equatable {
 
 struct TransactionDraft: Equatable {
   var id: String?
+  var importID: String?
   var direction: EntryDirection = .outflow
   /// Magnitude only; the Outflow/Inflow toggle owns the sign.
   var amountMagnitudeMilli = 0
@@ -1574,7 +1575,9 @@ struct TransactionDraft: Equatable {
   var flag: FlagColour = .none
   var memo = ""
 
-  init() {}
+  init() {
+    importID = UUID().uuidString.lowercased()
+  }
 
   init(transaction: Transaction) {
     id = transaction.id
@@ -1609,6 +1612,7 @@ struct TransactionDraft: Equatable {
     subtransactions = transaction.subtransactions.map { TransactionSubtransactionDraft(subtransaction: $0, preserveID: false) }
     flag = FlagColour(rawValue: transaction.flagColor ?? "") ?? .none
     memo = transaction.memo ?? ""
+    importID = UUID().uuidString.lowercased()
   }
 
   var isTransfer: Bool {
@@ -1696,7 +1700,8 @@ struct TransactionDraft: Equatable {
       cleared: clearedState,
       approved: true,
       flagColor: flag.rawValue.isEmpty ? nil : flag.rawValue,
-      subtransactions: subtransactions.compactMap { $0.writeRequest() }
+      subtransactions: subtransactions.compactMap { $0.writeRequest() },
+      importID: importID
     )
   }
 }

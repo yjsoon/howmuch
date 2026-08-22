@@ -1013,9 +1013,6 @@ final class AppModel {
         transactions[index] = saved
       }
     } else {
-      if request.importID == nil {
-        request.importID = UUID().uuidString.lowercased()
-      }
       do {
         saved = try await apiClient.createTransaction(planID: settings.planID, request: request)
       } catch let error where error.isOfflineError {
