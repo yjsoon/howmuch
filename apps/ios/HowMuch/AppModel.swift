@@ -64,7 +64,6 @@ final class AppModel {
   /// Increments after mutations that affect a plan month, so the Plan tab
   /// reloads its locally held monthly snapshot when it becomes visible.
   private(set) var planRefreshGeneration = 0
-  private(set) var reportsRefreshGeneration = 0
   var reportsPhase: LoadPhase = .idle
   var isSubmitting = false
   var lastSaveMessage: String?
@@ -1031,7 +1030,6 @@ final class AppModel {
     async let schedules: Void = refreshScheduledTransactions(quiet: true)
     _ = await (reference, ledger, schedules)
     planRefreshGeneration &+= 1
-    reportsRefreshGeneration &+= 1
   }
 
   /// The server never saw this capture; keep it locally and replay it once a
@@ -1094,7 +1092,6 @@ final class AppModel {
       transactions.sort { ($0.date, $0.id) > ($1.date, $1.id) }
       invalidateAccountUsage()
       planRefreshGeneration &+= 1
-      reportsRefreshGeneration &+= 1
       showSaveMessage(syncedCount == 1 ? "Synced 1 offline transaction" : "Synced \(syncedCount) offline transactions")
     } else if manual, !pendingTransactionsForLiveConnection.isEmpty {
       showSaveMessage("Couldn’t sync — will retry on the next refresh")
