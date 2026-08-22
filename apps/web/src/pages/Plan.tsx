@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { api, useApi } from "../api/client";
 import type { CategoryGroup, PlanMonthCategory } from "../api/types";
 import { isQuietGroup, isQuietGroupName } from "../lib/categories";
-import { formatMoney } from "../lib/money";
+import { formatMilliunitsInput, formatMoney, parseMilliunits } from "../lib/money";
 import { usePlan } from "../state/plan";
 
 interface PlanGroup {
@@ -38,7 +38,7 @@ export function PlanPage() {
   };
   const startAssignment = (category: PlanMonthCategory) => {
     setPlanError(null);
-    setEditing({ categoryId: category.id, value: editableAmount(category.budgeted ?? 0) });
+    setEditing({ categoryId: category.id, value: formatMilliunitsInput(category.budgeted ?? 0) });
   };
   const saveAssignment = async (category: PlanMonthCategory) => {
     if (!editing || editing.categoryId !== category.id) return;
@@ -63,7 +63,7 @@ export function PlanPage() {
     setPlanError(null);
     setEditingTarget({
       categoryId: category.id,
-      value: editableAmount(category.goal_target ?? 0),
+      value: formatMilliunitsInput(category.goal_target ?? 0),
       type: category.goal_type ?? "TB",
       month: category.goal_target_month?.slice(0, 7) ?? "",
     });
@@ -388,17 +388,3 @@ function clamp(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
-function editableAmount(milliunits: number): string {
-  return String(milliunits / 1_000);
-}
-
-/** Exact decimal-to-milliunit conversion; never pass a floating point amount to the API. */
-function parseMilliunits(value: string): number | null {
-  const match = value.trim().match(/^(-?)(\d+)(?:\.(\d{1,3}))?$/);
-  if (!match) return null;
-  const whole = Number(match[2]);
-  const fraction = Number((match[3] ?? "").padEnd(3, "0") || "0");
-  const result = whole * 1_000 + fraction;
-  if (!Number.isSafeInteger(result)) return null;
-  return match[1] === "-" ? -result : result;
-}

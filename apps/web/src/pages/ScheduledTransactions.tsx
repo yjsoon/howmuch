@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 import { api, useApi } from "../api/client";
 import type { Account, CategoryGroup, Payee, ScheduledSubtransaction, ScheduledTransaction, ScheduledTransactionInput } from "../api/types";
+import { CategorySelect } from "../components/CategorySelect";
 import { splitCategoryGroups } from "../lib/categories";
-import { formatDate } from "../lib/dates";
-import { formatMoney } from "../lib/money";
+import { formatDate, todayIso } from "../lib/dates";
+import { stableHash } from "../lib/hash";
+import { formatMilliunitsInput, formatMoney, parseMilliunits } from "../lib/money";
 import { usePlan } from "../state/plan";
 
 type ScheduleGroup = { date: string; schedules: ScheduledTransaction[] };
@@ -179,7 +181,7 @@ export function ScheduledTransactionsPage() {
           <div className="section-heading"><h2 id={`schedule-date-${group.date}`} className="section-title">{formatDate(group.date)}</h2><span className="section-meta">{group.schedules.length} {group.schedules.length === 1 ? "schedule" : "schedules"}</span></div>
           <div className="table-wrap table-wrap-wide">
             <table className="ledger-table schedule-table"><thead><tr><th>Next</th><th>Payee / memo</th><th>Account</th><th>Category</th><th>Repeat</th><th className="num">Amount</th><th><span className="sr-only">Actions</span></th></tr></thead>
-              <tbody>{group.schedules.map((schedule) => <ScheduleRows key={schedule.id} schedule={schedule} accounts={accountNames} categories={categoryNames} payees={payeeNames} busy={mutatingId === schedule.id} onEdit={() => { setEditor({ mode: "edit", schedule }); setMutationError(null); setMutationSuccess(null); }} onEnter={() => { if (!schedule.date_next) return; const operationSeed = crypto.randomUUID(); const enteredDate = today(); setPendingEntry({ schedule, occurrenceDate: schedule.date_next, enteredDate, operationSeed, idempotencyKey: materializationKey(schedule.id, schedule.date_next, enteredDate, operationSeed) }); setMutationError(null); setMutationSuccess(null); }} onDelete={() => { setPendingDeletion({ schedule, idempotencyKey: mutationKey(`delete-${schedule.id}`) }); setMutationError(null); setMutationSuccess(null); }} />)}</tbody>
+              <tbody>{group.schedules.map((schedule) => <ScheduleRows key={schedule.id} schedule={schedule} accounts={accountNames} categories={categoryNames} payees={payeeNames} busy={mutatingId === schedule.id} onEdit={() => { setEditor({ mode: "edit", schedule }); setMutationError(null); setMutationSuccess(null); }} onEnter={() => { if (!schedule.date_next) return; const operationSeed = crypto.randomUUID(); const enteredDate = todayIso(); setPendingEntry({ schedule, occurrenceDate: schedule.date_next, enteredDate, operationSeed, idempotencyKey: materializationKey(schedule.id, schedule.date_next, enteredDate, operationSeed) }); setMutationError(null); setMutationSuccess(null); }} onDelete={() => { setPendingDeletion({ schedule, idempotencyKey: mutationKey(`delete-${schedule.id}`) }); setMutationError(null); setMutationSuccess(null); }} />)}</tbody>
             </table>
           </div>
         </section>
@@ -208,16 +210,16 @@ function SplitScheduleRow({ line, accounts, categories, payees }: { line: Schedu
 
 function ScheduleEditor({ schedule, accounts, categoryGroups, payees, saving, onCancel, onSave }: { schedule?: ScheduledTransaction; accounts: Account[]; categoryGroups: CategoryGroup[]; payees: Payee[]; saving: boolean; onCancel: () => void; onSave: (input: ScheduledTransactionInput, idempotencyKey: string) => Promise<void> }) {
   const [accountId, setAccountId] = useState(schedule?.account_id ?? accounts.find((account) => !account.closed)?.id ?? "");
-  const [firstDate, setFirstDate] = useState(schedule?.date_first ?? schedule?.date_next ?? today());
-  const [nextDate, setNextDate] = useState(schedule?.date_next ?? schedule?.date_first ?? today());
+  const [firstDate, setFirstDate] = useState(schedule?.date_first ?? schedule?.date_next ?? todayIso());
+  const [nextDate, setNextDate] = useState(schedule?.date_next ?? schedule?.date_first ?? todayIso());
   const [frequency, setFrequency] = useState(schedule?.frequency ?? "monthly");
-  const [amount, setAmount] = useState(milliunitsInput(amountFor(schedule ?? {} as ScheduledTransaction)));
+  const [amount, setAmount] = useState(formatMilliunitsInput(amountFor(schedule ?? {} as ScheduledTransaction)));
   const [payeeId, setPayeeId] = useState(schedule?.payee_id ?? "");
   const [categoryId, setCategoryId] = useState(schedule?.category_id ?? "");
   const [transferAccountId, setTransferAccountId] = useState(schedule?.transfer_account_id ?? "");
   const [memo, setMemo] = useState(schedule?.memo ?? "");
   const [flagColor, setFlagColor] = useState(schedule?.flag_color ?? "");
-  const [splitLines, setSplitLines] = useState<SplitDraft[]>(() => (schedule?.subtransactions ?? []).map((line) => ({ key: line.id, sourceId: line.id, amount: milliunitsInput(line.amount), payeeId: line.payee_id ?? "", categoryId: line.category_id ?? "", transferAccountId: line.transfer_account_id ?? "", memo: line.memo ?? "" })));
+  const [splitLines, setSplitLines] = useState<SplitDraft[]>(() => (schedule?.subtransactions ?? []).map((line) => ({ key: line.id, sourceId: line.id, amount: formatMilliunitsInput(line.amount), payeeId: line.payee_id ?? "", categoryId: line.category_id ?? "", transferAccountId: line.transfer_account_id ?? "", memo: line.memo ?? "" })));
   const [validationError, setValidationError] = useState<string | null>(null);
   const [operationSeed] = useState(() => crypto.randomUUID());
   const groups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
@@ -256,7 +258,7 @@ function ScheduleEditor({ schedule, accounts, categoryGroups, payees, saving, on
   return <section className="transaction-editor schedule-editor" aria-labelledby="schedule-editor-heading">
     <div className="section-heading"><div><span className="section-title" id="schedule-editor-heading">{schedule ? "Edit scheduled transaction" : "Add scheduled transaction"}</span><span className="section-meta">{schedule ? "Changes apply to future instances in HowMuch." : "Create a repeating future ledger entry."}</span></div><button type="button" className="text-button" onClick={onCancel} disabled={saving}>Cancel</button></div>
     <form className="transaction-editor-form" onSubmit={(event) => void submit(event)}>
-      <div className="field-row transaction-editor-top-row"><label className="field"><span className="field-label">Account</span><select value={accountId} onChange={(event) => setAccountId(event.target.value)} required><option value="">Choose account</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}{account.closed ? " (closed)" : ""}</option>)}</select></label><label className="field"><span className="field-label">Amount</span><input type="text" inputMode="decimal" value={isSplit ? milliunitsInput(splitTotal) : amount} onChange={(event) => setAmount(event.target.value)} disabled={isSplit} required /><span className="field-note">Use a minus sign for outflow. Amounts use up to three decimal places.</span></label></div>
+      <div className="field-row transaction-editor-top-row"><label className="field"><span className="field-label">Account</span><select value={accountId} onChange={(event) => setAccountId(event.target.value)} required><option value="">Choose account</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}{account.closed ? " (closed)" : ""}</option>)}</select></label><label className="field"><span className="field-label">Amount</span><input type="text" inputMode="decimal" value={isSplit ? formatMilliunitsInput(splitTotal) : amount} onChange={(event) => setAmount(event.target.value)} disabled={isSplit} required /><span className="field-note">Use a minus sign for outflow. Amounts use up to three decimal places.</span></label></div>
       <div className="field-row transaction-editor-top-row"><label className="field"><span className="field-label">First date</span><input type="date" value={firstDate} onChange={(event) => setFirstDate(event.target.value)} required /></label><label className="field"><span className="field-label">Next date</span><input type="date" value={nextDate} onChange={(event) => setNextDate(event.target.value)} required /></label><label className="field"><span className="field-label">Repeat</span><select value={frequency} onChange={(event) => setFrequency(event.target.value)}>{FREQUENCIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
       {!isSplit && <><label className="field"><span className="field-label">Transfer</span><select value={transferAccountId} onChange={(event) => setTransfer(event.target.value)}><option value="">Not a transfer</option>{accounts.filter((account) => account.id !== accountId).map((account) => <option key={account.id} value={account.id}>Transfer to {account.name}</option>)}</select></label>{!transferAccountId && <><label className="field"><span className="field-label">Payee</span><select value={payeeId} onChange={(event) => setPayeeId(event.target.value)}><option value="">No payee</option>{payees.filter((payee) => !payee.deleted && !payee.transfer_account_id).map((payee) => <option key={payee.id} value={payee.id}>{payee.name}</option>)}</select></label><label className="field"><span className="field-label">Category</span><CategorySelect value={categoryId} onChange={setCategoryId} groups={groups} /></label></>}</>}
       <label className="transaction-editor-checkbox"><input type="checkbox" checked={isSplit} onChange={toggleSplit} /> Split this schedule</label>
@@ -269,13 +271,10 @@ function ScheduleEditor({ schedule, accounts, categoryGroups, payees, saving, on
   </section>;
 }
 
-function CategorySelect({ value, onChange, groups }: { value: string; onChange: (value: string) => void; groups: ReturnType<typeof splitCategoryGroups> }) { return <select value={value} onChange={(event) => onChange(event.target.value)}><option value="">Uncategorised</option>{[...groups.primary, ...groups.quiet].map((group) => <optgroup key={group.id} label={group.name}>{group.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</optgroup>)}</select>; }
 function Figure({ label, value }: { label: string; value: string }) { return <div className="headline-figure"><span className="figure-label">{label}</span><span className="figure-value schedule-figure-value">{value}</span></div>; }
 function groupSchedules(schedules: ScheduledTransaction[]): ScheduleGroup[] { const groups = new Map<string, ScheduledTransaction[]>(); for (const schedule of schedules) { const date = schedule.date_next ?? schedule.date_first ?? "Date unavailable"; const entries = groups.get(date) ?? []; entries.push(schedule); groups.set(date, entries); } return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([date, entries]) => ({ date, schedules: entries })); }
 function compareSchedules(left: ScheduledTransaction, right: ScheduledTransaction): number { return (left.date_next ?? left.date_first ?? "9999-12-31").localeCompare(right.date_next ?? right.date_first ?? "9999-12-31") || left.id.localeCompare(right.id); }
 function amountFor(schedule: ScheduledTransaction): number { if (Number.isSafeInteger(schedule.amount)) return Number(schedule.amount); return (schedule.subtransactions ?? []).reduce((sum, line) => sum + (Number.isSafeInteger(line.amount) ? line.amount : 0), 0); }
-function milliunitsInput(value: number): string { return (value / 1000).toFixed(3).replace(/\.?0+$/, ""); }
-function parseMilliunits(value: string): number | null { const match = value.trim().match(/^(-?)(\d+)(?:\.(\d{1,3}))?$/); if (!match) return null; const amount = Number(match[2]) * 1000 + Number((match[3] ?? "").padEnd(3, "0")); const signed = match[1] === "-" ? -amount : amount; return Number.isSafeInteger(signed) ? signed : null; }
 function nameFor(name: string | null | undefined, id: string | null | undefined, names: Map<string, string>, fallback: string): string { return name ?? (id ? names.get(id) ?? fallback : fallback); }
 function scheduleLabel(schedule: ScheduledTransaction, payees: Map<string, string>, accounts: Map<string, string>): string { return nameFor(schedule.payee_name, schedule.payee_id, payees, schedule.transfer_account_id ? transferName(schedule.transfer_account_id, accounts) : "No payee"); }
 function transferName(accountId: string, accounts: Map<string, string>): string { return `Transfer to ${accounts.get(accountId) ?? "account"}`; }
@@ -284,6 +283,4 @@ function recurrence(value: string | null | undefined): string { const labels: Re
 function draftKey(): string { return `split-${crypto.randomUUID()}`; }
 function mutationKey(action: string): string { return `scheduled-${action}-${crypto.randomUUID()}`; }
 function materializationKey(scheduleId: string, occurrenceDate: string, enteredDate: string, seed: string): string { return `scheduled-enter-${seed}-${stableHash(`${scheduleId}:${occurrenceDate}:${enteredDate}`)}`; }
-function stableHash(value: string): string { let hash = 2166136261; for (let index = 0; index < value.length; index += 1) { hash ^= value.charCodeAt(index); hash = Math.imul(hash, 16777619); } return (hash >>> 0).toString(36); }
-function today(): string { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; }
 const FREQUENCIES: Array<[string, string]> = [["never", "Once"], ["daily", "Daily"], ["weekly", "Weekly"], ["everyOtherWeek", "Every other week"], ["every4Weeks", "Every 4 weeks"], ["monthly", "Monthly"], ["everyOtherMonth", "Every other month"], ["every3Months", "Every 3 months"], ["every4Months", "Every 4 months"], ["twiceAMonth", "Twice a month"], ["yearly", "Yearly"], ["everyOtherYear", "Every other year"], ["twiceAYear", "Twice a year"]];

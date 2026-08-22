@@ -24,8 +24,19 @@ export function NetWorthPage() {
       period.accounts.filter((account) => account.balance !== 0).map((account) => account.account_id),
     ),
   );
-  const visibleAccounts = (period: (typeof periods)[number]) =>
-    period.accounts.filter((account) => activeAccountIds.has(account.account_id));
+  const columnAccounts = (() => {
+    const columns = new Map<string, { account_id: string; account_name: string }>();
+    for (const period of [...periods].reverse()) {
+      for (const account of period.accounts) {
+        if (activeAccountIds.has(account.account_id) && !columns.has(account.account_id)) {
+          columns.set(account.account_id, account);
+        }
+      }
+    }
+    return [...columns.values()];
+  })();
+  const balanceFor = (period: (typeof periods)[number], accountId: string) =>
+    period.accounts.find((account) => account.account_id === accountId)?.balance;
 
   return (
     <>
@@ -93,8 +104,7 @@ export function NetWorthPage() {
                     <thead>
                       <tr>
                         <th>Period</th>
-                        {latest &&
-                          visibleAccounts(latest).map((account) => (
+                        {columnAccounts.map((account) => (
                             <th key={account.account_id} className="num">
                               {account.account_name}
                             </th>
@@ -110,14 +120,17 @@ export function NetWorthPage() {
                         return (
                           <tr key={period.period}>
                             <td>{formatPeriod(period.period)}</td>
-                            {visibleAccounts(period).map((account) => (
+                            {columnAccounts.map((account) => {
+                              const balance = balanceFor(period, account.account_id);
+                              return (
                               <td
                                 key={account.account_id}
-                                className={account.balance < 0 ? "num amount-negative" : "num"}
+                                className={balance != null && balance < 0 ? "num amount-negative" : "num"}
                               >
-                                {formatMoney(account.balance)}
+                                {balance == null ? "—" : formatMoney(balance)}
                               </td>
-                            ))}
+                              );
+                            })}
                             <td className="num strong">{formatMoney(period.net_worth)}</td>
                             <td
                               className={

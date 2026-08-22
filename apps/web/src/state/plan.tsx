@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { ApiError, api } from "../api/client";
+import { ApiError, api, setUnauthorizedHandler } from "../api/client";
 import type { Account, Category, CategoryGroup } from "../api/types";
 import { configureMoney } from "../lib/money";
 
@@ -29,6 +29,15 @@ export function PlanProvider({ children }: { children: ReactNode }) {
   const [authMode, setAuthMode] = useState<"checking" | "setup" | "login" | "ready">("checking");
   const [bootstrapRequired, setBootstrapRequired] = useState(true);
   const [generation, setGeneration] = useState(0);
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setValue(null);
+      setError("Your session ended. Sign in again.");
+      setAuthMode("login");
+    });
+    return () => setUnauthorizedHandler(null);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
