@@ -12,6 +12,22 @@ WHERE t.deleted = 0
       )
   );
 
+UPDATE accounts
+SET
+  balance_milli = opening_balance_milli + COALESCE((
+    SELECT SUM(amount_milli) FROM transactions
+    WHERE account_id = accounts.id AND deleted = 0
+  ), 0),
+  cleared_balance_milli = opening_balance_milli + COALESCE((
+    SELECT SUM(amount_milli) FROM transactions
+    WHERE account_id = accounts.id AND deleted = 0 AND cleared IN ('cleared', 'reconciled')
+  ), 0),
+  uncleared_balance_milli = COALESCE((
+    SELECT SUM(amount_milli) FROM transactions
+    WHERE account_id = accounts.id AND deleted = 0 AND cleared = 'uncleared'
+  ), 0),
+  updated_at = CURRENT_TIMESTAMP;
+
 DROP INDEX IF EXISTS idx_transactions_import_id;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_live_import_id
   ON transactions(plan_id, import_id)
