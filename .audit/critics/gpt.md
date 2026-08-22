@@ -1,0 +1,67 @@
+## Findings
+
+### 1. [structural] Transaction creation has no retry identity
+**Components**: `AppModel.saveTransaction`, `APIClient.createTransaction`, `TransactionWriteRequest`, transaction POST handler
+**Finding**: A create has no stable client ID, import ID, or idempotency key. The outbox UUID is local metadata and never crosses the HTTP boundary. Excluding timeouts from automatic replay avoids one duplicate path, but an ambiguous timeout still leaves the form open for a manual retry that the server cannot identify as the same write.
+**Evidence**: `/workspace/apps/ios/HowMuch/AppModel.swift:970-1004` retries nothing after ambiguous failures and only queues selected offline errors. `/workspace/apps/ios/HowMuch/Services/APIClient.swift:314-320` sends a plain POST. `/workspace/apps/ios/HowMuch/Models/APIModels.swift:1281-1369` has no import or operation ID in `TransactionWriteRequest`. `/workspace/apps/api/src/http.ts:345-363` deduplicates a single create only when `import_id` is present.
+**Impact**: A committed request whose response is lost can become two financial transactions when the user retries. UI submission flags cannot establish exactly-once behavior across process death or network failure.
+
+### 2. [structural] The shared ledger cache is neither a complete query result nor a stable page snapshot
+**Components**: `AppModel.refreshLedger`, `AppModel.loadOlderTransactions`, `RegisterView`, transaction list API
+**Finding**: Account, month, category, date, and report drill-down registers filter the currently loaded prefix of one unfiltered ledger. They do not query the matching server scope. Normal paging also ignores `serverKnowledge`, so offset shifts caused by writes between pages can create gaps that ID deduplication cannot repair.
+**Evidence**: `/workspace/apps/ios/HowMuch/AppModel.swift:674-701` loads only the first 100 rows, and `loadOlderTransactions` at lines 868-909 does not retain or compare `TransactionPage.serverKnowledge`. `/workspace/apps/ios/HowMuch/Views/RegisterView.swift:238-365` computes all scopes, totals, and sections from `model.transactions`. The partial-data notice at lines 133-139 appears only during text search. `/workspace/apps/api/src/http.ts:196-208`, lines 328-343, and `/workspace/docs/api-contract.md:232-254` expose account, category, month, and date-filtered lists.
+**Impact**: A report can link to an empty or incomplete register even though the report counted matching transactions. Totals can be wrong, and loading every unrelated ledger row is the only way to improve them. Concurrent server writes can also make ordinary paging omit rows.
+
+### 3. [structural] View-owned financial caches bypass connection and mutation invalidation
+**Components**: `CategoriesView`, Reflect detail views, `AppModel` connection lifecycle
+**Finding**: Monthly plan and detail report responses live in view-local state, outside the state that `AppModel` clears on a user or plan change. The Plan task has a hand-maintained generation, but ordinary transaction save and delete do not increment it. Reflect detail task IDs contain filters but no connection fingerprint or report generation, and their fetches do not verify the active plan before accepting a result.
+**Evidence**: `/workspace/apps/ios/HowMuch/Views/CategoriesView.swift:7-13` owns `planMonth`, and lines 63-65 key reloads only by month and `planRefreshGeneration`. `/workspace/apps/ios/HowMuch/AppModel.swift:970-1004` and lines 1080-1088 do not increment that generation. `/workspace/apps/ios/HowMuch/Views/ReflectDetails.swift:383-437`, lines 607-650, lines 774-806, and lines 931-1015 keep reports in `@State` and omit `model.settings.connectionFingerprint` from task IDs. `AppModel.handleAuthenticationExpiry` at `/workspace/apps/ios/HowMuch/AppModel.swift:118-144` cannot clear child view state.
+**Impact**: Plan activity and available amounts stay stale after normal transaction changes. A completed detail report from one user or plan can remain visible after authentication expiry and sign-in as another identity, which crosses both correctness and privacy boundaries.
+
+### 4. [structural] Outbox replay races the ledger replacement
+**Components**: `AppModel.refreshAll`, `AppModel.refreshLedger`, `AppModel.syncOutbox`
+**Finding**: `refreshAll` deliberately runs outbox creates and the first-page ledger fetch in parallel even though both mutate `transactions`. Replay inserts a saved row, while ledger refresh replaces the entire array. There is no merge step or ordering constraint.
+**Evidence**: `/workspace/apps/ios/HowMuch/AppModel.swift:586-600` starts both operations with `async let`. `refreshLedger` assigns `transactions = sortedUniqueTransactions(page.transactions)` at line 691. `syncOutbox` inserts the replayed row at lines 1042-1050. ID deduplication handles the case where the GET contains the created row, but not a GET snapshot taken before the POST and applied after the insertion.
+**Impact**: A transaction can sync successfully, be removed from the outbox, then disappear from the visible ledger until another refresh. The server has the money record while the client temporarily says otherwise.
+
+### 5. [structural] Outbox scoping prevents replay, not disclosure
+**Components**: `PendingTransaction`, `OutboxStore`, `AppModel`, `AccountsView.OutboxCard`
+**Finding**: Pending entries carry a connection fingerprint, but the fingerprint is checked only before replay. The app loads one global queue and renders every entry after an account or server switch, including payee, date, amount, and server rejection text from other connection identities.
+**Evidence**: `/workspace/apps/ios/HowMuch/Models/APIModels.swift:1371-1411` persists the exact financial request in one UserDefaults array. `/workspace/apps/ios/HowMuch/AppModel.swift:72-76` owns that global array, and connection clearing at lines 714-739 does not scope or clear it. `/workspace/apps/ios/HowMuch/Views/AccountsView.swift:440-495` renders every pending item and merely adds "Captured against a different connection." Replay filtering exists at `/workspace/apps/ios/HowMuch/AppModel.swift:1030-1037`.
+**Impact**: A second user on the same device can see the first user's unsynced financial details. UserDefaults also gives those details no app-level encryption or explicit retention boundary. The replay guard protects server integrity but not local confidentiality.
+
+### 6. [concern] Every transaction mutation launches a broad, untracked refresh
+**Components**: `AppModel.saveTransaction`, `AppModel.deleteTransaction`, `AppModel.refreshAll`
+**Finding**: After already patching the saved result locally, create, update, and delete start an unstructured full refresh. One pass makes eleven fixed requests: plans, four reference endpoints, the first ledger page, schedules, and four reports. Pending outbox writes add more. Overlapping passes use generations to reject stale responses, but those requests still consume radio, decode, and server work.
+**Evidence**: `/workspace/apps/ios/HowMuch/AppModel.swift:1003` and line 1087 start `Task { await refreshAll(quiet: true) }`. Lines 586-600 show the fan-out, `/workspace/apps/ios/HowMuch/Services/APIClient.swift:68-79` adds four reference calls, and `/workspace/apps/ios/HowMuch/AppModel.swift:931-947` adds four report calls. `refreshLedger` resets paging state at lines 674-693.
+**Impact**: Saving on the hot path recalculates reports the user may never open, repeats mostly unchanged reference data, and discards loaded older pages. Rapid mutations can multiply the work while generation checks throw away completed responses. The broad refresh is still incomplete because it misses the view-owned Plan snapshot.
+
+### 7. [concern] The connection boundary accepts plaintext credentials for arbitrary hosts
+**Components**: `APISettings`, `SettingsView`, `APIClient`, Xcode network configuration
+**Finding**: The application treats any HTTP URL with a host as valid and advertises HTTP LAN use. Login sends the password to that URL, and every later authenticated request sends the bearer token there. No application rule limits HTTP to loopback or a trusted address range.
+**Evidence**: `/workspace/apps/ios/HowMuch/Models/APIModels.swift:54-85` and lines 107-134 accept `http` and `https`. `/workspace/apps/ios/HowMuch/Views/SettingsView.swift:65-77` advertises an HTTP address. `/workspace/apps/ios/HowMuch/Services/APIClient.swift:51-56` sends login credentials, and lines 406-410 attach the bearer. `/workspace/apps/ios/HowMuch.xcodeproj/project.pbxproj:272-330` supplies no explicit App Transport Security policy.
+**Impact**: If the platform permits a submitted HTTP destination, a local network observer can read the password, token, and financial payloads. If App Transport Security rejects it, the documented connection mode fails at runtime. Platform defaults do not make the product's intended security policy clear or testable.
+
+### 8. [concern] Clearing a category target violates the server's presence-based contract
+**Components**: `PlanTargetSheet`, `PlanTargetRequest`, month-category PATCH handler
+**Finding**: The UI represents clear as `nil`, but synthesized optional encoding omits the `target` key. The server distinguishes a present JSON null from an absent key, so it receives an empty category object and takes the assignment branch.
+**Evidence**: `/workspace/apps/ios/HowMuch/Views/CategoriesView.swift:432-435` calls `save(nil)`. `/workspace/apps/ios/HowMuch/Models/APIModels.swift:656-666` relies on synthesized `Encodable` for an optional target. `/workspace/apps/api/src/http.ts:300-325` requires `Object.hasOwn(category, "target")` and otherwise validates `budgeted`. The documented clear body is `{"category":{"target":null}}` at `/workspace/docs/api-contract.md:174-181`.
+**Impact**: "Clear target" always returns a validation error. This is a wire-boundary modeling error, not presentation polish.
+
+### 9. [concern] Switching endpoints leaves prior bearer tokens and server sessions behind
+**Components**: `APISettings.save`, `CredentialStore`, `SettingsView` account switching
+**Finding**: Credential cleanup knows only the newly selected normalized URL plus one legacy account. Saving server B cannot delete server A's Keychain item, and changing accounts does not log out the old server before replacing the draft.
+**Evidence**: `/workspace/apps/ios/HowMuch/Models/APIModels.swift:234-242` saves only the current endpoint. `CredentialStore.save` at lines 275-295 deletes only that endpoint's item and the legacy item. `/workspace/apps/ios/HowMuch/Views/SettingsView.swift:297-345` can authenticate a replacement endpoint without revoking the prior session. Sign-out at lines 406-420 revokes only the currently selected session.
+**Impact**: Old bearer tokens remain recoverable from the app's Keychain namespace and their server sessions remain active until server expiry or separate revocation. A user-facing "Use another account" flow does not amount to complete credential cleanup.
+
+### 10. [concern] The core state machine has no isolated test boundary
+**Components**: `AppModel`, `APIClient`, persistence stores, Xcode project
+**Finding**: `AppModel` creates a concrete client from mutable settings, and the client hardcodes `URLSession.shared`. The model also calls static UserDefaults and Keychain stores directly. There is no injected transport, clock, or outbox store, and the project defines only an application target.
+**Evidence**: `/workspace/apps/ios/HowMuch/AppModel.swift:88-112` injects settings and view preferences but not side-effecting collaborators. Lines 160-162 construct `APIClient` directly. `/workspace/apps/ios/HowMuch/Services/APIClient.swift:417` uses `URLSession.shared`. `/workspace/apps/ios/HowMuch/Models/APIModels.swift:154-242` and lines 1391-1411 use process-global persistence by default. `/workspace/apps/ios/HowMuch.xcodeproj/project.pbxproj:138-186` contains one native app target and no test target.
+**Impact**: Authentication transitions, stale-response rejection, outbox races, and encoding contracts require a live process or server to exercise reliably. The bugs above sit in exactly the boundaries that deterministic tests cannot currently control.
+
+### 11. [observation] Rendering rebuilds expensive formatters and lookup collections
+**Components**: `MoneyCodec`, `AppModel` reference lookups, register and account rows
+**Finding**: Every amount display allocates and configures a new `NumberFormatter`. Category lookup repeatedly flattens and filters all groups before a linear search, while account lookup is also linear. SwiftUI rows invoke these helpers during body evaluation, and the register recomputes several filter and grouping passes from the same transaction array.
+**Evidence**: `/workspace/apps/ios/HowMuch/Support/Formatting.swift:36-51` constructs `NumberFormatter` for every call. `/workspace/apps/ios/HowMuch/AppModel.swift:530-553` rebuilds `flattenedCategories` for `categoryName`, and lines 545-547 scan accounts. `/workspace/apps/ios/HowMuch/Views/RegisterView.swift:238-365` performs repeated filters, counts, totals, and grouping. Amount formatting appears per row at lines 673-765 and throughout `/workspace/apps/ios/HowMuch/Views/AccountsView.swift`.
+**Impact**: The first page cap keeps the current cost bounded, but scrolling and search still pay avoidable allocator and repeated lookup work. The cost grows with both row count and reference-data size, which makes the current model a poor base for larger ledgers.
