@@ -471,8 +471,8 @@ struct APIClient {
     }
 
     let requestPath = Self.encodedPath(path)
-    let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-    components.path = basePath.isEmpty ? requestPath : "/\(basePath)\(requestPath)"
+    let basePath = components.percentEncodedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    components.percentEncodedPath = basePath.isEmpty ? requestPath : "/\(basePath)\(requestPath)"
     components.queryItems = queryItems.isEmpty ? nil : queryItems
 
     guard let url = components.url else {
