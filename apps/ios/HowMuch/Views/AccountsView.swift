@@ -12,9 +12,7 @@ struct AccountsView: View {
       VStack(alignment: .leading, spacing: 16) {
         ScreenTitle("Accounts")
 
-        // Offline captures outrank everything else here: they are the user's
-        // money data that has not reached the server yet.
-        if !model.visiblePendingTransactions.isEmpty {
+        if !model.pendingTransactionsForLiveConnection.isEmpty {
           OutboxCard()
         }
 
@@ -419,7 +417,7 @@ struct AccountsView: View {
           Button {
             Task {
               if await model.syncOutbox(manual: true) > 0 {
-                await model.refreshAfterLedgerMutation()
+                await model.refreshLedgerAndInvalidatePlan()
               }
             }
           } label: {
@@ -436,7 +434,7 @@ struct AccountsView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
 
-        ForEach(model.visiblePendingTransactions) { item in
+        ForEach(model.pendingTransactionsForLiveConnection) { item in
           Divider().padding(.leading, 16)
           pendingRow(item)
         }
@@ -466,7 +464,7 @@ struct AccountsView: View {
     }
 
     private var title: String {
-      let count = model.visiblePendingTransactions.count
+      let count = model.pendingTransactionsForLiveConnection.count
       return count == 1 ? "1 transaction waiting to sync" : "\(count) transactions waiting to sync"
     }
 

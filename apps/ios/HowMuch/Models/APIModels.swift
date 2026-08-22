@@ -59,7 +59,7 @@ struct APISettings: Codable, Equatable {
       scheme == "http" || scheme == "https",
       let host = components.host?.lowercased(),
       !host.isEmpty,
-      Self.scheme(scheme, allowsHost: host),
+      Self.allowsHTTPSOrLocalHTTP(scheme, host: host),
       components.user == nil,
       components.password == nil,
       components.query == nil,
@@ -90,8 +90,7 @@ struct APISettings: Codable, Equatable {
     [normalizedBaseURLString ?? trimmedBaseURL, planID, authenticatedUserID].joined(separator: "|")
   }
 
-  /// Outbox rows captured before the fingerprint used the normalised URL.
-  func matchesOutboxFingerprint(_ stamp: String) -> Bool {
+  func matchesCurrentOrLegacyOutboxStamp(_ stamp: String) -> Bool {
     stamp == connectionFingerprint
       || stamp == [trimmedBaseURL, planID, authenticatedUserID].joined(separator: "|")
   }
@@ -118,7 +117,7 @@ struct APISettings: Codable, Equatable {
       scheme == "http" || scheme == "https",
       let host = components.host,
       !host.isEmpty,
-      Self.scheme(scheme, allowsHost: host),
+      Self.allowsHTTPSOrLocalHTTP(scheme, host: host),
       components.user == nil,
       components.password == nil,
       components.query == nil,
@@ -129,9 +128,7 @@ struct APISettings: Codable, Equatable {
     return components.url
   }
 
-  /// HTTPS may point anywhere. HTTP is only for this device or this LAN so a
-  /// bearer token cannot be typed toward a public cleartext host.
-  static func scheme(_ scheme: String, allowsHost host: String) -> Bool {
+  static func allowsHTTPSOrLocalHTTP(_ scheme: String, host: String) -> Bool {
     scheme == "https" || (scheme == "http" && isLocalNetworkHost(host))
   }
 

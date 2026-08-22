@@ -508,7 +508,7 @@ private struct AccountReconciliationSheet: View {
           .disabled(model.isSubmitting)
         }
       }
-      .task(id: previewRequestKey) {
+      .task(id: reconcilePreviewInvalidationKey) {
         await fetchPreview()
       }
     }
@@ -546,10 +546,7 @@ private struct AccountReconciliationSheet: View {
     return "The statement balance must exactly match the projected balance before confirmation."
   }
 
-  /// Account/date plus the fields that can change the server's candidate set.
-  /// Editing a transaction's cleared state (or amount/date) while this sheet
-  /// is open therefore replaces the review before it can be confirmed.
-  private var previewRequestKey: String {
+  private var reconcilePreviewInvalidationKey: String {
     var hasher = Hasher()
     hasher.combine(accountID)
     hasher.combine(statementDate)
