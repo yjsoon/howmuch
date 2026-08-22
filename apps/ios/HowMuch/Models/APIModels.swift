@@ -140,7 +140,11 @@ struct APISettings: Codable, Equatable {
     if host.contains(":") {
       return host == "::1" || host.hasPrefix("fe80:") || host.hasPrefix("fc") || host.hasPrefix("fd")
     }
-    let parts = host.split(separator: ".").compactMap { UInt8(String($0)) }
+    let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+    guard labels.count == 4 else {
+      return false
+    }
+    let parts = labels.compactMap { UInt8(String($0)) }
     guard parts.count == 4 else {
       return false
     }

@@ -86,7 +86,7 @@ final class AppModel {
   private var activeViewPrefsScope: String?
   private var saveMessageToken = 0
   /// Invalidates an in-flight older-page response when the first page reloads.
-  private var ledgerPageGeneration = 0
+  private(set) var ledgerPageGeneration = 0
   private var referenceGeneration = 0
   private var scheduledTransactionsGeneration = 0
   private var reportsGeneration = 0
@@ -1005,7 +1005,7 @@ final class AppModel {
       throw APIClientError.validation("Enter an amount and pick an account.")
     }
 
-    var request = draft.writeRequest()
+    let request = draft.writeRequest()
     let saved: Transaction
     if let id = draft.id {
       saved = try await apiClient.updateTransaction(planID: settings.planID, transactionID: id, request: request)
