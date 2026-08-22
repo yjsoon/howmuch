@@ -126,7 +126,7 @@ private struct RootView: View {
 
       Tab("Reflect", systemImage: "chart.bar.fill", value: AppTab.reflect) {
         NavigationStack {
-          ReflectView()
+          ReflectView(isSelected: tab == .reflect)
         }
       }
 

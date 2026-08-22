@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ReflectView: View {
   @Environment(AppModel.self) private var model
+  let isSelected: Bool
 
   var body: some View {
     ScrollView {
@@ -56,6 +57,17 @@ struct ReflectView: View {
     .refreshable {
       await model.refreshAll()
     }
+    .task(id: ReflectRefreshKey(isSelected: isSelected, generation: model.reportsRefreshGeneration)) {
+      guard isSelected, model.reportsRefreshGeneration > 0 else {
+        return
+      }
+      await model.refreshReflectOverview(quiet: true)
+    }
+  }
+
+  private struct ReflectRefreshKey: Hashable {
+    let isSelected: Bool
+    let generation: Int
   }
 
   // MARK: Spending Breakdown
