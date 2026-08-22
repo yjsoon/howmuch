@@ -508,7 +508,7 @@ private struct AccountReconciliationSheet: View {
           .disabled(model.isSubmitting)
         }
       }
-      .task(id: previewRequestKey) {
+      .task(id: reconcilePreviewInvalidationKey) {
         await fetchPreview()
       }
     }
@@ -546,16 +546,18 @@ private struct AccountReconciliationSheet: View {
     return "The statement balance must exactly match the projected balance before confirmation."
   }
 
-  /// Account/date plus the fields that can change the server's candidate set.
-  /// Editing a transaction's cleared state (or amount/date) while this sheet
-  /// is open therefore replaces the review before it can be confirmed.
-  private var previewRequestKey: String {
-    let candidateState = model.transactions
-      .filter { $0.accountID == accountID }
-      .map { "\($0.id):\($0.date):\($0.amount):\($0.cleared.rawValue):\($0.deleted)" }
-      .sorted()
-      .joined(separator: "|")
-    return "\(accountID)#\(statementDate)#\(candidateState)"
+  private var reconcilePreviewInvalidationKey: String {
+    var hasher = Hasher()
+    hasher.combine(accountID)
+    hasher.combine(statementDate)
+    for transaction in model.transactions where transaction.accountID == accountID {
+      hasher.combine(transaction.id)
+      hasher.combine(transaction.date)
+      hasher.combine(transaction.amount)
+      hasher.combine(transaction.cleared)
+      hasher.combine(transaction.deleted)
+    }
+    return String(hasher.finalize())
   }
 
   private func updateStatementDate(_ value: String) {

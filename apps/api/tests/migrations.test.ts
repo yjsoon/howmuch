@@ -10,7 +10,16 @@ describe("local schema migrations", () => {
         PRAGMA foreign_keys = ON;
         CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE plans (id TEXT PRIMARY KEY, name TEXT NOT NULL);
-        CREATE TABLE accounts (id TEXT PRIMARY KEY, plan_id TEXT NOT NULL REFERENCES plans(id), transfer_payee_id TEXT);
+        CREATE TABLE accounts (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL REFERENCES plans(id),
+          transfer_payee_id TEXT,
+          opening_balance_milli INTEGER NOT NULL DEFAULT 0,
+          balance_milli INTEGER NOT NULL DEFAULT 0,
+          cleared_balance_milli INTEGER NOT NULL DEFAULT 0,
+          uncleared_balance_milli INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE TABLE payees (
           id TEXT PRIMARY KEY,
           plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
@@ -30,7 +39,17 @@ describe("local schema migrations", () => {
             AND p.transfer_account_id=NEW.id AND p.deleted=0
         )
         BEGIN SELECT RAISE(ABORT, 'account transfer payee ownership failed'); END;
-        CREATE TABLE transactions (id TEXT PRIMARY KEY, payee_id TEXT REFERENCES payees(id));
+        CREATE TABLE transactions (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT,
+          account_id TEXT,
+          import_id TEXT,
+          amount_milli INTEGER NOT NULL DEFAULT 0,
+          cleared TEXT NOT NULL DEFAULT 'uncleared',
+          deleted INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          payee_id TEXT REFERENCES payees(id)
+        );
         INSERT INTO plans(id,name) VALUES ('p','Plan');
         INSERT INTO payees(id,plan_id,name,external_ynab_id) VALUES ('legacy-payee','p','Same merchant','legacy-payee');
         INSERT INTO transactions(id,payee_id) VALUES ('legacy-transaction','legacy-payee');
@@ -52,6 +71,67 @@ describe("local schema migrations", () => {
       ]);
       expect(db.query("SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('accounts_transfer_payee_plan_guard','accounts_transfer_payee_plan_update_guard','payees_transfer_account_plan_guard','payees_transfer_account_plan_update_guard') ORDER BY name").all()).toEqual([]);
       expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("unique live import_id cleanup recalculates denormalized account balances", () => {
+    const db = new Database(":memory:");
+    try {
+      db.exec(`
+        CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE plans (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+        CREATE TABLE accounts (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL REFERENCES plans(id),
+          opening_balance_milli INTEGER NOT NULL DEFAULT 0,
+          balance_milli INTEGER NOT NULL DEFAULT 0,
+          cleared_balance_milli INTEGER NOT NULL DEFAULT 0,
+          uncleared_balance_milli INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE transactions (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT,
+          account_id TEXT,
+          import_id TEXT,
+          amount_milli INTEGER NOT NULL DEFAULT 0,
+          cleared TEXT NOT NULL DEFAULT 'uncleared',
+          deleted INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO plans(id,name) VALUES ('p','Plan');
+        INSERT INTO accounts(id,plan_id,opening_balance_milli,balance_milli,cleared_balance_milli,uncleared_balance_milli) VALUES
+          ('a','p',1000,-8000,-9000,1000),
+          ('b','p',0,-9990,-9990,0);
+        INSERT INTO transactions(id,plan_id,account_id,import_id,amount_milli,cleared,updated_at) VALUES
+          ('old','p','a','dup',-5000,'cleared','2026-01-01T00:00:00Z'),
+          ('new','p','a','dup',-4000,'uncleared','2026-01-02T00:00:00Z'),
+          ('other','p','b','dup',-9990,'cleared','2026-01-01T00:00:00Z');
+        INSERT INTO schema_migrations(version) VALUES
+          ('001_initial'),('002_transaction_server_knowledge'),('003_transfer_payees'),('004_auth_foundation'),('005_password_auth'),
+          ('006_allow_duplicate_payee_names'),('007_ynab_raw_objects'),('008_plan_month_assignments'),('009_plan_month_category_targets'),
+          ('010_scheduled_transaction_edits'),('011_scheduled_transaction_snapshot_assertions'),('012_account_reconciliation_assertions');
+      `);
+
+      applyMigrations(db);
+
+      expect(db.query("SELECT id,account_id,amount_milli FROM transactions ORDER BY id").all()).toEqual([
+        { id: "new", account_id: "a", amount_milli: -4000 },
+        { id: "other", account_id: "b", amount_milli: -9990 },
+      ]);
+      expect(db.query("SELECT balance_milli, cleared_balance_milli, uncleared_balance_milli FROM accounts WHERE id='a'").get()).toEqual({
+        balance_milli: -3000,
+        cleared_balance_milli: 1000,
+        uncleared_balance_milli: -4000,
+      });
+      expect(db.query("SELECT balance_milli FROM accounts WHERE id='b'").get()).toEqual({ balance_milli: -9990 });
+      expect(db.query("SELECT name FROM pragma_index_info('idx_transactions_live_import_id') ORDER BY seqno").all()).toEqual([
+        { name: "plan_id" },
+        { name: "account_id" },
+        { name: "import_id" },
+      ]);
     } finally {
       db.close();
     }

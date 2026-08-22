@@ -58,13 +58,9 @@ struct ReflectView: View {
     }
   }
 
-  // MARK: Spending Breakdown
-
   @ViewBuilder
   private var spendingContent: some View {
     if let report = model.spendingBreakdown {
-      // Web parity: bookkeeping groups stay out of the headline figure
-      // unless the persisted include toggle says otherwise.
       let split = ReflectMaths.split(report.groups)
       let rows = model.includeQuietSpending ? split.primary + split.quiet : split.primary
       let total = rows.reduce(0) { $0 + abs($1.amount) }
@@ -131,8 +127,6 @@ struct ReflectView: View {
     }
   }
 
-  // MARK: Net Worth
-
   @ViewBuilder
   private var netWorthContent: some View {
     if let report = model.netWorth, let latest = report.periods.last {
@@ -168,8 +162,6 @@ struct ReflectView: View {
     }
   }
 
-  // MARK: Income vs Spending
-
   @ViewBuilder
   private var incomeContent: some View {
     if let report = model.incomeVsSpending, let latest = report.periods.last {
@@ -194,8 +186,6 @@ struct ReflectView: View {
       }
     }
   }
-
-  // MARK: Age of Money
 
   @ViewBuilder
   private var ageContent: some View {
@@ -230,7 +220,6 @@ struct ReflectView: View {
   }
 }
 
-/// Card wrapper: blurple header with chevron, tappable into a detail screen.
 struct ReflectCard<Destination: View, Content: View>: View {
   let icon: String
   let title: String
@@ -268,7 +257,6 @@ struct ReflectCard<Destination: View, Content: View>: View {
   }
 }
 
-/// A category group's slice of the spending breakdown, for sectioned lists.
 struct SpendingGroupSection: Identifiable {
   let id: String
   let name: String
@@ -277,15 +265,12 @@ struct SpendingGroupSection: Identifiable {
 }
 
 enum ReflectMaths {
-  /// Spending rows partitioned into everyday and bookkeeping ("quiet") groups,
-  /// mirroring the web app's splitCategoryGroups.
   static func split(_ groups: [SpendingBreakdownGroup]) -> (primary: [SpendingBreakdownGroup], quiet: [SpendingBreakdownGroup]) {
     let primary = groups.filter { !CategoryGroup.isQuietName($0.categoryGroupName) }
     let quiet = groups.filter { CategoryGroup.isQuietName($0.categoryGroupName) }
     return (primary, quiet)
   }
 
-  /// Rows bucketed by category group, largest group first, as on the web.
   static func groupSections(_ rows: [SpendingBreakdownGroup]) -> [SpendingGroupSection] {
     var order: [String] = []
     var byGroup: [String: SpendingGroupSection] = [:]
@@ -302,7 +287,6 @@ enum ReflectMaths {
     return order.compactMap { byGroup[$0] }.sorted { $0.amount > $1.amount }
   }
 
-  /// Top-N share segments plus a grey remainder, for stacked bars.
   static func shareSegments(_ groups: [SpendingBreakdownGroup], limit: Int) -> [(colour: Color, fraction: Double)] {
     let total = groups.reduce(0.0) { $0 + abs(Double($1.amount)) }
     guard total > 0 else {

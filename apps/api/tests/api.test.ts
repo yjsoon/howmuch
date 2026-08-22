@@ -430,6 +430,10 @@ describe("YNAB-compatible API", () => {
     expect(db.query("SELECT goal_type,goal_target_milli,goal_target_month FROM plan_month_category_targets").get()).toEqual({ goal_type: "TB", goal_target_milli: 9000, goal_target_month: "2026-12-01" });
     expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category'").get()).toEqual(rawBefore);
 
+    const omittedTarget = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", { method: "PATCH", body: { category: {} } });
+    expect(omittedTarget.status).toBe(400);
+    expect((await omittedTarget.json()).error.detail).toBe("budgeted must be integer milliunits");
+
     const cleared = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", { method: "PATCH", body: { category: { target: null } } });
     expect(cleared.status).toBe(200);
     expect((await cleared.json()).data.category).toMatchObject({ goal_type: null, goal_target: null, target_source: "howmuch-local" });
@@ -622,6 +626,92 @@ describe("YNAB-compatible API", () => {
 
     const listed = await (await request("/v1/plans/plan-test/transactions")).json();
     expect(listed.data.transactions).toHaveLength(1);
+  });
+
+  test("creates two same-day captures that differ only by import id", async () => {
+    const shared = {
+      account_id: "acct-1",
+      date: "2026-06-10",
+      amount: -4500,
+      payee_name: "Coffee",
+    };
+
+    const first = await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: { transaction: { ...shared, import_id: "capture-1" } },
+    });
+    const second = await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: { transaction: { ...shared, import_id: "capture-2" } },
+    });
+    const firstJson = await first.json();
+    const secondJson = await second.json();
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(secondJson.data.transaction.id).not.toBe(firstJson.data.transaction.id);
+
+    const listed = await (await request("/v1/plans/plan-test/transactions")).json();
+    expect(listed.data.transactions).toHaveLength(2);
+  });
+
+  test("collapses overlapping creates that share one import id", async () => {
+    const body = {
+      transaction: {
+        account_id: "acct-1",
+        date: "2026-06-10",
+        amount: -4500,
+        payee_name: "Coffee",
+        import_id: "capture-race",
+      },
+    };
+
+    const responses = await Promise.all([
+      request("/v1/plans/plan-test/transactions", { method: "POST", body }),
+      request("/v1/plans/plan-test/transactions", { method: "POST", body }),
+    ]);
+    const payloads = await Promise.all(responses.map((response) => response.json()));
+    const ids = payloads.map((payload) => payload.data.transaction.id);
+
+    expect(ids[0]).toBe(ids[1]);
+    const listed = await (await request("/v1/plans/plan-test/transactions")).json();
+    expect(listed.data.transactions).toHaveLength(1);
+    expect(listed.data.transactions[0].amount).toBe(-4500);
+    expect(db.query("SELECT name FROM sqlite_master WHERE name='idx_transactions_live_import_id'").get()).toEqual({
+      name: "idx_transactions_live_import_id",
+    });
+    expect(db.query("SELECT name FROM pragma_index_info('idx_transactions_live_import_id') ORDER BY seqno").all()).toEqual([
+      { name: "plan_id" },
+      { name: "account_id" },
+      { name: "import_id" },
+    ]);
+  });
+
+  test("keeps the same import id on two accounts", async () => {
+    const shared = {
+      date: "2026-06-10",
+      amount: -9990,
+      payee_name: "Same day charge",
+      import_id: "YNAB:-9990:2026-06-10:1",
+    };
+
+    const first = await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: { transaction: { ...shared, account_id: "acct-1" } },
+    });
+    const second = await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: { transaction: { ...shared, account_id: "acct-2" } },
+    });
+    const firstJson = await first.json();
+    const secondJson = await second.json();
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(secondJson.data.transaction.id).not.toBe(firstJson.data.transaction.id);
+
+    const listed = await (await request("/v1/plans/plan-test/transactions")).json();
+    expect(listed.data.transactions).toHaveLength(2);
   });
 
   test("serializes concurrent local SQLite transaction writes", async () => {

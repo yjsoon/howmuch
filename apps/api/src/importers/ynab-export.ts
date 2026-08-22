@@ -183,8 +183,8 @@ export async function importYnabExport(
 
     for (const prepared of preparedTransactions) {
       try {
-        const existing = prepared.input.import_id
-          ? await repo.findTransactionByImportId(options.planId, prepared.input.import_id)
+        const existing = prepared.input.import_id && prepared.input.account_id
+          ? await repo.findTransactionByImportId(options.planId, prepared.input.import_id, prepared.input.account_id)
           : null;
         if (existing) {
           await repo.recordImportRow(sessionId, prepared.index, "duplicate", prepared.row, undefined, existing.id);

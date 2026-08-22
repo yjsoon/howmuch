@@ -2180,8 +2180,8 @@ export class LedgerRepository {
   }
 
   async findDuplicateTransaction(planId: string, input: TransactionInput): Promise<any | null> {
-    if (input.import_id) {
-      const importMatch = await this.findTransactionByImportId(planId, input.import_id);
+    if (input.import_id && input.account_id) {
+      const importMatch = await this.findTransactionByImportId(planId, input.import_id, input.account_id);
       if (importMatch) {
         return importMatch;
       }
@@ -2233,7 +2233,7 @@ export class LedgerRepository {
     return row ? await this.formatTransaction(row) : null;
   }
 
-  async findTransactionByImportId(planId: string, importId: string): Promise<any | null> {
+  async findTransactionByImportId(planId: string, importId: string, accountId: string): Promise<any | null> {
     const row = await this.db
       .query(
         `SELECT
@@ -2245,11 +2245,11 @@ export class LedgerRepository {
          JOIN accounts a ON a.id = t.account_id
          LEFT JOIN payees p ON p.id = t.payee_id
          LEFT JOIN categories c ON c.id = t.category_id
-         WHERE t.plan_id = ? AND t.import_id = ? AND t.deleted = 0
+         WHERE t.plan_id = ? AND t.account_id = ? AND t.import_id = ? AND t.deleted = 0
          ORDER BY t.updated_at DESC
          LIMIT 1`,
       )
-      .get(planId, importId) as Row | null;
+      .get(planId, accountId, importId) as Row | null;
 
     return row ? await this.formatTransaction(row) : null;
   }

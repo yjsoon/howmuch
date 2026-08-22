@@ -15,16 +15,10 @@ struct HowMuchApp: App {
   }
 }
 
-/// Home-screen quick action ("Add Expense") plumbing. The shortcut is
-/// registered dynamically — no Info.plist entry, which this project generates
-/// from build settings — and the scene delegate relays taps into SwiftUI.
 @MainActor
 enum QuickAction {
   static let addExpenseType = "sg.soon.howmuch.add-expense"
   static let notification = Notification.Name("HowMuch.QuickAction.addExpense")
-
-  /// Set when the app is cold-launched from the shortcut, before any SwiftUI
-  /// view is subscribed to the notification; RootView consumes it on appear.
   static var pendingCapture = false
 
   static func register() {
@@ -93,13 +87,11 @@ enum AppTab: Hashable {
 private struct RootView: View {
   @Environment(AppModel.self) private var model
   @State private var tab: AppTab = .accounts
+  @State private var appliedReportsGeneration = 0
 
   var body: some View {
     @Bindable var model = model
 
-    // The Transaction tab takes the search role, so Liquid Glass floats it
-    // separately at the trailing edge. Selecting it opens the capture sheet
-    // rather than switching tabs.
     let selection = Binding(
       get: { tab },
       set: { (next: AppTab) in
@@ -131,7 +123,6 @@ private struct RootView: View {
       }
 
       Tab("Transaction", systemImage: "plus", value: AppTab.transaction, role: .search) {
-        // Never shown: selecting this tab presents the capture sheet instead.
         Color.clear
       }
     }
@@ -149,21 +140,29 @@ private struct RootView: View {
       }
     }
     .animation(.snappy, value: model.lastSaveMessage)
-    // A save (or delete) confirmation deserves a physical acknowledgement;
-    // the toast clearing itself three seconds later does not.
     .sensoryFeedback(trigger: model.lastSaveMessage) { _, newValue in
       newValue != nil ? .success : nil
     }
     .task(id: model.settings.connectionFingerprint) {
       await model.refreshAll()
     }
+    .task(id: ReflectVisitKey(tab: tab, generation: model.reportsRefreshGeneration)) {
+      guard tab == .reflect else {
+        return
+      }
+      let generation = model.reportsRefreshGeneration
+      guard generation > appliedReportsGeneration else {
+        return
+      }
+      if await model.refreshReflectOverview(quiet: true) {
+        appliedReportsGeneration = generation
+      }
+    }
     .sheet(isPresented: $model.isShowingSettings) {
       SettingsView(settings: model.settings) { nextSettings in
         await model.applySettings(nextSettings)
       }
       .interactiveDismissDisabled(!model.settings.isAuthenticated)
-      // Runs once the dismissal has completed, so swapping to the capture
-      // sheet cannot race the settings sheet's teardown.
       .onDisappear {
         consumePendingCapture()
       }
@@ -179,7 +178,6 @@ private struct RootView: View {
         return
       }
       if model.isShowingSettings {
-        // Dismiss settings first; its onDisappear picks the capture back up.
         QuickAction.pendingCapture = true
         model.isShowingSettings = false
       } else {
@@ -194,4 +192,9 @@ private struct RootView: View {
       model.isShowingCapture = true
     }
   }
+}
+
+private struct ReflectVisitKey: Hashable {
+  let tab: AppTab
+  let generation: Int
 }

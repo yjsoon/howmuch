@@ -59,6 +59,7 @@ struct APISettings: Codable, Equatable {
       scheme == "http" || scheme == "https",
       let host = components.host?.lowercased(),
       !host.isEmpty,
+      Self.allowsHTTPSOrLocalHTTP(scheme, host: host),
       components.user == nil,
       components.password == nil,
       components.query == nil,
@@ -86,7 +87,12 @@ struct APISettings: Codable, Equatable {
   }
 
   var connectionFingerprint: String {
-    [trimmedBaseURL, planID, authenticatedUserID].joined(separator: "|")
+    [normalizedBaseURLString ?? trimmedBaseURL, planID, authenticatedUserID].joined(separator: "|")
+  }
+
+  func matchesCurrentOrLegacyOutboxStamp(_ stamp: String) -> Bool {
+    stamp == connectionFingerprint
+      || stamp == [trimmedBaseURL, planID, authenticatedUserID].joined(separator: "|")
   }
 
   /// Account presentation preferences belong to one authenticated plan.
@@ -107,8 +113,11 @@ struct APISettings: Codable, Equatable {
   var baseURL: URL? {
     guard
       let components = URLComponents(string: trimmedBaseURL),
-      components.scheme == "http" || components.scheme == "https",
-      components.host?.isEmpty == false,
+      let scheme = components.scheme?.lowercased(),
+      scheme == "http" || scheme == "https",
+      let host = components.host,
+      !host.isEmpty,
+      Self.allowsHTTPSOrLocalHTTP(scheme, host: host),
       components.user == nil,
       components.password == nil,
       components.query == nil,
@@ -117,6 +126,47 @@ struct APISettings: Codable, Equatable {
       return nil
     }
     return components.url
+  }
+
+  static func allowsHTTPSOrLocalHTTP(_ scheme: String, host: String) -> Bool {
+    scheme == "https" || (scheme == "http" && isLocalNetworkHost(host))
+  }
+
+  static func isLocalNetworkHost(_ host: String) -> Bool {
+    let host = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+    if host == "localhost" {
+      return true
+    }
+    if host.hasSuffix(".local") {
+      let prefix = host.dropLast(6)
+      return !prefix.isEmpty && prefix.last != "."
+    }
+    if host.contains(":") {
+      return host == "::1" || host.hasPrefix("fe80:") || host.hasPrefix("fc") || host.hasPrefix("fd")
+    }
+    let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+    guard labels.count == 4 else {
+      return false
+    }
+    var parts: [UInt8] = []
+    parts.reserveCapacity(4)
+    for label in labels {
+      let text = String(label)
+      guard let octet = UInt8(text), String(octet) == text else {
+        return false
+      }
+      parts.append(octet)
+    }
+    if parts[0] == 127 || parts[0] == 10 || parts[0] == 169 && parts[1] == 254 {
+      return true
+    }
+    if parts[0] == 192 && parts[1] == 168 {
+      return true
+    }
+    if parts[0] == 172 && (16 ... 31).contains(parts[1]) {
+      return true
+    }
+    return false
   }
 
   var browserSetupURL: URL? {
@@ -131,6 +181,18 @@ struct APISettings: Codable, Equatable {
 
   var isConfigured: Bool {
     baseURL != nil
+  }
+
+  var refusesPublicHTTP: Bool {
+    guard
+      let components = URLComponents(string: trimmedBaseURL),
+      components.scheme?.lowercased() == "http",
+      let host = components.host,
+      !host.isEmpty
+    else {
+      return false
+    }
+    return !Self.isLocalNetworkHost(host)
   }
 
   var isAuthenticated: Bool {
@@ -662,6 +724,15 @@ struct PlanTargetRequest: Encodable {
 
   private struct Category: Encodable {
     let target: PlanTargetPayload?
+
+    func encode(to encoder: Encoder) throws {
+      var container = encoder.container(keyedBy: CodingKeys.self)
+      try container.encode(target, forKey: .target)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+      case target
+    }
   }
 }
 
@@ -1293,6 +1364,9 @@ struct TransactionWriteRequest: Codable, Equatable {
   let approved: Bool
   let flagColor: String?
   let subtransactions: [TransactionSubtransactionWriteRequest]
+  /// Client-minted create identity. The server returns the existing row when
+  /// this value is replayed, so a lost response cannot double-post money.
+  var importID: String?
 
   private enum CodingKeys: String, CodingKey {
     case accountID
@@ -1306,6 +1380,7 @@ struct TransactionWriteRequest: Codable, Equatable {
     case approved
     case flagColor
     case subtransactions
+    case importID
   }
 
   init(
@@ -1319,7 +1394,8 @@ struct TransactionWriteRequest: Codable, Equatable {
     cleared: ClearedState,
     approved: Bool,
     flagColor: String?,
-    subtransactions: [TransactionSubtransactionWriteRequest]
+    subtransactions: [TransactionSubtransactionWriteRequest],
+    importID: String? = nil
   ) {
     self.accountID = accountID
     self.date = date
@@ -1332,6 +1408,7 @@ struct TransactionWriteRequest: Codable, Equatable {
     self.approved = approved
     self.flagColor = flagColor
     self.subtransactions = subtransactions
+    self.importID = importID
   }
 
   func encode(to encoder: Encoder) throws {
@@ -1347,6 +1424,7 @@ struct TransactionWriteRequest: Codable, Equatable {
     try container.encode(approved, forKey: .approved)
     try container.encode(flagColor, forKey: .flagColor)
     try container.encode(subtransactions, forKey: .subtransactions)
+    try container.encodeIfPresent(importID, forKey: .importID)
   }
 
   /// Captures made before split support did not persist this key. Keep those
@@ -1365,6 +1443,7 @@ struct TransactionWriteRequest: Codable, Equatable {
     approved = try container.decode(Bool.self, forKey: .approved)
     flagColor = try container.decodeIfPresent(String.self, forKey: .flagColor)
     subtransactions = try container.decodeIfPresent([TransactionSubtransactionWriteRequest].self, forKey: .subtransactions) ?? []
+    importID = try container.decodeIfPresent(String.self, forKey: .importID)
   }
 }
 
@@ -1382,6 +1461,10 @@ struct PendingTransaction: Codable, Equatable, Identifiable {
 
   init(request: TransactionWriteRequest, connectionFingerprint: String, capturedAt: Date = .now) {
     id = UUID()
+    var request = request
+    if request.importID == nil {
+      request.importID = id.uuidString.lowercased()
+    }
     self.request = request
     self.connectionFingerprint = connectionFingerprint
     self.capturedAt = capturedAt
@@ -1498,6 +1581,7 @@ struct TransactionSubtransactionDraft: Equatable {
 
 struct TransactionDraft: Equatable {
   var id: String?
+  var importID: String?
   var direction: EntryDirection = .outflow
   /// Magnitude only; the Outflow/Inflow toggle owns the sign.
   var amountMagnitudeMilli = 0
@@ -1516,7 +1600,9 @@ struct TransactionDraft: Equatable {
   var flag: FlagColour = .none
   var memo = ""
 
-  init() {}
+  init() {
+    importID = UUID().uuidString.lowercased()
+  }
 
   init(transaction: Transaction) {
     id = transaction.id
@@ -1551,6 +1637,7 @@ struct TransactionDraft: Equatable {
     subtransactions = transaction.subtransactions.map { TransactionSubtransactionDraft(subtransaction: $0, preserveID: false) }
     flag = FlagColour(rawValue: transaction.flagColor ?? "") ?? .none
     memo = transaction.memo ?? ""
+    importID = UUID().uuidString.lowercased()
   }
 
   var isTransfer: Bool {
@@ -1638,7 +1725,8 @@ struct TransactionDraft: Equatable {
       cleared: clearedState,
       approved: true,
       flagColor: flag.rawValue.isEmpty ? nil : flag.rawValue,
-      subtransactions: subtransactions.compactMap { $0.writeRequest() }
+      subtransactions: subtransactions.compactMap { $0.writeRequest() },
+      importID: importID
     )
   }
 }

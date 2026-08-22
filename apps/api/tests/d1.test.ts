@@ -19,9 +19,38 @@ const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch=originalFetch; for (const db of databases.splice(0)) db.close(); });
 
 describe("D1 foundation", () => {
+  test("unique live import_id cleanup recalculates denormalized account balances", async () => {
+    const db = sqlite();
+    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql"]) {
+      db.exec(await Bun.file(new URL(path, import.meta.url)).text());
+    }
+    db.run("INSERT INTO plans (id, name) VALUES ('p', 'Plan')");
+    db.run("INSERT INTO accounts (id, plan_id, name, opening_balance_milli, balance_milli, cleared_balance_milli, uncleared_balance_milli) VALUES ('a', 'p', 'Cash', 1000, -8000, -9000, 1000)");
+    db.run("INSERT INTO accounts (id, plan_id, name, opening_balance_milli, balance_milli, cleared_balance_milli, uncleared_balance_milli) VALUES ('b', 'p', 'Card', 0, -9990, -9990, 0)");
+    db.run("INSERT INTO transactions (id, plan_id, account_id, date, amount_milli, import_id, cleared, updated_at) VALUES ('old', 'p', 'a', '2026-01-01', -5000, 'dup', 'cleared', '2026-01-01T00:00:00Z')");
+    db.run("INSERT INTO transactions (id, plan_id, account_id, date, amount_milli, import_id, cleared, updated_at) VALUES ('new', 'p', 'a', '2026-01-02', -4000, 'dup', 'uncleared', '2026-01-02T00:00:00Z')");
+    db.run("INSERT INTO transactions (id, plan_id, account_id, date, amount_milli, import_id, cleared, updated_at) VALUES ('other', 'p', 'b', '2026-01-01', -9990, 'dup', 'cleared', '2026-01-01T00:00:00Z')");
+    db.exec(await Bun.file(new URL("../d1-migrations/0010_unique_live_import_id.sql", import.meta.url)).text());
+    expect(db.query("SELECT id, account_id, amount_milli FROM transactions ORDER BY id").all()).toEqual([
+      { id: "new", account_id: "a", amount_milli: -4000 },
+      { id: "other", account_id: "b", amount_milli: -9990 },
+    ]);
+    expect(db.query("SELECT balance_milli, cleared_balance_milli, uncleared_balance_milli FROM accounts WHERE id = 'a'").get()).toEqual({
+      balance_milli: -3000,
+      cleared_balance_milli: 1000,
+      uncleared_balance_milli: -4000,
+    });
+    expect(db.query("SELECT balance_milli FROM accounts WHERE id = 'b'").get()).toEqual({ balance_milli: -9990 });
+    expect(db.query("SELECT name FROM pragma_index_info('idx_transactions_live_import_id') ORDER BY seqno").all()).toEqual([
+      { name: "plan_id" },
+      { name: "account_id" },
+      { name: "import_id" },
+    ]);
+  });
+
   test("canonical schema applies cleanly with auth constraints and cascades", async () => {
     const db = sqlite();
-    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
+    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
     const objects = db.query("SELECT name,type FROM sqlite_master WHERE type IN ('table','index','trigger')").all() as Array<{name:string;type:string}>;
     const names = new Set(objects.map((row) => row.name));
     for (const name of ["plans","import_sessions","import_rows","ynab_raw_objects","plan_month_assignments","plan_month_category_targets","scheduled_transaction_edits","scheduled_subtransaction_edits","scheduled_transaction_snapshot_assertions","account_reconciliation_assertions","users","auth_identities","sessions","plan_memberships","password_credentials","auth_setup","login_rate_limits","sync_runs","sync_attempts","sync_transition_receipts","audit_events","write_state","write_commands","write_assertions","idx_sessions_user","idx_sessions_expiry","idx_plan_memberships_user_plan","transactions_assign_ledger_sequence","accounts_transfer_payee_plan_guard"]) expect(names.has(name)).toBeTrue();
@@ -1301,7 +1330,7 @@ describe("D1 foundation", () => {
 
   test("versioned D1 metadata and import-session writes replay and reject collisions", async () => {
     const db = sqlite();
-    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql"]) {
+    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql"]) {
       db.exec(await Bun.file(new URL(path, import.meta.url)).text());
     }
     const metadata = new D1MetadataRepository(new D1Database(fakeD1(db)));
@@ -1345,7 +1374,7 @@ describe("D1 foundation", () => {
 
 async function ledgerSqlite(): Promise<Database> {
   const db = sqlite();
-  for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
+  for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
   db.run("INSERT INTO plans (id, name) VALUES ('p', 'Plan')");
   db.run("INSERT INTO accounts (id, plan_id, name) VALUES ('a', 'p', 'Cash')");
   return db;

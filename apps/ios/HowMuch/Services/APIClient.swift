@@ -470,13 +470,24 @@ struct APIClient {
       throw APIClientError.invalidBaseURL
     }
 
-    components.path = path.hasPrefix("/") ? path : "/\(path)"
+    let requestPath = Self.encodedPath(path)
+    let basePath = components.percentEncodedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    components.percentEncodedPath = basePath.isEmpty ? requestPath : "/\(basePath)\(requestPath)"
     components.queryItems = queryItems.isEmpty ? nil : queryItems
 
     guard let url = components.url else {
       throw APIClientError.invalidBaseURL
     }
     return url
+  }
+
+  private static func encodedPath(_ path: String) -> String {
+    let trimmed = path.hasPrefix("/") ? String(path.dropFirst()) : path
+    let segments = trimmed.split(separator: "/", omittingEmptySubsequences: false).map { segment in
+      segment.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/")))
+        ?? String(segment)
+    }
+    return "/" + segments.joined(separator: "/")
   }
 
   private var decoder: JSONDecoder {

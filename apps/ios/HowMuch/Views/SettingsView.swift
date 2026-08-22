@@ -70,10 +70,12 @@ struct SettingsView: View {
           Text("Server")
         } footer: {
           if !draft.trimmedBaseURL.isEmpty && !draft.isConfigured {
-            Text("Enter a complete HTTP or HTTPS URL with a host.")
+            Text(draft.refusesPublicHTTP
+              ? "HTTP is only for this device or this LAN."
+              : "Enter a complete HTTP or HTTPS URL with a host.")
               .foregroundStyle(Theme.outflow)
           } else {
-            Text("New installs use the production service. You can enter an HTTP LAN address for local development, but first-owner setup can only be opened from an HTTPS site.")
+            Text("New installs use the production service. HTTP is allowed only for this device or this LAN. First-owner setup can only be opened from an HTTPS site.")
           }
         }
         .disabled(isTesting)
@@ -113,6 +115,7 @@ struct SettingsView: View {
 
         Section {
           TextField("Username", text: $draft.username)
+            .textContentType(.username)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
 
