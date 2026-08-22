@@ -87,6 +87,7 @@ enum AppTab: Hashable {
 private struct RootView: View {
   @Environment(AppModel.self) private var model
   @State private var tab: AppTab = .accounts
+  @State private var appliedReportsGeneration = 0
 
   var body: some View {
     @Bindable var model = model
@@ -146,10 +147,15 @@ private struct RootView: View {
       await model.refreshAll()
     }
     .task(id: ReflectVisitKey(tab: tab, generation: model.reportsRefreshGeneration)) {
-      guard tab == .reflect, model.reportsRefreshGeneration > 0 else {
+      guard tab == .reflect else {
+        return
+      }
+      let generation = model.reportsRefreshGeneration
+      guard generation > appliedReportsGeneration else {
         return
       }
       await model.refreshReflectOverview(quiet: true)
+      appliedReportsGeneration = generation
     }
     .sheet(isPresented: $model.isShowingSettings) {
       SettingsView(settings: model.settings) { nextSettings in
