@@ -301,7 +301,7 @@ Minimum create body:
 }
 ```
 
-If a single create request includes an `import_id` that already exists for the plan, the API returns the existing transaction rather than creating a duplicate. This makes retrying OpenClaw writes safe even when the caller uses the single-transaction endpoint instead of the bulk import endpoint.
+If a single create request includes an `import_id` that already exists for the plan, the API returns the existing transaction rather than creating a duplicate. A new `import_id` always inserts, even when account, date, amount, and payee match an existing row. Bulk `POST /transactions/import` still fuzzy-matches those fields. This makes retrying OpenClaw and iOS writes safe without collapsing two identical same-day captures.
 
 Individual transaction:
 

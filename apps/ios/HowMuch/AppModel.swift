@@ -86,7 +86,7 @@ final class AppModel {
   private var activeViewPrefsScope: String?
   private var saveMessageToken = 0
   /// Invalidates an in-flight older-page response when the first page reloads.
-  private(set) var ledgerPageGeneration = 0
+  private var ledgerPageGeneration = 0
   private var referenceGeneration = 0
   private var scheduledTransactionsGeneration = 0
   private var reportsGeneration = 0

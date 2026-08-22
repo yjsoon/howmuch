@@ -348,7 +348,7 @@ async function handleV1(
       if (!input) {
         return apiError(400, "bad_request", "transaction is required");
       }
-      const duplicate = input?.import_id ? await repo.findDuplicateTransaction(planId, input) : null;
+      const duplicate = input?.import_id ? await repo.findTransactionByImportId(planId, input.import_id) : null;
       if (duplicate) {
         return json({
           data: {

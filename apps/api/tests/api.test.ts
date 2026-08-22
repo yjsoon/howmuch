@@ -628,6 +628,33 @@ describe("YNAB-compatible API", () => {
     expect(listed.data.transactions).toHaveLength(1);
   });
 
+  test("creates two same-day captures that differ only by import id", async () => {
+    const shared = {
+      account_id: "acct-1",
+      date: "2026-06-10",
+      amount: -4500,
+      payee_name: "Coffee",
+    };
+
+    const first = await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: { transaction: { ...shared, import_id: "capture-1" } },
+    });
+    const second = await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: { transaction: { ...shared, import_id: "capture-2" } },
+    });
+    const firstJson = await first.json();
+    const secondJson = await second.json();
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(secondJson.data.transaction.id).not.toBe(firstJson.data.transaction.id);
+
+    const listed = await (await request("/v1/plans/plan-test/transactions")).json();
+    expect(listed.data.transactions).toHaveLength(2);
+  });
+
   test("serializes concurrent local SQLite transaction writes", async () => {
     const responses = await Promise.all([
       request("/v1/plans/plan-test/transactions", {

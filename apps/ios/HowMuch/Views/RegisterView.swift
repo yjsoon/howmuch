@@ -550,7 +550,6 @@ private struct AccountReconciliationSheet: View {
     var hasher = Hasher()
     hasher.combine(accountID)
     hasher.combine(statementDate)
-    hasher.combine(model.ledgerPageGeneration)
     for transaction in model.transactions where transaction.accountID == accountID {
       hasher.combine(transaction.id)
       hasher.combine(transaction.date)
