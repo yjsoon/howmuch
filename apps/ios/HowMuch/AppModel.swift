@@ -542,12 +542,12 @@ final class AppModel {
   }
 
   private func rebuildLookups() {
-    accountsByID = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0) })
+    accountsByID = Dictionary(accounts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     categoriesByID = Dictionary(
       flattenedCategories.map { ($0.id, $0) },
       uniquingKeysWith: { first, _ in first }
     )
-    payeesByID = Dictionary(uniqueKeysWithValues: payees.map { ($0.id, $0) })
+    payeesByID = Dictionary(payees.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
   }
 
   var currencyFormat: CurrencyFormat? {
@@ -841,14 +841,7 @@ final class AppModel {
       enteredDate: enteredDate
     )
 
-    // A materialised occurrence affects the register, account balances,
-    // category activity, and the schedule's next date in one server-side
-    // operation. Re-fetch rather than trying to reconstruct those effects.
-    async let reference: Void = refreshReferenceData(quiet: true)
-    async let ledger: Void = refreshLedger(quiet: true)
-    async let schedules: Void = refreshScheduledTransactions(quiet: true)
-    _ = await (reference, ledger, schedules)
-    planRefreshGeneration &+= 1
+    await refreshLedgerAndInvalidatePlan()
     showSaveMessage(result.completed ? "Entered final scheduled transaction" : "Entered scheduled transaction")
     return result
   }
@@ -870,10 +863,7 @@ final class AppModel {
       statementBalance: statementBalance
     )
 
-    async let reference: Void = refreshReferenceData(quiet: true)
-    async let ledger: Void = refreshLedger(quiet: true)
-    _ = await (reference, ledger)
-    planRefreshGeneration &+= 1
+    await refreshLedgerAndInvalidatePlan()
 
     let accountName = result.account.name
     let count = result.reconciledTransactionCount
@@ -1104,6 +1094,7 @@ final class AppModel {
       transactions.sort { ($0.date, $0.id) > ($1.date, $1.id) }
       invalidateAccountUsage()
       planRefreshGeneration &+= 1
+      reportsRefreshGeneration &+= 1
       showSaveMessage(syncedCount == 1 ? "Synced 1 offline transaction" : "Synced \(syncedCount) offline transactions")
     } else if manual, !pendingTransactionsForLiveConnection.isEmpty {
       showSaveMessage("Couldn’t sync — will retry on the next refresh")

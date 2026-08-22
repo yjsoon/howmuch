@@ -30,7 +30,14 @@ describe("local schema migrations", () => {
             AND p.transfer_account_id=NEW.id AND p.deleted=0
         )
         BEGIN SELECT RAISE(ABORT, 'account transfer payee ownership failed'); END;
-        CREATE TABLE transactions (id TEXT PRIMARY KEY, payee_id TEXT REFERENCES payees(id));
+        CREATE TABLE transactions (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT,
+          import_id TEXT,
+          deleted INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          payee_id TEXT REFERENCES payees(id)
+        );
         INSERT INTO plans(id,name) VALUES ('p','Plan');
         INSERT INTO payees(id,plan_id,name,external_ynab_id) VALUES ('legacy-payee','p','Same merchant','legacy-payee');
         INSERT INTO transactions(id,payee_id) VALUES ('legacy-transaction','legacy-payee');

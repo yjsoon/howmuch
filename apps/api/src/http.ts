@@ -348,19 +348,34 @@ async function handleV1(
       if (!input) {
         return apiError(400, "bad_request", "transaction is required");
       }
-      const duplicate = input?.import_id ? await repo.findTransactionByImportId(planId, input.import_id) : null;
-      if (duplicate) {
+      const existing = input?.import_id ? await repo.findTransactionByImportId(planId, input.import_id) : null;
+      if (existing) {
         return json({
           data: {
-            transaction: duplicate,
-            transaction_ids: [duplicate.id],
+            transaction: existing,
+            transaction_ids: [existing.id],
             duplicate_import_ids: [input.import_id],
             server_knowledge: await repo.getServerKnowledge(planId),
           },
         });
       }
-      const created = await repo.createTransaction(planId, input);
-      return json({ data: { transaction: created, transaction_ids: [created.id], server_knowledge: await repo.getServerKnowledge(planId) } }, 201);
+      try {
+        const created = await repo.createTransaction(planId, input);
+        return json({ data: { transaction: created, transaction_ids: [created.id], server_knowledge: await repo.getServerKnowledge(planId) } }, 201);
+      } catch (error) {
+        const raced = input?.import_id ? await repo.findTransactionByImportId(planId, input.import_id) : null;
+        if (raced) {
+          return json({
+            data: {
+              transaction: raced,
+              transaction_ids: [raced.id],
+              duplicate_import_ids: [input.import_id],
+              server_knowledge: await repo.getServerKnowledge(planId),
+            },
+          });
+        }
+        throw error;
+      }
     }
     if (segments.length === 5 && segments[4] === "import" && method === "POST") {
       const body = await readJson(request);

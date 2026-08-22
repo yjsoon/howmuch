@@ -655,6 +655,33 @@ describe("YNAB-compatible API", () => {
     expect(listed.data.transactions).toHaveLength(2);
   });
 
+  test("collapses overlapping creates that share one import id", async () => {
+    const body = {
+      transaction: {
+        account_id: "acct-1",
+        date: "2026-06-10",
+        amount: -4500,
+        payee_name: "Coffee",
+        import_id: "capture-race",
+      },
+    };
+
+    const responses = await Promise.all([
+      request("/v1/plans/plan-test/transactions", { method: "POST", body }),
+      request("/v1/plans/plan-test/transactions", { method: "POST", body }),
+    ]);
+    const payloads = await Promise.all(responses.map((response) => response.json()));
+    const ids = payloads.map((payload) => payload.data.transaction.id);
+
+    expect(ids[0]).toBe(ids[1]);
+    const listed = await (await request("/v1/plans/plan-test/transactions")).json();
+    expect(listed.data.transactions).toHaveLength(1);
+    expect(listed.data.transactions[0].amount).toBe(-4500);
+    expect(db.query("SELECT name FROM sqlite_master WHERE name='idx_transactions_live_import_id'").get()).toEqual({
+      name: "idx_transactions_live_import_id",
+    });
+  });
+
   test("serializes concurrent local SQLite transaction writes", async () => {
     const responses = await Promise.all([
       request("/v1/plans/plan-test/transactions", {

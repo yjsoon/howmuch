@@ -74,6 +74,10 @@ export function applyMigrations(db: Database): void {
       version: "012_account_reconciliation_assertions",
       path: join(migrationsDir, "012_account_reconciliation_assertions.sql"),
     },
+    {
+      version: "013_unique_live_import_id",
+      path: join(migrationsDir, "013_unique_live_import_id.sql"),
+    },
   ];
 
   for (const migration of migrations) {
