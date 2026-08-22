@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, useApi } from "../api/client";
 import type { QuickEntrySplitLine, Transaction } from "../api/types";
+import { CategorySelect } from "../components/CategorySelect";
 import { splitCategoryGroups } from "../lib/categories";
 import { formatDate, todayIso, yesterdayIso } from "../lib/dates";
-import { formatMoney } from "../lib/money";
+import { formatMilliunitsInput, formatMoney, parseMilliunits } from "../lib/money";
 import { usePlan } from "../state/plan";
 
 type Direction = "spend" | "income" | "transfer";
@@ -18,12 +19,6 @@ type SplitLineDraft = {
 
 function newSplitLine(): SplitLineDraft {
   return { key: crypto.randomUUID(), categoryId: "", amount: "", memo: "" };
-}
-
-/** Whole cents, so split remainders never suffer float drift. */
-function toCents(value: string): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.round(parsed * 100) : 0;
 }
 
 export function QuickEntryPage() {
@@ -65,22 +60,23 @@ export function QuickEntryPage() {
   );
   const selectedTarget = transferTargets.find((account) => account.id === toAccountId) ?? transferTargets[0];
 
-  const amountCents = toCents(amount);
-  const splitRemainderCents = isSplit
-    ? amountCents - splitLines.reduce((sum, line) => sum + toCents(line.amount), 0)
+  const amountMilliunits = parseMilliunits(amount);
+  const splitRemainderMilliunits = isSplit
+    ? (amountMilliunits ?? 0) - splitLines.reduce((sum, line) => sum + (parseMilliunits(line.amount) ?? 0), 0)
     : 0;
 
   const canSave = Boolean(
     selectedAccount &&
-      Number(amount) > 0 &&
+      amountMilliunits !== null &&
+      amountMilliunits > 0 &&
       !saving &&
       (isTransfer
         ? Boolean(selectedTarget)
         : Boolean(payeeName.trim()) &&
           (!isSplit ||
             (splitLines.length >= 2 &&
-              splitRemainderCents === 0 &&
-              splitLines.every((line) => toCents(line.amount) > 0)))),
+              splitRemainderMilliunits === 0 &&
+              splitLines.every((line) => (parseMilliunits(line.amount) ?? 0) > 0)))),
   );
 
   const clearStatus = () => {
@@ -119,11 +115,11 @@ export function QuickEntryPage() {
     setSaving(true);
     setError(null);
     try {
-      const sign = direction === "income" ? "" : "-";
+      const signedAmount = (direction === "income" ? 1 : -1) * (parseMilliunits(amount) ?? 0);
       const subtransactions: QuickEntrySplitLine[] | undefined =
         !isTransfer && isSplit
           ? splitLines.map((line) => ({
-              amount: `${sign}${line.amount}`,
+              amount: formatMilliunitsInput((direction === "income" ? 1 : -1) * (parseMilliunits(line.amount) ?? 0)),
               category_id: line.categoryId || null,
               memo: line.memo.trim() || null,
             }))
@@ -132,7 +128,7 @@ export function QuickEntryPage() {
         client_id: clientIdRef.current,
         account_id: selectedAccount,
         date,
-        amount: `${sign}${amount}`,
+        amount: formatMilliunitsInput(signedAmount),
         payee_id: isTransfer ? (selectedTarget?.transfer_payee_id ?? null) : null,
         payee_name: isTransfer ? null : payeeName.trim(),
         category_id: isTransfer || isSplit ? null : categoryId || null,
@@ -311,25 +307,14 @@ export function QuickEntryPage() {
           {!isTransfer && !isSplit && (
             <label className="field">
               <span className="field-label">Category (optional)</span>
-              <select
-                name="category"
+              <CategorySelect
                 value={categoryId}
-                onChange={(event) => {
+                onChange={(value) => {
                   clearStatus();
-                  setCategoryId(event.target.value);
+                  setCategoryId(value);
                 }}
-              >
-                <option value="">Uncategorised</option>
-                {[...orderedGroups.primary, ...orderedGroups.quiet].map((group) => (
-                  <optgroup key={group.id} label={group.name}>
-                    {group.categories.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+                groups={orderedGroups}
+              />
             </label>
           )}
 
@@ -339,10 +324,10 @@ export function QuickEntryPage() {
                 {isSplit ? "Remove split" : "Split into multiple categories"}
               </button>
               {isSplit && (
-                <span className={splitRemainderCents === 0 ? "split-remainder split-remainder-ok" : "split-remainder"}>
-                  {splitRemainderCents === 0
+                <span className={splitRemainderMilliunits === 0 ? "split-remainder split-remainder-ok" : "split-remainder"}>
+                  {splitRemainderMilliunits === 0
                     ? "Lines match the total."
-                    : `${formatMoney(splitRemainderCents * 10, { sign: true })} left to assign.`}
+                    : `${formatMoney(splitRemainderMilliunits, { sign: true })} left to assign.`}
                 </span>
               )}
             </div>
@@ -352,22 +337,12 @@ export function QuickEntryPage() {
             <div className="split-lines">
               {splitLines.map((line, index) => (
                 <div key={line.key} className="split-line">
-                  <select
+                  <CategorySelect
                     aria-label={`Split line ${index + 1} category`}
                     value={line.categoryId}
-                    onChange={(event) => updateSplitLine(line.key, { categoryId: event.target.value })}
-                  >
-                    <option value="">Uncategorised</option>
-                    {[...orderedGroups.primary, ...orderedGroups.quiet].map((group) => (
-                      <optgroup key={group.id} label={group.name}>
-                        {group.categories.map((category) => (
-                          <option key={category.id} value={category.id}>
-                            {category.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
+                    onChange={(value) => updateSplitLine(line.key, { categoryId: value })}
+                    groups={orderedGroups}
+                  />
                   <input
                     type="text"
                     placeholder="Line memo"

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { formatMoney } from "../lib/money";
 import { useFilters } from "../state/filters";
@@ -140,7 +140,9 @@ export function Shell() {
           {logoutError && <span className="mobile-masthead-error" role="alert">{logoutError}</span>}
         </header>
         <main className="report-body">
-          <Outlet />
+          <Suspense fallback={<div className="boot-message">Loading…</div>}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>

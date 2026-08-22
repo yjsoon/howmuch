@@ -6,6 +6,7 @@ import { runDailyScheduledMaterialization } from "../../api/src/scheduled-materi
 import { runD1ScheduledYnabSync } from "../../api/src/d1-scheduled-sync-runner";
 import { createHandler } from "../../api/src/http";
 import { D1AuthStore } from "../../api/src/auth-store";
+import { withDocumentSecurityHeaders } from "./security-headers";
 
 const YNAB_TRANSITION_CRON = "10 16 * * *";
 const SCHEDULED_MATERIALIZATION_CRON = "5 16 * * *";
@@ -39,7 +40,9 @@ export default {
       });
     }
     if (!pathname.startsWith("/api/") && !pathname.startsWith("/v1/") && pathname !== "/health") {
-      return env.ASSETS.fetch(request);
+      // SPA documents are usually served by Assets directly. `_headers` in
+      // `apps/web/public` is the production policy; this wrap covers Worker-first fetches.
+      return withDocumentSecurityHeaders(await env.ASSETS.fetch(request));
     }
 
     const config = workerConfig(env);

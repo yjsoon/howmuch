@@ -11,10 +11,12 @@ import type {
   Transaction,
   TransactionUpdateInput,
 } from "../api/types";
+import { CategorySelect } from "../components/CategorySelect";
 import { FilterRail } from "../components/FilterRail";
 import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
-import { formatDate } from "../lib/dates";
-import { formatAmount, formatMoney } from "../lib/money";
+import { formatDate, todayIso } from "../lib/dates";
+import { stableHash } from "../lib/hash";
+import { formatAmount, formatMilliunitsInput, formatMoney, parseMilliunits } from "../lib/money";
 import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
 
@@ -223,7 +225,7 @@ export function TransactionsPage() {
   const openReconcile = () => {
     setReconcileDraft({
       accountId: selectedAccount?.id ?? "",
-      statementDate: today(),
+      statementDate: todayIso(),
       statementBalance: "",
       operationSeed: crypto.randomUUID(),
       reviewReady: false,
@@ -252,7 +254,7 @@ export function TransactionsPage() {
 
   const reviewReconciliation = () => {
     if (!reconcileDraft) return;
-    const statementBalance = parseExactMilliunits(reconcileDraft.statementBalance);
+    const statementBalance = parseMilliunits(reconcileDraft.statementBalance);
     if (!reconcileDraft.accountId) {
       setMutationError("Choose the account you want to reconcile.");
       return;
@@ -273,7 +275,7 @@ export function TransactionsPage() {
 
   const submitReconciliation = async () => {
     if (!reconcileDraft) return;
-    const statementBalance = parseExactMilliunits(reconcileDraft.statementBalance);
+    const statementBalance = parseMilliunits(reconcileDraft.statementBalance);
     if (statementBalance === null) {
       setMutationError("Enter the exact statement balance with no more than three decimal places.");
       return;
@@ -394,7 +396,7 @@ export function TransactionsPage() {
         ? "No transactions match this search."
         : "No transactions match these filters.";
   const reconciliationBusy = reconcileDraft ? mutatingId === `reconcile:${reconcileDraft.accountId}` : false;
-  const reviewedStatementBalance = reconcileDraft ? parseExactMilliunits(reconcileDraft.statementBalance) : null;
+  const reviewedStatementBalance = reconcileDraft ? parseMilliunits(reconcileDraft.statementBalance) : null;
   // `useApi` intentionally keeps its previous response while a new key starts
   // loading. Never allow that response to authorise a different draft.
   const reconciliationPreviewData = reconciliationPreview.data
@@ -825,25 +827,6 @@ type SplitDraft = {
   transferTransactionId: string | null;
 };
 
-function milliunitsInput(value: number): string {
-  return (value / 1000).toFixed(3).replace(/\.?0+$/, "");
-}
-
-function parseExactMilliunits(value: string): number | null {
-  const match = value.trim().match(/^([+-]?)(\d+)(?:\.(\d{1,3}))?$/);
-  if (!match) {
-    return null;
-  }
-  const amount = Number(match[2]) * 1000 + Number((match[3] ?? "").padEnd(3, "0"));
-  const signed = match[1] === "-" ? -amount : amount;
-  return Number.isSafeInteger(signed) ? signed : null;
-}
-
-function parseMilliunits(value: string): number | null {
-  const amount = Number(value);
-  return Number.isFinite(amount) ? Math.round(amount * 1000) : null;
-}
-
 function isReconciliationMismatchDetail(value: unknown): value is ReconciliationMismatchDetail {
   if (!value || typeof value !== "object") {
     return false;
@@ -863,20 +846,6 @@ function reconciliationSuccess(result: AccountReconciliationResult): string {
   const accountName = result.account?.name ?? "account";
   const count = result.reconciled_transaction_count;
   return `${accountName} reconciled through ${formatDate(result.statement_date)}. ${count} cleared transaction${count === 1 ? "" : "s"} matched ${formatMoney(result.statement_balance)}.`;
-}
-
-function stableHash(value: string): string {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
-}
-
-function today(): string {
-  const date = new Date();
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function payeeInput(name: string, originalId: string | null, originalName: string, payees: Payee[]): Pick<TransactionUpdateInput, "payee_id" | "payee_name"> {
@@ -912,7 +881,7 @@ function TransactionEditor({
   const isTransfer = Boolean(transaction.transfer_account_id);
   const direction = transaction.amount < 0 ? -1 : 1;
   const [date, setDate] = useState(transaction.date);
-  const [amount, setAmount] = useState(milliunitsInput(Math.abs(transaction.amount)));
+  const [amount, setAmount] = useState(formatMilliunitsInput(Math.abs(transaction.amount)));
   const [payeeName, setPayeeName] = useState(transaction.payee_name ?? "");
   const [categoryId, setCategoryId] = useState(transaction.category_id ?? "");
   const [memo, setMemo] = useState(transaction.memo ?? "");
@@ -922,7 +891,7 @@ function TransactionEditor({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [splitLines, setSplitLines] = useState<SplitDraft[]>(() => (transaction.subtransactions ?? []).map((line) => ({
     id: line.id,
-    amount: milliunitsInput(line.amount),
+    amount: formatMilliunitsInput(line.amount),
     payeeId: line.payee_id,
     originalPayeeName: line.payee_name ?? "",
     payeeName: line.payee_name ?? "",
@@ -1113,15 +1082,3 @@ function TransactionEditor({
   );
 }
 
-function CategorySelect({ value, onChange, groups }: { value: string; onChange: (value: string) => void; groups: ReturnType<typeof splitCategoryGroups> }) {
-  return (
-    <select value={value} onChange={(event) => onChange(event.target.value)}>
-      <option value="">Uncategorised</option>
-      {[...groups.primary, ...groups.quiet].map((group) => (
-        <optgroup key={group.id} label={group.name}>
-          {group.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-        </optgroup>
-      ))}
-    </select>
-  );
-}

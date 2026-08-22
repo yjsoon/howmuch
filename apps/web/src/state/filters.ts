@@ -25,6 +25,59 @@ function parseList(value: string | null): string[] {
   return value ? value.split(",").filter(Boolean) : [];
 }
 
+export function filtersFromSearch(
+  params: URLSearchParams,
+  options: { defaultRange: () => { from?: string; to?: string }; prefs?: ReturnType<typeof loadPrefs> },
+): Filters {
+  const prefs = options.prefs ?? {};
+  const explicitFrom = params.get("from") ?? undefined;
+  const explicitTo = params.get("to") ?? undefined;
+  const range =
+    explicitFrom || explicitTo
+      ? { from: explicitFrom, to: explicitTo }
+      : params.get("range") === "all"
+        ? {}
+        : options.defaultRange();
+
+  const accountsParam = params.get("accounts");
+  const accountIds =
+    accountsParam === null ? (prefs.accountIds ?? []) : accountsParam === "all" ? [] : parseList(accountsParam);
+
+  const interval = (params.get("interval") ?? prefs.interval) as Interval | null;
+
+  return {
+    from: range.from,
+    to: range.to,
+    accountIds,
+    categoryIds: parseList(params.get("categories")),
+    interval: interval && INTERVALS.includes(interval) ? interval : "month",
+  };
+}
+
+export function applyFilterPatch(previous: URLSearchParams, patch: Partial<Filters>): URLSearchParams {
+  const next = new URLSearchParams(previous);
+  if ("from" in patch) {
+    writeParam(next, "from", patch.from);
+  }
+  if ("to" in patch) {
+    writeParam(next, "to", patch.to);
+  }
+  if ("from" in patch || "to" in patch) {
+    // Both cleared means an explicit "all time", not "use the default".
+    writeParam(next, "range", next.get("from") || next.get("to") ? undefined : "all");
+  }
+  if ("accountIds" in patch && patch.accountIds !== undefined) {
+    writeParam(next, "accounts", patch.accountIds.join(",") || "all");
+  }
+  if ("categoryIds" in patch && patch.categoryIds !== undefined) {
+    writeParam(next, "categories", patch.categoryIds.join(",") || undefined);
+  }
+  if (patch.interval) {
+    writeParam(next, "interval", patch.interval);
+  }
+  return next;
+}
+
 /**
  * Explicit choices live in the URL search string so report views are linkable
  * and carry across tabs. When a param is absent, each report falls back to its
@@ -41,66 +94,20 @@ export function useFilters(options?: FilterOptions): {
   const { planId } = usePlan();
   const defaultRange = options?.defaultRange ?? monthRange;
 
-  const filters = useMemo<Filters>(() => {
-    const prefs = loadPrefs();
-    const explicitFrom = params.get("from") ?? undefined;
-    const explicitTo = params.get("to") ?? undefined;
-    const range =
-      explicitFrom || explicitTo
-        ? { from: explicitFrom, to: explicitTo }
-        : params.get("range") === "all"
-          ? {}
-          : defaultRange();
-
-    const accountsParam = params.get("accounts");
-    const accountIds =
-      accountsParam === null ? (prefs.accountIds ?? []) : accountsParam === "all" ? [] : parseList(accountsParam);
-
-    const interval = (params.get("interval") ?? prefs.interval) as Interval | null;
-
-    return {
-      from: range.from,
-      to: range.to,
-      accountIds,
-      categoryIds: parseList(params.get("categories")),
-      interval: interval && INTERVALS.includes(interval) ? interval : "month",
-    };
-  }, [params, defaultRange]);
+  const filters = useMemo<Filters>(
+    () => filtersFromSearch(params, { defaultRange, prefs: loadPrefs() }),
+    [params, defaultRange],
+  );
 
   const setFilters = useCallback(
     (patch: Partial<Filters>) => {
-      if (patch.accountIds) {
+      if ("accountIds" in patch && patch.accountIds !== undefined) {
         savePrefs({ accountIds: patch.accountIds });
       }
       if (patch.interval) {
         savePrefs({ interval: patch.interval });
       }
-      setParams(
-        (previous) => {
-          const next = new URLSearchParams(previous);
-          if ("from" in patch) {
-            writeParam(next, "from", patch.from);
-          }
-          if ("to" in patch) {
-            writeParam(next, "to", patch.to);
-          }
-          if ("from" in patch || "to" in patch) {
-            // Both cleared means an explicit "all time", not "use the default".
-            writeParam(next, "range", next.get("from") || next.get("to") ? undefined : "all");
-          }
-          if (patch.accountIds) {
-            writeParam(next, "accounts", patch.accountIds.join(",") || "all");
-          }
-          if (patch.categoryIds) {
-            writeParam(next, "categories", patch.categoryIds.join(",") || undefined);
-          }
-          if (patch.interval) {
-            writeParam(next, "interval", patch.interval);
-          }
-          return next;
-        },
-        { replace: true },
-      );
+      setParams((previous) => applyFilterPatch(previous, patch), { replace: true });
     },
     [setParams],
   );

@@ -38,9 +38,10 @@ export function SpendingPage() {
     const rows = hideQuiet
       ? report.data.groups.filter((row) => !isQuietGroupName(row.category_group_name))
       : report.data.groups;
-    const groups = new Map<string, { name: string; amount: number; rows: typeof rows }>();
+    const groups = new Map<string, { id: string; name: string; amount: number; rows: typeof rows }>();
     for (const row of rows) {
       const group = groups.get(row.category_group_id) ?? {
+        id: row.category_group_id,
         name: row.category_group_name,
         amount: 0,
         rows: [],
@@ -51,11 +52,14 @@ export function SpendingPage() {
     }
     const total = rows.reduce((sum, row) => sum + row.amount, 0);
     const totalTransactions = rows.reduce((sum, row) => sum + row.transaction_count, 0);
+    const largest = Math.max(0, ...rows.map((row) => row.amount));
     return {
-      grouped: [...groups.values()].sort((a, b) => b.amount - a.amount),
+      grouped: [...groups.values()]
+        .map((group) => ({ ...group, rows: [...group.rows].sort((a, b) => b.amount - a.amount) }))
+        .sort((a, b) => b.amount - a.amount),
       total,
       excluded: report.data.total - total,
-      maxAmount: rows[0]?.amount ?? 1,
+      maxAmount: largest > 0 ? largest : 1,
       totalTransactions,
       topCategory: rows[0] ?? null,
       averageTransaction: totalTransactions > 0 ? total / totalTransactions : null,
@@ -130,7 +134,7 @@ export function SpendingPage() {
                   </thead>
                   <tbody>
                     {grouped.map((group) => (
-                      <Fragment key={group.name}>
+                      <Fragment key={group.id}>
                         <tr className="group-row">
                           <td>{group.name}</td>
                           <td className="col-bar"></td>
@@ -148,7 +152,7 @@ export function SpendingPage() {
                             <td className="col-bar">
                               <span
                                 className="share-bar"
-                                style={{ width: `${(row.amount / maxAmount) * 100}%` }}
+                                style={{ width: `${Math.min(100, (row.amount / maxAmount) * 100)}%` }}
                               />
                             </td>
                             <td className="num">{formatAmount(row.amount)}</td>

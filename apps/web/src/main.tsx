@@ -7,19 +7,24 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import "./app.css";
 
-import { StrictMode } from "react";
+import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
 import { Shell } from "./components/Shell";
-import { AgeOfMoneyPage } from "./pages/AgeOfMoney";
-import { IncomePage } from "./pages/Income";
-import { NetWorthPage } from "./pages/NetWorth";
-import { PlanPage } from "./pages/Plan";
-import { QuickEntryPage } from "./pages/QuickEntry";
-import { ScheduledTransactionsPage } from "./pages/ScheduledTransactions";
-import { SpendingPage } from "./pages/Spending";
-import { TransactionsPage } from "./pages/Transactions";
 import { PlanProvider } from "./state/plan";
+
+const AgeOfMoneyPage = lazy(() => import("./pages/AgeOfMoney").then((module) => ({ default: module.AgeOfMoneyPage })));
+const IncomePage = lazy(() => import("./pages/Income").then((module) => ({ default: module.IncomePage })));
+const NetWorthPage = lazy(() => import("./pages/NetWorth").then((module) => ({ default: module.NetWorthPage })));
+const PlanPage = lazy(() => import("./pages/Plan").then((module) => ({ default: module.PlanPage })));
+const QuickEntryPage = lazy(() => import("./pages/QuickEntry").then((module) => ({ default: module.QuickEntryPage })));
+const ScheduledTransactionsPage = lazy(() => import("./pages/ScheduledTransactions").then((module) => ({ default: module.ScheduledTransactionsPage })));
+const SpendingPage = lazy(() => import("./pages/Spending").then((module) => ({ default: module.SpendingPage })));
+const TransactionsPage = lazy(() => import("./pages/Transactions").then((module) => ({ default: module.TransactionsPage })));
+
+function RouteFallback() {
+  return <div className="boot-message">Loading…</div>;
+}
 
 const router = createBrowserRouter([
   {
@@ -36,11 +41,13 @@ const router = createBrowserRouter([
       { path: "*", element: <Navigate to="/plan" replace /> },
     ],
   },
-  { path: "/add", element: <PlanProvider><QuickEntryPage /></PlanProvider> },
+  { path: "/add", element: <PlanProvider><Suspense fallback={<RouteFallback />}><QuickEntryPage /></Suspense></PlanProvider> },
 ]);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <RouterProvider router={router} />
+    <Suspense fallback={<RouteFallback />}>
+      <RouterProvider router={router} />
+    </Suspense>
   </StrictMode>,
 );
