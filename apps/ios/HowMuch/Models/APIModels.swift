@@ -144,9 +144,14 @@ struct APISettings: Codable, Equatable {
     guard labels.count == 4 else {
       return false
     }
-    let parts = labels.compactMap { UInt8(String($0)) }
-    guard parts.count == 4 else {
-      return false
+    var parts: [UInt8] = []
+    parts.reserveCapacity(4)
+    for label in labels {
+      let text = String(label)
+      guard let octet = UInt8(text), String(octet) == text else {
+        return false
+      }
+      parts.append(octet)
     }
     if parts[0] == 127 || parts[0] == 10 || parts[0] == 169 && parts[1] == 254 {
       return true
