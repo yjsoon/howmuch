@@ -2129,9 +2129,146 @@ tr:hover .share-bar {
   transform: translate(2px, 2px);
 }
 
+/* ── Public API documentation ──────────────────────────────── */
+
+.api-docs-page {
+  min-height: 100vh;
+}
+
+.api-docs-header {
+  position: sticky;
+  z-index: 10;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 68px;
+  padding: 10px max(24px, calc((100vw - 920px) / 2));
+  color: var(--paper);
+  background: #242722;
+  border-bottom: 1px solid #121411;
+}
+
+.api-docs-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.api-docs-brand strong,
+.api-docs-brand small {
+  display: block;
+}
+
+.api-docs-brand strong {
+  font: 600 20px/1.1 var(--font-display);
+}
+
+.api-docs-brand small {
+  margin-top: 2px;
+  color: #c4c5be;
+  font-size: 11px;
+}
+
+.api-docs-source {
+  padding: 7px 10px;
+  color: #deddd6;
+  font-size: 12px;
+  text-underline-offset: 3px;
+}
+
+.api-docs-content {
+  width: min(100% - 48px, 920px);
+  margin: 0 auto;
+  padding: 58px 0 96px;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.api-docs-content h1,
+.api-docs-content h2,
+.api-docs-content h3 {
+  color: var(--ink);
+  font-family: var(--font-display);
+  line-height: 1.15;
+}
+
+.api-docs-content h1 {
+  margin: 0 0 20px;
+  font-size: clamp(40px, 6vw, 62px);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+}
+
+.api-docs-content h2 {
+  margin: 64px 0 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--rule-strong);
+  font-size: 31px;
+  font-weight: 500;
+}
+
+.api-docs-content h3 {
+  margin: 42px 0 14px;
+  font-size: 23px;
+  font-weight: 500;
+}
+
+.api-docs-content p,
+.api-docs-content ul,
+.api-docs-content ol {
+  max-width: 76ch;
+}
+
+.api-docs-content li + li {
+  margin-top: 5px;
+}
+
+.api-docs-content code {
+  padding: 0.12em 0.32em;
+  font-family: var(--font-figures);
+  font-size: 0.88em;
+  background: var(--accent-press);
+  border-radius: 2px;
+}
+
+.api-docs-content pre {
+  max-width: 100%;
+  margin: 18px 0 26px;
+  padding: 18px 20px;
+  overflow-x: auto;
+  color: #f1efe7;
+  background: #242722;
+  border: 1px solid #121411;
+  border-radius: 3px;
+}
+
+.api-docs-content pre code {
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border-radius: 0;
+}
+
 /* ── Small screens ──────────────────────────────────────────── */
 
 @media (max-width: 720px) {
+  .api-docs-header {
+    padding-inline: 16px;
+  }
+
+  .api-docs-content {
+    width: min(100% - 32px, 920px);
+    padding: 38px 0 72px;
+    font-size: 14px;
+  }
+
+  .api-docs-content h2 {
+    margin-top: 48px;
+  }
+
   .shell {
     display: block;
     min-height: 0;
