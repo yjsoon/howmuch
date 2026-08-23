@@ -64,8 +64,10 @@ function parseTransactionInput(item: Record<string, unknown>, label: string): Tr
   if (!patch.date) throw new ValidationError(`${label} date must be an ISO date (YYYY-MM-DD)`);
   if (patch.amount === undefined) throw new ValidationError(`${label} amount must be integer milliunits`);
   const importId = Object.hasOwn(item, "import_id") ? nullableString(item.import_id, "import_id") : undefined;
+  const id = optionalString(item.id);
   return {
     ...patch,
+    ...(id ? { id } : {}),
     account_id: patch.account_id,
     date: patch.date,
     amount: patch.amount,

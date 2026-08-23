@@ -23,6 +23,11 @@ describe("transaction collection parse", () => {
     expect(() => parseTransactionUpdates({
       transactions: Array.from({ length: MAX_TRANSACTION_WRITE_BATCH + 1 }, (_, index) => ({ id: `t${index}` })),
     })).toThrow(`${MAX_TRANSACTION_WRITE_BATCH}`);
-    expect(parseTransactionCreates([{ account_id: "a", date: "2026-01-01", amount: -1 }])).toHaveLength(1);
+    expect(parseTransactionCreates([{ id: "txn-custom", account_id: "a", date: "2026-01-01", amount: -1 }])).toEqual([
+      { id: "txn-custom", account_id: "a", date: "2026-01-01", amount: -1 },
+    ]);
+    expect(() => parseTransactionCreates(
+      Array.from({ length: MAX_TRANSACTION_WRITE_BATCH + 1 }, () => ({ account_id: "a", date: "2026-01-01", amount: -1 })),
+    )).toThrow(`${MAX_TRANSACTION_WRITE_BATCH}`);
   });
 });

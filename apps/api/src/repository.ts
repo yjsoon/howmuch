@@ -18,7 +18,6 @@ import {
   type AccountReconciliationResult,
   type ScheduledWriteOptions,
   type TransactionPage,
-  type TransactionBatchCreateResult,
   type TransactionBatchResult,
   type TransactionBatchUpdate,
   type TransactionLookup,

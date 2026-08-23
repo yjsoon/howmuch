@@ -1014,6 +1014,32 @@ describe("YNAB-compatible API", () => {
     expect(bothKeys.status).toBe(200);
     expect((await bothKeys.json()).data.transactions[0].memo).toBe("id-wins");
     expect(db.query("SELECT import_id FROM transactions WHERE id = ?").get(keptId)).toEqual({ import_id: null });
+
+    const duplicate = await request("/v1/plans/plan-test/transactions", {
+      method: "PATCH",
+      body: { transactions: [{ id: keptId, memo: "once" }, { id: keptId, memo: "twice" }] },
+    });
+    expect(duplicate.status).toBe(400);
+    expect(db.query("SELECT memo FROM transactions WHERE id = ?").get(keptId)).toEqual({ memo: "id-wins" });
+
+    await createTransaction({
+      account_id: "acct-1",
+      date: "2026-06-10",
+      amount: -100,
+      import_id: "shared-import",
+    });
+    await createTransaction({
+      account_id: "acct-2",
+      date: "2026-06-10",
+      amount: -200,
+      import_id: "shared-import",
+    });
+    const ambiguous = await request("/v1/plans/plan-test/transactions", {
+      method: "PATCH",
+      body: { transactions: [{ import_id: "shared-import", memo: "which" }] },
+    });
+    expect(ambiguous.status).toBe(400);
+    expect((await ambiguous.json()).error.detail).toBe("import_id matches more than one transaction");
   });
 
   test("creates multiple transactions on the collection POST used by YNAB", async () => {
@@ -1021,14 +1047,15 @@ describe("YNAB-compatible API", () => {
       method: "POST",
       body: {
         transactions: [
-          { account_id: "acct-1", date: "2026-06-10", amount: -1100, payee_name: "One", import_id: "bulk-create-1" },
+          { id: "bulk-named", account_id: "acct-1", date: "2026-06-10", amount: -1100, payee_name: "One", import_id: "bulk-create-1" },
           { account_id: "acct-1", date: "2026-06-11", amount: -2200, payee_name: "Two" },
         ],
       },
     });
     expect(response.status).toBe(201);
     const body = await response.json();
-    expect(body.data.transaction_ids).toHaveLength(2);
+    expect(body.data.transaction_ids).toEqual(["bulk-named", body.data.transaction_ids[1]]);
+    expect(body.data.transactions[0].id).toBe("bulk-named");
     expect(body.data.transactions).toHaveLength(2);
     expect(body.data.transactions.map((transaction: { payee_name: string }) => transaction.payee_name)).toEqual(["One", "Two"]);
     expect(body.data.duplicate_import_ids).toEqual([]);
