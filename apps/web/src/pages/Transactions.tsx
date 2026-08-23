@@ -203,6 +203,27 @@ export function TransactionsPage() {
     }
   };
 
+  const toggleCleared = async (transaction: Transaction) => {
+    if (transaction.cleared === "reconciled") return;
+    const cleared = transaction.cleared === "cleared" ? "uncleared" : "cleared";
+    setMutatingId(transaction.id);
+    setMutationError(null);
+    setMutationSuccess(null);
+    try {
+      const updated = await api.updateTransaction(planId, transaction.id, { cleared });
+      setPage((current) => ({
+        ...current,
+        transactions: current.transactions.map((loaded) => loaded.id === updated.id ? updated : loaded),
+      }));
+      reload();
+      setReconciliationPreviewGeneration((generation) => generation + 1);
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setMutatingId(null);
+    }
+  };
+
   const deleteTransaction = async (transaction: Transaction) => {
     setMutatingId(transaction.id);
     setMutationError(null);
@@ -720,6 +741,7 @@ export function TransactionsPage() {
                     <th className="num">Outflow</th>
                     <th className="num">Inflow</th>
                     <th className="register-actions-heading"><span className="sr-only">Actions</span></th>
+                    <th className="register-status-heading"><span className="sr-only">Cleared status</span></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -766,6 +788,13 @@ export function TransactionsPage() {
                           Delete
                         </button>
                       </td>
+                      <td className="register-status">
+                        <ClearedStatus
+                          transaction={txn}
+                          busy={mutatingId === txn.id}
+                          onToggle={() => void toggleCleared(txn)}
+                        />
+                      </td>
                     </tr>,
                     ...(txn.subtransactions ?? []).map((sub) => (
                       <tr key={sub.id} className="split-line-row">
@@ -780,6 +809,7 @@ export function TransactionsPage() {
                         </td>
                         <td className="num amount-negative">{sub.amount < 0 ? formatAmount(sub.amount) : ""}</td>
                         <td className="num amount-positive">{sub.amount > 0 ? formatAmount(sub.amount) : ""}</td>
+                        <td />
                         <td />
                       </tr>
                     )),
@@ -803,6 +833,42 @@ export function TransactionsPage() {
         </section>
       )}
     </>
+  );
+}
+
+function ClearedStatus({
+  transaction,
+  busy,
+  onToggle,
+}: {
+  transaction: Transaction;
+  busy: boolean;
+  onToggle: () => void;
+}) {
+  if (transaction.cleared === "reconciled") {
+    return (
+      <span className="cleared-status cleared-status-reconciled" aria-label="Reconciled" title="Reconciled">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="M6.5 8V6a3.5 3.5 0 0 1 7 0v2M5 8h10v8H5z" />
+        </svg>
+      </span>
+    );
+  }
+
+  const cleared = transaction.cleared === "cleared";
+  const payee = transaction.payee_name ?? (transaction.transfer_account_id ? "transfer" : "transaction");
+  return (
+    <button
+      type="button"
+      className={`cleared-status cleared-status-toggle${cleared ? " cleared-status-cleared" : ""}`}
+      onClick={onToggle}
+      disabled={busy}
+      aria-pressed={cleared}
+      aria-label={`Mark ${payee} on ${formatDate(transaction.date)} ${cleared ? "uncleared" : "cleared"}`}
+      title={cleared ? "Cleared — click to mark uncleared" : "Uncleared — click to mark cleared"}
+    >
+      C
+    </button>
   );
 }
 
@@ -1081,4 +1147,3 @@ function TransactionEditor({
     </section>
   );
 }
-
