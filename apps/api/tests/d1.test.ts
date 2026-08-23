@@ -291,6 +291,21 @@ describe("D1 foundation", () => {
     expect((await repo.listTransactions("p")).map((row) => row.id)).toContain("api-row");
     await expect(repo.createTransaction("p", { id: "api-row", account_id: "a", date: "2026-07-01", amount: -100 })).rejects.toThrow("already exists");
     expect((await repo.updateTransaction("p", "api-row", { amount: -125 })).amount).toBe(-125);
+    await repo.createTransaction("p", { id: "api-row-2", account_id: "a", date: "2026-07-01", amount: -50 });
+    const batch = await repo.updateTransactions("p", [
+      { lookup: { kind: "id", id: "api-row" }, patch: { memo: "one" } },
+      { lookup: { kind: "id", id: "api-row-2" }, patch: { memo: "two" } },
+    ]);
+    expect(batch.transaction_ids).toEqual(["api-row", "api-row-2"]);
+    expect(batch.transactions.map((row) => row.memo)).toEqual(["one", "two"]);
+    const createdMany = await repo.createTransactions("p", [
+      { account_id: "a", date: "2026-07-03", amount: -10, import_id: "d1-batch-1" },
+      { account_id: "a", date: "2026-07-04", amount: -20 },
+    ]);
+    expect(createdMany.transaction_ids).toHaveLength(2);
+    expect((await repo.createTransactions("p", [
+      { account_id: "a", date: "2026-07-03", amount: -10, import_id: "d1-batch-1" },
+    ])).duplicate_import_ids).toEqual(["d1-batch-1"]);
 
     const csv = { id: "csv-row", account_id: "a", date: "2026-07-02", amount: -50, import_id: "csv:1", payee_name: "Shop" };
     await repo.createTransaction("p", csv, { autoLink: false });

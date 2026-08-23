@@ -997,12 +997,6 @@ describe("YNAB-compatible API", () => {
     });
     expect(empty.status).toBe(400);
 
-    const bothKeys = await request("/v1/plans/plan-test/transactions", {
-      method: "PATCH",
-      body: { transactions: [{ id: keptId, import_id: "nope", memo: "changed" }] },
-    });
-    expect(bothKeys.status).toBe(400);
-
     const missing = await request("/v1/plans/plan-test/transactions", {
       method: "PATCH",
       body: { transactions: [{ id: "missing-txn", memo: "changed" }, { id: keptId, memo: "changed" }] },
@@ -1012,6 +1006,14 @@ describe("YNAB-compatible API", () => {
     const stored = db.query("SELECT memo FROM transactions WHERE id = ?").get(keptId);
     expect(stored).toEqual({ memo: "keep" });
     expect(db.query("SELECT server_knowledge FROM plans WHERE id = 'plan-test'").get()).toEqual({ server_knowledge: knowledge });
+
+    const bothKeys = await request("/v1/plans/plan-test/transactions", {
+      method: "PATCH",
+      body: { transactions: [{ id: keptId, import_id: "nope", memo: "id-wins" }] },
+    });
+    expect(bothKeys.status).toBe(200);
+    expect((await bothKeys.json()).data.transactions[0].memo).toBe("id-wins");
+    expect(db.query("SELECT import_id FROM transactions WHERE id = ?").get(keptId)).toEqual({ import_id: null });
   });
 
   test("creates multiple transactions on the collection POST used by YNAB", async () => {
@@ -1043,8 +1045,9 @@ describe("YNAB-compatible API", () => {
     expect(replay.status).toBe(201);
     const replayed = await replay.json();
     expect(replayed.data.duplicate_import_ids).toEqual(["bulk-create-1"]);
-    expect(replayed.data.transactions).toHaveLength(1);
-    expect(replayed.data.transactions[0].payee_name).toBe("Three");
+    expect(replayed.data.transaction_ids).toHaveLength(2);
+    expect(replayed.data.transactions).toHaveLength(2);
+    expect(replayed.data.transactions[1].payee_name).toBe("Three");
 
     const bothKeys = await request("/v1/plans/plan-test/transactions", {
       method: "POST",
