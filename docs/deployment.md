@@ -23,10 +23,14 @@ For a first remote deployment, migrate before deploying:
 ```sh
 cd apps/worker
 wrangler d1 migrations apply DB --remote --env preview
-wrangler deploy --env preview
+bun run deploy:preview
 wrangler d1 migrations apply DB --remote
-wrangler deploy
+bun run deploy
 ```
+
+The deployment scripts build the web app immediately before Wrangler uploads
+its assets. Use them rather than invoking `wrangler deploy` directly so `/docs`
+and the rest of the SPA cannot be missing or stale.
 
 Keep `HOWMUCH_API_TOKEN` as an encrypted secret. Use the local, validated import, parity, and D1-bootstrap tools in `docs/ynab-migration.md` for any YNAB work. They copy the verified ledger, provenance, and raw mirror into an otherwise clean target. Do not use an unverified SQLite file or ad-hoc table copy.
 

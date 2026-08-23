@@ -1,8 +1,6 @@
 import { useEffect } from "react";
-import { marked } from "marked";
+import ReactMarkdown from "react-markdown";
 import apiContract from "../../../../docs/api-contract.md?raw";
-
-const apiContractHtml = marked.parse(apiContract) as string;
 
 export function ApiDocsPage() {
   useEffect(() => {
@@ -30,11 +28,9 @@ export function ApiDocsPage() {
           View source
         </a>
       </header>
-      <main
-        className="api-docs-content"
-        // The HTML is generated from the repository-owned contract at build time.
-        dangerouslySetInnerHTML={{ __html: apiContractHtml }}
-      />
+      <main className="api-docs-content">
+        <ReactMarkdown>{apiContract}</ReactMarkdown>
+      </main>
     </div>
   );
 }

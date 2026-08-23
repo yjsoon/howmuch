@@ -2179,6 +2179,10 @@ tr:hover .share-bar {
   text-underline-offset: 3px;
 }
 
+.api-docs-header a:focus-visible {
+  outline-color: var(--paper);
+}
+
 .api-docs-content {
   width: min(100% - 48px, 920px);
   margin: 0 auto;
