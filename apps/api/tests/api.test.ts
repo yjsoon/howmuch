@@ -202,6 +202,15 @@ describe("YNAB-compatible API", () => {
       { id: "other-row", cleared: "cleared" },
       { id: "uncleared", cleared: "uncleared" },
     ]);
+    const staleToggle = await request("/v1/plans/plan-test/transactions/eligible/cleared", {
+      method: "PATCH", body: { expected_cleared: "cleared", cleared: "uncleared" },
+    });
+    expect(staleToggle.status).toBe(409);
+    expect((await staleToggle.json()).error.name).toBe("transaction_state_conflict");
+    expect((await request("/v1/plans/plan-test/transactions/eligible", {
+      method: "PATCH", body: { transaction: { cleared: "uncleared" } },
+    })).status).toBe(409);
+    expect(db.query("SELECT cleared FROM transactions WHERE id='eligible'").get()).toEqual({ cleared: "reconciled" });
 
     const replay = await request(route, {
       method: "POST", headers: { "idempotency-key": "reconcile-bank-august" },
@@ -240,6 +249,21 @@ describe("YNAB-compatible API", () => {
     expect(staleBatch).toThrow("stale account reconciliation");
     expect(db.query("SELECT name FROM accounts WHERE id='race-account'").get()).toEqual({ name: "Before" });
     expect(db.query("SELECT COUNT(*) count FROM account_reconciliation_assertions WHERE command_id='stale-local-reconcile'").get()).toEqual({ count: 0 });
+  });
+
+  test("serializes generic SQLite edits with reconciliation", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertAccount("plan-test", { id: "edit-race-account", name: "Edit race" });
+    await repo.createTransaction("plan-test", {
+      id: "edit-race-row", account_id: "edit-race-account", date: "2026-08-01", amount: -100, cleared: "cleared",
+    });
+
+    await Promise.all([
+      repo.updateTransaction("plan-test", "edit-race-row", { memo: "kept" }),
+      repo.reconcileAccount("plan-test", "edit-race-account", "2026-08-31", -100, { operationId: "edit-race-reconcile" }),
+    ]);
+
+    expect(db.query("SELECT memo,cleared FROM transactions WHERE id='edit-race-row'").get()).toEqual({ memo: "kept", cleared: "reconciled" });
   });
 
   test("materialises one occurrence early, advances from the anchored date, and replays without duplicates", async () => {
@@ -741,6 +765,31 @@ describe("YNAB-compatible API", () => {
     ]);
     expect(db.query("SELECT COUNT(*) AS count FROM transactions").get()).toEqual({ count: 4 });
     expect(db.query("SELECT balance_milli FROM accounts WHERE id = 'acct-1'").get()).toEqual({ balance_milli: -15000 });
+  });
+
+  test("serializes SQLite transaction deletion with an account move", async () => {
+    const firstRepository = new LedgerRepository(db, "plan-test");
+    const secondRepository = new LedgerRepository(db, "plan-test");
+    await firstRepository.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await firstRepository.upsertAccount("plan-test", { id: "delete-race-a", name: "Delete race A" });
+    await firstRepository.upsertAccount("plan-test", { id: "delete-race-b", name: "Delete race B" });
+    await firstRepository.createTransaction("plan-test", {
+      id: "delete-race-row", account_id: "delete-race-a", date: "2026-06-14", amount: -16000,
+    });
+
+    await Promise.all([
+      firstRepository.updateTransaction("plan-test", "delete-race-row", { account_id: "delete-race-b" }),
+      secondRepository.deleteTransaction("plan-test", "delete-race-row"),
+    ]);
+
+    expect(db.query("SELECT account_id,deleted FROM transactions WHERE id='delete-race-row'").get()).toEqual({
+      account_id: "delete-race-b",
+      deleted: 1,
+    });
+    expect(db.query("SELECT id,balance_milli FROM accounts WHERE id IN ('delete-race-a','delete-race-b') ORDER BY id").all()).toEqual([
+      { id: "delete-race-a", balance_milli: 0 },
+      { id: "delete-race-b", balance_milli: 0 },
+    ]);
   });
 
   test("returns YNAB-shaped errors", async () => {
@@ -1500,6 +1549,17 @@ describe("transfers and splits", () => {
     expect(memoPatch.status).toBe(200);
     const memoPatched = await memoPatch.json();
     expect(memoPatched.data.transaction.amount).toBe(50000);
+
+    const clearedPatch = await request(`/v1/plans/plan-test/transactions/${mirrorId}/cleared`, {
+      method: "PATCH",
+      body: { expected_cleared: "cleared", cleared: "uncleared" },
+    });
+    expect(clearedPatch.status).toBe(200);
+    expect((await clearedPatch.json()).data.transaction.cleared).toBe("uncleared");
+    expect((await request(`/v1/plans/plan-test/transactions/${mirrorId}/cleared`, {
+      method: "PATCH",
+      body: { expected_cleared: "cleared", cleared: "uncleared" },
+    })).status).toBe(409);
   });
 
   test("rejects split parents that are themselves transfers", async () => {

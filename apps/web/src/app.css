@@ -921,6 +921,61 @@ select:focus-visible {
   cursor: progress;
 }
 
+.register-status-heading,
+.register-status {
+  width: 1%;
+  padding-inline: 8px !important;
+  text-align: center !important;
+  white-space: nowrap;
+}
+
+.register-status {
+  vertical-align: middle !important;
+}
+
+.cleared-status {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-soft);
+}
+
+.cleared-status-toggle {
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-family: var(--font-figures);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.cleared-status-toggle:hover:not(:disabled) {
+  color: var(--green);
+  background: var(--green-wash);
+}
+
+.cleared-status-cleared,
+.cleared-status-reconciled {
+  color: var(--green);
+}
+
+.cleared-status-toggle:disabled {
+  cursor: progress;
+  opacity: 0.55;
+}
+
+.cleared-status-reconciled svg {
+  width: 18px;
+  height: 18px;
+  fill: var(--green-wash);
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
 .transaction-editor {
   margin-top: 16px;
   padding: 14px 0 2px;

@@ -47,6 +47,9 @@ export class D1TransactionRepository {
       const old = snapshot.transaction;
       if (!old || old.deleted) throw new Error("Transaction not found");
       if (old.plan_id !== planId) throw new Error("Transaction belongs to another plan");
+      if (old.cleared === "reconciled" && patch.cleared !== undefined && patch.cleared !== "reconciled") {
+        throw new Error("reconciled transaction state conflict");
+      }
       const merged: TransactionInput = {
         id: transactionId, account_id: patch.account_id ?? old.account_id, date: patch.date ?? old.date,
         amount: patch.amount ?? old.amount_milli, memo: patch.memo === undefined ? old.memo : patch.memo,
@@ -68,6 +71,31 @@ export class D1TransactionRepository {
         deleted: Boolean(old.deleted), subtransactions: patch.subtransactions === undefined ? snapshot.subs.map(subInput) : patch.subtransactions,
       };
       return this.planUpsert("update", planId, merged, snapshot, stable, patch.payee_id !== undefined, fingerprint, context, true);
+    });
+  }
+
+  async updateCleared(
+    planId: string,
+    transactionId: string,
+    expectedCleared: "uncleared" | "cleared",
+    cleared: "uncleared" | "cleared",
+    context?: D1WriteContext,
+  ): Promise<Record<string, any>> {
+    const stable = identity(transactionId, context);
+    const fingerprint = requestHash({ expectedCleared, cleared });
+    this.assertContext(planId, context);
+    return this.write("cleared", planId, stable, fingerprint, context, async (snapshot) => {
+      const old = snapshot.transaction;
+      if (!old || old.deleted) throw new Error("Transaction not found");
+      if (old.plan_id !== planId) throw new Error("Transaction belongs to another plan");
+      if (old.cleared !== expectedCleared) throw new Error("transaction cleared state conflict");
+      const body = [
+        assertion(stable.commandId, "graph_update_target", transactionId, planId),
+        statement("UPDATE transactions SET cleared=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND plan_id=? AND deleted=0", [cleared, transactionId, planId]),
+        recalculate(old.account_id),
+        knowledge(planId, transactionId),
+      ];
+      return makePlan(stable.commandId, snapshot.writeVersion, transactionId, planId, "cleared", fingerprint, context, body);
     });
   }
 
@@ -181,7 +209,8 @@ export class D1TransactionRepository {
       if (input.payee_id) body.push(assertion(stable.commandId, "transfer_payee", input.payee_id, planId));
       body.push(assertion(stable.commandId, "upsert_transaction", transferId, planId));
       body.push(assertion(stable.commandId, "mirror_transaction", transferId, input.id!));
-      body.push(upsertTransaction({ id: transferId, planId, accountId: transferAccount, date: input.date, amount: -input.amount, memo: input.memo, cleared: input.source_kind === "scheduled-transaction" ? (target.type === "cash" ? "cleared" : "uncleared") : input.cleared, approved: input.approved, payeeId: sourcePayee.id, payeeName: sourcePayee.name, transferAccountId: input.account_id, transferTransactionId: input.id! }));
+      const existingMirror = snapshot.mirrors.find((row) => row.id === transferId);
+      body.push(upsertTransaction({ id: transferId, planId, accountId: transferAccount, date: input.date, amount: -input.amount, memo: input.memo, cleared: existingMirror?.cleared ?? (input.source_kind === "scheduled-transaction" ? (target.type === "cash" ? "cleared" : "uncleared") : input.cleared), approved: input.approved, payeeId: sourcePayee.id, payeeName: sourcePayee.name, transferAccountId: input.account_id, transferTransactionId: input.id! }));
       touched.add(transferId);
     } else if (transferAccount) {
       const target = await this.db.get<Record<string, any>>("SELECT id FROM accounts WHERE id=$1 AND plan_id=$2 AND deleted=0", [transferAccount, planId]);
@@ -222,7 +251,8 @@ export class D1TransactionRepository {
         if (!sourcePayee) throw new Error("Source account transfer payee not found");
         body.push(assertion(stable.commandId, "upsert_transaction", subMirror, planId));
         body.push(assertion(stable.commandId, "mirror_transaction", subMirror, id));
-        body.push(upsertTransaction({ id: subMirror, planId, accountId: subTarget, date: input.date, amount: -sub.amount, memo: sub.memo, cleared: input.source_kind === "scheduled-transaction" && target.type === "cash" ? "cleared" : "uncleared", approved: input.approved, payeeId: sourcePayee.id, payeeName: sourcePayee.name, transferAccountId: input.account_id, transferTransactionId: id }));
+        const existingMirror = snapshot.mirrors.find((row) => row.id === subMirror);
+        body.push(upsertTransaction({ id: subMirror, planId, accountId: subTarget, date: input.date, amount: -sub.amount, memo: sub.memo, cleared: existingMirror?.cleared ?? (input.source_kind === "scheduled-transaction" && target.type === "cash" ? "cleared" : "uncleared"), approved: input.approved, payeeId: sourcePayee.id, payeeName: sourcePayee.name, transferAccountId: input.account_id, transferTransactionId: id }));
         keptMirrors.add(subMirror); touched.add(subMirror);
       } else if (subTarget) {
         const target = await this.db.get<Record<string, any>>("SELECT id FROM accounts WHERE id=$1 AND plan_id=$2 AND deleted=0", [subTarget,planId]);
