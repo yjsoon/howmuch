@@ -1060,6 +1060,9 @@ final class AppModel {
       if let index = transactions.firstIndex(where: { $0.id == saved.id }) {
         transactions[index] = saved
       }
+      if let index = unapprovedTransactions.firstIndex(where: { $0.id == saved.id }) {
+        unapprovedTransactions[index] = saved
+      }
       showSaveMessage(cleared == .cleared ? "Marked transaction cleared" : "Marked transaction uncleared")
       Task { await refreshLedgerAndInvalidatePlan() }
     } catch {
