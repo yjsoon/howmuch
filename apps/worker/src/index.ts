@@ -55,7 +55,7 @@ export default {
     const database = new HowMuchD1Database(requiredBinding(env.DB, "DB"));
     assertCronMatchesMode(controller.cron, config.transitionReadOnly);
 
-    if (config.transitionReadOnly) {
+    if (controller.cron === YNAB_TRANSITION_CRON) {
       const result = await runD1ScheduledYnabSync({
         db: database,
         config,
@@ -105,8 +105,7 @@ function assertCronMatchesMode(cron: string | undefined, transitionReadOnly: boo
   if (cron !== YNAB_TRANSITION_CRON && cron !== SCHEDULED_MATERIALIZATION_CRON) {
     throw new Error(`Unknown scheduled cron: ${cron ?? "missing"}`);
   }
-  const expected = transitionReadOnly ? YNAB_TRANSITION_CRON : SCHEDULED_MATERIALIZATION_CRON;
-  if (cron !== expected) {
+  if (transitionReadOnly && cron !== YNAB_TRANSITION_CRON) {
     throw new Error(`Scheduled cron ${cron} does not match transition read-only mode`);
   }
 }

@@ -195,7 +195,7 @@ describe("D1 foundation", () => {
     expect(await Bun.file(new URL("../../../bun.lock", import.meta.url)).text()).not.toContain("@neondatabase/serverless");
   });
 
-  test("Worker routes exact crons by transition mode and never materialises in the YNAB branch", async () => {
+  test("Worker routes exact crons while allowing YNAB sync after financial writes are enabled", async () => {
     const db = await ledgerSqlite();
     const setup = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
     await setup.createScheduledTransaction("p", {
@@ -224,6 +224,7 @@ describe("D1 foundation", () => {
       ...baseEnv, HOWMUCH_TRANSITION_READ_ONLY: "true", HOWMUCH_YNAB_TOKEN: "secret-token", HOWMUCH_YNAB_PLAN_ID: "p",
     };
     const writableEnv = { ...baseEnv, HOWMUCH_TRANSITION_READ_ONLY: "false" };
+    const writableYnabEnv = { ...transitionEnv, HOWMUCH_TRANSITION_READ_ONLY: "false" };
     const transitionController = { cron: "10 16 * * *", scheduledTime: Date.UTC(2026, 7, 20, 16, 10) } as any;
     const logs: string[] = [];
     const originalLog = console.log;
@@ -245,8 +246,8 @@ describe("D1 foundation", () => {
 
       await expect(worker.scheduled({ cron: "5 16 * * *", scheduledTime: transitionController.scheduledTime } as any, transitionEnv as any))
         .rejects.toThrow("does not match transition read-only mode");
-      await expect(worker.scheduled({ cron: "10 16 * * *", scheduledTime: transitionController.scheduledTime } as any, writableEnv as any))
-        .rejects.toThrow("does not match transition read-only mode");
+      await expect(worker.scheduled(transitionController, writableYnabEnv as any)).resolves.toBeUndefined();
+      expect(JSON.parse(logs[2])).toMatchObject({ event: "ynab_delta_sync", status: "duplicate" });
       await expect(worker.scheduled({ cron: "0 0 * * *", scheduledTime: transitionController.scheduledTime } as any, transitionEnv as any))
         .rejects.toThrow("Unknown scheduled cron");
       await expect(worker.scheduled({ scheduledTime: transitionController.scheduledTime } as any, transitionEnv as any))
