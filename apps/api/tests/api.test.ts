@@ -767,6 +767,31 @@ describe("YNAB-compatible API", () => {
     expect(db.query("SELECT balance_milli FROM accounts WHERE id = 'acct-1'").get()).toEqual({ balance_milli: -15000 });
   });
 
+  test("serializes SQLite transaction deletion with an account move", async () => {
+    const firstRepository = new LedgerRepository(db, "plan-test");
+    const secondRepository = new LedgerRepository(db, "plan-test");
+    await firstRepository.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await firstRepository.upsertAccount("plan-test", { id: "delete-race-a", name: "Delete race A" });
+    await firstRepository.upsertAccount("plan-test", { id: "delete-race-b", name: "Delete race B" });
+    await firstRepository.createTransaction("plan-test", {
+      id: "delete-race-row", account_id: "delete-race-a", date: "2026-06-14", amount: -16000,
+    });
+
+    await Promise.all([
+      firstRepository.updateTransaction("plan-test", "delete-race-row", { account_id: "delete-race-b" }),
+      secondRepository.deleteTransaction("plan-test", "delete-race-row"),
+    ]);
+
+    expect(db.query("SELECT account_id,deleted FROM transactions WHERE id='delete-race-row'").get()).toEqual({
+      account_id: "delete-race-b",
+      deleted: 1,
+    });
+    expect(db.query("SELECT id,balance_milli FROM accounts WHERE id IN ('delete-race-a','delete-race-b') ORDER BY id").all()).toEqual([
+      { id: "delete-race-a", balance_milli: 0 },
+      { id: "delete-race-b", balance_milli: 0 },
+    ]);
+  });
+
   test("returns YNAB-shaped errors", async () => {
     const response = await handler(new Request("http://howmuch.test/v1/user"));
     const body = await response.json();

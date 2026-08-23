@@ -1096,13 +1096,13 @@ export class LedgerRepository {
   }
 
   async deleteTransaction(planId: string, transactionId: string): Promise<any> {
-    const existing = await this.getTransactionRow(planId, transactionId);
-    if (!existing) {
-      throw new NotFoundError("Transaction not found");
-    }
-
     const plan = newTransactionMutationPlan();
     await this.db.transaction(async () => {
+      const existing = await this.getTransactionRow(planId, transactionId);
+      if (!existing) {
+        throw new NotFoundError("Transaction not found");
+      }
+
       const removeIds = new Set<string>([transactionId]);
       const accountIds = new Set<string>([existing.account_id]);
 
