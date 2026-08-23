@@ -544,7 +544,6 @@ async function transactionListResponse(repo: LedgerStore, planId: string, filter
           server_knowledge: after,
           has_more: page.has_more,
           next_offset: page.next_offset,
-          total_count: page.total_count,
         },
       });
     }

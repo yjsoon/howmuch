@@ -139,6 +139,7 @@ final class AppModel {
     categoryGroups = []
     payees = []
     transactions = []
+    unapprovedTransactions = []
     scheduledTransactions = []
     spendingBreakdown = nil
     incomeVsSpending = nil
@@ -745,6 +746,7 @@ final class AppModel {
     categoryGroups = []
     payees = []
     transactions = []
+    unapprovedTransactions = []
     scheduledTransactions = []
     spendingBreakdown = nil
     incomeVsSpending = nil
@@ -1128,6 +1130,7 @@ final class AppModel {
 
     _ = try await apiClient.deleteTransaction(planID: settings.planID, transactionID: transaction.id)
     transactions.removeAll { $0.id == transaction.id }
+    unapprovedTransactions.removeAll { $0.id == transaction.id }
     showSaveMessage("Deleted \(transaction.payeeName ?? "transaction")")
     Task { await refreshLedgerAndInvalidatePlan() }
   }

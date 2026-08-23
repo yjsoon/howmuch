@@ -591,7 +591,6 @@ describe("YNAB-compatible API", () => {
     expect(first.data.transactions.map((transaction: { id: string }) => transaction.id)).toEqual(["page-d", "page-c"]);
     expect(first.data.has_more).toBeTrue();
     expect(first.data.next_offset).toBe(2);
-    expect(first.data.total_count).toBe(4);
 
     const second = await (await request("/v1/plans/plan-test/transactions?limit=2&offset=2")).json();
     expect(second.data.transactions.map((transaction: { id: string }) => transaction.id)).toEqual(["page-b", "page-a"]);

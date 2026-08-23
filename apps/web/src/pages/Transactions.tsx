@@ -112,17 +112,28 @@ export function TransactionsPage() {
   const approvalQueue = useApi(
     JSON.stringify({ planId, selectedAccountId, from: filters.from, to: filters.to, refreshGeneration, approvalQueue: true }),
     async () => {
-      const transactions: Transaction[] = [];
-      let offset = 0;
-      for (;;) {
-        const query = { since_date: filters.from, until_date: filters.to, type: "unapproved" as const, limit: 250, offset };
-        const result = selectedAccountId
-          ? await api.accountTransactions(planId, selectedAccountId, query)
-          : await api.transactions(planId, query);
-        transactions.push(...result.transactions);
-        if (!result.has_more || result.next_offset === null) return transactions;
-        offset = result.next_offset;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const transactions = new Map<string, Transaction>();
+        let expectedKnowledge: number | null = null;
+        let offset = 0;
+        let changed = false;
+        for (;;) {
+          const query = { since_date: filters.from, until_date: filters.to, type: "unapproved" as const, limit: 250, offset };
+          const result = selectedAccountId
+            ? await api.accountTransactions(planId, selectedAccountId, query)
+            : await api.transactions(planId, query);
+          expectedKnowledge ??= result.server_knowledge;
+          if (result.server_knowledge !== expectedKnowledge) {
+            changed = true;
+            break;
+          }
+          for (const transaction of result.transactions) transactions.set(transaction.id, transaction);
+          if (!result.has_more || result.next_offset === null) return [...transactions.values()];
+          offset = result.next_offset;
+        }
+        if (!changed) return [...transactions.values()];
       }
+      throw new Error("Transactions changed while the approval queue was loading. Try again.");
     },
   );
   const reconciliationPreviewInput = reconcileDraft?.reviewReady && reconcileDraft.accountId && reconcileDraft.statementDate
@@ -543,6 +554,12 @@ export function TransactionsPage() {
         <div className="status-panel status-panel-error">
           <p className="status-title">Could not load {page.loaded ? "older " : ""}transactions.</p>
           <p className="status-detail">{page.error}</p>
+        </div>
+      )}
+      {approvalQueue.error && (
+        <div className="status-panel status-panel-error" role="alert">
+          <p className="status-title">Could not load transactions awaiting approval.</p>
+          <p className="status-detail">{approvalQueue.error}</p>
         </div>
       )}
       {mutationError && (

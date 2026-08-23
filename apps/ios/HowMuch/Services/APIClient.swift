@@ -187,16 +187,34 @@ struct APIClient {
   }
 
   func fetchAllUnapprovedTransactions(planID: String) async throws -> [Transaction] {
-    var transactions: [Transaction] = []
-    var offset = 0
-    while true {
-      let page = try await fetchTransactions(planID: planID, offset: offset, type: "unapproved")
-      transactions.append(contentsOf: page.transactions)
-      guard page.hasMore, let nextOffset = page.nextOffset else {
-        return transactions
+    for _ in 0..<3 {
+      var transactions: [String: Transaction] = [:]
+      var expectedKnowledge: Int?
+      var offset = 0
+      var changed = false
+      while true {
+        let page = try await fetchTransactions(planID: planID, offset: offset, type: "unapproved")
+        guard let knowledge = page.serverKnowledge else {
+          throw APIClientError.invalidResponse
+        }
+        if let expectedKnowledge, knowledge != expectedKnowledge {
+          changed = true
+          break
+        }
+        expectedKnowledge = knowledge
+        for transaction in page.transactions {
+          transactions[transaction.id] = transaction
+        }
+        guard page.hasMore, let nextOffset = page.nextOffset else {
+          return transactions.values.sorted { ($0.date, $0.id) > ($1.date, $1.id) }
+        }
+        offset = nextOffset
       }
-      offset = nextOffset
+      if !changed {
+        return transactions.values.sorted { ($0.date, $0.id) > ($1.date, $1.id) }
+      }
     }
+    throw APIClientError.server("Transactions changed while the approval queue was loading. Try again.")
   }
 
   func fetchScheduledTransactions(planID: String) async throws -> [ScheduledTransaction] {

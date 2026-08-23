@@ -140,7 +140,7 @@ export interface TransactionPage {
   transactions: Transaction[];
   has_more: boolean;
   next_offset: number | null;
-  total_count: number;
+  server_knowledge: number;
 }
 
 export const api = {

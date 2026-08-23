@@ -853,7 +853,6 @@ struct TransactionsPayload: Decodable {
   let serverKnowledge: Int?
   let hasMore: Bool?
   let nextOffset: Int?
-  let totalCount: Int?
 }
 
 /// One bounded, newest-first ledger page from the HowMuch transaction API.

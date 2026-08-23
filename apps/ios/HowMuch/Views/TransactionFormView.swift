@@ -666,7 +666,7 @@ struct TransactionFormView: View {
 
   private func deleteTransaction() {
     guard let id = draft.id,
-          let transaction = model.transactions.first(where: { $0.id == id }) else {
+          let transaction = (model.transactions + model.unapprovedTransactions).first(where: { $0.id == id }) else {
       return
     }
     Task {

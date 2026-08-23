@@ -1249,7 +1249,6 @@ export class LedgerRepository {
       transactions: has_more ? transactions.slice(0, limit) : transactions,
       has_more,
       next_offset: has_more ? offset + limit : null,
-      total_count: result.totalCount,
     };
   }
 
@@ -1258,7 +1257,7 @@ export class LedgerRepository {
     filters: TransactionFilters,
     limit?: number,
     offset?: number,
-  ): Promise<{ transactions: any[]; totalCount: number }> {
+  ): Promise<{ transactions: any[] }> {
     await this.ensurePlan(planId);
     const clauses = ["t.plan_id = ?"];
     const params: any[] = [planId];
@@ -1314,7 +1313,6 @@ export class LedgerRepository {
       .query(
         `SELECT
            t.*,
-           COUNT(*) OVER() AS result_count,
            a.name AS account_name,
            p.name AS payee_name,
            c.name AS category_name,
@@ -1329,10 +1327,7 @@ export class LedgerRepository {
       )
       .all(...params) as Row[];
 
-    return {
-      transactions: await this.formatTransactions(rows),
-      totalCount: Number(rows[0]?.result_count ?? 0),
-    };
+    return { transactions: await this.formatTransactions(rows) };
   }
 
   async getTransaction(planId: string, transactionId: string, includeDeleted = false): Promise<any> {
