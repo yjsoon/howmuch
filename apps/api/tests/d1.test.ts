@@ -1262,6 +1262,11 @@ describe("D1 foundation", () => {
       { id: "a", cleared_balance_milli: -100, uncleared_balance_milli: 0 },
       { id: "b", cleared_balance_milli: 0, uncleared_balance_milli: 100 },
     ]);
+    await writer.update("p", transfer.id, { memo: "cosmetic" }, { operationId: "clear-transfer-memo" });
+    expect(db.query("SELECT id,cleared FROM transactions WHERE id IN (?,?) ORDER BY id").all(transfer.id, transfer.transfer_transaction_id)).toEqual([
+      { id: transfer.id, cleared: "cleared" },
+      { id: transfer.transfer_transaction_id, cleared: "uncleared" },
+    ].sort((left, right) => left.id.localeCompare(right.id)));
     await expect(writer.updateCleared("p", transfer.id, "uncleared", "cleared", { operationId: "clear-transfer-stale" })).rejects.toThrow("cleared state conflict");
 
     await writer.create("p", {
@@ -1270,6 +1275,8 @@ describe("D1 foundation", () => {
     }, { operationId: "clear-split-create" });
     const splitMirror = (db.query("SELECT transfer_transaction_id FROM subtransactions WHERE id='clear-line'").get() as any).transfer_transaction_id;
     await writer.updateCleared("p", splitMirror, "uncleared", "cleared", { operationId: "clear-split-mirror" });
+    expect(db.query("SELECT cleared FROM transactions WHERE id=?").get(splitMirror)).toEqual({ cleared: "cleared" });
+    await writer.update("p", "clear-split", { memo: "cosmetic" }, { operationId: "clear-split-memo" });
     expect(db.query("SELECT cleared FROM transactions WHERE id=?").get(splitMirror)).toEqual({ cleared: "cleared" });
 
     await writer.create("p", { id: "locked", account_id: "a", date: "2026-07-03", amount: 1, cleared: "reconciled" }, { operationId: "locked-create" });

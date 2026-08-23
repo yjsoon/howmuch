@@ -882,9 +882,9 @@ export class LedgerRepository {
   }
 
   async updateTransaction(planId: string, transactionId: string, patch: Partial<TransactionInput>): Promise<any> {
-    const prepared = await this.prepareTransactionUpdate(planId, transactionId, patch);
     const plan = newTransactionMutationPlan();
     await this.db.transaction(async () => {
+      const prepared = await this.prepareTransactionUpdate(planId, transactionId, patch);
       await this.applyResolvedPatch(planId, prepared.existing, prepared.next, patch, plan);
       await this.executeMutationPlan(planId, plan);
     })();

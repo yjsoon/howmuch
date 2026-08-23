@@ -251,6 +251,21 @@ describe("YNAB-compatible API", () => {
     expect(db.query("SELECT COUNT(*) count FROM account_reconciliation_assertions WHERE command_id='stale-local-reconcile'").get()).toEqual({ count: 0 });
   });
 
+  test("serializes generic SQLite edits with reconciliation", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertAccount("plan-test", { id: "edit-race-account", name: "Edit race" });
+    await repo.createTransaction("plan-test", {
+      id: "edit-race-row", account_id: "edit-race-account", date: "2026-08-01", amount: -100, cleared: "cleared",
+    });
+
+    await Promise.all([
+      repo.updateTransaction("plan-test", "edit-race-row", { memo: "kept" }),
+      repo.reconcileAccount("plan-test", "edit-race-account", "2026-08-31", -100, { operationId: "edit-race-reconcile" }),
+    ]);
+
+    expect(db.query("SELECT memo,cleared FROM transactions WHERE id='edit-race-row'").get()).toEqual({ memo: "kept", cleared: "reconciled" });
+  });
+
   test("materialises one occurrence early, advances from the anchored date, and replays without duplicates", async () => {
     const repo = new LedgerRepository(db, "plan-test");
     await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
