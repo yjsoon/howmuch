@@ -352,16 +352,12 @@ async function handleV1(
       return json({ data: result });
     }
     if (segments.length === 4 && method === "POST") {
-      const body = await readJson(request);
-      const parsed = parseTransactionCollectionPost(body);
+      const parsed = parseTransactionCollectionPost(await readJson(request));
       if (parsed.mode === "many") {
         const result = await repo.createTransactions(planId, parsed.inputs.map(parseTransactionInput));
         return json({ data: result }, 201);
       }
-      const input = body.transaction;
-      if (!input) {
-        return apiError(400, "bad_request", "transaction is required");
-      }
+      const input = parseTransactionInput(parsed.input);
       const existing = input?.import_id && input?.account_id
         ? await repo.findTransactionByImportId(planId, input.import_id, input.account_id)
         : null;
