@@ -56,23 +56,24 @@ export const DEFAULT_TRANSACTION_PAGE_SIZE = 100;
 export const MAX_TRANSACTION_PAGE_SIZE = 250;
 export const MAX_TRANSACTION_WRITE_BATCH = 100;
 
+export type NonEmpty<T> = [T, ...T[]];
+
 export type TransactionLookup =
   | { readonly kind: "id"; readonly id: string }
-  | { readonly kind: "import_id"; readonly importId: string; readonly accountId?: string };
+  | { readonly kind: "import_id"; readonly importId: string };
+
+export type TransactionFieldPatch = Omit<Partial<TransactionInput>, "id" | "import_id">;
 
 export type TransactionBatchUpdate = {
   readonly lookup: TransactionLookup;
-  readonly patch: Partial<TransactionInput>;
+  readonly patch: TransactionFieldPatch;
 };
 
 export type TransactionBatchResult = {
-  readonly transaction_ids: string[];
-  readonly transactions: any[];
-  readonly server_knowledge: number;
-};
-
-export type TransactionBatchCreateResult = TransactionBatchResult & {
-  readonly duplicate_import_ids: string[];
+  transaction_ids: string[];
+  transactions: any[];
+  duplicate_import_ids: string[];
+  server_knowledge: number;
 };
 
 export type TransactionPage = {

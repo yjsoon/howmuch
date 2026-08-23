@@ -18,7 +18,6 @@ import {
   type AccountReconciliationResult,
   type ScheduledWriteOptions,
   type TransactionPage,
-  type TransactionBatchCreateResult,
   type TransactionBatchResult,
   type TransactionBatchUpdate,
   type TransactionLookup,
@@ -883,63 +882,67 @@ export class LedgerRepository {
   }
 
   async updateTransaction(planId: string, transactionId: string, patch: Partial<TransactionInput>): Promise<any> {
+    const prepared = await this.prepareTransactionUpdate(planId, transactionId, patch);
     const plan = newTransactionMutationPlan();
     await this.db.transaction(async () => {
-      await this.applyTransactionPatch(planId, transactionId, patch, plan);
+      await this.applyResolvedPatch(planId, prepared.existing, prepared.next, patch, plan);
       await this.executeMutationPlan(planId, plan);
     })();
     return this.getTransaction(planId, transactionId);
   }
 
-  async updateTransactions(planId: string, updates: TransactionBatchUpdate[]): Promise<TransactionBatchResult> {
-    const transactionIds: string[] = [];
+  async updateTransactions(planId: string, edits: TransactionBatchUpdate[]): Promise<TransactionBatchResult> {
+    const resolved: Array<{ id: string; existing: Row; next: TransactionInput; patch: Partial<TransactionInput> }> = [];
+    const seen = new Set<string>();
+    for (const edit of edits) {
+      const id = await this.resolveTransactionLookup(planId, edit.lookup);
+      if (seen.has(id)) throw new ValidationError("Duplicate transaction in batch");
+      seen.add(id);
+      const prepared = await this.prepareTransactionUpdate(planId, id, edit.patch);
+      resolved.push({ id, ...prepared, patch: edit.patch });
+    }
     const plan = newTransactionMutationPlan();
     await this.db.transaction(async () => {
-      for (const update of updates) {
-        transactionIds.push(await this.resolveTransactionLookup(planId, update.lookup));
-      }
-      for (const [index, update] of updates.entries()) {
-        await this.applyTransactionPatch(planId, transactionIds[index], update.patch, plan);
+      for (const item of resolved) {
+        await this.applyResolvedPatch(planId, item.existing, item.next, item.patch, plan);
       }
       await this.executeMutationPlan(planId, plan);
     })();
-    return this.loadTransactionBatchResult(planId, transactionIds);
+    return this.loadTransactionSaveResult(planId, resolved.map((item) => item.id), []);
   }
 
-  async createTransactions(planId: string, inputs: TransactionInput[]): Promise<TransactionBatchCreateResult> {
-    await this.ensurePlan(planId);
-    for (const input of inputs) {
-      validateTransactionInput(input, true);
+  async createTransactions(planId: string, inputs: TransactionInput[]): Promise<TransactionBatchResult> {
+    const explicitIds = inputs.map((input) => input.id).filter((id): id is string => Boolean(id));
+    if (new Set(explicitIds).size !== explicitIds.length) {
+      throw new ValidationError("Duplicate transaction id in batch");
     }
-
     const transactionIds: string[] = [];
-    const duplicateImportIds = new Set<string>();
+    const duplicateImportIds: string[] = [];
     const plan = newTransactionMutationPlan();
     await this.db.transaction(async () => {
       for (const input of inputs) {
-        if (input.import_id) {
+        if (input.import_id && input.account_id) {
           const existing = await this.findTransactionByImportId(planId, input.import_id, input.account_id);
           if (existing) {
-            duplicateImportIds.add(input.import_id);
+            duplicateImportIds.push(input.import_id);
+            transactionIds.push(existing.id);
             continue;
           }
         }
+        validateTransactionInput(input, true);
         const transactionId = input.id ?? createId("txn");
         await this.executeTransactionWrite(planId, { ...input, id: transactionId }, true, plan);
         transactionIds.push(transactionId);
       }
       await this.executeMutationPlan(planId, plan);
     })();
-
-    return {
-      ...await this.loadTransactionBatchResult(planId, transactionIds),
-      duplicate_import_ids: [...duplicateImportIds],
-    };
+    return this.loadTransactionSaveResult(planId, transactionIds, duplicateImportIds);
   }
 
-  protected async loadTransactionBatchResult(
+  async loadTransactionSaveResult(
     planId: string,
     transactionIds: string[],
+    duplicateImportIds: string[],
   ): Promise<TransactionBatchResult> {
     const transactions = [];
     for (const id of transactionIds) {
@@ -948,6 +951,7 @@ export class LedgerRepository {
     return {
       transaction_ids: transactionIds,
       transactions,
+      duplicate_import_ids: duplicateImportIds,
       server_knowledge: await this.getServerKnowledge(planId),
     };
   }
@@ -958,20 +962,15 @@ export class LedgerRepository {
       if (!row) throw new NotFoundError("Transaction not found");
       return lookup.id;
     }
-
-    const accountClause = lookup.accountId === undefined ? "" : " AND account_id = ?";
-    const params = lookup.accountId === undefined
-      ? [planId, lookup.importId]
-      : [planId, lookup.importId, lookup.accountId];
     const matches = await this.db
-      .query(`SELECT id FROM transactions WHERE plan_id = ? AND import_id = ?${accountClause} AND deleted = 0 ORDER BY id LIMIT 2`)
-      .all(...params) as Row[];
+      .query("SELECT id FROM transactions WHERE plan_id = ? AND import_id = ? AND deleted = 0 ORDER BY id")
+      .all(planId, lookup.importId) as Row[];
     if (matches.length === 0) throw new NotFoundError("Transaction not found");
     if (matches.length > 1) throw new ValidationError("import_id matches more than one transaction");
     return matches[0].id;
   }
 
-  private async mergeTransactionPatch(
+  private async prepareTransactionUpdate(
     planId: string,
     transactionId: string,
     patch: Partial<TransactionInput>,
@@ -1016,7 +1015,7 @@ export class LedgerRepository {
         patch.transfer_transaction_id === undefined ? existing.transfer_transaction_id : patch.transfer_transaction_id,
       matched_transaction_id:
         patch.matched_transaction_id === undefined ? existing.matched_transaction_id : patch.matched_transaction_id,
-      import_id: patch.import_id === undefined ? existing.import_id : patch.import_id,
+      import_id: existing.import_id,
       import_payee_name: patch.import_payee_name === undefined ? existing.import_payee_name : patch.import_payee_name,
       import_payee_name_original:
         patch.import_payee_name_original === undefined
@@ -1044,13 +1043,13 @@ export class LedgerRepository {
     return { existing, next };
   }
 
-  private async applyTransactionPatch(
+  private async applyResolvedPatch(
     planId: string,
-    transactionId: string,
+    existing: Row,
+    next: TransactionInput,
     patch: Partial<TransactionInput>,
-    plan: TransactionMutationPlan,
+    plan: ReturnType<typeof newTransactionMutationPlan>,
   ): Promise<void> {
-    const { existing, next } = await this.mergeTransactionPatch(planId, transactionId, patch);
     const linkedRow = existing.transfer_transaction_id
       ? await this.getTransactionRow(planId, existing.transfer_transaction_id)
       : null;
