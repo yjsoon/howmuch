@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import type { ApiConfig } from "./config";
 import { LedgerRepository, NotFoundError, ReconciliationMismatchError, ValidationError } from "./repository";
 import { DEFAULT_TRANSACTION_PAGE_SIZE, MAX_TRANSACTION_PAGE_SIZE, type TransactionFilters } from "./types";
+import { collectionPostIntent, parseTransactionCreates, parseTransactionUpdates } from "./transaction-batch";
 import { ReportService } from "./reports";
 import { decimalToMilliunits } from "./money";
 import { importCsvRows } from "./importers/csv";
@@ -342,8 +343,16 @@ async function handleV1(
     if (segments.length === 4 && method === "GET") {
       return transactionListResponse(repo, planId, queryFilters(url));
     }
+    if (segments.length === 4 && method === "PATCH") {
+      const result = await repo.updateTransactions(planId, parseTransactionUpdates(await readJson(request)));
+      return json({ data: result });
+    }
     if (segments.length === 4 && method === "POST") {
       const body = await readJson(request);
+      if (collectionPostIntent(body) === "many") {
+        const result = await repo.createTransactions(planId, parseTransactionCreates(body.transactions));
+        return json({ data: result }, 201);
+      }
       const input = body.transaction;
       if (!input) {
         return apiError(400, "bad_request", "transaction is required");
@@ -771,7 +780,7 @@ function isTransitionFinancialWrite(methodValue: string, segments: string[]): bo
     return method === "POST";
   }
   if (resource === "transactions") {
-    if (segments.length === 4) return method === "POST";
+    if (segments.length === 4) return method === "POST" || method === "PATCH";
     if (segments.length === 5 && segments[4] === "import") return method === "POST";
     if (segments.length === 5) return method === "PUT" || method === "PATCH" || method === "DELETE";
     return false;

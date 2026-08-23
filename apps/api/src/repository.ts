@@ -18,6 +18,9 @@ import {
   type AccountReconciliationResult,
   type ScheduledWriteOptions,
   type TransactionPage,
+  type TransactionBatchResult,
+  type TransactionBatchUpdate,
+  type TransactionLookup,
 } from "./types";
 import {
   scheduledOccurrencesThrough,
@@ -879,14 +882,105 @@ export class LedgerRepository {
   }
 
   async updateTransaction(planId: string, transactionId: string, patch: Partial<TransactionInput>): Promise<any> {
+    const prepared = await this.prepareTransactionUpdate(planId, transactionId, patch);
+    const plan = newTransactionMutationPlan();
+    await this.db.transaction(async () => {
+      await this.applyResolvedPatch(planId, prepared.existing, prepared.next, patch, plan);
+      await this.executeMutationPlan(planId, plan);
+    })();
+    return this.getTransaction(planId, transactionId);
+  }
+
+  async updateTransactions(planId: string, edits: TransactionBatchUpdate[]): Promise<TransactionBatchResult> {
+    const resolved: Array<{ id: string; existing: Row; next: TransactionInput; patch: Partial<TransactionInput> }> = [];
+    const seen = new Set<string>();
+    for (const edit of edits) {
+      const id = await this.resolveTransactionLookup(planId, edit.lookup);
+      if (seen.has(id)) throw new ValidationError("Duplicate transaction in batch");
+      seen.add(id);
+      const prepared = await this.prepareTransactionUpdate(planId, id, edit.patch);
+      resolved.push({ id, ...prepared, patch: edit.patch });
+    }
+    const plan = newTransactionMutationPlan();
+    await this.db.transaction(async () => {
+      for (const item of resolved) {
+        await this.applyResolvedPatch(planId, item.existing, item.next, item.patch, plan);
+      }
+      await this.executeMutationPlan(planId, plan);
+    })();
+    return this.loadTransactionSaveResult(planId, resolved.map((item) => item.id), []);
+  }
+
+  async createTransactions(planId: string, inputs: TransactionInput[]): Promise<TransactionBatchResult> {
+    const explicitIds = inputs.map((input) => input.id).filter((id): id is string => Boolean(id));
+    if (new Set(explicitIds).size !== explicitIds.length) {
+      throw new ValidationError("Duplicate transaction id in batch");
+    }
+    const transactionIds: string[] = [];
+    const duplicateImportIds: string[] = [];
+    const plan = newTransactionMutationPlan();
+    await this.db.transaction(async () => {
+      for (const input of inputs) {
+        if (input.import_id && input.account_id) {
+          const existing = await this.findTransactionByImportId(planId, input.import_id, input.account_id);
+          if (existing) {
+            duplicateImportIds.push(input.import_id);
+            transactionIds.push(existing.id);
+            continue;
+          }
+        }
+        validateTransactionInput(input, true);
+        const transactionId = input.id ?? createId("txn");
+        await this.executeTransactionWrite(planId, { ...input, id: transactionId }, true, plan);
+        transactionIds.push(transactionId);
+      }
+      await this.executeMutationPlan(planId, plan);
+    })();
+    return this.loadTransactionSaveResult(planId, transactionIds, duplicateImportIds);
+  }
+
+  async loadTransactionSaveResult(
+    planId: string,
+    transactionIds: string[],
+    duplicateImportIds: string[],
+  ): Promise<TransactionBatchResult> {
+    const transactions = [];
+    for (const id of transactionIds) {
+      transactions.push(await this.getTransaction(planId, id, true));
+    }
+    return {
+      transaction_ids: transactionIds,
+      transactions,
+      duplicate_import_ids: duplicateImportIds,
+      server_knowledge: await this.getServerKnowledge(planId),
+    };
+  }
+
+  protected async resolveTransactionLookup(planId: string, lookup: TransactionLookup): Promise<string> {
+    if (lookup.kind === "id") {
+      const row = await this.getTransactionRow(planId, lookup.id);
+      if (!row) throw new NotFoundError("Transaction not found");
+      return lookup.id;
+    }
+    const matches = await this.db
+      .query("SELECT id FROM transactions WHERE plan_id = ? AND import_id = ? AND deleted = 0 ORDER BY id")
+      .all(planId, lookup.importId) as Row[];
+    if (matches.length === 0) throw new NotFoundError("Transaction not found");
+    if (matches.length > 1) throw new ValidationError("import_id matches more than one transaction");
+    return matches[0].id;
+  }
+
+  private async prepareTransactionUpdate(
+    planId: string,
+    transactionId: string,
+    patch: Partial<TransactionInput>,
+  ): Promise<{ existing: Row; next: TransactionInput }> {
     const existing = await this.getTransactionRow(planId, transactionId);
     if (!existing) {
       throw new NotFoundError("Transaction not found");
     }
     const existingTransaction = await this.getTransaction(planId, transactionId);
 
-    // The linked side of a split line cannot restate the transfer itself —
-    // its amount/date/accounts live on the split. Cosmetic edits are fine.
     if (existing.transfer_transaction_id && !await this.getTransactionRow(planId, existing.transfer_transaction_id)) {
       const linkedSub = await this.db
         .query("SELECT id FROM subtransactions WHERE id = ? AND deleted = 0")
@@ -921,7 +1015,7 @@ export class LedgerRepository {
         patch.transfer_transaction_id === undefined ? existing.transfer_transaction_id : patch.transfer_transaction_id,
       matched_transaction_id:
         patch.matched_transaction_id === undefined ? existing.matched_transaction_id : patch.matched_transaction_id,
-      import_id: patch.import_id === undefined ? existing.import_id : patch.import_id,
+      import_id: existing.import_id,
       import_payee_name: patch.import_payee_name === undefined ? existing.import_payee_name : patch.import_payee_name,
       import_payee_name_original:
         patch.import_payee_name_original === undefined
@@ -946,33 +1040,34 @@ export class LedgerRepository {
     };
 
     validateTransactionInput(next, true);
-    const plan = newTransactionMutationPlan();
-    await this.db.transaction(async () => {
-        // Transfer link management (YNAB): changing the payee can break or
-        // move the linked side; every other edit keeps both sides in step
-        // (createTransaction syncs a kept link itself).
-        const linkedRow = existing.transfer_transaction_id
-          ? await this.getTransactionRow(planId, existing.transfer_transaction_id)
-          : null;
-        if (linkedRow && patch.payee_id !== undefined) {
-          const nextTarget = patch.payee_id ? await this.payeeTransferTarget(planId, patch.payee_id) : null;
-          if (!nextTarget || nextTarget === next.account_id) {
-            // No longer a transfer: the linked side goes away.
-            await this.softDeleteLinkedTransaction(planId, linkedRow.id, plan);
-            next.transfer_account_id = null;
-            next.transfer_transaction_id = null;
-          } else {
-            next.transfer_account_id = nextTarget;
-          }
-        }
+    return { existing, next };
+  }
 
-        await this.executeTransactionWrite(planId, next, true, plan);
-        if (existing.account_id !== next.account_id) {
-          plan.accountIdsToRecalculate.add(existing.account_id);
-        }
-        await this.executeMutationPlan(planId, plan);
-    })();
-    return this.getTransaction(planId, transactionId);
+  private async applyResolvedPatch(
+    planId: string,
+    existing: Row,
+    next: TransactionInput,
+    patch: Partial<TransactionInput>,
+    plan: ReturnType<typeof newTransactionMutationPlan>,
+  ): Promise<void> {
+    const linkedRow = existing.transfer_transaction_id
+      ? await this.getTransactionRow(planId, existing.transfer_transaction_id)
+      : null;
+    if (linkedRow && patch.payee_id !== undefined) {
+      const nextTarget = patch.payee_id ? await this.payeeTransferTarget(planId, patch.payee_id) : null;
+      if (!nextTarget || nextTarget === next.account_id) {
+        await this.softDeleteLinkedTransaction(planId, linkedRow.id, plan);
+        next.transfer_account_id = null;
+        next.transfer_transaction_id = null;
+      } else {
+        next.transfer_account_id = nextTarget;
+      }
+    }
+
+    await this.executeTransactionWrite(planId, next, true, plan);
+    if (existing.account_id !== next.account_id) {
+      plan.accountIdsToRecalculate.add(existing.account_id);
+    }
   }
 
   async deleteTransaction(planId: string, transactionId: string): Promise<any> {

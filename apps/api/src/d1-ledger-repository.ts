@@ -2,7 +2,7 @@ import { createId } from "./ids";
 import { createHash } from "node:crypto";
 import { LedgerRepository, NotFoundError, ReconciliationMismatchError, ValidationError, type TransactionWriteOptions } from "./repository";
 import type { LedgerStore } from "./storage";
-import type { AccountReconciliationOptions, AccountReconciliationPreview, AccountReconciliationResult, MonthCategoryTargetInput, ScheduledTransactionInput, ScheduledWriteOptions, TransactionInput } from "./types";
+import type { AccountReconciliationOptions, AccountReconciliationPreview, AccountReconciliationResult, MonthCategoryTargetInput, ScheduledTransactionInput, ScheduledWriteOptions, TransactionBatchResult, TransactionBatchUpdate, TransactionInput } from "./types";
 import { D1Database } from "./d1";
 import { D1MetadataRepository, type AccountReconciliationSnapshot, type ScheduledMutationSnapshot } from "./d1-metadata-repository";
 import { D1TransactionRepository, type D1WriteContext } from "./d1-transaction-repository";
@@ -13,7 +13,6 @@ export type D1LedgerRepositoryOptions = Readonly<{
   operationId?: (kind: string, planId: string | undefined, resourceId: string) => string;
 }>;
 
-/** D1 facade: inherited methods are reads; all public mutations use guarded batches. */
 export class D1LedgerRepository extends LedgerRepository {
   private readonly metadata: D1MetadataRepository;
   private readonly transactions: D1TransactionRepository;
@@ -306,6 +305,40 @@ export class D1LedgerRepository extends LedgerRepository {
     return this.getTransaction(planId,row.id,Boolean(input.deleted));
   }
   override async updateTransaction(planId:string,id:string,patch:Partial<TransactionInput>):Promise<any>{await this.transactions.update(planId,id,patch,this.context("transaction.update",planId,id));return this.getTransaction(planId,id);}
+  override async updateTransactions(planId: string, edits: TransactionBatchUpdate[]): Promise<TransactionBatchResult> {
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    for (const edit of edits) {
+      const id = await this.resolveTransactionLookup(planId, edit.lookup);
+      if (seen.has(id)) throw new ValidationError("Duplicate transaction in batch");
+      seen.add(id);
+      ids.push(id);
+    }
+    for (const [index, edit] of edits.entries()) {
+      await this.updateTransaction(planId, ids[index], edit.patch);
+    }
+    return this.loadTransactionSaveResult(planId, ids, []);
+  }
+  override async createTransactions(planId: string, inputs: TransactionInput[]): Promise<TransactionBatchResult> {
+    const explicitIds = inputs.map((input) => input.id).filter((id): id is string => Boolean(id));
+    if (new Set(explicitIds).size !== explicitIds.length) {
+      throw new ValidationError("Duplicate transaction id in batch");
+    }
+    const transactionIds: string[] = [];
+    const duplicateImportIds: string[] = [];
+    for (const input of inputs) {
+      if (input.import_id && input.account_id) {
+        const existing = await this.findTransactionByImportId(planId, input.import_id, input.account_id);
+        if (existing) {
+          duplicateImportIds.push(input.import_id);
+          transactionIds.push(existing.id);
+          continue;
+        }
+      }
+      transactionIds.push((await this.createTransaction(planId, input)).id);
+    }
+    return this.loadTransactionSaveResult(planId, transactionIds, duplicateImportIds);
+  }
   override async deleteTransaction(planId:string,id:string):Promise<any>{await this.transactions.delete(planId,id,this.context("transaction.delete",planId,id));return this.getTransaction(planId,id,true);}
   override async importTransactions(planId:string,inputs:TransactionInput[]):Promise<{transaction_ids:string[];duplicate_import_ids:string[];duplicate_transaction_ids:string[];server_knowledge:number}>{
     const transaction_ids:string[]=[]; const duplicate_import_ids=new Set<string>(); const duplicate_transaction_ids=new Set<string>();

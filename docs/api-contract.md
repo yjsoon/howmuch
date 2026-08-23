@@ -8,7 +8,7 @@ This contract is intentionally smaller than the full YNAB write API. It covers t
 - Store and return amounts as integer milliunits on `/v1`.
 - Use ISO `YYYY-MM-DD` dates.
 - Support both `/plans/{id}` and `/budgets/{id}` aliases.
-- Accept `PATCH` and `PUT` on individual transactions.
+- Accept `PATCH` and `PUT` on individual transactions, and `PATCH` on the transaction collection for up to 100 rows.
 - Return `server_knowledge` where practical, even if early clients do not need strict deltas.
 
 ## Authentication
@@ -284,6 +284,13 @@ Create:
 
 `POST /v1/plans/{plan_id}/transactions`
 
+The body is `{ "transaction": { ... } }` or `{ "transactions": [ ... ] }`, not both.
+A `transactions` array may contain at most 100 items. An empty array is `400`.
+Many-create returns `201` with `transaction_ids`, `transactions`,
+`duplicate_import_ids`, and `server_knowledge`. An item whose `import_id`
+already exists on that account is listed in `duplicate_import_ids` and is
+not inserted. The matching existing id still appears in `transaction_ids`.
+
 Minimum create body:
 
 ```json
@@ -302,6 +309,28 @@ Minimum create body:
 ```
 
 If a single create request includes an `import_id` that already exists for the plan, the API returns the existing transaction rather than creating a duplicate. A new `import_id` always inserts, even when account, date, amount, and payee match an existing row. Bulk `POST /transactions/import` still fuzzy-matches those fields. This makes retrying OpenClaw and iOS writes safe without collapsing two identical same-day captures.
+
+Collection update:
+
+`PATCH /v1/plans/{plan_id}/transactions`
+
+```json
+{
+  "transactions": [
+    { "id": "txn-1", "memo": "CLAIMED" },
+    { "import_id": "source-unique-id", "approved": true }
+  ]
+}
+```
+
+Each item must include `id` or `import_id`. If both are present, `id` is the
+lookup and `import_id` is ignored. `import_id` never changes the stored import
+id. Collection PATCH ignores `deleted`. Use `DELETE` to tombstone a row. A live
+`import_id` that matches more than one row is `400`. The array may contain at
+most 100 items. An empty array is `400`. A missing target is `404`
+and SQLite applies none of the batch. The response is `200` with
+`transaction_ids`, `transactions`, and `server_knowledge`. SQLite bumps
+knowledge once for the batch.
 
 Individual transaction:
 
