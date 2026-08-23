@@ -78,6 +78,10 @@ export function applyMigrations(db: Database): void {
       version: "013_unique_live_import_id",
       path: join(migrationsDir, "013_unique_live_import_id.sql"),
     },
+    {
+      version: "014_personal_api_tokens",
+      path: join(migrationsDir, "014_personal_api_tokens.sql"),
+    },
   ];
 
   for (const migration of migrations) {

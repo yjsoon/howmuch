@@ -62,6 +62,8 @@ function migratedTarget(): Database {
   target.exec(readFileSync(new URL("../apps/api/d1-migrations/0007_scheduled_transaction_edits.sql", import.meta.url), "utf8"));
   target.exec(readFileSync(new URL("../apps/api/d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", import.meta.url), "utf8"));
   target.exec(readFileSync(new URL("../apps/api/d1-migrations/0009_account_reconciliation_assertions.sql", import.meta.url), "utf8"));
+  target.exec(readFileSync(new URL("../apps/api/d1-migrations/0010_unique_live_import_id.sql", import.meta.url), "utf8"));
+  target.exec(readFileSync(new URL("../apps/api/d1-migrations/0011_personal_api_tokens.sql", import.meta.url), "utf8"));
   return target;
 }
 

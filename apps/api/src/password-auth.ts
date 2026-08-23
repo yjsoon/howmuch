@@ -75,6 +75,16 @@ export function newSession(now = Math.floor(Date.now() / 1000)) {
   return { id: randomBytes(16).toString("hex"), token, tokenHash: sha256(token), expiresAt: now + SESSION_SECONDS };
 }
 
+export function newPersonalApiToken(now = Math.floor(Date.now() / 1000)) {
+  const token = `hm_pat_${randomBytes(32).toString("base64url")}`;
+  return {
+    id: randomBytes(16).toString("hex"),
+    token,
+    tokenHash: sha256(token),
+    createdAt: now,
+  };
+}
+
 export function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }

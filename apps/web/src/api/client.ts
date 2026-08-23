@@ -122,6 +122,18 @@ export interface AuthStatus {
   user: AuthUser | null;
 }
 
+export interface PersonalApiToken {
+  id: string;
+  name: string;
+  created_at: number;
+  revoked_at: number | null;
+}
+
+export interface CreatedPersonalApiToken {
+  token: PersonalApiToken;
+  value: string;
+}
+
 export interface TransactionPage {
   transactions: Transaction[];
   has_more: boolean;
@@ -142,6 +154,17 @@ export const api = {
       body: JSON.stringify({ username, password }),
     }).then((data) => data.user),
   logout: () => request<{ ok: true }>("/api/auth/logout", { method: "POST", body: "{}" }),
+  personalApiTokens: () =>
+    request<{ tokens: PersonalApiToken[] }>("/api/auth/personal-tokens").then((data) => data.tokens),
+  createPersonalApiToken: (name: string) =>
+    request<CreatedPersonalApiToken>("/api/auth/personal-tokens", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  revokePersonalApiToken: (id: string) =>
+    request<{ token: PersonalApiToken }>(`/api/auth/personal-tokens/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }).then((data) => data.token),
   plans: () => request<{ plans: Plan[] }>("/v1/plans").then((d) => d.plans),
   settings: (planId: string) =>
     request<{ settings: PlanSettings }>(planUrl(planId, "settings")).then((d) => d.settings),
