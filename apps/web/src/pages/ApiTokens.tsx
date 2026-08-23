@@ -62,7 +62,11 @@ export function ApiTokensPage() {
           <span className="page-eyebrow">Account access</span>
           <h1>API tokens</h1>
         </div>
-        <p className="api-token-endpoint"><span>Base URL</span><code>{window.location.origin}/v1</code></p>
+        <p className="api-token-endpoint">
+          <span>Base URL</span>
+          <code>{window.location.origin}/v1</code>
+          <a href="/docs">API documentation →</a>
+        </p>
       </header>
 
       <p className="diagnostic-note">Personal tokens use your current plan permissions. They remain valid until you revoke them.</p>

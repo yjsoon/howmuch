@@ -2282,6 +2282,12 @@ tr:hover .share-bar {
   font: 500 12px var(--font-figures);
 }
 
+.api-token-endpoint a {
+  color: var(--ink-soft);
+  font-size: 11px;
+  text-underline-offset: 3px;
+}
+
 .api-token-reveal {
   position: relative;
   display: grid;
