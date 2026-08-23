@@ -2,7 +2,11 @@ import type { Database } from "bun:sqlite";
 import type { ApiConfig } from "./config";
 import { LedgerRepository, NotFoundError, ReconciliationMismatchError, ValidationError } from "./repository";
 import { DEFAULT_TRANSACTION_PAGE_SIZE, MAX_TRANSACTION_PAGE_SIZE, type TransactionFilters } from "./types";
-import { collectionPostIntent, parseTransactionCreates, parseTransactionUpdates } from "./transaction-batch";
+import {
+  parseTransactionCollectionPatch,
+  parseTransactionCollectionPost,
+  parseTransactionInput,
+} from "./transaction-batch";
 import { ReportService } from "./reports";
 import { decimalToMilliunits } from "./money";
 import { importCsvRows } from "./importers/csv";
@@ -344,19 +348,16 @@ async function handleV1(
       return transactionListResponse(repo, planId, queryFilters(url));
     }
     if (segments.length === 4 && method === "PATCH") {
-      const result = await repo.updateTransactions(planId, parseTransactionUpdates(await readJson(request)));
+      const result = await repo.updateTransactions(planId, parseTransactionCollectionPatch(await readJson(request)));
       return json({ data: result });
     }
     if (segments.length === 4 && method === "POST") {
-      const body = await readJson(request);
-      if (collectionPostIntent(body) === "many") {
-        const result = await repo.createTransactions(planId, parseTransactionCreates(body.transactions));
+      const parsed = parseTransactionCollectionPost(await readJson(request));
+      if (parsed.mode === "many") {
+        const result = await repo.createTransactions(planId, parsed.inputs.map(parseTransactionInput));
         return json({ data: result }, 201);
       }
-      const input = body.transaction;
-      if (!input) {
-        return apiError(400, "bad_request", "transaction is required");
-      }
+      const input = parseTransactionInput(parsed.input);
       const existing = input?.import_id && input?.account_id
         ? await repo.findTransactionByImportId(planId, input.import_id, input.account_id)
         : null;

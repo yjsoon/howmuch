@@ -289,7 +289,7 @@ A `transactions` array may contain at most 100 items. An empty array is `400`.
 Many-create returns `201` with `transaction_ids`, `transactions`,
 `duplicate_import_ids`, and `server_knowledge`. An item whose `import_id`
 already exists on that account is listed in `duplicate_import_ids` and is
-not inserted. The matching existing id still appears in `transaction_ids`.
+not inserted.
 
 Minimum create body:
 
@@ -318,18 +318,19 @@ Collection update:
 {
   "transactions": [
     { "id": "txn-1", "memo": "CLAIMED" },
-    { "import_id": "source-unique-id", "approved": true }
+    { "import_id": "source-unique-id", "account_id": "account-id", "approved": true }
   ]
 }
 ```
 
-Each item must include `id` or `import_id`. If both are present, `id` is the
-lookup and `import_id` is ignored. `import_id` never changes the stored import
-id. A live `import_id` that matches more than one row is `400`. The array may
-contain at most 100 items. An empty array is `400`. A missing target is `404`
-and SQLite applies none of the batch. The response is `200` with
+Each item must include exactly one of `id` or `import_id`. `import_id` is a
+lookup field and never changes the stored import id. `account_id` disambiguates
+an `import_id` that exists in more than one account. An ambiguous lookup is
+`400`. The array may contain at most 100 items. An empty array is `400`. A
+missing target is `404` and SQLite applies none of the batch. The response is `200` with
 `transaction_ids`, `transactions`, and `server_knowledge`. SQLite bumps
-knowledge once for the batch.
+knowledge once for the batch. D1 applies items sequentially and returns the
+final `server_knowledge`.
 
 Individual transaction:
 
