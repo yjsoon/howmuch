@@ -1,6 +1,6 @@
 import { createId } from "./ids";
 import { createHash } from "node:crypto";
-import { LedgerRepository, NotFoundError, ReconciliationMismatchError, ValidationError, type TransactionWriteOptions } from "./repository";
+import { LedgerRepository, NotFoundError, ReconciliationMismatchError, TransactionStateConflictError, ValidationError, type TransactionWriteOptions } from "./repository";
 import type { LedgerStore } from "./storage";
 import type { AccountReconciliationOptions, AccountReconciliationPreview, AccountReconciliationResult, MonthCategoryTargetInput, ScheduledTransactionInput, ScheduledWriteOptions, TransactionBatchResult, TransactionBatchUpdate, TransactionInput } from "./types";
 import { D1Database } from "./d1";
@@ -305,10 +305,26 @@ export class D1LedgerRepository extends LedgerRepository {
     return this.getTransaction(planId,row.id,Boolean(input.deleted));
   }
   override async updateTransaction(planId:string,id:string,patch:Partial<TransactionInput>):Promise<any>{
-    if (patch.approved !== undefined && Object.keys(patch).length === 1) {
-      await this.transactions.approve(planId,id,patch.approved,this.context("transaction.approve",planId,id));
-    } else {
-      await this.transactions.update(planId,id,patch,this.context("transaction.update",planId,id));
+    try {
+      if (patch.approved !== undefined && Object.keys(patch).length === 1) {
+        await this.transactions.approve(planId,id,patch.approved,this.context("transaction.approve",planId,id));
+      } else {
+        await this.transactions.update(planId,id,patch,this.context("transaction.update",planId,id));
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("reconciled transaction state conflict")) {
+        throw new TransactionStateConflictError("Reconciled transactions cannot be changed to another cleared state");
+      }
+      throw error;
+    }
+    return this.getTransaction(planId,id);
+  }
+  override async updateTransactionCleared(planId:string,id:string,expectedCleared:"uncleared"|"cleared",cleared:"uncleared"|"cleared"):Promise<any>{
+    try {
+      await this.transactions.updateCleared(planId,id,expectedCleared,cleared,this.context("transaction.cleared",planId,id));
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("cleared state conflict")) throw new TransactionStateConflictError();
+      throw error;
     }
     return this.getTransaction(planId,id);
   }

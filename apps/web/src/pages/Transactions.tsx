@@ -108,6 +108,7 @@ export function TransactionsPage() {
   const [mutationSuccess, setMutationSuccess] = useState<string | null>(null);
   const [mutatingId, setMutatingId] = useState<string | null>(null);
   const [unapprovedOnly, setUnapprovedOnly] = useState(false);
+  const mutationLockRef = useRef(false);
   const selectedAccountId = filters.accountIds.length === 1 ? filters.accountIds[0]! : null;
   const approvalQueue = useApi(
     JSON.stringify({ planId, selectedAccountId, from: filters.from, to: filters.to, refreshGeneration, approvalQueue: true }),
@@ -216,22 +217,54 @@ export function TransactionsPage() {
   };
 
   const saveTransaction = async (transactionId: string, input: TransactionUpdateInput) => {
+    if (mutationLockRef.current) return;
+    mutationLockRef.current = true;
+    requestVersionRef.current += 1;
     setMutatingId(transactionId);
     setMutationError(null);
     setMutationSuccess(null);
     try {
       await api.updateTransaction(planId, transactionId, input);
       setEditing(null);
+      reload();
       refreshFirstPage();
       setReconciliationPreviewGeneration((generation) => generation + 1);
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause.message : String(cause));
+      refreshFirstPage();
     } finally {
+      mutationLockRef.current = false;
+      setMutatingId(null);
+    }
+  };
+
+  const toggleCleared = async (transaction: Transaction) => {
+    if (mutationLockRef.current || (transaction.cleared !== "uncleared" && transaction.cleared !== "cleared")) return;
+    const cleared = transaction.cleared === "cleared" ? "uncleared" : "cleared";
+    mutationLockRef.current = true;
+    requestVersionRef.current += 1;
+    setMutatingId(transaction.id);
+    setMutationError(null);
+    setMutationSuccess(null);
+    try {
+      await api.updateTransactionCleared(planId, transaction.id, transaction.cleared, cleared);
+      reload();
+      refreshFirstPage();
+      setReconciliationPreviewGeneration((generation) => generation + 1);
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause.message : String(cause));
+      refreshFirstPage();
+      reload();
+    } finally {
+      mutationLockRef.current = false;
       setMutatingId(null);
     }
   };
 
   const deleteTransaction = async (transaction: Transaction) => {
+    if (mutationLockRef.current) return;
+    mutationLockRef.current = true;
+    requestVersionRef.current += 1;
     setMutatingId(transaction.id);
     setMutationError(null);
     setMutationSuccess(null);
@@ -241,26 +274,35 @@ export function TransactionsPage() {
         setEditing(null);
       }
       setPendingDeletion(null);
+      reload();
       refreshFirstPage();
       setReconciliationPreviewGeneration((generation) => generation + 1);
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause.message : String(cause));
+      refreshFirstPage();
     } finally {
+      mutationLockRef.current = false;
       setMutatingId(null);
     }
   };
 
   const approveTransaction = async (transaction: Transaction) => {
+    if (mutationLockRef.current) return;
+    mutationLockRef.current = true;
+    requestVersionRef.current += 1;
     setMutatingId(transaction.id);
     setMutationError(null);
     setMutationSuccess(null);
     try {
       await api.updateTransaction(planId, transaction.id, { approved: true });
+      reload();
       refreshFirstPage();
       setMutationSuccess("Transaction approved.");
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause.message : String(cause));
+      refreshFirstPage();
     } finally {
+      mutationLockRef.current = false;
       setMutatingId(null);
     }
   };
@@ -329,8 +371,11 @@ export function TransactionsPage() {
       setMutationError("Wait for a matching reconciliation preview, then confirm it before continuing.");
       return;
     }
+    if (mutationLockRef.current) return;
 
     const mutationId = `reconcile:${reconcileDraft.accountId}`;
+    mutationLockRef.current = true;
+    requestVersionRef.current += 1;
     setMutatingId(mutationId);
     setMutationError(null);
     setMutationSuccess(null);
@@ -347,6 +392,7 @@ export function TransactionsPage() {
       refreshFirstPage();
       setMutationSuccess(reconciliationSuccess(result));
     } catch (cause) {
+      refreshFirstPage();
       if (cause instanceof ApiError && cause.status === 409 && cause.code === "reconciliation_mismatch" && isReconciliationMismatchDetail(cause.detail)) {
         const mismatch = cause.detail;
         setReconcileDraft((current) => current ? { ...current, mismatch } : current);
@@ -356,6 +402,7 @@ export function TransactionsPage() {
         setMutationError(cause instanceof Error ? cause.message : String(cause));
       }
     } finally {
+      mutationLockRef.current = false;
       setMutatingId(null);
     }
   };
@@ -443,7 +490,8 @@ export function TransactionsPage() {
       : deferredSearch.trim()
         ? "No transactions match this search."
         : "No transactions match these filters.";
-  const reconciliationBusy = reconcileDraft ? mutatingId === `reconcile:${reconcileDraft.accountId}` : false;
+  const mutationBusy = Boolean(mutatingId);
+  const reconciliationBusy = mutationBusy;
   const reviewedStatementBalance = reconcileDraft ? parseMilliunits(reconcileDraft.statementBalance) : null;
   // `useApi` intentionally keeps its previous response while a new key starts
   // loading. Never allow that response to authorise a different draft.
@@ -735,8 +783,8 @@ export function TransactionsPage() {
             </p>
           </div>
           <div className="transaction-delete-confirm-actions">
-            <button type="button" className="text-button" onClick={() => setPendingDeletion(null)} disabled={mutatingId === pendingDeletion.id}>Cancel</button>
-            <button type="button" className="transaction-delete-button" onClick={() => void deleteTransaction(pendingDeletion)} disabled={mutatingId === pendingDeletion.id}>
+            <button type="button" className="text-button" onClick={() => setPendingDeletion(null)} disabled={mutationBusy}>Cancel</button>
+            <button type="button" className="transaction-delete-button" onClick={() => void deleteTransaction(pendingDeletion)} disabled={mutationBusy}>
               {mutatingId === pendingDeletion.id ? "Removing..." : pendingDeletion.approved ? "Delete transaction" : "Reject transaction"}
             </button>
           </div>
@@ -749,6 +797,7 @@ export function TransactionsPage() {
           categoryGroups={categoryGroups}
           accounts={accounts}
           saving={mutatingId === editing.id}
+          disabled={mutationBusy}
           onCancel={() => {
             setEditing(null);
             setMutationError(null);
@@ -783,6 +832,7 @@ export function TransactionsPage() {
                     <th className="num">Outflow</th>
                     <th className="num">Inflow</th>
                     <th className="register-actions-heading"><span className="sr-only">Actions</span></th>
+                    <th className="register-status-heading"><span className="sr-only">Cleared status</span></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -822,7 +872,7 @@ export function TransactionsPage() {
                             setEditing(txn);
                             setMutationError(null);
                           }}
-                          disabled={mutatingId === txn.id}
+                          disabled={Boolean(mutatingId)}
                           aria-label={`Edit ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
                         >
                           Edit
@@ -835,12 +885,19 @@ export function TransactionsPage() {
                               setPendingDeletion(txn);
                               setMutationError(null);
                             }}
-                            disabled={mutatingId === txn.id}
+                            disabled={Boolean(mutatingId)}
                             aria-label={`${txn.approved ? "Delete" : "Reject"} ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
                           >
                             {txn.approved ? "Delete" : "Reject"}
                           </button>
                         )}
+                      </td>
+                      <td className="register-status">
+                        <ClearedStatus
+                          transaction={txn}
+                          busy={Boolean(mutatingId)}
+                          onToggle={() => void toggleCleared(txn)}
+                        />
                       </td>
                     </tr>,
                     ...(txn.subtransactions ?? []).map((sub) => (
@@ -856,6 +913,7 @@ export function TransactionsPage() {
                         </td>
                         <td className="num amount-negative">{sub.amount < 0 ? formatAmount(sub.amount) : ""}</td>
                         <td className="num amount-positive">{sub.amount > 0 ? formatAmount(sub.amount) : ""}</td>
+                        <td />
                         <td />
                       </tr>
                     )),
@@ -879,6 +937,42 @@ export function TransactionsPage() {
         </section>
       )}
     </>
+  );
+}
+
+function ClearedStatus({
+  transaction,
+  busy,
+  onToggle,
+}: {
+  transaction: Transaction;
+  busy: boolean;
+  onToggle: () => void;
+}) {
+  if (transaction.cleared === "reconciled") {
+    return (
+      <span className="cleared-status cleared-status-reconciled" aria-label="Reconciled" title="Reconciled">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="M6.5 8V6a3.5 3.5 0 0 1 7 0v2M5 8h10v8H5z" />
+        </svg>
+      </span>
+    );
+  }
+
+  const cleared = transaction.cleared === "cleared";
+  const payee = transaction.payee_name ?? (transaction.transfer_account_id ? "transfer" : "transaction");
+  return (
+    <button
+      type="button"
+      className={`cleared-status cleared-status-toggle${cleared ? " cleared-status-cleared" : ""}`}
+      onClick={onToggle}
+      disabled={busy}
+      aria-pressed={cleared}
+      aria-label={`Mark ${payee} on ${formatDate(transaction.date)} ${cleared ? "uncleared" : "cleared"}`}
+      title={cleared ? "Cleared — click to mark uncleared" : "Uncleared — click to mark cleared"}
+    >
+      <span aria-hidden="true">{cleared ? "C✓" : "C"}</span>
+    </button>
   );
 }
 
@@ -942,6 +1036,7 @@ function TransactionEditor({
   categoryGroups,
   accounts,
   saving,
+  disabled,
   onCancel,
   onSave,
 }: {
@@ -950,6 +1045,7 @@ function TransactionEditor({
   categoryGroups: CategoryGroup[];
   accounts: Account[];
   saving: boolean;
+  disabled: boolean;
   onCancel: () => void;
   onSave: (transactionId: string, input: TransactionUpdateInput) => Promise<void>;
 }) {
@@ -961,7 +1057,6 @@ function TransactionEditor({
   const [payeeName, setPayeeName] = useState(transaction.payee_name ?? "");
   const [categoryId, setCategoryId] = useState(transaction.category_id ?? "");
   const [memo, setMemo] = useState(transaction.memo ?? "");
-  const [cleared, setCleared] = useState(transaction.cleared);
   const [approved, setApproved] = useState(transaction.approved);
   const [flagColor, setFlagColor] = useState(transaction.flag_color ?? "");
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -998,7 +1093,6 @@ function TransactionEditor({
       date,
       amount: signedAmount,
       memo: memo.trim() || null,
-      cleared: cleared as "cleared" | "uncleared" | "reconciled",
       approved,
       flag_color: flagColor || null,
     };
@@ -1046,7 +1140,7 @@ function TransactionEditor({
           <span className="section-title" id="edit-transaction-heading">Edit transaction</span>
           <span className="section-meta">{transaction.account_name ?? "Account"} · {isTransfer ? `Transfer to ${transferTarget}` : isSplit ? "Split transaction" : "Posted transaction"}</span>
         </div>
-        <button type="button" className="text-button" onClick={onCancel} disabled={saving}>Cancel</button>
+        <button type="button" className="text-button" onClick={onCancel} disabled={disabled}>Cancel</button>
       </div>
       <form className="transaction-editor-form" onSubmit={(event) => void submit(event)}>
         <div className="field-row transaction-editor-top-row">
@@ -1126,14 +1220,6 @@ function TransactionEditor({
         </label>
         <div className="transaction-editor-status-row">
           <label className="field">
-            <span className="field-label">Status</span>
-            <select value={cleared} onChange={(event) => setCleared(event.target.value)}>
-              <option value="uncleared">Uncleared</option>
-              <option value="cleared">Cleared</option>
-              <option value="reconciled">Reconciled</option>
-            </select>
-          </label>
-          <label className="field">
             <span className="field-label">Flag</span>
             <select value={flagColor} onChange={(event) => setFlagColor(event.target.value)}>
               <option value="">None</option>
@@ -1147,8 +1233,8 @@ function TransactionEditor({
         </div>
         {validationError && <p className="transaction-editor-error" role="alert">{validationError}</p>}
         <div className="transaction-editor-actions">
-          <button type="button" className="text-button" onClick={onCancel} disabled={saving}>Cancel</button>
-          <button type="submit" className="save-button" disabled={saving}>{saving ? "Saving..." : "Save changes"}</button>
+          <button type="button" className="text-button" onClick={onCancel} disabled={disabled}>Cancel</button>
+          <button type="submit" className="save-button" disabled={disabled}>{saving ? "Saving..." : "Save changes"}</button>
         </div>
         <datalist id="editor-payee-options">
           {payees.filter((payee) => !payee.deleted && !payee.transfer_account_id).map((payee) => <option key={payee.id} value={payee.name} />)}

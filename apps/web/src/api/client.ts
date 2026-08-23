@@ -248,6 +248,16 @@ export const api = {
       planUrl(planId, "transactions", transactionId),
       { method: "PATCH", body: JSON.stringify({ transaction }) },
     ).then((data) => data.transaction),
+  updateTransactionCleared: (
+    planId: string,
+    transactionId: string,
+    expectedCleared: "uncleared" | "cleared",
+    cleared: "uncleared" | "cleared",
+  ) =>
+    request<{ transaction: Transaction }>(
+      planUrl(planId, "transactions", transactionId, "cleared"),
+      { method: "PATCH", body: JSON.stringify({ expected_cleared: expectedCleared, cleared }) },
+    ).then((data) => data.transaction),
   deleteTransaction: (planId: string, transactionId: string) =>
     request<{ transaction: Transaction }>(
       planUrl(planId, "transactions", transactionId),

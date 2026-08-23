@@ -341,6 +341,14 @@ Individual transaction:
 - `PATCH /v1/plans/{plan_id}/transactions/{transaction_id}`
 - `DELETE /v1/plans/{plan_id}/transactions/{transaction_id}`
 
+The register's cleared-state toggle uses
+`PATCH /v1/plans/{plan_id}/transactions/{transaction_id}/cleared` with a body
+such as `{ "expected_cleared": "uncleared", "cleared": "cleared" }`. Both
+values must be `uncleared` or `cleared`. The update changes only that ledger
+side, including for transfers, and returns `409 transaction_state_conflict` if
+the live state no longer matches `expected_cleared`. Reconciled transactions
+cannot be changed back through either update route.
+
 Updatable fields:
 
 - `date`

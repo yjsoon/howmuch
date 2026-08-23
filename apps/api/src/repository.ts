@@ -895,9 +895,30 @@ export class LedgerRepository {
         return this.getTransaction(planId, transactionId);
       }
     }
-    const prepared = await this.prepareTransactionUpdate(planId, transactionId, patch);
     await this.db.transaction(async () => {
+      const prepared = await this.prepareTransactionUpdate(planId, transactionId, patch);
       await this.applyResolvedPatch(planId, prepared.existing, prepared.next, patch, plan);
+      await this.executeMutationPlan(planId, plan);
+    })();
+    return this.getTransaction(planId, transactionId);
+  }
+
+  async updateTransactionCleared(
+    planId: string,
+    transactionId: string,
+    expectedCleared: "uncleared" | "cleared",
+    cleared: "uncleared" | "cleared",
+  ): Promise<any> {
+    const plan = newTransactionMutationPlan();
+    await this.db.transaction(async () => {
+      const existing = await this.getTransactionRow(planId, transactionId);
+      if (!existing) throw new NotFoundError("Transaction not found");
+      if (existing.cleared !== expectedCleared) throw new TransactionStateConflictError();
+      await this.db.query(
+        "UPDATE transactions SET cleared=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND plan_id=? AND deleted=0 AND cleared=?",
+      ).run(cleared, transactionId, planId, expectedCleared);
+      plan.accountIdsToRecalculate.add(String(existing.account_id));
+      plan.touchedTransactionIds.add(transactionId);
       await this.executeMutationPlan(planId, plan);
     })();
     return this.getTransaction(planId, transactionId);
@@ -1041,6 +1062,10 @@ export class LedgerRepository {
     }
     const existingTransaction = await this.getTransaction(planId, transactionId);
 
+    if (existing.cleared === "reconciled" && patch.cleared !== undefined && patch.cleared !== "reconciled") {
+      throw new TransactionStateConflictError("Reconciled transactions cannot be changed to another cleared state");
+    }
+
     if (existing.transfer_transaction_id && !await this.getTransactionRow(planId, existing.transfer_transaction_id)) {
       const linkedSub = await this.db
         .query("SELECT id FROM subtransactions WHERE id = ? AND deleted = 0")
@@ -1131,13 +1156,13 @@ export class LedgerRepository {
   }
 
   async deleteTransaction(planId: string, transactionId: string): Promise<any> {
-    const existing = await this.getTransactionRow(planId, transactionId);
-    if (!existing) {
-      throw new NotFoundError("Transaction not found");
-    }
-
     const plan = newTransactionMutationPlan();
     await this.db.transaction(async () => {
+      const existing = await this.getTransactionRow(planId, transactionId);
+      if (!existing) {
+        throw new NotFoundError("Transaction not found");
+      }
+
       const removeIds = new Set<string>([transactionId]);
       const accountIds = new Set<string>([existing.account_id]);
 
@@ -2623,6 +2648,12 @@ function canonicalScheduleJson(value: unknown): string {
 export class NotFoundError extends Error {}
 
 export class ValidationError extends Error {}
+
+export class TransactionStateConflictError extends Error {
+  constructor(message = "Transaction cleared status changed; refresh and try again") {
+    super(message);
+  }
+}
 
 export class ReconciliationMismatchError extends Error {
   readonly difference: number;

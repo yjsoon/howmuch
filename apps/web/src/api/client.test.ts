@@ -39,4 +39,25 @@ describe("shouldHandleUnauthorized", () => {
     expect(requests.map((entry) => entry.init?.method)).toEqual([undefined, "POST", "DELETE"]);
     expect(requests.every((entry) => entry.init?.credentials === "same-origin")).toBeTrue();
   });
+
+  test("sends a compare-and-set request for cleared status changes", async () => {
+    const originalFetch = globalThis.fetch;
+    let captured: { path: string; init?: RequestInit } | null = null;
+    globalThis.fetch = (async (path: string | URL | Request, init?: RequestInit) => {
+      captured = { path: String(path), init };
+      return new Response(JSON.stringify({ data: { transaction: { id: "txn-1", cleared: "cleared" } } }), {
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    try {
+      expect((await api.updateTransactionCleared("plan-1", "txn-1", "uncleared", "cleared")).cleared).toBe("cleared");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(captured).not.toBeNull();
+    expect(captured!.path).toBe("/v1/plans/plan-1/transactions/txn-1/cleared");
+    expect(captured!.init?.method).toBe("PATCH");
+    expect(JSON.parse(String(captured!.init?.body))).toEqual({ expected_cleared: "uncleared", cleared: "cleared" });
+  });
 });
