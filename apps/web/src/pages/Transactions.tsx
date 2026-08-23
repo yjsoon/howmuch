@@ -198,6 +198,7 @@ export function TransactionsPage() {
     try {
       await api.updateTransaction(planId, transactionId, input);
       setEditing(null);
+      reload();
       refreshFirstPage();
       setReconciliationPreviewGeneration((generation) => generation + 1);
     } catch (cause) {
@@ -245,6 +246,7 @@ export function TransactionsPage() {
         setEditing(null);
       }
       setPendingDeletion(null);
+      reload();
       refreshFirstPage();
       setReconciliationPreviewGeneration((generation) => generation + 1);
     } catch (cause) {
@@ -887,7 +889,7 @@ function ClearedStatus({
       aria-label={`Mark ${payee} on ${formatDate(transaction.date)} ${cleared ? "uncleared" : "cleared"}`}
       title={cleared ? "Cleared — click to mark uncleared" : "Uncleared — click to mark cleared"}
     >
-      C
+      <span aria-hidden="true">{cleared ? "C✓" : "C"}</span>
     </button>
   );
 }
@@ -973,7 +975,6 @@ function TransactionEditor({
   const [payeeName, setPayeeName] = useState(transaction.payee_name ?? "");
   const [categoryId, setCategoryId] = useState(transaction.category_id ?? "");
   const [memo, setMemo] = useState(transaction.memo ?? "");
-  const [cleared, setCleared] = useState(transaction.cleared);
   const [approved, setApproved] = useState(transaction.approved);
   const [flagColor, setFlagColor] = useState(transaction.flag_color ?? "");
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -1010,7 +1011,6 @@ function TransactionEditor({
       date,
       amount: signedAmount,
       memo: memo.trim() || null,
-      cleared: cleared as "cleared" | "uncleared" | "reconciled",
       approved,
       flag_color: flagColor || null,
     };
@@ -1137,14 +1137,6 @@ function TransactionEditor({
           <input value={memo} onChange={(event) => setMemo(event.target.value)} placeholder="Note" />
         </label>
         <div className="transaction-editor-status-row">
-          <label className="field">
-            <span className="field-label">Status</span>
-            <select value={cleared} onChange={(event) => setCleared(event.target.value)} disabled={transaction.cleared === "reconciled"}>
-              <option value="uncleared">Uncleared</option>
-              <option value="cleared">Cleared</option>
-              {transaction.cleared === "reconciled" && <option value="reconciled">Reconciled</option>}
-            </select>
-          </label>
           <label className="field">
             <span className="field-label">Flag</span>
             <select value={flagColor} onChange={(event) => setFlagColor(event.target.value)}>
