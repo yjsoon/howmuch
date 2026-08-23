@@ -291,6 +291,10 @@ describe("D1 foundation", () => {
     expect((await repo.listTransactions("p")).map((row) => row.id)).toContain("api-row");
     await expect(repo.createTransaction("p", { id: "api-row", account_id: "a", date: "2026-07-01", amount: -100 })).rejects.toThrow("already exists");
     expect((await repo.updateTransaction("p", "api-row", { amount: -125 })).amount).toBe(-125);
+    await repo.updateTransaction("p", "api-row", { import_id: "stolen", deleted: true, memo: "keep-import" });
+    expect(db.query("SELECT import_id, deleted, memo FROM transactions WHERE id='api-row'").get()).toEqual({
+      import_id: null, deleted: 0, memo: "keep-import",
+    });
     await repo.createTransaction("p", { id: "api-row-2", account_id: "a", date: "2026-07-01", amount: -50 });
     const batch = await repo.updateTransactions("p", [
       { lookup: { kind: "id", id: "api-row" }, patch: { memo: "one" } },

@@ -1040,6 +1040,14 @@ describe("YNAB-compatible API", () => {
     });
     expect(ambiguous.status).toBe(400);
     expect((await ambiguous.json()).error.detail).toBe("import_id matches more than one transaction");
+
+    const tombstone = await request("/v1/plans/plan-test/transactions", {
+      method: "PATCH",
+      body: { transactions: [{ id: keptId, deleted: true, memo: "still-live" }] },
+    });
+    expect(tombstone.status).toBe(200);
+    expect((await tombstone.json()).data.transactions[0]).toMatchObject({ id: keptId, deleted: false, memo: "still-live" });
+    expect(db.query("SELECT deleted, memo FROM transactions WHERE id = ?").get(keptId)).toEqual({ deleted: 0, memo: "still-live" });
   });
 
   test("creates multiple transactions on the collection POST used by YNAB", async () => {
@@ -1084,6 +1092,17 @@ describe("YNAB-compatible API", () => {
       },
     });
     expect(bothKeys.status).toBe(400);
+
+    const createdDeleted = await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: {
+        transactions: [{ account_id: "acct-1", date: "2026-06-14", amount: -1, payee_name: "Gone", deleted: true }],
+      },
+    });
+    expect(createdDeleted.status).toBe(201);
+    const createdDeletedBody = await createdDeleted.json();
+    expect(createdDeletedBody.data.transactions[0]).toMatchObject({ payee_name: "Gone", deleted: true });
+    expect(createdDeletedBody.data.transaction_ids).toHaveLength(1);
   });
 
   test("supports category reads and incremental transaction sync", async () => {

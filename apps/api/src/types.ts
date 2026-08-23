@@ -62,7 +62,7 @@ export type TransactionLookup =
   | { readonly kind: "id"; readonly id: string }
   | { readonly kind: "import_id"; readonly importId: string };
 
-export type TransactionFieldPatch = Omit<Partial<TransactionInput>, "id" | "import_id">;
+export type TransactionFieldPatch = Omit<Partial<TransactionInput>, "id" | "import_id" | "deleted">;
 
 export type TransactionBatchUpdate = {
   readonly lookup: TransactionLookup;

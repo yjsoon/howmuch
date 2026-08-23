@@ -57,7 +57,7 @@ export class D1TransactionRepository {
         flag_color: patch.flag_color === undefined ? old.flag_color : patch.flag_color,
         flag_name: patch.flag_name === undefined ? old.flag_name : patch.flag_name,
         matched_transaction_id: patch.matched_transaction_id === undefined ? old.matched_transaction_id : patch.matched_transaction_id,
-        import_id: patch.import_id === undefined ? old.import_id : patch.import_id,
+        import_id: old.import_id,
         import_payee_name: patch.import_payee_name === undefined ? old.import_payee_name : patch.import_payee_name,
         import_payee_name_original: patch.import_payee_name_original === undefined ? old.import_payee_name_original : patch.import_payee_name_original,
         source_kind: patch.source_kind === undefined ? old.source_kind : patch.source_kind,
@@ -65,7 +65,7 @@ export class D1TransactionRepository {
         external_ynab_id: patch.external_ynab_id === undefined ? old.external_ynab_id : patch.external_ynab_id,
         transfer_account_id: patch.transfer_account_id === undefined ? old.transfer_account_id : patch.transfer_account_id,
         transfer_transaction_id: patch.transfer_transaction_id === undefined ? old.transfer_transaction_id : patch.transfer_transaction_id,
-        deleted: patch.deleted ?? Boolean(old.deleted), subtransactions: patch.subtransactions === undefined ? snapshot.subs.map(subInput) : patch.subtransactions,
+        deleted: Boolean(old.deleted), subtransactions: patch.subtransactions === undefined ? snapshot.subs.map(subInput) : patch.subtransactions,
       };
       return this.planUpsert("update", planId, merged, snapshot, stable, patch.payee_id !== undefined, fingerprint, context, true);
     });

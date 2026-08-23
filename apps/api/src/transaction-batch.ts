@@ -55,6 +55,7 @@ function parseFieldPatch(item: Record<string, unknown>): TransactionFieldPatch {
   const patch = { ...item };
   delete patch.id;
   delete patch.import_id;
+  delete patch.deleted;
   return parseKnownFields(patch);
 }
 
@@ -75,8 +76,8 @@ function parseTransactionInput(item: Record<string, unknown>, label: string): Tr
   };
 }
 
-function parseKnownFields(value: Record<string, unknown>): TransactionFieldPatch {
-  const patch: TransactionFieldPatch = {};
+function parseKnownFields(value: Record<string, unknown>): Partial<TransactionInput> {
+  const patch: Partial<TransactionInput> = {};
   if (Object.hasOwn(value, "account_id")) patch.account_id = requiredString(value.account_id, "account_id");
   if (Object.hasOwn(value, "date")) patch.date = requiredString(value.date, "date");
   if (Object.hasOwn(value, "amount")) patch.amount = integer(value.amount, "amount");

@@ -946,7 +946,7 @@ export class LedgerRepository {
   ): Promise<TransactionBatchResult> {
     const transactions = [];
     for (const id of transactionIds) {
-      transactions.push(await this.getTransaction(planId, id));
+      transactions.push(await this.getTransaction(planId, id, true));
     }
     return {
       transaction_ids: transactionIds,

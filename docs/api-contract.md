@@ -325,8 +325,9 @@ Collection update:
 
 Each item must include `id` or `import_id`. If both are present, `id` is the
 lookup and `import_id` is ignored. `import_id` never changes the stored import
-id. A live `import_id` that matches more than one row is `400`. The array may
-contain at most 100 items. An empty array is `400`. A missing target is `404`
+id. Collection PATCH ignores `deleted`. Use `DELETE` to tombstone a row. A live
+`import_id` that matches more than one row is `400`. The array may contain at
+most 100 items. An empty array is `400`. A missing target is `404`
 and SQLite applies none of the batch. The response is `200` with
 `transaction_ids`, `transactions`, and `server_knowledge`. SQLite bumps
 knowledge once for the batch.

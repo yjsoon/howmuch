@@ -14,7 +14,7 @@ HowMuch keeps `/v1/plans/{plan_id}/...` and `/v1/budgets/{budget_id}/...` for th
 | `DELETE /plans/{plan_id}/transactions/{transaction_id}` | Same |
 | `POST /plans/{plan_id}/transactions/import` starts bank import | HowMuch accepts a client-supplied `transactions` array on this path |
 
-YNAB collection PATCH treats `import_id` as lookup only. HowMuch does the same. Live import ids are unique on `(plan_id, account_id)`.
+YNAB collection PATCH treats `import_id` as lookup only. HowMuch does the same. Collection PATCH ignores `deleted` on both backends. Tombstone via `DELETE`. Live import ids are unique on `(plan_id, account_id)`.
 
 ## Transaction reads
 
