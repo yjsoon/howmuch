@@ -14,6 +14,7 @@ import { Shell } from "./components/Shell";
 import { PlanProvider } from "./state/plan";
 
 const AgeOfMoneyPage = lazy(() => import("./pages/AgeOfMoney").then((module) => ({ default: module.AgeOfMoneyPage })));
+const ApiDocsPage = lazy(() => import("./pages/ApiDocs").then((module) => ({ default: module.ApiDocsPage })));
 const ApiTokensPage = lazy(() => import("./pages/ApiTokens").then((module) => ({ default: module.ApiTokensPage })));
 const IncomePage = lazy(() => import("./pages/Income").then((module) => ({ default: module.IncomePage })));
 const NetWorthPage = lazy(() => import("./pages/NetWorth").then((module) => ({ default: module.NetWorthPage })));
@@ -44,6 +45,7 @@ const router = createBrowserRouter([
     ],
   },
   { path: "/add", element: <PlanProvider><Suspense fallback={<RouteFallback />}><QuickEntryPage /></Suspense></PlanProvider> },
+  { path: "/docs", element: <ApiDocsPage /> },
 ]);
 
 createRoot(document.getElementById("root")!).render(

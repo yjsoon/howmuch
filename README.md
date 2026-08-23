@@ -2,6 +2,8 @@
 
 HowMuch is a personal ledger and reporting app with YNAB-compatible `/v1` APIs and native `/api` reports/imports.
 
+Public API documentation is available at [howmuch.soon.sg/docs](https://howmuch.soon.sg/docs). Its source is [the API contract](docs/api-contract.md).
+
 Local development uses Bun and SQLite:
 
 ```sh
