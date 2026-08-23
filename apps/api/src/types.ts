@@ -80,6 +80,7 @@ export type TransactionPage = {
   transactions: any[];
   has_more: boolean;
   next_offset: number | null;
+  total_count: number;
 };
 
 /**

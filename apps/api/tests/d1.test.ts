@@ -1337,6 +1337,11 @@ describe("D1 foundation", () => {
     const splitMirror = (db.query("SELECT transfer_transaction_id FROM subtransactions WHERE id = 'line-transfer'").get() as any).transfer_transaction_id;
     await expect(writer.update("p", splitMirror, { memo: "blocked" }, { operationId: "split-mirror-update" })).rejects.toThrow("linked side of a split line");
     await expect(writer.delete("p", splitMirror, { operationId: "split-mirror-delete" })).rejects.toThrow("linked side of a split line");
+    await writer.approve("p", splitMirror, true, { operationId: "split-mirror-approve" });
+    expect(db.query("SELECT id,approved FROM transactions WHERE id IN ('split-update',?) ORDER BY id").all(splitMirror)).toEqual([
+      { id: "split-update", approved: 1 },
+      { id: splitMirror, approved: 1 },
+    ]);
     await writer.update("p", "split-update", {
       subtransactions: [{ id: "line-transfer", amount: -10 }, { id: "line-plain", amount: -20 }],
     }, { operationId: "split-unlink" });

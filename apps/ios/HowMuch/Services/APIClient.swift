@@ -158,7 +158,8 @@ struct APIClient {
     planID: String,
     offset: Int = 0,
     sinceDate: String? = nil,
-    untilDate: String? = nil
+    untilDate: String? = nil,
+    type: String? = nil
   ) async throws -> TransactionPage {
     var queryItems = [
       URLQueryItem(name: "limit", value: String(Self.transactionPageSize)),
@@ -170,6 +171,9 @@ struct APIClient {
     if let untilDate {
       queryItems.append(URLQueryItem(name: "until_date", value: untilDate))
     }
+    if let type {
+      queryItems.append(URLQueryItem(name: "type", value: type))
+    }
     let response: APIEnvelope<TransactionsPayload> = try await request(
       path: "/v1/plans/\(planID)/transactions",
       queryItems: queryItems
@@ -180,6 +184,19 @@ struct APIClient {
       nextOffset: response.data.nextOffset,
       serverKnowledge: response.data.serverKnowledge
     )
+  }
+
+  func fetchAllUnapprovedTransactions(planID: String) async throws -> [Transaction] {
+    var transactions: [Transaction] = []
+    var offset = 0
+    while true {
+      let page = try await fetchTransactions(planID: planID, offset: offset, type: "unapproved")
+      transactions.append(contentsOf: page.transactions)
+      guard page.hasMore, let nextOffset = page.nextOffset else {
+        return transactions
+      }
+      offset = nextOffset
+    }
   }
 
   func fetchScheduledTransactions(planID: String) async throws -> [ScheduledTransaction] {

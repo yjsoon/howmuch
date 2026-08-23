@@ -853,6 +853,7 @@ struct TransactionsPayload: Decodable {
   let serverKnowledge: Int?
   let hasMore: Bool?
   let nextOffset: Int?
+  let totalCount: Int?
 }
 
 /// One bounded, newest-first ledger page from the HowMuch transaction API.
@@ -1035,6 +1036,7 @@ struct Transaction: Decodable, Identifiable, Hashable {
   let categoryName: String?
   let transferAccountID: String?
   let transferTransactionID: String?
+  let parentTransactionID: String?
   let matchedTransactionID: String?
   let importID: String?
   let importPayeeName: String?
@@ -1059,6 +1061,7 @@ struct Transaction: Decodable, Identifiable, Hashable {
     case categoryName
     case transferAccountID = "transferAccountId"
     case transferTransactionID = "transferTransactionId"
+    case parentTransactionID = "parentTransactionId"
     case matchedTransactionID = "matchedTransactionId"
     case importID = "importId"
     case importPayeeName = "importPayeeName"

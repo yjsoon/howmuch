@@ -280,7 +280,15 @@ struct RegisterView: View {
   }
 
   private var scopedTransactions: [Transaction] {
-    model.transactions.filter { transaction in
+    scoped(model.transactions)
+  }
+
+  private var approvalScopedTransactions: [Transaction] {
+    scoped(model.unapprovedTransactions)
+  }
+
+  private func scoped(_ transactions: [Transaction]) -> [Transaction] {
+    transactions.filter { transaction in
       if let accountID = scope.accountID, transaction.accountID != accountID {
         return false
       }
@@ -381,12 +389,13 @@ struct RegisterView: View {
   }
 
   private var unapprovedCount: Int {
-    scopedTransactions.count { !$0.approved }
+    approvalScopedTransactions.count
   }
 
   private var visibleTransactions: [Transaction] {
     let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-    return scopedTransactions.filter { transaction in
+    let source = unapprovedOnly ? approvalScopedTransactions : scopedTransactions
+    return source.filter { transaction in
       if unclearedOnly, transaction.cleared != .uncleared {
         return false
       }
@@ -763,7 +772,7 @@ struct TransactionRow: View {
         if !transaction.approved {
           Text("New")
             .font(.caption2.weight(.bold))
-            .foregroundStyle(.white)
+            .foregroundStyle(Theme.textPrimary)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(Theme.accent, in: Capsule())

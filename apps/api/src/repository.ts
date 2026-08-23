@@ -884,8 +884,18 @@ export class LedgerRepository {
   }
 
   async updateTransaction(planId: string, transactionId: string, patch: Partial<TransactionInput>): Promise<any> {
-    const prepared = await this.prepareTransactionUpdate(planId, transactionId, patch);
     const plan = newTransactionMutationPlan();
+    if (patch.approved !== undefined && Object.keys(patch).length === 1) {
+      let linkedSplit = false;
+      await this.db.transaction(async () => {
+        linkedSplit = await this.applyLinkedSplitApproval(planId, transactionId, patch.approved!, plan);
+        if (linkedSplit) await this.executeMutationPlan(planId, plan);
+      })();
+      if (linkedSplit) {
+        return this.getTransaction(planId, transactionId);
+      }
+    }
+    const prepared = await this.prepareTransactionUpdate(planId, transactionId, patch);
     await this.db.transaction(async () => {
       await this.applyResolvedPatch(planId, prepared.existing, prepared.next, patch, plan);
       await this.executeMutationPlan(planId, plan);
@@ -905,12 +915,60 @@ export class LedgerRepository {
     const plan = newTransactionMutationPlan();
     await this.db.transaction(async () => {
       for (const item of resolved) {
+        if (
+          item.patch.approved !== undefined &&
+          Object.keys(item.patch).length === 1 &&
+          await this.applyLinkedSplitApproval(planId, item.id, item.patch.approved, plan)
+        ) {
+          continue;
+        }
         const prepared = await this.prepareTransactionUpdate(planId, item.id, item.patch);
         await this.applyResolvedPatch(planId, prepared.existing, prepared.next, item.patch, plan);
       }
       await this.executeMutationPlan(planId, plan);
     })();
     return this.loadTransactionSaveResult(planId, resolved.map((item) => item.id), []);
+  }
+
+  private async applyLinkedSplitApproval(
+    planId: string,
+    transactionId: string,
+    approved: boolean,
+    plan: TransactionMutationPlan,
+  ): Promise<boolean> {
+    const linkedSub = await this.db
+      .query(
+        `SELECT s.transaction_id
+         FROM transactions t
+         JOIN subtransactions s ON s.id = t.transfer_transaction_id AND s.deleted = 0
+         WHERE t.id = ? AND t.plan_id = ? AND t.deleted = 0`,
+      )
+      .get(transactionId, planId) as Row | null;
+    if (!linkedSub) return false;
+    const rows = await this.db
+      .query(
+        `SELECT id FROM transactions
+         WHERE plan_id = ? AND deleted = 0 AND (
+           id = ? OR id IN (
+             SELECT transfer_transaction_id FROM subtransactions
+             WHERE transaction_id = ? AND deleted = 0 AND transfer_transaction_id IS NOT NULL
+           )
+         )`,
+      )
+      .all(planId, linkedSub.transaction_id, linkedSub.transaction_id) as Row[];
+    await this.db
+      .query(
+        `UPDATE transactions SET approved = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE plan_id = ? AND deleted = 0 AND (
+           id = ? OR id IN (
+             SELECT transfer_transaction_id FROM subtransactions
+             WHERE transaction_id = ? AND deleted = 0 AND transfer_transaction_id IS NOT NULL
+           )
+         )`,
+      )
+      .run(bool(approved), planId, linkedSub.transaction_id, linkedSub.transaction_id);
+    for (const row of rows) plan.touchedTransactionIds.add(row.id);
+    return true;
   }
 
   async createTransactions(planId: string, inputs: TransactionInput[]): Promise<TransactionBatchResult> {
@@ -1170,7 +1228,7 @@ export class LedgerRepository {
   }
 
   async listTransactions(planId: string, filters: TransactionFilters = {}): Promise<any[]> {
-    return this.queryTransactions(planId, filters);
+    return (await this.queryTransactions(planId, filters)).transactions;
   }
 
   /**
@@ -1184,12 +1242,14 @@ export class LedgerRepository {
       MAX_TRANSACTION_PAGE_SIZE,
     );
     const offset = Math.max(Math.floor(filters.offset ?? 0), 0);
-    const transactions = await this.queryTransactions(planId, filters, limit + 1, offset);
+    const result = await this.queryTransactions(planId, filters, limit + 1, offset);
+    const transactions = result.transactions;
     const has_more = transactions.length > limit;
     return {
       transactions: has_more ? transactions.slice(0, limit) : transactions,
       has_more,
       next_offset: has_more ? offset + limit : null,
+      total_count: result.totalCount,
     };
   }
 
@@ -1198,7 +1258,7 @@ export class LedgerRepository {
     filters: TransactionFilters,
     limit?: number,
     offset?: number,
-  ): Promise<any[]> {
+  ): Promise<{ transactions: any[]; totalCount: number }> {
     await this.ensurePlan(planId);
     const clauses = ["t.plan_id = ?"];
     const params: any[] = [planId];
@@ -1254,19 +1314,25 @@ export class LedgerRepository {
       .query(
         `SELECT
            t.*,
+           COUNT(*) OVER() AS result_count,
            a.name AS account_name,
            p.name AS payee_name,
-           c.name AS category_name
+           c.name AS category_name,
+           linked_sub.transaction_id AS parent_transaction_id
          FROM transactions t
          JOIN accounts a ON a.id = t.account_id
          LEFT JOIN payees p ON p.id = t.payee_id
          LEFT JOIN categories c ON c.id = t.category_id
+         LEFT JOIN subtransactions linked_sub ON linked_sub.id = t.transfer_transaction_id AND linked_sub.deleted = 0
          WHERE ${clauses.join(" AND ")}
          ORDER BY t.date DESC, t.created_at DESC, t.id DESC${pagination}`,
       )
       .all(...params) as Row[];
 
-    return this.formatTransactions(rows);
+    return {
+      transactions: await this.formatTransactions(rows),
+      totalCount: Number(rows[0]?.result_count ?? 0),
+    };
   }
 
   async getTransaction(planId: string, transactionId: string, includeDeleted = false): Promise<any> {
@@ -2444,6 +2510,7 @@ export class LedgerRepository {
       category_name: subtransactions.length > 0 ? "Split" : (row.category_name ?? row.category_name_snapshot),
       transfer_account_id: row.transfer_account_id,
       transfer_transaction_id: row.transfer_transaction_id,
+      parent_transaction_id: row.parent_transaction_id ?? null,
       matched_transaction_id: row.matched_transaction_id,
       import_id: row.import_id,
       import_payee_name: row.import_payee_name,

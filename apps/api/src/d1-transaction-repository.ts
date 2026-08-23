@@ -71,6 +71,35 @@ export class D1TransactionRepository {
     });
   }
 
+  async approve(planId: string, transactionId: string, approved: boolean, context?: D1WriteContext): Promise<Record<string, any>> {
+    const stable = identity(transactionId, context);
+    const fingerprint = requestHash({ approved });
+    this.assertContext(planId, context);
+    return this.write("approve", planId, stable, fingerprint, context, async (snapshot) => {
+      const target = snapshot.transaction;
+      if (!target || target.deleted) throw new Error("Transaction not found");
+      if (target.plan_id !== planId) throw new Error("Transaction belongs to another plan");
+      const parentId = snapshot.linkedSub?.transaction_id ?? transactionId;
+      const rows = await this.db.all<Record<string, any>>(
+        `SELECT * FROM transactions WHERE plan_id = ? AND deleted = 0 AND (
+           id = ? OR transfer_transaction_id = ? OR id IN (
+             SELECT transfer_transaction_id FROM subtransactions
+             WHERE transaction_id = ? AND deleted = 0 AND transfer_transaction_id IS NOT NULL
+           )
+         ) ORDER BY id`,
+        [planId, parentId, parentId, parentId],
+      );
+      const body: PlannedStatement[] = rows.map((row) => assertion(stable.commandId, "graph_transaction", row.id, planId));
+      body.push(statement(
+        `UPDATE transactions SET approved = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE plan_id = ? AND deleted = 0 AND id IN (${rows.map(() => "?").join(",")})`,
+        [approved ? 1 : 0, planId, ...rows.map((row) => row.id)],
+      ));
+      for (const row of rows) body.push(knowledge(planId, row.id));
+      return makePlan(stable.commandId, snapshot.writeVersion, transactionId, planId, "approve", fingerprint, context, body);
+    });
+  }
+
   async delete(planId: string, transactionId: string, context?: D1WriteContext): Promise<Record<string, any>> {
     const stable = identity(transactionId, context);
     this.assertContext(planId, context);

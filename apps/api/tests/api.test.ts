@@ -591,6 +591,7 @@ describe("YNAB-compatible API", () => {
     expect(first.data.transactions.map((transaction: { id: string }) => transaction.id)).toEqual(["page-d", "page-c"]);
     expect(first.data.has_more).toBeTrue();
     expect(first.data.next_offset).toBe(2);
+    expect(first.data.total_count).toBe(4);
 
     const second = await (await request("/v1/plans/plan-test/transactions?limit=2&offset=2")).json();
     expect(second.data.transactions.map((transaction: { id: string }) => transaction.id)).toEqual(["page-b", "page-a"]);
@@ -1404,6 +1405,13 @@ describe("transfers and splits", () => {
     expect(mirrored.data.transaction.amount).toBe(50000);
     expect(mirrored.data.transaction.transfer_transaction_id).toBe(transferLine.id);
 
+    const approved = await (await request(`/v1/plans/plan-test/transactions/${transferLine.transfer_transaction_id}`, {
+      method: "PATCH",
+      body: { transaction: { approved: true } },
+    })).json();
+    expect(approved.data.transaction.approved).toBeTrue();
+    expect((await (await request(`/v1/plans/plan-test/transactions/${parent.id}`)).json()).data.transaction.approved).toBeTrue();
+
     // Deleting the split takes the linked transfer side with it.
     await request(`/v1/plans/plan-test/transactions/${parent.id}`, { method: "DELETE" });
     const remaining = await (await request("/v1/plans/plan-test/transactions")).json();
@@ -1589,6 +1597,7 @@ describe("transfers and splits", () => {
     const transfer = (await transferResponse.json()).data.transaction;
     expect(transfer.transfer_account_id).toBe(savings.id);
     expect(transfer.amount).toBe(-250000);
+    expect(transfer.approved).toBeTrue();
 
     const splitResponse = await request("/api/mobile/quick-entry?plan_id=plan-test", {
       method: "POST",
@@ -1662,6 +1671,7 @@ describe("native reports and imports", () => {
     expect(quickEntryResponse.status).toBe(201);
     const quickEntry = await quickEntryResponse.json();
     expect(quickEntry.data.transaction.amount).toBe(-12340);
+    expect(quickEntry.data.transaction.approved).toBeTrue();
     expect(quickEntry.data.transaction.source_kind).toBeUndefined();
   });
 

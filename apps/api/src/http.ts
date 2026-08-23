@@ -478,6 +478,7 @@ async function handleNative(
       category_id: body.category_id ?? null,
       memo: body.memo ?? null,
       flag_color: body.flag_color ?? null,
+      approved: true,
       source_kind: "mobile",
       source_ref: body.client_id ?? null,
       subtransactions,
@@ -543,6 +544,7 @@ async function transactionListResponse(repo: LedgerStore, planId: string, filter
           server_knowledge: after,
           has_more: page.has_more,
           next_offset: page.next_offset,
+          total_count: page.total_count,
         },
       });
     }

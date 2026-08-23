@@ -37,6 +37,9 @@ final class AppModel {
   var payees: [Payee] = []
   /// Loaded portion of the ledger, newest first. Older pages append on demand.
   var transactions: [Transaction] = []
+  /// Complete review queue, loaded separately so old unapproved entries do
+  /// not disappear behind the register's bounded first page.
+  private(set) var unapprovedTransactions: [Transaction] = []
   /// Imported YNAB schedules remain an immutable source mirror; local edits
   /// and entered occurrences are reflected through HowMuch overlays.
   var scheduledTransactions: [ScheduledTransaction] = []
@@ -706,11 +709,14 @@ final class AppModel {
       ledgerPhase = .loading
     }
     do {
-      let page = try await apiClient.fetchTransactions(planID: planID)
+      async let firstPage = apiClient.fetchTransactions(planID: planID)
+      async let approvalQueue = apiClient.fetchAllUnapprovedTransactions(planID: planID)
+      let (page, unapproved) = try await (firstPage, approvalQueue)
       guard generation == ledgerPageGeneration, planID == settings.planID else {
         return
       }
       transactions = sortedUniqueTransactions(page.transactions)
+      unapprovedTransactions = sortedUniqueTransactions(unapproved)
       hasMoreTransactions = page.hasMore && page.nextOffset != nil
       nextTransactionOffset = hasMoreTransactions ? page.nextOffset : nil
       ledgerPhase = .loaded
@@ -1138,6 +1144,7 @@ final class AppModel {
       transactions[index] = approved
     }
     showSaveMessage("Approved \(approved.payeeName ?? "transaction")")
+    await refreshLedger(quiet: true)
   }
 
   private func showSaveMessage(_ message: String) {

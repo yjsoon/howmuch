@@ -109,6 +109,22 @@ export function TransactionsPage() {
   const [mutatingId, setMutatingId] = useState<string | null>(null);
   const [unapprovedOnly, setUnapprovedOnly] = useState(false);
   const selectedAccountId = filters.accountIds.length === 1 ? filters.accountIds[0]! : null;
+  const approvalQueue = useApi(
+    JSON.stringify({ planId, selectedAccountId, from: filters.from, to: filters.to, refreshGeneration, approvalQueue: true }),
+    async () => {
+      const transactions: Transaction[] = [];
+      let offset = 0;
+      for (;;) {
+        const query = { since_date: filters.from, until_date: filters.to, type: "unapproved" as const, limit: 250, offset };
+        const result = selectedAccountId
+          ? await api.accountTransactions(planId, selectedAccountId, query)
+          : await api.transactions(planId, query);
+        transactions.push(...result.transactions);
+        if (!result.has_more || result.next_offset === null) return transactions;
+        offset = result.next_offset;
+      }
+    },
+  );
   const reconciliationPreviewInput = reconcileDraft?.reviewReady && reconcileDraft.accountId && reconcileDraft.statementDate
     ? { accountId: reconcileDraft.accountId, statementDate: reconcileDraft.statementDate }
     : null;
@@ -341,14 +357,17 @@ export function TransactionsPage() {
 
   const inScope = useMemo(
     () =>
-      page.transactions
+      (unapprovedOnly ? (approvalQueue.data ?? []) : page.transactions)
         .filter((txn) => !txn.deleted)
         .filter((txn) => registerAccountIds.has(txn.account_id)),
-    [page.transactions, registerAccountIds],
+    [approvalQueue.data, page.transactions, registerAccountIds, unapprovedOnly],
   );
 
   const uncategorisedCount = useMemo(() => inScope.filter(hasUncategorisedLine).length, [inScope]);
-  const unapprovedCount = useMemo(() => inScope.filter((transaction) => !transaction.approved).length, [inScope]);
+  const unapprovedCount = useMemo(
+    () => (approvalQueue.data ?? []).filter((transaction) => !transaction.deleted && registerAccountIds.has(transaction.account_id)).length,
+    [approvalQueue.data, registerAccountIds],
+  );
 
   const scopedRows = useMemo(() => {
     const outflowOnly = flow === "outflow" || wantsUncategorised;
@@ -791,18 +810,20 @@ export function TransactionsPage() {
                         >
                           Edit
                         </button>
-                        <button
-                          type="button"
-                          className="register-row-action register-row-action-danger"
-                          onClick={() => {
-                            setPendingDeletion(txn);
-                            setMutationError(null);
-                          }}
-                          disabled={mutatingId === txn.id}
-                          aria-label={`${txn.approved ? "Delete" : "Reject"} ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
-                        >
-                          {txn.approved ? "Delete" : "Reject"}
-                        </button>
+                        {(txn.approved || !txn.parent_transaction_id) && (
+                          <button
+                            type="button"
+                            className="register-row-action register-row-action-danger"
+                            onClick={() => {
+                              setPendingDeletion(txn);
+                              setMutationError(null);
+                            }}
+                            disabled={mutatingId === txn.id}
+                            aria-label={`${txn.approved ? "Delete" : "Reject"} ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
+                          >
+                            {txn.approved ? "Delete" : "Reject"}
+                          </button>
+                        )}
                       </td>
                     </tr>,
                     ...(txn.subtransactions ?? []).map((sub) => (
@@ -831,7 +852,7 @@ export function TransactionsPage() {
               <p className="status-detail">Try widening the date range, clearing filters, or shortening the search term.</p>
             </div>
           )}
-          {page.hasMore && (
+          {page.hasMore && !unapprovedOnly && (
             <div className="register-load-more">
               <button type="button" className="register-load-more-button" onClick={loadOlder} disabled={page.loadingMore}>
                 {page.loadingMore ? "Loading older transactions…" : "Load older transactions"}

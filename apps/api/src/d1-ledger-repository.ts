@@ -304,7 +304,14 @@ export class D1LedgerRepository extends LedgerRepository {
     const row=await this.transactions.create(planId,{...input,id},this.context("transaction.create",planId,id,options.operationId),{autoLink,upsert:!autoLink});
     return this.getTransaction(planId,row.id,Boolean(input.deleted));
   }
-  override async updateTransaction(planId:string,id:string,patch:Partial<TransactionInput>):Promise<any>{await this.transactions.update(planId,id,patch,this.context("transaction.update",planId,id));return this.getTransaction(planId,id);}
+  override async updateTransaction(planId:string,id:string,patch:Partial<TransactionInput>):Promise<any>{
+    if (patch.approved !== undefined && Object.keys(patch).length === 1) {
+      await this.transactions.approve(planId,id,patch.approved,this.context("transaction.approve",planId,id));
+    } else {
+      await this.transactions.update(planId,id,patch,this.context("transaction.update",planId,id));
+    }
+    return this.getTransaction(planId,id);
+  }
   override async updateTransactions(planId: string, edits: TransactionBatchUpdate[]): Promise<TransactionBatchResult> {
     const ids: string[] = [];
     const seen = new Set<string>();
