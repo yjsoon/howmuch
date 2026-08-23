@@ -373,6 +373,20 @@ struct APIClient {
     return response.data.transaction
   }
 
+  func updateTransactionCleared(
+    planID: String,
+    transactionID: String,
+    expectedCleared: ClearedState,
+    cleared: ClearedState
+  ) async throws -> Transaction {
+    let response: APIEnvelope<TransactionPayload> = try await request(
+      path: "/v1/plans/\(planID)/transactions/\(transactionID)/cleared",
+      method: "PATCH",
+      body: ClearedUpdateRequest(expectedCleared: expectedCleared, cleared: cleared)
+    )
+    return response.data.transaction
+  }
+
   func deleteTransaction(planID: String, transactionID: String, expectedApproved: Bool? = nil) async throws -> Transaction {
     let expectation = expectedApproved.map { "?expected_approved=\($0)" } ?? ""
     let response: APIEnvelope<TransactionPayload> = try await request(
@@ -546,6 +560,11 @@ struct APIClient {
     encoder.keyEncodingStrategy = .convertToSnakeCase
     return encoder
   }
+}
+
+private struct ClearedUpdateRequest: Encodable {
+  let expectedCleared: ClearedState
+  let cleared: ClearedState
 }
 
 private struct LoginRequest: Encodable {

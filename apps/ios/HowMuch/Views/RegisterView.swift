@@ -29,6 +29,7 @@ struct RegisterView: View {
   @State private var duplicatingDraft: DuplicateDraft?
   @State private var isShowingReconciliation = false
   @State private var approvalError: String?
+  @State private var statusError: String?
 
   /// Identifiable box so sheet(item:) can present a prefilled capture form.
   private struct DuplicateDraft: Identifiable {
@@ -107,16 +108,14 @@ struct RegisterView: View {
 
             VStack(spacing: 0) {
               ForEach(section.transactions.enumerated(), id: \.element.id) { index, transaction in
-                Button {
-                  editingTransaction = transaction
-                } label: {
-                  TransactionRow(
-                    transaction: transaction,
-                    showsAccount: scope == .all,
-                    currencyFormat: model.currencyFormat
-                  )
-                }
-                .buttonStyle(.plain)
+                TransactionRow(
+                  transaction: transaction,
+                  showsAccount: scope == .all,
+                  currencyFormat: model.currencyFormat,
+                  isBusy: model.isSubmitting,
+                  onOpen: { editingTransaction = transaction },
+                  onToggleCleared: { toggleCleared(transaction) }
+                )
                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
                   if !transaction.approved {
                     Button {
@@ -248,6 +247,14 @@ struct RegisterView: View {
     } message: {
       Text(approvalError ?? "Please try again.")
     }
+    .alert("Couldn’t update status", isPresented: Binding(
+      get: { statusError != nil },
+      set: { if !$0 { statusError = nil } }
+    )) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(statusError ?? "Refresh and try again.")
+    }
   }
 
   private func approve(_ transaction: Transaction) {
@@ -269,6 +276,16 @@ struct RegisterView: View {
       return "All Transactions"
     case .account(let id):
       return model.account(withID: id)?.name ?? "Account"
+    }
+  }
+
+  private func toggleCleared(_ transaction: Transaction) {
+    Task {
+      do {
+        try await model.toggleTransactionCleared(transaction)
+      } catch {
+        statusError = error.localizedDescription
+      }
     }
   }
 
@@ -737,53 +754,63 @@ struct TransactionRow: View {
   let transaction: Transaction
   let showsAccount: Bool
   let currencyFormat: CurrencyFormat?
+  let isBusy: Bool
+  let onOpen: () -> Void
+  let onToggleCleared: () -> Void
 
   var body: some View {
     HStack(alignment: .center, spacing: 10) {
-      if let flag = Theme.flagColour(named: transaction.flagColor) {
-        RoundedRectangle(cornerRadius: 2)
-          .fill(flag)
-          .frame(width: 4, height: 34)
-      }
+      Button(action: onOpen) {
+        HStack(alignment: .center, spacing: 10) {
+          if let flag = Theme.flagColour(named: transaction.flagColor) {
+            RoundedRectangle(cornerRadius: 2)
+              .fill(flag)
+              .frame(width: 4, height: 34)
+          }
 
-      VStack(alignment: .leading, spacing: 3) {
-        Text(payeeDisplay)
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(Theme.textPrimary)
-          .lineLimit(1)
-        Text(detailLine)
-          .font(.footnote)
-          .foregroundStyle(transaction.isUncategorised ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
-          .lineLimit(1)
-        if let memo = transaction.memo, !memo.isEmpty {
-          Text(memo)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Theme.surfaceMuted, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+          VStack(alignment: .leading, spacing: 3) {
+            Text(payeeDisplay)
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(Theme.textPrimary)
+              .lineLimit(1)
+            Text(detailLine)
+              .font(.footnote)
+              .foregroundStyle(transaction.isUncategorised ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
+              .lineLimit(1)
+            if let memo = transaction.memo, !memo.isEmpty {
+              Text(memo)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Theme.surfaceMuted, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+          }
+
+          Spacer()
+
+          if !transaction.approved {
+            Text("New")
+              .font(.caption2.weight(.bold))
+              .foregroundStyle(Theme.textPrimary)
+              .padding(.horizontal, 6)
+              .padding(.vertical, 3)
+              .background(Theme.accent, in: Capsule())
+              .accessibilityLabel("Needs approval")
+          }
+
+          Text(MoneyCodec.signedDisplayString(for: transaction.amount, currencyFormat: currencyFormat))
+            .font(.subheadline.weight(.medium))
+            .monospacedDigit()
+            .foregroundStyle(Theme.registerAmountColour(transaction.amount))
         }
+        .contentShape(Rectangle())
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
+      .buttonStyle(.plain)
 
-      Spacer()
-
-      HStack(spacing: 6) {
-        if !transaction.approved {
-          Text("New")
-            .font(.caption2.weight(.bold))
-            .foregroundStyle(Theme.textPrimary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(Theme.accent, in: Capsule())
-            .accessibilityLabel("Needs approval")
-        }
-        Text(MoneyCodec.signedDisplayString(for: transaction.amount, currencyFormat: currencyFormat))
-          .font(.subheadline.weight(.medium))
-          .monospacedDigit()
-          .foregroundStyle(Theme.registerAmountColour(transaction.amount))
-        clearedBadge
-      }
+      clearedBadge
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 11)
@@ -821,17 +848,30 @@ struct TransactionRow: View {
       Image(systemName: "lock.fill")
         .font(.caption)
         .foregroundStyle(Theme.inflow)
+        .frame(width: 44, height: 44)
         .accessibilityLabel("Reconciled")
     case .cleared:
-      Image(systemName: "c.circle.fill")
-        .font(.footnote)
-        .foregroundStyle(Theme.inflow)
-        .accessibilityLabel("Cleared")
+      Button(action: onToggleCleared) {
+        Image(systemName: "c.circle.fill")
+          .font(.title3)
+          .foregroundStyle(Theme.inflow)
+          .frame(width: 44, height: 44)
+      }
+      .buttonStyle(.plain)
+      .disabled(isBusy)
+      .accessibilityLabel("Mark \(payeeDisplay) uncleared")
+      .accessibilityHint("Double tap to change this transaction’s status.")
     case .uncleared:
-      Image(systemName: "c.circle")
-        .font(.footnote)
-        .foregroundStyle(.tertiary)
-        .accessibilityLabel("Uncleared")
+      Button(action: onToggleCleared) {
+        Image(systemName: "c.circle")
+          .font(.title3)
+          .foregroundStyle(.tertiary)
+          .frame(width: 44, height: 44)
+      }
+      .buttonStyle(.plain)
+      .disabled(isBusy)
+      .accessibilityLabel("Mark \(payeeDisplay) cleared")
+      .accessibilityHint("Double tap to change this transaction’s status.")
     }
   }
 }

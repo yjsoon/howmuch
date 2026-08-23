@@ -1007,7 +1007,10 @@ final class AppModel {
       throw APIClientError.validation("Enter an amount and pick an account.")
     }
 
-    let request = draft.writeRequest()
+    // Existing cleared state is changed only through the compare-and-set
+    // register control, so an editor opened before another client toggles the
+    // row cannot silently write that older status back.
+    let request = draft.writeRequest(includeCleared: draft.id == nil)
     let saved: Transaction
     if let id = draft.id {
       saved = try await apiClient.updateTransaction(planID: settings.planID, transactionID: id, request: request)
@@ -1034,6 +1037,38 @@ final class AppModel {
     showSaveMessage("Saved \(MoneyCodec.displayString(for: saved.amount, currencyFormat: currencyFormat)) — \(saved.payeeName ?? "transaction")")
     Task { await refreshLedgerAndInvalidatePlan() }
     return saved
+  }
+
+  func toggleTransactionCleared(_ transaction: Transaction) async throws {
+    guard !isSubmitting else {
+      throw APIClientError.validation("Another transaction change is already in progress.")
+    }
+    guard transaction.cleared != .reconciled else {
+      throw APIClientError.validation("Reconciled transactions stay locked.")
+    }
+
+    isSubmitting = true
+    defer { isSubmitting = false }
+    let cleared: ClearedState = transaction.cleared == .cleared ? .uncleared : .cleared
+    do {
+      let saved = try await apiClient.updateTransactionCleared(
+        planID: settings.planID,
+        transactionID: transaction.id,
+        expectedCleared: transaction.cleared,
+        cleared: cleared
+      )
+      if let index = transactions.firstIndex(where: { $0.id == saved.id }) {
+        transactions[index] = saved
+      }
+      if let index = unapprovedTransactions.firstIndex(where: { $0.id == saved.id }) {
+        unapprovedTransactions[index] = saved
+      }
+      showSaveMessage(cleared == .cleared ? "Marked transaction cleared" : "Marked transaction uncleared")
+      Task { await refreshLedgerAndInvalidatePlan() }
+    } catch {
+      await refreshLedger(quiet: true)
+      throw error
+    }
   }
 
   func refreshLedgerAndInvalidatePlan() async {

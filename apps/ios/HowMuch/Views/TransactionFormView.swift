@@ -153,6 +153,7 @@ struct TransactionFormView: View {
   @State private var isKeypadVisible: Bool
   @State private var errorMessage: String?
   @State private var isConfirmingDelete = false
+  @State private var isConfirmingEdit = false
   @State private var isConfirmingSplitRemoval = false
   @State private var isAutoAdvancingToPayee = false
   private let isEditing: Bool
@@ -269,6 +270,16 @@ struct TransactionFormView: View {
         Button("Delete Transaction", role: .destructive) {
           deleteTransaction()
         }
+      } message: {
+        Text("This also deletes any linked transfer entries. If this transaction or a linked entry has been reconciled, deleting it can make your next reconciliation inaccurate.")
+      }
+      .confirmationDialog("Save transaction changes?", isPresented: $isConfirmingEdit, titleVisibility: .visible) {
+        Button("Save Changes") {
+          submitSave()
+        }
+        Button("Cancel", role: .cancel) {}
+      } message: {
+        Text("If this transaction or a linked transfer has been reconciled, its status stays locked, but changing its amount, account, or date can make your next reconciliation inaccurate.")
       }
       .confirmationDialog("Remove split allocations?", isPresented: $isConfirmingSplitRemoval, titleVisibility: .visible) {
         Button("Remove Split", role: .destructive) {
@@ -586,12 +597,21 @@ struct TransactionFormView: View {
   private var extrasCard: some View {
     VStack(spacing: 0) {
       HStack(spacing: 12) {
-        Image(systemName: "c.circle")
+        Image(systemName: draft.wasReconciled ? "lock.fill" : draft.isCleared ? "c.circle.fill" : "c.circle")
           .foregroundStyle(draft.isCleared ? Theme.inflow : Color.secondary)
           .frame(width: 28)
-        Toggle("Cleared", isOn: $draft.isCleared)
-          .tint(Theme.inflow)
-          .foregroundStyle(Theme.textPrimary)
+        if isEditing {
+          Text(draft.wasReconciled ? "Reconciled" : draft.isCleared ? "Cleared" : "Uncleared")
+            .foregroundStyle(Theme.textPrimary)
+          Spacer()
+          Text("Change in register")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        } else {
+          Toggle("Cleared", isOn: $draft.isCleared)
+            .tint(Theme.inflow)
+            .foregroundStyle(Theme.textPrimary)
+        }
       }
       .padding(.horizontal, 16)
       .padding(.vertical, 10)
@@ -664,6 +684,14 @@ struct TransactionFormView: View {
       // choice would be sent (and discarded) invisibly.
       draft.categoryID = nil
     }
+    if isEditing {
+      isConfirmingEdit = true
+      return
+    }
+    submitSave()
+  }
+
+  private func submitSave() {
     errorMessage = nil
     Task {
       do {
