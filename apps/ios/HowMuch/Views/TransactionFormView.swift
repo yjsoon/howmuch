@@ -153,7 +153,7 @@ struct TransactionFormView: View {
   @State private var isKeypadVisible: Bool
   @State private var errorMessage: String?
   @State private var isConfirmingDelete = false
-  @State private var isConfirmingReconciledEdit = false
+  @State private var isConfirmingEdit = false
   @State private var isConfirmingSplitRemoval = false
   @State private var isAutoAdvancingToPayee = false
   private let isEditing: Bool
@@ -271,17 +271,15 @@ struct TransactionFormView: View {
           deleteTransaction()
         }
       } message: {
-        if draft.wasReconciled {
-          Text("This transaction is reconciled. Deleting it cannot be undone and can make your next reconciliation balance inaccurate.")
-        }
+        Text("This also deletes any linked transfer entries. If this transaction or a linked entry has been reconciled, deleting it can make your next reconciliation inaccurate.")
       }
-      .confirmationDialog("Edit reconciled transaction?", isPresented: $isConfirmingReconciledEdit, titleVisibility: .visible) {
+      .confirmationDialog("Save transaction changes?", isPresented: $isConfirmingEdit, titleVisibility: .visible) {
         Button("Save Changes") {
           submitSave()
         }
         Button("Cancel", role: .cancel) {}
       } message: {
-        Text("Its reconciled status will stay locked, but changing its amount, account, or date can make your next reconciliation balance inaccurate.")
+        Text("If this transaction or a linked transfer has been reconciled, its status stays locked, but changing its amount, account, or date can make your next reconciliation inaccurate.")
       }
       .confirmationDialog("Remove split allocations?", isPresented: $isConfirmingSplitRemoval, titleVisibility: .visible) {
         Button("Remove Split", role: .destructive) {
@@ -686,8 +684,8 @@ struct TransactionFormView: View {
       // choice would be sent (and discarded) invisibly.
       draft.categoryID = nil
     }
-    if isEditing, draft.wasReconciled {
-      isConfirmingReconciledEdit = true
+    if isEditing {
+      isConfirmingEdit = true
       return
     }
     submitSave()
