@@ -778,6 +778,7 @@ describe("YNAB-compatible API", () => {
       ["/v1/plans/plan-test/accounts/account-1/reconcile", "POST"],
       ["/v1/plans/plan-test/payees", "POST"],
       ["/v1/plans/plan-test/transactions", "POST"],
+      ["/v1/plans/plan-test/transactions", "PATCH"],
       ["/v1/plans/plan-test/transactions/import", "POST"],
       ["/v1/plans/plan-test/transactions/transaction-1", "PUT"],
       ["/v1/plans/plan-test/transactions/transaction-1", "PATCH"],
@@ -936,6 +937,123 @@ describe("YNAB-compatible API", () => {
       "groceries",
       "household",
     ]);
+  });
+
+  test("updates multiple transactions on the collection PATCH used by YNAB", async () => {
+    const firstId = await createTransaction({
+      account_id: "acct-1",
+      date: "2026-06-10",
+      amount: -1000,
+      memo: "TODO: one",
+      import_id: "bulk-import-1",
+    });
+    const secondId = await createTransaction({
+      account_id: "acct-1",
+      date: "2026-06-11",
+      amount: -2000,
+      memo: "TODO: two",
+    });
+    const knowledgeBefore = (db.query("SELECT server_knowledge FROM plans WHERE id = 'plan-test'").get() as { server_knowledge: number }).server_knowledge;
+
+    const response = await request("/v1/plans/plan-test/transactions", {
+      method: "PATCH",
+      body: {
+        transactions: [
+          { id: firstId, memo: "CLAIMED: one", flag_color: "green" },
+          { id: secondId, memo: "CLAIMED: two", approved: true },
+        ],
+      },
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.transaction_ids).toEqual([firstId, secondId]);
+    expect(body.data.transactions.map((transaction: { id: string }) => transaction.id)).toEqual([firstId, secondId]);
+    expect(body.data.transactions[0]).toMatchObject({ memo: "CLAIMED: one", flag_color: "green" });
+    expect(body.data.transactions[1]).toMatchObject({ memo: "CLAIMED: two", approved: true });
+    expect(body.data.server_knowledge).toBe(knowledgeBefore + 1);
+
+    const alias = await request("/v1/budgets/plan-test/transactions", {
+      method: "PATCH",
+      body: { transactions: [{ import_id: "bulk-import-1", account_id: "acct-1", memo: "CLAIMED: import" }] },
+    });
+    expect(alias.status).toBe(200);
+    expect((await alias.json()).data.transactions[0].memo).toBe("CLAIMED: import");
+  });
+
+  test("rejects invalid collection PATCH bodies without changing other rows", async () => {
+    const keptId = await createTransaction({ account_id: "acct-1", date: "2026-06-10", amount: -1000, memo: "keep" });
+    const knowledge = (db.query("SELECT server_knowledge FROM plans WHERE id = 'plan-test'").get() as { server_knowledge: number }).server_knowledge;
+
+    const tooMany = await request("/v1/plans/plan-test/transactions", {
+      method: "PATCH",
+      body: { transactions: Array.from({ length: 101 }, (_, index) => ({ id: `missing-${index}`, memo: "x" })) },
+    });
+    expect(tooMany.status).toBe(400);
+    expect((await tooMany.json()).error.name).toBe("bad_request");
+
+    const empty = await request("/v1/plans/plan-test/transactions", {
+      method: "PATCH",
+      body: { transactions: [] },
+    });
+    expect(empty.status).toBe(400);
+
+    const bothKeys = await request("/v1/plans/plan-test/transactions", {
+      method: "PATCH",
+      body: { transactions: [{ id: keptId, import_id: "nope", memo: "changed" }] },
+    });
+    expect(bothKeys.status).toBe(400);
+
+    const missing = await request("/v1/plans/plan-test/transactions", {
+      method: "PATCH",
+      body: { transactions: [{ id: "missing-txn", memo: "changed" }, { id: keptId, memo: "changed" }] },
+    });
+    expect(missing.status).toBe(404);
+
+    const stored = db.query("SELECT memo FROM transactions WHERE id = ?").get(keptId);
+    expect(stored).toEqual({ memo: "keep" });
+    expect(db.query("SELECT server_knowledge FROM plans WHERE id = 'plan-test'").get()).toEqual({ server_knowledge: knowledge });
+  });
+
+  test("creates multiple transactions on the collection POST used by YNAB", async () => {
+    const response = await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: {
+        transactions: [
+          { account_id: "acct-1", date: "2026-06-10", amount: -1100, payee_name: "One", import_id: "bulk-create-1" },
+          { account_id: "acct-1", date: "2026-06-11", amount: -2200, payee_name: "Two" },
+        ],
+      },
+    });
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.data.transaction_ids).toHaveLength(2);
+    expect(body.data.transactions).toHaveLength(2);
+    expect(body.data.transactions.map((transaction: { payee_name: string }) => transaction.payee_name)).toEqual(["One", "Two"]);
+    expect(body.data.duplicate_import_ids).toEqual([]);
+
+    const replay = await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: {
+        transactions: [
+          { account_id: "acct-1", date: "2026-06-10", amount: -1100, payee_name: "One", import_id: "bulk-create-1" },
+          { account_id: "acct-1", date: "2026-06-12", amount: -3300, payee_name: "Three" },
+        ],
+      },
+    });
+    expect(replay.status).toBe(201);
+    const replayed = await replay.json();
+    expect(replayed.data.duplicate_import_ids).toEqual(["bulk-create-1"]);
+    expect(replayed.data.transactions).toHaveLength(1);
+    expect(replayed.data.transactions[0].payee_name).toBe("Three");
+
+    const bothKeys = await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: {
+        transaction: { account_id: "acct-1", date: "2026-06-13", amount: -1 },
+        transactions: [{ account_id: "acct-1", date: "2026-06-13", amount: -1 }],
+      },
+    });
+    expect(bothKeys.status).toBe(400);
   });
 
   test("supports category reads and incremental transaction sync", async () => {
