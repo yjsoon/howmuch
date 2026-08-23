@@ -258,9 +258,9 @@ export const api = {
       planUrl(planId, "transactions", transactionId, "cleared"),
       { method: "PATCH", body: JSON.stringify({ expected_cleared: expectedCleared, cleared }) },
     ).then((data) => data.transaction),
-  deleteTransaction: (planId: string, transactionId: string) =>
+  deleteTransaction: (planId: string, transactionId: string, expectedApproved?: boolean) =>
     request<{ transaction: Transaction }>(
-      planUrl(planId, "transactions", transactionId),
+      `${planUrl(planId, "transactions", transactionId)}${query({ expected_approved: expectedApproved?.toString() })}`,
       { method: "DELETE" },
     ).then((data) => data.transaction),
   spendingBreakdown: (params: ReportQuery) =>

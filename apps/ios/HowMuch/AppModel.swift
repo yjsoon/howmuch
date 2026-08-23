@@ -1128,7 +1128,11 @@ final class AppModel {
     isSubmitting = true
     defer { isSubmitting = false }
 
-    _ = try await apiClient.deleteTransaction(planID: settings.planID, transactionID: transaction.id)
+    _ = try await apiClient.deleteTransaction(
+      planID: settings.planID,
+      transactionID: transaction.id,
+      expectedApproved: transaction.approved ? nil : false
+    )
     transactions.removeAll { $0.id == transaction.id }
     unapprovedTransactions.removeAll { $0.id == transaction.id }
     showSaveMessage("Deleted \(transaction.payeeName ?? "transaction")")

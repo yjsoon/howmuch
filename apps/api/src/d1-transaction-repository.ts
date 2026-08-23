@@ -128,13 +128,17 @@ export class D1TransactionRepository {
     });
   }
 
-  async delete(planId: string, transactionId: string, context?: D1WriteContext): Promise<Record<string, any>> {
+  async delete(planId: string, transactionId: string, context?: D1WriteContext, expectedApproved?: boolean): Promise<Record<string, any>> {
     const stable = identity(transactionId, context);
+    const fingerprint = requestHash({ expectedApproved });
     this.assertContext(planId, context);
-    return this.write("delete", planId, stable, requestHash({}), context, async (snapshot) => {
+    return this.write("delete", planId, stable, fingerprint, context, async (snapshot) => {
       if (snapshot.linkedSub) throw new Error("This transaction is the linked side of a split line; edit the split parent");
       if (!snapshot.transaction || snapshot.transaction.deleted) throw new Error("Transaction not found");
       if (snapshot.transaction.plan_id !== planId) throw new Error("Transaction belongs to another plan");
+      if (expectedApproved !== undefined && Boolean(snapshot.transaction.approved) !== expectedApproved) {
+        throw new Error("transaction approved state conflict");
+      }
       const affected = new Set<string>([snapshot.transaction.account_id, ...snapshot.mirrors.map((row) => row.account_id)]);
       const rows = [snapshot.transaction, ...snapshot.mirrors];
       const body: PlannedStatement[] = [assertion(stable.commandId, "graph_update_target", transactionId, planId)];
@@ -144,7 +148,7 @@ export class D1TransactionRepository {
       if (snapshot.subs.length) body.push(statement("UPDATE subtransactions SET deleted=1, updated_at=CURRENT_TIMESTAMP WHERE transaction_id=?", [transactionId]));
       for (const account of affected) body.push(recalculate(account));
       for (const row of rows) body.push(knowledge(planId, row.id));
-      return makePlan(stable.commandId, snapshot.writeVersion, transactionId, planId, "delete", requestHash({}), context, [
+      return makePlan(stable.commandId, snapshot.writeVersion, transactionId, planId, "delete", fingerprint, context, [
         ...body,
       ]);
     });

@@ -373,9 +373,10 @@ struct APIClient {
     return response.data.transaction
   }
 
-  func deleteTransaction(planID: String, transactionID: String) async throws -> Transaction {
+  func deleteTransaction(planID: String, transactionID: String, expectedApproved: Bool? = nil) async throws -> Transaction {
+    let expectation = expectedApproved.map { "?expected_approved=\($0)" } ?? ""
     let response: APIEnvelope<TransactionPayload> = try await request(
-      path: "/v1/plans/\(planID)/transactions/\(transactionID)",
+      path: "/v1/plans/\(planID)/transactions/\(transactionID)\(expectation)",
       method: "DELETE"
     )
     return response.data.transaction

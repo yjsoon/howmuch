@@ -424,7 +424,12 @@ async function handleV1(
       return json({ data: { transaction: updated, server_knowledge: await repo.getServerKnowledge(planId) } });
     }
     if (segments.length === 5 && method === "DELETE") {
-      const deleted = await repo.deleteTransaction(planId, transactionId);
+      const expectedApprovedParameter = url.searchParams.get("expected_approved");
+      if (expectedApprovedParameter !== null && expectedApprovedParameter !== "true" && expectedApprovedParameter !== "false") {
+        throw new ValidationError("expected_approved must be true or false");
+      }
+      const expectedApproved = expectedApprovedParameter === null ? undefined : expectedApprovedParameter === "true";
+      const deleted = await repo.deleteTransaction(planId, transactionId, expectedApproved);
       return json({ data: { transaction: deleted, server_knowledge: await repo.getServerKnowledge(planId) } });
     }
   }

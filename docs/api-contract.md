@@ -349,6 +349,12 @@ side, including for transfers, and returns `409 transaction_state_conflict` if
 the live state no longer matches `expected_cleared`. Reconciled transactions
 cannot be changed back through either update route.
 
+Review clients reject new rows with
+`DELETE /v1/plans/{plan_id}/transactions/{transaction_id}?expected_approved=false`.
+The delete is atomic and returns `409 transaction_state_conflict` if another
+client approved the transaction after it was loaded. Omitting the query
+parameter retains the ordinary unconditional delete behavior.
+
 Updatable fields:
 
 - `date`

@@ -1155,12 +1155,15 @@ export class LedgerRepository {
     }
   }
 
-  async deleteTransaction(planId: string, transactionId: string): Promise<any> {
+  async deleteTransaction(planId: string, transactionId: string, expectedApproved?: boolean): Promise<any> {
     const plan = newTransactionMutationPlan();
     await this.db.transaction(async () => {
       const existing = await this.getTransactionRow(planId, transactionId);
       if (!existing) {
         throw new NotFoundError("Transaction not found");
+      }
+      if (expectedApproved !== undefined && Boolean(existing.approved) !== expectedApproved) {
+        throw new TransactionStateConflictError("Transaction approval state changed");
       }
 
       const removeIds = new Set<string>([transactionId]);

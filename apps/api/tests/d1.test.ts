@@ -1383,6 +1383,8 @@ describe("D1 foundation", () => {
       { id: "split-update", approved: 1 },
       { id: splitMirror, approved: 1 },
     ]);
+    await expect(writer.delete("p", "split-update", { operationId: "stale-split-reject" }, false)).rejects.toThrow("approved state conflict");
+    expect(db.query("SELECT deleted FROM transactions WHERE id = 'split-update'").get()).toEqual({ deleted: 0 });
     await writer.update("p", "split-update", {
       subtransactions: [{ id: "line-transfer", amount: -10 }, { id: "line-plain", amount: -20 }],
     }, { operationId: "split-unlink" });

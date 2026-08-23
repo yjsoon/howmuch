@@ -922,6 +922,30 @@ describe("YNAB-compatible API", () => {
     expect(patched.data.transaction.flag_color).toBe("green");
   });
 
+  test("rejects only transactions that are still unapproved", async () => {
+    const created = await (await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: { transaction: { account_id: "acct-1", date: "2026-06-10", amount: -5000 } },
+    })).json();
+    const transactionId = created.data.transaction.id;
+
+    await request(`/v1/plans/plan-test/transactions/${transactionId}`, {
+      method: "PATCH",
+      body: { transaction: { approved: true } },
+    });
+    const staleRejection = await request(`/v1/plans/plan-test/transactions/${transactionId}?expected_approved=false`, {
+      method: "DELETE",
+    });
+
+    expect(staleRejection.status).toBe(409);
+    expect((await staleRejection.json()).error.name).toBe("transaction_state_conflict");
+    expect((await (await request(`/v1/plans/plan-test/transactions/${transactionId}`)).json()).data.transaction).toMatchObject({
+      id: transactionId,
+      approved: true,
+      deleted: false,
+    });
+  });
+
   test("rejects invalid transaction patches without mutating the ledger", async () => {
     const created = await (await request("/v1/plans/plan-test/transactions", {
       method: "POST",

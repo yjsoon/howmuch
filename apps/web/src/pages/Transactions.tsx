@@ -269,7 +269,7 @@ export function TransactionsPage() {
     setMutationError(null);
     setMutationSuccess(null);
     try {
-      await api.deleteTransaction(planId, transaction.id);
+      await api.deleteTransaction(planId, transaction.id, transaction.approved ? undefined : false);
       if (editing?.id === transaction.id) {
         setEditing(null);
       }
