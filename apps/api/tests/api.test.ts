@@ -202,6 +202,15 @@ describe("YNAB-compatible API", () => {
       { id: "other-row", cleared: "cleared" },
       { id: "uncleared", cleared: "uncleared" },
     ]);
+    const staleToggle = await request("/v1/plans/plan-test/transactions/eligible/cleared", {
+      method: "PATCH", body: { expected_cleared: "cleared", cleared: "uncleared" },
+    });
+    expect(staleToggle.status).toBe(409);
+    expect((await staleToggle.json()).error.name).toBe("transaction_state_conflict");
+    expect((await request("/v1/plans/plan-test/transactions/eligible", {
+      method: "PATCH", body: { transaction: { cleared: "uncleared" } },
+    })).status).toBe(409);
+    expect(db.query("SELECT cleared FROM transactions WHERE id='eligible'").get()).toEqual({ cleared: "reconciled" });
 
     const replay = await request(route, {
       method: "POST", headers: { "idempotency-key": "reconcile-bank-august" },
@@ -1500,6 +1509,17 @@ describe("transfers and splits", () => {
     expect(memoPatch.status).toBe(200);
     const memoPatched = await memoPatch.json();
     expect(memoPatched.data.transaction.amount).toBe(50000);
+
+    const clearedPatch = await request(`/v1/plans/plan-test/transactions/${mirrorId}/cleared`, {
+      method: "PATCH",
+      body: { expected_cleared: "cleared", cleared: "uncleared" },
+    });
+    expect(clearedPatch.status).toBe(200);
+    expect((await clearedPatch.json()).data.transaction.cleared).toBe("uncleared");
+    expect((await request(`/v1/plans/plan-test/transactions/${mirrorId}/cleared`, {
+      method: "PATCH",
+      body: { expected_cleared: "cleared", cleared: "uncleared" },
+    })).status).toBe(409);
   });
 
   test("rejects split parents that are themselves transfers", async () => {

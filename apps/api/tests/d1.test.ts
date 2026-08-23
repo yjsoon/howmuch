@@ -1243,6 +1243,40 @@ describe("D1 foundation", () => {
     expect(db.query("SELECT COUNT(*) count FROM source_events WHERE transaction_id='split-parent'").get()).toEqual({ count: 1 });
   });
 
+  test("D1 cleared-only updates are guarded and preserve transfer mirror states", async () => {
+    const db = await ledgerSqlite();
+    db.run("INSERT INTO accounts (id, plan_id, name) VALUES ('b', 'p', 'Savings')");
+    db.run("INSERT INTO payees (id, plan_id, name, transfer_account_id) VALUES ('to-a','p','Transfer to Cash','a'),('to-b','p','Transfer to Savings','b')");
+    db.run("UPDATE accounts SET transfer_payee_id=CASE id WHEN 'a' THEN 'to-a' ELSE 'to-b' END WHERE id IN ('a','b')");
+    const writer = new D1TransactionRepository(new D1Database(fakeD1(db)));
+
+    const transfer = await writer.create("p", {
+      id: "clear-transfer", account_id: "a", date: "2026-07-01", amount: -100, payee_id: "to-b",
+    }, { operationId: "clear-transfer-create" });
+    await writer.updateCleared("p", transfer.id, "uncleared", "cleared", { operationId: "clear-transfer-source" });
+    expect(db.query("SELECT id,cleared FROM transactions WHERE id IN (?,?) ORDER BY id").all(transfer.id, transfer.transfer_transaction_id)).toEqual([
+      { id: transfer.id, cleared: "cleared" },
+      { id: transfer.transfer_transaction_id, cleared: "uncleared" },
+    ].sort((left, right) => left.id.localeCompare(right.id)));
+    expect(db.query("SELECT id,cleared_balance_milli,uncleared_balance_milli FROM accounts ORDER BY id").all()).toEqual([
+      { id: "a", cleared_balance_milli: -100, uncleared_balance_milli: 0 },
+      { id: "b", cleared_balance_milli: 0, uncleared_balance_milli: 100 },
+    ]);
+    await expect(writer.updateCleared("p", transfer.id, "uncleared", "cleared", { operationId: "clear-transfer-stale" })).rejects.toThrow("cleared state conflict");
+
+    await writer.create("p", {
+      id: "clear-split", account_id: "a", date: "2026-07-02", amount: -30,
+      subtransactions: [{ id: "clear-line", amount: -10, payee_id: "to-b" }, { id: "plain-line", amount: -20 }],
+    }, { operationId: "clear-split-create" });
+    const splitMirror = (db.query("SELECT transfer_transaction_id FROM subtransactions WHERE id='clear-line'").get() as any).transfer_transaction_id;
+    await writer.updateCleared("p", splitMirror, "uncleared", "cleared", { operationId: "clear-split-mirror" });
+    expect(db.query("SELECT cleared FROM transactions WHERE id=?").get(splitMirror)).toEqual({ cleared: "cleared" });
+
+    await writer.create("p", { id: "locked", account_id: "a", date: "2026-07-03", amount: 1, cleared: "reconciled" }, { operationId: "locked-create" });
+    await expect(writer.updateCleared("p", "locked", "cleared", "uncleared", { operationId: "locked-stale" })).rejects.toThrow("cleared state conflict");
+    await expect(writer.update("p", "locked", { cleared: "uncleared" }, { operationId: "locked-generic" })).rejects.toThrow("reconciled transaction state conflict");
+  });
+
   test("deleting either side of an intact D1 transfer deletes both sides",async()=>{
     const db=await ledgerSqlite();
     db.run("INSERT INTO accounts(id,plan_id,name) VALUES('b','p','Savings')");

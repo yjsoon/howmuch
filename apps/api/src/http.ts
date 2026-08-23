@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { ApiConfig } from "./config";
-import { LedgerRepository, NotFoundError, ReconciliationMismatchError, ValidationError } from "./repository";
+import { LedgerRepository, NotFoundError, ReconciliationMismatchError, TransactionStateConflictError, ValidationError } from "./repository";
 import { DEFAULT_TRANSACTION_PAGE_SIZE, MAX_TRANSACTION_PAGE_SIZE, type TransactionFilters } from "./types";
 import { collectionPostIntent, parseTransactionCreates, parseTransactionUpdates } from "./transaction-batch";
 import { ReportService } from "./reports";
@@ -84,6 +84,9 @@ export function createHandler(options: HandlerOptions): (request: Request) => Pr
       }
       if (error instanceof ValidationError) {
         return apiError(400, "bad_request", error.message);
+      }
+      if (error instanceof TransactionStateConflictError) {
+        return apiError(409, "transaction_state_conflict", error.message);
       }
       if (error instanceof ScheduledTransactionValidationError) {
         return apiError(400, "bad_request", error.message);
@@ -406,6 +409,14 @@ async function handleV1(
     const transactionId = segments[4];
     if (segments.length === 5 && method === "GET") {
       return json({ data: { transaction: await repo.getTransaction(planId, transactionId), server_knowledge: await repo.getServerKnowledge(planId) } });
+    }
+    if (segments.length === 6 && segments[5] === "cleared" && method === "PATCH") {
+      const body = await readJson(request);
+      if (!isToggleClearedState(body.expected_cleared) || !isToggleClearedState(body.cleared)) {
+        throw new ValidationError("expected_cleared and cleared must be uncleared or cleared");
+      }
+      const updated = await repo.updateTransactionCleared(planId, transactionId, body.expected_cleared, body.cleared);
+      return json({ data: { transaction: updated, server_knowledge: await repo.getServerKnowledge(planId) } });
     }
     if (segments.length === 5 && (method === "PUT" || method === "PATCH")) {
       const body = await readJson(request);
@@ -853,6 +864,7 @@ function isTransitionFinancialWrite(methodValue: string, segments: string[]): bo
     if (segments.length === 4) return method === "POST" || method === "PATCH";
     if (segments.length === 5 && segments[4] === "import") return method === "POST";
     if (segments.length === 5) return method === "PUT" || method === "PATCH" || method === "DELETE";
+    if (segments.length === 6 && segments[5] === "cleared") return method === "PATCH";
     return false;
   }
   if (resource === "scheduled_transactions") {
@@ -866,6 +878,10 @@ function isTransitionFinancialWrite(methodValue: string, segments: string[]): bo
     && segments.length === 7
     && segments[5] === "categories"
     && method === "PATCH";
+}
+
+function isToggleClearedState(value: unknown): value is "uncleared" | "cleared" {
+  return value === "uncleared" || value === "cleared";
 }
 
 function canRead(principal: Principal, planId: string, defaultPlanId: string): boolean {

@@ -47,6 +47,9 @@ export class D1TransactionRepository {
       const old = snapshot.transaction;
       if (!old || old.deleted) throw new Error("Transaction not found");
       if (old.plan_id !== planId) throw new Error("Transaction belongs to another plan");
+      if (old.cleared === "reconciled" && patch.cleared !== undefined && patch.cleared !== "reconciled") {
+        throw new Error("reconciled transaction state conflict");
+      }
       const merged: TransactionInput = {
         id: transactionId, account_id: patch.account_id ?? old.account_id, date: patch.date ?? old.date,
         amount: patch.amount ?? old.amount_milli, memo: patch.memo === undefined ? old.memo : patch.memo,
@@ -68,6 +71,31 @@ export class D1TransactionRepository {
         deleted: Boolean(old.deleted), subtransactions: patch.subtransactions === undefined ? snapshot.subs.map(subInput) : patch.subtransactions,
       };
       return this.planUpsert("update", planId, merged, snapshot, stable, patch.payee_id !== undefined, fingerprint, context, true);
+    });
+  }
+
+  async updateCleared(
+    planId: string,
+    transactionId: string,
+    expectedCleared: "uncleared" | "cleared",
+    cleared: "uncleared" | "cleared",
+    context?: D1WriteContext,
+  ): Promise<Record<string, any>> {
+    const stable = identity(transactionId, context);
+    const fingerprint = requestHash({ expectedCleared, cleared });
+    this.assertContext(planId, context);
+    return this.write("cleared", planId, stable, fingerprint, context, async (snapshot) => {
+      const old = snapshot.transaction;
+      if (!old || old.deleted) throw new Error("Transaction not found");
+      if (old.plan_id !== planId) throw new Error("Transaction belongs to another plan");
+      if (old.cleared !== expectedCleared) throw new Error("transaction cleared state conflict");
+      const body = [
+        assertion(stable.commandId, "graph_update_target", transactionId, planId),
+        statement("UPDATE transactions SET cleared=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND plan_id=? AND deleted=0", [cleared, transactionId, planId]),
+        recalculate(old.account_id),
+        knowledge(planId, transactionId),
+      ];
+      return makePlan(stable.commandId, snapshot.writeVersion, transactionId, planId, "cleared", fingerprint, context, body);
     });
   }
 

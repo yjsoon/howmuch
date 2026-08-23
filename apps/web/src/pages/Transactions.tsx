@@ -204,13 +204,13 @@ export function TransactionsPage() {
   };
 
   const toggleCleared = async (transaction: Transaction) => {
-    if (transaction.cleared === "reconciled") return;
+    if (mutatingId || (transaction.cleared !== "uncleared" && transaction.cleared !== "cleared")) return;
     const cleared = transaction.cleared === "cleared" ? "uncleared" : "cleared";
     setMutatingId(transaction.id);
     setMutationError(null);
     setMutationSuccess(null);
     try {
-      const updated = await api.updateTransaction(planId, transaction.id, { cleared });
+      const updated = await api.updateTransactionCleared(planId, transaction.id, transaction.cleared, cleared);
       setPage((current) => ({
         ...current,
         transactions: current.transactions.map((loaded) => loaded.id === updated.id ? updated : loaded),
@@ -219,6 +219,8 @@ export function TransactionsPage() {
       setReconciliationPreviewGeneration((generation) => generation + 1);
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause.message : String(cause));
+      refreshFirstPage();
+      reload();
     } finally {
       setMutatingId(null);
     }
@@ -770,7 +772,7 @@ export function TransactionsPage() {
                             setEditing(txn);
                             setMutationError(null);
                           }}
-                          disabled={mutatingId === txn.id}
+                          disabled={Boolean(mutatingId)}
                           aria-label={`Edit ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
                         >
                           Edit
@@ -782,7 +784,7 @@ export function TransactionsPage() {
                             setPendingDeletion(txn);
                             setMutationError(null);
                           }}
-                          disabled={mutatingId === txn.id}
+                          disabled={Boolean(mutatingId)}
                           aria-label={`Delete ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
                         >
                           Delete
@@ -791,7 +793,7 @@ export function TransactionsPage() {
                       <td className="register-status">
                         <ClearedStatus
                           transaction={txn}
-                          busy={mutatingId === txn.id}
+                          busy={Boolean(mutatingId)}
                           onToggle={() => void toggleCleared(txn)}
                         />
                       </td>
@@ -1117,10 +1119,10 @@ function TransactionEditor({
         <div className="transaction-editor-status-row">
           <label className="field">
             <span className="field-label">Status</span>
-            <select value={cleared} onChange={(event) => setCleared(event.target.value)}>
+            <select value={cleared} onChange={(event) => setCleared(event.target.value)} disabled={transaction.cleared === "reconciled"}>
               <option value="uncleared">Uncleared</option>
               <option value="cleared">Cleared</option>
-              <option value="reconciled">Reconciled</option>
+              {transaction.cleared === "reconciled" && <option value="reconciled">Reconciled</option>}
             </select>
           </label>
           <label className="field">

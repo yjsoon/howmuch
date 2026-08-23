@@ -935,11 +935,11 @@ select:focus-visible {
 
 .cleared-status {
   display: inline-flex;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   align-items: center;
   justify-content: center;
-  color: var(--ink-faint);
+  color: var(--ink-soft);
 }
 
 .cleared-status-toggle {
