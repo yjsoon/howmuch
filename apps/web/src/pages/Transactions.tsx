@@ -107,8 +107,36 @@ export function TransactionsPage() {
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [mutationSuccess, setMutationSuccess] = useState<string | null>(null);
   const [mutatingId, setMutatingId] = useState<string | null>(null);
+  const [unapprovedOnly, setUnapprovedOnly] = useState(false);
   const mutationLockRef = useRef(false);
   const selectedAccountId = filters.accountIds.length === 1 ? filters.accountIds[0]! : null;
+  const approvalQueue = useApi(
+    JSON.stringify({ planId, selectedAccountId, from: filters.from, to: filters.to, refreshGeneration, approvalQueue: true }),
+    async () => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const transactions = new Map<string, Transaction>();
+        let expectedKnowledge: number | null = null;
+        let offset = 0;
+        let changed = false;
+        for (;;) {
+          const query = { since_date: filters.from, until_date: filters.to, type: "unapproved" as const, limit: 250, offset };
+          const result = selectedAccountId
+            ? await api.accountTransactions(planId, selectedAccountId, query)
+            : await api.transactions(planId, query);
+          expectedKnowledge ??= result.server_knowledge;
+          if (result.server_knowledge !== expectedKnowledge) {
+            changed = true;
+            break;
+          }
+          for (const transaction of result.transactions) transactions.set(transaction.id, transaction);
+          if (!result.has_more || result.next_offset === null) return [...transactions.values()];
+          offset = result.next_offset;
+        }
+        if (!changed) return [...transactions.values()];
+      }
+      throw new Error("Transactions changed while the approval queue was loading. Try again.");
+    },
+  );
   const reconciliationPreviewInput = reconcileDraft?.reviewReady && reconcileDraft.accountId && reconcileDraft.statementDate
     ? { accountId: reconcileDraft.accountId, statementDate: reconcileDraft.statementDate }
     : null;
@@ -241,7 +269,7 @@ export function TransactionsPage() {
     setMutationError(null);
     setMutationSuccess(null);
     try {
-      await api.deleteTransaction(planId, transaction.id);
+      await api.deleteTransaction(planId, transaction.id, transaction.approved ? undefined : false);
       if (editing?.id === transaction.id) {
         setEditing(null);
       }
@@ -249,6 +277,27 @@ export function TransactionsPage() {
       reload();
       refreshFirstPage();
       setReconciliationPreviewGeneration((generation) => generation + 1);
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause.message : String(cause));
+      refreshFirstPage();
+    } finally {
+      mutationLockRef.current = false;
+      setMutatingId(null);
+    }
+  };
+
+  const approveTransaction = async (transaction: Transaction) => {
+    if (mutationLockRef.current) return;
+    mutationLockRef.current = true;
+    requestVersionRef.current += 1;
+    setMutatingId(transaction.id);
+    setMutationError(null);
+    setMutationSuccess(null);
+    try {
+      await api.updateTransaction(planId, transaction.id, { approved: true });
+      reload();
+      refreshFirstPage();
+      setMutationSuccess("Transaction approved.");
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause.message : String(cause));
       refreshFirstPage();
@@ -366,17 +415,22 @@ export function TransactionsPage() {
 
   const inScope = useMemo(
     () =>
-      page.transactions
+      (unapprovedOnly ? (approvalQueue.data ?? []) : page.transactions)
         .filter((txn) => !txn.deleted)
         .filter((txn) => registerAccountIds.has(txn.account_id)),
-    [page.transactions, registerAccountIds],
+    [approvalQueue.data, page.transactions, registerAccountIds, unapprovedOnly],
   );
 
   const uncategorisedCount = useMemo(() => inScope.filter(hasUncategorisedLine).length, [inScope]);
+  const unapprovedCount = useMemo(
+    () => (approvalQueue.data ?? []).filter((transaction) => !transaction.deleted && registerAccountIds.has(transaction.account_id)).length,
+    [approvalQueue.data, registerAccountIds],
+  );
 
   const scopedRows = useMemo(() => {
     const outflowOnly = flow === "outflow" || wantsUncategorised;
     return inScope
+      .filter((txn) => !unapprovedOnly || !txn.approved)
       .filter((txn) => !outflowOnly || (txn.amount < 0 && !txn.transfer_account_id))
       .filter((txn) => {
         if (!filters.categoryIds.length) {
@@ -393,7 +447,7 @@ export function TransactionsPage() {
         return wantsUncategorised && hasUncategorisedLine(txn);
       })
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-  }, [categoryIds, filters.categoryIds.length, flow, inScope, wantsUncategorised]);
+  }, [categoryIds, filters.categoryIds.length, flow, inScope, unapprovedOnly, wantsUncategorised]);
 
   const rows = useMemo(() => {
     const needle = deferredSearch.trim().toLowerCase();
@@ -501,6 +555,15 @@ export function TransactionsPage() {
           </button>
         </div>
         <div className="headline-row">
+          {(unapprovedCount > 0 || unapprovedOnly) && (
+            <button
+              type="button"
+              className={unapprovedOnly ? "approval-pill approval-pill-active" : "approval-pill"}
+              onClick={() => setUnapprovedOnly((current) => !current)}
+            >
+              {unapprovedOnly ? "Showing new transactions · clear" : `${unapprovedCount} new to approve`}
+            </button>
+          )}
           {uncategorisedCount > 0 && !wantsUncategorised && (
             <button
               type="button"
@@ -539,6 +602,12 @@ export function TransactionsPage() {
         <div className="status-panel status-panel-error">
           <p className="status-title">Could not load {page.loaded ? "older " : ""}transactions.</p>
           <p className="status-detail">{page.error}</p>
+        </div>
+      )}
+      {approvalQueue.error && (
+        <div className="status-panel status-panel-error" role="alert">
+          <p className="status-title">Could not load transactions awaiting approval.</p>
+          <p className="status-detail">{approvalQueue.error}</p>
         </div>
       )}
       {mutationError && (
@@ -707,7 +776,7 @@ export function TransactionsPage() {
       {pendingDeletion && (
         <section className="transaction-delete-confirm" role="region" aria-labelledby="delete-transaction-heading">
           <div>
-            <h2 id="delete-transaction-heading">Delete transaction?</h2>
+            <h2 id="delete-transaction-heading">{pendingDeletion.approved ? "Delete transaction?" : "Reject new transaction?"}</h2>
             <p id="delete-transaction-detail">
               {pendingDeletion.payee_name ?? (pendingDeletion.transfer_account_id ? "This transfer" : "This transaction")} will be removed from HowMuch.
               {pendingDeletion.transfer_transaction_id ? " Its linked transfer entry will also be removed." : ""}
@@ -716,7 +785,7 @@ export function TransactionsPage() {
           <div className="transaction-delete-confirm-actions">
             <button type="button" className="text-button" onClick={() => setPendingDeletion(null)} disabled={mutationBusy}>Cancel</button>
             <button type="button" className="transaction-delete-button" onClick={() => void deleteTransaction(pendingDeletion)} disabled={mutationBusy}>
-              {mutatingId === pendingDeletion.id ? "Deleting..." : "Delete transaction"}
+              {mutatingId === pendingDeletion.id ? "Removing..." : pendingDeletion.approved ? "Delete transaction" : "Reject transaction"}
             </button>
           </div>
         </section>
@@ -768,7 +837,7 @@ export function TransactionsPage() {
                 </thead>
                 <tbody>
                   {rows.flatMap((txn) => [
-                    <tr key={txn.id}>
+                    <tr key={txn.id} className={txn.approved ? undefined : "register-row-unapproved"}>
                       <td className="nowrap">{formatDate(txn.date)}</td>
                       <td className="muted">{txn.account_name}</td>
                       <td>{txn.payee_name ?? (txn.transfer_account_id ? "Transfer" : "-")}</td>
@@ -785,6 +854,17 @@ export function TransactionsPage() {
                       <td className="num amount-negative">{txn.amount < 0 ? formatAmount(txn.amount) : ""}</td>
                       <td className="num amount-positive">{txn.amount > 0 ? formatAmount(txn.amount) : ""}</td>
                       <td className="register-actions">
+                        {!txn.approved && (
+                          <button
+                            type="button"
+                            className="register-row-action register-row-action-approve"
+                            onClick={() => void approveTransaction(txn)}
+                            disabled={mutatingId === txn.id}
+                            aria-label={`Approve ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
+                          >
+                            {mutatingId === txn.id ? "Approving…" : "Approve"}
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="register-row-action"
@@ -797,18 +877,20 @@ export function TransactionsPage() {
                         >
                           Edit
                         </button>
-                        <button
-                          type="button"
-                          className="register-row-action register-row-action-danger"
-                          onClick={() => {
-                            setPendingDeletion(txn);
-                            setMutationError(null);
-                          }}
-                          disabled={Boolean(mutatingId)}
-                          aria-label={`Delete ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
-                        >
-                          Delete
-                        </button>
+                        {(txn.approved || !txn.parent_transaction_id) && (
+                          <button
+                            type="button"
+                            className="register-row-action register-row-action-danger"
+                            onClick={() => {
+                              setPendingDeletion(txn);
+                              setMutationError(null);
+                            }}
+                            disabled={Boolean(mutatingId)}
+                            aria-label={`${txn.approved ? "Delete" : "Reject"} ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
+                          >
+                            {txn.approved ? "Delete" : "Reject"}
+                          </button>
+                        )}
                       </td>
                       <td className="register-status">
                         <ClearedStatus
@@ -845,7 +927,7 @@ export function TransactionsPage() {
               <p className="status-detail">Try widening the date range, clearing filters, or shortening the search term.</p>
             </div>
           )}
-          {page.hasMore && (
+          {page.hasMore && !unapprovedOnly && (
             <div className="register-load-more">
               <button type="button" className="register-load-more-button" onClick={loadOlder} disabled={page.loadingMore}>
                 {page.loadingMore ? "Loading older transactions…" : "Load older transactions"}

@@ -306,7 +306,11 @@ export class D1LedgerRepository extends LedgerRepository {
   }
   override async updateTransaction(planId:string,id:string,patch:Partial<TransactionInput>):Promise<any>{
     try {
-      await this.transactions.update(planId,id,patch,this.context("transaction.update",planId,id));
+      if (patch.approved !== undefined && Object.keys(patch).length === 1) {
+        await this.transactions.approve(planId,id,patch.approved,this.context("transaction.approve",planId,id));
+      } else {
+        await this.transactions.update(planId,id,patch,this.context("transaction.update",planId,id));
+      }
     } catch (error) {
       if (error instanceof Error && error.message.includes("reconciled transaction state conflict")) {
         throw new TransactionStateConflictError("Reconciled transactions cannot be changed to another cleared state");
@@ -367,7 +371,17 @@ export class D1LedgerRepository extends LedgerRepository {
     }
     return this.loadTransactionSaveResult(planId, transactionIds, duplicateImportIds);
   }
-  override async deleteTransaction(planId:string,id:string):Promise<any>{await this.transactions.delete(planId,id,this.context("transaction.delete",planId,id));return this.getTransaction(planId,id,true);}
+  override async deleteTransaction(planId:string,id:string,expectedApproved?:boolean):Promise<any>{
+    try {
+      await this.transactions.delete(planId,id,this.context("transaction.delete",planId,id),expectedApproved);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("approved state conflict")) {
+        throw new TransactionStateConflictError("Transaction approval state changed");
+      }
+      throw error;
+    }
+    return this.getTransaction(planId,id,true);
+  }
   override async importTransactions(planId:string,inputs:TransactionInput[]):Promise<{transaction_ids:string[];duplicate_import_ids:string[];duplicate_transaction_ids:string[];server_knowledge:number}>{
     const transaction_ids:string[]=[]; const duplicate_import_ids=new Set<string>(); const duplicate_transaction_ids=new Set<string>();
     for(const input of inputs){const duplicate=await this.findDuplicateTransaction(planId,input);if(duplicate){if(input.import_id)duplicate_import_ids.add(input.import_id);duplicate_transaction_ids.add(duplicate.id);}else transaction_ids.push((await this.createTransaction(planId,input,{autoLink:false})).id);}

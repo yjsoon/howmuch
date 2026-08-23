@@ -117,7 +117,11 @@ struct TransactionEditorSheet: View {
   let transaction: Transaction
 
   var body: some View {
-    TransactionFormView(draft: TransactionDraft(transaction: transaction), isEditing: true)
+    TransactionFormView(
+      draft: TransactionDraft(transaction: transaction),
+      isEditing: true,
+      allowsDeletion: transaction.parentTransactionID == nil
+    )
   }
 }
 
@@ -152,11 +156,13 @@ struct TransactionFormView: View {
   @State private var isConfirmingSplitRemoval = false
   @State private var isAutoAdvancingToPayee = false
   private let isEditing: Bool
+  private let allowsDeletion: Bool
 
   // Plain stored properties before @State, assigned as wrapped values: the
   // shape the SDK 27 @State macro migration expects.
-  init(draft: TransactionDraft, isEditing: Bool) {
+  init(draft: TransactionDraft, isEditing: Bool, allowsDeletion: Bool = true) {
     self.isEditing = isEditing
+    self.allowsDeletion = allowsDeletion
     var engine = AmountKeypadEngine()
     engine.setValue(draft.amountMagnitudeMilli)
     self.draft = draft
@@ -178,7 +184,7 @@ struct TransactionFormView: View {
             }
             extrasCard
 
-            if isEditing {
+            if isEditing && allowsDeletion {
               Button(role: .destructive) {
                 isConfirmingDelete = true
               } label: {
@@ -187,6 +193,11 @@ struct TransactionFormView: View {
                   .padding(.vertical, 13)
               }
               .ynabCard()
+            } else if isEditing {
+              Text("This is the linked side of a split transfer. Reject or delete the split from its source account.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if let errorMessage {
@@ -666,7 +677,7 @@ struct TransactionFormView: View {
 
   private func deleteTransaction() {
     guard let id = draft.id,
-          let transaction = model.transactions.first(where: { $0.id == id }) else {
+          let transaction = (model.transactions + model.unapprovedTransactions).first(where: { $0.id == id }) else {
       return
     }
     Task {

@@ -37,6 +37,9 @@ final class AppModel {
   var payees: [Payee] = []
   /// Loaded portion of the ledger, newest first. Older pages append on demand.
   var transactions: [Transaction] = []
+  /// Complete review queue, loaded separately so old unapproved entries do
+  /// not disappear behind the register's bounded first page.
+  private(set) var unapprovedTransactions: [Transaction] = []
   /// Imported YNAB schedules remain an immutable source mirror; local edits
   /// and entered occurrences are reflected through HowMuch overlays.
   var scheduledTransactions: [ScheduledTransaction] = []
@@ -136,6 +139,7 @@ final class AppModel {
     categoryGroups = []
     payees = []
     transactions = []
+    unapprovedTransactions = []
     scheduledTransactions = []
     spendingBreakdown = nil
     incomeVsSpending = nil
@@ -706,11 +710,14 @@ final class AppModel {
       ledgerPhase = .loading
     }
     do {
-      let page = try await apiClient.fetchTransactions(planID: planID)
+      async let firstPage = apiClient.fetchTransactions(planID: planID)
+      async let approvalQueue = apiClient.fetchAllUnapprovedTransactions(planID: planID)
+      let (page, unapproved) = try await (firstPage, approvalQueue)
       guard generation == ledgerPageGeneration, planID == settings.planID else {
         return
       }
       transactions = sortedUniqueTransactions(page.transactions)
+      unapprovedTransactions = sortedUniqueTransactions(unapproved)
       hasMoreTransactions = page.hasMore && page.nextOffset != nil
       nextTransactionOffset = hasMoreTransactions ? page.nextOffset : nil
       ledgerPhase = .loaded
@@ -739,6 +746,7 @@ final class AppModel {
     categoryGroups = []
     payees = []
     transactions = []
+    unapprovedTransactions = []
     scheduledTransactions = []
     spendingBreakdown = nil
     incomeVsSpending = nil
@@ -1120,10 +1128,30 @@ final class AppModel {
     isSubmitting = true
     defer { isSubmitting = false }
 
-    _ = try await apiClient.deleteTransaction(planID: settings.planID, transactionID: transaction.id)
+    _ = try await apiClient.deleteTransaction(
+      planID: settings.planID,
+      transactionID: transaction.id,
+      expectedApproved: transaction.approved ? nil : false
+    )
     transactions.removeAll { $0.id == transaction.id }
+    unapprovedTransactions.removeAll { $0.id == transaction.id }
     showSaveMessage("Deleted \(transaction.payeeName ?? "transaction")")
     Task { await refreshLedgerAndInvalidatePlan() }
+  }
+
+  func approveTransaction(_ transaction: Transaction) async throws {
+    guard !transaction.approved else {
+      return
+    }
+    let approved = try await apiClient.approveTransaction(
+      planID: settings.planID,
+      transactionID: transaction.id
+    )
+    if let index = transactions.firstIndex(where: { $0.id == transaction.id }) {
+      transactions[index] = approved
+    }
+    showSaveMessage("Approved \(approved.payeeName ?? "transaction")")
+    await refreshLedger(quiet: true)
   }
 
   private func showSaveMessage(_ message: String) {

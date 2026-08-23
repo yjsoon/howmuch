@@ -226,6 +226,7 @@ export interface Transaction {
   category_name: string | null;
   transfer_account_id: string | null;
   transfer_transaction_id: string | null;
+  parent_transaction_id?: string | null;
   deleted: boolean;
   subtransactions?: Subtransaction[];
 }

@@ -1035,6 +1035,7 @@ struct Transaction: Decodable, Identifiable, Hashable {
   let categoryName: String?
   let transferAccountID: String?
   let transferTransactionID: String?
+  let parentTransactionID: String?
   let matchedTransactionID: String?
   let importID: String?
   let importPayeeName: String?
@@ -1059,6 +1060,7 @@ struct Transaction: Decodable, Identifiable, Hashable {
     case categoryName
     case transferAccountID = "transferAccountId"
     case transferTransactionID = "transferTransactionId"
+    case parentTransactionID = "parentTransactionId"
     case matchedTransactionID = "matchedTransactionId"
     case importID = "importId"
     case importPayeeName = "importPayeeName"
@@ -1334,6 +1336,14 @@ struct AgeOfMoneyPeriod: Decodable, Identifiable {
 
 struct TransactionWriteEnvelope: Encodable {
   let transaction: TransactionWriteRequest
+}
+
+struct TransactionApprovalEnvelope: Encodable {
+  let transaction: TransactionApprovalRequest
+}
+
+struct TransactionApprovalRequest: Encodable {
+  let approved: Bool
 }
 
 struct TransactionSubtransactionWriteRequest: Codable, Equatable {

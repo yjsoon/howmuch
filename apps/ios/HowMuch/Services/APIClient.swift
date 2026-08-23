@@ -158,7 +158,8 @@ struct APIClient {
     planID: String,
     offset: Int = 0,
     sinceDate: String? = nil,
-    untilDate: String? = nil
+    untilDate: String? = nil,
+    type: String? = nil
   ) async throws -> TransactionPage {
     var queryItems = [
       URLQueryItem(name: "limit", value: String(Self.transactionPageSize)),
@@ -170,6 +171,9 @@ struct APIClient {
     if let untilDate {
       queryItems.append(URLQueryItem(name: "until_date", value: untilDate))
     }
+    if let type {
+      queryItems.append(URLQueryItem(name: "type", value: type))
+    }
     let response: APIEnvelope<TransactionsPayload> = try await request(
       path: "/v1/plans/\(planID)/transactions",
       queryItems: queryItems
@@ -180,6 +184,37 @@ struct APIClient {
       nextOffset: response.data.nextOffset,
       serverKnowledge: response.data.serverKnowledge
     )
+  }
+
+  func fetchAllUnapprovedTransactions(planID: String) async throws -> [Transaction] {
+    for _ in 0..<3 {
+      var transactions: [String: Transaction] = [:]
+      var expectedKnowledge: Int?
+      var offset = 0
+      var changed = false
+      while true {
+        let page = try await fetchTransactions(planID: planID, offset: offset, type: "unapproved")
+        guard let knowledge = page.serverKnowledge else {
+          throw APIClientError.invalidResponse
+        }
+        if let expectedKnowledge, knowledge != expectedKnowledge {
+          changed = true
+          break
+        }
+        expectedKnowledge = knowledge
+        for transaction in page.transactions {
+          transactions[transaction.id] = transaction
+        }
+        guard page.hasMore, let nextOffset = page.nextOffset else {
+          return transactions.values.sorted { ($0.date, $0.id) > ($1.date, $1.id) }
+        }
+        offset = nextOffset
+      }
+      if !changed {
+        return transactions.values.sorted { ($0.date, $0.id) > ($1.date, $1.id) }
+      }
+    }
+    throw APIClientError.server("Transactions changed while the approval queue was loading. Try again.")
   }
 
   func fetchScheduledTransactions(planID: String) async throws -> [ScheduledTransaction] {
@@ -329,9 +364,19 @@ struct APIClient {
     return response.data.transaction
   }
 
-  func deleteTransaction(planID: String, transactionID: String) async throws -> Transaction {
+  func approveTransaction(planID: String, transactionID: String) async throws -> Transaction {
     let response: APIEnvelope<TransactionPayload> = try await request(
       path: "/v1/plans/\(planID)/transactions/\(transactionID)",
+      method: "PATCH",
+      body: TransactionApprovalEnvelope(transaction: TransactionApprovalRequest(approved: true))
+    )
+    return response.data.transaction
+  }
+
+  func deleteTransaction(planID: String, transactionID: String, expectedApproved: Bool? = nil) async throws -> Transaction {
+    let expectation = expectedApproved.map { "?expected_approved=\($0)" } ?? ""
+    let response: APIEnvelope<TransactionPayload> = try await request(
+      path: "/v1/plans/\(planID)/transactions/\(transactionID)\(expectation)",
       method: "DELETE"
     )
     return response.data.transaction

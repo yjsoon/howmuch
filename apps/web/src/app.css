@@ -900,6 +900,12 @@ select:focus-visible {
   padding-inline: 6px !important;
 }
 
+.register-row-unapproved {
+  background: var(--plan-accent-wash);
+  box-shadow: inset 3px 0 var(--plan-accent);
+  font-weight: 600;
+}
+
 .register-row-action {
   padding: 3px 5px;
   color: var(--ink-soft);
@@ -910,6 +916,15 @@ select:focus-visible {
 
 .register-row-action:hover:not(:disabled) {
   color: var(--ink);
+}
+
+.register-row-action-approve {
+  color: var(--green);
+  font-weight: 600;
+}
+
+.register-row-action-approve:hover:not(:disabled) {
+  color: var(--green);
 }
 
 .register-row-action-danger:hover:not(:disabled) {
@@ -1843,6 +1858,24 @@ tr:hover .share-bar {
 
 .uncat-pill-active {
   background: var(--red);
+  color: var(--paper);
+}
+
+.approval-pill {
+  align-self: center;
+  padding: 4px 12px;
+  border: 1px solid var(--plan-accent);
+  border-radius: 2px;
+  background: var(--plan-accent-wash);
+  color: var(--plan-accent);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.approval-pill:hover,
+.approval-pill-active {
+  background: var(--plan-accent);
   color: var(--paper);
 }
 

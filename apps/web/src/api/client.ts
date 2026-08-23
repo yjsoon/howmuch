@@ -140,6 +140,7 @@ export interface TransactionPage {
   transactions: Transaction[];
   has_more: boolean;
   next_offset: number | null;
+  server_knowledge: number;
 }
 
 export const api = {
@@ -234,11 +235,11 @@ export const api = {
       planUrl(planId, "months", month, "categories", categoryId),
       { method: "PATCH", body: JSON.stringify({ category: { restore_target: true } }) },
     ).then((d) => d.month),
-  transactions: (planId: string, params: { since_date?: string; until_date?: string; limit?: number; offset?: number }) =>
+  transactions: (planId: string, params: { since_date?: string; until_date?: string; type?: "unapproved"; limit?: number; offset?: number }) =>
     request<TransactionPage>(
       `${planUrl(planId, "transactions")}${query(params)}`,
     ),
-  accountTransactions: (planId: string, accountId: string, params: { since_date?: string; until_date?: string; limit?: number; offset?: number }) =>
+  accountTransactions: (planId: string, accountId: string, params: { since_date?: string; until_date?: string; type?: "unapproved"; limit?: number; offset?: number }) =>
     request<TransactionPage>(
       `${planUrl(planId, "accounts", accountId, "transactions")}${query(params)}`,
     ),
@@ -257,9 +258,9 @@ export const api = {
       planUrl(planId, "transactions", transactionId, "cleared"),
       { method: "PATCH", body: JSON.stringify({ expected_cleared: expectedCleared, cleared }) },
     ).then((data) => data.transaction),
-  deleteTransaction: (planId: string, transactionId: string) =>
+  deleteTransaction: (planId: string, transactionId: string, expectedApproved?: boolean) =>
     request<{ transaction: Transaction }>(
-      planUrl(planId, "transactions", transactionId),
+      `${planUrl(planId, "transactions", transactionId)}${query({ expected_approved: expectedApproved?.toString() })}`,
       { method: "DELETE" },
     ).then((data) => data.transaction),
   spendingBreakdown: (params: ReportQuery) =>

@@ -906,6 +906,7 @@ describe("YNAB-compatible API", () => {
     })).json();
 
     const transactionId = created.data.transaction.id;
+    expect(created.data.transaction.approved).toBe(false);
     const patchResponse = await request(`/v1/plans/plan-test/transactions/${transactionId}`, {
       method: "PATCH",
       body: {
@@ -919,6 +920,30 @@ describe("YNAB-compatible API", () => {
     const patched = await patchResponse.json();
     expect(patched.data.transaction.memo).toBe("CLAIMED: receipt");
     expect(patched.data.transaction.flag_color).toBe("green");
+  });
+
+  test("rejects only transactions that are still unapproved", async () => {
+    const created = await (await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: { transaction: { account_id: "acct-1", date: "2026-06-10", amount: -5000 } },
+    })).json();
+    const transactionId = created.data.transaction.id;
+
+    await request(`/v1/plans/plan-test/transactions/${transactionId}`, {
+      method: "PATCH",
+      body: { transaction: { approved: true } },
+    });
+    const staleRejection = await request(`/v1/plans/plan-test/transactions/${transactionId}?expected_approved=false`, {
+      method: "DELETE",
+    });
+
+    expect(staleRejection.status).toBe(409);
+    expect((await staleRejection.json()).error.name).toBe("transaction_state_conflict");
+    expect((await (await request(`/v1/plans/plan-test/transactions/${transactionId}`)).json()).data.transaction).toMatchObject({
+      id: transactionId,
+      approved: true,
+      deleted: false,
+    });
   });
 
   test("rejects invalid transaction patches without mutating the ledger", async () => {
@@ -1345,9 +1370,10 @@ describe("transfers and splits", () => {
 
     const patched = await (await request(`/v1/plans/plan-test/transactions/${outflow.id}`, {
       method: "PATCH",
-      body: { transaction: { amount: -75000, date: "2026-06-12", memo: "topped up" } },
+      body: { transaction: { amount: -75000, date: "2026-06-12", memo: "topped up", approved: true } },
     })).json();
     expect(patched.data.transaction.amount).toBe(-75000);
+    expect(patched.data.transaction.approved).toBe(true);
 
     const mirrored = await (
       await request(`/v1/plans/plan-test/transactions/${outflow.transfer_transaction_id}`)
@@ -1355,6 +1381,7 @@ describe("transfers and splits", () => {
     expect(mirrored.data.transaction.amount).toBe(75000);
     expect(mirrored.data.transaction.date).toBe("2026-06-12");
     expect(mirrored.data.transaction.memo).toBe("topped up");
+    expect(mirrored.data.transaction.approved).toBe(true);
 
     const deleteResponse = await request(`/v1/plans/plan-test/transactions/${outflow.id}`, { method: "DELETE" });
     expect(deleteResponse.status).toBe(200);
@@ -1449,6 +1476,13 @@ describe("transfers and splits", () => {
     expect(mirrored.data.transaction.account_id).toBe(savings.id);
     expect(mirrored.data.transaction.amount).toBe(50000);
     expect(mirrored.data.transaction.transfer_transaction_id).toBe(transferLine.id);
+
+    const approved = await (await request(`/v1/plans/plan-test/transactions/${transferLine.transfer_transaction_id}`, {
+      method: "PATCH",
+      body: { transaction: { approved: true } },
+    })).json();
+    expect(approved.data.transaction.approved).toBeTrue();
+    expect((await (await request(`/v1/plans/plan-test/transactions/${parent.id}`)).json()).data.transaction.approved).toBeTrue();
 
     // Deleting the split takes the linked transfer side with it.
     await request(`/v1/plans/plan-test/transactions/${parent.id}`, { method: "DELETE" });
@@ -1646,6 +1680,7 @@ describe("transfers and splits", () => {
     const transfer = (await transferResponse.json()).data.transaction;
     expect(transfer.transfer_account_id).toBe(savings.id);
     expect(transfer.amount).toBe(-250000);
+    expect(transfer.approved).toBeTrue();
 
     const splitResponse = await request("/api/mobile/quick-entry?plan_id=plan-test", {
       method: "POST",
@@ -1719,6 +1754,7 @@ describe("native reports and imports", () => {
     expect(quickEntryResponse.status).toBe(201);
     const quickEntry = await quickEntryResponse.json();
     expect(quickEntry.data.transaction.amount).toBe(-12340);
+    expect(quickEntry.data.transaction.approved).toBeTrue();
     expect(quickEntry.data.transaction.source_kind).toBeUndefined();
   });
 
