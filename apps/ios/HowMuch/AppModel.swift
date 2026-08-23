@@ -94,6 +94,9 @@ final class AppModel {
   private var referenceGeneration = 0
   private var scheduledTransactionsGeneration = 0
   private var reportsGeneration = 0
+  /// Serialises preference writes so a slower earlier request cannot overwrite
+  /// a newer reorder on the server.
+  @ObservationIgnored private var accountPreferencesSyncTask: Task<Void, Never>?
 
   init(settings: APISettings = .load(), viewPrefs: ViewPrefs = .load()) {
     var scopedStore = ScopedViewPrefsStore.load()
@@ -373,6 +376,28 @@ final class AppModel {
     }
     viewPrefs = viewPrefs.structurallyNormalised()
     scopedViewPrefsStore.set(viewPrefs, for: scope)
+    enqueueAccountPreferencesSync()
+  }
+
+  private func enqueueAccountPreferencesSync() {
+    guard let scope = activeViewPrefsScope, settings.isAuthenticated else {
+      return
+    }
+    let previous = accountPreferencesSyncTask
+    let client = apiClient
+    let planID = settings.planID
+    let preferences = AccountPresentationPreferences(viewPrefs)
+    accountPreferencesSyncTask = Task {
+      await previous?.value
+      guard !Task.isCancelled else { return }
+      do {
+        try await client.updateAccountPreferences(planID: planID, preferences: preferences)
+        scopedViewPrefsStore.markAccountPreferencesSynced(preferences, for: scope)
+      } catch {
+        // Keep the local value dirty. A later refresh retries it rather than
+        // letting an older server snapshot overwrite an offline reorder.
+      }
+    }
   }
 
   /// Switches the in-memory preference view whenever endpoint, user, or plan
@@ -461,6 +486,7 @@ final class AppModel {
         return
       }
       accountUsageLast30Days = counts
+      snapshotMostUsedAccountOrders()
       accountUsagePhase = .loaded
     } catch {
       guard
@@ -471,6 +497,32 @@ final class AppModel {
         return
       }
       accountUsagePhase = .failed(error.localizedDescription)
+    }
+  }
+
+  private func snapshotMostUsedAccountOrders() {
+    let cashTypes: Set<String> = ["checking", "savings", "cash"]
+    let creditTypes: Set<String> = ["creditCard", "lineOfCredit"]
+    let open = accounts.filter { !$0.closed }
+    let groups: [String: [Account]] = [
+      "favourites": open.filter { favouriteAccountIDs.contains($0.id) },
+      "cash": open.filter { cashTypes.contains($0.type) },
+      "credit": open.filter { creditTypes.contains($0.type) },
+      "tracking": open.filter { !cashTypes.contains($0.type) && !creditTypes.contains($0.type) },
+      "closed": accounts.filter(\.closed),
+    ].merging(Dictionary(uniqueKeysWithValues: customAccountGroups.map { group in
+      (group.id, accounts.filter { group.accountIDs.contains($0.id) })
+    })) { current, _ in current }
+    var changed = false
+    for (groupID, accounts) in groups where sortForAccountGroup(groupID) == .mostUsedLast30Days {
+      let order = orderedAccounts(accounts, inGroup: groupID).map(\.id)
+      if viewPrefs.accountOrderByGroup[groupID] != order {
+        viewPrefs.accountOrderByGroup[groupID] = order
+        changed = true
+      }
+    }
+    if changed {
+      saveViewPrefs()
     }
   }
 
@@ -687,6 +739,23 @@ final class AppModel {
       categoryGroups = reference.categoryGroups
       payees = reference.payees
       rebuildLookups()
+      let localAccountPreferences = AccountPresentationPreferences(viewPrefs)
+      let lastSynced = scope.flatMap { scopedViewPrefsStore.syncedAccountPreferences[$0] }
+      let hasUnsyncedLocalArrangement = localAccountPreferences != lastSynced
+        && localAccountPreferences != AccountPresentationPreferences(ViewPrefs())
+      if hasUnsyncedLocalArrangement {
+        enqueueAccountPreferencesSync()
+      } else if let accountPreferences = reference.accountPreferences {
+        viewPrefs = accountPreferences.applying(to: viewPrefs)
+        if let scope = activeViewPrefsScope {
+          scopedViewPrefsStore.set(viewPrefs, for: scope)
+          scopedViewPrefsStore.markAccountPreferencesSynced(accountPreferences, for: scope)
+        }
+      } else {
+        // First sync migrates an existing device-local arrangement instead of
+        // replacing it with an empty server default.
+        enqueueAccountPreferencesSync()
+      }
       pruneViewPrefs(using: reference.accounts)
       referencePhase = .loaded
     } catch {

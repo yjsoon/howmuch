@@ -1,0 +1,37 @@
+import { describe, expect, test } from "bun:test";
+import type { Account, AccountPreferences } from "../api/types";
+import { accountGroups } from "./account-groups";
+
+const accounts: Account[] = [
+  { id: "cash", name: "Wallet", type: "cash", on_budget: true, closed: false, balance: 1000, cleared_balance: 1000, uncleared_balance: 0, transfer_payee_id: null, deleted: false },
+  { id: "card", name: "Visa", type: "creditCard", on_budget: true, closed: false, balance: -500, cleared_balance: -500, uncleared_balance: 0, transfer_payee_id: null, deleted: false },
+  { id: "loan", name: "Loan", type: "otherLiability", on_budget: false, closed: false, balance: -5000, cleared_balance: -5000, uncleared_balance: 0, transfer_payee_id: null, deleted: false },
+];
+
+const preferences: AccountPreferences = {
+  favourite_account_ids: ["card", "cash"],
+  account_order: [],
+  account_order_by_group: {
+    favourites: ["cash", "card"],
+    "custom-daily": ["card", "cash"],
+  },
+  account_group_sorts: { favourites: "manual", "custom-daily": "manual", cash: "alphabetical" },
+  custom_account_groups: [
+    { id: "custom-daily", name: "Daily", account_ids: ["cash", "card"] },
+  ],
+};
+
+describe("accountGroups", () => {
+  test("projects mobile favourites, custom groups, built-ins, and manual order", () => {
+    expect(accountGroups(accounts, preferences).map((group) => ({
+      id: group.id,
+      accountIds: group.accounts.map((account) => account.id),
+    }))).toEqual([
+      { id: "favourites", accountIds: ["cash", "card"] },
+      { id: "custom-daily", accountIds: ["card", "cash"] },
+      { id: "cash", accountIds: ["cash"] },
+      { id: "credit", accountIds: ["card"] },
+      { id: "tracking", accountIds: ["loan"] },
+    ]);
+  });
+});

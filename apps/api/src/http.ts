@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { ApiConfig } from "./config";
 import { LedgerRepository, NotFoundError, ReconciliationMismatchError, TransactionStateConflictError, ValidationError } from "./repository";
-import { DEFAULT_TRANSACTION_PAGE_SIZE, MAX_TRANSACTION_PAGE_SIZE, type TransactionFilters } from "./types";
+import { DEFAULT_TRANSACTION_PAGE_SIZE, MAX_TRANSACTION_PAGE_SIZE, type AccountPreferences, type TransactionFilters } from "./types";
 import { collectionPostIntent, parseTransactionCreates, parseTransactionUpdates } from "./transaction-batch";
 import { ReportService } from "./reports";
 import { decimalToMilliunits } from "./money";
@@ -166,6 +166,20 @@ async function handleV1(
 
   if (resource === "settings" && segments.length === 4 && method === "GET") {
     return json({ data: { settings: await repo.getSettings(planId) } });
+  }
+
+  if (resource === "account_preferences" && segments.length === 4) {
+    if (principal.kind === "api-token") {
+      return apiError(403, "forbidden", "Account preferences require a user-scoped credential");
+    }
+    if (method === "GET") {
+      return json({ data: { account_preferences: await repo.getAccountPreferences(planId, principal.id) } });
+    }
+    if (method === "PUT") {
+      const body = await readJson(request);
+      const preferences = parseAccountPreferences(body.account_preferences);
+      return json({ data: { account_preferences: await repo.setAccountPreferences(planId, principal.id, preferences) } });
+    }
   }
 
   if (resource === "accounts") {
@@ -435,6 +449,56 @@ async function handleV1(
   }
 
   return apiError(404, "not_found", "Route not found");
+}
+
+function parseAccountPreferences(value: unknown): AccountPreferences {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ValidationError("account_preferences is required");
+  }
+  const input = value as Record<string, unknown>;
+  const strings = (field: unknown, name: string): string[] => {
+    if (!Array.isArray(field) || field.length > 500 || field.some((item) => typeof item !== "string" || !item || item.length > 200)) {
+      throw new ValidationError(`${name} must be an array of non-empty strings`);
+    }
+    return field as string[];
+  };
+  const orderByGroup: Record<string, string[]> = {};
+  if (!input.account_order_by_group || typeof input.account_order_by_group !== "object" || Array.isArray(input.account_order_by_group)) {
+    throw new ValidationError("account_order_by_group must be an object");
+  }
+  for (const [groupId, order] of Object.entries(input.account_order_by_group)) {
+    if (!groupId || groupId.length > 200) throw new ValidationError("account group IDs must be non-empty strings");
+    orderByGroup[groupId] = strings(order, "account group order");
+  }
+  if (!input.account_group_sorts || typeof input.account_group_sorts !== "object" || Array.isArray(input.account_group_sorts)) {
+    throw new ValidationError("account_group_sorts must be an object");
+  }
+  const sorts: AccountPreferences["account_group_sorts"] = {};
+  for (const [groupId, sort] of Object.entries(input.account_group_sorts)) {
+    if (!groupId || groupId.length > 200 || !["manual", "alphabetical", "mostUsedLast30Days"].includes(String(sort))) {
+      throw new ValidationError("account group sorts are invalid");
+    }
+    sorts[groupId] = sort as AccountPreferences["account_group_sorts"][string];
+  }
+  if (!Array.isArray(input.custom_account_groups) || input.custom_account_groups.length > 100) {
+    throw new ValidationError("custom_account_groups must be an array");
+  }
+  const customGroups = input.custom_account_groups.map((group) => {
+    if (!group || typeof group !== "object" || Array.isArray(group)) throw new ValidationError("custom account groups are invalid");
+    const candidate = group as Record<string, unknown>;
+    if (typeof candidate.id !== "string" || !candidate.id || candidate.id.length > 200
+      || typeof candidate.name !== "string" || !candidate.name.trim() || candidate.name.length > 100) {
+      throw new ValidationError("custom account groups are invalid");
+    }
+    return { id: candidate.id, name: candidate.name.trim(), account_ids: strings(candidate.account_ids, "custom group account_ids") };
+  });
+  return {
+    favourite_account_ids: strings(input.favourite_account_ids, "favourite_account_ids"),
+    account_order: strings(input.account_order, "account_order"),
+    account_order_by_group: orderByGroup,
+    account_group_sorts: sorts,
+    custom_account_groups: customGroups,
+  };
 }
 
 async function handleNative(

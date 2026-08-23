@@ -1,5 +1,13 @@
 export type ClearedState = "cleared" | "uncleared" | "reconciled";
 
+export type AccountPreferences = {
+  favourite_account_ids: string[];
+  account_order: string[];
+  account_order_by_group: Record<string, string[]>;
+  account_group_sorts: Record<string, "manual" | "alphabetical" | "mostUsedLast30Days">;
+  custom_account_groups: Array<{ id: string; name: string; account_ids: string[] }>;
+};
+
 export type TransactionInput = {
   id?: string;
   account_id: string;

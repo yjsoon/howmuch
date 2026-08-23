@@ -16,6 +16,7 @@ import {
   type AccountReconciliationOptions,
   type AccountReconciliationPreview,
   type AccountReconciliationResult,
+  type AccountPreferences,
   type ScheduledWriteOptions,
   type TransactionPage,
   type TransactionBatchResult,
@@ -150,6 +151,26 @@ export class LedgerRepository {
         flag_names: JSON.parse(row.flag_names_json),
       },
     };
+  }
+
+  async getAccountPreferences(planId: string, userId: string): Promise<AccountPreferences | null> {
+    const row = await this.db
+      .query("SELECT preferences_json FROM account_preferences WHERE user_id = ? AND plan_id = ?")
+      .get(userId, planId) as Row | null;
+    return row ? JSON.parse(String(row.preferences_json)) as AccountPreferences : null;
+  }
+
+  async setAccountPreferences(planId: string, userId: string, preferences: AccountPreferences): Promise<AccountPreferences> {
+    await this.db
+      .query(
+        `INSERT INTO account_preferences (user_id, plan_id, preferences_json, updated_at)
+         VALUES (?, ?, ?, unixepoch())
+         ON CONFLICT(user_id, plan_id) DO UPDATE SET
+           preferences_json = excluded.preferences_json,
+           updated_at = excluded.updated_at`,
+      )
+      .run(userId, planId, JSON.stringify(preferences));
+    return preferences;
   }
 
   async ensureAccount(planId: string, accountId: string, name?: string): Promise<void> {

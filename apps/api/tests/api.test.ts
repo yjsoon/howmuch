@@ -2168,6 +2168,46 @@ describe("password authentication", () => {
     }))).status).toBe(401);
   });
 
+  test("syncs ordered account presentation preferences per user and plan", async () => {
+    await authRequest(
+      "/api/auth/setup",
+      { username: "owner", password },
+      { authorization: "Bearer test-token" },
+    );
+    const tokenResponse = await authRequest("/api/auth/token", { username: "owner", password });
+    const token = (await tokenResponse.json()).data.token;
+    const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+    const path = "https://howmuch.test/v1/plans/plan-test/account_preferences";
+
+    const empty = await handler(new Request(path, { headers }));
+    expect(empty.status).toBe(200);
+    expect((await empty.json()).data.account_preferences).toBeNull();
+
+    const preferences = {
+      favourite_account_ids: ["card", "cash"],
+      account_order: ["cash", "card"],
+      account_order_by_group: {
+        favourites: ["card", "cash"],
+        "custom-travel": ["cash", "card"],
+      },
+      account_group_sorts: { favourites: "manual", cash: "alphabetical" },
+      custom_account_groups: [
+        { id: "custom-travel", name: "Travel", account_ids: ["cash", "card"] },
+      ],
+    };
+    const saved = await handler(new Request(path, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ account_preferences: preferences }),
+    }));
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).data.account_preferences).toEqual(preferences);
+
+    const read = await handler(new Request(path, { headers }));
+    expect((await read.json()).data.account_preferences).toEqual(preferences);
+    expect(db.query("SELECT COUNT(*) count FROM account_preferences").get()).toEqual({ count: 1 });
+  });
+
   test("creates, lists, authenticates, and revokes account-scoped API tokens", async () => {
     const setup = await authRequest(
       "/api/auth/setup",

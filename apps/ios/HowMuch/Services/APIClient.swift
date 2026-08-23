@@ -70,12 +70,14 @@ struct APIClient {
     async let accounts = fetchAccounts(planID: planID)
     async let categories = fetchCategories(planID: planID)
     async let payees = fetchPayees(planID: planID)
+    async let accountPreferences = fetchAccountPreferences(planID: planID)
 
     return try await ReferenceData(
       planSettings: planSettings,
       accounts: accounts,
       categoryGroups: categories,
-      payees: payees
+      payees: payees,
+      accountPreferences: accountPreferences
     )
   }
 
@@ -98,6 +100,21 @@ struct APIClient {
   func fetchAccounts(planID: String) async throws -> [Account] {
     let response: APIEnvelope<AccountsPayload> = try await request(path: "/v1/plans/\(planID)/accounts")
     return response.data.accounts.filter { !$0.deleted }
+  }
+
+  func fetchAccountPreferences(planID: String) async throws -> AccountPresentationPreferences? {
+    let response: APIEnvelope<AccountPreferencesPayload> = try await request(
+      path: "/v1/plans/\(planID)/account_preferences"
+    )
+    return response.data.accountPreferences
+  }
+
+  func updateAccountPreferences(planID: String, preferences: AccountPresentationPreferences) async throws {
+    let _: APIEnvelope<AccountPreferencesPayload> = try await request(
+      path: "/v1/plans/\(planID)/account_preferences",
+      method: "PUT",
+      body: AccountPreferencesPayload(accountPreferences: preferences)
+    )
   }
 
   func fetchCategories(planID: String) async throws -> [CategoryGroup] {

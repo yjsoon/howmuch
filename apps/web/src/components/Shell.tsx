@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { formatMoney } from "../lib/money";
+import { accountGroups as buildAccountGroups } from "../lib/account-groups";
 import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
 
@@ -13,17 +14,11 @@ const REPORTS = [
 
 export function Shell() {
   const location = useLocation();
-  const { accounts, logout } = usePlan();
+  const { accounts, accountPreferences, logout } = usePlan();
   const { filters } = useFilters();
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const openAccounts = useMemo(() => accounts.filter((account) => !account.closed), [accounts]);
-  const accountGroups = useMemo(
-    () => [
-      { label: "Budget", accounts: openAccounts.filter((account) => account.on_budget) },
-      { label: "Tracking", accounts: openAccounts.filter((account) => !account.on_budget) },
-    ].filter((group) => group.accounts.length > 0),
-    [openAccounts],
-  );
+  const accountGroups = useMemo(() => buildAccountGroups(accounts, accountPreferences), [accounts, accountPreferences]);
   const selectedAccount = location.pathname === "/transactions" && filters.accountIds.length === 1
     ? accounts.find((account) => account.id === filters.accountIds[0])
     : undefined;
@@ -104,7 +99,7 @@ export function Shell() {
 
         <div className="account-list">
           {accountGroups.map((group) => (
-            <section key={group.label} className="account-group">
+            <section key={group.id} className="account-group">
               <div className="account-group-heading">
                 <span>{group.label}</span>
                 <span>{formatMoney(group.accounts.reduce((sum, account) => sum + account.balance, 0))}</span>

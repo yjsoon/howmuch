@@ -378,9 +378,8 @@ struct ViewPrefs: Codable, Equatable {
   /// Whether the spending report includes bookkeeping ("quiet") category
   /// groups; mirrors the web app's persisted includeQuietSpending pref.
   var includeQuietSpending: Bool?
-  /// Account presentation preferences stay on this device. The server's
-  /// account payload is an immutable source list, so these IDs are deliberately
-  /// not sent back to the API.
+  /// Account presentation preferences are cached locally and synced separately
+  /// from the server's immutable account source list.
   var favouriteAccountIDs: [String] = []
   /// Legacy global order retained so existing installs can seed every new
   /// group's manual order deterministically.
@@ -487,6 +486,34 @@ struct ViewPrefs: Codable, Equatable {
   }
 }
 
+/// The account-only subset shared by every client for one user and plan.
+/// Device-specific navigation and report preferences remain in `ViewPrefs`.
+struct AccountPresentationPreferences: Codable, Equatable {
+  var favouriteAccountIDs: [String]
+  var accountOrder: [String]
+  var accountOrderByGroup: [String: [String]]
+  var accountGroupSorts: [String: AccountGroupSort]
+  var customAccountGroups: [CustomAccountGroup]
+
+  init(_ preferences: ViewPrefs) {
+    favouriteAccountIDs = preferences.favouriteAccountIDs
+    accountOrder = preferences.accountOrder
+    accountOrderByGroup = preferences.accountOrderByGroup
+    accountGroupSorts = preferences.accountGroupSorts
+    customAccountGroups = preferences.customAccountGroups
+  }
+
+  func applying(to preferences: ViewPrefs) -> ViewPrefs {
+    var result = preferences
+    result.favouriteAccountIDs = favouriteAccountIDs
+    result.accountOrder = accountOrder
+    result.accountOrderByGroup = accountOrderByGroup
+    result.accountGroupSorts = accountGroupSorts
+    result.customAccountGroups = customAccountGroups
+    return result.structurallyNormalised()
+  }
+}
+
 private extension Array where Element == String {
   var uniqueNonEmptyStrings: [String] {
     var seen: Set<String> = []
@@ -505,15 +532,22 @@ struct ScopedViewPrefsStore: Codable, Equatable {
   static let userDefaultsKey = "HowMuch.ViewPrefsByScope"
 
   var scopes: [String: ViewPrefs] = [:]
+  var syncedAccountPreferences: [String: AccountPresentationPreferences] = [:]
   var didMigrateLegacy = false
 
   private enum CodingKeys: String, CodingKey {
     case scopes
+    case syncedAccountPreferences
     case didMigrateLegacy
   }
 
-  init(scopes: [String: ViewPrefs] = [:], didMigrateLegacy: Bool = false) {
+  init(
+    scopes: [String: ViewPrefs] = [:],
+    syncedAccountPreferences: [String: AccountPresentationPreferences] = [:],
+    didMigrateLegacy: Bool = false
+  ) {
     self.scopes = scopes.mapValues { $0.structurallyNormalised() }
+    self.syncedAccountPreferences = syncedAccountPreferences
     self.didMigrateLegacy = didMigrateLegacy
   }
 
@@ -532,6 +566,10 @@ struct ScopedViewPrefsStore: Codable, Equatable {
     } else {
       scopes = [:]
     }
+    syncedAccountPreferences = try container.decodeIfPresent(
+      [String: AccountPresentationPreferences].self,
+      forKey: .syncedAccountPreferences
+    ) ?? [:]
     didMigrateLegacy = try container.decodeIfPresent(Bool.self, forKey: .didMigrateLegacy) ?? false
   }
 
@@ -575,6 +613,11 @@ struct ScopedViewPrefsStore: Codable, Equatable {
 
   mutating func set(_ preferences: ViewPrefs, for scope: String) {
     scopes[scope] = preferences.structurallyNormalised()
+    save()
+  }
+
+  mutating func markAccountPreferencesSynced(_ preferences: AccountPresentationPreferences, for scope: String) {
+    syncedAccountPreferences[scope] = preferences
     save()
   }
 
@@ -627,8 +670,8 @@ enum AccountGroupSort: String, Codable, CaseIterable, Identifiable {
   }
 }
 
-/// A device-local account collection. Membership is deliberately represented
-/// by IDs so account balances and names remain authoritative API data.
+/// A synced account collection. Membership is deliberately represented by IDs
+/// so account balances and names remain authoritative API data.
 struct CustomAccountGroup: Codable, Equatable, Hashable, Identifiable {
   static let reservedIDs: Set<String> = ["favourites", "cash", "credit", "tracking", "closed"]
   static let reservedNameKeys: Set<String> = Set(["Favourites", "Cash", "Credit", "Tracking", "Closed"].map(normalisedNameKey))
@@ -680,6 +723,11 @@ struct ReferenceData {
   let accounts: [Account]
   let categoryGroups: [CategoryGroup]
   let payees: [Payee]
+  let accountPreferences: AccountPresentationPreferences?
+}
+
+struct AccountPreferencesPayload: Codable {
+  let accountPreferences: AccountPresentationPreferences?
 }
 
 struct PlanSettingsPayload: Decodable {
