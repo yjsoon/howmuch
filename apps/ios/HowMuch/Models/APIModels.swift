@@ -1361,6 +1361,8 @@ struct TransactionSubtransactionWriteRequest: Codable, Equatable {
 
 /// Create/update body. Encodes optional fields as explicit nulls so an update
 /// can clear them — the API treats omitted keys as "keep existing".
+/// Cleared status is the exception: edits omit it so the guarded status
+/// endpoint remains its sole owner.
 /// Decodable too, so offline captures can be persisted and replayed.
 struct TransactionWriteRequest: Codable, Equatable {
   let accountID: String
@@ -1370,7 +1372,9 @@ struct TransactionWriteRequest: Codable, Equatable {
   let payeeName: String?
   let categoryID: String?
   let memo: String?
-  let cleared: ClearedState
+  /// Nil only for edits, where status is owned by the register's guarded
+  /// compare-and-set control rather than a potentially stale full form.
+  let cleared: ClearedState?
   let approved: Bool
   let flagColor: String?
   let subtransactions: [TransactionSubtransactionWriteRequest]
@@ -1401,7 +1405,7 @@ struct TransactionWriteRequest: Codable, Equatable {
     payeeName: String?,
     categoryID: String?,
     memo: String?,
-    cleared: ClearedState,
+    cleared: ClearedState?,
     approved: Bool,
     flagColor: String?,
     subtransactions: [TransactionSubtransactionWriteRequest],
@@ -1430,7 +1434,7 @@ struct TransactionWriteRequest: Codable, Equatable {
     try container.encode(payeeName, forKey: .payeeName)
     try container.encode(categoryID, forKey: .categoryID)
     try container.encode(memo, forKey: .memo)
-    try container.encode(cleared, forKey: .cleared)
+    try container.encodeIfPresent(cleared, forKey: .cleared)
     try container.encode(approved, forKey: .approved)
     try container.encode(flagColor, forKey: .flagColor)
     try container.encode(subtransactions, forKey: .subtransactions)
@@ -1449,7 +1453,7 @@ struct TransactionWriteRequest: Codable, Equatable {
     payeeName = try container.decodeIfPresent(String.self, forKey: .payeeName)
     categoryID = try container.decodeIfPresent(String.self, forKey: .categoryID)
     memo = try container.decodeIfPresent(String.self, forKey: .memo)
-    cleared = try container.decode(ClearedState.self, forKey: .cleared)
+    cleared = try container.decodeIfPresent(ClearedState.self, forKey: .cleared)
     approved = try container.decode(Bool.self, forKey: .approved)
     flagColor = try container.decodeIfPresent(String.self, forKey: .flagColor)
     subtransactions = try container.decodeIfPresent([TransactionSubtransactionWriteRequest].self, forKey: .subtransactions) ?? []
@@ -1721,7 +1725,7 @@ struct TransactionDraft: Equatable {
     return wasReconciled ? .reconciled : .cleared
   }
 
-  func writeRequest() -> TransactionWriteRequest {
+  func writeRequest(includeCleared: Bool = true) -> TransactionWriteRequest {
     let trimmedPayee = payeeName.trimmingCharacters(in: .whitespacesAndNewlines)
     let hasParentTransfer = transferAccountID != nil
     return TransactionWriteRequest(
@@ -1732,7 +1736,7 @@ struct TransactionDraft: Equatable {
       payeeName: isSplit && hasParentTransfer ? nil : (trimmedPayee.isEmpty ? nil : trimmedPayee),
       categoryID: isSplit ? nil : categoryID,
       memo: memo.trimmedNil,
-      cleared: clearedState,
+      cleared: includeCleared ? clearedState : nil,
       approved: true,
       flagColor: flag.rawValue.isEmpty ? nil : flag.rawValue,
       subtransactions: subtransactions.compactMap { $0.writeRequest() },
