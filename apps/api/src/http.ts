@@ -11,6 +11,7 @@ import type { LedgerStore, ReportStore } from "./storage";
 import { SQLiteAuthStore, type AuthStore, type AuthUser } from "./auth-store";
 import {
   canonicalUsername,
+  newPersonalApiToken,
   newSession,
   passwordCredential,
   safeTokenEqual,
@@ -115,7 +116,10 @@ export function createHandler(options: HandlerOptions): (request: Request) => Pr
   };
 }
 
-type Principal = { kind: "api-token" } | ({ kind: "session"; transport: "cookie" | "bearer" } & AuthUser);
+type Principal =
+  | { kind: "api-token" }
+  | ({ kind: "session"; transport: "cookie" | "bearer" } & AuthUser)
+  | ({ kind: "personal-token" } & AuthUser);
 
 async function handleV1(
   request: Request,
@@ -128,7 +132,7 @@ async function handleV1(
   const method = request.method.toUpperCase();
 
   if (segments.length === 2 && segments[1] === "user" && method === "GET") {
-    const user = principal.kind === "session"
+    const user = principal.kind !== "api-token"
       ? { id: principal.id, username: principal.username }
       : { id: "local-user" };
     return json({ data: { user } });
@@ -626,7 +630,7 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
 
   if (path === "/api/auth/status" && method === "GET") {
     const principal = await authenticate(request, store, config.apiToken);
-    const user = principal?.kind === "session"
+    const user = principal && principal.kind !== "api-token"
       ? { id: principal.id, username: principal.username }
       : null;
     return authJson({
@@ -638,13 +642,69 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
     });
   }
 
+  if (path === "/api/auth/personal-tokens" && method === "GET") {
+    const principal = await authenticate(request, store, config.apiToken);
+    if (!principal || principal.kind !== "session" || principal.transport !== "cookie") {
+      return authError(401, "not_authorized", "A signed-in account is required");
+    }
+    return authJson({ data: { tokens: await store.listPersonalApiTokens(principal.id) } });
+  }
+
+  if (path === "/api/auth/personal-tokens" && method === "POST") {
+    const principal = await authenticate(request, store, config.apiToken);
+    if (!principal || principal.kind !== "session" || principal.transport !== "cookie") {
+      return authError(401, "not_authorized", "A signed-in account is required");
+    }
+    if (!sameOrigin(request, url)) {
+      return authError(403, "forbidden", "CSRF validation failed");
+    }
+    const body = await readJson(request);
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name || name.length > 64 || /[\u0000-\u001f\u007f]/u.test(name)) {
+      return authError(400, "bad_request", "Token name must be 1–64 visible characters");
+    }
+    const generated = newPersonalApiToken();
+    const token = {
+      id: generated.id,
+      name,
+      created_at: generated.createdAt,
+      revoked_at: null,
+    };
+    await store.createPersonalApiToken({
+      ...token,
+      userId: principal.id,
+      tokenHash: generated.tokenHash,
+    });
+    return authJson({ data: { token, value: generated.token } }, 201);
+  }
+
+  const tokenMatch = path.match(/^\/api\/auth\/personal-tokens\/([0-9a-f]{32})$/);
+  if (tokenMatch && method === "DELETE") {
+    const principal = await authenticate(request, store, config.apiToken);
+    if (!principal || principal.kind !== "session" || principal.transport !== "cookie") {
+      return authError(401, "not_authorized", "A signed-in account is required");
+    }
+    if (!sameOrigin(request, url)) {
+      return authError(403, "forbidden", "CSRF validation failed");
+    }
+    const revoked = await store.revokePersonalApiToken(
+      principal.id,
+      tokenMatch[1],
+      Math.floor(Date.now() / 1_000),
+    );
+    return revoked
+      ? authJson({ data: { token: revoked } })
+      : authError(404, "not_found", "API token not found");
+  }
+
   if (path === "/api/auth/setup" && method === "POST") {
     if (!sameOrigin(request, url)) {
       return authError(403, "forbidden", "Origin validation failed");
     }
     const authorization = request.headers.get("authorization");
+    const bootstrapToken = bearerToken(authorization);
     const validBootstrap = config.apiToken
-      ? authorization?.startsWith("Bearer ") && safeTokenEqual(authorization.slice(7), config.apiToken)
+      ? bootstrapToken !== null && safeTokenEqual(bootstrapToken, config.apiToken)
       : authorization === null;
     if (!validBootstrap) {
       return authError(401, "not_authorized", "Invalid bootstrap token");
@@ -712,7 +772,7 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
       return authError(403, "forbidden", "CSRF validation failed");
     }
     const token = principal.transport === "bearer"
-      ? request.headers.get("authorization")!.slice(7)
+      ? bearerToken(request.headers.get("authorization"))!
       : cookieToken(request)!;
     await store.revokeSession(sha256(token), Math.floor(Date.now() / 1_000));
     return clearSessionResponse({ data: { ok: true } });
@@ -724,11 +784,16 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
 async function authenticate(request: Request, store: AuthStore, apiToken?: string): Promise<Principal | null> {
   const authorization = request.headers.get("authorization");
   if (authorization !== null) {
-    if (!authorization.startsWith("Bearer ")) return null;
-    const token = authorization.slice(7);
+    const token = bearerToken(authorization);
+    if (token === null) return null;
     if (apiToken && safeTokenEqual(token, apiToken)) return { kind: "api-token" };
-    const user = await store.authenticateSession(sha256(token), Math.floor(Date.now() / 1_000));
-    return user ? { kind: "session", transport: "bearer", ...user } : null;
+    const tokenHash = sha256(token);
+    const user = await store.authenticateSession(tokenHash, Math.floor(Date.now() / 1_000));
+    if (user) return { kind: "session", transport: "bearer", ...user };
+    const tokenUser = token.startsWith("hm_pat_")
+      ? await store.authenticatePersonalApiToken(tokenHash)
+      : null;
+    return tokenUser ? { kind: "personal-token", ...tokenUser } : null;
   }
 
   const token = cookieToken(request);
@@ -739,6 +804,11 @@ async function authenticate(request: Request, store: AuthStore, apiToken?: strin
 
 function cookieToken(request: Request): string | null {
   const match = request.headers.get("cookie")?.match(/(?:^|;\s*)__Host-howmuch_session=([^;]+)/);
+  return match?.[1] ?? null;
+}
+
+function bearerToken(authorization: string | null): string | null {
+  const match = authorization?.match(/^Bearer ([^\s]+)$/i);
   return match?.[1] ?? null;
 }
 
@@ -808,14 +878,14 @@ function authorizePlan(principal: Principal, planId: string, defaultPlanId: stri
   if (!canRead(principal, planId, defaultPlanId)) {
     return apiError(404, "resource_not_found", "Plan not found", "404.2");
   }
-  if (principal.kind === "session" && isUnsafeMethod(method) && principal.roles[planId] === "viewer") {
+  if (principal.kind !== "api-token" && isUnsafeMethod(method) && principal.roles[planId] === "viewer") {
     return apiError(403, "forbidden", "Plan is read-only");
   }
   return null;
 }
 
 function authorizePlanAdministration(principal: Principal, planId: string): Response | null {
-  if (principal.kind === "session" && principal.roles[planId] !== "owner") {
+  if (principal.kind !== "api-token" && principal.roles[planId] !== "owner") {
     return apiError(403, "forbidden", "Plan owner access is required");
   }
   return null;

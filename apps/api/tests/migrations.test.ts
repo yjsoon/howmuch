@@ -136,4 +136,30 @@ describe("local schema migrations", () => {
       db.close();
     }
   });
+
+  test("personal API tokens enforce hashed secrets and cascade with their user", () => {
+    const db = new Database(":memory:");
+    try {
+      applyMigrations(db);
+      db.run("INSERT INTO users(id,display_name) VALUES ('owner','Owner')");
+      const hash = "a".repeat(64);
+      db.run("INSERT INTO personal_api_tokens(id,user_id,name,token_hash) VALUES ('one','owner','Home server',?)", [hash]);
+      expect(() => db.run(
+        "INSERT INTO personal_api_tokens(id,user_id,name,token_hash) VALUES ('two','owner','Duplicate',?)",
+        [hash],
+      )).toThrow();
+      expect(() => db.run(
+        "INSERT INTO personal_api_tokens(id,user_id,name,token_hash) VALUES ('bad','owner','Bad hash',?)",
+        ["A".repeat(64)],
+      )).toThrow();
+      expect(db.query("SELECT version FROM schema_migrations WHERE version='014_personal_api_tokens'").get()).toEqual({
+        version: "014_personal_api_tokens",
+      });
+      db.run("DELETE FROM users WHERE id='owner'");
+      expect(db.query("SELECT id FROM personal_api_tokens").get()).toBeNull();
+      expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
 });

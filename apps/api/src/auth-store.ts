@@ -4,6 +4,8 @@ import type { NewSession, StoredCredential } from "./password-auth";
 
 export type PlanRole = "owner" | "editor" | "viewer";
 export type AuthUser = { id: string; username: string; roles: Record<string, PlanRole> };
+export type PersonalApiToken = { id: string; name: string; created_at: number; revoked_at: number | null };
+export type NewPersonalApiToken = PersonalApiToken & { userId: string; tokenHash: string };
 export type SetupInput = {
   userId: string;
   username: string;
@@ -19,6 +21,10 @@ export interface AuthStore {
   createSession(userId: string, session: Pick<NewSession, "id" | "tokenHash" | "expiresAt">): Promise<void>;
   authenticateSession(tokenHash: string, now: number): Promise<AuthUser | null>;
   revokeSession(tokenHash: string, now: number): Promise<void>;
+  listPersonalApiTokens(userId: string): Promise<PersonalApiToken[]>;
+  createPersonalApiToken(token: NewPersonalApiToken): Promise<void>;
+  revokePersonalApiToken(userId: string, tokenId: string, now: number): Promise<PersonalApiToken | null>;
+  authenticatePersonalApiToken(tokenHash: string): Promise<AuthUser | null>;
   rateAttempt(scope: "username" | "ip", keyHash: string, windowStart: number): Promise<number>;
 }
 
@@ -78,6 +84,38 @@ export class SQLiteAuthStore implements AuthStore {
 
   async revokeSession(tokenHash: string, now: number): Promise<void> {
     this.db.query("UPDATE sessions SET revoked_at=? WHERE token_hash=? AND revoked_at IS NULL").run(now, tokenHash);
+  }
+
+  async listPersonalApiTokens(userId: string): Promise<PersonalApiToken[]> {
+    return this.db.query(
+      "SELECT id,name,created_at,revoked_at FROM personal_api_tokens WHERE user_id=? ORDER BY created_at DESC,id",
+    ).all(userId) as PersonalApiToken[];
+  }
+
+  async createPersonalApiToken(token: NewPersonalApiToken): Promise<void> {
+    this.db.query(
+      "INSERT INTO personal_api_tokens(id,user_id,name,token_hash,created_at) VALUES(?,?,?,?,?)",
+    ).run(token.id, token.userId, token.name, token.tokenHash, token.created_at);
+  }
+
+  async revokePersonalApiToken(userId: string, tokenId: string, now: number): Promise<PersonalApiToken | null> {
+    return (this.db.query(
+      `UPDATE personal_api_tokens SET revoked_at=COALESCE(revoked_at,?) WHERE id=? AND user_id=?
+       RETURNING id,name,created_at,revoked_at`,
+    ).get(now, tokenId, userId) as PersonalApiToken | null) ?? null;
+  }
+
+  async authenticatePersonalApiToken(tokenHash: string): Promise<AuthUser | null> {
+    const user = this.db.query(
+      `SELECT u.id,pc.username
+       FROM personal_api_tokens t
+       JOIN users u ON u.id=t.user_id
+       JOIN password_credentials pc ON pc.user_id=u.id
+       WHERE t.token_hash=? AND t.revoked_at IS NULL`,
+    ).get(tokenHash) as { id: string; username: string } | null;
+    if (!user) return null;
+    const memberships = this.db.query("SELECT plan_id,role FROM plan_memberships WHERE user_id=?").all(user.id);
+    return { ...user, roles: roles(memberships as Array<{ plan_id: string; role: PlanRole }>) };
   }
 
   async rateAttempt(scope: "username" | "ip", keyHash: string, windowStart: number): Promise<number> {
@@ -190,6 +228,45 @@ export class D1AuthStore implements AuthStore {
       "UPDATE sessions SET revoked_at=$1 WHERE token_hash=$2 AND revoked_at IS NULL",
       [now, tokenHash],
     );
+  }
+
+  async listPersonalApiTokens(userId: string): Promise<PersonalApiToken[]> {
+    return this.db.all<PersonalApiToken>(
+      "SELECT id,name,created_at,revoked_at FROM personal_api_tokens WHERE user_id=$1 ORDER BY created_at DESC,id",
+      [userId],
+    );
+  }
+
+  async createPersonalApiToken(token: NewPersonalApiToken): Promise<void> {
+    await this.db.run(
+      "INSERT INTO personal_api_tokens(id,user_id,name,token_hash,created_at) VALUES($1,$2,$3,$4,$5)",
+      [token.id, token.userId, token.name, token.tokenHash, token.created_at],
+    );
+  }
+
+  async revokePersonalApiToken(userId: string, tokenId: string, now: number): Promise<PersonalApiToken | null> {
+    return this.db.get<PersonalApiToken>(
+      `UPDATE personal_api_tokens SET revoked_at=COALESCE(revoked_at,$1) WHERE id=$2 AND user_id=$3
+       RETURNING id,name,created_at,revoked_at`,
+      [now, tokenId, userId],
+    );
+  }
+
+  async authenticatePersonalApiToken(tokenHash: string): Promise<AuthUser | null> {
+    const user = await this.db.get<{ id: string; username: string }>(
+      `SELECT u.id,pc.username
+       FROM personal_api_tokens t
+       JOIN users u ON u.id=t.user_id
+       JOIN password_credentials pc ON pc.user_id=u.id
+       WHERE t.token_hash=$1 AND t.revoked_at IS NULL`,
+      [tokenHash],
+    );
+    if (!user) return null;
+    const memberships = await this.db.all<{ plan_id: string; role: PlanRole }>(
+      "SELECT plan_id,role FROM plan_memberships WHERE user_id=$1",
+      [user.id],
+    );
+    return { ...user, roles: roles(memberships) };
   }
 
   async rateAttempt(scope: "username" | "ip", keyHash: string, windowStart: number): Promise<number> {

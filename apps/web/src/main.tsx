@@ -15,6 +15,7 @@ import { PlanProvider } from "./state/plan";
 
 const AgeOfMoneyPage = lazy(() => import("./pages/AgeOfMoney").then((module) => ({ default: module.AgeOfMoneyPage })));
 const ApiDocsPage = lazy(() => import("./pages/ApiDocs").then((module) => ({ default: module.ApiDocsPage })));
+const ApiTokensPage = lazy(() => import("./pages/ApiTokens").then((module) => ({ default: module.ApiTokensPage })));
 const IncomePage = lazy(() => import("./pages/Income").then((module) => ({ default: module.IncomePage })));
 const NetWorthPage = lazy(() => import("./pages/NetWorth").then((module) => ({ default: module.NetWorthPage })));
 const PlanPage = lazy(() => import("./pages/Plan").then((module) => ({ default: module.PlanPage })));
@@ -34,6 +35,7 @@ const router = createBrowserRouter([
       { path: "/", element: <Navigate to="/plan" replace /> },
       { path: "/plan", element: <PlanPage /> },
       { path: "/scheduled", element: <ScheduledTransactionsPage /> },
+      { path: "/api-tokens", element: <ApiTokensPage /> },
       { path: "/spending", element: <SpendingPage /> },
       { path: "/income", element: <IncomePage /> },
       { path: "/net-worth", element: <NetWorthPage /> },

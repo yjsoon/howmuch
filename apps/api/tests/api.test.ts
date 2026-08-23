@@ -2072,6 +2072,78 @@ describe("password authentication", () => {
     }))).status).toBe(401);
   });
 
+  test("creates, lists, authenticates, and revokes account-scoped API tokens", async () => {
+    const setup = await authRequest(
+      "/api/auth/setup",
+      { username: "owner", password },
+      { authorization: "bearer test-token" },
+    );
+    const cookie = setup.headers.get("set-cookie")!.split(";", 1)[0];
+
+    const missingOrigin = await handler(new Request("https://howmuch.test/api/auth/personal-tokens", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "OpenClaw" }),
+    }));
+    expect(missingOrigin.status).toBe(403);
+
+    const createdResponse = await handler(new Request("https://howmuch.test/api/auth/personal-tokens", {
+      method: "POST",
+      headers: { cookie, origin: "https://howmuch.test", "content-type": "application/json" },
+      body: JSON.stringify({ name: "  OpenClaw  " }),
+    }));
+    expect(createdResponse.status).toBe(201);
+    expect(createdResponse.headers.get("cache-control")).toBe("no-store");
+    const createdBody = (await createdResponse.json()).data;
+    const created = createdBody.token;
+    expect(created).toMatchObject({ name: "OpenClaw" });
+    expect(createdBody.value).toMatch(/^hm_pat_[A-Za-z0-9_-]{43}$/);
+    expect(JSON.stringify(db.query("SELECT * FROM personal_api_tokens").get())).not.toContain(createdBody.value);
+
+    const listResponse = await handler(new Request("https://howmuch.test/api/auth/personal-tokens", { headers: { cookie } }));
+    expect(listResponse.status).toBe(200);
+    const listed = (await listResponse.json()).data.tokens;
+    expect(listed).toEqual([{
+      id: created.id,
+      name: "OpenClaw",
+      created_at: created.created_at,
+      revoked_at: null,
+    }]);
+    expect(JSON.stringify(listed)).not.toContain(createdBody.value);
+
+    const bearerRead = await handler(new Request("https://howmuch.test/v1/user", {
+      headers: { authorization: `bearer ${createdBody.value}` },
+    }));
+    expect(bearerRead.status).toBe(200);
+    expect((await bearerRead.json()).data.user.username).toBe("owner");
+    expect((await handler(new Request("https://howmuch.test/api/auth/personal-tokens", {
+      headers: { authorization: `Bearer ${createdBody.value}` },
+    }))).status).toBe(401);
+    expect((await handler(new Request("https://howmuch.test/api/auth/personal-tokens", {
+      headers: { authorization: "Bearer test-token" },
+    }))).status).toBe(401);
+    const nativeResponse = await authRequest("/api/auth/token", { username: "owner", password });
+    const nativeToken = (await nativeResponse.json()).data.token;
+    expect((await handler(new Request("https://howmuch.test/api/auth/personal-tokens", {
+      headers: { authorization: `Bearer ${nativeToken}` },
+    }))).status).toBe(401);
+
+    const revoked = await handler(new Request(`https://howmuch.test/api/auth/personal-tokens/${created.id}`, {
+      method: "DELETE",
+      headers: { cookie, origin: "https://howmuch.test" },
+    }));
+    expect(revoked.status).toBe(200);
+    expect((await handler(new Request("https://howmuch.test/v1/user", {
+      headers: { authorization: `Bearer ${createdBody.value}` },
+    }))).status).toBe(401);
+    expect((await handler(new Request(`https://howmuch.test/api/auth/personal-tokens/${created.id}`, {
+      method: "DELETE",
+      headers: { cookie, origin: "https://howmuch.test" },
+    }))).status).toBe(200);
+    const afterRevoke = await handler(new Request("https://howmuch.test/api/auth/personal-tokens", { headers: { cookie } }));
+    expect((await afterRevoke.json()).data.tokens[0].revoked_at).toBeNumber();
+  });
+
   test("enforces cookie CSRF and membership roles before plan access", async () => {
     const setup = await authRequest(
       "/api/auth/setup",
