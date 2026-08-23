@@ -13,7 +13,6 @@ export type D1LedgerRepositoryOptions = Readonly<{
   operationId?: (kind: string, planId: string | undefined, resourceId: string) => string;
 }>;
 
-/** D1 facade: inherited methods are reads; all public mutations use guarded batches. */
 export class D1LedgerRepository extends LedgerRepository {
   private readonly metadata: D1MetadataRepository;
   private readonly transactions: D1TransactionRepository;
