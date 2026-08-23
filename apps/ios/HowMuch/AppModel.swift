@@ -1126,6 +1126,20 @@ final class AppModel {
     Task { await refreshLedgerAndInvalidatePlan() }
   }
 
+  func approveTransaction(_ transaction: Transaction) async throws {
+    guard !transaction.approved else {
+      return
+    }
+    let approved = try await apiClient.approveTransaction(
+      planID: settings.planID,
+      transactionID: transaction.id
+    )
+    if let index = transactions.firstIndex(where: { $0.id == transaction.id }) {
+      transactions[index] = approved
+    }
+    showSaveMessage("Approved \(approved.payeeName ?? "transaction")")
+  }
+
   private func showSaveMessage(_ message: String) {
     lastSaveMessage = message
     saveMessageToken += 1

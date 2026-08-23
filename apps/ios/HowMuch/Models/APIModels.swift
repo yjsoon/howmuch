@@ -1336,6 +1336,14 @@ struct TransactionWriteEnvelope: Encodable {
   let transaction: TransactionWriteRequest
 }
 
+struct TransactionApprovalEnvelope: Encodable {
+  let transaction: TransactionApprovalRequest
+}
+
+struct TransactionApprovalRequest: Encodable {
+  let approved: Bool
+}
+
 struct TransactionSubtransactionWriteRequest: Codable, Equatable {
   let id: String?
   let amount: Int

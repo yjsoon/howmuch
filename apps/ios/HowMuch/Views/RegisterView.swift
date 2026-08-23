@@ -24,9 +24,11 @@ struct RegisterView: View {
   @State private var searchText = ""
   @State private var unclearedOnly = false
   @State private var uncategorisedOnly = false
+  @State private var unapprovedOnly = false
   @State private var editingTransaction: Transaction?
   @State private var duplicatingDraft: DuplicateDraft?
   @State private var isShowingReconciliation = false
+  @State private var approvalError: String?
 
   /// Identifiable box so sheet(item:) can present a prefilled capture form.
   private struct DuplicateDraft: Identifiable {
@@ -70,6 +72,13 @@ struct RegisterView: View {
             await model.refreshLedger()
           }
         } else {
+          if unapprovedCount > 0 || unapprovedOnly {
+            filterBanner(
+              isOn: $unapprovedOnly,
+              offLabel: "Review \(unapprovedCount) new transaction\(unapprovedCount == 1 ? "" : "s")",
+              onLabel: "Showing new transactions to approve"
+            )
+          }
           if unclearedCount > 0 || unclearedOnly {
             filterBanner(
               isOn: $unclearedOnly,
@@ -108,7 +117,24 @@ struct RegisterView: View {
                   )
                 }
                 .buttonStyle(.plain)
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                  if !transaction.approved {
+                    Button {
+                      approve(transaction)
+                    } label: {
+                      Label("Approve", systemImage: "checkmark")
+                    }
+                    .tint(Theme.inflow)
+                  }
+                }
                 .contextMenu {
+                  if !transaction.approved {
+                    Button {
+                      approve(transaction)
+                    } label: {
+                      Label("Approve", systemImage: "checkmark")
+                    }
+                  }
                   Button {
                     editingTransaction = transaction
                   } label: {
@@ -214,6 +240,24 @@ struct RegisterView: View {
     .sheet(item: $duplicatingDraft) { duplicate in
       TransactionFormView(draft: duplicate.draft, isEditing: false)
     }
+    .alert("Couldn’t approve transaction", isPresented: Binding(
+      get: { approvalError != nil },
+      set: { if !$0 { approvalError = nil } }
+    )) {
+      Button("OK", role: .cancel) { approvalError = nil }
+    } message: {
+      Text(approvalError ?? "Please try again.")
+    }
+  }
+
+  private func approve(_ transaction: Transaction) {
+    Task {
+      do {
+        try await model.approveTransaction(transaction)
+      } catch {
+        approvalError = error.localizedDescription
+      }
+    }
   }
 
   private var title: String {
@@ -262,6 +306,7 @@ struct RegisterView: View {
     !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       || unclearedOnly
       || uncategorisedOnly
+      || unapprovedOnly
       || categoryID != nil
       || dateRange != nil
       || accountIDs?.isEmpty == false
@@ -335,6 +380,10 @@ struct RegisterView: View {
     scopedTransactions.count(where: \.isUncategorised)
   }
 
+  private var unapprovedCount: Int {
+    scopedTransactions.count { !$0.approved }
+  }
+
   private var visibleTransactions: [Transaction] {
     let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     return scopedTransactions.filter { transaction in
@@ -342,6 +391,9 @@ struct RegisterView: View {
         return false
       }
       if uncategorisedOnly, !transaction.isUncategorised {
+        return false
+      }
+      if unapprovedOnly, transaction.approved {
         return false
       }
       guard !query.isEmpty else {
@@ -708,6 +760,15 @@ struct TransactionRow: View {
       Spacer()
 
       HStack(spacing: 6) {
+        if !transaction.approved {
+          Text("New")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(Theme.accent, in: Capsule())
+            .accessibilityLabel("Needs approval")
+        }
         Text(MoneyCodec.signedDisplayString(for: transaction.amount, currencyFormat: currencyFormat))
           .font(.subheadline.weight(.medium))
           .monospacedDigit()

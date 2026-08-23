@@ -768,6 +768,7 @@ export class LedgerRepository {
             date: input.date,
             amount: -sub.amount,
             memo: sub.memo ?? null,
+            approved: input.approved,
             sourceAccountId: input.account_id,
             accountId: subTransferAccountId ?? undefined,
           }, plan);
@@ -869,6 +870,7 @@ export class LedgerRepository {
           date: input.date,
           amount: -input.amount,
           memo: input.memo ?? null,
+          approved: input.approved,
           sourceAccountId: input.account_id,
           accountId: transferAccountId ?? undefined,
         }, plan);
@@ -2168,6 +2170,7 @@ export class LedgerRepository {
       date: string;
       amount: number;
       memo: string | null;
+      approved?: boolean | null;
       sourceAccountId: string;
       accountId?: string;
     },
@@ -2183,7 +2186,7 @@ export class LedgerRepository {
       .query(
         `UPDATE transactions
          SET account_id = ?, date = ?, amount_milli = ?, memo = ?,
-             payee_id = ?, payee_name_snapshot = ?, transfer_account_id = ?,
+             approved = ?, payee_id = ?, payee_name_snapshot = ?, transfer_account_id = ?,
              updated_at = CURRENT_TIMESTAMP
          WHERE id = ? AND plan_id = ?`,
       )
@@ -2192,6 +2195,7 @@ export class LedgerRepository {
         opts.date,
         opts.amount,
         opts.memo,
+        bool(opts.approved),
         payee?.id ?? linked.payee_id,
         payee?.name ?? linked.payee_name_snapshot,
         opts.sourceAccountId,

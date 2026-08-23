@@ -857,6 +857,7 @@ describe("YNAB-compatible API", () => {
     })).json();
 
     const transactionId = created.data.transaction.id;
+    expect(created.data.transaction.approved).toBe(false);
     const patchResponse = await request(`/v1/plans/plan-test/transactions/${transactionId}`, {
       method: "PATCH",
       body: {
@@ -1296,9 +1297,10 @@ describe("transfers and splits", () => {
 
     const patched = await (await request(`/v1/plans/plan-test/transactions/${outflow.id}`, {
       method: "PATCH",
-      body: { transaction: { amount: -75000, date: "2026-06-12", memo: "topped up" } },
+      body: { transaction: { amount: -75000, date: "2026-06-12", memo: "topped up", approved: true } },
     })).json();
     expect(patched.data.transaction.amount).toBe(-75000);
+    expect(patched.data.transaction.approved).toBe(true);
 
     const mirrored = await (
       await request(`/v1/plans/plan-test/transactions/${outflow.transfer_transaction_id}`)
@@ -1306,6 +1308,7 @@ describe("transfers and splits", () => {
     expect(mirrored.data.transaction.amount).toBe(75000);
     expect(mirrored.data.transaction.date).toBe("2026-06-12");
     expect(mirrored.data.transaction.memo).toBe("topped up");
+    expect(mirrored.data.transaction.approved).toBe(true);
 
     const deleteResponse = await request(`/v1/plans/plan-test/transactions/${outflow.id}`, { method: "DELETE" });
     expect(deleteResponse.status).toBe(200);

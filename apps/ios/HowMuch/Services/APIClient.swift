@@ -329,6 +329,15 @@ struct APIClient {
     return response.data.transaction
   }
 
+  func approveTransaction(planID: String, transactionID: String) async throws -> Transaction {
+    let response: APIEnvelope<TransactionPayload> = try await request(
+      path: "/v1/plans/\(planID)/transactions/\(transactionID)",
+      method: "PATCH",
+      body: TransactionApprovalEnvelope(transaction: TransactionApprovalRequest(approved: true))
+    )
+    return response.data.transaction
+  }
+
   func deleteTransaction(planID: String, transactionID: String) async throws -> Transaction {
     let response: APIEnvelope<TransactionPayload> = try await request(
       path: "/v1/plans/\(planID)/transactions/\(transactionID)",
