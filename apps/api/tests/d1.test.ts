@@ -311,6 +311,19 @@ describe("D1 foundation", () => {
       { account_id: "a", date: "2026-07-03", amount: -10, import_id: "d1-batch-1" },
     ])).duplicate_import_ids).toEqual(["d1-batch-1"]);
 
+    const raceRepo = new D1LedgerRepository(d1, "p");
+    const createTransaction = raceRepo.createTransaction.bind(raceRepo);
+    (raceRepo as any).createTransaction = async (planId: string, input: any) => {
+      await createTransaction(planId, { ...input, id: "d1-raced-create" });
+      throw new Error("simulated unique import_id race");
+    };
+    const raced = await raceRepo.createTransactions("p", [
+      { account_id: "a", date: "2026-07-05", amount: -30, import_id: "d1-batch-race" },
+    ]);
+    expect(raced).toMatchObject({
+      transaction_ids: ["d1-raced-create"], duplicate_import_ids: ["d1-batch-race"],
+    });
+
     const csv = { id: "csv-row", account_id: "a", date: "2026-07-02", amount: -50, import_id: "csv:1", payee_name: "Shop" };
     await repo.createTransaction("p", csv, { autoLink: false });
     await repo.createTransaction("p", { ...csv, amount: -55 }, { autoLink: false });

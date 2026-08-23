@@ -44,10 +44,12 @@ export function parseTransactionUpdates(body: unknown): NonEmpty<TransactionBatc
 }
 
 function parseLookup(item: Record<string, unknown>, index: number): TransactionLookup {
-  const id = optionalString(item.id);
-  const importId = optionalString(item.import_id);
-  if (id) return { kind: "id", id };
-  if (importId) return { kind: "import_id", importId };
+  if (Object.hasOwn(item, "id")) {
+    return { kind: "id", id: requiredString(item.id, `transactions[${index}] id`) };
+  }
+  if (Object.hasOwn(item, "import_id")) {
+    return { kind: "import_id", importId: requiredString(item.import_id, `transactions[${index}] import_id`) };
+  }
   throw new ValidationError(`transactions[${index}] requires id or import_id`);
 }
 

@@ -892,19 +892,19 @@ export class LedgerRepository {
   }
 
   async updateTransactions(planId: string, edits: TransactionBatchUpdate[]): Promise<TransactionBatchResult> {
-    const resolved: Array<{ id: string; existing: Row; next: TransactionInput; patch: Partial<TransactionInput> }> = [];
+    const resolved: Array<{ id: string; patch: Partial<TransactionInput> }> = [];
     const seen = new Set<string>();
     for (const edit of edits) {
       const id = await this.resolveTransactionLookup(planId, edit.lookup);
       if (seen.has(id)) throw new ValidationError("Duplicate transaction in batch");
       seen.add(id);
-      const prepared = await this.prepareTransactionUpdate(planId, id, edit.patch);
-      resolved.push({ id, ...prepared, patch: edit.patch });
+      resolved.push({ id, patch: edit.patch });
     }
     const plan = newTransactionMutationPlan();
     await this.db.transaction(async () => {
       for (const item of resolved) {
-        await this.applyResolvedPatch(planId, item.existing, item.next, item.patch, plan);
+        const prepared = await this.prepareTransactionUpdate(planId, item.id, item.patch);
+        await this.applyResolvedPatch(planId, prepared.existing, prepared.next, item.patch, plan);
       }
       await this.executeMutationPlan(planId, plan);
     })();

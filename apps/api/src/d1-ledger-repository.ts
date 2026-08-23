@@ -335,7 +335,16 @@ export class D1LedgerRepository extends LedgerRepository {
           continue;
         }
       }
-      transactionIds.push((await this.createTransaction(planId, input)).id);
+      try {
+        transactionIds.push((await this.createTransaction(planId, input)).id);
+      } catch (error) {
+        const raced = input.import_id && input.account_id
+          ? await this.findTransactionByImportId(planId, input.import_id, input.account_id)
+          : null;
+        if (!raced) throw error;
+        duplicateImportIds.push(input.import_id!);
+        transactionIds.push(raced.id);
+      }
     }
     return this.loadTransactionSaveResult(planId, transactionIds, duplicateImportIds);
   }

@@ -980,6 +980,33 @@ describe("YNAB-compatible API", () => {
     expect((await alias.json()).data.transactions[0].memo).toBe("CLAIMED: import");
   });
 
+  test("collection PATCH preserves an earlier transfer edit when both legs are included", async () => {
+    const checking = await createAccountViaApi({ name: "Batch checking", type: "checking" });
+    const savings = await createAccountViaApi({ name: "Batch savings", type: "savings" });
+    const created = await (await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: { transaction: {
+        account_id: checking.id,
+        date: "2026-06-10",
+        amount: -50000,
+        payee_id: savings.transfer_payee_id,
+      } },
+    })).json();
+    const outflow = created.data.transaction;
+
+    const response = await request("/v1/plans/plan-test/transactions", {
+      method: "PATCH",
+      body: { transactions: [
+        { id: outflow.id, amount: -75000, date: "2026-06-12", memo: "topped up" },
+        { id: outflow.transfer_transaction_id, flag_color: "green" },
+      ] },
+    });
+    expect(response.status).toBe(200);
+    const transactions = (await response.json()).data.transactions;
+    expect(transactions[0]).toMatchObject({ amount: -75000, date: "2026-06-12", memo: "topped up" });
+    expect(transactions[1]).toMatchObject({ amount: 75000, date: "2026-06-12", memo: "topped up", flag_color: "green" });
+  });
+
   test("rejects invalid collection PATCH bodies without changing other rows", async () => {
     const keptId = await createTransaction({ account_id: "acct-1", date: "2026-06-10", amount: -1000, memo: "keep" });
     const knowledge = (db.query("SELECT server_knowledge FROM plans WHERE id = 'plan-test'").get() as { server_knowledge: number }).server_knowledge;

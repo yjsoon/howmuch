@@ -19,6 +19,9 @@ describe("transaction collection parse", () => {
     });
     expect(edits[0]).toEqual({ lookup: { kind: "id", id: "txn-1" }, patch: { memo: "keep-id" } });
     expect(edits[1]).toEqual({ lookup: { kind: "import_id", importId: "imp-1" }, patch: { approved: true } });
+    expect(() => parseTransactionUpdates({
+      transactions: [{ id: 123, import_id: "must-not-fallback", memo: "wrong-row" }],
+    })).toThrow("transactions[0] id must be a non-empty string");
     expect(parseTransactionUpdates({
       transactions: [{ id: "txn-1", deleted: true, memo: "still-live" }],
     })).toEqual([{ lookup: { kind: "id", id: "txn-1" }, patch: { memo: "still-live" } }]);
