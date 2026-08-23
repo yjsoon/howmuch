@@ -5,8 +5,8 @@ import { dirname, resolve } from "node:path";
 import { mkdirSync } from "node:fs";
 
 const COPY_TABLES = ["plans", "category_groups", "categories", "payees", "accounts", "import_sessions", "transactions", "subtransactions", "source_events", "import_rows", "ynab_raw_objects"] as const;
-const EMPTY_TABLES = ["plans","category_groups","categories","payees","accounts","transactions","subtransactions","source_events","import_sessions","import_rows","ynab_raw_objects","plan_month_assignments","plan_month_category_targets","scheduled_transaction_edits","scheduled_subtransaction_edits","scheduled_transaction_snapshot_assertions","account_reconciliation_assertions","ynab_sync_state","sync_runs","sync_attempts","sync_transition_receipts","sync_renewal_receipts","audit_events","write_commands","write_assertions","users","auth_identities","sessions","plan_memberships","password_credentials","auth_setup","login_rate_limits"];
-const SOURCE_AUTH_TABLES = ["users", "auth_identities", "sessions", "plan_memberships", "password_credentials", "auth_setup", "login_rate_limits"];
+const EMPTY_TABLES = ["plans","category_groups","categories","payees","accounts","transactions","subtransactions","source_events","import_sessions","import_rows","ynab_raw_objects","plan_month_assignments","plan_month_category_targets","scheduled_transaction_edits","scheduled_subtransaction_edits","scheduled_transaction_snapshot_assertions","account_reconciliation_assertions","ynab_sync_state","sync_runs","sync_attempts","sync_transition_receipts","sync_renewal_receipts","audit_events","write_commands","write_assertions","users","auth_identities","sessions","personal_api_tokens","plan_memberships","password_credentials","auth_setup","login_rate_limits"];
+const SOURCE_AUTH_TABLES = ["users", "auth_identities", "sessions", "personal_api_tokens", "plan_memberships", "password_credentials", "auth_setup", "login_rate_limits"];
 // `wrangler d1 execute --file` is checkpointed through a Durable Object.
 // Small statements keep each checkpoint well below its CPU budget even for
 // wide transaction and raw-object rows; individual oversized rows still fail
@@ -219,6 +219,8 @@ function validateStatementGroups(source: Database, statementGroups: string[][], 
     db.exec(readFileSync(new URL("../../apps/api/d1-migrations/0007_scheduled_transaction_edits.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../apps/api/d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../apps/api/d1-migrations/0009_account_reconciliation_assertions.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../apps/api/d1-migrations/0010_unique_live_import_id.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../apps/api/d1-migrations/0011_personal_api_tokens.sql", import.meta.url), "utf8"));
     for (const statements of statementGroups) db.exec(statements.join("\n"));
     if ((db.query("PRAGMA foreign_key_check").all() as any[]).length) throw new Error("Generated database has foreign-key violations");
     for (const table of COPY_TABLES) {
