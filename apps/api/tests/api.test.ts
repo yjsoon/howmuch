@@ -2076,7 +2076,7 @@ describe("password authentication", () => {
     const setup = await authRequest(
       "/api/auth/setup",
       { username: "owner", password },
-      { authorization: "Bearer test-token" },
+      { authorization: "bearer test-token" },
     );
     const cookie = setup.headers.get("set-cookie")!.split(";", 1)[0];
 
@@ -2112,7 +2112,7 @@ describe("password authentication", () => {
     expect(JSON.stringify(listed)).not.toContain(createdBody.value);
 
     const bearerRead = await handler(new Request("https://howmuch.test/v1/user", {
-      headers: { authorization: `Bearer ${createdBody.value}` },
+      headers: { authorization: `bearer ${createdBody.value}` },
     }));
     expect(bearerRead.status).toBe(200);
     expect((await bearerRead.json()).data.user.username).toBe("owner");

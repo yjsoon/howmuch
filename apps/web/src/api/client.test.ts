@@ -4,8 +4,11 @@ import { api, shouldHandleUnauthorized } from "./client";
 describe("shouldHandleUnauthorized", () => {
   test("ignores auth-route failures and stale epochs after a new session starts", () => {
     expect(shouldHandleUnauthorized("/api/auth/login", 1, 1)).toBe(false);
+    expect(shouldHandleUnauthorized("/api/auth/personal-tokens", 1, 1)).toBe(true);
+    expect(shouldHandleUnauthorized(`/api/auth/personal-tokens/${"a".repeat(32)}`, 1, 1)).toBe(true);
     expect(shouldHandleUnauthorized("/v1/plans", 1, 1)).toBe(true);
     expect(shouldHandleUnauthorized("/v1/plans", 1, 2)).toBe(false);
+    expect(shouldHandleUnauthorized("/api/auth/personal-tokens", 1, 2)).toBe(false);
   });
 
   test("uses cookie-authenticated personal token management endpoints", async () => {

@@ -40,12 +40,13 @@ export function ApiTokensPage() {
   };
 
   const revokeToken = async (id: string) => {
+    if (busy !== null) return;
     setBusy(id);
     setError(null);
     try {
       await api.revokePersonalApiToken(id);
       setPendingRevoke(null);
-      if (created?.token.id === id) setCreated(null);
+      setCreated((current) => current?.token.id === id ? null : current);
       setGeneration((value) => value + 1);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -93,33 +94,35 @@ export function ApiTokensPage() {
         </section>
       )}
 
-      <section className="report-section api-token-create" aria-labelledby="create-token-heading">
-        <div className="section-heading">
-          <div>
-            <span className="section-title" id="create-token-heading">Create a token</span>
-            <span className="section-meta">Give it the name of the app or device that will use it.</span>
+      {!created && (
+        <section className="report-section api-token-create" aria-labelledby="create-token-heading">
+          <div className="section-heading">
+            <div>
+              <span className="section-title" id="create-token-heading">Create a token</span>
+              <span className="section-meta">Give it the name of the app or device that will use it.</span>
+            </div>
           </div>
-        </div>
-        <form
-          className="api-token-form"
-          onSubmit={(event) => { event.preventDefault(); void createToken(); }}
-        >
-          <label className="field">
-            <span className="field-label">Token name</span>
-            <input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="OpenClaw on home server"
-              maxLength={64}
-              autoComplete="off"
-              required
-            />
-          </label>
-          <button type="submit" className="save-button api-token-create-button" disabled={busy !== null || !name.trim()}>
-            {busy === "create" ? "Creating…" : "Create token"}
-          </button>
-        </form>
-      </section>
+          <form
+            className="api-token-form"
+            onSubmit={(event) => { event.preventDefault(); void createToken(); }}
+          >
+            <label className="field">
+              <span className="field-label">Token name</span>
+              <input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="OpenClaw on home server"
+                maxLength={64}
+                autoComplete="off"
+                required
+              />
+            </label>
+            <button type="submit" className="save-button api-token-create-button" disabled={busy !== null || !name.trim()}>
+              {busy === "create" ? "Creating…" : "Create token"}
+            </button>
+          </form>
+        </section>
+      )}
 
       <section className="report-section" aria-labelledby="active-token-heading">
         <div className="section-heading">
@@ -140,11 +143,11 @@ export function ApiTokensPage() {
                 {pendingRevoke === token.id ? (
                   <div className="api-token-confirm">
                     <span>Stop this token immediately?</span>
-                    <button type="button" className="text-button" onClick={() => setPendingRevoke(null)} disabled={busy === token.id}>Cancel</button>
-                    <button type="button" className="api-token-revoke" onClick={() => void revokeToken(token.id)} disabled={busy === token.id}>{busy === token.id ? "Revoking…" : "Revoke"}</button>
+                    <button type="button" className="text-button" onClick={() => setPendingRevoke(null)} disabled={busy !== null}>Cancel</button>
+                    <button type="button" className="api-token-revoke" onClick={() => void revokeToken(token.id)} disabled={busy !== null}>{busy === token.id ? "Revoking…" : "Revoke"}</button>
                   </div>
                 ) : (
-                  <button type="button" className="api-token-revoke" onClick={() => setPendingRevoke(token.id)}>Revoke</button>
+                  <button type="button" className="api-token-revoke" onClick={() => setPendingRevoke(token.id)} disabled={busy !== null}>Revoke</button>
                 )}
               </li>
             ))}

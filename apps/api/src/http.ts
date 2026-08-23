@@ -702,8 +702,9 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
       return authError(403, "forbidden", "Origin validation failed");
     }
     const authorization = request.headers.get("authorization");
+    const bootstrapToken = bearerToken(authorization);
     const validBootstrap = config.apiToken
-      ? authorization?.startsWith("Bearer ") && safeTokenEqual(authorization.slice(7), config.apiToken)
+      ? bootstrapToken !== null && safeTokenEqual(bootstrapToken, config.apiToken)
       : authorization === null;
     if (!validBootstrap) {
       return authError(401, "not_authorized", "Invalid bootstrap token");
@@ -771,7 +772,7 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
       return authError(403, "forbidden", "CSRF validation failed");
     }
     const token = principal.transport === "bearer"
-      ? request.headers.get("authorization")!.slice(7)
+      ? bearerToken(request.headers.get("authorization"))!
       : cookieToken(request)!;
     await store.revokeSession(sha256(token), Math.floor(Date.now() / 1_000));
     return clearSessionResponse({ data: { ok: true } });
@@ -783,8 +784,8 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
 async function authenticate(request: Request, store: AuthStore, apiToken?: string): Promise<Principal | null> {
   const authorization = request.headers.get("authorization");
   if (authorization !== null) {
-    if (!authorization.startsWith("Bearer ")) return null;
-    const token = authorization.slice(7);
+    const token = bearerToken(authorization);
+    if (token === null) return null;
     if (apiToken && safeTokenEqual(token, apiToken)) return { kind: "api-token" };
     const tokenHash = sha256(token);
     const user = await store.authenticateSession(tokenHash, Math.floor(Date.now() / 1_000));
@@ -803,6 +804,11 @@ async function authenticate(request: Request, store: AuthStore, apiToken?: strin
 
 function cookieToken(request: Request): string | null {
   const match = request.headers.get("cookie")?.match(/(?:^|;\s*)__Host-howmuch_session=([^;]+)/);
+  return match?.[1] ?? null;
+}
+
+function bearerToken(authorization: string | null): string | null {
+  const match = authorization?.match(/^Bearer ([^\s]+)$/i);
   return match?.[1] ?? null;
 }
 

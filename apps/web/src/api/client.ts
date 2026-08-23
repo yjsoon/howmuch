@@ -47,7 +47,9 @@ export function bumpRequestEpoch(): number {
 }
 
 export function shouldHandleUnauthorized(path: string, startedEpoch: number, currentEpoch = requestEpoch): boolean {
-  return !path.startsWith("/api/auth/") && startedEpoch === currentEpoch;
+  const requiresSession = path === "/api/auth/personal-tokens"
+    || path.startsWith("/api/auth/personal-tokens/");
+  return (!path.startsWith("/api/auth/") || requiresSession) && startedEpoch === currentEpoch;
 }
 
 function planUrl(planId: string, ...segments: string[]): string {
