@@ -1154,10 +1154,7 @@ final class AppModel {
       throw APIClientError.validation("Enter an amount and pick an account.")
     }
 
-    // Existing cleared state is changed only through the compare-and-set
-    // register control, so an editor opened before another client toggles the
-    // row cannot silently write that older status back.
-    let request = draft.writeRequest(includeCleared: draft.id == nil)
+    let request = draft.writeRequest(includeCleared: draft.shouldWriteCleared)
     let saved: Transaction
     if let id = draft.id {
       saved = try await apiClient.updateTransaction(planID: settings.planID, transactionID: id, request: request)
