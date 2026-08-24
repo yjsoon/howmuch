@@ -73,12 +73,6 @@ struct AccountsView: View {
           }
           .buttonStyle(.plain)
 
-          if !favouriteAccounts.isEmpty {
-            accountGroupSection(
-              AccountGroup(id: "favourites", title: "Favourites", accounts: favouriteAccounts)
-            )
-          }
-
           ForEach(accountGroups) { group in
             accountGroupSection(group)
           }
@@ -180,7 +174,7 @@ struct AccountsView: View {
     )
   }
 
-  private func accountGroupSection(_ group: AccountGroup) -> some View {
+  private func accountGroupSection(_ group: AccountListGroup) -> some View {
     let isCollapsed = collapsedGroups.contains(group.id)
     return VStack(alignment: .leading, spacing: 8) {
       HStack(spacing: 8) {
@@ -222,7 +216,7 @@ struct AccountsView: View {
           if model.sortForAccountGroup(group.id) == .manual, group.accounts.count > 1 {
             Divider()
             Button {
-              presentedSheet = .reorder(group.managementItem)
+              presentedSheet = .reorder(AccountGroupManagementItem(id: group.id, title: group.title))
             } label: {
               Label("Reorder Accounts…", systemImage: "arrow.up.arrow.down")
             }
@@ -311,10 +305,6 @@ struct AccountsView: View {
         }
       }
     }
-  }
-
-  private var favouriteAccounts: [Account] {
-    model.orderedAccounts(model.openAccounts.filter { model.isAccountFavourite($0.id) }, inGroup: "favourites")
   }
 
   private func accountRow(_ account: Account) -> some View {
@@ -504,65 +494,13 @@ struct AccountsView: View {
     }
   }
 
-  private struct AccountGroup: Identifiable {
-    let id: String
-    let title: String
-    let accounts: [Account]
-    let customGroup: CustomAccountGroup?
-
-    init(id: String, title: String, accounts: [Account], customGroup: CustomAccountGroup? = nil) {
-      self.id = id
-      self.title = title
-      self.accounts = accounts
-      self.customGroup = customGroup
-    }
-
-    var total: Int {
-      accounts.reduce(0) { $0 + $1.balance }
-    }
-
-    var managementItem: AccountGroupManagementItem {
-      AccountGroupManagementItem(id: id, title: title)
-    }
-  }
-
-  private var accountGroups: [AccountGroup] {
-    let live = model.accounts
-    let cashTypes: Set<String> = ["checking", "savings", "cash"]
-    let creditTypes: Set<String> = ["creditCard", "lineOfCredit"]
-
-    let open = live.filter { !$0.closed }
-    let systemGroups: [AccountGroup] = [
-      AccountGroup(id: "cash", title: "Cash", accounts: model.orderedAccounts(open.filter { cashTypes.contains($0.type) }, inGroup: "cash")),
-      AccountGroup(id: "credit", title: "Credit", accounts: model.orderedAccounts(open.filter { creditTypes.contains($0.type) }, inGroup: "credit")),
-      AccountGroup(
-        id: "tracking",
-        title: "Tracking",
-        accounts: model.orderedAccounts(open.filter { !cashTypes.contains($0.type) && !creditTypes.contains($0.type) }, inGroup: "tracking")
-      ),
-      AccountGroup(id: "closed", title: "Closed", accounts: model.orderedAccounts(live.filter(\.closed), inGroup: "closed")),
-    ]
-    let customGroups = model.customAccountGroups.map { group in
-      AccountGroup(
-        id: group.id,
-        title: group.name,
-        accounts: model.orderedAccounts(live.filter { group.accountIDs.contains($0.id) }, inGroup: group.id),
-        customGroup: group
-      )
-    }
-    return customGroups + systemGroups.filter { !$0.accounts.isEmpty }
+  private var accountGroups: [AccountListGroup] {
+    model.accountListGroups()
   }
 
   private var groupManagementItems: [AccountGroupManagementItem] {
-    [
-      AccountGroupManagementItem(id: "favourites", title: "Favourites"),
-      AccountGroupManagementItem(id: "cash", title: "Cash"),
-      AccountGroupManagementItem(id: "credit", title: "Credit"),
-      AccountGroupManagementItem(id: "tracking", title: "Tracking"),
-      AccountGroupManagementItem(id: "closed", title: "Closed"),
-    ] + model.customAccountGroups.map { group in
-      AccountGroupManagementItem(id: group.id, title: group.name)
-    }
+    AccountSystemGroup.allCases.map { AccountGroupManagementItem(id: $0.id, title: $0.title) }
+      + model.customAccountGroups.map { AccountGroupManagementItem(id: $0.id, title: $0.name) }
   }
 
   private var usesMostUsedSort: Bool {
@@ -852,7 +790,7 @@ private struct AccountGroupReorderSheet: View {
   }
 
   private var accounts: [Account] {
-    accountsForGroup(group, in: model)
+    model.accounts(inGroupID: group.id)
   }
 }
 
@@ -899,36 +837,6 @@ private struct AccountSelectionSections: View {
       }
     )
   }
-}
-
-@MainActor
-private func accountsForGroup(_ group: AccountGroupManagementItem, in model: AppModel) -> [Account] {
-  let all = model.accounts
-  let open = model.openAccounts
-  let cashTypes: Set<String> = ["checking", "savings", "cash"]
-  let creditTypes: Set<String> = ["creditCard", "lineOfCredit"]
-  let source: [Account]
-  switch group.id {
-  case "favourites":
-    source = open.filter { model.isAccountFavourite($0.id) }
-  case "cash":
-    source = open.filter { cashTypes.contains($0.type) }
-  case "credit":
-    source = open.filter { creditTypes.contains($0.type) }
-  case "tracking":
-    source = open.filter { !cashTypes.contains($0.type) && !creditTypes.contains($0.type) }
-  case "closed":
-    source = all.filter(\.closed)
-  default:
-    let ids = Set(model.customAccountGroups.first(where: { $0.id == group.id })?.accountIDs ?? [])
-    source = all.filter { ids.contains($0.id) }
-  }
-  return model.orderedAccounts(source, inGroup: group.id)
-}
-
-private func accountNameOrder(_ first: Account, _ second: Account) -> Bool {
-  let comparison = first.name.localizedStandardCompare(second.name)
-  return comparison == .orderedSame ? first.id < second.id : comparison == .orderedAscending
 }
 
 private struct CustomAccountGroupEditor: View {

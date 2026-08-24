@@ -163,51 +163,28 @@ struct CategoryPickerView: View {
   @State private var searchText = ""
 
   var body: some View {
-    List {
+    CategorisedPickerList(
+      groups: visibleGroups,
+      groupTitle: { $0.name },
+      items: { $0.categories.filter(categoryMatches) },
+      itemTitle: { $0.name },
+      isSelected: { $0.id == draft.categoryID },
+      searchText: $searchText,
+      searchPrompt: "Search categories",
+      title: "Category"
+    ) { category in
+      draft.categoryID = category.id
+      dismiss()
+    } header: {
       if trimmedSearch.isEmpty {
         Button {
           draft.categoryID = nil
           dismiss()
         } label: {
-          HStack {
-            Text("No Category")
-              .foregroundStyle(.secondary)
-            Spacer()
-            if draft.categoryID == nil {
-              Image(systemName: "checkmark")
-                .foregroundStyle(Theme.accent)
-            }
-          }
-        }
-      }
-
-      ForEach(visibleGroups) { group in
-        Section(group.name) {
-          ForEach(group.categories.filter(categoryMatches)) { category in
-            Button {
-              draft.categoryID = category.id
-              dismiss()
-            } label: {
-              HStack {
-                Text(category.name)
-                  .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                if category.id == draft.categoryID {
-                  Image(systemName: "checkmark")
-                    .foregroundStyle(Theme.accent)
-                }
-              }
-            }
-          }
+          PickerCheckRow(title: "No Category", isSelected: draft.categoryID == nil, isSecondary: true)
         }
       }
     }
-    .listStyle(.insetGrouped)
-    .scrollContentBackground(.hidden)
-    .background(Theme.canvas)
-    .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search categories")
-    .navigationTitle("Category")
-    .navigationBarTitleDisplayMode(.inline)
   }
 
   private var trimmedSearch: String {
@@ -215,68 +192,177 @@ struct CategoryPickerView: View {
   }
 
   private func categoryMatches(_ category: Category) -> Bool {
-    trimmedSearch.isEmpty || category.name.localizedStandardContains(trimmedSearch)
+    !category.deleted && (trimmedSearch.isEmpty || category.name.localizedStandardContains(trimmedSearch))
   }
 
   /// Everyday groups first, bookkeeping groups demoted to the bottom.
   private var visibleGroups: [CategoryGroup] {
     let live = model.categoryGroups.filter { group in
-      !group.deleted && group.categories.contains { !$0.deleted && categoryMatches($0) }
+      !group.deleted && group.categories.contains(where: categoryMatches)
     }
-    let primary = live.filter { !$0.isQuiet }
-    let quiet = live.filter(\.isQuiet)
-    return primary + quiet
+    return live.filter { !$0.isQuiet } + live.filter(\.isQuiet)
   }
 }
 
 struct AccountPickerView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
-  @Binding var draft: TransactionDraft
+  let selectedAccountID: String
+  var disabledAccountIDs: Set<String> = []
+  let onSelect: (Account) -> Void
+  @State private var searchText = ""
+
+  var body: some View {
+    CategorisedPickerList(
+      groups: visibleGroups,
+      groupTitle: { $0.title },
+      items: { $0.accounts },
+      itemTitle: { $0.name },
+      isSelected: { $0.id == selectedAccountID },
+      isEnabled: { !disabledAccountIDs.contains($0.id) },
+      searchText: $searchText,
+      searchPrompt: "Search accounts",
+      title: "Account",
+      onSelect: { account in
+        onSelect(account)
+        dismiss()
+      }
+    )
+    .task(id: accountUsageTaskID) {
+      guard usesMostUsedSort, model.accountUsagePhase != .loaded else {
+        return
+      }
+      await model.refreshAccountUsageLast30Days()
+    }
+  }
+
+  private var pickerGroups: [AccountListGroup] {
+    model.accountListGroups(includeClosed: false, includeEmptyCustomGroups: false)
+  }
+
+  private var visibleGroups: [AccountListGroup] {
+    pickerGroups.compactMap { $0.matching(searchText) }
+  }
+
+  private var usesMostUsedSort: Bool {
+    pickerGroups.contains { model.sortForAccountGroup($0.id) == .mostUsedLast30Days }
+  }
+
+  private var accountUsageTaskID: String {
+    "\(usesMostUsedSort)-\(model.accountUsageGeneration)"
+  }
+}
+
+/// Checkmark row shared by the searchable grouped pickers.
+struct PickerCheckRow: View {
+  let title: String
+  var isSelected: Bool
+  var isSecondary: Bool = false
+
+  var body: some View {
+    HStack {
+      Text(title)
+        .foregroundStyle(isSecondary ? Color.secondary : Theme.textPrimary)
+      Spacer()
+      if isSelected {
+        Image(systemName: "checkmark")
+          .foregroundStyle(Theme.accent)
+      }
+    }
+  }
+}
+
+/// Sectioned searchable list used by category and account pickers.
+struct CategorisedPickerList<Group: Identifiable, Item: Identifiable, Header: View>: View {
+  let groups: [Group]
+  let groupTitle: (Group) -> String
+  let items: (Group) -> [Item]
+  let itemTitle: (Item) -> String
+  let isSelected: (Item) -> Bool
+  var isEnabled: (Item) -> Bool = { _ in true }
+  @Binding var searchText: String
+  var searchPrompt: String
+  var title: String
+  let onSelect: (Item) -> Void
+  let header: () -> Header
+
+  init(
+    groups: [Group],
+    groupTitle: @escaping (Group) -> String,
+    items: @escaping (Group) -> [Item],
+    itemTitle: @escaping (Item) -> String,
+    isSelected: @escaping (Item) -> Bool,
+    isEnabled: @escaping (Item) -> Bool = { _ in true },
+    searchText: Binding<String>,
+    searchPrompt: String,
+    title: String,
+    onSelect: @escaping (Item) -> Void,
+    @ViewBuilder header: @escaping () -> Header
+  ) {
+    self.groups = groups
+    self.groupTitle = groupTitle
+    self.items = items
+    self.itemTitle = itemTitle
+    self.isSelected = isSelected
+    self.isEnabled = isEnabled
+    self._searchText = searchText
+    self.searchPrompt = searchPrompt
+    self.title = title
+    self.onSelect = onSelect
+    self.header = header
+  }
 
   var body: some View {
     List {
-      accountSection("Budget", accounts: model.openAccounts.filter(\.onBudget))
-      accountSection("Tracking", accounts: model.openAccounts.filter { !$0.onBudget })
+      header()
+      ForEach(groups) { group in
+        Section(groupTitle(group)) {
+          ForEach(items(group)) { item in
+            let enabled = isEnabled(item)
+            Button {
+              onSelect(item)
+            } label: {
+              PickerCheckRow(title: itemTitle(item), isSelected: isSelected(item), isSecondary: !enabled)
+            }
+            .disabled(!enabled)
+          }
+        }
+      }
     }
     .listStyle(.insetGrouped)
     .scrollContentBackground(.hidden)
     .background(Theme.canvas)
-    .navigationTitle("Account")
+    .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: searchPrompt)
+    .navigationTitle(title)
     .navigationBarTitleDisplayMode(.inline)
   }
+}
 
-  @ViewBuilder
-  private func accountSection(_ title: String, accounts: [Account]) -> some View {
-    if !accounts.isEmpty {
-      Section(title) {
-        ForEach(accounts) { account in
-          // A split line transferring to this account pins the parent
-          // elsewhere; the server rejects the self-transfer anyway.
-          let isSplitTransferTarget = draft.subtransactions.contains { $0.transferAccountID == account.id }
-          Button {
-            draft.accountID = account.id
-            if draft.transferAccountID == account.id {
-              // A transfer cannot target its own account; drop the payee.
-              draft.transferAccountID = nil
-              draft.payeeID = nil
-              draft.payeeName = ""
-            }
-            dismiss()
-          } label: {
-            HStack {
-              Text(account.name)
-                .foregroundStyle(isSplitTransferTarget ? Color.secondary : Theme.textPrimary)
-              Spacer()
-              if account.id == draft.accountID {
-                Image(systemName: "checkmark")
-                  .foregroundStyle(Theme.accent)
-              }
-            }
-          }
-          .disabled(isSplitTransferTarget)
-        }
-      }
-    }
+extension CategorisedPickerList where Header == EmptyView {
+  init(
+    groups: [Group],
+    groupTitle: @escaping (Group) -> String,
+    items: @escaping (Group) -> [Item],
+    itemTitle: @escaping (Item) -> String,
+    isSelected: @escaping (Item) -> Bool,
+    isEnabled: @escaping (Item) -> Bool = { _ in true },
+    searchText: Binding<String>,
+    searchPrompt: String,
+    title: String,
+    onSelect: @escaping (Item) -> Void
+  ) {
+    self.init(
+      groups: groups,
+      groupTitle: groupTitle,
+      items: items,
+      itemTitle: itemTitle,
+      isSelected: isSelected,
+      isEnabled: isEnabled,
+      searchText: searchText,
+      searchPrompt: searchPrompt,
+      title: title,
+      onSelect: onSelect,
+      header: { EmptyView() }
+    )
   }
 }

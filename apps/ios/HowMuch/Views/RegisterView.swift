@@ -255,6 +255,16 @@ struct RegisterView: View {
     } message: {
       Text(statusError ?? "Refresh and try again.")
     }
+    .onAppear {
+      if let accountID = scope.accountID {
+        model.beginFocusedRegisterAccount(accountID)
+      }
+    }
+    .onDisappear {
+      if let accountID = scope.accountID {
+        model.endFocusedRegisterAccount(accountID)
+      }
+    }
   }
 
   private func approve(_ transaction: Transaction) {

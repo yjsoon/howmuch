@@ -97,7 +97,8 @@ struct AmountKeypadEngine: Equatable {
   }
 }
 
-/// "Add Transaction" sheet, seeded with the last-used account.
+/// "Add Transaction" sheet, seeded from the visible register when there is
+/// one, otherwise the last-used account.
 struct AddTransactionSheet: View {
   @Environment(AppModel.self) private var model
 
@@ -107,7 +108,7 @@ struct AddTransactionSheet: View {
 
   private var seededDraft: TransactionDraft {
     var draft = TransactionDraft()
-    draft.seedIfNeeded(accounts: model.openAccounts, preferredAccountID: model.lastUsedAccountID)
+    draft.seedIfNeeded(accounts: model.openAccounts, preferredAccountID: model.preferredCaptureAccountID)
     return draft
   }
 }
@@ -456,7 +457,20 @@ struct TransactionFormView: View {
       CardDivider()
 
       NavigationLink {
-        AccountPickerView(draft: $draft)
+        AccountPickerView(
+          selectedAccountID: draft.accountID,
+          // A split line transferring to this account pins the parent
+          // elsewhere; the server rejects the self-transfer anyway.
+          disabledAccountIDs: Set(draft.subtransactions.compactMap(\.transferAccountID))
+        ) { account in
+          draft.accountID = account.id
+          if draft.transferAccountID == account.id {
+            // A transfer cannot target its own account; drop the payee.
+            draft.transferAccountID = nil
+            draft.payeeID = nil
+            draft.payeeName = ""
+          }
+        }
       } label: {
         DisclosureValueRow(
           icon: "building.columns",
@@ -943,36 +957,29 @@ private struct TransactionSplitCategoryPicker: View {
   @State private var searchText = ""
 
   var body: some View {
-    List {
+    CategorisedPickerList(
+      groups: visibleGroups,
+      groupTitle: { $0.name },
+      items: { $0.categories.filter(categoryMatches) },
+      itemTitle: { $0.name },
+      isSelected: { $0.id == line.categoryID },
+      searchText: $searchText,
+      searchPrompt: "Search categories",
+      title: "Category"
+    ) { category in
+      line.categoryID = category.id
+      line.transferAccountID = nil
+      dismiss()
+    } header: {
       if trimmedSearch.isEmpty {
         Button {
           line.categoryID = nil
           dismiss()
         } label: {
-          selectionRow("No Category", selected: line.categoryID == nil, secondary: true)
-        }
-      }
-
-      ForEach(visibleGroups) { group in
-        Section(group.name) {
-          ForEach(group.categories.filter(categoryMatches)) { category in
-            Button {
-              line.categoryID = category.id
-              line.transferAccountID = nil
-              dismiss()
-            } label: {
-              selectionRow(category.name, selected: line.categoryID == category.id)
-            }
-          }
+          PickerCheckRow(title: "No Category", isSelected: line.categoryID == nil, isSecondary: true)
         }
       }
     }
-    .listStyle(.insetGrouped)
-    .scrollContentBackground(.hidden)
-    .background(Theme.canvas)
-    .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search categories")
-    .navigationTitle("Category")
-    .navigationBarTitleDisplayMode(.inline)
   }
 
   private var trimmedSearch: String {
@@ -981,25 +988,13 @@ private struct TransactionSplitCategoryPicker: View {
 
   private var visibleGroups: [CategoryGroup] {
     let live = model.categoryGroups.filter { group in
-      !group.deleted && group.categories.contains { !$0.deleted && categoryMatches($0) }
+      !group.deleted && group.categories.contains(where: categoryMatches)
     }
     return live.filter { !$0.isQuiet } + live.filter(\.isQuiet)
   }
 
   private func categoryMatches(_ category: Category) -> Bool {
     !category.deleted && (trimmedSearch.isEmpty || category.name.localizedStandardContains(trimmedSearch))
-  }
-
-  private func selectionRow(_ title: String, selected: Bool, secondary: Bool = false) -> some View {
-    HStack {
-      Text(title)
-        .foregroundStyle(secondary ? Color.secondary : Theme.textPrimary)
-      Spacer()
-      if selected {
-        Image(systemName: "checkmark")
-          .foregroundStyle(Theme.accent)
-      }
-    }
   }
 }
 
