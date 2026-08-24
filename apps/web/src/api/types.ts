@@ -34,12 +34,20 @@ export interface Account {
   deleted: boolean;
 }
 
+export type AccountGroupSort = "manual" | "alphabetical" | "mostUsedLast30Days";
+
+export interface CustomAccountGroup {
+  id: string;
+  name: string;
+  account_ids: string[];
+}
+
 export interface AccountPreferences {
   favourite_account_ids: string[];
   account_order: string[];
   account_order_by_group: Record<string, string[]>;
-  account_group_sorts: Record<string, "manual" | "alphabetical" | "mostUsedLast30Days">;
-  custom_account_groups: Array<{ id: string; name: string; account_ids: string[] }>;
+  account_group_sorts: Record<string, AccountGroupSort>;
+  custom_account_groups: CustomAccountGroup[];
 }
 
 export interface AccountPreferencesSnapshot {

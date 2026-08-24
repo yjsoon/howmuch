@@ -169,6 +169,12 @@ select:focus-visible {
   margin-left: auto;
 }
 
+.account-organizer-entry {
+  width: 100%;
+  color: inherit;
+  text-align: left;
+}
+
 .sidebar-report-link {
   padding: 6px 10px 6px 34px;
   color: #d5d4ce;
@@ -286,6 +292,13 @@ select:focus-visible {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.mobile-organizer-entry {
+  color: var(--ink-soft);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .mobile-masthead-error {
@@ -2579,6 +2592,452 @@ tr:hover .share-bar {
   opacity: 0.72;
 }
 
+/* ── Account organisation ─────────────────────────────────── */
+
+.account-organizer {
+  width: min(820px, calc(100vw - 32px));
+  max-width: none;
+  height: min(860px, calc(100dvh - 48px));
+  max-height: none;
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  box-shadow: 8px 8px 0 #12141155;
+}
+
+.account-organizer::backdrop {
+  background: #121411aa;
+  backdrop-filter: blur(2px);
+}
+
+.account-organizer-surface {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.account-organizer-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 24px 18px;
+  color: var(--paper);
+  background: #242722;
+  border-bottom: 1px solid #121411;
+}
+
+.account-organizer-header .page-eyebrow {
+  color: #a8aaa2;
+}
+
+.account-organizer-header h2 {
+  margin: 0;
+  font: 500 30px/1.1 var(--font-display);
+}
+
+.account-organizer-header p {
+  max-width: 62ch;
+  margin: 6px 0 0;
+  color: #d5d4ce;
+  font-size: 12px;
+}
+
+.account-organizer-close {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: #d5d4ce;
+  border: 1px solid #ffffff35;
+  border-radius: 50%;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.account-organizer-close:hover {
+  color: #fff;
+  border-color: #ffffff80;
+}
+
+.account-organizer-close:focus-visible {
+  outline-color: var(--paper);
+}
+
+.account-organizer-content,
+.account-organizer-unsupported {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.account-organizer-content {
+  padding: 0 24px 28px;
+}
+
+.account-organizer-section {
+  padding: 22px 0 24px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.account-organizer-section:last-child {
+  border-bottom: 0;
+}
+
+.account-organizer-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.account-organizer-section h3,
+.account-organizer-unsupported h3 {
+  margin: 0;
+  font: 500 21px/1.2 var(--font-display);
+}
+
+.account-organizer-section-heading p,
+.account-organizer-unsupported p {
+  margin: 3px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.account-sync-status {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 24px;
+  color: var(--ink-soft);
+  background: var(--accent-press);
+  border-bottom: 1px solid var(--rule);
+  font-size: 11.5px;
+}
+
+.account-sync-status-saving span::first-letter {
+  color: var(--green);
+}
+
+.account-sync-status-error,
+.account-sync-status-unsupported {
+  color: var(--red);
+  background: var(--red-wash);
+}
+
+.account-sync-status button,
+.group-sort-note button {
+  flex: 0 0 auto;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.account-organizer-unsupported {
+  flex: 1;
+  padding: 28px 24px;
+}
+
+.account-checkboxes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+}
+
+.account-checkboxes label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+}
+
+.account-checkboxes label:nth-of-type(odd) {
+  border-right: 1px solid var(--rule);
+}
+
+.account-checkboxes label:hover {
+  background: var(--accent-press);
+}
+
+.account-checkboxes input {
+  flex: 0 0 auto;
+  accent-color: var(--ink);
+}
+
+.account-checkboxes span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-checkboxes p {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 12px;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.organizer-secondary-button,
+.organizer-primary-button,
+.organizer-danger-button {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 2px;
+  background: var(--paper-raised);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.organizer-primary-button {
+  color: var(--paper);
+  background: var(--ink);
+}
+
+.organizer-danger-button {
+  color: var(--paper);
+  background: var(--red);
+  border-color: var(--red);
+}
+
+.organizer-danger-link {
+  color: var(--red);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.custom-group-list,
+.group-sort-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.custom-group-card,
+.group-sort-card {
+  padding: 12px;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+}
+
+.custom-group-heading,
+.group-sort-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.custom-group-heading > div:first-child {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.custom-group-heading strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-group-heading > div:first-child span,
+.organizer-field-hint,
+.organizer-field-error {
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+
+.organizer-field-error {
+  color: var(--red);
+}
+
+.organizer-move-buttons {
+  display: inline-flex;
+  flex: 0 0 auto;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.organizer-move-buttons button {
+  display: grid;
+  width: 32px;
+  min-height: 30px;
+  place-items: center;
+  color: var(--ink-soft);
+  background: var(--paper);
+  border-right: 1px solid var(--rule);
+}
+
+.organizer-move-buttons button:last-child {
+  border-right: 0;
+}
+
+.organizer-move-buttons button:disabled {
+  color: var(--rule);
+  cursor: not-allowed;
+}
+
+.custom-group-form {
+  display: grid;
+  gap: 5px;
+  margin: 12px 0;
+  padding: 10px;
+  background: var(--accent-press);
+  border: 1px solid var(--rule);
+}
+
+.custom-group-form > label {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.custom-group-form-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.custom-group-form input,
+.group-sort-heading select {
+  min-width: 0;
+  padding: 7px 9px;
+  color: var(--ink);
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  font: inherit;
+}
+
+.custom-group-form input {
+  flex: 1;
+}
+
+.custom-group-delete-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 10px;
+  padding: 10px;
+  color: var(--red);
+  background: var(--red-wash);
+  border: 1px solid var(--red);
+  font-size: 12px;
+}
+
+.custom-group-delete-confirm > div {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.custom-group-members {
+  margin-top: 10px;
+  border-top: 1px dotted var(--rule);
+}
+
+.custom-group-members summary {
+  width: fit-content;
+  padding: 9px 0 0;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.custom-group-members .account-checkboxes {
+  margin-top: 9px;
+}
+
+.account-organizer-empty,
+.group-sort-empty,
+.group-sort-note {
+  margin: 8px 0 0;
+  color: var(--ink-faint);
+  font-size: 11.5px;
+}
+
+.group-sort-heading {
+  justify-content: space-between;
+}
+
+.group-sort-heading label {
+  font-weight: 600;
+}
+
+.group-sort-heading select {
+  width: min(240px, 50%);
+}
+
+.group-sort-note-error {
+  color: var(--red);
+}
+
+.account-order-list {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--rule);
+}
+
+.account-order-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  padding: 5px 0 5px 4px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.account-order-list li > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-organizer-footer {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  padding: 12px 24px;
+  background: var(--paper-raised);
+  border-top: 1px solid var(--rule-strong);
+}
+
+.account-organizer-footer .save-button {
+  width: auto;
+  min-width: 96px;
+  margin: 0;
+  padding: 8px 18px;
+  font-size: 13px;
+}
+
 /* ── Small screens ──────────────────────────────────────────── */
 
 @media (max-width: 720px) {
@@ -2645,6 +3104,95 @@ tr:hover .share-bar {
     flex-wrap: wrap;
     padding: 12px;
     border-bottom: 2px solid var(--rule-strong);
+  }
+
+  .mobile-actions {
+    gap: 10px;
+  }
+
+  .account-organizer-entry {
+    display: none;
+  }
+
+  .account-organizer {
+    width: 100%;
+    height: 100dvh;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .account-organizer-header {
+    padding: 18px 16px 14px;
+  }
+
+  .account-organizer-header h2 {
+    font-size: 26px;
+  }
+
+  .account-organizer-content {
+    padding: 0 16px 24px;
+  }
+
+  .account-sync-status {
+    padding-inline: 16px;
+  }
+
+  .account-checkboxes {
+    grid-template-columns: 1fr;
+  }
+
+  .account-checkboxes label {
+    min-height: 44px;
+  }
+
+  .account-checkboxes label:nth-of-type(odd) {
+    border-right: 0;
+  }
+
+  .custom-group-heading,
+  .custom-group-form-row,
+  .custom-group-delete-confirm {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .custom-group-heading > div:first-child {
+    flex-basis: calc(100% - 82px);
+  }
+
+  .custom-group-form input {
+    flex-basis: 100%;
+  }
+
+  .organizer-secondary-button,
+  .organizer-primary-button,
+  .organizer-danger-button,
+  .organizer-move-buttons button {
+    min-height: 44px;
+  }
+
+  .organizer-move-buttons button {
+    width: 44px;
+  }
+
+  .group-sort-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .group-sort-heading select {
+    width: 100%;
+  }
+
+  .account-organizer-footer {
+    padding: 10px 16px max(10px, env(safe-area-inset-bottom));
+  }
+
+  .account-organizer-footer .save-button {
+    min-height: 44px;
   }
 
   .report-body {

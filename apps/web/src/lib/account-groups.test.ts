@@ -50,4 +50,12 @@ describe("accountGroups", () => {
       custom_account_groups: [{ id: "__proto__", name: "Broken", account_ids: ["cash"] }],
     })).not.toThrow();
   });
+
+  test("uses 30-day account usage for the supported most-used sort", () => {
+    expect(accountGroups(accounts, {
+      ...preferences,
+      account_group_sorts: { favourites: "mostUsedLast30Days" },
+    }, { cash: 2, card: 8 }).find((group) => group.id === "favourites")?.accounts.map((account) => account.id))
+      .toEqual(["card", "cash"]);
+  });
 });
