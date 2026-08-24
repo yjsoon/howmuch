@@ -10,6 +10,7 @@
 		A10000000000000000000020 /* HowMuchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000010 /* HowMuchApp.swift */; };
 		A10000000000000000000021 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* AppModel.swift */; };
 		A10000000000000000000022 /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* APIModels.swift */; };
+		A10000000000000000000025 /* AccountGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* AccountGroups.swift */; };
 		A10000000000000000000023 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* APIClient.swift */; };
 		A10000000000000000000024 /* Formatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* Formatting.swift */; };
 		A10000000000000000000060 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000070 /* Components.swift */; };
@@ -32,6 +33,7 @@
 		A10000000000000000000010 /* HowMuchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HowMuchApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000011 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		A10000000000000000000012 /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
+		A10000000000000000000015 /* AccountGroups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountGroups.swift; sourceTree = "<group>"; };
 		A10000000000000000000013 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		A10000000000000000000014 /* Formatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Formatting.swift; sourceTree = "<group>"; };
 		A10000000000000000000070 /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
@@ -96,6 +98,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000012 /* APIModels.swift */,
+				A10000000000000000000015 /* AccountGroups.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -206,6 +209,7 @@
 			files = (
 				A10000000000000000000021 /* AppModel.swift in Sources */,
 				A10000000000000000000022 /* APIModels.swift in Sources */,
+				A10000000000000000000025 /* AccountGroups.swift in Sources */,
 				A10000000000000000000023 /* APIClient.swift in Sources */,
 				A10000000000000000000024 /* Formatting.swift in Sources */,
 				A10000000000000000000029 /* Theme.swift in Sources */,

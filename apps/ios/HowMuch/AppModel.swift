@@ -300,6 +300,37 @@ final class AppModel {
     saveViewPrefs()
   }
 
+  /// Favourites, custom groups, then Cash / Credit / Tracking / Closed — the
+  /// same sections as the Accounts tab and the capture account picker.
+  func accountListGroups(
+    includeClosed: Bool = true,
+    includeEmptySystemGroups: Bool = false,
+    includeEmptyCustomGroups: Bool = true
+  ) -> [AccountListGroup] {
+    AccountListGroup.build(
+      accounts: accounts,
+      favouriteIDs: favouriteAccountIDs,
+      customGroups: customAccountGroups,
+      includeClosed: includeClosed,
+      includeEmptySystemGroups: includeEmptySystemGroups,
+      includeEmptyCustomGroups: includeEmptyCustomGroups,
+      orderedAccounts: { [self] accounts, groupID in
+        self.orderedAccounts(accounts, inGroup: groupID)
+      }
+    )
+  }
+
+  func accounts(inGroupID groupID: String) -> [Account] {
+    if let system = AccountSystemGroup(rawValue: groupID) {
+      return orderedAccounts(
+        accounts.filter { system.contains($0, favouriteIDs: favouriteAccountIDs) },
+        inGroup: groupID
+      )
+    }
+    let ids = Set(customAccountGroups.first(where: { $0.id == groupID })?.accountIDs ?? [])
+    return orderedAccounts(accounts.filter { ids.contains($0.id) }, inGroup: groupID)
+  }
+
   /// Applies a group's selected sort while retaining the old global order as
   /// the backward-compatible fallback for pre-groups installs.
   func orderedAccounts(_ source: [Account], inGroup groupID: String) -> [Account] {
@@ -338,11 +369,6 @@ final class AppModel {
         return accountNameOrder(first, second)
       }
     }
-  }
-
-  private func accountNameOrder(_ first: Account, _ second: Account) -> Bool {
-    let nameOrder = first.name.localizedStandardCompare(second.name)
-    return nameOrder == .orderedSame ? first.id < second.id : nameOrder == .orderedAscending
   }
 
   /// Moves accounts within only the displayed group, leaving every other
@@ -568,23 +594,12 @@ final class AppModel {
   }
 
   private func snapshotMostUsedAccountOrders() {
-    let cashTypes: Set<String> = ["checking", "savings", "cash"]
-    let creditTypes: Set<String> = ["creditCard", "lineOfCredit"]
-    let open = accounts.filter { !$0.closed }
-    let groups: [String: [Account]] = [
-      "favourites": open.filter { favouriteAccountIDs.contains($0.id) },
-      "cash": open.filter { cashTypes.contains($0.type) },
-      "credit": open.filter { creditTypes.contains($0.type) },
-      "tracking": open.filter { !cashTypes.contains($0.type) && !creditTypes.contains($0.type) },
-      "closed": accounts.filter(\.closed),
-    ].merging(Dictionary(uniqueKeysWithValues: customAccountGroups.map { group in
-      (group.id, accounts.filter { group.accountIDs.contains($0.id) })
-    })) { current, _ in current }
     var changed = false
-    for (groupID, accounts) in groups where sortForAccountGroup(groupID) == .mostUsedLast30Days {
-      let order = orderedAccounts(accounts, inGroup: groupID).map(\.id)
-      if viewPrefs.accountOrderByGroup[groupID] != order {
-        viewPrefs.accountOrderByGroup[groupID] = order
+    for group in accountListGroups(includeEmptySystemGroups: true, includeEmptyCustomGroups: true)
+    where sortForAccountGroup(group.id) == .mostUsedLast30Days {
+      let order = group.accounts.map(\.id)
+      if viewPrefs.accountOrderByGroup[group.id] != order {
+        viewPrefs.accountOrderByGroup[group.id] = order
         changed = true
       }
     }
