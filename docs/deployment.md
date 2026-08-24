@@ -34,9 +34,9 @@ and the rest of the SPA cannot be missing or stale.
 
 Keep `HOWMUCH_API_TOKEN` as an encrypted secret. Use the local, validated import, parity, and D1-bootstrap tools in `docs/ynab-migration.md` for any YNAB work. They copy the verified ledger, provenance, and raw mirror into an otherwise clean target. Do not use an unverified SQLite file or ad-hoc table copy.
 
-## Temporary YNAB transition mode
+## Production YNAB sync mode
 
-Production has an explicitly authorised, temporary YNAB-primary transition configuration. `HOWMUCH_TRANSITION_READ_ONLY=true`, `HOWMUCH_YNAB_PLAN_ID=80bc6db0-d926-4635-a37a-1ba0787c4c4e`, and cron `10 16 * * *` route one daily delta at `00:10 Asia/Singapore`. `HOWMUCH_YNAB_TOKEN` must exist only as an encrypted Worker secret; it must never appear in `wrangler.jsonc`, command output, logs, or verification notes. Preview has `HOWMUCH_TRANSITION_READ_ONLY=false`, no YNAB plan or token, and no cron. Local configuration is writable unless the variable is the literal string `true`.
+Production intentionally permits HowMuch financial writes while retaining the YNAB delta sync. `HOWMUCH_TRANSITION_READ_ONLY=false`, `HOWMUCH_YNAB_PLAN_ID=80bc6db0-d926-4635-a37a-1ba0787c4c4e`, and cron `10 16 * * *` route one daily delta at `00:10 Asia/Singapore`. This is an explicitly authorised concurrent-writer configuration; do not mistake the active YNAB cron for evidence that HowMuch should be locked. `HOWMUCH_YNAB_TOKEN` must exist only as an encrypted Worker secret; it must never appear in `wrangler.jsonc`, command output, logs, or verification notes. Preview has no YNAB plan, token, or cron. Local and preview configuration is writable unless the variable is the literal string `true`.
 
 Before enabling the production secret or deploying a transition configuration, verify Wrangler profile `yj` is using account `YJ` (`810a0c404daff0737f4a2a97a7aab092`) and D1 database `howmuch-production` (`57dc5569-d639-44c1-bb9d-6214f43a43b8`). A current D1 Time Travel bookmark is a required recovery gate. From `apps/worker`, record the private bookmark returned by:
 
@@ -46,15 +46,15 @@ wrangler d1 time-travel info DB --profile yj --json
 
 Do not proceed without a valid bookmark and its timestamp. Keep the bookmark out of public logs and source control.
 
-While transition mode is enabled, YNAB is the only financial writer. After authentication and browser CSRF checks, production returns HTTP `423` with error name `transition_read_only` for transaction create/import/update/delete, mobile quick entry, reconciliation commits, scheduled-transaction create/update/delete/materialisation, account and payee creation, CSV or manual YNAB imports, and month category assignment or target changes. Authentication, reads, health checks, and unrelated unknown unsafe routes keep their normal behaviour. The transition cron never invokes HowMuch scheduled materialisation, which prevents YNAB and HowMuch from entering the same scheduled occurrence.
+Only when `HOWMUCH_TRANSITION_READ_ONLY=true` is explicitly restored does YNAB become the sole financial writer. After authentication and browser CSRF checks, that lock returns HTTP `423` with error name `transition_read_only` for transaction create/import/update/delete, mobile quick entry, reconciliation commits, scheduled-transaction create/update/delete/materialisation, account and payee creation, CSV or manual YNAB imports, and month category assignment or target changes. Authentication, reads, health checks, and unrelated unknown unsafe routes keep their normal behaviour. The YNAB cron never invokes HowMuch scheduled materialisation, so the HowMuch materialisation cron remains inactive while YNAB sync is configured.
 
 The scheduled delta resumes from `ynab_sync_state.server_knowledge`. A successful fenced import atomically advances the cursor only after its ledger writes complete; a failed import leaves the cursor unchanged. The stable scheduled run ID and transition receipts make a replay of the same cron invocation a duplicate rather than a second import. Do not reset the cursor or perform a full bootstrap during transition.
 
 Verification must be privacy-safe. Use only the structured `ynab_delta_sync` event (`status`, run ID, transaction/raw-object counts, and cursor) and count/status/cursor queries against `sync_runs`, `sync_attempts`, and `ynab_sync_state`. Do not print transaction rows, YNAB response bodies, tokens, plan names, payees, memos, or stored failure text. Failed scheduled runs retain and throw only the generic `YNAB scheduled sync failed` status; detailed upstream response bodies are neither persisted by the scheduler nor logged.
 
-Final cutover back to HowMuch must happen in this order:
+Retiring YNAB sync requires a separately reviewed cutover. The current configuration is not already locked; a cutover must happen in this order:
 
-1. Stop every write in YNAB and keep HowMuch locked.
+1. Set `HOWMUCH_TRANSITION_READ_ONLY=true`, deploy the lock, and stop every write in YNAB.
 2. Allow the final `00:10` delta to complete, then verify its completed status, counts, cursor advancement, cleared lease, and expected ledger parity without exposing financial data.
 3. Remove the YNAB cron from production and deploy that locked, no-cron configuration. Confirm no scheduled trigger remains.
 4. Delete the encrypted `HOWMUCH_YNAB_TOKEN` Worker secret and verify it is absent. Remove `HOWMUCH_YNAB_PLAN_ID` from production configuration as part of the cutover change.
