@@ -2223,6 +2223,31 @@ describe("password authentication", () => {
     }));
     expect(reservedGroup.status).toBe(400);
 
+    const dangerousGroup = await handler(new Request(path, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({
+        account_preferences: {
+          ...preferences,
+          account_order_by_group: { constructor: [] },
+          custom_account_groups: [{ id: "__proto__", name: "Broken", account_ids: [] }],
+        },
+        expected_revision: 1,
+      }),
+    }));
+    expect(dangerousGroup.status).toBe(400);
+
+    const multibyteAccountIDs = Array.from({ length: 300 }, (_, index) => `${index}-`.padEnd(200, "界"));
+    const oversized = await handler(new Request(path, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({
+        account_preferences: { ...preferences, favourite_account_ids: multibyteAccountIDs },
+        expected_revision: 1,
+      }),
+    }));
+    expect(oversized.status).toBe(400);
+
     const read = await handler(new Request(path, { headers }));
     expect((await read.json()).data).toEqual({ account_preferences: preferences, account_preferences_revision: 1 });
     expect(db.query("SELECT COUNT(*) count FROM account_preferences").get()).toEqual({ count: 1 });

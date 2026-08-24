@@ -536,7 +536,7 @@ struct APIClient {
           (httpResponse.statusCode == 401 ||
            (httpResponse.statusCode == 403 && serverError.error.name == "not_authorized"))
         if authFailure {
-          NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: nil)
+          NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: trimmedToken)
           throw APIClientError.authenticationExpired
         }
         if serverError.error.name == "reconciliation_mismatch",
@@ -560,7 +560,7 @@ struct APIClient {
         throw APIClientError.server(serverError.error.detail)
       }
       if requestHasSession && httpResponse.statusCode == 401 {
-        NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: nil)
+        NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: trimmedToken)
         throw APIClientError.authenticationExpired
       }
       throw APIClientError.httpStatus(httpResponse.statusCode)

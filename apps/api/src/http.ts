@@ -465,7 +465,9 @@ function parseAccountPreferences(value: unknown): AccountPreferences {
     throw new ValidationError("account_preferences is required");
   }
   const input = value as Record<string, unknown>;
-  if (JSON.stringify(value).length > 65_536) throw new ValidationError("account_preferences is too large");
+  if (new TextEncoder().encode(JSON.stringify(value)).byteLength > 65_536) {
+    throw new ValidationError("account_preferences is too large");
+  }
   const strings = (field: unknown, name: string): string[] => {
     if (!Array.isArray(field) || field.length > 500 || field.some((item) => typeof item !== "string" || !item || item.length > 200)) {
       throw new ValidationError(`${name} must be an array of non-empty strings`);
@@ -480,7 +482,7 @@ function parseAccountPreferences(value: unknown): AccountPreferences {
   const orderEntries = Object.entries(input.account_order_by_group);
   if (orderEntries.length > 100) throw new ValidationError("account_order_by_group has too many entries");
   for (const [groupId, order] of orderEntries) {
-    if (!groupId || groupId.length > 200) throw new ValidationError("account group IDs must be non-empty strings");
+    if (!validPreferenceKey(groupId)) throw new ValidationError("account group IDs must be canonical non-empty strings");
     orderByGroup[groupId] = strings(order, "account group order");
   }
   if (!input.account_group_sorts || typeof input.account_group_sorts !== "object" || Array.isArray(input.account_group_sorts)) {
@@ -490,7 +492,7 @@ function parseAccountPreferences(value: unknown): AccountPreferences {
   const sortEntries = Object.entries(input.account_group_sorts);
   if (sortEntries.length > 100) throw new ValidationError("account_group_sorts has too many entries");
   for (const [groupId, sort] of sortEntries) {
-    if (!groupId || groupId.length > 200 || !["manual", "alphabetical", "mostUsedLast30Days"].includes(String(sort))) {
+    if (!validPreferenceKey(groupId) || !["manual", "alphabetical", "mostUsedLast30Days"].includes(String(sort))) {
       throw new ValidationError("account group sorts are invalid");
     }
     sorts[groupId] = sort as AccountPreferences["account_group_sorts"][string];
@@ -501,20 +503,25 @@ function parseAccountPreferences(value: unknown): AccountPreferences {
   const usedGroupIDs = new Set<string>();
   const usedGroupNames = new Set<string>();
   const reserved = new Set(["favourites", "cash", "credit", "tracking", "closed"]);
+  const dangerous = new Set(["__proto__", "prototype", "constructor"]);
   const customGroups = input.custom_account_groups.map((group) => {
     if (!group || typeof group !== "object" || Array.isArray(group)) throw new ValidationError("custom account groups are invalid");
     const candidate = group as Record<string, unknown>;
-    if (typeof candidate.id !== "string" || !candidate.id || candidate.id.length > 200
+    if (typeof candidate.id !== "string" || !validPreferenceKey(candidate.id)
       || typeof candidate.name !== "string" || !candidate.name.trim() || candidate.name.length > 100) {
       throw new ValidationError("custom account groups are invalid");
     }
     const idKey = candidate.id.toLowerCase();
     const nameKey = candidate.name.trim().toLocaleLowerCase();
-    if (reserved.has(idKey) || reserved.has(nameKey) || !usedGroupIDs.add(idKey) || !usedGroupNames.add(nameKey)) {
+    if (reserved.has(idKey) || dangerous.has(idKey) || reserved.has(nameKey) || !usedGroupIDs.add(idKey) || !usedGroupNames.add(nameKey)) {
       throw new ValidationError("custom account group IDs and names must be unique and non-reserved");
     }
     return { id: candidate.id, name: candidate.name.trim(), account_ids: strings(candidate.account_ids, "custom group account_ids") };
   });
+  const validGroupIDs = new Set([...reserved, ...customGroups.map((group) => group.id)]);
+  if (orderEntries.some(([key]) => !validGroupIDs.has(key)) || sortEntries.some(([key]) => !validGroupIDs.has(key))) {
+    throw new ValidationError("account preference maps contain an unknown group ID");
+  }
   return {
     favourite_account_ids: strings(input.favourite_account_ids, "favourite_account_ids"),
     account_order: strings(input.account_order, "account_order"),
@@ -522,6 +529,11 @@ function parseAccountPreferences(value: unknown): AccountPreferences {
     account_group_sorts: sorts,
     custom_account_groups: customGroups,
   };
+}
+
+function validPreferenceKey(value: string): boolean {
+  return Boolean(value) && value.length <= 200 && value === value.trim()
+    && !["__proto__", "prototype", "constructor"].includes(value.toLowerCase());
 }
 
 async function handleNative(

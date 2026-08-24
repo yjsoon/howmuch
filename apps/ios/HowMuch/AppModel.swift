@@ -117,9 +117,10 @@ final class AppModel {
       forName: .howMuchAuthenticationExpired,
       object: nil,
       queue: .main
-    ) { [weak self] _ in
+    ) { [weak self] notification in
+      guard let expiredSessionToken = notification.object as? String else { return }
       Task { @MainActor [weak self] in
-        self?.handleAuthenticationExpiry()
+        self?.handleAuthenticationExpiry(expiredSessionToken: expiredSessionToken)
       }
     }
   }
@@ -128,8 +129,8 @@ final class AppModel {
   /// revocation. Keeping stale accounts visible while another request reports
   /// "Invalid credentials" is misleading and can invite writes with a dead
   /// session, so the connection screen is made the single next step.
-  private func handleAuthenticationExpiry() {
-    guard settings.isAuthenticated else {
+  private func handleAuthenticationExpiry(expiredSessionToken: String) {
+    guard settings.isAuthenticated, settings.sessionToken == expiredSessionToken else {
       return
     }
 
@@ -416,6 +417,7 @@ final class AppModel {
               remote: remote.preferences
             )
             scopedPreferences = preferences.applying(to: latestScopedPreferences)
+            preferences = AccountPresentationPreferences(scopedPreferences)
             scopedViewPrefsStore.set(scopedPreferences, for: scope)
             if activeViewPrefsScope == scope {
               viewPrefs = scopedPreferences
@@ -757,6 +759,7 @@ final class AppModel {
     let generation = referenceGeneration
     let planID = settings.planID
     let scope = activeViewPrefsScope
+    let accountPreferencesAtStart = AccountPresentationPreferences(viewPrefs)
     if !quiet {
       referencePhase = .loading
     }
@@ -775,8 +778,12 @@ final class AppModel {
       rebuildLookups()
       let localAccountPreferences = AccountPresentationPreferences(viewPrefs)
       let lastSynced = scope.flatMap { scopedViewPrefsStore.syncedAccountPreferences[$0] }
+      let localChangedDuringRefresh = localAccountPreferences != accountPreferencesAtStart
+      let responseIsStale = reference.accountPreferences.map { response in
+        response.revision < (lastSynced?.revision ?? 0)
+      } ?? false
       let hasUnsyncedLocalArrangement = lastSynced.map { localAccountPreferences != $0.preferences } ?? false
-      if hasUnsyncedLocalArrangement {
+      if localChangedDuringRefresh || responseIsStale || hasUnsyncedLocalArrangement {
         enqueueAccountPreferencesSync()
       } else if let accountPreferences = reference.accountPreferences {
         viewPrefs = accountPreferences.preferences.applying(to: viewPrefs)

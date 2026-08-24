@@ -43,4 +43,11 @@ describe("accountGroups", () => {
       custom_account_groups: [{ id: "custom-empty", name: "Empty", account_ids: [] }],
     }).map((group) => group.id)).toEqual(["custom-empty", "cash", "credit", "tracking"]);
   });
+
+  test("does not read inherited prototype values as group order or sort", () => {
+    expect(() => accountGroups(accounts, {
+      ...preferences,
+      custom_account_groups: [{ id: "__proto__", name: "Broken", account_ids: ["cash"] }],
+    })).not.toThrow();
+  });
 });

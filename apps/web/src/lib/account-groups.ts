@@ -42,9 +42,13 @@ export function accountGroups(accounts: Account[], preferences: AccountPreferenc
 }
 
 function orderedAccounts(accounts: Account[], groupId: string, preferences: AccountPreferences): Account[] {
-  const sort = preferences.account_group_sorts[groupId] ?? "manual";
+  const sort = Object.hasOwn(preferences.account_group_sorts, groupId)
+    ? preferences.account_group_sorts[groupId]
+    : "manual";
   if (sort === "alphabetical") return [...accounts].sort(accountNameOrder);
-  const order = preferences.account_order_by_group[groupId] ?? preferences.account_order;
+  const order = Object.hasOwn(preferences.account_order_by_group, groupId)
+    ? preferences.account_order_by_group[groupId]
+    : preferences.account_order;
   const rank = new Map(order.map((id, index) => [id, index]));
   return [...accounts].sort((first, second) => {
     const firstRank = rank.get(first.id);
