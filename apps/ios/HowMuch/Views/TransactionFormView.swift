@@ -596,25 +596,7 @@ struct TransactionFormView: View {
 
   private var extrasCard: some View {
     VStack(spacing: 0) {
-      HStack(spacing: 12) {
-        Image(systemName: draft.wasReconciled ? "lock.fill" : draft.isCleared ? "c.circle.fill" : "c.circle")
-          .foregroundStyle(draft.isCleared ? Theme.inflow : Color.secondary)
-          .frame(width: 28)
-        if isEditing {
-          Text(draft.wasReconciled ? "Reconciled" : draft.isCleared ? "Cleared" : "Uncleared")
-            .foregroundStyle(Theme.textPrimary)
-          Spacer()
-          Text("Change in register")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        } else {
-          Toggle("Cleared", isOn: $draft.isCleared)
-            .tint(Theme.inflow)
-            .foregroundStyle(Theme.textPrimary)
-        }
-      }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 10)
+      clearedRow
       CardDivider()
 
       HStack(spacing: 12) {
@@ -647,6 +629,40 @@ struct TransactionFormView: View {
       .padding(.vertical, 13)
     }
     .ynabCard()
+  }
+
+  /// Same Cleared switch as a new capture. Reconciled rows stay locked — the
+  /// API will not accept an uncleared write after reconciliation.
+  private var clearedRow: some View {
+    HStack(spacing: 12) {
+      Image(systemName: draft.wasReconciled ? "lock.fill" : draft.isCleared ? "c.circle.fill" : "c.circle")
+        .foregroundStyle(draft.isCleared ? Theme.inflow : Color.secondary)
+        .frame(width: 28)
+
+      if draft.wasReconciled {
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Cleared")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          Text("Reconciled")
+            .foregroundStyle(Theme.textPrimary)
+        }
+        Spacer()
+        Toggle("Cleared", isOn: .constant(true))
+          .labelsHidden()
+          .disabled(true)
+          .tint(Theme.inflow)
+      } else {
+        Toggle("Cleared", isOn: $draft.isCleared)
+          .tint(Theme.inflow)
+          .foregroundStyle(Theme.textPrimary)
+      }
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 10)
+    .accessibilityElement(children: .combine)
+    .accessibilityValue(draft.wasReconciled ? "Reconciled" : (draft.isCleared ? "On" : "Off"))
+    .accessibilityHint(draft.wasReconciled ? "Reconciled transactions stay locked." : "Marks this transaction cleared when on.")
   }
 
   private var saveButton: some View {
