@@ -377,17 +377,24 @@ final class AppModel {
     }
     viewPrefs = viewPrefs.structurallyNormalised()
     let previousAccountPreferences = scopedViewPrefsStore.scopes[scope].map(AccountPresentationPreferences.init)
-    scopedViewPrefsStore.set(viewPrefs, for: scope)
-    if previousAccountPreferences != AccountPresentationPreferences(viewPrefs) {
-      enqueueAccountPreferencesSync(
-        localMutationBaseline: previousAccountPreferences ?? AccountPresentationPreferences(ViewPrefs())
+    let preferences = AccountPresentationPreferences(viewPrefs)
+    if previousAccountPreferences != preferences,
+       scopedViewPrefsStore.syncedAccountPreferences[scope] == nil {
+      // Persist the true pre-edit baseline even before first hydration. This
+      // distinguishes a user mutation from untouched legacy preferences.
+      let baseline = previousAccountPreferences ?? AccountPresentationPreferences(ViewPrefs())
+      scopedViewPrefsStore.markAccountPreferencesSynced(
+        SyncedAccountPreferences(preferences: baseline, revision: 0),
+        for: scope
       )
+    }
+    scopedViewPrefsStore.set(viewPrefs, for: scope)
+    if previousAccountPreferences != preferences {
+      enqueueAccountPreferencesSync()
     }
   }
 
-  private func enqueueAccountPreferencesSync(
-    localMutationBaseline: AccountPresentationPreferences? = nil
-  ) {
+  private func enqueueAccountPreferencesSync() {
     guard let scope = activeViewPrefsScope, settings.isAuthenticated else {
       return
     }
@@ -416,25 +423,13 @@ final class AppModel {
               ?? SyncedAccountPreferences(preferences: AccountPresentationPreferences(ViewPrefs()), revision: 0)
             let latestScopedPreferences = scopedViewPrefsStore.scopes[scope] ?? scopedPreferences
             if baseline == nil {
-              if let localMutationBaseline {
-                preferences = AccountPresentationPreferences.merging(
-                  baseline: localMutationBaseline,
-                  local: AccountPresentationPreferences(latestScopedPreferences),
-                  remote: remote.preferences
-                )
-                scopedPreferences = preferences.applying(to: latestScopedPreferences)
-              } else {
-                // A revision-zero conflict means another device already
-                // established the shared layout. Unchanged legacy preferences
-                // on this device are not a merge baseline.
-                scopedPreferences = remote.preferences.applying(to: latestScopedPreferences)
-              }
+              // A revision-zero conflict without a persisted pre-edit baseline
+              // is untouched legacy state from a later upgraded device.
+              scopedPreferences = remote.preferences.applying(to: latestScopedPreferences)
               scopedViewPrefsStore.set(scopedPreferences, for: scope)
               if activeViewPrefsScope == scope { viewPrefs = scopedPreferences }
               scopedViewPrefsStore.markAccountPreferencesSynced(remote, for: scope)
-              guard localMutationBaseline != nil, preferences != remote.preferences else { return }
-              baseline = remote
-              continue
+              return
             }
             guard let baselinePreferences = baseline?.preferences else { return }
             preferences = AccountPresentationPreferences.merging(
@@ -808,11 +803,11 @@ final class AppModel {
       let responseIsStale = reference.accountPreferences.map { response in
         response.revision < (lastSynced?.revision ?? 0)
       } ?? false
-      let hasUnsyncedLocalArrangement = lastSynced.map { localAccountPreferences != $0.preferences } ?? false
+      let hasUnsyncedLocalArrangement = lastSynced.map {
+        localAccountPreferences != $0.preferences
+      } ?? false
       if localChangedDuringRefresh || responseIsStale || hasUnsyncedLocalArrangement {
-        enqueueAccountPreferencesSync(
-          localMutationBaseline: localChangedDuringRefresh ? accountPreferencesAtStart : nil
-        )
+        enqueueAccountPreferencesSync()
       } else if let accountPreferences = reference.accountPreferences {
         viewPrefs = accountPreferences.preferences.applying(to: viewPrefs)
         if let scope = activeViewPrefsScope {
