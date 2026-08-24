@@ -331,8 +331,6 @@ struct TransactionFormView: View {
         Text(amountDisplay)
           .font(.system(size: 40, weight: .bold))
           .monospacedDigit()
-          .contentTransition(.numericText(value: Double(displayedSignedAmount)))
-          .animation(.snappy, value: displayedSignedAmount)
           .foregroundStyle(displayedSignedAmount < 0 ? Theme.outflow : Theme.textPrimary)
           .lineLimit(1)
           .minimumScaleFactor(0.5)
@@ -349,7 +347,7 @@ struct TransactionFormView: View {
     .sensoryFeedback(.selection, trigger: draft.direction)
   }
 
-  /// Signed milliunits behind the header, driving the rolling-digit motion.
+  /// Signed milliunits shown in the amount header.
   private var displayedSignedAmount: Int {
     if draft.isSplit {
       return draft.signedMilliunits
