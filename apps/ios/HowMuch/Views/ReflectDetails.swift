@@ -413,7 +413,7 @@ struct SpendingBreakdownDetailView: View {
             ContentUnavailableView(
               "No Spending",
               systemImage: "chart.pie",
-              description: Text("Adjust the dates or clear filters to widen the ledger.")
+              description: Text("Adjust the dates or clear filters to show more transactions.")
             )
           } else {
             ForEach(ReflectMaths.groupSections(rows)) { section in

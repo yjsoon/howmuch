@@ -180,7 +180,7 @@ export function QuickEntryPage() {
       {!openAccounts.length ? (
         <div className="status-panel status-panel-error">
           <p className="status-title">No open accounts available.</p>
-          <p className="status-detail">Create or import an account before using quick entry.</p>
+          <p className="status-detail">Add an account before using quick entry.</p>
         </div>
       ) : (
         <form onSubmit={submit} className="quick-entry-form">
@@ -229,9 +229,9 @@ export function QuickEntryPage() {
             />
             <span className="field-note">
               {direction === "spend"
-                ? "Saved as an outflow in the ledger."
+                ? "Saved as spending."
                 : direction === "income"
-                  ? "Saved as an inflow in the ledger."
+                  ? "Saved as income."
                   : "Moves money between two accounts; both sides are recorded."}
             </span>
           </label>

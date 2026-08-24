@@ -830,7 +830,7 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
       ? bootstrapToken !== null && safeTokenEqual(bootstrapToken, config.apiToken)
       : authorization === null;
     if (!validBootstrap) {
-      return authError(401, "not_authorized", "Invalid bootstrap token");
+      return authError(401, "not_authorized", "Invalid setup token");
     }
 
     const body = await readJson(request);

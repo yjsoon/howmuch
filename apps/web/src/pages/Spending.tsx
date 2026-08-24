@@ -168,7 +168,7 @@ export function SpendingPage() {
             ) : (
               <div className="status-panel">
                 <p className="status-title">No spending in this range.</p>
-                <p className="status-detail">Adjust the dates or clear category filters to widen the ledger.</p>
+                <p className="status-detail">Adjust the dates or clear category filters to show more transactions.</p>
               </div>
             )}
           </section>

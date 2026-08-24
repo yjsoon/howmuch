@@ -386,7 +386,7 @@ struct ScheduledTransactionEditorView: View {
             } label: {
               Label("Add split line", systemImage: "plus.circle.fill")
             }
-            Text("Enter signed line amounts. The scheduled total is calculated from these lines and sent as their exact sum.")
+            Text("Enter a minus for spending and a plus for income. The scheduled total is the sum of these lines.")
               .font(.footnote)
               .foregroundStyle(.secondary)
             if let splitValidation = draft.splitValidationMessage {

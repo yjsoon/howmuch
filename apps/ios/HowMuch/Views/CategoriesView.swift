@@ -393,7 +393,7 @@ private struct PlanTargetSheet: View {
           TextField("Target amount", text: $amountText)
             .keyboardType(.decimalPad)
             .multilineTextAlignment(.trailing)
-          TextField("Target month (optional, YYYY-MM)", text: $monthText)
+          TextField("Target month (optional)", text: $monthText)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
         }
@@ -427,7 +427,7 @@ private struct PlanTargetSheet: View {
     }
     let trimmedMonth = monthText.trimmingCharacters(in: .whitespacesAndNewlines)
     guard trimmedMonth.isEmpty || trimmedMonth.range(of: "^[0-9]{4}-(0[1-9]|1[0-2])$", options: .regularExpression) != nil else {
-      errorMessage = "Use YYYY-MM for the optional target month."
+      errorMessage = "Use a month like 2026-08."
       return
     }
     isSaving = true; errorMessage = nil

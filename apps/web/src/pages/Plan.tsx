@@ -82,7 +82,7 @@ export function PlanPage() {
       return;
     }
     if (editingTarget.month && !/^\d{4}-(0[1-9]|1[0-2])$/.test(editingTarget.month)) {
-      setPlanError("Use YYYY-MM for the optional target month.");
+      setPlanError("Use a month like 2026-08.");
       return;
     }
     setSavingCategoryId(category.id); setPlanError(null);
@@ -294,7 +294,7 @@ function PlanGroupTable({
                             <option value="TB">Savings balance</option><option value="TBD">By date</option><option value="MF">Monthly spending</option><option value="NEED">Needed for spending</option><option value="DEBT">Debt payoff</option>
                           </select>
                           <input aria-label={`Target amount for ${category.name}`} inputMode="decimal" value={editingTarget.value} onChange={(event) => onChangeTarget({ value: event.target.value })} />
-                          <input aria-label={`Target month for ${category.name}`} placeholder="YYYY-MM" value={editingTarget.month} onChange={(event) => onChangeTarget({ month: event.target.value })} />
+                          <input aria-label={`Target month for ${category.name}`} placeholder="2026-08" value={editingTarget.month} onChange={(event) => onChangeTarget({ month: event.target.value })} />
                           <button type="submit" className="plan-assignment-save" disabled={savingCategoryId === category.id}>{savingCategoryId === category.id ? "Saving" : "Save"}</button>
                           <button type="button" className="plan-assignment-cancel" onClick={onCancelTarget} disabled={savingCategoryId === category.id}>Cancel</button>
                           <button type="button" className="plan-target-clear" onClick={() => void onClearTarget(category)} disabled={savingCategoryId === category.id}>Clear</button>
