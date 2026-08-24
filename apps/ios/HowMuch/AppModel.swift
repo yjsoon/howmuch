@@ -411,8 +411,21 @@ final class AppModel {
             let remote = try await client.fetchAccountPreferences(planID: planID)
               ?? SyncedAccountPreferences(preferences: AccountPresentationPreferences(ViewPrefs()), revision: 0)
             let latestScopedPreferences = scopedViewPrefsStore.scopes[scope] ?? scopedPreferences
+            if baseline == nil {
+              // A revision-zero conflict means another device already
+              // established the shared layout. Legacy preferences on this
+              // device are not a merge baseline, so adopt the server value.
+              scopedPreferences = remote.preferences.applying(to: latestScopedPreferences)
+              scopedViewPrefsStore.set(scopedPreferences, for: scope)
+              if activeViewPrefsScope == scope {
+                viewPrefs = scopedPreferences
+              }
+              scopedViewPrefsStore.markAccountPreferencesSynced(remote, for: scope)
+              return
+            }
+            guard let baselinePreferences = baseline?.preferences else { return }
             preferences = AccountPresentationPreferences.merging(
-              baseline: baseline?.preferences ?? AccountPresentationPreferences(ViewPrefs()),
+              baseline: baselinePreferences,
               local: AccountPresentationPreferences(latestScopedPreferences),
               remote: remote.preferences
             )

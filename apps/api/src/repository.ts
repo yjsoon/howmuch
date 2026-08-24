@@ -65,7 +65,7 @@ export class LedgerRepository {
   private readonly db: RepositoryDatabase;
 
   constructor(db: Database | RepositoryDatabase, private readonly defaultPlanId: string) {
-    this.db = "run" in db ? new SqliteRepositoryDatabase(db) : db;
+    this.db = "inTransaction" in db ? new SqliteRepositoryDatabase(db as Database) : db;
   }
 
   getDefaultPlanId(): string {
