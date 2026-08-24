@@ -396,15 +396,12 @@ private struct PlanTargetSheet: View {
           TextField("Target month (optional, YYYY-MM)", text: $monthText)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
-          Text("Targets are saved in HowMuch and do not change the imported YNAB data.")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
         }
         Section {
           Button("Clear target", role: .destructive) { Task { await clear() } }
             .disabled(isSaving)
           if category.targetSource != nil {
-            Button("Restore imported target") { Task { await restoreSource() } }
+            Button("Restore original target") { Task { await restoreSource() } }
               .disabled(isSaving)
           }
         }

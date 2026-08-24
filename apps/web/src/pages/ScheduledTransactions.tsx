@@ -122,8 +122,6 @@ export function ScheduledTransactionsPage() {
         </div>
       </header>
 
-      <p className="diagnostic-note">Changes stay in HowMuch and leave the imported YNAB schedule intact.</p>
-
       {mutationError && <div className="status-panel status-panel-error" role="alert"><p className="status-title">Could not update scheduled transactions.</p><p className="status-detail">{mutationError}</p></div>}
       {mutationSuccess && <div className="status-panel" role="status"><p className="status-title">{mutationSuccess}</p></div>}
       {editor && (

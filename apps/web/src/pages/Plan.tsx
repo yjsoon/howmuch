@@ -161,7 +161,6 @@ export function PlanPage() {
             <PlanFigure label="Activity" amount={result.data.activity ?? 0} tone={(result.data.activity ?? 0) < 0 ? "negative" : "positive"} />
           </section>
 
-          <p className="diagnostic-note">Assignments and targets are saved in HowMuch. Imported YNAB values are preserved and can be restored.</p>
           {planError && <div className="status-panel status-panel-error compact-panel"><p className="status-title">Plan change was not saved.</p><p className="status-detail">{planError}</p></div>}
 
           {primaryGroups.map((group) => (
@@ -199,7 +198,7 @@ export function PlanPage() {
           {groups.length === 0 && (
             <div className="status-panel">
               <p className="status-title">No categories in this month.</p>
-              <p className="status-detail">The imported plan has no active category rows for {formatMonth(month)}.</p>
+              <p className="status-detail">There are no active categories for {formatMonth(month)}.</p>
             </div>
           )}
         </>
@@ -299,7 +298,7 @@ function PlanGroupTable({
                           <button type="submit" className="plan-assignment-save" disabled={savingCategoryId === category.id}>{savingCategoryId === category.id ? "Saving" : "Save"}</button>
                           <button type="button" className="plan-assignment-cancel" onClick={onCancelTarget} disabled={savingCategoryId === category.id}>Cancel</button>
                           <button type="button" className="plan-target-clear" onClick={() => void onClearTarget(category)} disabled={savingCategoryId === category.id}>Clear</button>
-                          {category.target_source && <button type="button" className="plan-target-restore" onClick={() => void onRestoreTarget(category)} disabled={savingCategoryId === category.id}>Restore imported</button>}
+                          {category.target_source && <button type="button" className="plan-target-restore" onClick={() => void onRestoreTarget(category)} disabled={savingCategoryId === category.id}>Restore original</button>}
                         </form>
                       ) : (
                         <button type="button" className="plan-target-button" onClick={() => onStartTarget(category)} aria-label={`Edit target for ${category.name}`}>
