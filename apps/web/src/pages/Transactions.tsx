@@ -8,6 +8,7 @@ import type {
   CategoryGroup,
   Payee,
   ReconciliationMismatchDetail,
+  ScheduledTransaction,
   Transaction,
   TransactionUpdateInput,
 } from "../api/types";
@@ -17,6 +18,7 @@ import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categorie
 import { formatDate, todayIso } from "../lib/dates";
 import { stableHash } from "../lib/hash";
 import { formatAmount, formatMilliunitsInput, formatMoney, parseMilliunits } from "../lib/money";
+import { activeSchedulesForAccount, scheduledAmount } from "../lib/schedules";
 import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
 
@@ -110,6 +112,14 @@ export function TransactionsPage() {
   const [unapprovedOnly, setUnapprovedOnly] = useState(false);
   const mutationLockRef = useRef(false);
   const selectedAccountId = filters.accountIds.length === 1 ? filters.accountIds[0]! : null;
+  const schedules = useApi<ScheduledTransaction[]>(
+    selectedAccountId ? `${planId}:account-schedules:${selectedAccountId}` : `${planId}:account-schedules-idle`,
+    () => selectedAccountId ? api.scheduledTransactions(planId) : Promise.resolve([]),
+  );
+  const accountSchedules = useMemo(
+    () => selectedAccountId ? activeSchedulesForAccount(schedules.data ?? [], selectedAccountId) : [],
+    [schedules.data, selectedAccountId],
+  );
   const approvalQueue = useApi(
     JSON.stringify({ planId, selectedAccountId, from: filters.from, to: filters.to, refreshGeneration, approvalQueue: true }),
     async () => {
@@ -819,7 +829,7 @@ export function TransactionsPage() {
               {rows.length} transactions · {formatMoney(totals.inflow)} in · {formatMoney(totals.outflow)} out · {formatMoney(totals.net, { sign: true })} net
             </span>
           </div>
-          {rows.length > 0 ? (
+          {rows.length > 0 || selectedAccountId ? (
             <div className="table-wrap table-wrap-wide">
               <table className="ledger-table register-table">
                 <thead>
@@ -836,6 +846,17 @@ export function TransactionsPage() {
                   </tr>
                 </thead>
                 <tbody>
+                  {selectedAccountId && (
+                    <AccountScheduledRows
+                      key={selectedAccountId}
+                      schedules={accountSchedules}
+                      loading={schedules.loading}
+                      error={schedules.error}
+                      accounts={accounts}
+                      categoryGroups={categoryGroups}
+                      payees={payees.data ?? []}
+                    />
+                  )}
                   {rows.flatMap((txn) => [
                     <tr key={txn.id} className={txn.approved ? undefined : "register-row-unapproved"}>
                       <td className="nowrap">{formatDate(txn.date)}</td>
@@ -920,6 +941,12 @@ export function TransactionsPage() {
                   ])}
                 </tbody>
               </table>
+              {rows.length === 0 && (
+                <div className="register-empty-state">
+                  <p className="status-title">{emptyMessage}</p>
+                  <p className="status-detail">Try widening the date range, clearing filters, or shortening the search term.</p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="status-panel">
@@ -936,6 +963,97 @@ export function TransactionsPage() {
           )}
         </section>
       )}
+    </>
+  );
+}
+
+function AccountScheduledRows({
+  schedules,
+  loading,
+  error,
+  accounts,
+  categoryGroups,
+  payees,
+}: {
+  schedules: ScheduledTransaction[];
+  loading: boolean;
+  error: string | null;
+  accounts: Account[];
+  categoryGroups: CategoryGroup[];
+  payees: Payee[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const accountNames = new Map(accounts.map((account) => [account.id, account.name]));
+  const categoryNames = new Map(categoryGroups.flatMap((group) => group.categories ?? []).map((category) => [category.id, category.name]));
+  const payeeNames = new Map(payees.map((payee) => [payee.id, payee.name]));
+  const summary = loading && schedules.length === 0
+    ? "Loading…"
+    : error
+      ? "Unavailable"
+      : `${schedules.length} upcoming`;
+
+  return (
+    <>
+      <tr className="register-scheduled-disclosure-row">
+        <td colSpan={9}>
+          <button
+            type="button"
+            className="register-scheduled-disclosure"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((current) => !current)}
+          >
+            <svg className="register-scheduled-icon" viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M4 6.5h12M6.5 3.5v4M13.5 3.5v4M4 5h12v12H4z" />
+            </svg>
+            <span>Scheduled transactions</span>
+            <span className="register-scheduled-count">{summary}</span>
+            <span className="register-scheduled-chevron" aria-hidden="true">›</span>
+          </button>
+        </td>
+      </tr>
+      {expanded && error && (
+        <tr className="register-scheduled-message"><td colSpan={9}>Could not load scheduled transactions: {error}</td></tr>
+      )}
+      {expanded && !error && !loading && schedules.length === 0 && (
+        <tr className="register-scheduled-message"><td colSpan={9}>No active schedules for this account.</td></tr>
+      )}
+      {expanded && schedules.flatMap((schedule) => {
+        const amount = scheduledAmount(schedule);
+        const payee = schedule.payee_name
+          ?? (schedule.payee_id ? payeeNames.get(schedule.payee_id) : null)
+          ?? (schedule.transfer_account_id ? `Transfer: ${accountNames.get(schedule.transfer_account_id) ?? "account unavailable"}` : "No payee");
+        const category = schedule.subtransactions?.length
+          ? `Split · ${schedule.subtransactions.length} lines`
+          : schedule.transfer_account_id
+            ? "Transfer"
+            : schedule.category_name ?? (schedule.category_id ? categoryNames.get(schedule.category_id) : null) ?? "Uncategorised";
+        return [
+          <tr key={schedule.id} className="register-scheduled-row">
+            <td className="nowrap">{schedule.date_next ? formatDate(schedule.date_next) : "No next date"}</td>
+            <td className="muted">Scheduled</td>
+            <td>{payee}</td>
+            <td className="muted">{category}</td>
+            <td className="muted memo-cell" title={schedule.memo ?? ""}>{schedule.memo ?? "-"}</td>
+            <td className="num amount-negative">{amount < 0 ? formatAmount(amount) : ""}</td>
+            <td className="num amount-positive">{amount > 0 ? formatAmount(amount) : ""}</td>
+            <td className="register-actions"><NavLink className="register-row-action" to="/scheduled">Manage</NavLink></td>
+            <td className="register-scheduled-frequency">{schedule.frequency ?? ""}</td>
+          </tr>,
+          ...(schedule.subtransactions ?? []).map((line) => (
+            <tr key={line.id} className="split-line-row register-scheduled-split-row">
+              <td />
+              <td />
+              <td className="muted split-line-cell">↳ {line.payee_name ?? (line.payee_id ? payeeNames.get(line.payee_id) : null) ?? "-"}</td>
+              <td className="muted">{line.transfer_account_id ? "Transfer" : line.category_name ?? (line.category_id ? categoryNames.get(line.category_id) : null) ?? "Uncategorised"}</td>
+              <td className="muted memo-cell" title={line.memo ?? ""}>{line.memo ?? "-"}</td>
+              <td className="num amount-negative">{line.amount < 0 ? formatAmount(line.amount) : ""}</td>
+              <td className="num amount-positive">{line.amount > 0 ? formatAmount(line.amount) : ""}</td>
+              <td />
+              <td />
+            </tr>
+          )),
+        ];
+      })}
     </>
   );
 }
