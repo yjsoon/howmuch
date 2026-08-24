@@ -42,6 +42,11 @@ export interface AccountPreferences {
   custom_account_groups: Array<{ id: string; name: string; account_ids: string[] }>;
 }
 
+export interface AccountPreferencesSnapshot {
+  account_preferences: AccountPreferences | null;
+  account_preferences_revision: number;
+}
+
 export interface CategoryGroup {
   id: string;
   name: string;

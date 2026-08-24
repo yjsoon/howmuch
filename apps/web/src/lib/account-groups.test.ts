@@ -34,4 +34,13 @@ describe("accountGroups", () => {
       { id: "tracking", accountIds: ["loan"] },
     ]);
   });
+
+  test("uses mobile built-ins without synced preferences and keeps empty custom groups", () => {
+    expect(accountGroups(accounts, null).map((group) => group.id)).toEqual(["cash", "credit", "tracking"]);
+    expect(accountGroups(accounts, {
+      ...preferences,
+      favourite_account_ids: [],
+      custom_account_groups: [{ id: "custom-empty", name: "Empty", account_ids: [] }],
+    }).map((group) => group.id)).toEqual(["custom-empty", "cash", "credit", "tracking"]);
+  });
 });

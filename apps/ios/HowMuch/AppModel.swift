@@ -375,8 +375,11 @@ final class AppModel {
       return
     }
     viewPrefs = viewPrefs.structurallyNormalised()
+    let previousAccountPreferences = scopedViewPrefsStore.scopes[scope].map(AccountPresentationPreferences.init)
     scopedViewPrefsStore.set(viewPrefs, for: scope)
-    enqueueAccountPreferencesSync()
+    if previousAccountPreferences != AccountPresentationPreferences(viewPrefs) {
+      enqueueAccountPreferencesSync()
+    }
   }
 
   private func enqueueAccountPreferencesSync() {
@@ -386,16 +389,47 @@ final class AppModel {
     let previous = accountPreferencesSyncTask
     let client = apiClient
     let planID = settings.planID
-    let preferences = AccountPresentationPreferences(viewPrefs)
     accountPreferencesSyncTask = Task {
       await previous?.value
       guard !Task.isCancelled else { return }
-      do {
-        try await client.updateAccountPreferences(planID: planID, preferences: preferences)
-        scopedViewPrefsStore.markAccountPreferencesSynced(preferences, for: scope)
-      } catch {
-        // Keep the local value dirty. A later refresh retries it rather than
-        // letting an older server snapshot overwrite an offline reorder.
+      var baseline = scopedViewPrefsStore.syncedAccountPreferences[scope]
+      guard var scopedPreferences = scopedViewPrefsStore.scopes[scope] else { return }
+      var preferences = AccountPresentationPreferences(scopedPreferences)
+      guard baseline?.preferences != preferences else { return }
+      for _ in 0 ..< 3 {
+        do {
+          let saved = try await client.updateAccountPreferences(
+            planID: planID,
+            preferences: preferences,
+            expectedRevision: baseline?.revision ?? 0
+          )
+          scopedViewPrefsStore.markAccountPreferencesSynced(saved, for: scope)
+          return
+        } catch APIClientError.accountPreferencesConflict {
+          do {
+            let remote = try await client.fetchAccountPreferences(planID: planID)
+              ?? SyncedAccountPreferences(preferences: AccountPresentationPreferences(ViewPrefs()), revision: 0)
+            let latestScopedPreferences = scopedViewPrefsStore.scopes[scope] ?? scopedPreferences
+            preferences = AccountPresentationPreferences.merging(
+              baseline: baseline?.preferences ?? AccountPresentationPreferences(ViewPrefs()),
+              local: AccountPresentationPreferences(latestScopedPreferences),
+              remote: remote.preferences
+            )
+            scopedPreferences = preferences.applying(to: latestScopedPreferences)
+            scopedViewPrefsStore.set(scopedPreferences, for: scope)
+            if activeViewPrefsScope == scope {
+              viewPrefs = scopedPreferences
+            }
+            scopedViewPrefsStore.markAccountPreferencesSynced(remote, for: scope)
+            baseline = remote
+          } catch {
+            return
+          }
+        } catch {
+          // Keep the local value different from the synced baseline. A later
+          // refresh retries it instead of applying an older server snapshot.
+          return
+        }
       }
     }
   }
@@ -741,12 +775,11 @@ final class AppModel {
       rebuildLookups()
       let localAccountPreferences = AccountPresentationPreferences(viewPrefs)
       let lastSynced = scope.flatMap { scopedViewPrefsStore.syncedAccountPreferences[$0] }
-      let hasUnsyncedLocalArrangement = localAccountPreferences != lastSynced
-        && localAccountPreferences != AccountPresentationPreferences(ViewPrefs())
+      let hasUnsyncedLocalArrangement = lastSynced.map { localAccountPreferences != $0.preferences } ?? false
       if hasUnsyncedLocalArrangement {
         enqueueAccountPreferencesSync()
       } else if let accountPreferences = reference.accountPreferences {
-        viewPrefs = accountPreferences.applying(to: viewPrefs)
+        viewPrefs = accountPreferences.preferences.applying(to: viewPrefs)
         if let scope = activeViewPrefsScope {
           scopedViewPrefsStore.set(viewPrefs, for: scope)
           scopedViewPrefsStore.markAccountPreferencesSynced(accountPreferences, for: scope)

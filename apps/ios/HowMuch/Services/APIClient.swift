@@ -12,6 +12,8 @@ enum APIClientError: LocalizedError {
   case invalidResponse
   case server(String)
   case reconciliationMismatch(ReconciliationMismatchDetail)
+  case accountPreferencesConflict
+  case endpointUnsupported
   case httpStatus(Int)
   case authenticationExpired
   case decoding(String)
@@ -27,6 +29,10 @@ enum APIClientError: LocalizedError {
       return message
     case .reconciliationMismatch(let detail):
       return detail.message
+    case .accountPreferencesConflict:
+      return "Account groups changed on another device."
+    case .endpointUnsupported:
+      return "This server does not support account group sync."
     case .httpStatus(let code):
       return "The API request failed with status \(code)."
     case .authenticationExpired:
@@ -102,18 +108,40 @@ struct APIClient {
     return response.data.accounts.filter { !$0.deleted }
   }
 
-  func fetchAccountPreferences(planID: String) async throws -> AccountPresentationPreferences? {
-    let response: APIEnvelope<AccountPreferencesPayload> = try await request(
-      path: "/v1/plans/\(planID)/account_preferences"
-    )
-    return response.data.accountPreferences
+  func fetchAccountPreferences(planID: String) async throws -> SyncedAccountPreferences? {
+    do {
+      let response: APIEnvelope<AccountPreferencesPayload> = try await request(
+        path: "/v1/plans/\(planID)/account_preferences"
+      )
+      guard let preferences = response.data.accountPreferences else { return nil }
+      return SyncedAccountPreferences(
+        preferences: preferences.presentationPreferences,
+        revision: response.data.accountPreferencesRevision
+      )
+    } catch APIClientError.endpointUnsupported {
+      return nil
+    }
   }
 
-  func updateAccountPreferences(planID: String, preferences: AccountPresentationPreferences) async throws {
-    let _: APIEnvelope<AccountPreferencesPayload> = try await request(
+  func updateAccountPreferences(
+    planID: String,
+    preferences: AccountPresentationPreferences,
+    expectedRevision: Int
+  ) async throws -> SyncedAccountPreferences {
+    let response: APIEnvelope<AccountPreferencesPayload> = try await request(
       path: "/v1/plans/\(planID)/account_preferences",
       method: "PUT",
-      body: AccountPreferencesPayload(accountPreferences: preferences)
+      body: AccountPreferencesWriteRequest(
+        accountPreferences: APIAccountPreferences(preferences),
+        expectedRevision: expectedRevision
+      )
+    )
+    guard let saved = response.data.accountPreferences else {
+      throw APIClientError.invalidResponse
+    }
+    return SyncedAccountPreferences(
+      preferences: saved.presentationPreferences,
+      revision: response.data.accountPreferencesRevision
     )
   }
 
@@ -496,6 +524,9 @@ struct APIClient {
     }
 
     guard (200 ..< 300).contains(httpResponse.statusCode) else {
+      if httpResponse.statusCode == 404, path.hasSuffix("/account_preferences") {
+        throw APIClientError.endpointUnsupported
+      }
       if let serverError = try? decoder.decode(ServerErrorEnvelope.self, from: data) {
         // Login failures are intentionally not treated as session expiry: the
         // settings sheet uses a tokenless client to authenticate. For an
@@ -522,6 +553,9 @@ struct APIClient {
               message: serverError.error.detail
             )
           )
+        }
+        if serverError.error.name == "account_preferences_conflict" {
+          throw APIClientError.accountPreferencesConflict
         }
         throw APIClientError.server(serverError.error.detail)
       }

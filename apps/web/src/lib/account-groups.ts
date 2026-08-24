@@ -4,15 +4,17 @@ export type AccountGroup = { id: string; label: string; accounts: Account[] };
 
 const CASH_TYPES = new Set(["checking", "savings", "cash"]);
 const CREDIT_TYPES = new Set(["creditCard", "lineOfCredit"]);
+const EMPTY_PREFERENCES: AccountPreferences = {
+  favourite_account_ids: [],
+  account_order: [],
+  account_order_by_group: {},
+  account_group_sorts: {},
+  custom_account_groups: [],
+};
 
 export function accountGroups(accounts: Account[], preferences: AccountPreferences | null): AccountGroup[] {
   const open = accounts.filter((account) => !account.closed);
-  if (!preferences) {
-    return [
-      { id: "budget", label: "Budget", accounts: open.filter((account) => account.on_budget) },
-      { id: "tracking", label: "Tracking", accounts: open.filter((account) => !account.on_budget) },
-    ].filter(hasAccounts);
-  }
+  preferences ??= EMPTY_PREFERENCES;
 
   const byId = new Map(accounts.map((account) => [account.id, account]));
   const favourites = preferences.favourite_account_ids
@@ -30,10 +32,10 @@ export function accountGroups(accounts: Account[], preferences: AccountPreferenc
     { id: "closed", label: "Closed", accounts: accounts.filter((account) => account.closed) },
   ];
   return [
-    { id: "favourites", label: "Favourites", accounts: favourites },
+    ...([{ id: "favourites", label: "Favourites", accounts: favourites }].filter(hasAccounts)),
     ...custom,
-    ...builtIn,
-  ].filter(hasAccounts).map((group) => ({
+    ...builtIn.filter(hasAccounts),
+  ].map((group) => ({
     ...group,
     accounts: orderedAccounts(group.accounts, group.id, preferences),
   }));

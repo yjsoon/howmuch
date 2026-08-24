@@ -80,6 +80,25 @@ describe("D1 foundation", () => {
     expect(db.query("SELECT id FROM payees WHERE plan_id='p1' AND name='Same' ORDER BY id").all()).toEqual([{ id: "same-a" }, { id: "same-b" }]);
   });
 
+  test("D1 account preferences use compare-and-set revisions", async () => {
+    const db = await ledgerSqlite();
+    db.run("INSERT INTO users(id) VALUES ('u')");
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    const preferences = {
+      favourite_account_ids: ["a"], account_order: [], account_order_by_group: {},
+      account_group_sorts: {}, custom_account_groups: [],
+    };
+
+    expect(await repo.getAccountPreferences("p", "u")).toEqual({
+      account_preferences: null, account_preferences_revision: 0,
+    });
+    expect(await repo.setAccountPreferences("p", "u", preferences, 0)).toEqual({
+      account_preferences: preferences, account_preferences_revision: 1,
+    });
+    await expect(repo.setAccountPreferences("p", "u", { ...preferences, favourite_account_ids: [] }, 0)).rejects.toThrow();
+    expect((await repo.setAccountPreferences("p", "u", { ...preferences, favourite_account_ids: [] }, 1)).account_preferences_revision).toBe(2);
+  });
+
   test("D1 auth setup is atomic, one-time, and uses returning rate counters", async () => {
     const db = await ledgerSqlite();
     const auth = new D1AuthStore(new D1Database(fakeD1(db)));

@@ -17,6 +17,7 @@ import {
   type AccountReconciliationPreview,
   type AccountReconciliationResult,
   type AccountPreferences,
+  type AccountPreferencesSnapshot,
   type ScheduledWriteOptions,
   type TransactionPage,
   type TransactionBatchResult,
@@ -153,24 +154,41 @@ export class LedgerRepository {
     };
   }
 
-  async getAccountPreferences(planId: string, userId: string): Promise<AccountPreferences | null> {
+  async getAccountPreferences(planId: string, userId: string): Promise<AccountPreferencesSnapshot> {
     const row = await this.db
-      .query("SELECT preferences_json FROM account_preferences WHERE user_id = ? AND plan_id = ?")
+      .query("SELECT preferences_json, revision FROM account_preferences WHERE user_id = ? AND plan_id = ?")
       .get(userId, planId) as Row | null;
-    return row ? JSON.parse(String(row.preferences_json)) as AccountPreferences : null;
+    return row
+      ? { account_preferences: JSON.parse(String(row.preferences_json)) as AccountPreferences, account_preferences_revision: Number(row.revision) }
+      : { account_preferences: null, account_preferences_revision: 0 };
   }
 
-  async setAccountPreferences(planId: string, userId: string, preferences: AccountPreferences): Promise<AccountPreferences> {
-    await this.db
-      .query(
-        `INSERT INTO account_preferences (user_id, plan_id, preferences_json, updated_at)
-         VALUES (?, ?, ?, unixepoch())
-         ON CONFLICT(user_id, plan_id) DO UPDATE SET
-           preferences_json = excluded.preferences_json,
-           updated_at = excluded.updated_at`,
-      )
-      .run(userId, planId, JSON.stringify(preferences));
-    return preferences;
+  async setAccountPreferences(
+    planId: string,
+    userId: string,
+    preferences: AccountPreferences,
+    expectedRevision: number,
+  ): Promise<AccountPreferencesSnapshot> {
+    const result = expectedRevision === 0
+      ? await this.db.query(
+        `INSERT INTO account_preferences (user_id, plan_id, preferences_json, revision, updated_at)
+         VALUES (?, ?, ?, 1, unixepoch()) ON CONFLICT(user_id, plan_id) DO NOTHING`,
+      ).run(userId, planId, JSON.stringify(preferences))
+      : await this.db.query(
+        `UPDATE account_preferences SET preferences_json = ?, revision = revision + 1, updated_at = unixepoch()
+         WHERE user_id = ? AND plan_id = ? AND revision = ?`,
+      ).run(JSON.stringify(preferences), userId, planId, expectedRevision);
+    if (result.changes !== 1) {
+      const current = await this.db
+        .query("SELECT preferences_json, revision FROM account_preferences WHERE user_id = ? AND plan_id = ?")
+        .get(userId, planId) as Row | null;
+      if (!current
+        || Number(current.revision) !== expectedRevision + 1
+        || String(current.preferences_json) !== JSON.stringify(preferences)) {
+        throw new AccountPreferencesConflictError();
+      }
+    }
+    return { account_preferences: preferences, account_preferences_revision: expectedRevision + 1 };
   }
 
   async ensureAccount(planId: string, accountId: string, name?: string): Promise<void> {
@@ -2672,6 +2690,8 @@ function canonicalScheduleJson(value: unknown): string {
 export class NotFoundError extends Error {}
 
 export class ValidationError extends Error {}
+
+export class AccountPreferencesConflictError extends Error {}
 
 export class TransactionStateConflictError extends Error {
   constructor(message = "Transaction cleared status changed; refresh and try again") {

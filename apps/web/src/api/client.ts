@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type {
   Account,
-  AccountPreferences,
+  AccountPreferencesSnapshot,
   AccountReconciliationPreview,
   AccountReconciliationResult,
   AgeOfMoneyReport,
@@ -175,9 +175,12 @@ export const api = {
   accounts: (planId: string) =>
     request<{ accounts: Account[] }>(planUrl(planId, "accounts")).then((d) => d.accounts),
   accountPreferences: (planId: string) =>
-    request<{ account_preferences: AccountPreferences | null }>(planUrl(planId, "account_preferences")).then(
-      (d) => d.account_preferences,
-    ),
+    request<AccountPreferencesSnapshot>(planUrl(planId, "account_preferences"))
+      .then((d) => d.account_preferences)
+      .catch((error) => {
+        if (error instanceof ApiError && error.status === 404) return null;
+        throw error;
+      }),
   categories: (planId: string) =>
     request<{ category_groups: CategoryGroup[] }>(planUrl(planId, "categories")).then(
       (d) => d.category_groups,
