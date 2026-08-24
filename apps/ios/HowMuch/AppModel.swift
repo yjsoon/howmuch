@@ -97,6 +97,8 @@ final class AppModel {
   /// Serialises preference writes so a slower earlier request cannot overwrite
   /// a newer reorder on the server.
   @ObservationIgnored private var accountPreferencesSyncTask: Task<Void, Never>?
+  @ObservationIgnored private var accountPreferenceMutationGenerations: [String: Int] = [:]
+  @ObservationIgnored private var accountPreferenceSyncedGenerations: [String: Int] = [:]
 
   init(settings: APISettings = .load(), viewPrefs: ViewPrefs = .load()) {
     var scopedStore = ScopedViewPrefsStore.load()
@@ -390,6 +392,7 @@ final class AppModel {
     }
     scopedViewPrefsStore.set(viewPrefs, for: scope)
     if previousAccountPreferences != preferences {
+      accountPreferenceMutationGenerations[scope, default: 0] &+= 1
       enqueueAccountPreferencesSync()
     }
   }
@@ -404,10 +407,14 @@ final class AppModel {
     accountPreferencesSyncTask = Task {
       await previous?.value
       guard !Task.isCancelled else { return }
+      let syncGeneration = accountPreferenceMutationGenerations[scope, default: 0]
       var baseline = scopedViewPrefsStore.syncedAccountPreferences[scope]
       guard var scopedPreferences = scopedViewPrefsStore.scopes[scope] else { return }
       var preferences = AccountPresentationPreferences(scopedPreferences)
-      guard baseline?.preferences != preferences else { return }
+      guard baseline?.preferences != preferences else {
+        accountPreferenceSyncedGenerations[scope] = syncGeneration
+        return
+      }
       for _ in 0 ..< 3 {
         do {
           let saved = try await client.updateAccountPreferences(
@@ -416,22 +423,25 @@ final class AppModel {
             expectedRevision: baseline?.revision ?? 0
           )
           scopedViewPrefsStore.markAccountPreferencesSynced(saved, for: scope)
+          accountPreferenceSyncedGenerations[scope] = syncGeneration
           return
         } catch APIClientError.accountPreferencesConflict {
           do {
             let remote = try await client.fetchAccountPreferences(planID: planID)
               ?? SyncedAccountPreferences(preferences: AccountPresentationPreferences(ViewPrefs()), revision: 0)
             let latestScopedPreferences = scopedViewPrefsStore.scopes[scope] ?? scopedPreferences
-            if baseline == nil {
+            let latestBaseline = scopedViewPrefsStore.syncedAccountPreferences[scope] ?? baseline
+            if latestBaseline == nil {
               // A revision-zero conflict without a persisted pre-edit baseline
               // is untouched legacy state from a later upgraded device.
               scopedPreferences = remote.preferences.applying(to: latestScopedPreferences)
               scopedViewPrefsStore.set(scopedPreferences, for: scope)
               if activeViewPrefsScope == scope { viewPrefs = scopedPreferences }
               scopedViewPrefsStore.markAccountPreferencesSynced(remote, for: scope)
+              accountPreferenceSyncedGenerations[scope] = syncGeneration
               return
             }
-            guard let baselinePreferences = baseline?.preferences else { return }
+            guard let baselinePreferences = latestBaseline?.preferences else { return }
             preferences = AccountPresentationPreferences.merging(
               baseline: baselinePreferences,
               local: AccountPresentationPreferences(latestScopedPreferences),
@@ -806,7 +816,12 @@ final class AppModel {
       let hasUnsyncedLocalArrangement = lastSynced.map {
         localAccountPreferences != $0.preferences
       } ?? false
-      if localChangedDuringRefresh || responseIsStale || hasUnsyncedLocalArrangement {
+      let hasPendingLocalMutation = scope.map {
+        accountPreferenceSyncedGenerations[$0, default: 0]
+          < accountPreferenceMutationGenerations[$0, default: 0]
+      } ?? false
+      if localChangedDuringRefresh || responseIsStale || hasUnsyncedLocalArrangement
+        || hasPendingLocalMutation {
         enqueueAccountPreferencesSync()
       } else if let accountPreferences = reference.accountPreferences {
         viewPrefs = accountPreferences.preferences.applying(to: viewPrefs)
