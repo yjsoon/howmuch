@@ -2237,6 +2237,35 @@ describe("password authentication", () => {
     }));
     expect(dangerousGroup.status).toBe(400);
 
+    const accentDuplicateGroups = await handler(new Request(path, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({
+        account_preferences: {
+          ...preferences,
+          custom_account_groups: [
+            { id: "custom-travel", name: "Travel", account_ids: [] },
+            { id: "custom-travel-accent", name: "Trável", account_ids: [] },
+          ],
+        },
+        expected_revision: 1,
+      }),
+    }));
+    expect(accentDuplicateGroups.status).toBe(400);
+
+    const accentReservedGroup = await handler(new Request(path, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({
+        account_preferences: {
+          ...preferences,
+          custom_account_groups: [{ id: "custom-cash", name: "Cásh", account_ids: [] }],
+        },
+        expected_revision: 1,
+      }),
+    }));
+    expect(accentReservedGroup.status).toBe(400);
+
     const multibyteAccountIDs = Array.from({ length: 300 }, (_, index) => `${index}-`.padEnd(200, "界"));
     const oversized = await handler(new Request(path, {
       method: "PUT",

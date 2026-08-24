@@ -12,7 +12,11 @@ const EMPTY_PREFERENCES: AccountPreferences = {
   custom_account_groups: [],
 };
 
-export function accountGroups(accounts: Account[], preferences: AccountPreferences | null): AccountGroup[] {
+export function accountGroups(
+  accounts: Account[],
+  preferences: AccountPreferences | null,
+  usageLast30Days?: Record<string, number>,
+): AccountGroup[] {
   const open = accounts.filter((account) => !account.closed);
   preferences ??= EMPTY_PREFERENCES;
 
@@ -37,15 +41,24 @@ export function accountGroups(accounts: Account[], preferences: AccountPreferenc
     ...builtIn.filter(hasAccounts),
   ].map((group) => ({
     ...group,
-    accounts: orderedAccounts(group.accounts, group.id, preferences),
+    accounts: orderedAccounts(group.accounts, group.id, preferences, usageLast30Days),
   }));
 }
 
-function orderedAccounts(accounts: Account[], groupId: string, preferences: AccountPreferences): Account[] {
+function orderedAccounts(
+  accounts: Account[],
+  groupId: string,
+  preferences: AccountPreferences,
+  usageLast30Days?: Record<string, number>,
+): Account[] {
   const sort = Object.hasOwn(preferences.account_group_sorts, groupId)
     ? preferences.account_group_sorts[groupId]
     : "manual";
   if (sort === "alphabetical") return [...accounts].sort(accountNameOrder);
+  if (sort === "mostUsedLast30Days" && usageLast30Days) {
+    return [...accounts].sort((first, second) =>
+      (usageLast30Days[second.id] ?? 0) - (usageLast30Days[first.id] ?? 0) || accountNameOrder(first, second));
+  }
   const order = Object.hasOwn(preferences.account_order_by_group, groupId)
     ? preferences.account_order_by_group[groupId]
     : preferences.account_order;

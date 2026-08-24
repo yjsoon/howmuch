@@ -512,10 +512,13 @@ function parseAccountPreferences(value: unknown): AccountPreferences {
       throw new ValidationError("custom account groups are invalid");
     }
     const idKey = candidate.id.toLowerCase();
-    const nameKey = candidate.name.trim().toLocaleLowerCase();
-    if (reserved.has(idKey) || dangerous.has(idKey) || reserved.has(nameKey) || !usedGroupIDs.add(idKey) || !usedGroupNames.add(nameKey)) {
+    const nameKey = canonicalAccountGroupName(candidate.name);
+    if (reserved.has(idKey) || dangerous.has(idKey) || reserved.has(nameKey)
+      || usedGroupIDs.has(idKey) || usedGroupNames.has(nameKey)) {
       throw new ValidationError("custom account group IDs and names must be unique and non-reserved");
     }
+    usedGroupIDs.add(idKey);
+    usedGroupNames.add(nameKey);
     return { id: candidate.id, name: candidate.name.trim(), account_ids: strings(candidate.account_ids, "custom group account_ids") };
   });
   const validGroupIDs = new Set([...reserved, ...customGroups.map((group) => group.id)]);
@@ -529,6 +532,10 @@ function parseAccountPreferences(value: unknown): AccountPreferences {
     account_group_sorts: sorts,
     custom_account_groups: customGroups,
   };
+}
+
+function canonicalAccountGroupName(name: string): string {
+  return name.trim().normalize("NFD").replace(/\p{Diacritic}/gu, "").toLocaleLowerCase();
 }
 
 function validPreferenceKey(value: string): boolean {

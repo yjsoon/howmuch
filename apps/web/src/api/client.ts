@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type {
   Account,
+  AccountPreferences,
   AccountPreferencesSnapshot,
   AccountReconciliationPreview,
   AccountReconciliationResult,
@@ -173,14 +174,18 @@ export const api = {
   settings: (planId: string) =>
     request<{ settings: PlanSettings }>(planUrl(planId, "settings")).then((d) => d.settings),
   accounts: (planId: string) =>
-    request<{ accounts: Account[] }>(planUrl(planId, "accounts")).then((d) => d.accounts),
+    request<{ accounts: Account[]; server_knowledge: number }>(planUrl(planId, "accounts")),
   accountPreferences: (planId: string) =>
     request<AccountPreferencesSnapshot>(planUrl(planId, "account_preferences"))
-      .then((d) => d.account_preferences)
       .catch((error) => {
         if (error instanceof ApiError && error.status === 404) return null;
         throw error;
       }),
+  updateAccountPreferences: (planId: string, accountPreferences: AccountPreferences, expectedRevision: number) =>
+    request<AccountPreferencesSnapshot>(planUrl(planId, "account_preferences"), {
+      method: "PUT",
+      body: JSON.stringify({ account_preferences: accountPreferences, expected_revision: expectedRevision }),
+    }),
   categories: (planId: string) =>
     request<{ category_groups: CategoryGroup[] }>(planUrl(planId, "categories")).then(
       (d) => d.category_groups,

@@ -72,4 +72,43 @@ describe("shouldHandleUnauthorized", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  test("reads the account preference revision and sends it in a compare-and-set write", async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    const preferences = {
+      favourite_account_ids: ["cash"],
+      account_order: [],
+      account_order_by_group: {},
+      account_group_sorts: {},
+      custom_account_groups: [],
+    };
+    globalThis.fetch = (async (path: string | URL | Request, init?: RequestInit) => {
+      requests.push({ path: String(path), init });
+      const revision = requests.length;
+      return new Response(JSON.stringify({ data: {
+        account_preferences: preferences,
+        account_preferences_revision: revision,
+      } }), { headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    try {
+      expect(await api.accountPreferences("plan-1")).toEqual({
+        account_preferences: preferences,
+        account_preferences_revision: 1,
+      });
+      expect(await api.updateAccountPreferences("plan-1", preferences, 1)).toEqual({
+        account_preferences: preferences,
+        account_preferences_revision: 2,
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(requests[1]!.path).toBe("/v1/plans/plan-1/account_preferences");
+    expect(requests[1]!.init?.method).toBe("PUT");
+    expect(JSON.parse(String(requests[1]!.init?.body))).toEqual({
+      account_preferences: preferences,
+      expected_revision: 1,
+    });
+  });
 });
