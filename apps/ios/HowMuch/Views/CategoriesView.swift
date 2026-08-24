@@ -504,7 +504,7 @@ private struct PlanAssignmentSheet: View {
           TextField("Assigned", text: $amountText)
             .keyboardType(.decimalPad)
             .multilineTextAlignment(.trailing)
-          Text("Enter the amount to assign for this month. Targets use a separate HowMuch-local editor.")
+          Text("Enter the amount to assign for this month.")
             .font(.footnote)
             .foregroundStyle(.secondary)
         }
