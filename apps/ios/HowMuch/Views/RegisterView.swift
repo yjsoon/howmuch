@@ -793,10 +793,10 @@ struct TransactionRow: View {
           if !transaction.approved {
             Text("New")
               .font(.caption2.weight(.bold))
-              .foregroundStyle(Theme.textPrimary)
+              .foregroundStyle(Color.white)
               .padding(.horizontal, 6)
               .padding(.vertical, 3)
-              .background(Theme.accent, in: Capsule())
+              .background(Theme.newBadge, in: Capsule())
               .accessibilityLabel("Needs approval")
           }
 
