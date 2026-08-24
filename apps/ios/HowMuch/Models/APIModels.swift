@@ -461,18 +461,14 @@ struct ViewPrefs: Codable, Equatable {
     }
 
     var usedIDs: Set<String> = []
-    var usedNames: Set<String> = []
     result.customAccountGroups = result.customAccountGroups.compactMap { group in
       let id = group.id.trimmingCharacters(in: .whitespacesAndNewlines)
       let name = group.name.trimmingCharacters(in: .whitespacesAndNewlines)
-      let nameKey = CustomAccountGroup.normalisedNameKey(name)
       guard
         !id.isEmpty,
         !CustomAccountGroup.reservedIDs.contains(id.lowercased()),
         !name.isEmpty,
-        !CustomAccountGroup.reservedNameKeys.contains(nameKey),
-        usedIDs.insert(id).inserted,
-        usedNames.insert(nameKey).inserted
+        usedIDs.insert(id).inserted
       else {
         return nil
       }

@@ -327,7 +327,7 @@ function CustomGroupEditor({ group, index, count, accounts, preferences, onUpdat
     onUpdate((current) => deleteCustomAccountGroup(current, group.id));
     requestAnimationFrame(() => {
       if (focusTarget instanceof HTMLElement && document.contains(focusTarget)) {
-        focusTarget.querySelector<HTMLElement>("button")?.focus();
+        focusTarget.querySelector<HTMLElement>("[data-focus-after-group-delete]")?.focus();
       } else {
         document.querySelector<HTMLElement>(".organizer-secondary-button")?.focus();
       }
@@ -347,7 +347,13 @@ function CustomGroupEditor({ group, index, count, accounts, preferences, onUpdat
           last={index === count - 1}
           onMove={(direction) => onUpdate((current) => moveCustomAccountGroup(current, group.id, direction))}
         />
-        <button ref={renameButtonRef} type="button" className="text-button" onClick={() => { setName(group.name); setRenaming(true); }}>Rename</button>
+        <button
+          ref={renameButtonRef}
+          type="button"
+          className="text-button"
+          data-focus-after-group-delete
+          onClick={() => { setName(group.name); setRenaming(true); }}
+        >Rename</button>
         <button ref={deleteButtonRef} type="button" className="organizer-danger-link" onClick={() => setConfirmingDelete(true)}>Delete</button>
       </div>
       {renaming && (

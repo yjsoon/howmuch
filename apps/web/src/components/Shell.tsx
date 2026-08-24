@@ -85,7 +85,7 @@ export function Shell() {
     }
     let cancelled = false;
     setAccountUsage((current) => ({ ...current, state: { phase: "loading", message: null } }));
-    loadAccountUsageLast30Days(planId, usageDate)
+    loadAccountUsageLast30Days(planId, usageDate, () => cancelled)
       .then((counts) => {
         if (cancelled) return;
         setAccountUsage({ counts, state: { phase: "loaded", message: null } });
@@ -287,13 +287,18 @@ function snapshotMostUsedOrders(preferences: AccountPreferences, groups: Account
   return changed ? { ...preferences, account_order_by_group: accountOrderByGroup } : preferences;
 }
 
-async function loadAccountUsageLast30Days(planId: string, untilDate: string): Promise<Record<string, number>> {
+async function loadAccountUsageLast30Days(
+  planId: string,
+  untilDate: string,
+  isCancelled: () => boolean,
+): Promise<Record<string, number>> {
   const [year, month, day] = untilDate.split("-").map(Number);
   const start = new Date(year!, month! - 1, day!);
   start.setDate(start.getDate() - 29);
   const sinceDate = localIsoDate(start);
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (isCancelled()) throw new Error("The account usage scan was superseded.");
     const counts: Record<string, number> = {};
     const transactionIds = new Set<string>();
     const requestedOffsets = new Set<number>();
@@ -302,6 +307,7 @@ async function loadAccountUsageLast30Days(planId: string, untilDate: string): Pr
     let ledgerChanged = false;
     try {
       while (requestedOffsets.size < 250) {
+        if (isCancelled()) throw new Error("The account usage scan was superseded.");
         if (requestedOffsets.has(offset)) throw new Error("The transaction usage cursor repeated.");
         requestedOffsets.add(offset);
         const page: TransactionPage = await api.transactions(planId, {
@@ -310,6 +316,7 @@ async function loadAccountUsageLast30Days(planId: string, untilDate: string): Pr
           limit: 250,
           offset,
         });
+        if (isCancelled()) throw new Error("The account usage scan was superseded.");
         if (expectedKnowledge !== undefined && page.server_knowledge !== expectedKnowledge) {
           ledgerChanged = true;
           break;
@@ -329,7 +336,7 @@ async function loadAccountUsageLast30Days(planId: string, untilDate: string): Pr
         offset = page.next_offset;
       }
     } catch (cause) {
-      if (attempt === 0 && cause instanceof ApiError && cause.status === 409 && cause.code === "ledger_changed") {
+      if (!isCancelled() && attempt === 0 && cause instanceof ApiError && cause.status === 409 && cause.code === "ledger_changed") {
         continue;
       }
       throw cause;
