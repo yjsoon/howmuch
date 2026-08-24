@@ -7,6 +7,7 @@ import { splitCategoryGroups } from "../lib/categories";
 import { formatDate, todayIso } from "../lib/dates";
 import { stableHash } from "../lib/hash";
 import { formatMilliunitsInput, formatMoney, parseMilliunits } from "../lib/money";
+import { scheduleRecurrence } from "../lib/schedules";
 import { usePlan } from "../state/plan";
 
 type ScheduleGroup = { date: string; schedules: ScheduledTransaction[] };
@@ -196,9 +197,9 @@ function ScheduleRows({ schedule, accounts, categories, payees, busy, onEdit, on
   const payee = scheduleLabel(schedule, payees, accounts);
   const category = categoryLabel(schedule, accounts, categories);
   const amount = amountFor(schedule);
-  const detail = [account, category, recurrence(schedule.frequency)].filter(Boolean).join(" · ");
+  const detail = [account, category, scheduleRecurrence(schedule.frequency)].filter(Boolean).join(" · ");
   return <>
-    <tr className="schedule-row"><td className="schedule-date">{schedule.date_next ? formatDate(schedule.date_next) : "Date unavailable"}</td><td><div className="schedule-payee">{payee}<FlagTag colour={schedule.flag_color} /></div>{schedule.memo && <div className="schedule-memo">{schedule.memo}</div>}<div className="schedule-mobile-detail">{detail}</div></td><td>{account}</td><td>{category}</td><td>{recurrence(schedule.frequency)}</td><td className={amount < 0 ? "num amount-negative" : amount > 0 ? "num amount-positive" : "num"}>{formatMoney(amount, { sign: amount > 0 })}</td><td className="register-actions"><button type="button" className="register-row-action" onClick={onEnter} disabled={busy || !schedule.date_next} aria-label={`Enter ${payee} now`}>Enter now</button><button type="button" className="register-row-action" onClick={onEdit} disabled={busy} aria-label={`Edit ${payee}`}>Edit</button><button type="button" className="register-row-action register-row-action-danger" onClick={onDelete} disabled={busy} aria-label={`Delete ${payee}`}>Delete</button></td></tr>
+    <tr className="schedule-row"><td className="schedule-date">{schedule.date_next ? formatDate(schedule.date_next) : "Date unavailable"}</td><td><div className="schedule-payee">{payee}<FlagTag colour={schedule.flag_color} /></div>{schedule.memo && <div className="schedule-memo">{schedule.memo}</div>}<div className="schedule-mobile-detail">{detail}</div></td><td>{account}</td><td>{category}</td><td>{scheduleRecurrence(schedule.frequency)}</td><td className={amount < 0 ? "num amount-negative" : amount > 0 ? "num amount-positive" : "num"}>{formatMoney(amount, { sign: amount > 0 })}</td><td className="register-actions"><button type="button" className="register-row-action" onClick={onEnter} disabled={busy || !schedule.date_next} aria-label={`Enter ${payee} now`}>Enter now</button><button type="button" className="register-row-action" onClick={onEdit} disabled={busy} aria-label={`Edit ${payee}`}>Edit</button><button type="button" className="register-row-action register-row-action-danger" onClick={onDelete} disabled={busy} aria-label={`Delete ${payee}`}>Delete</button></td></tr>
     {(schedule.subtransactions ?? []).map((line) => <SplitScheduleRow key={line.id} line={line} accounts={accounts} categories={categories} payees={payees} />)}
   </>;
 }
@@ -280,7 +281,6 @@ function nameFor(name: string | null | undefined, id: string | null | undefined,
 function scheduleLabel(schedule: ScheduledTransaction, payees: Map<string, string>, accounts: Map<string, string>): string { return nameFor(schedule.payee_name, schedule.payee_id, payees, schedule.transfer_account_id ? transferName(schedule.transfer_account_id, accounts) : "No payee"); }
 function transferName(accountId: string, accounts: Map<string, string>): string { return `Transfer to ${accounts.get(accountId) ?? "account"}`; }
 function categoryLabel(schedule: ScheduledTransaction, accounts: Map<string, string>, categories: Map<string, string>): string { if (schedule.transfer_account_id) return transferName(schedule.transfer_account_id, accounts); return nameFor(schedule.category_name, schedule.category_id, categories, "Uncategorised"); }
-function recurrence(value: string | null | undefined): string { const labels: Record<string, string> = { daily: "Daily", weekly: "Weekly", monthly: "Monthly", yearly: "Yearly", never: "Once", twiceamonth: "Twice a month", twiceayear: "Twice a year", everyotherweek: "Every other week", everyothermonth: "Every other month" }; if (!value) return "Recurring"; const key = value.trim().toLowerCase(); if (labels[key]) return labels[key]; const words = value.trim().replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").toLowerCase(); return words ? `${words[0].toUpperCase()}${words.slice(1)}` : "Recurring"; }
 function draftKey(): string { return `split-${crypto.randomUUID()}`; }
 function mutationKey(action: string): string { return `scheduled-${action}-${crypto.randomUUID()}`; }
 function materializationKey(scheduleId: string, occurrenceDate: string, enteredDate: string, seed: string): string { return `scheduled-enter-${seed}-${stableHash(`${scheduleId}:${occurrenceDate}:${enteredDate}`)}`; }

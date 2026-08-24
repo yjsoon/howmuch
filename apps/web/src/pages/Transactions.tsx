@@ -19,7 +19,7 @@ import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categorie
 import { formatDate, todayIso } from "../lib/dates";
 import { stableHash } from "../lib/hash";
 import { formatAmount, formatMilliunitsInput, formatMoney, parseMilliunits } from "../lib/money";
-import { activeSchedulesForAccount, scheduledAmount } from "../lib/schedules";
+import { activeSchedulesForAccount, scheduledAmount, scheduleRecurrence, transferScheduleLabel } from "../lib/schedules";
 import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
 
@@ -1015,47 +1015,51 @@ function AccountScheduledRows({
           </button>
         </td>
       </tr>
+      {expanded && loading && schedules.length === 0 && (
+        <tr className="register-scheduled-message"><td colSpan={9}><span role="status">Loading scheduled transactions…</span></td></tr>
+      )}
       {expanded && error && (
-        <tr className="register-scheduled-message"><td colSpan={9}>Could not load scheduled transactions: {error}</td></tr>
+        <tr className="register-scheduled-message"><td colSpan={9}><span role="alert">Could not load scheduled transactions: {error}</span> · <NavLink to="/scheduled">Manage schedules</NavLink></td></tr>
       )}
       {expanded && !error && !loading && schedules.length === 0 && (
-        <tr className="register-scheduled-message"><td colSpan={9}>No active schedules for this account.</td></tr>
+        <tr className="register-scheduled-message"><td colSpan={9}>No active schedules for this account. <NavLink to="/scheduled">Manage schedules</NavLink></td></tr>
       )}
       {expanded && schedules.flatMap((schedule) => {
         const amount = scheduledAmount(schedule);
+        const transfer = schedule.transfer_account_id ? transferScheduleLabel(schedule.transfer_account_id, accountNames) : null;
         const payee = schedule.payee_name
           ?? (schedule.payee_id ? payeeNames.get(schedule.payee_id) : null)
-          ?? (schedule.transfer_account_id ? `Transfer: ${accountNames.get(schedule.transfer_account_id) ?? "account unavailable"}` : "No payee");
+          ?? transfer
+          ?? "No payee";
         const category = schedule.subtransactions?.length
           ? `Split · ${schedule.subtransactions.length} lines`
-          : schedule.transfer_account_id
-            ? "Transfer"
-            : schedule.category_name ?? (schedule.category_id ? categoryNames.get(schedule.category_id) : null) ?? "Uncategorised";
+          : transfer ?? schedule.category_name ?? (schedule.category_id ? categoryNames.get(schedule.category_id) : null) ?? "Uncategorised";
         return [
           <tr key={schedule.id} className="register-scheduled-row">
             <td className="nowrap">{schedule.date_next ? formatDate(schedule.date_next) : "No next date"}</td>
-            <td className="muted">Scheduled</td>
+            <td className="muted">Scheduled · {scheduleRecurrence(schedule.frequency)}</td>
             <td>{payee}</td>
             <td className="muted">{category}</td>
             <td className="muted memo-cell" title={schedule.memo ?? ""}>{schedule.memo ?? "-"}</td>
             <td className="num amount-negative">{amount < 0 ? formatAmount(amount) : ""}</td>
             <td className="num amount-positive">{amount > 0 ? formatAmount(amount) : ""}</td>
             <td className="register-actions"><NavLink className="register-row-action" to="/scheduled">Manage</NavLink></td>
-            <td className="register-scheduled-frequency">{schedule.frequency ?? ""}</td>
+            <td />
           </tr>,
-          ...(schedule.subtransactions ?? []).map((line) => (
-            <tr key={line.id} className="split-line-row register-scheduled-split-row">
+          ...(schedule.subtransactions ?? []).map((line) => {
+            const lineTransfer = line.transfer_account_id ? transferScheduleLabel(line.transfer_account_id, accountNames) : null;
+            return <tr key={line.id} className="split-line-row register-scheduled-split-row">
               <td />
               <td />
-              <td className="muted split-line-cell">↳ {line.payee_name ?? (line.payee_id ? payeeNames.get(line.payee_id) : null) ?? "-"}</td>
-              <td className="muted">{line.transfer_account_id ? "Transfer" : line.category_name ?? (line.category_id ? categoryNames.get(line.category_id) : null) ?? "Uncategorised"}</td>
+              <td className="muted split-line-cell">↳ {line.payee_name ?? (line.payee_id ? payeeNames.get(line.payee_id) : null) ?? lineTransfer ?? "-"}</td>
+              <td className="muted">{lineTransfer ?? line.category_name ?? (line.category_id ? categoryNames.get(line.category_id) : null) ?? "Uncategorised"}</td>
               <td className="muted memo-cell" title={line.memo ?? ""}>{line.memo ?? "-"}</td>
               <td className="num amount-negative">{line.amount < 0 ? formatAmount(line.amount) : ""}</td>
               <td className="num amount-positive">{line.amount > 0 ? formatAmount(line.amount) : ""}</td>
               <td />
               <td />
-            </tr>
-          )),
+            </tr>;
+          }),
         ];
       })}
     </>

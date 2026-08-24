@@ -1495,8 +1495,7 @@ select:focus-visible {
   stroke-width: 1.5;
 }
 
-.register-scheduled-count,
-.register-scheduled-frequency {
+.register-scheduled-count {
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 400;
@@ -1524,11 +1523,6 @@ select:focus-visible {
 .register-scheduled-row:hover,
 .register-scheduled-split-row:hover {
   background: #ece5d7 !important;
-}
-
-.register-scheduled-frequency {
-  text-transform: capitalize;
-  white-space: nowrap;
 }
 
 .register-scheduled-message td,

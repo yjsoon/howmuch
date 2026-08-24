@@ -19,3 +19,31 @@ export function scheduledAmount(schedule: ScheduledTransaction): number {
     0,
   );
 }
+
+export function scheduleRecurrence(value: string | null | undefined): string {
+  const labels: Record<string, string> = {
+    daily: "Daily",
+    weekly: "Weekly",
+    monthly: "Monthly",
+    yearly: "Yearly",
+    never: "Once",
+    twiceamonth: "Twice a month",
+    twiceayear: "Twice a year",
+    everyotherweek: "Every other week",
+    everyothermonth: "Every other month",
+  };
+  if (!value) return "Recurring";
+  const key = value.trim().toLowerCase();
+  if (labels[key]) return labels[key];
+  const words = value.trim()
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Za-z])(\d)/g, "$1 $2")
+    .replace(/(\d)([A-Za-z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .toLowerCase();
+  return words ? `${words[0].toUpperCase()}${words.slice(1)}` : "Recurring";
+}
+
+export function transferScheduleLabel(accountId: string, accounts: Map<string, string>): string {
+  return `Transfer to ${accounts.get(accountId) ?? "account"}`;
+}

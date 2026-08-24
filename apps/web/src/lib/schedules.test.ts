@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ScheduledTransaction } from "../api/types";
-import { activeSchedulesForAccount, scheduledAmount } from "./schedules";
+import { activeSchedulesForAccount, scheduledAmount, scheduleRecurrence, transferScheduleLabel } from "./schedules";
 
 describe("account register schedules", () => {
   test("keeps only active schedules for the selected account and sorts by next date", () => {
@@ -22,5 +22,11 @@ describe("account register schedules", () => {
         { id: "two", amount: -2_750 },
       ],
     })).toBe(-4_000);
+  });
+
+  test("formats API recurrence values and transfer destinations for register rows", () => {
+    expect(scheduleRecurrence("everyOtherWeek")).toBe("Every other week");
+    expect(scheduleRecurrence("every4Weeks")).toBe("Every 4 weeks");
+    expect(transferScheduleLabel("savings", new Map([["savings", "Rainy Day Saver"]]))).toBe("Transfer to Rainy Day Saver");
   });
 });
