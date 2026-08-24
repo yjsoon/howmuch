@@ -379,11 +379,15 @@ final class AppModel {
     let previousAccountPreferences = scopedViewPrefsStore.scopes[scope].map(AccountPresentationPreferences.init)
     scopedViewPrefsStore.set(viewPrefs, for: scope)
     if previousAccountPreferences != AccountPresentationPreferences(viewPrefs) {
-      enqueueAccountPreferencesSync()
+      enqueueAccountPreferencesSync(
+        localMutationBaseline: previousAccountPreferences ?? AccountPresentationPreferences(ViewPrefs())
+      )
     }
   }
 
-  private func enqueueAccountPreferencesSync() {
+  private func enqueueAccountPreferencesSync(
+    localMutationBaseline: AccountPresentationPreferences? = nil
+  ) {
     guard let scope = activeViewPrefsScope, settings.isAuthenticated else {
       return
     }
@@ -412,16 +416,25 @@ final class AppModel {
               ?? SyncedAccountPreferences(preferences: AccountPresentationPreferences(ViewPrefs()), revision: 0)
             let latestScopedPreferences = scopedViewPrefsStore.scopes[scope] ?? scopedPreferences
             if baseline == nil {
-              // A revision-zero conflict means another device already
-              // established the shared layout. Legacy preferences on this
-              // device are not a merge baseline, so adopt the server value.
-              scopedPreferences = remote.preferences.applying(to: latestScopedPreferences)
-              scopedViewPrefsStore.set(scopedPreferences, for: scope)
-              if activeViewPrefsScope == scope {
-                viewPrefs = scopedPreferences
+              if let localMutationBaseline {
+                preferences = AccountPresentationPreferences.merging(
+                  baseline: localMutationBaseline,
+                  local: AccountPresentationPreferences(latestScopedPreferences),
+                  remote: remote.preferences
+                )
+                scopedPreferences = preferences.applying(to: latestScopedPreferences)
+              } else {
+                // A revision-zero conflict means another device already
+                // established the shared layout. Unchanged legacy preferences
+                // on this device are not a merge baseline.
+                scopedPreferences = remote.preferences.applying(to: latestScopedPreferences)
               }
+              scopedViewPrefsStore.set(scopedPreferences, for: scope)
+              if activeViewPrefsScope == scope { viewPrefs = scopedPreferences }
               scopedViewPrefsStore.markAccountPreferencesSynced(remote, for: scope)
-              return
+              guard localMutationBaseline != nil, preferences != remote.preferences else { return }
+              baseline = remote
+              continue
             }
             guard let baselinePreferences = baseline?.preferences else { return }
             preferences = AccountPresentationPreferences.merging(
@@ -797,7 +810,9 @@ final class AppModel {
       } ?? false
       let hasUnsyncedLocalArrangement = lastSynced.map { localAccountPreferences != $0.preferences } ?? false
       if localChangedDuringRefresh || responseIsStale || hasUnsyncedLocalArrangement {
-        enqueueAccountPreferencesSync()
+        enqueueAccountPreferencesSync(
+          localMutationBaseline: localChangedDuringRefresh ? accountPreferencesAtStart : nil
+        )
       } else if let accountPreferences = reference.accountPreferences {
         viewPrefs = accountPreferences.preferences.applying(to: viewPrefs)
         if let scope = activeViewPrefsScope {

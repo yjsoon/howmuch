@@ -83,7 +83,19 @@ describe("D1 foundation", () => {
   test("D1 account preferences use compare-and-set revisions", async () => {
     const db = await ledgerSqlite();
     db.run("INSERT INTO users(id) VALUES ('u')");
-    const repo = new D1LedgerRepository(new D1Database(fakeD1(db, { delayRunMutation: true })), "p");
+    let mutationStarted!: () => void;
+    let releaseMutation!: () => void;
+    const started = new Promise<void>((resolve) => { mutationStarted = resolve; });
+    const gate = new Promise<void>((resolve) => { releaseMutation = resolve; });
+    let shouldDelayMutation = true;
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db, {
+      beforeRunMutation: async () => {
+        if (!shouldDelayMutation) return;
+        shouldDelayMutation = false;
+        mutationStarted();
+        await gate;
+      },
+    })), "p");
     const preferences = {
       favourite_account_ids: ["a"], account_order: [], account_order_by_group: {},
       account_group_sorts: {}, custom_account_groups: [],
@@ -92,7 +104,17 @@ describe("D1 foundation", () => {
     expect(await repo.getAccountPreferences("p", "u")).toEqual({
       account_preferences: null, account_preferences_revision: 0,
     });
-    expect(await repo.setAccountPreferences("p", "u", preferences, 0)).toEqual({
+    const firstWrite = repo.setAccountPreferences("p", "u", preferences, 0);
+    let firstWriteSettled = false;
+    void firstWrite.then(
+      () => { firstWriteSettled = true; },
+      () => { firstWriteSettled = true; },
+    );
+    await started;
+    await Bun.sleep(0);
+    expect(firstWriteSettled).toBeFalse();
+    releaseMutation();
+    expect(await firstWrite).toEqual({
       account_preferences: preferences, account_preferences_revision: 1,
     });
     await expect(repo.setAccountPreferences("p", "u", { ...preferences, favourite_account_ids: [] }, 0)).rejects.toThrow();
@@ -1502,7 +1524,7 @@ async function ledgerSqlite(): Promise<Database> {
 
 function sqlite(): Database { const db = new Database(":memory:", { strict: true }); databases.push(db); return db; }
 
-function fakeD1(db: Database, faults: { commitThenThrowOnce?: boolean; commitThenThrowSql?: RegExp; beforeWriteBatch?: (db: Database) => void; maxBindings?: number; delayRunMutation?: boolean } = {}): D1Binding {
+function fakeD1(db: Database, faults: { commitThenThrowOnce?: boolean; commitThenThrowSql?: RegExp; beforeWriteBatch?: (db: Database) => void; maxBindings?: number; beforeRunMutation?: () => Promise<void> } = {}): D1Binding {
   let commitThenThrow = faults.commitThenThrowOnce ?? Boolean(faults.commitThenThrowSql);
   let mutateBeforeWrite = faults.beforeWriteBatch;
   // D1 serialises atomic batches.  Keep the fake faithful while still letting
@@ -1517,7 +1539,7 @@ function fakeD1(db: Database, faults: { commitThenThrowOnce?: boolean; commitThe
     }
     async all<Row>(): Promise<D1Result<Row>> { return { success: true, results: db.query(this.sql).all(...this.values as any[]) as Row[] }; }
     async first<Row>(): Promise<Row | null> { return db.query(this.sql).get(...this.values as any[]) as Row | null; }
-    async run(): Promise<D1Result> { if (faults.delayRunMutation) await Promise.resolve(); const result = db.query(this.sql).run(...this.values as any[]); return { success: true, meta: { changes: Number(result.changes) } }; }
+    async run(): Promise<D1Result> { await faults.beforeRunMutation?.(); const result = db.query(this.sql).run(...this.values as any[]); return { success: true, meta: { changes: Number(result.changes) } }; }
     async execute<Row>(): Promise<D1Result<Row>> {
       return /^\s*(SELECT|WITH)\b/i.test(this.sql) ? this.all<Row>() : this.run() as Promise<D1Result<Row>>;
     }
