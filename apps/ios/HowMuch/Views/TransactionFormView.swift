@@ -97,7 +97,8 @@ struct AmountKeypadEngine: Equatable {
   }
 }
 
-/// "Add Transaction" sheet, seeded with the last-used account.
+/// "Add Transaction" sheet, seeded from the visible register when there is
+/// one, otherwise the last-used account.
 struct AddTransactionSheet: View {
   @Environment(AppModel.self) private var model
 
@@ -107,7 +108,7 @@ struct AddTransactionSheet: View {
 
   private var seededDraft: TransactionDraft {
     var draft = TransactionDraft()
-    draft.seedIfNeeded(accounts: model.openAccounts, preferredAccountID: model.lastUsedAccountID)
+    draft.seedIfNeeded(accounts: model.openAccounts, preferredAccountID: model.preferredCaptureAccountID)
     return draft
   }
 }

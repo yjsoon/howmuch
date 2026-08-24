@@ -73,6 +73,9 @@ final class AppModel {
   var lastSaveMessage: String?
   var isShowingSettings = false
   var isShowingCapture = false
+  /// Account registers currently on a navigation stack, deepest last.
+  /// Capture prefers the visible register over the last account a save used.
+  private(set) var focusedRegisterAccountIDs: [String] = []
   /// Captures made while the server was unreachable, oldest first.
   var pendingTransactions: [PendingTransaction] = OutboxStore.load()
   var pendingTransactionsForLiveConnection: [PendingTransaction] {
@@ -163,6 +166,29 @@ final class AppModel {
 
   var lastUsedAccountID: String? {
     viewPrefs.lastUsedAccountID
+  }
+
+  /// The account the + sheet should open on: the register you are looking
+  /// at, or the last saved account if you are not inside one.
+  var preferredCaptureAccountID: String? {
+    let openIDs = Set(openAccounts.map(\.id))
+    if let focused = focusedRegisterAccountIDs.last, openIDs.contains(focused) {
+      return focused
+    }
+    if let lastUsed = lastUsedAccountID, openIDs.contains(lastUsed) {
+      return lastUsed
+    }
+    return nil
+  }
+
+  func beginFocusedRegisterAccount(_ accountID: String) {
+    focusedRegisterAccountIDs.append(accountID)
+  }
+
+  func endFocusedRegisterAccount(_ accountID: String) {
+    if let index = focusedRegisterAccountIDs.lastIndex(of: accountID) {
+      focusedRegisterAccountIDs.remove(at: index)
+    }
   }
 
   /// Web parity: the spending report hides bookkeeping groups until asked.
