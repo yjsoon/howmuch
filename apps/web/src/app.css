@@ -2794,7 +2794,7 @@ tr:hover .share-bar {
   grid-column: 1 / -1;
   margin: 0;
   padding: 12px;
-  color: var(--ink-faint);
+  color: var(--ink-soft);
   font-size: 12px;
 }
 
@@ -2864,7 +2864,7 @@ tr:hover .share-bar {
 .custom-group-heading > div:first-child span,
 .organizer-field-hint,
 .organizer-field-error {
-  color: var(--ink-faint);
+  color: var(--ink-soft);
   font-size: 11px;
 }
 
@@ -2977,7 +2977,7 @@ tr:hover .share-bar {
 .group-sort-empty,
 .group-sort-note {
   margin: 8px 0 0;
-  color: var(--ink-faint);
+  color: var(--ink-soft);
   font-size: 11.5px;
 }
 
@@ -3036,6 +3036,36 @@ tr:hover .share-bar {
   margin: 0;
   padding: 8px 18px;
   font-size: 13px;
+}
+
+.account-organization-global-status {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 30;
+  display: grid;
+  max-width: min(440px, calc(100vw - 40px));
+  gap: 6px;
+  padding: 10px 14px;
+  color: var(--ink);
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-strong);
+  box-shadow: 0 8px 30px #0002;
+  font-size: 12px;
+}
+
+.account-organization-global-status span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.account-organization-global-status button {
+  flex: 0 0 auto;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* ── Small screens ──────────────────────────────────────────── */

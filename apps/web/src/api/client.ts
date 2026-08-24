@@ -174,7 +174,7 @@ export const api = {
   settings: (planId: string) =>
     request<{ settings: PlanSettings }>(planUrl(planId, "settings")).then((d) => d.settings),
   accounts: (planId: string) =>
-    request<{ accounts: Account[] }>(planUrl(planId, "accounts")).then((d) => d.accounts),
+    request<{ accounts: Account[]; server_knowledge: number }>(planUrl(planId, "accounts")),
   accountPreferences: (planId: string) =>
     request<AccountPreferencesSnapshot>(planUrl(planId, "account_preferences"))
       .catch((error) => {

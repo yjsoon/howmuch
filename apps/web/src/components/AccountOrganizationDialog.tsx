@@ -63,6 +63,15 @@ export function AccountOrganizationDialog({
     if (dialog && !dialog.open) dialog.showModal();
   }, []);
 
+  const saving = accountPreferencesSync.phase === "saving";
+  const requestClose = () => {
+    if (saving) return;
+    if (accountPreferencesSync.phase === "error" && !window.confirm(
+      "These account organisation changes have not been saved. Close and keep them visible with a retry option?",
+    )) return;
+    dialogRef.current?.close();
+  };
+
   return (
     <dialog
       ref={dialogRef}
@@ -70,11 +79,14 @@ export function AccountOrganizationDialog({
       aria-labelledby="account-organizer-title"
       aria-describedby="account-organizer-description"
       onCancel={(event) => {
-        event.preventDefault();
-        onClose();
+        if (saving || accountPreferencesSync.phase === "error") {
+          event.preventDefault();
+          requestClose();
+        }
       }}
+      onClose={onClose}
       onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget) requestClose();
       }}
     >
       <div className="account-organizer-surface">
@@ -86,7 +98,7 @@ export function AccountOrganizationDialog({
               Favourites, groups, and account order are shared with your other signed-in devices.
             </p>
           </div>
-          <button type="button" className="account-organizer-close" onClick={onClose} aria-label="Close account organiser">×</button>
+          <button type="button" className="account-organizer-close" onClick={requestClose} disabled={saving} aria-label="Close account organiser">×</button>
         </header>
 
         <SyncStatus state={accountPreferencesSync} onRetry={retryAccountPreferences} />
@@ -206,7 +218,9 @@ export function AccountOrganizationDialog({
         )}
 
         <footer className="account-organizer-footer">
-          <button type="button" className="save-button" onClick={onClose}>Done</button>
+          <button type="button" className="save-button" onClick={requestClose} disabled={saving}>
+            {saving ? "Saving…" : "Done"}
+          </button>
         </footer>
       </div>
     </dialog>
@@ -237,6 +251,7 @@ function NewGroupForm({ preferences, onCreate }: {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const createButtonRef = useRef<HTMLButtonElement>(null);
   const error = customAccountGroupNameError(preferences, name);
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -246,10 +261,11 @@ function NewGroupForm({ preferences, onCreate }: {
     setName("");
     setSubmitted(false);
     setCreating(false);
+    requestAnimationFrame(() => createButtonRef.current?.focus());
   };
 
   if (!creating) {
-    return <button type="button" className="organizer-secondary-button" onClick={() => setCreating(true)}>+ New group</button>;
+    return <button ref={createButtonRef} type="button" className="organizer-secondary-button" onClick={() => setCreating(true)}>+ New group</button>;
   }
   return (
     <form className="custom-group-form" onSubmit={submit}>
@@ -265,7 +281,10 @@ function NewGroupForm({ preferences, onCreate }: {
           aria-describedby="new-account-group-hint"
         />
         <button type="submit" className="organizer-primary-button">Create</button>
-        <button type="button" className="text-button" onClick={() => { setCreating(false); setName(""); setSubmitted(false); }}>Cancel</button>
+        <button type="button" className="text-button" onClick={() => {
+          setCreating(false); setName(""); setSubmitted(false);
+          requestAnimationFrame(() => createButtonRef.current?.focus());
+        }}>Cancel</button>
       </div>
       <span id="new-account-group-hint" className={submitted && error ? "organizer-field-error" : "organizer-field-hint"} role={submitted && error ? "alert" : undefined}>
         {submitted && error ? error : "Names must be unique and cannot use a built-in group name."}
@@ -286,6 +305,9 @@ function CustomGroupEditor({ group, index, count, accounts, preferences, onUpdat
   const [name, setName] = useState(group.name);
   const [submitted, setSubmitted] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const cardRef = useRef<HTMLElement>(null);
+  const renameButtonRef = useRef<HTMLButtonElement>(null);
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
   const error = customAccountGroupNameError(preferences, name, group.id);
   const sortedAccounts = useMemo(() => [...accounts].sort((first, second) =>
     Number(first.closed) - Number(second.closed) || accountNameOrder(first, second)), [accounts]);
@@ -296,10 +318,24 @@ function CustomGroupEditor({ group, index, count, accounts, preferences, onUpdat
     onUpdate((current) => renameCustomAccountGroup(current, group.id, name));
     setRenaming(false);
     setSubmitted(false);
+    requestAnimationFrame(() => renameButtonRef.current?.focus());
+  };
+
+  const deleteGroup = () => {
+    const card = cardRef.current;
+    const focusTarget = card?.nextElementSibling ?? card?.previousElementSibling;
+    onUpdate((current) => deleteCustomAccountGroup(current, group.id));
+    requestAnimationFrame(() => {
+      if (focusTarget instanceof HTMLElement && document.contains(focusTarget)) {
+        focusTarget.querySelector<HTMLElement>("button")?.focus();
+      } else {
+        document.querySelector<HTMLElement>(".organizer-secondary-button")?.focus();
+      }
+    });
   };
 
   return (
-    <article className="custom-group-card">
+    <article ref={cardRef} className="custom-group-card">
       <div className="custom-group-heading">
         <div>
           <strong>{group.name}</strong>
@@ -311,8 +347,8 @@ function CustomGroupEditor({ group, index, count, accounts, preferences, onUpdat
           last={index === count - 1}
           onMove={(direction) => onUpdate((current) => moveCustomAccountGroup(current, group.id, direction))}
         />
-        <button type="button" className="text-button" onClick={() => { setName(group.name); setRenaming(true); }}>Rename</button>
-        <button type="button" className="organizer-danger-link" onClick={() => setConfirmingDelete(true)}>Delete</button>
+        <button ref={renameButtonRef} type="button" className="text-button" onClick={() => { setName(group.name); setRenaming(true); }}>Rename</button>
+        <button ref={deleteButtonRef} type="button" className="organizer-danger-link" onClick={() => setConfirmingDelete(true)}>Delete</button>
       </div>
       {renaming && (
         <form className="custom-group-form" onSubmit={rename}>
@@ -327,7 +363,10 @@ function CustomGroupEditor({ group, index, count, accounts, preferences, onUpdat
               aria-invalid={submitted && Boolean(error)}
             />
             <button type="submit" className="organizer-primary-button">Save name</button>
-            <button type="button" className="text-button" onClick={() => { setRenaming(false); setSubmitted(false); }}>Cancel</button>
+            <button type="button" className="text-button" onClick={() => {
+              setRenaming(false); setSubmitted(false);
+              requestAnimationFrame(() => renameButtonRef.current?.focus());
+            }}>Cancel</button>
           </div>
           {submitted && error && <span className="organizer-field-error" role="alert">{error}</span>}
         </form>
@@ -336,9 +375,11 @@ function CustomGroupEditor({ group, index, count, accounts, preferences, onUpdat
         <div className="custom-group-delete-confirm" role="alert">
           <span>Delete {group.name}? Accounts and transactions will not be deleted.</span>
           <div>
-            <button type="button" className="text-button" onClick={() => setConfirmingDelete(false)}>Cancel</button>
-            <button type="button" className="organizer-danger-button" onClick={() =>
-              onUpdate((current) => deleteCustomAccountGroup(current, group.id))}>Delete group</button>
+            <button type="button" className="text-button" onClick={() => {
+              setConfirmingDelete(false);
+              requestAnimationFrame(() => deleteButtonRef.current?.focus());
+            }}>Cancel</button>
+            <button type="button" className="organizer-danger-button" onClick={deleteGroup}>Delete group</button>
           </div>
         </div>
       )}

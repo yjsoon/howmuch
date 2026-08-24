@@ -1,6 +1,6 @@
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { api, type TransactionPage } from "../api/client";
+import { ApiError, api, type TransactionPage } from "../api/client";
 import type { AccountPreferences } from "../api/types";
 import { formatMoney } from "../lib/money";
 import { accountGroups as buildAccountGroups, type AccountGroup } from "../lib/account-groups";
@@ -17,10 +17,20 @@ const REPORTS = [
 
 export function Shell() {
   const location = useLocation();
-  const { planId, accounts, accountPreferences, updateAccountPreferences, logout } = usePlan();
+  const {
+    planId,
+    accounts,
+    ledgerKnowledge,
+    accountPreferences,
+    accountPreferencesSync,
+    updateAccountPreferences,
+    retryAccountPreferences,
+    logout,
+  } = usePlan();
   const { filters } = useFilters();
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const [organizerOpen, setOrganizerOpen] = useState(false);
+  const organizerOpener = useRef<HTMLButtonElement | null>(null);
   const [usageGeneration, setUsageGeneration] = useState(0);
   const [accountUsage, setAccountUsage] = useState<{
     counts?: Record<string, number>;
@@ -34,6 +44,15 @@ export function Shell() {
   const usesMostUsedSort = accountPreferences
     ? Object.values(accountPreferences.account_group_sorts).includes("mostUsedLast30Days")
     : false;
+  const usageDate = localIsoDate(new Date());
+  const openOrganizer = (opener: HTMLButtonElement) => {
+    organizerOpener.current = opener;
+    setOrganizerOpen(true);
+  };
+  const closeOrganizer = () => {
+    setOrganizerOpen(false);
+    requestAnimationFrame(() => organizerOpener.current?.focus());
+  };
   const selectedAccount = location.pathname === "/transactions" && filters.accountIds.length === 1
     ? accounts.find((account) => account.id === filters.accountIds[0])
     : undefined;
@@ -66,7 +85,7 @@ export function Shell() {
     }
     let cancelled = false;
     setAccountUsage((current) => ({ ...current, state: { phase: "loading", message: null } }));
-    loadAccountUsageLast30Days(planId)
+    loadAccountUsageLast30Days(planId, usageDate)
       .then((counts) => {
         if (cancelled) return;
         setAccountUsage({ counts, state: { phase: "loaded", message: null } });
@@ -81,7 +100,7 @@ export function Shell() {
     return () => {
       cancelled = true;
     };
-  }, [planId, usesMostUsedSort, usageGeneration]);
+  }, [planId, ledgerKnowledge, usageDate, usesMostUsedSort, usageGeneration]);
 
   useEffect(() => {
     if (!accountPreferences || !accountUsage.counts) return;
@@ -142,7 +161,11 @@ export function Shell() {
             <span aria-hidden="true">▤</span> All Accounts
             <span className="sidebar-balance" title="Open-account working balance">{formatMoney(openAccounts.reduce((sum, account) => sum + account.balance, 0))}</span>
           </NavLink>
-          <button type="button" className="sidebar-primary-link account-organizer-entry" onClick={() => setOrganizerOpen(true)}>
+          <button
+            type="button"
+            className="sidebar-primary-link account-organizer-entry"
+            onClick={(event) => openOrganizer(event.currentTarget)}
+          >
             <span aria-hidden="true">☷</span> Organise accounts
           </button>
         </nav>
@@ -186,7 +209,11 @@ export function Shell() {
         <header className="mobile-masthead">
           <span className="masthead-title">HowMuch</span>
           <div className="mobile-actions">
-            <button type="button" className="mobile-organizer-entry" onClick={() => setOrganizerOpen(true)}>Organise</button>
+            <button
+              type="button"
+              className="mobile-organizer-entry"
+              onClick={(event) => openOrganizer(event.currentTarget)}
+            >Organise</button>
             <NavLink to="/add" className="add-button">+ Add</NavLink>
             <button type="button" className="sign-out-button" onClick={handleLogout}>Sign out</button>
           </div>
@@ -198,13 +225,49 @@ export function Shell() {
           </Suspense>
         </main>
       </div>
+      {!organizerOpen && (
+        <AccountOrganizationNotice
+          sync={accountPreferencesSync}
+          supported={accountPreferences !== null}
+          usage={accountUsage.state}
+          onRetrySave={retryAccountPreferences}
+          onRetryUsage={() => setUsageGeneration((generation) => generation + 1)}
+        />
+      )}
       {organizerOpen && (
         <AccountOrganizationDialog
           accountGroups={accountGroups}
           usage={accountUsage.state}
           onRetryUsage={() => setUsageGeneration((generation) => generation + 1)}
-          onClose={() => setOrganizerOpen(false)}
+          onClose={closeOrganizer}
         />
+      )}
+    </div>
+  );
+}
+
+function AccountOrganizationNotice({ sync, supported, usage, onRetrySave, onRetryUsage }: {
+  sync: ReturnType<typeof usePlan>["accountPreferencesSync"];
+  supported: boolean;
+  usage: AccountUsageState;
+  onRetrySave: () => void;
+  onRetryUsage: () => void;
+}) {
+  const showSync = sync.phase === "saving" || sync.phase === "error" || (supported && sync.phase === "unsupported");
+  const showUsage = usage.phase === "error";
+  if (!showSync && !showUsage) return null;
+  return (
+    <div className="account-organization-global-status" role={sync.phase === "saving" && !showUsage ? "status" : "alert"} aria-live="polite">
+      {showSync && (
+        <span>
+          {sync.message}
+          {sync.phase === "error" && <button type="button" onClick={onRetrySave}>Retry save</button>}
+        </span>
+      )}
+      {showUsage && (
+        <span>
+          30-day account usage is unavailable. <button type="button" onClick={onRetryUsage}>Retry</button>
+        </span>
       )}
     </div>
   );
@@ -224,12 +287,11 @@ function snapshotMostUsedOrders(preferences: AccountPreferences, groups: Account
   return changed ? { ...preferences, account_order_by_group: accountOrderByGroup } : preferences;
 }
 
-async function loadAccountUsageLast30Days(planId: string): Promise<Record<string, number>> {
-  const today = new Date();
-  const start = new Date(today);
+async function loadAccountUsageLast30Days(planId: string, untilDate: string): Promise<Record<string, number>> {
+  const [year, month, day] = untilDate.split("-").map(Number);
+  const start = new Date(year!, month! - 1, day!);
   start.setDate(start.getDate() - 29);
   const sinceDate = localIsoDate(start);
-  const untilDate = localIsoDate(today);
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const counts: Record<string, number> = {};
@@ -238,32 +300,39 @@ async function loadAccountUsageLast30Days(planId: string): Promise<Record<string
     let offset = 0;
     let expectedKnowledge: number | undefined;
     let ledgerChanged = false;
-    while (requestedOffsets.size < 250) {
-      if (requestedOffsets.has(offset)) throw new Error("The transaction usage cursor repeated.");
-      requestedOffsets.add(offset);
-      const page: TransactionPage = await api.transactions(planId, {
-        since_date: sinceDate,
-        until_date: untilDate,
-        limit: 250,
-        offset,
-      });
-      if (expectedKnowledge !== undefined && page.server_knowledge !== expectedKnowledge) {
-        ledgerChanged = true;
-        break;
-      }
-      expectedKnowledge = page.server_knowledge;
-      for (const transaction of page.transactions) {
-        if (transaction.date >= sinceDate && transaction.date <= untilDate && !transactionIds.has(transaction.id)) {
-          transactionIds.add(transaction.id);
-          counts[transaction.account_id] = (counts[transaction.account_id] ?? 0) + 1;
+    try {
+      while (requestedOffsets.size < 250) {
+        if (requestedOffsets.has(offset)) throw new Error("The transaction usage cursor repeated.");
+        requestedOffsets.add(offset);
+        const page: TransactionPage = await api.transactions(planId, {
+          since_date: sinceDate,
+          until_date: untilDate,
+          limit: 250,
+          offset,
+        });
+        if (expectedKnowledge !== undefined && page.server_knowledge !== expectedKnowledge) {
+          ledgerChanged = true;
+          break;
         }
+        expectedKnowledge = page.server_knowledge;
+        for (const transaction of page.transactions) {
+          if (transaction.date >= sinceDate && transaction.date <= untilDate && !transactionIds.has(transaction.id)) {
+            transactionIds.add(transaction.id);
+            counts[transaction.account_id] = (counts[transaction.account_id] ?? 0) + 1;
+          }
+        }
+        if (!page.has_more) return counts;
+        if (page.transactions.length === 0) throw new Error("The transaction usage page was empty before the final page.");
+        if (page.next_offset === null || page.next_offset <= offset) {
+          throw new Error("The transaction usage cursor did not advance.");
+        }
+        offset = page.next_offset;
       }
-      if (!page.has_more) return counts;
-      if (page.transactions.length === 0) throw new Error("The transaction usage page was empty before the final page.");
-      if (page.next_offset === null || page.next_offset <= offset) {
-        throw new Error("The transaction usage cursor did not advance.");
+    } catch (cause) {
+      if (attempt === 0 && cause instanceof ApiError && cause.status === 409 && cause.code === "ledger_changed") {
+        continue;
       }
-      offset = page.next_offset;
+      throw cause;
     }
     if (!ledgerChanged && requestedOffsets.size >= 250) {
       throw new Error("The transaction usage scan exceeded its safe page limit.");

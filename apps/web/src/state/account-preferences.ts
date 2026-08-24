@@ -36,17 +36,13 @@ export function normaliseAccountPreferences(preferences: AccountPreferences | nu
   if (!preferences) return emptyAccountPreferences();
   const groups: CustomAccountGroup[] = [];
   const usedIds = new Set<string>();
-  const usedNames = new Set<string>();
   for (const candidate of preferences.custom_account_groups) {
     const id = candidate.id.trim();
     const name = candidate.name.trim();
-    const nameKey = normalisedNameKey(name);
-    if (!validCustomGroupId(id) || !name || name.length > 100 || usedIds.has(id) || usedNames.has(nameKey)
-      || BUILT_IN_GROUP_IDS.has(nameKey)) {
+    if (!validCustomGroupId(id) || !name || name.length > 100 || usedIds.has(id)) {
       continue;
     }
     usedIds.add(id);
-    usedNames.add(nameKey);
     groups.push({ id, name, account_ids: uniqueStrings(candidate.account_ids) });
   }
   const validGroupIds = new Set([...BUILT_IN_GROUP_IDS, ...groups.map((group) => group.id)]);
@@ -245,6 +241,7 @@ export class AccountPreferencesController {
   private baseline: { preferences: AccountPreferences; revision: number };
   private current: AccountPreferencesState;
   private dirty = false;
+  private detached = false;
   private runPromise: Promise<void> | null = null;
   private onChange: ((state: AccountPreferencesState) => void) | null;
 
@@ -264,6 +261,7 @@ export class AccountPreferencesController {
   }
 
   update(updater: (preferences: AccountPreferences) => AccountPreferences): void {
+    if (this.detached) return;
     const preferences = normaliseAccountPreferences(updater(this.current.preferences));
     if (equal(preferences, this.current.preferences)) return;
     this.dirty = true;
@@ -272,7 +270,7 @@ export class AccountPreferencesController {
   }
 
   retry(): void {
-    if (!this.dirty || this.current.phase === "unsupported") return;
+    if (this.detached || !this.dirty || this.current.phase === "unsupported") return;
     this.setState(this.current.preferences, this.baseline.revision, "saving", "Retrying account organisation…");
     this.start();
   }
@@ -282,6 +280,7 @@ export class AccountPreferencesController {
   }
 
   detach(): void {
+    this.detached = true;
     this.onChange = null;
   }
 
@@ -302,6 +301,7 @@ export class AccountPreferencesController {
       const target = this.current.preferences;
       try {
         const saved = await this.client.save(target, this.baseline.revision);
+        if (this.detached) return;
         if (!saved.account_preferences) throw new Error("The server returned empty account preferences after saving.");
         this.baseline = {
           preferences: normaliseAccountPreferences(saved.account_preferences),
@@ -319,10 +319,12 @@ export class AccountPreferencesController {
           this.setState(this.current.preferences, this.baseline.revision, "saving", "Saving newer account changes…");
         }
       } catch (cause) {
+        if (this.detached) return;
         if (isConflict(cause) && conflictAttempts < 3) {
           conflictAttempts += 1;
           try {
             const remoteSnapshot = await this.client.load();
+            if (this.detached) return;
             if (!remoteSnapshot) {
               this.dirty = true;
               this.setState(

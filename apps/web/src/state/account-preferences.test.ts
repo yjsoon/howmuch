@@ -9,6 +9,7 @@ import {
   mergeAccountPreferences,
   moveAccountInGroup,
   moveCustomAccountGroup,
+  normaliseAccountPreferences,
   renameCustomAccountGroup,
   setAccountGroupSort,
   setAccountInCustomGroup,
@@ -54,6 +55,20 @@ describe("account preference editing", () => {
     expect(customAccountGroupNameError(preferences, "   ")).toBe("Enter a group name.");
     expect(customAccountGroupNameError(preferences, "Trips")).toBeNull();
   });
+
+  test("preserves legacy accent-colliding groups so an edit cannot silently delete them", () => {
+    const preferences = normaliseAccountPreferences({
+      ...emptyAccountPreferences(),
+      custom_account_groups: [
+        { id: "custom-travel", name: "Travel", account_ids: [] },
+        { id: "custom-travel-accent", name: "Trável", account_ids: [] },
+        { id: "custom-cash", name: "Cásh", account_ids: [] },
+      ],
+    });
+
+    expect(preferences.custom_account_groups.map((group) => group.name)).toEqual(["Travel", "Trável", "Cásh"]);
+    expect(customAccountGroupNameError(preferences, "Trips", "custom-travel-accent")).toBeNull();
+  });
 });
 
 describe("account preference conflict merge", () => {
@@ -95,6 +110,36 @@ describe("account preference conflict merge", () => {
 });
 
 describe("AccountPreferencesController", () => {
+  test("a detached controller cannot conflict-retry over its replacement", async () => {
+    let releaseWrite!: () => void;
+    const writeGate = new Promise<void>((resolve) => { releaseWrite = resolve; });
+    let writeStarted!: () => void;
+    const started = new Promise<void>((resolve) => { writeStarted = resolve; });
+    let loadCount = 0;
+    let saveCount = 0;
+    const controller = new AccountPreferencesController(snapshot(emptyAccountPreferences(), 1), {
+      load: async () => {
+        loadCount += 1;
+        return snapshot(emptyAccountPreferences(), 2);
+      },
+      save: async () => {
+        saveCount += 1;
+        writeStarted();
+        await writeGate;
+        throw Object.assign(new Error("conflict"), { status: 409, code: "account_preferences_conflict" });
+      },
+    });
+
+    controller.update((preferences) => toggleFavouriteAccount(preferences, "cash"));
+    await started;
+    controller.detach();
+    releaseWrite();
+    await controller.settled();
+
+    expect(saveCount).toBe(1);
+    expect(loadCount).toBe(0);
+  });
+
   test("uses revision CAS, refetches on conflict, and merges edits made during the request", async () => {
     const initial = emptyAccountPreferences();
     const remote = {
