@@ -378,9 +378,8 @@ struct ViewPrefs: Codable, Equatable {
   /// Whether the spending report includes bookkeeping ("quiet") category
   /// groups; mirrors the web app's persisted includeQuietSpending pref.
   var includeQuietSpending: Bool?
-  /// Account presentation preferences stay on this device. The server's
-  /// account payload is an immutable source list, so these IDs are deliberately
-  /// not sent back to the API.
+  /// Account presentation preferences are cached locally and synced separately
+  /// from the server's immutable account source list.
   var favouriteAccountIDs: [String] = []
   /// Legacy global order retained so existing installs can seed every new
   /// group's manual order deterministically.
@@ -487,6 +486,93 @@ struct ViewPrefs: Codable, Equatable {
   }
 }
 
+/// The account-only subset shared by every client for one user and plan.
+/// Device-specific navigation and report preferences remain in `ViewPrefs`.
+struct AccountPresentationPreferences: Codable, Equatable {
+  var favouriteAccountIDs: [String]
+  var accountOrder: [String]
+  var accountOrderByGroup: [String: [String]]
+  var accountGroupSorts: [String: AccountGroupSort]
+  var customAccountGroups: [CustomAccountGroup]
+
+  init(_ preferences: ViewPrefs) {
+    favouriteAccountIDs = preferences.favouriteAccountIDs
+    accountOrder = preferences.accountOrder
+    accountOrderByGroup = preferences.accountOrderByGroup
+    accountGroupSorts = preferences.accountGroupSorts
+    customAccountGroups = preferences.customAccountGroups
+  }
+
+  func applying(to preferences: ViewPrefs) -> ViewPrefs {
+    var result = preferences
+    result.favouriteAccountIDs = favouriteAccountIDs
+    result.accountOrder = accountOrder
+    result.accountOrderByGroup = accountOrderByGroup
+    result.accountGroupSorts = accountGroupSorts
+    result.customAccountGroups = customAccountGroups
+    return result.structurallyNormalised()
+  }
+
+  static func merging(
+    baseline: AccountPresentationPreferences,
+    local: AccountPresentationPreferences,
+    remote: AccountPresentationPreferences
+  ) -> AccountPresentationPreferences {
+    let groups = mergeCustomGroups(baseline: baseline.customAccountGroups, local: local.customAccountGroups, remote: remote.customAccountGroups)
+    return AccountPresentationPreferences(
+      favouriteAccountIDs: local.favouriteAccountIDs != baseline.favouriteAccountIDs ? local.favouriteAccountIDs : remote.favouriteAccountIDs,
+      accountOrder: local.accountOrder != baseline.accountOrder ? local.accountOrder : remote.accountOrder,
+      accountOrderByGroup: mergeMap(baseline: baseline.accountOrderByGroup, local: local.accountOrderByGroup, remote: remote.accountOrderByGroup),
+      accountGroupSorts: mergeMap(baseline: baseline.accountGroupSorts, local: local.accountGroupSorts, remote: remote.accountGroupSorts),
+      customAccountGroups: groups
+    )
+  }
+
+  private init(
+    favouriteAccountIDs: [String],
+    accountOrder: [String],
+    accountOrderByGroup: [String: [String]],
+    accountGroupSorts: [String: AccountGroupSort],
+    customAccountGroups: [CustomAccountGroup]
+  ) {
+    self.favouriteAccountIDs = favouriteAccountIDs
+    self.accountOrder = accountOrder
+    self.accountOrderByGroup = accountOrderByGroup
+    self.accountGroupSorts = accountGroupSorts
+    self.customAccountGroups = customAccountGroups
+  }
+}
+
+private func mergeMap<Value: Equatable>(baseline: [String: Value], local: [String: Value], remote: [String: Value]) -> [String: Value] {
+  var result = remote
+  for key in Set(baseline.keys).union(local.keys) where local[key] != baseline[key] {
+    result[key] = local[key]
+  }
+  return result
+}
+
+private func mergeCustomGroups(
+  baseline: [CustomAccountGroup],
+  local: [CustomAccountGroup],
+  remote: [CustomAccountGroup]
+) -> [CustomAccountGroup] {
+  let baselineByID = Dictionary(uniqueKeysWithValues: baseline.map { ($0.id, $0) })
+  let localByID = Dictionary(uniqueKeysWithValues: local.map { ($0.id, $0) })
+  let remoteByID = Dictionary(uniqueKeysWithValues: remote.map { ($0.id, $0) })
+  let localChangedOrder = local.map(\.id) != baseline.map(\.id)
+  let preferredOrder = localChangedOrder
+    ? local.map(\.id) + remote.map(\.id).filter { baselineByID[$0] == nil && localByID[$0] == nil }
+    : remote.map(\.id)
+  return preferredOrder.compactMap { id in
+    localByID[id] != baselineByID[id] ? localByID[id] : remoteByID[id]
+  }
+}
+
+struct SyncedAccountPreferences: Codable, Equatable {
+  let preferences: AccountPresentationPreferences
+  let revision: Int
+}
+
 private extension Array where Element == String {
   var uniqueNonEmptyStrings: [String] {
     var seen: Set<String> = []
@@ -505,15 +591,22 @@ struct ScopedViewPrefsStore: Codable, Equatable {
   static let userDefaultsKey = "HowMuch.ViewPrefsByScope"
 
   var scopes: [String: ViewPrefs] = [:]
+  var syncedAccountPreferences: [String: SyncedAccountPreferences] = [:]
   var didMigrateLegacy = false
 
   private enum CodingKeys: String, CodingKey {
     case scopes
+    case syncedAccountPreferences
     case didMigrateLegacy
   }
 
-  init(scopes: [String: ViewPrefs] = [:], didMigrateLegacy: Bool = false) {
+  init(
+    scopes: [String: ViewPrefs] = [:],
+    syncedAccountPreferences: [String: SyncedAccountPreferences] = [:],
+    didMigrateLegacy: Bool = false
+  ) {
     self.scopes = scopes.mapValues { $0.structurallyNormalised() }
+    self.syncedAccountPreferences = syncedAccountPreferences
     self.didMigrateLegacy = didMigrateLegacy
   }
 
@@ -532,6 +625,10 @@ struct ScopedViewPrefsStore: Codable, Equatable {
     } else {
       scopes = [:]
     }
+    syncedAccountPreferences = try container.decodeIfPresent(
+      [String: SyncedAccountPreferences].self,
+      forKey: .syncedAccountPreferences
+    ) ?? [:]
     didMigrateLegacy = try container.decodeIfPresent(Bool.self, forKey: .didMigrateLegacy) ?? false
   }
 
@@ -575,6 +672,11 @@ struct ScopedViewPrefsStore: Codable, Equatable {
 
   mutating func set(_ preferences: ViewPrefs, for scope: String) {
     scopes[scope] = preferences.structurallyNormalised()
+    save()
+  }
+
+  mutating func markAccountPreferencesSynced(_ snapshot: SyncedAccountPreferences, for scope: String) {
+    syncedAccountPreferences[scope] = snapshot
     save()
   }
 
@@ -627,8 +729,8 @@ enum AccountGroupSort: String, Codable, CaseIterable, Identifiable {
   }
 }
 
-/// A device-local account collection. Membership is deliberately represented
-/// by IDs so account balances and names remain authoritative API data.
+/// A synced account collection. Membership is deliberately represented by IDs
+/// so account balances and names remain authoritative API data.
 struct CustomAccountGroup: Codable, Equatable, Hashable, Identifiable {
   static let reservedIDs: Set<String> = ["favourites", "cash", "credit", "tracking", "closed"]
   static let reservedNameKeys: Set<String> = Set(["Favourites", "Cash", "Credit", "Tracking", "Closed"].map(normalisedNameKey))
@@ -680,6 +782,59 @@ struct ReferenceData {
   let accounts: [Account]
   let categoryGroups: [CategoryGroup]
   let payees: [Payee]
+  let accountPreferences: SyncedAccountPreferences?
+}
+
+struct AccountPreferencesPayload: Codable {
+  let accountPreferences: APIAccountPreferences?
+  let accountPreferencesRevision: Int
+}
+
+struct AccountPreferencesWriteRequest: Encodable {
+  let accountPreferences: APIAccountPreferences
+  let expectedRevision: Int
+}
+
+struct APIAccountPreferences: Codable {
+  let favouriteAccountIds: [String]
+  let accountOrder: [String]
+  let accountOrderByGroup: [String: [String]]
+  let accountGroupSorts: [String: AccountGroupSort]
+  let customAccountGroups: [APICustomAccountGroup]
+
+  init(_ preferences: AccountPresentationPreferences) {
+    favouriteAccountIds = preferences.favouriteAccountIDs
+    accountOrder = preferences.accountOrder
+    accountOrderByGroup = preferences.accountOrderByGroup
+    accountGroupSorts = preferences.accountGroupSorts
+    customAccountGroups = preferences.customAccountGroups.map(APICustomAccountGroup.init)
+  }
+
+  var presentationPreferences: AccountPresentationPreferences {
+    var preferences = ViewPrefs()
+    preferences.favouriteAccountIDs = favouriteAccountIds
+    preferences.accountOrder = accountOrder
+    preferences.accountOrderByGroup = accountOrderByGroup
+    preferences.accountGroupSorts = accountGroupSorts
+    preferences.customAccountGroups = customAccountGroups.map(\.customAccountGroup)
+    return AccountPresentationPreferences(preferences.structurallyNormalised())
+  }
+}
+
+struct APICustomAccountGroup: Codable {
+  let id: String
+  let name: String
+  let accountIds: [String]
+
+  init(_ group: CustomAccountGroup) {
+    id = group.id
+    name = group.name
+    accountIds = group.accountIDs
+  }
+
+  var customAccountGroup: CustomAccountGroup {
+    CustomAccountGroup(id: id, name: name, accountIDs: accountIds)
+  }
 }
 
 struct PlanSettingsPayload: Decodable {

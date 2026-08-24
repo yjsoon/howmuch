@@ -34,6 +34,19 @@ export interface Account {
   deleted: boolean;
 }
 
+export interface AccountPreferences {
+  favourite_account_ids: string[];
+  account_order: string[];
+  account_order_by_group: Record<string, string[]>;
+  account_group_sorts: Record<string, "manual" | "alphabetical" | "mostUsedLast30Days">;
+  custom_account_groups: Array<{ id: string; name: string; account_ids: string[] }>;
+}
+
+export interface AccountPreferencesSnapshot {
+  account_preferences: AccountPreferences | null;
+  account_preferences_revision: number;
+}
+
 export interface CategoryGroup {
   id: string;
   name: string;

@@ -60,4 +60,16 @@ describe("shouldHandleUnauthorized", () => {
     expect(captured!.init?.method).toBe("PATCH");
     expect(JSON.parse(String(captured!.init?.body))).toEqual({ expected_cleared: "uncleared", cleared: "cleared" });
   });
+
+  test("treats account preferences as optional on an older server", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      error: { name: "not_found", detail: "Route not found" },
+    }), { status: 404, headers: { "content-type": "application/json" } })) as typeof fetch;
+    try {
+      expect(await api.accountPreferences("plan-1")).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

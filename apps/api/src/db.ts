@@ -82,6 +82,10 @@ export function applyMigrations(db: Database): void {
       version: "014_personal_api_tokens",
       path: join(migrationsDir, "014_personal_api_tokens.sql"),
     },
+    {
+      version: "015_account_preferences",
+      path: join(migrationsDir, "015_account_preferences.sql"),
+    },
   ];
 
   for (const migration of migrations) {

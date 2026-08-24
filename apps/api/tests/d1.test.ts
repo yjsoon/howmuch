@@ -50,10 +50,10 @@ describe("D1 foundation", () => {
 
   test("canonical schema applies cleanly with auth constraints and cascades", async () => {
     const db = sqlite();
-    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql", "../d1-migrations/0011_personal_api_tokens.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
+    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql", "../d1-migrations/0011_personal_api_tokens.sql", "../d1-migrations/0012_account_preferences.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
     const objects = db.query("SELECT name,type FROM sqlite_master WHERE type IN ('table','index','trigger')").all() as Array<{name:string;type:string}>;
     const names = new Set(objects.map((row) => row.name));
-    for (const name of ["plans","import_sessions","import_rows","ynab_raw_objects","plan_month_assignments","plan_month_category_targets","scheduled_transaction_edits","scheduled_subtransaction_edits","scheduled_transaction_snapshot_assertions","account_reconciliation_assertions","users","auth_identities","sessions","personal_api_tokens","plan_memberships","password_credentials","auth_setup","login_rate_limits","sync_runs","sync_attempts","sync_transition_receipts","audit_events","write_state","write_commands","write_assertions","idx_sessions_user","idx_sessions_expiry","idx_personal_api_tokens_user","idx_plan_memberships_user_plan","transactions_assign_ledger_sequence","accounts_transfer_payee_plan_guard"]) expect(names.has(name)).toBeTrue();
+    for (const name of ["plans","import_sessions","import_rows","ynab_raw_objects","plan_month_assignments","plan_month_category_targets","scheduled_transaction_edits","scheduled_subtransaction_edits","scheduled_transaction_snapshot_assertions","account_reconciliation_assertions","users","auth_identities","sessions","personal_api_tokens","account_preferences","plan_memberships","password_credentials","auth_setup","login_rate_limits","sync_runs","sync_attempts","sync_transition_receipts","audit_events","write_state","write_commands","write_assertions","idx_sessions_user","idx_sessions_expiry","idx_personal_api_tokens_user","idx_plan_memberships_user_plan","transactions_assign_ledger_sequence","accounts_transfer_payee_plan_guard"]) expect(names.has(name)).toBeTrue();
     expect(names.has("schema_migrations")).toBeFalse();
     expect(names.has("migration_runs")).toBeFalse();
     expect(names.has("migration_chunks")).toBeFalse();
@@ -78,6 +78,47 @@ describe("D1 foundation", () => {
 
     db.run("INSERT INTO payees(id,plan_id,name) VALUES ('same-a','p1','Same'),('same-b','p1','Same')");
     expect(db.query("SELECT id FROM payees WHERE plan_id='p1' AND name='Same' ORDER BY id").all()).toEqual([{ id: "same-a" }, { id: "same-b" }]);
+  });
+
+  test("D1 account preferences use compare-and-set revisions", async () => {
+    const db = await ledgerSqlite();
+    db.run("INSERT INTO users(id) VALUES ('u')");
+    let mutationStarted!: () => void;
+    let releaseMutation!: () => void;
+    const started = new Promise<void>((resolve) => { mutationStarted = resolve; });
+    const gate = new Promise<void>((resolve) => { releaseMutation = resolve; });
+    let shouldDelayMutation = true;
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db, {
+      beforeRunMutation: async () => {
+        if (!shouldDelayMutation) return;
+        shouldDelayMutation = false;
+        mutationStarted();
+        await gate;
+      },
+    })), "p");
+    const preferences = {
+      favourite_account_ids: ["a"], account_order: [], account_order_by_group: {},
+      account_group_sorts: {}, custom_account_groups: [],
+    };
+
+    expect(await repo.getAccountPreferences("p", "u")).toEqual({
+      account_preferences: null, account_preferences_revision: 0,
+    });
+    const firstWrite = repo.setAccountPreferences("p", "u", preferences, 0);
+    let firstWriteSettled = false;
+    void firstWrite.then(
+      () => { firstWriteSettled = true; },
+      () => { firstWriteSettled = true; },
+    );
+    await started;
+    await Bun.sleep(0);
+    expect(firstWriteSettled).toBeFalse();
+    releaseMutation();
+    expect(await firstWrite).toEqual({
+      account_preferences: preferences, account_preferences_revision: 1,
+    });
+    await expect(repo.setAccountPreferences("p", "u", { ...preferences, favourite_account_ids: [] }, 0)).rejects.toThrow();
+    expect((await repo.setAccountPreferences("p", "u", { ...preferences, favourite_account_ids: [] }, 1)).account_preferences_revision).toBe(2);
   });
 
   test("D1 auth setup is atomic, one-time, and uses returning rate counters", async () => {
@@ -1475,7 +1516,7 @@ describe("D1 foundation", () => {
 
 async function ledgerSqlite(): Promise<Database> {
   const db = sqlite();
-  for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql", "../d1-migrations/0011_personal_api_tokens.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
+  for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql", "../d1-migrations/0011_personal_api_tokens.sql", "../d1-migrations/0012_account_preferences.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
   db.run("INSERT INTO plans (id, name) VALUES ('p', 'Plan')");
   db.run("INSERT INTO accounts (id, plan_id, name) VALUES ('a', 'p', 'Cash')");
   return db;
@@ -1483,7 +1524,7 @@ async function ledgerSqlite(): Promise<Database> {
 
 function sqlite(): Database { const db = new Database(":memory:", { strict: true }); databases.push(db); return db; }
 
-function fakeD1(db: Database, faults: { commitThenThrowOnce?: boolean; commitThenThrowSql?: RegExp; beforeWriteBatch?: (db: Database) => void; maxBindings?: number } = {}): D1Binding {
+function fakeD1(db: Database, faults: { commitThenThrowOnce?: boolean; commitThenThrowSql?: RegExp; beforeWriteBatch?: (db: Database) => void; maxBindings?: number; beforeRunMutation?: () => Promise<void> } = {}): D1Binding {
   let commitThenThrow = faults.commitThenThrowOnce ?? Boolean(faults.commitThenThrowSql);
   let mutateBeforeWrite = faults.beforeWriteBatch;
   // D1 serialises atomic batches.  Keep the fake faithful while still letting
@@ -1498,7 +1539,7 @@ function fakeD1(db: Database, faults: { commitThenThrowOnce?: boolean; commitThe
     }
     async all<Row>(): Promise<D1Result<Row>> { return { success: true, results: db.query(this.sql).all(...this.values as any[]) as Row[] }; }
     async first<Row>(): Promise<Row | null> { return db.query(this.sql).get(...this.values as any[]) as Row | null; }
-    async run(): Promise<D1Result> { const result = db.query(this.sql).run(...this.values as any[]); return { success: true, meta: { changes: Number(result.changes) } }; }
+    async run(): Promise<D1Result> { await faults.beforeRunMutation?.(); const result = db.query(this.sql).run(...this.values as any[]); return { success: true, meta: { changes: Number(result.changes) } }; }
     async execute<Row>(): Promise<D1Result<Row>> {
       return /^\s*(SELECT|WITH)\b/i.test(this.sql) ? this.all<Row>() : this.run() as Promise<D1Result<Row>>;
     }

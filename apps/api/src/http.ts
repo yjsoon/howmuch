@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { ApiConfig } from "./config";
-import { LedgerRepository, NotFoundError, ReconciliationMismatchError, TransactionStateConflictError, ValidationError } from "./repository";
-import { DEFAULT_TRANSACTION_PAGE_SIZE, MAX_TRANSACTION_PAGE_SIZE, type TransactionFilters } from "./types";
+import { AccountPreferencesConflictError, LedgerRepository, NotFoundError, ReconciliationMismatchError, TransactionStateConflictError, ValidationError } from "./repository";
+import { DEFAULT_TRANSACTION_PAGE_SIZE, MAX_TRANSACTION_PAGE_SIZE, type AccountPreferences, type TransactionFilters } from "./types";
 import { collectionPostIntent, parseTransactionCreates, parseTransactionUpdates } from "./transaction-batch";
 import { ReportService } from "./reports";
 import { decimalToMilliunits } from "./money";
@@ -88,6 +88,9 @@ export function createHandler(options: HandlerOptions): (request: Request) => Pr
       if (error instanceof TransactionStateConflictError) {
         return apiError(409, "transaction_state_conflict", error.message);
       }
+      if (error instanceof AccountPreferencesConflictError) {
+        return apiError(409, "account_preferences_conflict", "Account preferences changed on another client");
+      }
       if (error instanceof ScheduledTransactionValidationError) {
         return apiError(400, "bad_request", error.message);
       }
@@ -153,7 +156,10 @@ async function handleV1(
   }
 
   const planId = segments[2];
-  const denied = authorizePlan(principal, planId, defaultPlanId, method);
+  const isAccountPreferencesRoute = segments.length === 4 && segments[3] === "account_preferences";
+  const denied = isAccountPreferencesRoute
+    ? (!canRead(principal, planId, defaultPlanId) ? apiError(404, "resource_not_found", "Plan not found", "404.2") : null)
+    : authorizePlan(principal, planId, defaultPlanId, method);
   if (denied) return denied;
   await repo.ensurePlan(planId);
 
@@ -166,6 +172,23 @@ async function handleV1(
 
   if (resource === "settings" && segments.length === 4 && method === "GET") {
     return json({ data: { settings: await repo.getSettings(planId) } });
+  }
+
+  if (resource === "account_preferences" && segments.length === 4) {
+    if (principal.kind === "api-token") {
+      return apiError(403, "forbidden", "Account preferences require a user-scoped credential");
+    }
+    if (method === "GET") {
+      return json({ data: await repo.getAccountPreferences(planId, principal.id) });
+    }
+    if (method === "PUT") {
+      const body = await readJson(request);
+      const preferences = parseAccountPreferences(body.account_preferences);
+      if (!Number.isSafeInteger(body.expected_revision) || body.expected_revision < 0) {
+        throw new ValidationError("expected_revision must be a non-negative integer");
+      }
+      return json({ data: await repo.setAccountPreferences(planId, principal.id, preferences, body.expected_revision) });
+    }
   }
 
   if (resource === "accounts") {
@@ -435,6 +458,82 @@ async function handleV1(
   }
 
   return apiError(404, "not_found", "Route not found");
+}
+
+function parseAccountPreferences(value: unknown): AccountPreferences {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ValidationError("account_preferences is required");
+  }
+  const input = value as Record<string, unknown>;
+  if (new TextEncoder().encode(JSON.stringify(value)).byteLength > 65_536) {
+    throw new ValidationError("account_preferences is too large");
+  }
+  const strings = (field: unknown, name: string): string[] => {
+    if (!Array.isArray(field) || field.length > 500 || field.some((item) => typeof item !== "string" || !item || item.length > 200)) {
+      throw new ValidationError(`${name} must be an array of non-empty strings`);
+    }
+    if (new Set(field).size !== field.length) throw new ValidationError(`${name} must not contain duplicates`);
+    return field as string[];
+  };
+  const orderByGroup: Record<string, string[]> = Object.create(null);
+  if (!input.account_order_by_group || typeof input.account_order_by_group !== "object" || Array.isArray(input.account_order_by_group)) {
+    throw new ValidationError("account_order_by_group must be an object");
+  }
+  const orderEntries = Object.entries(input.account_order_by_group);
+  if (orderEntries.length > 100) throw new ValidationError("account_order_by_group has too many entries");
+  for (const [groupId, order] of orderEntries) {
+    if (!validPreferenceKey(groupId)) throw new ValidationError("account group IDs must be canonical non-empty strings");
+    orderByGroup[groupId] = strings(order, "account group order");
+  }
+  if (!input.account_group_sorts || typeof input.account_group_sorts !== "object" || Array.isArray(input.account_group_sorts)) {
+    throw new ValidationError("account_group_sorts must be an object");
+  }
+  const sorts: AccountPreferences["account_group_sorts"] = Object.create(null);
+  const sortEntries = Object.entries(input.account_group_sorts);
+  if (sortEntries.length > 100) throw new ValidationError("account_group_sorts has too many entries");
+  for (const [groupId, sort] of sortEntries) {
+    if (!validPreferenceKey(groupId) || !["manual", "alphabetical", "mostUsedLast30Days"].includes(String(sort))) {
+      throw new ValidationError("account group sorts are invalid");
+    }
+    sorts[groupId] = sort as AccountPreferences["account_group_sorts"][string];
+  }
+  if (!Array.isArray(input.custom_account_groups) || input.custom_account_groups.length > 100) {
+    throw new ValidationError("custom_account_groups must be an array");
+  }
+  const usedGroupIDs = new Set<string>();
+  const usedGroupNames = new Set<string>();
+  const reserved = new Set(["favourites", "cash", "credit", "tracking", "closed"]);
+  const dangerous = new Set(["__proto__", "prototype", "constructor"]);
+  const customGroups = input.custom_account_groups.map((group) => {
+    if (!group || typeof group !== "object" || Array.isArray(group)) throw new ValidationError("custom account groups are invalid");
+    const candidate = group as Record<string, unknown>;
+    if (typeof candidate.id !== "string" || !validPreferenceKey(candidate.id)
+      || typeof candidate.name !== "string" || !candidate.name.trim() || candidate.name.length > 100) {
+      throw new ValidationError("custom account groups are invalid");
+    }
+    const idKey = candidate.id.toLowerCase();
+    const nameKey = candidate.name.trim().toLocaleLowerCase();
+    if (reserved.has(idKey) || dangerous.has(idKey) || reserved.has(nameKey) || !usedGroupIDs.add(idKey) || !usedGroupNames.add(nameKey)) {
+      throw new ValidationError("custom account group IDs and names must be unique and non-reserved");
+    }
+    return { id: candidate.id, name: candidate.name.trim(), account_ids: strings(candidate.account_ids, "custom group account_ids") };
+  });
+  const validGroupIDs = new Set([...reserved, ...customGroups.map((group) => group.id)]);
+  if (orderEntries.some(([key]) => !validGroupIDs.has(key)) || sortEntries.some(([key]) => !validGroupIDs.has(key))) {
+    throw new ValidationError("account preference maps contain an unknown group ID");
+  }
+  return {
+    favourite_account_ids: strings(input.favourite_account_ids, "favourite_account_ids"),
+    account_order: strings(input.account_order, "account_order"),
+    account_order_by_group: orderByGroup,
+    account_group_sorts: sorts,
+    custom_account_groups: customGroups,
+  };
+}
+
+function validPreferenceKey(value: string): boolean {
+  return Boolean(value) && value.length <= 200 && value === value.trim()
+    && !["__proto__", "prototype", "constructor"].includes(value.toLowerCase());
 }
 
 async function handleNative(

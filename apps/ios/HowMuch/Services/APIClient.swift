@@ -12,6 +12,8 @@ enum APIClientError: LocalizedError {
   case invalidResponse
   case server(String)
   case reconciliationMismatch(ReconciliationMismatchDetail)
+  case accountPreferencesConflict
+  case endpointUnsupported
   case httpStatus(Int)
   case authenticationExpired
   case decoding(String)
@@ -27,6 +29,10 @@ enum APIClientError: LocalizedError {
       return message
     case .reconciliationMismatch(let detail):
       return detail.message
+    case .accountPreferencesConflict:
+      return "Account groups changed on another device."
+    case .endpointUnsupported:
+      return "This server does not support account group sync."
     case .httpStatus(let code):
       return "The API request failed with status \(code)."
     case .authenticationExpired:
@@ -70,12 +76,14 @@ struct APIClient {
     async let accounts = fetchAccounts(planID: planID)
     async let categories = fetchCategories(planID: planID)
     async let payees = fetchPayees(planID: planID)
+    async let accountPreferences = fetchAccountPreferences(planID: planID)
 
     return try await ReferenceData(
       planSettings: planSettings,
       accounts: accounts,
       categoryGroups: categories,
-      payees: payees
+      payees: payees,
+      accountPreferences: accountPreferences
     )
   }
 
@@ -98,6 +106,43 @@ struct APIClient {
   func fetchAccounts(planID: String) async throws -> [Account] {
     let response: APIEnvelope<AccountsPayload> = try await request(path: "/v1/plans/\(planID)/accounts")
     return response.data.accounts.filter { !$0.deleted }
+  }
+
+  func fetchAccountPreferences(planID: String) async throws -> SyncedAccountPreferences? {
+    do {
+      let response: APIEnvelope<AccountPreferencesPayload> = try await request(
+        path: "/v1/plans/\(planID)/account_preferences"
+      )
+      guard let preferences = response.data.accountPreferences else { return nil }
+      return SyncedAccountPreferences(
+        preferences: preferences.presentationPreferences,
+        revision: response.data.accountPreferencesRevision
+      )
+    } catch APIClientError.endpointUnsupported {
+      return nil
+    }
+  }
+
+  func updateAccountPreferences(
+    planID: String,
+    preferences: AccountPresentationPreferences,
+    expectedRevision: Int
+  ) async throws -> SyncedAccountPreferences {
+    let response: APIEnvelope<AccountPreferencesPayload> = try await request(
+      path: "/v1/plans/\(planID)/account_preferences",
+      method: "PUT",
+      body: AccountPreferencesWriteRequest(
+        accountPreferences: APIAccountPreferences(preferences),
+        expectedRevision: expectedRevision
+      )
+    )
+    guard let saved = response.data.accountPreferences else {
+      throw APIClientError.invalidResponse
+    }
+    return SyncedAccountPreferences(
+      preferences: saved.presentationPreferences,
+      revision: response.data.accountPreferencesRevision
+    )
   }
 
   func fetchCategories(planID: String) async throws -> [CategoryGroup] {
@@ -479,6 +524,9 @@ struct APIClient {
     }
 
     guard (200 ..< 300).contains(httpResponse.statusCode) else {
+      if httpResponse.statusCode == 404, path.hasSuffix("/account_preferences") {
+        throw APIClientError.endpointUnsupported
+      }
       if let serverError = try? decoder.decode(ServerErrorEnvelope.self, from: data) {
         // Login failures are intentionally not treated as session expiry: the
         // settings sheet uses a tokenless client to authenticate. For an
@@ -488,7 +536,7 @@ struct APIClient {
           (httpResponse.statusCode == 401 ||
            (httpResponse.statusCode == 403 && serverError.error.name == "not_authorized"))
         if authFailure {
-          NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: nil)
+          NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: trimmedToken)
           throw APIClientError.authenticationExpired
         }
         if serverError.error.name == "reconciliation_mismatch",
@@ -506,10 +554,13 @@ struct APIClient {
             )
           )
         }
+        if serverError.error.name == "account_preferences_conflict" {
+          throw APIClientError.accountPreferencesConflict
+        }
         throw APIClientError.server(serverError.error.detail)
       }
       if requestHasSession && httpResponse.statusCode == 401 {
-        NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: nil)
+        NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: trimmedToken)
         throw APIClientError.authenticationExpired
       }
       throw APIClientError.httpStatus(httpResponse.statusCode)

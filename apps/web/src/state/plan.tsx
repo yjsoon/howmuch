@@ -1,11 +1,12 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { ApiError, api, bumpRequestEpoch, setUnauthorizedHandler } from "../api/client";
-import type { Account, Category, CategoryGroup } from "../api/types";
+import type { Account, AccountPreferences, Category, CategoryGroup } from "../api/types";
 import { configureMoney } from "../lib/money";
 
 export interface PlanContextValue {
   planId: string;
   accounts: Account[];
+  accountPreferences: AccountPreferences | null;
   categoryGroups: CategoryGroup[];
   categories: Category[];
   categoryNames: Map<string, string>;
@@ -62,9 +63,10 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         if (!planId) {
           throw new Error("No plans found — run an import or create a transaction first.");
         }
-        const [settings, accounts, categoryGroups] = await Promise.all([
+        const [settings, accounts, accountPreferences, categoryGroups] = await Promise.all([
           api.settings(planId),
           api.accounts(planId),
+          api.accountPreferences(planId),
           api.categories(planId),
         ]);
         if (cancelled) {
@@ -75,6 +77,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         setValue({
           planId,
           accounts: accounts.filter((account) => !account.deleted),
+          accountPreferences,
           categoryGroups,
           categories,
           categoryNames: new Map(categories.map((category) => [category.id, category.name])),

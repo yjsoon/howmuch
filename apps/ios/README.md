@@ -5,7 +5,8 @@ A YNAB-styled transaction ledger, editable monthly Plan, and reports companion.
 API dependency:
 
 - `GET/POST/PUT/DELETE /v1/plans/{id}/transactions[/{txid}]`
-- `GET /v1/plans/{id}/accounts`, `/categories`, `/payees`, `/settings`
+- `GET /v1/plans/{id}/accounts`, `/categories`, `/payees`, `/settings`, `/account_preferences`
+- `PUT /v1/plans/{id}/account_preferences`
 - `GET /v1/plans/{id}/months/{YYYY-MM}`
 - `PATCH /v1/plans/{id}/months/{YYYY-MM}/categories/{categoryId}`
 - `GET /v1/plans/{id}/scheduled_transactions`

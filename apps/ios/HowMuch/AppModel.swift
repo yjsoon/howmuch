@@ -94,6 +94,11 @@ final class AppModel {
   private var referenceGeneration = 0
   private var scheduledTransactionsGeneration = 0
   private var reportsGeneration = 0
+  /// Serialises preference writes so a slower earlier request cannot overwrite
+  /// a newer reorder on the server.
+  @ObservationIgnored private var accountPreferencesSyncTask: Task<Void, Never>?
+  @ObservationIgnored private var accountPreferenceMutationGenerations: [String: Int] = [:]
+  @ObservationIgnored private var accountPreferenceSyncedGenerations: [String: Int] = [:]
 
   init(settings: APISettings = .load(), viewPrefs: ViewPrefs = .load()) {
     var scopedStore = ScopedViewPrefsStore.load()
@@ -114,9 +119,10 @@ final class AppModel {
       forName: .howMuchAuthenticationExpired,
       object: nil,
       queue: .main
-    ) { [weak self] _ in
+    ) { [weak self] notification in
+      guard let expiredSessionToken = notification.object as? String else { return }
       Task { @MainActor [weak self] in
-        self?.handleAuthenticationExpiry()
+        self?.handleAuthenticationExpiry(expiredSessionToken: expiredSessionToken)
       }
     }
   }
@@ -125,8 +131,8 @@ final class AppModel {
   /// revocation. Keeping stale accounts visible while another request reports
   /// "Invalid credentials" is misleading and can invite writes with a dead
   /// session, so the connection screen is made the single next step.
-  private func handleAuthenticationExpiry() {
-    guard settings.isAuthenticated else {
+  private func handleAuthenticationExpiry(expiredSessionToken: String) {
+    guard settings.isAuthenticated, settings.sessionToken == expiredSessionToken else {
       return
     }
 
@@ -372,7 +378,93 @@ final class AppModel {
       return
     }
     viewPrefs = viewPrefs.structurallyNormalised()
+    let previousAccountPreferences = scopedViewPrefsStore.scopes[scope].map(AccountPresentationPreferences.init)
+    let preferences = AccountPresentationPreferences(viewPrefs)
+    if previousAccountPreferences != preferences,
+       scopedViewPrefsStore.syncedAccountPreferences[scope] == nil {
+      // Persist the true pre-edit baseline even before first hydration. This
+      // distinguishes a user mutation from untouched legacy preferences.
+      let baseline = previousAccountPreferences ?? AccountPresentationPreferences(ViewPrefs())
+      scopedViewPrefsStore.markAccountPreferencesSynced(
+        SyncedAccountPreferences(preferences: baseline, revision: 0),
+        for: scope
+      )
+    }
     scopedViewPrefsStore.set(viewPrefs, for: scope)
+    if previousAccountPreferences != preferences {
+      accountPreferenceMutationGenerations[scope, default: 0] &+= 1
+      enqueueAccountPreferencesSync()
+    }
+  }
+
+  private func enqueueAccountPreferencesSync() {
+    guard let scope = activeViewPrefsScope, settings.isAuthenticated else {
+      return
+    }
+    let previous = accountPreferencesSyncTask
+    let client = apiClient
+    let planID = settings.planID
+    accountPreferencesSyncTask = Task {
+      await previous?.value
+      guard !Task.isCancelled else { return }
+      let syncGeneration = accountPreferenceMutationGenerations[scope, default: 0]
+      var baseline = scopedViewPrefsStore.syncedAccountPreferences[scope]
+      guard var scopedPreferences = scopedViewPrefsStore.scopes[scope] else { return }
+      var preferences = AccountPresentationPreferences(scopedPreferences)
+      guard baseline?.preferences != preferences else {
+        accountPreferenceSyncedGenerations[scope] = syncGeneration
+        return
+      }
+      for _ in 0 ..< 3 {
+        do {
+          let saved = try await client.updateAccountPreferences(
+            planID: planID,
+            preferences: preferences,
+            expectedRevision: baseline?.revision ?? 0
+          )
+          scopedViewPrefsStore.markAccountPreferencesSynced(saved, for: scope)
+          accountPreferenceSyncedGenerations[scope] = syncGeneration
+          return
+        } catch APIClientError.accountPreferencesConflict {
+          do {
+            let remote = try await client.fetchAccountPreferences(planID: planID)
+              ?? SyncedAccountPreferences(preferences: AccountPresentationPreferences(ViewPrefs()), revision: 0)
+            let latestScopedPreferences = scopedViewPrefsStore.scopes[scope] ?? scopedPreferences
+            let latestBaseline = scopedViewPrefsStore.syncedAccountPreferences[scope] ?? baseline
+            if latestBaseline == nil {
+              // A revision-zero conflict without a persisted pre-edit baseline
+              // is untouched legacy state from a later upgraded device.
+              scopedPreferences = remote.preferences.applying(to: latestScopedPreferences)
+              scopedViewPrefsStore.set(scopedPreferences, for: scope)
+              if activeViewPrefsScope == scope { viewPrefs = scopedPreferences }
+              scopedViewPrefsStore.markAccountPreferencesSynced(remote, for: scope)
+              accountPreferenceSyncedGenerations[scope] = syncGeneration
+              return
+            }
+            guard let baselinePreferences = latestBaseline?.preferences else { return }
+            preferences = AccountPresentationPreferences.merging(
+              baseline: baselinePreferences,
+              local: AccountPresentationPreferences(latestScopedPreferences),
+              remote: remote.preferences
+            )
+            scopedPreferences = preferences.applying(to: latestScopedPreferences)
+            preferences = AccountPresentationPreferences(scopedPreferences)
+            scopedViewPrefsStore.set(scopedPreferences, for: scope)
+            if activeViewPrefsScope == scope {
+              viewPrefs = scopedPreferences
+            }
+            scopedViewPrefsStore.markAccountPreferencesSynced(remote, for: scope)
+            baseline = remote
+          } catch {
+            return
+          }
+        } catch {
+          // Keep the local value different from the synced baseline. A later
+          // refresh retries it instead of applying an older server snapshot.
+          return
+        }
+      }
+    }
   }
 
   /// Switches the in-memory preference view whenever endpoint, user, or plan
@@ -461,6 +553,7 @@ final class AppModel {
         return
       }
       accountUsageLast30Days = counts
+      snapshotMostUsedAccountOrders()
       accountUsagePhase = .loaded
     } catch {
       guard
@@ -471,6 +564,32 @@ final class AppModel {
         return
       }
       accountUsagePhase = .failed(error.localizedDescription)
+    }
+  }
+
+  private func snapshotMostUsedAccountOrders() {
+    let cashTypes: Set<String> = ["checking", "savings", "cash"]
+    let creditTypes: Set<String> = ["creditCard", "lineOfCredit"]
+    let open = accounts.filter { !$0.closed }
+    let groups: [String: [Account]] = [
+      "favourites": open.filter { favouriteAccountIDs.contains($0.id) },
+      "cash": open.filter { cashTypes.contains($0.type) },
+      "credit": open.filter { creditTypes.contains($0.type) },
+      "tracking": open.filter { !cashTypes.contains($0.type) && !creditTypes.contains($0.type) },
+      "closed": accounts.filter(\.closed),
+    ].merging(Dictionary(uniqueKeysWithValues: customAccountGroups.map { group in
+      (group.id, accounts.filter { group.accountIDs.contains($0.id) })
+    })) { current, _ in current }
+    var changed = false
+    for (groupID, accounts) in groups where sortForAccountGroup(groupID) == .mostUsedLast30Days {
+      let order = orderedAccounts(accounts, inGroup: groupID).map(\.id)
+      if viewPrefs.accountOrderByGroup[groupID] != order {
+        viewPrefs.accountOrderByGroup[groupID] = order
+        changed = true
+      }
+    }
+    if changed {
+      saveViewPrefs()
     }
   }
 
@@ -671,6 +790,7 @@ final class AppModel {
     let generation = referenceGeneration
     let planID = settings.planID
     let scope = activeViewPrefsScope
+    let accountPreferencesAtStart = AccountPresentationPreferences(viewPrefs)
     if !quiet {
       referencePhase = .loading
     }
@@ -687,6 +807,33 @@ final class AppModel {
       categoryGroups = reference.categoryGroups
       payees = reference.payees
       rebuildLookups()
+      let localAccountPreferences = AccountPresentationPreferences(viewPrefs)
+      let lastSynced = scope.flatMap { scopedViewPrefsStore.syncedAccountPreferences[$0] }
+      let localChangedDuringRefresh = localAccountPreferences != accountPreferencesAtStart
+      let responseIsStale = reference.accountPreferences.map { response in
+        response.revision < (lastSynced?.revision ?? 0)
+      } ?? false
+      let hasUnsyncedLocalArrangement = lastSynced.map {
+        localAccountPreferences != $0.preferences
+      } ?? false
+      let hasPendingLocalMutation = scope.map {
+        accountPreferenceSyncedGenerations[$0, default: 0]
+          < accountPreferenceMutationGenerations[$0, default: 0]
+      } ?? false
+      if localChangedDuringRefresh || responseIsStale || hasUnsyncedLocalArrangement
+        || hasPendingLocalMutation {
+        enqueueAccountPreferencesSync()
+      } else if let accountPreferences = reference.accountPreferences {
+        viewPrefs = accountPreferences.preferences.applying(to: viewPrefs)
+        if let scope = activeViewPrefsScope {
+          scopedViewPrefsStore.set(viewPrefs, for: scope)
+          scopedViewPrefsStore.markAccountPreferencesSynced(accountPreferences, for: scope)
+        }
+      } else {
+        // First sync migrates an existing device-local arrangement instead of
+        // replacing it with an empty server default.
+        enqueueAccountPreferencesSync()
+      }
       pruneViewPrefs(using: reference.accounts)
       referencePhase = .loaded
     } catch {
