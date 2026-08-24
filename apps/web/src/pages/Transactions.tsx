@@ -13,6 +13,7 @@ import type {
   TransactionUpdateInput,
 } from "../api/types";
 import { CategorySelect } from "../components/CategorySelect";
+import { FlagPicker, FlagTag } from "../components/FlagTag";
 import { FilterRail } from "../components/FilterRail";
 import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
 import { formatDate, todayIso } from "../lib/dates";
@@ -861,7 +862,10 @@ export function TransactionsPage() {
                     <tr key={txn.id} className={txn.approved ? undefined : "register-row-unapproved"}>
                       <td className="nowrap">{formatDate(txn.date)}</td>
                       <td className="muted">{txn.account_name}</td>
-                      <td>{txn.payee_name ?? (txn.transfer_account_id ? "Transfer" : "-")}</td>
+                      <td>
+                        {txn.payee_name ?? (txn.transfer_account_id ? "Transfer" : "-")}
+                        <FlagTag colour={txn.flag_color} name={txn.flag_name} />
+                      </td>
                       <td className="muted">
                         {txn.subtransactions?.length
                           ? `Split · ${txn.subtransactions.length} lines`
@@ -1337,13 +1341,10 @@ function TransactionEditor({
           <input value={memo} onChange={(event) => setMemo(event.target.value)} placeholder="Note" />
         </label>
         <div className="transaction-editor-status-row">
-          <label className="field">
-            <span className="field-label">Flag</span>
-            <select value={flagColor} onChange={(event) => setFlagColor(event.target.value)}>
-              <option value="">None</option>
-              {['red', 'orange', 'yellow', 'green', 'blue', 'purple'].map((colour) => <option key={colour} value={colour}>{colour[0]!.toUpperCase() + colour.slice(1)}</option>)}
-            </select>
-          </label>
+          <div className="field">
+            <span className="field-label" id="transaction-flag-label">Flag</span>
+            <FlagPicker labelledBy="transaction-flag-label" value={flagColor} onChange={setFlagColor} disabled={disabled} />
+          </div>
           <label className="transaction-editor-checkbox">
             <input type="checkbox" checked={approved} onChange={(event) => setApproved(event.target.checked)} />
             Approved

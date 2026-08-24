@@ -1,12 +1,21 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api, bumpRequestEpoch, setUnauthorizedHandler } from "../api/client";
 import type { Account, AccountPreferences, Category, CategoryGroup } from "../api/types";
 import { configureMoney } from "../lib/money";
+import {
+  AccountPreferencesController,
+  emptyAccountPreferences,
+  type AccountPreferencesState,
+} from "./account-preferences";
 
 export interface PlanContextValue {
   planId: string;
   accounts: Account[];
+  ledgerKnowledge: number;
   accountPreferences: AccountPreferences | null;
+  accountPreferencesSync: AccountPreferencesState;
+  updateAccountPreferences: (updater: (preferences: AccountPreferences) => AccountPreferences) => void;
+  retryAccountPreferences: () => void;
   categoryGroups: CategoryGroup[];
   categories: Category[];
   categoryNames: Map<string, string>;
@@ -30,6 +39,10 @@ export function PlanProvider({ children }: { children: ReactNode }) {
   const [authMode, setAuthMode] = useState<"checking" | "setup" | "login" | "ready">("checking");
   const [bootstrapRequired, setBootstrapRequired] = useState(true);
   const [generation, setGeneration] = useState(0);
+  const accountPreferencesControllerRef = useRef<{
+    key: string;
+    controller: AccountPreferencesController;
+  } | null>(null);
 
   useEffect(() => {
     bumpRequestEpoch();
@@ -37,6 +50,8 @@ export function PlanProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setUnauthorizedHandler(() => {
+      accountPreferencesControllerRef.current?.controller.detach();
+      accountPreferencesControllerRef.current = null;
       setValue(null);
       setError("Your session ended. Sign in again.");
       setAuthMode("login");
@@ -63,10 +78,14 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         if (!planId) {
           throw new Error("No plans found — run an import or create a transaction first.");
         }
-        const [settings, accounts, accountPreferences, categoryGroups] = await Promise.all([
+        const controllerKey = `${status.user.id}:${planId}`;
+        const existingController = accountPreferencesControllerRef.current?.key === controllerKey
+          ? accountPreferencesControllerRef.current.controller
+          : null;
+        const [settings, accountsSnapshot, accountPreferencesSnapshot, categoryGroups] = await Promise.all([
           api.settings(planId),
           api.accounts(planId),
-          api.accountPreferences(planId),
+          existingController ? Promise.resolve(null) : api.accountPreferences(planId),
           api.categories(planId),
         ]);
         if (cancelled) {
@@ -74,16 +93,52 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         }
         configureMoney(settings.currency_format);
         const categories = categoryGroups.flatMap((group) => group.categories ?? []);
+        let accountPreferencesSync: AccountPreferencesState;
+        let accountPreferencesController = existingController;
+        if (!accountPreferencesController && accountPreferencesSnapshot) {
+          accountPreferencesControllerRef.current?.controller.detach();
+          accountPreferencesController = new AccountPreferencesController(
+            accountPreferencesSnapshot,
+            {
+              load: () => api.accountPreferences(planId),
+              save: (preferences, expectedRevision) =>
+                api.updateAccountPreferences(planId, preferences, expectedRevision),
+            },
+            (state) => {
+              if (accountPreferencesControllerRef.current?.key !== controllerKey) return;
+              setValue((current) => current?.planId === planId
+                ? { ...current, accountPreferences: state.preferences, accountPreferencesSync: state }
+                : current);
+            },
+          );
+          accountPreferencesControllerRef.current = { key: controllerKey, controller: accountPreferencesController };
+        }
+        if (accountPreferencesController) {
+          accountPreferencesSync = accountPreferencesController.state;
+        } else {
+          accountPreferencesSync = {
+            preferences: emptyAccountPreferences(),
+            revision: 0,
+            phase: "unsupported",
+            message: "This server version does not support synced account organisation.",
+          };
+        }
         setValue({
           planId,
-          accounts: accounts.filter((account) => !account.deleted),
-          accountPreferences,
+          accounts: accountsSnapshot.accounts.filter((account) => !account.deleted),
+          ledgerKnowledge: accountsSnapshot.server_knowledge,
+          accountPreferences: accountPreferencesController ? accountPreferencesSync.preferences : null,
+          accountPreferencesSync,
+          updateAccountPreferences: (updater) => accountPreferencesController?.update(updater),
+          retryAccountPreferences: () => accountPreferencesController?.retry(),
           categoryGroups,
           categories,
           categoryNames: new Map(categories.map((category) => [category.id, category.name])),
           reload: () => setGeneration((n) => n + 1),
           logout: async () => {
             await api.logout();
+            accountPreferencesControllerRef.current?.controller.detach();
+            accountPreferencesControllerRef.current = null;
             setValue(null);
             setError(null);
             setAuthMode("login");
@@ -103,6 +158,11 @@ export function PlanProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [generation]);
+
+  useEffect(() => () => {
+    accountPreferencesControllerRef.current?.controller.detach();
+    accountPreferencesControllerRef.current = null;
+  }, []);
 
   if (authMode === "setup" || authMode === "login") {
     return (

@@ -461,18 +461,14 @@ struct ViewPrefs: Codable, Equatable {
     }
 
     var usedIDs: Set<String> = []
-    var usedNames: Set<String> = []
     result.customAccountGroups = result.customAccountGroups.compactMap { group in
       let id = group.id.trimmingCharacters(in: .whitespacesAndNewlines)
       let name = group.name.trimmingCharacters(in: .whitespacesAndNewlines)
-      let nameKey = CustomAccountGroup.normalisedNameKey(name)
       guard
         !id.isEmpty,
         !CustomAccountGroup.reservedIDs.contains(id.lowercased()),
         !name.isEmpty,
-        !CustomAccountGroup.reservedNameKeys.contains(nameKey),
-        usedIDs.insert(id).inserted,
-        usedNames.insert(nameKey).inserted
+        usedIDs.insert(id).inserted
       else {
         return nil
       }
@@ -1766,6 +1762,9 @@ struct TransactionDraft: Equatable {
   var date = Date.now
   var isCleared = false
   var wasReconciled = false
+  /// Cleared state when the editor opened. New captures have none, so Save
+  /// always sends the toggle. Edits send it only when this differs.
+  var loadedCleared: ClearedState?
   var flag: FlagColour = .none
   var memo = ""
 
@@ -1789,6 +1788,7 @@ struct TransactionDraft: Equatable {
     date = Date(isoDateString: transaction.date) ?? .now
     isCleared = transaction.cleared != .uncleared
     wasReconciled = transaction.cleared == .reconciled
+    loadedCleared = transaction.cleared
     flag = FlagColour(rawValue: transaction.flagColor ?? "") ?? .none
     memo = transaction.memo ?? ""
   }
@@ -1878,6 +1878,19 @@ struct TransactionDraft: Equatable {
       return .uncleared
     }
     return wasReconciled ? .reconciled : .cleared
+  }
+
+  /// True when Save should send `cleared`. New rows always send it; edits
+  /// send it only if the user moved the toggle, so an untouched form cannot
+  /// write back a stale status after another client toggled the register.
+  var shouldWriteCleared: Bool {
+    guard let loadedCleared else {
+      return true
+    }
+    if loadedCleared == .reconciled || wasReconciled {
+      return false
+    }
+    return clearedState != loadedCleared
   }
 
   func writeRequest(includeCleared: Bool = true) -> TransactionWriteRequest {

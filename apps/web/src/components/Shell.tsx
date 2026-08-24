@@ -1,9 +1,12 @@
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { ApiError, api, type TransactionPage } from "../api/client";
+import type { AccountPreferences } from "../api/types";
 import { formatMoney } from "../lib/money";
-import { accountGroups as buildAccountGroups } from "../lib/account-groups";
+import { accountGroups as buildAccountGroups, type AccountGroup } from "../lib/account-groups";
 import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
+import { AccountOrganizationDialog, type AccountUsageState } from "./AccountOrganizationDialog";
 
 const REPORTS = [
   { to: "/spending", label: "Spending breakdown" },
@@ -14,11 +17,42 @@ const REPORTS = [
 
 export function Shell() {
   const location = useLocation();
-  const { accounts, accountPreferences, logout } = usePlan();
+  const {
+    planId,
+    accounts,
+    ledgerKnowledge,
+    accountPreferences,
+    accountPreferencesSync,
+    updateAccountPreferences,
+    retryAccountPreferences,
+    logout,
+  } = usePlan();
   const { filters } = useFilters();
   const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [organizerOpen, setOrganizerOpen] = useState(false);
+  const organizerOpener = useRef<HTMLButtonElement | null>(null);
+  const [usageGeneration, setUsageGeneration] = useState(0);
+  const [accountUsage, setAccountUsage] = useState<{
+    counts?: Record<string, number>;
+    state: AccountUsageState;
+  }>({ state: { phase: "idle", message: null } });
   const openAccounts = useMemo(() => accounts.filter((account) => !account.closed), [accounts]);
-  const accountGroups = useMemo(() => buildAccountGroups(accounts, accountPreferences), [accounts, accountPreferences]);
+  const accountGroups = useMemo(
+    () => buildAccountGroups(accounts, accountPreferences, accountUsage.counts),
+    [accounts, accountPreferences, accountUsage.counts],
+  );
+  const usesMostUsedSort = accountPreferences
+    ? Object.values(accountPreferences.account_group_sorts).includes("mostUsedLast30Days")
+    : false;
+  const usageDate = localIsoDate(new Date());
+  const openOrganizer = (opener: HTMLButtonElement) => {
+    organizerOpener.current = opener;
+    setOrganizerOpen(true);
+  };
+  const closeOrganizer = () => {
+    setOrganizerOpen(false);
+    requestAnimationFrame(() => organizerOpener.current?.focus());
+  };
   const selectedAccount = location.pathname === "/transactions" && filters.accountIds.length === 1
     ? accounts.find((account) => account.id === filters.accountIds[0])
     : undefined;
@@ -43,6 +77,38 @@ export function Shell() {
       ?? report?.label;
     document.title = label ? `${label} · HowMuch` : "HowMuch";
   }, [location.pathname, registerLabel]);
+
+  useEffect(() => {
+    if (!usesMostUsedSort) {
+      setAccountUsage({ state: { phase: "idle", message: null } });
+      return;
+    }
+    let cancelled = false;
+    setAccountUsage((current) => ({ ...current, state: { phase: "loading", message: null } }));
+    loadAccountUsageLast30Days(planId, usageDate, () => cancelled)
+      .then((counts) => {
+        if (cancelled) return;
+        setAccountUsage({ counts, state: { phase: "loaded", message: null } });
+      })
+      .catch((cause) => {
+        if (!cancelled) {
+          setAccountUsage({
+            state: { phase: "error", message: cause instanceof Error ? cause.message : String(cause) },
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [planId, ledgerKnowledge, usageDate, usesMostUsedSort, usageGeneration]);
+
+  useEffect(() => {
+    if (!accountPreferences || !accountUsage.counts) return;
+    updateAccountPreferences((current) => snapshotMostUsedOrders(
+      current,
+      buildAccountGroups(accounts, current, accountUsage.counts),
+    ));
+  }, [accounts, accountPreferences, accountUsage.counts]);
 
   return (
     <div className="shell">
@@ -95,6 +161,13 @@ export function Shell() {
             <span aria-hidden="true">▤</span> All Accounts
             <span className="sidebar-balance" title="Open-account working balance">{formatMoney(openAccounts.reduce((sum, account) => sum + account.balance, 0))}</span>
           </NavLink>
+          <button
+            type="button"
+            className="sidebar-primary-link account-organizer-entry"
+            onClick={(event) => openOrganizer(event.currentTarget)}
+          >
+            <span aria-hidden="true">☷</span> Organise accounts
+          </button>
         </nav>
 
         <div className="account-list">
@@ -136,6 +209,11 @@ export function Shell() {
         <header className="mobile-masthead">
           <span className="masthead-title">HowMuch</span>
           <div className="mobile-actions">
+            <button
+              type="button"
+              className="mobile-organizer-entry"
+              onClick={(event) => openOrganizer(event.currentTarget)}
+            >Organise</button>
             <NavLink to="/add" className="add-button">+ Add</NavLink>
             <button type="button" className="sign-out-button" onClick={handleLogout}>Sign out</button>
           </div>
@@ -147,6 +225,131 @@ export function Shell() {
           </Suspense>
         </main>
       </div>
+      {!organizerOpen && (
+        <AccountOrganizationNotice
+          sync={accountPreferencesSync}
+          supported={accountPreferences !== null}
+          usage={accountUsage.state}
+          onRetrySave={retryAccountPreferences}
+          onRetryUsage={() => setUsageGeneration((generation) => generation + 1)}
+        />
+      )}
+      {organizerOpen && (
+        <AccountOrganizationDialog
+          accountGroups={accountGroups}
+          usage={accountUsage.state}
+          onRetryUsage={() => setUsageGeneration((generation) => generation + 1)}
+          onClose={closeOrganizer}
+        />
+      )}
     </div>
   );
+}
+
+function AccountOrganizationNotice({ sync, supported, usage, onRetrySave, onRetryUsage }: {
+  sync: ReturnType<typeof usePlan>["accountPreferencesSync"];
+  supported: boolean;
+  usage: AccountUsageState;
+  onRetrySave: () => void;
+  onRetryUsage: () => void;
+}) {
+  const showSync = sync.phase === "saving" || sync.phase === "error" || (supported && sync.phase === "unsupported");
+  const showUsage = usage.phase === "error";
+  if (!showSync && !showUsage) return null;
+  return (
+    <div className="account-organization-global-status" role={sync.phase === "saving" && !showUsage ? "status" : "alert"} aria-live="polite">
+      {showSync && (
+        <span>
+          {sync.message}
+          {sync.phase === "error" && <button type="button" onClick={onRetrySave}>Retry save</button>}
+        </span>
+      )}
+      {showUsage && (
+        <span>
+          30-day account usage is unavailable. <button type="button" onClick={onRetryUsage}>Retry</button>
+        </span>
+      )}
+    </div>
+  );
+}
+
+function snapshotMostUsedOrders(preferences: AccountPreferences, groups: AccountGroup[]): AccountPreferences {
+  let changed = false;
+  const accountOrderByGroup = { ...preferences.account_order_by_group };
+  for (const group of groups) {
+    if (preferences.account_group_sorts[group.id] !== "mostUsedLast30Days") continue;
+    const order = group.accounts.map((account) => account.id);
+    if (JSON.stringify(accountOrderByGroup[group.id] ?? []) !== JSON.stringify(order)) {
+      accountOrderByGroup[group.id] = order;
+      changed = true;
+    }
+  }
+  return changed ? { ...preferences, account_order_by_group: accountOrderByGroup } : preferences;
+}
+
+async function loadAccountUsageLast30Days(
+  planId: string,
+  untilDate: string,
+  isCancelled: () => boolean,
+): Promise<Record<string, number>> {
+  const [year, month, day] = untilDate.split("-").map(Number);
+  const start = new Date(year!, month! - 1, day!);
+  start.setDate(start.getDate() - 29);
+  const sinceDate = localIsoDate(start);
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (isCancelled()) throw new Error("The account usage scan was superseded.");
+    const counts: Record<string, number> = {};
+    const transactionIds = new Set<string>();
+    const requestedOffsets = new Set<number>();
+    let offset = 0;
+    let expectedKnowledge: number | undefined;
+    let ledgerChanged = false;
+    try {
+      while (requestedOffsets.size < 250) {
+        if (isCancelled()) throw new Error("The account usage scan was superseded.");
+        if (requestedOffsets.has(offset)) throw new Error("The transaction usage cursor repeated.");
+        requestedOffsets.add(offset);
+        const page: TransactionPage = await api.transactions(planId, {
+          since_date: sinceDate,
+          until_date: untilDate,
+          limit: 250,
+          offset,
+        });
+        if (isCancelled()) throw new Error("The account usage scan was superseded.");
+        if (expectedKnowledge !== undefined && page.server_knowledge !== expectedKnowledge) {
+          ledgerChanged = true;
+          break;
+        }
+        expectedKnowledge = page.server_knowledge;
+        for (const transaction of page.transactions) {
+          if (transaction.date >= sinceDate && transaction.date <= untilDate && !transactionIds.has(transaction.id)) {
+            transactionIds.add(transaction.id);
+            counts[transaction.account_id] = (counts[transaction.account_id] ?? 0) + 1;
+          }
+        }
+        if (!page.has_more) return counts;
+        if (page.transactions.length === 0) throw new Error("The transaction usage page was empty before the final page.");
+        if (page.next_offset === null || page.next_offset <= offset) {
+          throw new Error("The transaction usage cursor did not advance.");
+        }
+        offset = page.next_offset;
+      }
+    } catch (cause) {
+      if (!isCancelled() && attempt === 0 && cause instanceof ApiError && cause.status === 409 && cause.code === "ledger_changed") {
+        continue;
+      }
+      throw cause;
+    }
+    if (!ledgerChanged && requestedOffsets.size >= 250) {
+      throw new Error("The transaction usage scan exceeded its safe page limit.");
+    }
+  }
+  throw new Error("Transactions changed while usage was loading. Try again.");
+}
+
+function localIsoDate(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
 }
