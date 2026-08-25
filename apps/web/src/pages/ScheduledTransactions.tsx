@@ -105,7 +105,7 @@ export function ScheduledTransactionsPage() {
     <>
       <header className="report-header schedule-header">
         <div>
-          <span className="page-eyebrow">Future ledger</span>
+          <span className="page-eyebrow">Upcoming</span>
           <h1>Scheduled transactions</h1>
         </div>
         <div className="headline-row schedule-figures" aria-label="Schedule summary">
@@ -122,8 +122,6 @@ export function ScheduledTransactionsPage() {
         </div>
       </header>
 
-      <p className="diagnostic-note">Changes stay in HowMuch and preserve the imported YNAB schedule beneath the local overlay.</p>
-
       {mutationError && <div className="status-panel status-panel-error" role="alert"><p className="status-title">Could not update scheduled transactions.</p><p className="status-detail">{mutationError}</p></div>}
       {mutationSuccess && <div className="status-panel" role="status"><p className="status-title">{mutationSuccess}</p></div>}
       {editor && (
@@ -139,7 +137,7 @@ export function ScheduledTransactionsPage() {
       )}
       {pendingDeletion && (
         <section className="transaction-editor schedule-delete-confirm" aria-labelledby="delete-schedule-heading">
-          <div className="section-heading"><div><span className="section-title" id="delete-schedule-heading">Delete scheduled transaction?</span><span className="section-meta">This stops future instances in HowMuch.</span></div></div>
+          <div className="section-heading"><div><span className="section-title" id="delete-schedule-heading">Delete scheduled transaction?</span><span className="section-meta">This stops future repeats.</span></div></div>
           <p>{scheduleLabel(pendingDeletion.schedule, payeeNames, accountNames)} is due next on {pendingDeletion.schedule.date_next ? formatDate(pendingDeletion.schedule.date_next) : "its configured date"}.</p>
           <div className="transaction-editor-actions">
             <button type="button" className="text-button" onClick={() => setPendingDeletion(null)} disabled={mutatingId === pendingDeletion.schedule.id}>Cancel</button>
@@ -149,7 +147,7 @@ export function ScheduledTransactionsPage() {
       )}
       {pendingEntry && (
         <section className="transaction-editor schedule-enter-confirm" aria-labelledby="enter-schedule-heading">
-          <div className="section-heading"><div><span className="section-title" id="enter-schedule-heading">Enter scheduled transaction now?</span><span className="section-meta">This creates one real ledger transaction and advances the schedule.</span></div></div>
+          <div className="section-heading"><div><span className="section-title" id="enter-schedule-heading">Enter scheduled transaction now?</span><span className="section-meta">This adds the next payment to your register and moves the schedule forward.</span></div></div>
           <p><strong>{scheduleLabel(pendingEntry.schedule, payeeNames, accountNames)}</strong> is scheduled for {formatDate(pendingEntry.occurrenceDate)}.</p>
           <label className="field">
             <span className="field-label">Register date</span>
@@ -163,7 +161,7 @@ export function ScheduledTransactionsPage() {
               } : current)}
               required
             />
-            <span className="field-note">Defaults to today on this device. The schedule still advances from {formatDate(pendingEntry.occurrenceDate)}.</span>
+            <span className="field-note">Defaults to today. The schedule still moves forward from {formatDate(pendingEntry.occurrenceDate)}.</span>
           </label>
           <div className="transaction-editor-actions">
             <button type="button" className="text-button" onClick={() => setPendingEntry(null)} disabled={mutatingId === pendingEntry.schedule.id}>Cancel</button>
@@ -258,7 +256,7 @@ function ScheduleEditor({ schedule, accounts, categoryGroups, payees, saving, on
   };
 
   return <section className="transaction-editor schedule-editor" aria-labelledby="schedule-editor-heading">
-    <div className="section-heading"><div><span className="section-title" id="schedule-editor-heading">{schedule ? "Edit scheduled transaction" : "Add scheduled transaction"}</span><span className="section-meta">{schedule ? "Changes apply to future instances in HowMuch." : "Create a repeating future ledger entry."}</span></div><button type="button" className="text-button" onClick={onCancel} disabled={saving}>Cancel</button></div>
+    <div className="section-heading"><div><span className="section-title" id="schedule-editor-heading">{schedule ? "Edit scheduled transaction" : "Add scheduled transaction"}</span><span className="section-meta">{schedule ? "Changes apply to future repeats." : "Add a repeating transaction."}</span></div><button type="button" className="text-button" onClick={onCancel} disabled={saving}>Cancel</button></div>
     <form className="transaction-editor-form" onSubmit={(event) => void submit(event)}>
       <div className="field-row transaction-editor-top-row"><label className="field"><span className="field-label">Account</span><select value={accountId} onChange={(event) => setAccountId(event.target.value)} required><option value="">Choose account</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}{account.closed ? " (closed)" : ""}</option>)}</select></label><label className="field"><span className="field-label">Amount</span><input type="text" inputMode="decimal" value={isSplit ? formatMilliunitsInput(splitTotal) : amount} onChange={(event) => setAmount(event.target.value)} disabled={isSplit} required /><span className="field-note">Use a minus sign for outflow. Amounts use up to three decimal places.</span></label></div>
       <div className="field-row transaction-editor-top-row"><label className="field"><span className="field-label">First date</span><input type="date" value={firstDate} onChange={(event) => setFirstDate(event.target.value)} required /></label><label className="field"><span className="field-label">Next date</span><input type="date" value={nextDate} onChange={(event) => setNextDate(event.target.value)} required /></label><label className="field"><span className="field-label">Repeat</span><select value={frequency} onChange={(event) => setFrequency(event.target.value)}>{FREQUENCIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>

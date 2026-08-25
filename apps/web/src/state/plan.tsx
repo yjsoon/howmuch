@@ -76,7 +76,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         const plans = await api.plans();
         const planId = plans[0]?.id;
         if (!planId) {
-          throw new Error("No plans found — run an import or create a transaction first.");
+          throw new Error("No plans are available yet.");
         }
         const controllerKey = `${status.user.id}:${planId}`;
         const existingController = accountPreferencesControllerRef.current?.key === controllerKey
@@ -183,7 +183,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
   if (error) {
     return (
       <div className="boot-message">
-        <p>Could not reach the HowMuch API.</p>
+        <p>Could not reach HowMuch.</p>
         <p className="boot-detail">{error}</p>
         <button type="button" onClick={() => { setError(null); setGeneration((n) => n + 1); }}>
           Retry
@@ -192,7 +192,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
     );
   }
   if (!value) {
-    return <div className="boot-message">{authMode === "checking" ? "Checking session…" : "Loading ledger…"}</div>;
+    return <div className="boot-message">{authMode === "checking" ? "Checking session…" : "Loading…"}</div>;
   }
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }
@@ -236,7 +236,7 @@ function AuthForm({
       }}
     >
       <h1>{setup ? "Set up HowMuch" : "Sign in to HowMuch"}</h1>
-      <p>{setup ? "Create the first owner account." : "Enter your username and password."}</p>
+      <p>{setup ? "Create your account." : "Enter your username and password."}</p>
       <label>
         <span>Username</span>
         <input
@@ -265,7 +265,7 @@ function AuthForm({
       </label>
       {setup && bootstrapRequired && (
         <label>
-          <span>Bootstrap token</span>
+          <span>Setup token</span>
           <input
             type="password"
             value={bootstrapToken}
@@ -282,7 +282,7 @@ function AuthForm({
         {submitting ? "Please wait…" : setup ? "Create account" : "Sign in"}
       </button>
       {setup && bootstrapRequired && (
-        <p className="boot-hint">The bootstrap token is used once and is never stored in this browser.</p>
+        <p className="boot-hint">This setup token is used once and is not stored in this browser.</p>
       )}
       {error && <p className="boot-detail" role="alert">{error}</p>}
     </form>

@@ -92,7 +92,7 @@ export function AgeOfMoneyPage() {
               )}
               <section className="report-section">
                 <div className="section-heading">
-                  <span className="section-title">Period ledger</span>
+                  <span className="section-title">History</span>
                   <span className="section-meta">Newest periods first</span>
                 </div>
                 <div className="table-wrap">
@@ -126,7 +126,7 @@ export function AgeOfMoneyPage() {
           ) : (
             <div className="status-panel">
               <p className="status-title">No spending in this range.</p>
-              <p className="status-detail">The ledger needs both inflows and outflows before age of money can be computed.</p>
+              <p className="status-detail">Need both income and spending before age of money can be calculated.</p>
             </div>
           )}
         </>

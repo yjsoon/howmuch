@@ -156,11 +156,10 @@ struct RegisterView: View {
         }
 
         if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-          Text("Searches the \(model.transactions.count) transactions loaded on this device.")
+          Text("Search covers \(model.transactions.count) loaded transaction\(model.transactions.count == 1 ? "" : "s"). Scroll to load older ones.")
             .font(.footnote)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityLabel("Searches the \(model.transactions.count) transactions loaded on this device. Load older transactions to extend the search.")
         }
 
         if visibleTransactions.isEmpty, model.ledgerPhase == .loaded {
@@ -168,7 +167,7 @@ struct RegisterView: View {
             ContentUnavailableView(
               "No Transactions",
               systemImage: "tray",
-              description: Text("Transactions you add or import will appear here.")
+              description: Text("Transactions you add will appear here.")
             )
           } else {
             ContentUnavailableView.search

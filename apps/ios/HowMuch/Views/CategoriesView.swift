@@ -393,18 +393,15 @@ private struct PlanTargetSheet: View {
           TextField("Target amount", text: $amountText)
             .keyboardType(.decimalPad)
             .multilineTextAlignment(.trailing)
-          TextField("Target month (optional, YYYY-MM)", text: $monthText)
+          TextField("Target month (optional)", text: $monthText)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
-          Text("Targets are saved in HowMuch and do not change the imported YNAB data.")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
         }
         Section {
           Button("Clear target", role: .destructive) { Task { await clear() } }
             .disabled(isSaving)
           if category.targetSource != nil {
-            Button("Restore imported target") { Task { await restoreSource() } }
+            Button("Restore original target") { Task { await restoreSource() } }
               .disabled(isSaving)
           }
         }
@@ -430,7 +427,7 @@ private struct PlanTargetSheet: View {
     }
     let trimmedMonth = monthText.trimmingCharacters(in: .whitespacesAndNewlines)
     guard trimmedMonth.isEmpty || trimmedMonth.range(of: "^[0-9]{4}-(0[1-9]|1[0-2])$", options: .regularExpression) != nil else {
-      errorMessage = "Use YYYY-MM for the optional target month."
+      errorMessage = "Use a month like 2026-08."
       return
     }
     isSaving = true; errorMessage = nil
@@ -504,7 +501,7 @@ private struct PlanAssignmentSheet: View {
           TextField("Assigned", text: $amountText)
             .keyboardType(.decimalPad)
             .multilineTextAlignment(.trailing)
-          Text("Enter the amount to assign for this month. Targets use a separate HowMuch-local editor.")
+          Text("Enter the amount to assign for this month.")
             .font(.footnote)
             .foregroundStyle(.secondary)
         }

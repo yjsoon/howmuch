@@ -497,7 +497,7 @@ export function TransactionsPage() {
 
   const emptyMessage =
     page.loaded && page.transactions.length === 0
-      ? "No transactions have been recorded in this ledger yet."
+      ? "No transactions yet."
       : deferredSearch.trim()
         ? "No transactions match this search."
         : "No transactions match these filters.";
@@ -741,7 +741,7 @@ export function TransactionsPage() {
 
             {reconcileDraft.mismatch && (
               <div className="status-panel status-panel-error reconcile-mismatch" role="alert">
-                <p className="status-title">The statement balance does not match the reconciled ledger total.</p>
+                <p className="status-title">The statement balance does not match the reconciled total.</p>
                 <p className="status-detail">
                   Update the cleared transactions on or before {formatDate(reconcileDraft.statementDate)} or correct the statement balance, then try again.
                 </p>
@@ -789,7 +789,7 @@ export function TransactionsPage() {
           <div>
             <h2 id="delete-transaction-heading">{pendingDeletion.approved ? "Delete transaction?" : "Reject new transaction?"}</h2>
             <p id="delete-transaction-detail">
-              {pendingDeletion.payee_name ?? (pendingDeletion.transfer_account_id ? "This transfer" : "This transaction")} will be removed from HowMuch.
+              {pendingDeletion.payee_name ?? (pendingDeletion.transfer_account_id ? "This transfer" : "This transaction")} will be deleted.
               {pendingDeletion.transfer_transaction_id ? " Its linked transfer entry will also be removed." : ""}
             </p>
           </div>

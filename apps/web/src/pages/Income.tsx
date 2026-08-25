@@ -80,7 +80,7 @@ export function IncomePage() {
               </section>
               <section className="report-section">
                 <div className="section-heading">
-                  <span className="section-title">Period ledger</span>
+                  <span className="section-title">History</span>
                   <span className="section-meta">Newest periods first</span>
                 </div>
                 <div className="table-wrap">

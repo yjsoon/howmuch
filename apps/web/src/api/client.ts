@@ -89,7 +89,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(message, response.status, typeof detail?.name === "string" ? detail.name : undefined, detail);
   }
   if (!body || typeof body !== "object" || !("data" in body)) {
-    throw new ApiError("Unexpected response from the HowMuch API", response.status);
+    throw new ApiError("Unexpected response from HowMuch", response.status);
   }
   return (body as { data: T }).data;
 }

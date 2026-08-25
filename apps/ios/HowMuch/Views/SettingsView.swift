@@ -75,14 +75,14 @@ struct SettingsView: View {
               : "Enter a complete HTTP or HTTPS URL with a host.")
               .foregroundStyle(Theme.outflow)
           } else {
-            Text("New installs use the production service. HTTP is allowed only for this device or this LAN. First-owner setup can only be opened from an HTTPS site.")
+            Text("New installs connect to HowMuch. HTTP is allowed only for this device or this network. First-time setup must be opened from the website.")
           }
         }
         .disabled(isTesting)
 
         if setupState == .required {
           Section {
-            Text("This HowMuch server does not have an owner yet. Finish first-owner setup securely in the HowMuch website, then return here and retry before signing in.")
+            Text("This HowMuch site does not have an account yet. Finish setup in the website, then return here and sign in.")
 
             if let setupURL = draft.browserSetupURL {
               Button {
@@ -91,7 +91,7 @@ struct SettingsView: View {
                 Label("Open HowMuch Setup in Browser", systemImage: "safari")
               }
             } else {
-              Text("Enter the server's HTTPS URL above to open setup in your browser.")
+              Text("Enter the HTTPS address above to open setup in your browser.")
                 .foregroundStyle(.secondary)
             }
 
@@ -99,7 +99,7 @@ struct SettingsView: View {
               checkSetupStatus()
             }
           } header: {
-            Text("First-owner setup required")
+            Text("Setup required")
           }
         } else if case .failure(let message) = setupState {
           Section {
@@ -230,7 +230,7 @@ struct SettingsView: View {
       Section("Plan") {
         Text("No plans available")
           .font(.headline)
-        Text("This account doesn’t have access to a plan yet. Ask the server owner to add access, then try again.")
+        Text("This account doesn’t have access to a plan yet. Ask for access, then try again.")
           .foregroundStyle(.secondary)
         Button("Try Again") {
           loadPlans()
@@ -311,7 +311,7 @@ struct SettingsView: View {
         let status = try await client.fetchAuthStatus()
         guard !status.setupRequired else {
           setupState = .required
-          testResult = .failure("Complete first-owner setup in the website before signing in.")
+          testResult = .failure("Finish setup in the website before signing in.")
           isTesting = false
           return
         }
