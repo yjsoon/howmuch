@@ -1419,7 +1419,6 @@ describe("D1 foundation", () => {
     }, { operationId: "split-create" });
     const splitMirror = (db.query("SELECT transfer_transaction_id FROM subtransactions WHERE id = 'line-transfer'").get() as any).transfer_transaction_id;
     await expect(writer.update("p", splitMirror, { memo: "blocked" }, { operationId: "split-mirror-update" })).rejects.toThrow("linked side of a split line");
-    await expect(writer.delete("p", splitMirror, { operationId: "split-mirror-delete" })).rejects.toThrow("linked side of a split line");
     await writer.approve("p", splitMirror, true, { operationId: "split-mirror-approve" });
     expect(db.query("SELECT id,approved FROM transactions WHERE id IN ('split-update',?) ORDER BY id").all(splitMirror)).toEqual([
       { id: "split-update", approved: 1 },
@@ -1441,6 +1440,37 @@ describe("D1 foundation", () => {
     expect(db.query("SELECT deleted FROM transactions WHERE id = ?").get(splitMirror)).toEqual({ deleted: 1 });
     await writer.delete("p", "split-update", { operationId: "split-delete" });
     expect(db.query("SELECT balance_milli FROM accounts WHERE id = 'a'").get()).toEqual({ balance_milli: 0 });
+  });
+
+  test("D1 rejects a new linked split-transfer side and unlinks the split line", async () => {
+    const db = await ledgerSqlite();
+    db.run("INSERT INTO accounts (id, plan_id, name) VALUES ('b', 'p', 'Savings')");
+    db.run("INSERT INTO payees (id, plan_id, name, transfer_account_id) VALUES ('to-a','p','Transfer to Cash','a'),('to-b','p','Transfer to Savings','b')");
+    db.run("UPDATE accounts SET transfer_payee_id=CASE id WHEN 'a' THEN 'to-a' ELSE 'to-b' END WHERE id IN ('a','b')");
+    const d1 = new D1Database(fakeD1(db));
+    const repo = new D1LedgerRepository(d1, "p");
+    const created = await repo.createTransaction("p", {
+      account_id: "a",
+      date: "2026-07-02",
+      amount: -30,
+      approved: false,
+      subtransactions: [
+        { id: "line-transfer", amount: -10, payee_id: "to-b" },
+        { id: "line-plain", amount: -20 },
+      ],
+    });
+    const mirrorId = created.subtransactions.find((sub: { transfer_transaction_id?: string }) => sub.transfer_transaction_id)?.transfer_transaction_id;
+    expect(mirrorId).toBeString();
+    const rejected = await repo.deleteTransaction("p", mirrorId, false);
+    expect(rejected).toMatchObject({ id: mirrorId, deleted: true, approved: false });
+    expect(db.query("SELECT deleted FROM transactions WHERE id=?").get(mirrorId)).toEqual({ deleted: 1 });
+    expect(db.query("SELECT transfer_account_id, transfer_transaction_id, deleted FROM subtransactions WHERE id='line-transfer'").get()).toEqual({
+      transfer_account_id: null,
+      transfer_transaction_id: null,
+      deleted: 0,
+    });
+    expect(db.query("SELECT deleted FROM transactions WHERE id=?").get(created.id)).toEqual({ deleted: 0 });
+    expect(db.query("SELECT balance_milli FROM accounts WHERE id='b'").get()).toEqual({ balance_milli: 0 });
   });
 
   test("D1 importer upserts explicit transfer sides without minting mirrors or dropping categories", async () => {

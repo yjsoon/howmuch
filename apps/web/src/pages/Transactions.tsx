@@ -790,7 +790,11 @@ export function TransactionsPage() {
             <h2 id="delete-transaction-heading">{pendingDeletion.approved ? "Delete transaction?" : "Reject new transaction?"}</h2>
             <p id="delete-transaction-detail">
               {pendingDeletion.payee_name ?? (pendingDeletion.transfer_account_id ? "This transfer" : "This transaction")} will be deleted.
-              {pendingDeletion.transfer_transaction_id ? " Its linked transfer entry will also be removed." : ""}
+              {pendingDeletion.parent_transaction_id
+                ? " The split line on the other account stays and loses this transfer link."
+                : pendingDeletion.transfer_transaction_id
+                  ? " Its linked transfer entry will also be removed."
+                  : ""}
             </p>
           </div>
           <div className="transaction-delete-confirm-actions">
@@ -902,20 +906,18 @@ export function TransactionsPage() {
                         >
                           Edit
                         </button>
-                        {(txn.approved || !txn.parent_transaction_id) && (
-                          <button
-                            type="button"
-                            className="register-row-action register-row-action-danger"
-                            onClick={() => {
-                              setPendingDeletion(txn);
-                              setMutationError(null);
-                            }}
-                            disabled={Boolean(mutatingId)}
-                            aria-label={`${txn.approved ? "Delete" : "Reject"} ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
-                          >
-                            {txn.approved ? "Delete" : "Reject"}
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          className="register-row-action register-row-action-danger"
+                          onClick={() => {
+                            setPendingDeletion(txn);
+                            setMutationError(null);
+                          }}
+                          disabled={Boolean(mutatingId)}
+                          aria-label={`${txn.approved ? "Delete" : "Reject"} ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
+                        >
+                          {txn.approved ? "Delete" : "Reject"}
+                        </button>
                       </td>
                       <td className="register-status">
                         <ClearedStatus

@@ -121,7 +121,7 @@ struct TransactionEditorSheet: View {
     TransactionFormView(
       draft: TransactionDraft(transaction: transaction),
       isEditing: true,
-      allowsDeletion: transaction.parentTransactionID == nil
+      allowsDeletion: true
     )
   }
 }
@@ -195,11 +195,6 @@ struct TransactionFormView: View {
                   .padding(.vertical, 13)
               }
               .ynabCard()
-            } else if isEditing {
-              Text("This is the linked side of a split transfer. Reject or delete the split from its source account.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if let errorMessage {
