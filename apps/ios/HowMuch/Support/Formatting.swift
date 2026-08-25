@@ -145,7 +145,7 @@ enum LedgerDate {
   /// in a trailing-year net-worth chart stay distinguishable.
   static func periodAxisLabels(_ raws: [String]) -> [String] {
     let months = raws.compactMap(yearMonth(from:))
-    let spansYears = Set(months.map(\.year)).count > 1
+    let spansYears = Set(months.map { $0.year }).count > 1
     guard months.count == raws.count, spansYears else {
       return raws.map(periodAxisLabel)
     }
