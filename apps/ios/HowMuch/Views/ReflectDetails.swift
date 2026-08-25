@@ -727,7 +727,11 @@ struct NetWorthDetailView: View {
             .monospacedDigit()
         }
       }
-      ColumnChart(values: report.periods.map { Double($0.netWorth) }, height: 120)
+      ColumnChart(
+        values: report.periods.map { Double($0.netWorth) },
+        labels: LedgerDate.periodAxisLabels(report.periods.map(\.period)),
+        height: 120
+      )
     }
     .frame(maxWidth: .infinity)
     .padding(16)
@@ -868,7 +872,7 @@ struct IncomeVsSpendingDetailView: View {
 
       PairedColumnChart(
         pairs: report.periods.map { (Double($0.income), Double(abs($0.spending))) },
-        labels: report.periods.map { LedgerDate.periodAxisLabel($0.period) },
+        labels: LedgerDate.periodAxisLabels(report.periods.map(\.period)),
         height: 120
       )
       HStack(spacing: 16) {

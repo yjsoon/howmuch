@@ -157,7 +157,10 @@ struct ReflectView: View {
         }
         .font(.subheadline)
 
-        ColumnChart(values: report.periods.map { Double($0.netWorth) })
+        ColumnChart(
+          values: report.periods.map { Double($0.netWorth) },
+          labels: LedgerDate.periodAxisLabels(report.periods.map(\.period))
+        )
       }
     }
   }
@@ -176,7 +179,7 @@ struct ReflectView: View {
 
         PairedColumnChart(
           pairs: report.periods.map { (Double($0.income), Double(abs($0.spending))) },
-          labels: report.periods.map { LedgerDate.periodAxisLabel($0.period) }
+          labels: LedgerDate.periodAxisLabels(report.periods.map(\.period))
         )
 
         HStack(spacing: 16) {

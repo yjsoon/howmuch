@@ -140,6 +140,34 @@ enum LedgerDate {
     return raw
   }
 
+  /// Axis labels for a whole series. A monthly run that crosses a year
+  /// gets a short year on the first column and on January, so two Augusts
+  /// in a trailing-year net-worth chart stay distinguishable.
+  static func periodAxisLabels(_ raws: [String]) -> [String] {
+    let months = raws.compactMap(yearMonth(from:))
+    let spansYears = Set(months.map { $0.year }).count > 1
+    guard months.count == raws.count, spansYears else {
+      return raws.map(periodAxisLabel)
+    }
+    return months.enumerated().map { index, item in
+      let short = Calendar.current.shortMonthSymbols[item.month - 1]
+      if index == 0 || item.month == 1 {
+        return "\(short) \(String(item.year).suffix(2))"
+      }
+      return short
+    }
+  }
+
+  private static func yearMonth(from raw: String) -> (year: Int, month: Int)? {
+    let parts = raw.split(separator: "-")
+    guard parts.count == 2, !parts[1].hasPrefix("W"),
+          let year = Int(parts[0]), let month = Int(parts[1]),
+          (1 ... 12).contains(month) else {
+      return nil
+    }
+    return (year, month)
+  }
+
   private static let parser: DateFormatter = {
     let formatter = DateFormatter()
     formatter.calendar = Calendar(identifier: .iso8601)
