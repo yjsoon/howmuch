@@ -121,7 +121,11 @@ struct TransactionEditorSheet: View {
     TransactionFormView(
       draft: TransactionDraft(transaction: transaction),
       isEditing: true,
+<<<<<<< HEAD
       allowsDeletion: true
+=======
+      allowsDeletion: transaction.allowsDeletion
+>>>>>>> 8b6a424 (Hide register delete on linked split-transfer sides)
     )
   }
 }

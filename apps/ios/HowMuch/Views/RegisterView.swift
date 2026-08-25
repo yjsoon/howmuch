@@ -138,7 +138,6 @@ struct RegisterView: View {
               onOpen: { editingTransaction = transaction },
               onToggleCleared: { toggleCleared(transaction) }
             )
-            // Swipe right (leading) approves; swipe left (trailing) deletes.
             .swipeActions(edge: .leading, allowsFullSwipe: true) {
               if !transaction.approved {
                 Button {
@@ -150,12 +149,14 @@ struct RegisterView: View {
               }
             }
             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-              Button(role: .destructive) {
-                transactionPendingDeletion = transaction
-              } label: {
-                Label("Delete", systemImage: "trash")
+              if transaction.allowsDeletion {
+                Button(role: .destructive) {
+                  transactionPendingDeletion = transaction
+                } label: {
+                  Label("Delete", systemImage: "trash")
+                }
+                .disabled(model.isSubmitting)
               }
-              .disabled(model.isSubmitting)
             }
             .contextMenu {
               if !transaction.approved {
@@ -175,10 +176,12 @@ struct RegisterView: View {
               } label: {
                 Label("Duplicate for Today", systemImage: "plus.square.on.square")
               }
-              Button(role: .destructive) {
-                transactionPendingDeletion = transaction
-              } label: {
-                Label("Delete", systemImage: "trash")
+              if transaction.allowsDeletion {
+                Button(role: .destructive) {
+                  transactionPendingDeletion = transaction
+                } label: {
+                  Label("Delete", systemImage: "trash")
+                }
               }
             }
             .listRowInsets(EdgeInsets())

@@ -1231,6 +1231,11 @@ extension Transaction {
   var isSplit: Bool {
     !subtransactions.isEmpty
   }
+
+  /// Linked sides of a split transfer must be deleted from the source split.
+  var allowsDeletion: Bool {
+    parentTransactionID == nil
+  }
 }
 
 struct Subtransaction: Decodable, Hashable {
