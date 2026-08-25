@@ -166,10 +166,10 @@ private struct ChartAxisLabels: View {
   var spacing: CGFloat = 6
 
   var body: some View {
-    let labelStride = max(1, Int(ceil(Double(labels.count) / 12)))
+    let visible = visibleIndices
     HStack(alignment: .top, spacing: spacing) {
       ForEach(labels.indices, id: \.self) { index in
-        let isVisible = index.isMultiple(of: labelStride) || index == labels.index(before: labels.endIndex)
+        let isVisible = visible.contains(index)
         Text(isVisible ? labels[index] : " ")
           .font(.caption2)
           .foregroundStyle(.secondary)
@@ -179,6 +179,31 @@ private struct ChartAxisLabels: View {
           .accessibilityHidden(!isVisible)
       }
     }
+  }
+
+  /// About twelve ticks. If a window contains a year-bearing label
+  /// (`Jan 26`), show that rather than the window start, so All Time
+  /// does not drop the year boundary.
+  private var visibleIndices: Set<Int> {
+    let count = labels.count
+    guard count > 0 else { return [] }
+    let stride = max(1, Int(ceil(Double(count) / 12)))
+    var visible: Set<Int> = [count - 1]
+    var start = 0
+    while start < count {
+      let end = min(start + stride, count)
+      if let yearTick = (start ..< end).first(where: carriesYear) {
+        visible.insert(yearTick)
+      } else {
+        visible.insert(start)
+      }
+      start += stride
+    }
+    return visible
+  }
+
+  private func carriesYear(_ index: Int) -> Bool {
+    labels[index].range(of: #"\s\d{2}$"#, options: .regularExpression) != nil
   }
 }
 
