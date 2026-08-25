@@ -1353,8 +1353,17 @@ final class AppModel {
       transactionID: transaction.id,
       expectedApproved: transaction.approved ? nil : false
     )
-    transactions.removeAll { $0.id == transaction.id }
-    unapprovedTransactions.removeAll { $0.id == transaction.id }
+    var removedIDs: Set<String> = [transaction.id]
+    if let linkedID = transaction.transferTransactionID {
+      removedIDs.insert(linkedID)
+    }
+    for subtransaction in transaction.subtransactions {
+      if let linkedID = subtransaction.transferTransactionID {
+        removedIDs.insert(linkedID)
+      }
+    }
+    transactions.removeAll { removedIDs.contains($0.id) }
+    unapprovedTransactions.removeAll { removedIDs.contains($0.id) }
     showSaveMessage("Deleted \(transaction.payeeName ?? "transaction")")
     Task { await refreshLedgerAndInvalidatePlan() }
   }
