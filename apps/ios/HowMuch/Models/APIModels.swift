@@ -1232,11 +1232,6 @@ extension Transaction {
     !subtransactions.isEmpty
   }
 
-  /// Linked sides of a split transfer must be deleted from the source split.
-  var allowsDeletion: Bool {
-    parentTransactionID == nil
-  }
-
   /// Single-transaction writes can omit `parentTransactionID`. Keep the list value.
   func preservingParent(from existing: Transaction) -> Transaction {
     guard parentTransactionID == nil, let parentTransactionID = existing.parentTransactionID else {

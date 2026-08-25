@@ -149,14 +149,12 @@ struct RegisterView: View {
               }
             }
             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-              if transaction.allowsDeletion {
-                Button(role: .destructive) {
-                  transactionPendingDeletion = transaction
-                } label: {
-                  Label("Delete", systemImage: "trash")
-                }
-                .disabled(model.isSubmitting)
+              Button(role: .destructive) {
+                transactionPendingDeletion = transaction
+              } label: {
+                Label("Delete", systemImage: "trash")
               }
+              .disabled(model.isSubmitting)
             }
             .contextMenu {
               if !transaction.approved {
@@ -176,12 +174,10 @@ struct RegisterView: View {
               } label: {
                 Label("Duplicate for Today", systemImage: "plus.square.on.square")
               }
-              if transaction.allowsDeletion {
-                Button(role: .destructive) {
-                  transactionPendingDeletion = transaction
-                } label: {
-                  Label("Delete", systemImage: "trash")
-                }
+              Button(role: .destructive) {
+                transactionPendingDeletion = transaction
+              } label: {
+                Label("Delete", systemImage: "trash")
               }
             }
             .listRowInsets(EdgeInsets())
@@ -324,8 +320,12 @@ struct RegisterView: View {
       Button("Delete Transaction", role: .destructive) {
         delete(transaction)
       }
-    } message: { _ in
-      Text("This also deletes any linked transfer entries. If this transaction or a linked entry has been reconciled, deleting it can make your next reconciliation inaccurate.")
+    } message: { transaction in
+      if transaction.parentTransactionID != nil {
+        Text("The split line on the other account stays and loses this transfer link.")
+      } else {
+        Text("This also deletes any linked transfer entries. If this transaction or a linked entry has been reconciled, deleting it can make your next reconciliation inaccurate.")
+      }
     }
     .alert("Couldn’t delete transaction", isPresented: Binding(
       get: { deleteError != nil },
