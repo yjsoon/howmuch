@@ -160,26 +160,58 @@ struct StackedShareBar: View {
   }
 }
 
+/// Shared x-axis row so net worth and income charts label months the same way.
+private struct ChartAxisLabels: View {
+  let labels: [String]
+  var spacing: CGFloat = 6
+
+  var body: some View {
+    let labelStride = max(1, Int(ceil(Double(labels.count) / 12)))
+    HStack(alignment: .top, spacing: spacing) {
+      ForEach(labels.indices, id: \.self) { index in
+        let isVisible = index.isMultiple(of: labelStride) || index == labels.index(before: labels.endIndex)
+        Text(isVisible ? labels[index] : " ")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .minimumScaleFactor(0.65)
+          .frame(maxWidth: .infinity)
+          .accessibilityHidden(!isVisible)
+      }
+    }
+  }
+}
+
 /// Single-series column chart drawn with capsules; negatives drop below the axis.
 struct ColumnChart: View {
   let values: [Double]
+  var labels: [String] = []
   var positiveColour: Color = Theme.accent
   var negativeColour: Color = Theme.outflow
   var height: CGFloat = 90
 
+  private let monthSpacing: CGFloat = 6
+
   var body: some View {
     let magnitude = max(values.map(abs).max() ?? 1, 1)
-    HStack(alignment: .bottom, spacing: 4) {
-      ForEach(values.enumerated(), id: \.offset) { _, value in
-        VStack(spacing: 0) {
-          Spacer(minLength: 0)
-          Capsule()
-            .fill(value < 0 ? negativeColour : positiveColour)
-            .frame(height: max(3, height * abs(value) / magnitude))
+    VStack(spacing: 6) {
+      HStack(alignment: .bottom, spacing: monthSpacing) {
+        ForEach(values.enumerated(), id: \.offset) { _, value in
+          VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            Capsule()
+              .fill(value < 0 ? negativeColour : positiveColour)
+              .frame(height: max(3, height * abs(value) / magnitude))
+          }
+          .frame(maxWidth: .infinity)
         }
       }
+      .frame(height: height)
+
+      if labels.count == values.count, !labels.isEmpty {
+        ChartAxisLabels(labels: labels, spacing: monthSpacing)
+      }
     }
-    .frame(height: height)
   }
 }
 
@@ -189,12 +221,13 @@ struct PairedColumnChart: View {
   var labels: [String] = []
   var height: CGFloat = 90
 
+  private let monthSpacing: CGFloat = 10
+
   var body: some View {
     let magnitude = max(pairs.flatMap { [$0.income, $0.spending] }.max() ?? 1, 1)
-    let labelStride = max(1, Int(ceil(Double(labels.count) / 12)))
 
     VStack(spacing: 6) {
-      HStack(alignment: .bottom, spacing: 6) {
+      HStack(alignment: .bottom, spacing: monthSpacing) {
         ForEach(pairs.enumerated(), id: \.offset) { _, pair in
           HStack(alignment: .bottom, spacing: 2) {
             Capsule()
@@ -210,18 +243,7 @@ struct PairedColumnChart: View {
       .frame(height: height)
 
       if labels.count == pairs.count, !labels.isEmpty {
-        HStack(alignment: .top, spacing: 6) {
-          ForEach(labels.indices, id: \.self) { index in
-            let isVisible = index.isMultiple(of: labelStride) || index == labels.index(before: labels.endIndex)
-            Text(isVisible ? labels[index] : " ")
-              .font(.caption2)
-              .foregroundStyle(.secondary)
-              .lineLimit(1)
-              .minimumScaleFactor(0.65)
-              .frame(maxWidth: .infinity)
-              .accessibilityHidden(!isVisible)
-          }
-        }
+        ChartAxisLabels(labels: labels, spacing: monthSpacing)
       }
     }
   }
