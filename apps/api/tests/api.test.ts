@@ -922,6 +922,43 @@ describe("YNAB-compatible API", () => {
     expect(patched.data.transaction.flag_color).toBe("green");
   });
 
+  test("rejects a new linked split-transfer side without a 500", async () => {
+    const checking = await createAccountViaApi({ name: "Checking", type: "checking" });
+    const savings = await createAccountViaApi({ name: "Savings", type: "savings" });
+    const created = await (await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: {
+        transaction: {
+          account_id: checking.id,
+          date: "2026-06-10",
+          amount: -80000,
+          payee_name: "Payday sorting",
+          subtransactions: [
+            { amount: -30000, category_id: "cat-groceries" },
+            { amount: -50000, payee_id: savings.transfer_payee_id },
+          ],
+        },
+      },
+    })).json();
+    const transferLine = created.data.transaction.subtransactions.find((sub: any) => sub.transfer_account_id);
+    const mirrorId = transferLine.transfer_transaction_id;
+    expect(created.data.transaction.approved).toBe(false);
+
+    const rejected = await request(`/v1/plans/plan-test/transactions/${mirrorId}?expected_approved=false`, {
+      method: "DELETE",
+    });
+    expect(rejected.status).toBe(200);
+    expect((await rejected.json()).data.transaction).toMatchObject({ id: mirrorId, deleted: true, approved: false });
+
+    const parent = await (await request(`/v1/plans/plan-test/transactions/${created.data.transaction.id}`)).json();
+    expect(parent.data.transaction.deleted).toBe(false);
+    expect(parent.data.transaction.subtransactions.find((sub: any) => sub.id === transferLine.id)).toMatchObject({
+      id: transferLine.id,
+      transfer_account_id: null,
+      transfer_transaction_id: null,
+    });
+  });
+
   test("rejects only transactions that are still unapproved", async () => {
     const created = await (await request("/v1/plans/plan-test/transactions", {
       method: "POST",

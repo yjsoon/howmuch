@@ -378,6 +378,9 @@ export class D1LedgerRepository extends LedgerRepository {
       if (error instanceof Error && error.message.includes("approved state conflict")) {
         throw new TransactionStateConflictError("Transaction approval state changed");
       }
+      if (error instanceof Error && error.message === "Transaction not found") {
+        throw new NotFoundError("Transaction not found");
+      }
       throw error;
     }
     return this.getTransaction(planId,id,true);

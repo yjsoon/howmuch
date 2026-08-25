@@ -133,11 +133,25 @@ export class D1TransactionRepository {
     const fingerprint = requestHash({ expectedApproved });
     this.assertContext(planId, context);
     return this.write("delete", planId, stable, fingerprint, context, async (snapshot) => {
-      if (snapshot.linkedSub) throw new Error("This transaction is the linked side of a split line; edit the split parent");
       if (!snapshot.transaction || snapshot.transaction.deleted) throw new Error("Transaction not found");
       if (snapshot.transaction.plan_id !== planId) throw new Error("Transaction belongs to another plan");
       if (expectedApproved !== undefined && Boolean(snapshot.transaction.approved) !== expectedApproved) {
         throw new Error("transaction approved state conflict");
+      }
+      if (snapshot.linkedSub) {
+        if (snapshot.linkedSub.parent_plan_id !== planId) throw new Error("Transaction belongs to another plan");
+        const body: PlannedStatement[] = [
+          assertion(stable.commandId, "graph_update_target", transactionId, planId),
+          assertion(stable.commandId, "graph_transaction", transactionId, planId),
+          assertion(stable.commandId, "graph_transaction", snapshot.linkedSub.transaction_id, planId),
+          assertion(stable.commandId, "graph_subtransaction", snapshot.linkedSub.id, planId),
+          statement("UPDATE subtransactions SET transfer_account_id=NULL, transfer_transaction_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?", [snapshot.linkedSub.id]),
+          statement("UPDATE transactions SET deleted=1, updated_at=CURRENT_TIMESTAMP WHERE id=? AND plan_id=?", [transactionId, planId]),
+          recalculate(snapshot.transaction.account_id),
+          knowledge(planId, transactionId),
+          knowledge(planId, snapshot.linkedSub.transaction_id),
+        ];
+        return makePlan(stable.commandId, snapshot.writeVersion, transactionId, planId, "delete", fingerprint, context, body);
       }
       const affected = new Set<string>([snapshot.transaction.account_id, ...snapshot.mirrors.map((row) => row.account_id)]);
       const rows = [snapshot.transaction, ...snapshot.mirrors];
@@ -148,9 +162,7 @@ export class D1TransactionRepository {
       if (snapshot.subs.length) body.push(statement("UPDATE subtransactions SET deleted=1, updated_at=CURRENT_TIMESTAMP WHERE transaction_id=?", [transactionId]));
       for (const account of affected) body.push(recalculate(account));
       for (const row of rows) body.push(knowledge(planId, row.id));
-      return makePlan(stable.commandId, snapshot.writeVersion, transactionId, planId, "delete", fingerprint, context, [
-        ...body,
-      ]);
+      return makePlan(stable.commandId, snapshot.writeVersion, transactionId, planId, "delete", fingerprint, context, body);
     });
   }
 
