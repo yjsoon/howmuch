@@ -1626,7 +1626,9 @@ describe("transfers and splits", () => {
       body: { expected_cleared: "cleared", cleared: "uncleared" },
     });
     expect(clearedPatch.status).toBe(200);
-    expect((await clearedPatch.json()).data.transaction.cleared).toBe("uncleared");
+    const clearedBody = await clearedPatch.json();
+    expect(clearedBody.data.transaction.cleared).toBe("uncleared");
+    expect(clearedBody.data.transaction.parent_transaction_id).toBe(created.data.transaction.id);
     expect((await request(`/v1/plans/plan-test/transactions/${mirrorId}/cleared`, {
       method: "PATCH",
       body: { expected_cleared: "cleared", cleared: "uncleared" },

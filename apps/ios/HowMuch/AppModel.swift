@@ -1242,17 +1242,22 @@ final class AppModel {
         expectedCleared: transaction.cleared,
         cleared: cleared
       )
-      if let index = transactions.firstIndex(where: { $0.id == saved.id }) {
-        transactions[index] = saved
-      }
-      if let index = unapprovedTransactions.firstIndex(where: { $0.id == saved.id }) {
-        unapprovedTransactions[index] = saved
-      }
+      applySavedTransaction(saved, replacing: transaction)
       showSaveMessage(cleared == .cleared ? "Marked transaction cleared" : "Marked transaction uncleared")
       Task { await refreshLedgerAndInvalidatePlan() }
     } catch {
       await refreshLedger(quiet: true)
       throw error
+    }
+  }
+
+  private func applySavedTransaction(_ saved: Transaction, replacing existing: Transaction) {
+    let next = saved.preservingParent(from: existing)
+    if let index = transactions.firstIndex(where: { $0.id == existing.id }) {
+      transactions[index] = next
+    }
+    if let index = unapprovedTransactions.firstIndex(where: { $0.id == existing.id }) {
+      unapprovedTransactions[index] = next
     }
   }
 
@@ -1353,8 +1358,17 @@ final class AppModel {
       transactionID: transaction.id,
       expectedApproved: transaction.approved ? nil : false
     )
-    transactions.removeAll { $0.id == transaction.id }
-    unapprovedTransactions.removeAll { $0.id == transaction.id }
+    var removedIDs: Set<String> = [transaction.id]
+    if let linkedID = transaction.transferTransactionID {
+      removedIDs.insert(linkedID)
+    }
+    for subtransaction in transaction.subtransactions {
+      if let linkedID = subtransaction.transferTransactionID {
+        removedIDs.insert(linkedID)
+      }
+    }
+    transactions.removeAll { removedIDs.contains($0.id) }
+    unapprovedTransactions.removeAll { removedIDs.contains($0.id) }
     showSaveMessage("Deleted \(transaction.payeeName ?? "transaction")")
     Task { await refreshLedgerAndInvalidatePlan() }
   }
@@ -1367,9 +1381,7 @@ final class AppModel {
       planID: settings.planID,
       transactionID: transaction.id
     )
-    if let index = transactions.firstIndex(where: { $0.id == transaction.id }) {
-      transactions[index] = approved
-    }
+    applySavedTransaction(approved, replacing: transaction)
     showSaveMessage("Approved \(approved.payeeName ?? "transaction")")
     await refreshLedger(quiet: true)
   }

@@ -2492,11 +2492,13 @@ export class LedgerRepository {
            t.*,
            a.name AS account_name,
            p.name AS payee_name,
-           c.name AS category_name
+           c.name AS category_name,
+           linked_sub.transaction_id AS parent_transaction_id
          FROM transactions t
          JOIN accounts a ON a.id = t.account_id
          LEFT JOIN payees p ON p.id = t.payee_id
          LEFT JOIN categories c ON c.id = t.category_id
+         LEFT JOIN subtransactions linked_sub ON linked_sub.id = t.transfer_transaction_id AND linked_sub.deleted = 0
          WHERE ${clauses.join(" AND ")}
          LIMIT 1`,
       )
