@@ -138,6 +138,7 @@ struct RegisterView: View {
               onOpen: { editingTransaction = transaction },
               onToggleCleared: { toggleCleared(transaction) }
             )
+            // Swipe right (leading) approves; swipe left (trailing) deletes.
             .swipeActions(edge: .leading, allowsFullSwipe: true) {
               if !transaction.approved {
                 Button {
@@ -856,55 +857,55 @@ struct TransactionRow: View {
 
   var body: some View {
     HStack(alignment: .center, spacing: 10) {
-      Button(action: onOpen) {
-        HStack(alignment: .center, spacing: 10) {
-          if let flag = Theme.flagColour(named: transaction.flagColor) {
-            RoundedRectangle(cornerRadius: 2)
-              .fill(flag)
-              .frame(width: 4, height: 34)
-          }
-
-          VStack(alignment: .leading, spacing: 3) {
-            Text(payeeDisplay)
-              .font(.subheadline.weight(.semibold))
-              .foregroundStyle(Theme.textPrimary)
-              .lineLimit(1)
-            Text(detailLine)
-              .font(.footnote)
-              .foregroundStyle(transaction.isUncategorised ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
-              .lineLimit(1)
-            if let memo = transaction.memo, !memo.isEmpty {
-              Text(memo)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Theme.surfaceMuted, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            }
-          }
-
-          Spacer()
-
-          if !transaction.approved {
-            Text("New")
-              .font(.caption2.weight(.bold))
-              .foregroundStyle(Color.white)
-              .padding(.horizontal, 6)
-              .padding(.vertical, 3)
-              .background(Theme.newBadge, in: Capsule())
-              .accessibilityLabel("Needs approval")
-          }
-
-          Text(MoneyCodec.signedDisplayString(for: transaction.amount, currencyFormat: currencyFormat))
-            .font(.subheadline.weight(.medium))
-            .monospacedDigit()
-            .foregroundStyle(Theme.registerAmountColour(transaction.amount))
+      HStack(alignment: .center, spacing: 10) {
+        if let flag = Theme.flagColour(named: transaction.flagColor) {
+          RoundedRectangle(cornerRadius: 2)
+            .fill(flag)
+            .frame(width: 4, height: 34)
         }
-        .contentShape(Rectangle())
-        .frame(maxWidth: .infinity, alignment: .leading)
+
+        VStack(alignment: .leading, spacing: 3) {
+          Text(payeeDisplay)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Theme.textPrimary)
+            .lineLimit(1)
+          Text(detailLine)
+            .font(.footnote)
+            .foregroundStyle(transaction.isUncategorised ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
+            .lineLimit(1)
+          if let memo = transaction.memo, !memo.isEmpty {
+            Text(memo)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .padding(.horizontal, 8)
+              .padding(.vertical, 3)
+              .background(Theme.surfaceMuted, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+          }
+        }
+
+        Spacer()
+
+        if !transaction.approved {
+          Text("New")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(Color.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(Theme.newBadge, in: Capsule())
+            .accessibilityLabel("Needs approval")
+        }
+
+        Text(MoneyCodec.signedDisplayString(for: transaction.amount, currencyFormat: currencyFormat))
+          .font(.subheadline.weight(.medium))
+          .monospacedDigit()
+          .foregroundStyle(Theme.registerAmountColour(transaction.amount))
       }
-      .buttonStyle(.plain)
+      .contentShape(Rectangle())
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .onTapGesture(perform: onOpen)
+      .accessibilityAddTraits(.isButton)
+      .accessibilityHint("Opens this transaction.")
 
       clearedBadge
     }
