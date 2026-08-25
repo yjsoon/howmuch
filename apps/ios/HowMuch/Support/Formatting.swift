@@ -192,9 +192,20 @@ extension Date {
     Self.monthYearFormatter.string(from: self)
   }
 
+  /// "8 Jun 2026", for compact custom-range chips.
+  var compactDateLabel: String {
+    Self.compactDateFormatter.string(from: self)
+  }
+
   private static let monthYearFormatter: DateFormatter = {
     let formatter = DateFormatter()
     formatter.dateFormat = "MMMM yyyy"
+    return formatter
+  }()
+
+  private static let compactDateFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "d MMM yyyy"
     return formatter
   }()
 

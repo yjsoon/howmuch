@@ -2010,7 +2010,14 @@ enum ReportInterval: String, CaseIterable, Identifiable {
   var id: String { rawValue }
 
   var title: String {
-    rawValue.capitalized
+    switch self {
+    case .week:
+      return "By week"
+    case .month:
+      return "By month"
+    case .year:
+      return "By year"
+    }
   }
 }
 
