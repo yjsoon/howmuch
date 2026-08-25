@@ -48,7 +48,9 @@ struct ReportRange: Equatable {
     case .preset:
       return preset.title
     case .custom:
-      return "Custom range"
+      let from = min(customFrom, customTo).compactDateLabel
+      let to = max(customFrom, customTo).compactDateLabel
+      return from == to ? from : "\(from) – \(to)"
     }
   }
 
@@ -81,96 +83,59 @@ struct ReportScope: Equatable {
   }
 }
 
-/// Month/Preset/Custom segmented control plus the matching range selector.
-struct ReportRangePicker: View {
-  @Binding var range: ReportRange
-
-  var body: some View {
-    VStack(spacing: 12) {
-      Picker("Range mode", selection: $range.mode) {
-        ForEach(ReportRange.Mode.allCases) { mode in
-          Text(mode.rawValue).tag(mode)
-        }
-      }
-      .pickerStyle(.segmented)
-
-      switch range.mode {
-      case .month:
-        MonthStepper(monthAnchor: $range.monthAnchor)
-      case .preset:
-        Menu {
-          ForEach(ReportPreset.allCases) { preset in
-            Button(preset.title) {
-              range.preset = preset
-            }
-          }
-        } label: {
-          HStack(spacing: 6) {
-            Text(range.preset.title)
-              .font(.subheadline.weight(.semibold))
-            Image(systemName: "chevron.down")
-              .font(.caption.weight(.semibold))
-          }
-          .foregroundStyle(Theme.accent)
-          .padding(.horizontal, 16)
-          .padding(.vertical, 8)
-          .background(Theme.surfaceMuted, in: Capsule())
-        }
-      case .custom:
-        HStack(spacing: 12) {
-          DatePicker("From", selection: $range.customFrom, in: ...Date.now, displayedComponents: .date)
-            .labelsHidden()
-          Text("–")
-            .foregroundStyle(.secondary)
-          DatePicker("To", selection: $range.customTo, in: ...Date.now, displayedComponents: .date)
-            .labelsHidden()
-        }
-        .frame(maxWidth: .infinity)
-      }
-    }
-  }
-}
-
-/// Interval segmented control; each report offers the same intervals as the web.
-struct ReportIntervalPicker: View {
-  @Binding var interval: ReportInterval
-  let choices: [ReportInterval]
-
-  var body: some View {
-    Picker("Interval", selection: $interval) {
-      ForEach(choices) { choice in
-        Text(choice.title).tag(choice)
-      }
-    }
-    .pickerStyle(.segmented)
-  }
-}
-
-/// Account (and optionally category) filter chips with their picker sheets.
-struct ReportScopeBar: View {
+/// Range, grouping, and scope as one chip row — no stacked segmented controls.
+struct ReportFilterBar: View {
+  var range: Binding<ReportRange>?
+  var interval: Binding<ReportInterval>?
+  var intervalChoices: [ReportInterval] = []
   @Binding var scope: ReportScope
   var showsCategories = false
 
   @State private var isPickingAccounts = false
   @State private var isPickingCategories = false
 
+  init(
+    range: Binding<ReportRange>? = nil,
+    interval: Binding<ReportInterval>? = nil,
+    intervalChoices: [ReportInterval] = [],
+    scope: Binding<ReportScope>,
+    showsCategories: Bool = false
+  ) {
+    self.range = range
+    self.interval = interval
+    self.intervalChoices = intervalChoices
+    _scope = scope
+    self.showsCategories = showsCategories
+  }
+
   var body: some View {
-    HStack(spacing: 8) {
-      chip(label: accountsLabel, isActive: !scope.accountIDs.isEmpty) {
-        isPickingAccounts = true
-      }
-      if showsCategories {
-        chip(label: categoriesLabel, isActive: !scope.categoryIDs.isEmpty) {
-          isPickingCategories = true
+    VStack(alignment: .leading, spacing: 12) {
+      WrappingHStack(spacing: 8) {
+        if let range {
+          ReportRangeMenu(range: range)
+        }
+        if let interval {
+          ReportIntervalMenu(interval: interval, choices: intervalChoices)
+        }
+        chip(label: accountsLabel, isActive: !scope.accountIDs.isEmpty) {
+          isPickingAccounts = true
+        }
+        if showsCategories {
+          chip(label: categoriesLabel, isActive: !scope.categoryIDs.isEmpty) {
+            isPickingCategories = true
+          }
+        }
+        if scope.isActive {
+          Button("Clear") {
+            scope = ReportScope()
+          }
+          .font(.footnote.weight(.medium))
+          .foregroundStyle(Theme.accent)
         }
       }
-      Spacer()
-      if scope.isActive {
-        Button("Clear") {
-          scope = ReportScope()
-        }
-        .font(.footnote.weight(.medium))
-        .foregroundStyle(Theme.accent)
+
+      if let range, range.wrappedValue.mode != .preset {
+        ReportRangeAccessory(range: range)
       }
     }
     .sheet(isPresented: $isPickingAccounts) {
@@ -195,21 +160,99 @@ struct ReportScopeBar: View {
 
   private func chip(label: String, isActive: Bool, action: @escaping () -> Void) -> some View {
     Button(action: action) {
-      HStack(spacing: 5) {
-        Text(label)
-          .font(.footnote.weight(.medium))
-        Image(systemName: "chevron.down")
-          .font(.caption.weight(.semibold))
-          .accessibilityHidden(true)
-      }
-      .foregroundStyle(isActive ? Theme.card : Theme.accent)
-      .padding(.horizontal, 12)
-      .padding(.vertical, 7)
-      .background(isActive ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Theme.surfaceMuted), in: Capsule())
+      FilterChip(label: label, isActive: isActive)
     }
     .buttonStyle(.plain)
+    .accessibilityLabel(label)
   }
 }
+
+/// One menu for window length: a calendar month, a named preset, or custom dates.
+struct ReportRangeMenu: View {
+  @Binding var range: ReportRange
+
+  var body: some View {
+    Menu {
+      Button {
+        range.mode = .month
+      } label: {
+        menuRow("Choose a month", selected: range.mode == .month)
+      }
+      Section {
+        ForEach(ReportPreset.allCases) { preset in
+          Button {
+            range.mode = .preset
+            range.preset = preset
+          } label: {
+            menuRow(preset.title, selected: range.mode == .preset && range.preset == preset)
+          }
+        }
+      }
+      Button {
+        range.mode = .custom
+      } label: {
+        menuRow("Custom dates", selected: range.mode == .custom)
+      }
+    } label: {
+      FilterChip(label: range.label)
+    }
+    .accessibilityLabel("Date range, \(range.label)")
+  }
+}
+
+/// Stepper or from/to dates; hidden while a named preset is selected.
+struct ReportRangeAccessory: View {
+  @Binding var range: ReportRange
+
+  var body: some View {
+    switch range.mode {
+    case .month:
+      MonthStepper(monthAnchor: $range.monthAnchor)
+    case .preset:
+      EmptyView()
+    case .custom:
+      HStack(spacing: 12) {
+        DatePicker("From", selection: $range.customFrom, in: ...Date.now, displayedComponents: .date)
+          .labelsHidden()
+        Text("–")
+          .foregroundStyle(.secondary)
+        DatePicker("To", selection: $range.customTo, in: ...Date.now, displayedComponents: .date)
+          .labelsHidden()
+      }
+      .frame(maxWidth: .infinity)
+    }
+  }
+}
+
+/// Grouping menu (week / month / year). A chip, not a second segmented control.
+struct ReportIntervalMenu: View {
+  @Binding var interval: ReportInterval
+  let choices: [ReportInterval]
+
+  var body: some View {
+    Menu {
+      Picker("Group by", selection: $interval) {
+        ForEach(choices) { choice in
+          Text(choice.title).tag(choice)
+        }
+      }
+    } label: {
+      FilterChip(label: interval.title)
+    }
+    .accessibilityLabel("Group by, \(interval.title)")
+  }
+}
+
+private func menuRow(_ title: String, selected: Bool) -> some View {
+  Label {
+    Text(title)
+  } icon: {
+    if selected {
+      Image(systemName: "checkmark")
+    }
+  }
+}
+
 
 /// Multi-select over open accounts; empty selection means "all accounts".
 struct AccountScopePicker: View {
@@ -390,8 +433,7 @@ struct SpendingBreakdownDetailView: View {
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
-        ReportRangePicker(range: $range)
-        ReportScopeBar(scope: $scope, showsCategories: true)
+        ReportFilterBar(range: $range, scope: $scope, showsCategories: true)
 
         if let report {
           // Web parity: bookkeeping groups are excluded until asked, unless
@@ -615,9 +657,7 @@ struct NetWorthDetailView: View {
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
-        ReportRangePicker(range: $range)
-        ReportIntervalPicker(interval: $interval, choices: [.week, .month])
-        ReportScopeBar(scope: $scope)
+        ReportFilterBar(range: $range, interval: $interval, intervalChoices: [.week, .month], scope: $scope)
 
         if let report, let latest = report.periods.last {
           headlineCard(report: report, latest: latest)
@@ -782,9 +822,13 @@ struct IncomeVsSpendingDetailView: View {
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
-        ReportRangePicker(range: $range)
-        ReportIntervalPicker(interval: $interval, choices: [.week, .month, .year])
-        ReportScopeBar(scope: $scope, showsCategories: true)
+        ReportFilterBar(
+          range: $range,
+          interval: $interval,
+          intervalChoices: [.week, .month, .year],
+          scope: $scope,
+          showsCategories: true
+        )
 
         if let report, !report.periods.isEmpty {
           totalsCard(report: report)
@@ -940,8 +984,7 @@ struct AgeOfMoneyDetailView: View {
       VStack(alignment: .leading, spacing: 16) {
         // No range picker: the server replays income lots from the start of
         // the window, so the age is only honest over the full history.
-        ReportIntervalPicker(interval: $interval, choices: [.week, .month])
-        ReportScopeBar(scope: $scope)
+        ReportFilterBar(interval: $interval, intervalChoices: [.week, .month], scope: $scope)
 
         if let report {
           let measured = report.periods.filter { $0.ageOfMoneyDays != nil }

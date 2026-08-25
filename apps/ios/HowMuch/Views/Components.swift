@@ -69,6 +69,69 @@ struct CardDivider: View {
   }
 }
 
+/// Wraps chips onto another line instead of compressing them off-screen.
+struct WrappingHStack: Layout {
+  var spacing: CGFloat = 8
+  var lineSpacing: CGFloat = 8
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    arrange(in: proposal.width ?? 0, subviews: subviews).size
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    let origins = arrange(in: bounds.width, subviews: subviews).origins
+    for (subview, origin) in zip(subviews, origins) {
+      subview.place(
+        at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y),
+        proposal: .unspecified
+      )
+    }
+  }
+
+  private func arrange(in width: CGFloat, subviews: Subviews) -> (size: CGSize, origins: [CGPoint]) {
+    var origins: [CGPoint] = []
+    var x: CGFloat = 0
+    var y: CGFloat = 0
+    var rowHeight: CGFloat = 0
+    var usedWidth: CGFloat = 0
+
+    for subview in subviews {
+      let size = subview.sizeThatFits(.unspecified)
+      if width > 0, x > 0, x + size.width > width {
+        x = 0
+        y += rowHeight + lineSpacing
+        rowHeight = 0
+      }
+      origins.append(CGPoint(x: x, y: y))
+      rowHeight = max(rowHeight, size.height)
+      usedWidth = max(usedWidth, x + size.width)
+      x += size.width + spacing
+    }
+
+    return (CGSize(width: usedWidth, height: y + rowHeight), origins)
+  }
+}
+
+/// Capsule used by Reflect filter menus and scope pickers.
+struct FilterChip: View {
+  let label: String
+  var isActive = false
+
+  var body: some View {
+    HStack(spacing: 5) {
+      Text(label)
+        .font(.footnote.weight(.medium))
+      Image(systemName: "chevron.down")
+        .font(.caption.weight(.semibold))
+        .accessibilityHidden(true)
+    }
+    .foregroundStyle(isActive ? Theme.card : Theme.accent)
+    .padding(.horizontal, 12)
+    .padding(.vertical, 7)
+    .background(isActive ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Theme.surfaceMuted), in: Capsule())
+  }
+}
+
 /// `‹ June 2026 ›` month stepper, clamped to the current month.
 struct MonthStepper: View {
   @Binding var monthAnchor: Date
