@@ -29,6 +29,7 @@ export function Shell() {
   } = usePlan();
   const { filters } = useFilters();
   const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [mobileNav, setMobileNav] = useState<"closed" | "open">("closed");
   const [organizerOpen, setOrganizerOpen] = useState(false);
   const organizerOpener = useRef<HTMLButtonElement | null>(null);
   const [usageGeneration, setUsageGeneration] = useState(0);
@@ -67,6 +68,19 @@ export function Shell() {
       setLogoutError(cause instanceof Error ? cause.message : String(cause));
     }
   };
+
+  useEffect(() => {
+    setMobileNav("closed");
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (mobileNav === "closed") return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileNav("closed");
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileNav]);
 
   useEffect(() => {
     const report = REPORTS.find((entry) => entry.to === location.pathname);
@@ -111,7 +125,34 @@ export function Shell() {
   }, [accounts, accountPreferences, accountUsage.counts]);
 
   return (
-    <div className="shell">
+    <div className={mobileNav === "open" ? "shell mobile-nav-open" : "shell"}>
+      <header className="mobile-masthead">
+        <button
+          type="button"
+          className="mobile-nav-toggle"
+          aria-expanded={mobileNav === "open"}
+          aria-controls="primary-navigation"
+          onClick={() => setMobileNav((current) => (current === "open" ? "closed" : "open"))}
+        >
+          <span className="sr-only">{mobileNav === "open" ? "Close menu" : "Open menu"}</span>
+          <span className="mobile-nav-toggle-icon" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+        </button>
+        <span className="masthead-title">HowMuch</span>
+        <div className="mobile-actions">
+          <button
+            type="button"
+            className="mobile-organizer-entry"
+            onClick={(event) => openOrganizer(event.currentTarget)}
+          >Organise</button>
+          <NavLink to="/add" className="add-button">+ Add</NavLink>
+          <button type="button" className="sign-out-button" onClick={handleLogout}>Sign out</button>
+        </div>
+        {logoutError && <span className="mobile-masthead-error" role="alert">{logoutError}</span>}
+      </header>
       <aside className="sidebar">
         <div className="sidebar-brand">
           <span className="brand-mark" aria-hidden="true">H</span>
@@ -121,7 +162,7 @@ export function Shell() {
           </span>
         </div>
 
-        <nav className="sidebar-nav" aria-label="Primary navigation">
+        <nav id="primary-navigation" className="sidebar-nav" aria-label="Primary navigation">
           <NavLink
             to={{ pathname: "/plan", search: location.search }}
             className={({ isActive }) => isActive ? "sidebar-primary-link sidebar-link-active" : "sidebar-primary-link"}
@@ -206,19 +247,6 @@ export function Shell() {
         </div>
       </aside>
       <div className="workspace">
-        <header className="mobile-masthead">
-          <span className="masthead-title">HowMuch</span>
-          <div className="mobile-actions">
-            <button
-              type="button"
-              className="mobile-organizer-entry"
-              onClick={(event) => openOrganizer(event.currentTarget)}
-            >Organise</button>
-            <NavLink to="/add" className="add-button">+ Add</NavLink>
-            <button type="button" className="sign-out-button" onClick={handleLogout}>Sign out</button>
-          </div>
-          {logoutError && <span className="mobile-masthead-error" role="alert">{logoutError}</span>}
-        </header>
         <main className="report-body">
           <Suspense fallback={<div className="boot-message">Loading…</div>}>
             <Outlet />
