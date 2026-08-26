@@ -4,6 +4,18 @@ extension View {
   /// White rounded card, the basic YNAB surface.
   func ynabCard() -> some View {
     background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+      .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+  }
+
+  func flagRail(_ colour: Color?) -> some View {
+    overlay(alignment: .leading) {
+      if let colour {
+        Rectangle()
+          .fill(colour)
+          .frame(width: 3)
+          .accessibilityHidden(true)
+      }
+    }
   }
 }
 
