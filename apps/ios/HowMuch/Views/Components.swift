@@ -8,7 +8,7 @@ extension View {
   }
 
   func flagRail(_ colour: Color?) -> some View {
-    overlay(alignment: .trailing) {
+    overlay(alignment: .leading) {
       if let colour {
         Rectangle()
           .fill(colour)
