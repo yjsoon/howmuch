@@ -82,37 +82,31 @@ struct RegisterView: View {
           .listRowSeparator(.hidden)
         }
       } else {
-        if unapprovedCount > 0 || unapprovedOnly {
+        if showsFilterBanners {
           Section {
-            filterBanner(
-              isOn: $unapprovedOnly,
-              offLabel: "Review \(unapprovedCount) new transaction\(unapprovedCount == 1 ? "" : "s")",
-              onLabel: "Showing new transactions to approve"
-            )
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-          }
-        }
-        if unclearedCount > 0 || unclearedOnly {
-          Section {
-            filterBanner(
-              isOn: $unclearedOnly,
-              offLabel: "Show \(unclearedCount) uncleared transactions",
-              onLabel: "Showing uncleared only"
-            )
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-          }
-        }
-        if uncategorisedCount > 0 || uncategorisedOnly {
-          Section {
-            filterBanner(
-              isOn: $uncategorisedOnly,
-              offLabel: "Show \(uncategorisedCount) uncategorised transactions",
-              onLabel: "Showing uncategorised only"
-            )
+            VStack(spacing: 8) {
+              if unapprovedCount > 0 || unapprovedOnly {
+                filterBanner(
+                  isOn: $unapprovedOnly,
+                  offLabel: "Review \(unapprovedCount) new transaction\(unapprovedCount == 1 ? "" : "s")",
+                  onLabel: "Showing new transactions to approve"
+                )
+              }
+              if unclearedCount > 0 || unclearedOnly {
+                filterBanner(
+                  isOn: $unclearedOnly,
+                  offLabel: "Show \(unclearedCount) uncleared transactions",
+                  onLabel: "Showing uncleared only"
+                )
+              }
+              if uncategorisedCount > 0 || uncategorisedOnly {
+                filterBanner(
+                  isOn: $uncategorisedOnly,
+                  offLabel: "Show \(uncategorisedCount) uncategorised transactions",
+                  onLabel: "Showing uncategorised only"
+                )
+              }
+            }
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
@@ -530,6 +524,12 @@ struct RegisterView: View {
     .buttonStyle(.plain)
   }
 
+  private var showsFilterBanners: Bool {
+    unapprovedCount > 0 || unapprovedOnly
+      || unclearedCount > 0 || unclearedOnly
+      || uncategorisedCount > 0 || uncategorisedOnly
+  }
+
   private var unclearedCount: Int {
     scopedTransactions.count { $0.cleared == .uncleared }
   }
@@ -942,7 +942,7 @@ struct TransactionRow: View {
       clearedBadge
     }
     .padding(.horizontal, 16)
-    .padding(.vertical, 11)
+    .padding(.vertical, 7)
     .flagRail(Theme.flagColour(named: transaction.flagColor))
     .contentShape(Rectangle())
   }

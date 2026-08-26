@@ -1,6 +1,7 @@
 import Foundation
 
-/// Built-in account collections. Custom groups keep their own IDs and names.
+/// Built-in account sections. Favourites is a user collection.
+/// Cash, Credit, Tracking, and Closed are a type index.
 enum AccountSystemGroup: String, CaseIterable, Identifiable {
   case favourites
   case cash
@@ -39,7 +40,12 @@ enum AccountSystemGroup: String, CaseIterable, Identifiable {
   }
 }
 
-/// One Favourites, custom, or built-in section on Accounts and in pickers.
+enum AccountListGroupKind: Equatable {
+  case collection
+  case index
+}
+
+/// One Favourites, custom, or type-index section on Accounts and in pickers.
 struct AccountListGroup: Identifiable, Equatable {
   let id: String
   let title: String
@@ -51,6 +57,10 @@ struct AccountListGroup: Identifiable, Equatable {
     self.title = title
     self.accounts = accounts
     self.customGroup = customGroup
+  }
+
+  var kind: AccountListGroupKind {
+    id == AccountSystemGroup.favourites.rawValue || customGroup != nil ? .collection : .index
   }
 
   var total: Int {
@@ -68,9 +78,9 @@ struct AccountListGroup: Identifiable, Equatable {
     return AccountListGroup(id: id, title: title, accounts: matches, customGroup: customGroup)
   }
 
-  /// Favourites, then custom groups, then Cash / Credit / Tracking / Closed.
-  /// Empty built-ins are omitted unless asked for; empty custom groups stay
-  /// visible on Accounts so a new group can receive members.
+  /// Favourites and custom groups, then the Cash / Credit / Tracking / Closed
+  /// type index. Empty index sections are omitted unless asked for; empty
+  /// custom groups stay visible on Accounts so a new group can receive members.
   static func build(
     accounts: [Account],
     favouriteIDs: Set<String>,

@@ -326,8 +326,8 @@ final class AppModel {
     saveViewPrefs()
   }
 
-  /// Favourites, custom groups, then Cash / Credit / Tracking / Closed — the
-  /// same sections as the Accounts tab and the capture account picker.
+  /// Favourites and custom groups, then the Cash / Credit / Tracking / Closed
+  /// type index. Same sections as the Accounts tab and the capture account picker.
   func accountListGroups(
     includeClosed: Bool = true,
     includeEmptySystemGroups: Bool = false,

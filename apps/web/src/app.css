@@ -73,6 +73,13 @@ select:focus-visible {
   outline-offset: 2px;
 }
 
+/* iOS Safari zooms the page when a focused control is below 16px. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="color"]):not([type="file"]):not([type="image"]),
+select,
+textarea {
+  font-size: 16px;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -212,6 +219,25 @@ select:focus-visible {
   scrollbar-width: thin;
 }
 
+.account-list-band + .account-list-band {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid #3d3f38;
+}
+
+.account-list-band-label {
+  margin: 8px 10px 2px;
+  color: #8a8c84;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.account-list-band-index .account-list-band-label {
+  color: #6f716a;
+}
+
 .account-group {
   margin-top: 14px;
 }
@@ -226,6 +252,11 @@ select:focus-visible {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+}
+
+.account-group-index .account-group-heading {
+  color: #7c7e76;
+  font-weight: 500;
 }
 
 .account-group-heading span:last-child,
@@ -286,6 +317,40 @@ select:focus-visible {
 
 .mobile-masthead {
   display: none;
+}
+
+.mobile-nav-toggle {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -8px 0 -8px -8px;
+  color: var(--ink);
+}
+
+.mobile-nav-toggle-icon {
+  display: grid;
+  gap: 5px;
+  width: 18px;
+}
+
+.mobile-nav-toggle-icon span {
+  display: block;
+  height: 1.5px;
+  background: currentColor;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.mobile-nav-open .mobile-nav-toggle-icon span:nth-child(1) {
+  transform: translateY(6.5px) rotate(45deg);
+}
+
+.mobile-nav-open .mobile-nav-toggle-icon span:nth-child(2) {
+  opacity: 0;
+}
+
+.mobile-nav-open .mobile-nav-toggle-icon span:nth-child(3) {
+  transform: translateY(-6.5px) rotate(-45deg);
 }
 
 .mobile-actions {
@@ -435,7 +500,7 @@ select:focus-visible {
   padding: 8px 10px;
   background: var(--paper-raised);
   color: var(--ink);
-  font: 14px var(--font-figures);
+  font: 16px var(--font-figures);
 }
 
 .auth-form button:disabled {
@@ -544,6 +609,10 @@ select:focus-visible {
     width: 100%;
     opacity: 0.4;
   }
+
+  .mobile-nav-toggle-icon span {
+    transition: none;
+  }
 }
 
 .segmented {
@@ -618,7 +687,7 @@ select:focus-visible {
 
 .custom-range input[type="date"] {
   font-family: var(--font-figures);
-  font-size: 11.5px;
+  font-size: 16px;
   padding: 3px 6px;
   border: 1px solid var(--rule);
   border-radius: 2px;
@@ -683,7 +752,7 @@ select:focus-visible {
 .menu-search input {
   width: 100%;
   font: inherit;
-  font-size: 12px;
+  font-size: 16px;
   padding: 3px 8px;
   border: 1px solid var(--rule);
   border-radius: 2px;
@@ -1140,7 +1209,7 @@ select:focus-visible {
   background: var(--paper);
   color: var(--ink);
   font: inherit;
-  font-size: 12px;
+  font-size: 16px;
 }
 
 .transaction-editor-split-line input[type="number"] {
@@ -1869,7 +1938,7 @@ tr:hover .share-bar {
   border-radius: 2px;
   background: var(--paper-raised);
   color: var(--ink);
-  font: 12px var(--font-figures);
+  font: 16px var(--font-figures);
   text-align: right;
 }
 
@@ -1940,7 +2009,7 @@ tr:hover .share-bar {
   border-radius: 2px;
   background: var(--paper-raised);
   color: var(--ink);
-  font: 11px var(--font-figures);
+  font: 16px var(--font-figures);
 }
 
 .plan-target-clear,
@@ -2060,7 +2129,7 @@ tr:hover .share-bar {
 
 .search-input {
   font: inherit;
-  font-size: 13px;
+  font-size: 16px;
   padding: 5px 10px;
   border: 1px solid var(--rule);
   border-radius: 2px;
@@ -2172,7 +2241,7 @@ tr:hover .share-bar {
 .field input,
 .field select {
   font: inherit;
-  font-size: 15px;
+  font-size: 16px;
   padding: 9px 10px;
   border: 1px solid var(--rule);
   border-radius: 2px;
@@ -2270,7 +2339,7 @@ tr:hover .share-bar {
 .split-line select,
 .split-line input {
   font: inherit;
-  font-size: 13px;
+  font-size: 16px;
   padding: 6px 8px;
   border: 1px solid var(--rule);
   border-radius: 2px;
@@ -2614,7 +2683,7 @@ tr:hover .share-bar {
   background: var(--paper-raised);
   border: 0;
   border-radius: 2px 0 0 2px;
-  font: 12px var(--font-figures);
+  font: 16px var(--font-figures);
 }
 
 .api-token-copy {
@@ -3008,6 +3077,11 @@ tr:hover .share-bar {
   border: 1px solid var(--rule);
 }
 
+.group-sort-card-index {
+  background: transparent;
+  border-style: dashed;
+}
+
 .custom-group-heading,
 .group-sort-heading {
   display: flex;
@@ -3095,6 +3169,7 @@ tr:hover .share-bar {
   border: 1px solid var(--rule);
   border-radius: 2px;
   font: inherit;
+  font-size: 16px;
 }
 
 .custom-group-form input {
@@ -3258,35 +3333,45 @@ tr:hover .share-bar {
 
   .sidebar {
     position: static;
-    display: block;
+    display: none;
     height: auto;
     border-right: none;
   }
 
+  .mobile-nav-open .sidebar {
+    display: block;
+  }
+
   .sidebar-brand,
   .account-list,
-  .sidebar-footer,
-  .sidebar-section-label {
+  .sidebar-footer {
     display: none;
   }
 
   .sidebar-nav {
     display: flex;
-    gap: 4px;
-    padding: 8px 10px;
-    overflow-x: auto;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px 12px;
+    overflow: visible;
+  }
+
+  .sidebar-primary-link,
+  .sidebar-report-link {
+    flex: none;
+    width: 100%;
+    min-height: 44px;
+    font-size: 14px;
   }
 
   .sidebar-primary-link {
-    flex: 0 0 auto;
-    padding: 6px 9px;
-    font-size: 12px;
+    padding: 10px 12px;
   }
 
   .sidebar-report-link {
-    flex: 0 0 auto;
-    padding: 6px 9px;
-    font-size: 12px;
+    display: flex;
+    align-items: center;
+    padding: 10px 12px 10px 34px;
   }
 
   .sidebar-primary-link .sidebar-balance {
@@ -3296,10 +3381,15 @@ tr:hover .share-bar {
   .mobile-masthead {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     flex-wrap: wrap;
+    gap: 8px;
     padding: 12px;
     border-bottom: 2px solid var(--rule-strong);
+  }
+
+  .mobile-masthead .masthead-title {
+    flex: 1;
+    min-width: 0;
   }
 
   .mobile-actions {

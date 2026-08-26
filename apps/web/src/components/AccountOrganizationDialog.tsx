@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import type { Account, AccountGroupSort, CustomAccountGroup } from "../api/types";
+import type { Account, AccountGroupSort, AccountPreferences, CustomAccountGroup } from "../api/types";
 import type { AccountGroup } from "../lib/account-groups";
 import {
   addCustomAccountGroup,
@@ -95,7 +95,7 @@ export function AccountOrganizationDialog({
             <span className="page-eyebrow">Synced with iOS</span>
             <h2 id="account-organizer-title">Organise accounts</h2>
             <p id="account-organizer-description">
-              Favourites, groups, and account order are shared with your other signed-in devices.
+              Favourites, your groups, and account order are shared with your other signed-in devices. Cash, Credit, Tracking, and Closed stay a type index.
             </p>
           </div>
           <button type="button" className="account-organizer-close" onClick={requestClose} disabled={saving} aria-label="Close account organiser">×</button>
@@ -158,61 +158,42 @@ export function AccountOrganizationDialog({
               )}
             </section>
 
-            <section className="account-organizer-section" aria-labelledby="display-order-heading">
+            <section className="account-organizer-section" aria-labelledby="collection-sort-heading">
               <div className="account-organizer-section-heading">
                 <div>
-                  <h3 id="display-order-heading">Sort and order</h3>
-                  <p>Sort each group independently. Manual order is shared across devices.</p>
+                  <h3 id="collection-sort-heading">Your groups</h3>
+                  <p>Sort Favourites and the groups you created. Manual order is shared across devices.</p>
                 </div>
               </div>
-              <div className="group-sort-list">
-                {[
+              <GroupSortList
+                items={[
                   BUILT_IN_GROUPS[0]!,
                   ...preferences.custom_account_groups.map((group) => ({ id: group.id, label: group.name })),
-                  ...BUILT_IN_GROUPS.slice(1),
-                ].map((item) => {
-                  const accountsInGroup = groupsById.get(item.id)?.accounts ?? [];
-                  const sort = preferences.account_group_sorts[item.id] ?? "manual";
-                  return (
-                    <div className="group-sort-card" key={item.id}>
-                      <div className="group-sort-heading">
-                        <label htmlFor={`group-sort-${item.id}`}>{item.label}</label>
-                        <select
-                          id={`group-sort-${item.id}`}
-                          value={sort}
-                          onChange={(event) => updateAccountPreferences((current) =>
-                            setAccountGroupSort(current, item.id, event.target.value as AccountGroupSort))}
-                        >
-                          {SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                        </select>
-                      </div>
-                      {sort === "mostUsedLast30Days" && <UsageStatus usage={usage} onRetry={onRetryUsage} />}
-                      {sort === "manual" && accountsInGroup.length > 1 && (
-                        <ol className="account-order-list" aria-label={`Manual order for ${item.label}`}>
-                          {accountsInGroup.map((account, index) => (
-                            <li key={account.id}>
-                              <span>{account.name}</span>
-                              <MoveButtons
-                                label={account.name}
-                                first={index === 0}
-                                last={index === accountsInGroup.length - 1}
-                                onMove={(direction) => updateAccountPreferences((current) => moveAccountInGroup(
-                                  current,
-                                  item.id,
-                                  accountsInGroup.map((entry) => entry.id),
-                                  account.id,
-                                  direction,
-                                ))}
-                              />
-                            </li>
-                          ))}
-                        </ol>
-                      )}
-                      {accountsInGroup.length === 0 && <p className="group-sort-empty">No accounts in this group.</p>}
-                    </div>
-                  );
-                })}
+                ]}
+                groupsById={groupsById}
+                preferences={preferences}
+                usage={usage}
+                onRetryUsage={onRetryUsage}
+                onUpdate={updateAccountPreferences}
+              />
+            </section>
+
+            <section className="account-organizer-section" aria-labelledby="type-index-heading">
+              <div className="account-organizer-section-heading">
+                <div>
+                  <h3 id="type-index-heading">By type</h3>
+                  <p>Cash, Credit, Tracking, and Closed follow account type and closed status. Sort inside a list. Accounts do not move between these lists.</p>
+                </div>
               </div>
+              <GroupSortList
+                items={BUILT_IN_GROUPS.slice(1)}
+                groupsById={groupsById}
+                preferences={preferences}
+                usage={usage}
+                onRetryUsage={onRetryUsage}
+                onUpdate={updateAccountPreferences}
+                tone="index"
+              />
             </section>
           </div>
         )}
@@ -224,6 +205,75 @@ export function AccountOrganizationDialog({
         </footer>
       </div>
     </dialog>
+  );
+}
+
+function GroupSortList({
+  items,
+  groupsById,
+  preferences,
+  usage,
+  onRetryUsage,
+  onUpdate,
+  tone,
+}: {
+  items: Array<{ id: string; label: string }>;
+  groupsById: Map<string, AccountGroup>;
+  preferences: AccountPreferences;
+  usage: AccountUsageState;
+  onRetryUsage: () => void;
+  onUpdate: (updater: (current: AccountPreferences) => AccountPreferences) => void;
+  tone?: "index";
+}) {
+  return (
+    <div className="group-sort-list">
+      {items.map((item) => {
+        const accountsInGroup = groupsById.get(item.id)?.accounts ?? [];
+        const sort = preferences.account_group_sorts[item.id] ?? "manual";
+        return (
+          <div className={tone === "index" ? "group-sort-card group-sort-card-index" : "group-sort-card"} key={item.id}>
+            <div className="group-sort-heading">
+              <label htmlFor={`group-sort-${item.id}`}>{item.label}</label>
+              <select
+                id={`group-sort-${item.id}`}
+                value={sort}
+                onChange={(event) => onUpdate((current) =>
+                  setAccountGroupSort(current, item.id, event.target.value as AccountGroupSort))}
+              >
+                {SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </div>
+            {sort === "mostUsedLast30Days" && <UsageStatus usage={usage} onRetry={onRetryUsage} />}
+            {sort === "manual" && accountsInGroup.length > 1 && (
+              <ol className="account-order-list" aria-label={`Manual order for ${item.label}`}>
+                {accountsInGroup.map((account, index) => (
+                  <li key={account.id}>
+                    <span>{account.name}</span>
+                    <MoveButtons
+                      label={account.name}
+                      first={index === 0}
+                      last={index === accountsInGroup.length - 1}
+                      onMove={(direction) => onUpdate((current) => moveAccountInGroup(
+                        current,
+                        item.id,
+                        accountsInGroup.map((entry) => entry.id),
+                        account.id,
+                        direction,
+                      ))}
+                    />
+                  </li>
+                ))}
+              </ol>
+            )}
+            {accountsInGroup.length === 0 && (
+              <p className="group-sort-empty">
+                {tone === "index" ? "No accounts of this type." : "No accounts in this group."}
+              </p>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
