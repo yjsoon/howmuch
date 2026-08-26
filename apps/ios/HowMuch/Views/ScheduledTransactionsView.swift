@@ -105,12 +105,6 @@ private struct ScheduledTransactionRow: View {
 
   var body: some View {
     HStack(alignment: .center, spacing: 10) {
-      if let flag = Theme.flagColour(named: schedule.flagColor) {
-        RoundedRectangle(cornerRadius: 2)
-          .fill(flag)
-          .frame(width: 4, height: 42)
-      }
-
       VStack(alignment: .leading, spacing: 3) {
         Text(payeeLabel)
           .font(.subheadline.weight(.semibold))
@@ -136,6 +130,7 @@ private struct ScheduledTransactionRow: View {
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 11)
+    .flagRail(Theme.flagColour(named: schedule.flagColor))
     .accessibilityElement(children: .combine)
   }
 

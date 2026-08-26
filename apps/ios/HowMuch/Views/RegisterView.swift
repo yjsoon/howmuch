@@ -894,12 +894,6 @@ struct TransactionRow: View {
   var body: some View {
     HStack(alignment: .center, spacing: 10) {
       HStack(alignment: .center, spacing: 10) {
-        if let flag = Theme.flagColour(named: transaction.flagColor) {
-          RoundedRectangle(cornerRadius: 2)
-            .fill(flag)
-            .frame(width: 4, height: 34)
-        }
-
         VStack(alignment: .leading, spacing: 3) {
           Text(payeeDisplay)
             .font(.subheadline.weight(.semibold))
@@ -922,20 +916,22 @@ struct TransactionRow: View {
 
         Spacer()
 
-        if !transaction.approved {
-          Text("New")
-            .font(.caption2.weight(.bold))
-            .foregroundStyle(Color.white)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(Theme.newBadge, in: Capsule())
-            .accessibilityLabel("Needs approval")
-        }
+        VStack(alignment: .trailing, spacing: 2) {
+          if !transaction.approved {
+            Text("New")
+              .font(.caption2.weight(.bold))
+              .foregroundStyle(Color.white)
+              .padding(.horizontal, 6)
+              .padding(.vertical, 3)
+              .background(Theme.newBadge, in: Capsule())
+              .accessibilityLabel("Needs approval")
+          }
 
-        Text(MoneyCodec.signedDisplayString(for: transaction.amount, currencyFormat: currencyFormat))
-          .font(.subheadline.weight(.medium))
-          .monospacedDigit()
-          .foregroundStyle(Theme.registerAmountColour(transaction.amount))
+          Text(MoneyCodec.signedDisplayString(for: transaction.amount, currencyFormat: currencyFormat))
+            .font(.subheadline.weight(.medium))
+            .monospacedDigit()
+            .foregroundStyle(Theme.registerAmountColour(transaction.amount))
+        }
       }
       .contentShape(Rectangle())
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -947,6 +943,7 @@ struct TransactionRow: View {
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 11)
+    .flagRail(Theme.flagColour(named: transaction.flagColor))
     .contentShape(Rectangle())
   }
 
