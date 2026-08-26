@@ -28,6 +28,7 @@ struct RegisterView: View {
   @State private var editingTransaction: Transaction?
   @State private var duplicatingDraft: DuplicateDraft?
   @State private var isShowingReconciliation = false
+  @State private var membershipsAccount: Account?
   @State private var approvalError: String?
   @State private var statusError: String?
   @State private var transactionPendingDeletion: Transaction?
@@ -271,7 +272,36 @@ struct RegisterView: View {
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
-        if !model.accounts.isEmpty {
+        if let account = scopedAccount {
+          Menu {
+            if !account.closed {
+              Button {
+                model.toggleAccountFavourite(account.id)
+              } label: {
+                Label(
+                  model.isAccountFavourite(account.id) ? "Remove from Favourites" : "Add to Favourites",
+                  systemImage: model.isAccountFavourite(account.id) ? "star.slash" : "star"
+                )
+              }
+            }
+            Button {
+              membershipsAccount = account
+            } label: {
+              Label("Groups…", systemImage: "folder")
+            }
+            Divider()
+            Button {
+              isShowingReconciliation = true
+            } label: {
+              Label("Reconcile", systemImage: "checkmark.circle")
+            }
+            .accessibilityHint("Enter a statement date and statement balance before confirming a reconciliation.")
+          } label: {
+            Image(systemName: "ellipsis.circle")
+          }
+          .accessibilityLabel("Actions for \(account.name)")
+          .accessibilityHint(account.closed ? "Groups and reconcile." : "Favourites, groups, and reconcile.")
+        } else if !model.accounts.isEmpty {
           Button("Reconcile") {
             isShowingReconciliation = true
           }
@@ -285,6 +315,9 @@ struct RegisterView: View {
     }
     .sheet(isPresented: $isShowingReconciliation) {
       AccountReconciliationSheet(preferredAccountID: scope.accountID)
+    }
+    .sheet(item: $membershipsAccount) { account in
+      AccountMembershipSheet(accountID: account.id)
     }
     .sheet(item: $editingTransaction) { transaction in
       TransactionEditorSheet(transaction: transaction)
