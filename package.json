@@ -19,6 +19,7 @@
     "baseline:sqlite": "bun scripts/ledger-baseline.ts",
     "test:d1": "bun test apps/api/tests/d1.test.ts",
     "smoke": "bun scripts/smoke.ts",
+    "verify:ios-focus-zoom": "bun scripts/verify-ios-focus-zoom.ts",
     "test": "bun test",
     "verify:worker": "bun run --cwd apps/worker build"
   },
