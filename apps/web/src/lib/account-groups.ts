@@ -1,6 +1,37 @@
 import type { Account, AccountPreferences } from "../api/types";
 
-export type AccountGroup = { id: string; label: string; accounts: Account[] };
+/** User-owned overlays versus type/status partitions. */
+export type AccountGroupKind = "collection" | "index";
+
+export type AccountGroup = {
+  id: string;
+  label: string;
+  kind: AccountGroupKind;
+  accounts: Account[];
+};
+
+export function partitionAccountGroups(groups: AccountGroup[]): {
+  collections: AccountGroup[];
+  index: AccountGroup[];
+} {
+  const collections: AccountGroup[] = [];
+  const index: AccountGroup[] = [];
+  for (const group of groups) {
+    switch (group.kind) {
+      case "collection":
+        collections.push(group);
+        break;
+      case "index":
+        index.push(group);
+        break;
+      default: {
+        const _exhaustive: never = group.kind;
+        return _exhaustive;
+      }
+    }
+  }
+  return { collections, index };
+}
 
 const CASH_TYPES = new Set(["checking", "savings", "cash"]);
 const CREDIT_TYPES = new Set(["creditCard", "lineOfCredit"]);
@@ -27,16 +58,17 @@ export function accountGroups(
   const custom = preferences.custom_account_groups.map((group) => ({
     id: group.id,
     label: group.name,
+    kind: "collection" as const,
     accounts: group.account_ids.map((id) => byId.get(id)).filter((account): account is Account => Boolean(account)),
   }));
   const builtIn: AccountGroup[] = [
-    { id: "cash", label: "Cash", accounts: open.filter((account) => CASH_TYPES.has(account.type ?? "")) },
-    { id: "credit", label: "Credit", accounts: open.filter((account) => CREDIT_TYPES.has(account.type ?? "")) },
-    { id: "tracking", label: "Tracking", accounts: open.filter((account) => !CASH_TYPES.has(account.type ?? "") && !CREDIT_TYPES.has(account.type ?? "")) },
-    { id: "closed", label: "Closed", accounts: accounts.filter((account) => account.closed) },
+    { id: "cash", label: "Cash", kind: "index", accounts: open.filter((account) => CASH_TYPES.has(account.type ?? "")) },
+    { id: "credit", label: "Credit", kind: "index", accounts: open.filter((account) => CREDIT_TYPES.has(account.type ?? "")) },
+    { id: "tracking", label: "Tracking", kind: "index", accounts: open.filter((account) => !CASH_TYPES.has(account.type ?? "") && !CREDIT_TYPES.has(account.type ?? "")) },
+    { id: "closed", label: "Closed", kind: "index", accounts: accounts.filter((account) => account.closed) },
   ];
   return [
-    ...([{ id: "favourites", label: "Favourites", accounts: favourites }].filter(hasAccounts)),
+    ...([{ id: "favourites", label: "Favourites", kind: "collection" as const, accounts: favourites }].filter(hasAccounts)),
     ...custom,
     ...builtIn.filter(hasAccounts),
   ].map((group) => ({

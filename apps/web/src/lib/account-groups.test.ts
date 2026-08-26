@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Account, AccountPreferences } from "../api/types";
-import { accountGroups } from "./account-groups";
+import { accountGroups, partitionAccountGroups } from "./account-groups";
 
 const accounts: Account[] = [
   { id: "cash", name: "Wallet", type: "cash", on_budget: true, closed: false, balance: 1000, cleared_balance: 1000, uncleared_balance: 0, transfer_payee_id: null, deleted: false },
@@ -25,14 +25,18 @@ describe("accountGroups", () => {
   test("projects mobile favourites, custom groups, built-ins, and manual order", () => {
     expect(accountGroups(accounts, preferences).map((group) => ({
       id: group.id,
+      kind: group.kind,
       accountIds: group.accounts.map((account) => account.id),
     }))).toEqual([
-      { id: "favourites", accountIds: ["cash", "card"] },
-      { id: "custom-daily", accountIds: ["card", "cash"] },
-      { id: "cash", accountIds: ["cash"] },
-      { id: "credit", accountIds: ["card"] },
-      { id: "tracking", accountIds: ["loan"] },
+      { id: "favourites", kind: "collection", accountIds: ["cash", "card"] },
+      { id: "custom-daily", kind: "collection", accountIds: ["card", "cash"] },
+      { id: "cash", kind: "index", accountIds: ["cash"] },
+      { id: "credit", kind: "index", accountIds: ["card"] },
+      { id: "tracking", kind: "index", accountIds: ["loan"] },
     ]);
+    const partitioned = partitionAccountGroups(accountGroups(accounts, preferences));
+    expect(partitioned.collections.map((group) => group.id)).toEqual(["favourites", "custom-daily"]);
+    expect(partitioned.index.map((group) => group.id)).toEqual(["cash", "credit", "tracking"]);
   });
 
   test("uses mobile built-ins without synced preferences and keeps empty custom groups", () => {
