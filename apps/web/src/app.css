@@ -219,6 +219,25 @@ textarea {
   scrollbar-width: thin;
 }
 
+.account-list-band + .account-list-band {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid #3d3f38;
+}
+
+.account-list-band-label {
+  margin: 8px 10px 2px;
+  color: #8a8c84;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.account-list-band-index .account-list-band-label {
+  color: #6f716a;
+}
+
 .account-group {
   margin-top: 14px;
 }
@@ -233,6 +252,11 @@ textarea {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+}
+
+.account-group-index .account-group-heading {
+  color: #7c7e76;
+  font-weight: 500;
 }
 
 .account-group-heading span:last-child,
@@ -3051,6 +3075,11 @@ tr:hover .share-bar {
   padding: 12px;
   background: var(--paper-raised);
   border: 1px solid var(--rule);
+}
+
+.group-sort-card-index {
+  background: transparent;
+  border-style: dashed;
 }
 
 .custom-group-heading,

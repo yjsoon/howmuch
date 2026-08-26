@@ -3,7 +3,11 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { ApiError, api, type TransactionPage } from "../api/client";
 import type { AccountPreferences } from "../api/types";
 import { formatMoney } from "../lib/money";
-import { accountGroups as buildAccountGroups, type AccountGroup } from "../lib/account-groups";
+import {
+  accountGroups as buildAccountGroups,
+  partitionAccountGroups,
+  type AccountGroup,
+} from "../lib/account-groups";
 import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
 import { AccountOrganizationDialog, type AccountUsageState } from "./AccountOrganizationDialog";
@@ -41,6 +45,10 @@ export function Shell() {
   const accountGroups = useMemo(
     () => buildAccountGroups(accounts, accountPreferences, accountUsage.counts),
     [accounts, accountPreferences, accountUsage.counts],
+  );
+  const { collections, index: typeIndex } = useMemo(
+    () => partitionAccountGroups(accountGroups),
+    [accountGroups],
   );
   const usesMostUsedSort = accountPreferences
     ? Object.values(accountPreferences.account_group_sorts).includes("mostUsedLast30Days")
@@ -212,26 +220,18 @@ export function Shell() {
         </nav>
 
         <div className="account-list">
-          {accountGroups.map((group) => (
-            <section key={group.id} className="account-group">
-              <div className="account-group-heading">
-                <span>{group.label}</span>
-                <span>{formatMoney(group.accounts.reduce((sum, account) => sum + account.balance, 0))}</span>
-              </div>
-              {group.accounts.map((account) => (
-                <NavLink
-                  key={account.id}
-                  to={`/transactions?range=all&accounts=${encodeURIComponent(account.id)}`}
-                  className={selectedAccount?.id === account.id ? "account-link sidebar-link-active" : "account-link"}
-                >
-                  <span className="account-name" title={account.name}>{account.name}</span>
-                  <span className={account.balance < 0 ? "sidebar-balance sidebar-balance-negative" : "sidebar-balance"}>
-                    {formatMoney(account.balance)}
-                  </span>
-                </NavLink>
-              ))}
-            </section>
-          ))}
+          {collections.length > 0 && (
+            <div className="account-list-band">
+              <p className="account-list-band-label">Your groups</p>
+              <AccountGroupSections groups={collections} selectedAccountId={selectedAccount?.id} />
+            </div>
+          )}
+          {typeIndex.length > 0 && (
+            <div className="account-list-band account-list-band-index">
+              <p className="account-list-band-label">By type</p>
+              <AccountGroupSections groups={typeIndex} selectedAccountId={selectedAccount?.id} tone="index" />
+            </div>
+          )}
         </div>
 
         <div className="sidebar-footer">
@@ -272,6 +272,37 @@ export function Shell() {
       )}
     </div>
   );
+}
+
+function AccountGroupSections({
+  groups,
+  selectedAccountId,
+  tone,
+}: {
+  groups: AccountGroup[];
+  selectedAccountId: string | undefined;
+  tone?: "index";
+}) {
+  return groups.map((group) => (
+    <section key={group.id} className={tone === "index" ? "account-group account-group-index" : "account-group"}>
+      <div className="account-group-heading">
+        <span>{group.label}</span>
+        <span>{formatMoney(group.accounts.reduce((sum, account) => sum + account.balance, 0))}</span>
+      </div>
+      {group.accounts.map((account) => (
+        <NavLink
+          key={account.id}
+          to={`/transactions?range=all&accounts=${encodeURIComponent(account.id)}`}
+          className={selectedAccountId === account.id ? "account-link sidebar-link-active" : "account-link"}
+        >
+          <span className="account-name" title={account.name}>{account.name}</span>
+          <span className={account.balance < 0 ? "sidebar-balance sidebar-balance-negative" : "sidebar-balance"}>
+            {formatMoney(account.balance)}
+          </span>
+        </NavLink>
+      ))}
+    </section>
+  ));
 }
 
 function AccountOrganizationNotice({ sync, supported, usage, onRetrySave, onRetryUsage }: {

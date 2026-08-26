@@ -73,8 +73,17 @@ struct AccountsView: View {
           }
           .buttonStyle(.plain)
 
-          ForEach(accountGroups) { group in
-            accountGroupSection(group)
+          if !collectionGroups.isEmpty {
+            accountListBandLabel("Your groups")
+            ForEach(collectionGroups) { group in
+              accountGroupSection(group)
+            }
+          }
+          if !indexGroups.isEmpty {
+            accountListBandLabel("By type")
+            ForEach(indexGroups) { group in
+              accountGroupSection(group)
+            }
           }
         }
       }
@@ -193,8 +202,8 @@ struct AccountsView: View {
               .foregroundStyle(.secondary)
               .rotationEffect(.degrees(isCollapsed ? -90 : 0))
             Text(group.title)
-              .font(.subheadline.weight(.semibold))
-              .foregroundStyle(Theme.textPrimary)
+              .font(group.kind == .index ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
+              .foregroundStyle(group.kind == .index ? Color.secondary : Theme.textPrimary)
             Spacer()
             Text(MoneyCodec.displayString(for: group.total, currencyFormat: model.currencyFormat))
               .font(.subheadline.weight(.semibold))
@@ -469,6 +478,25 @@ struct AccountsView: View {
 
   private var accountGroups: [AccountListGroup] {
     model.accountListGroups()
+  }
+
+  private var collectionGroups: [AccountListGroup] {
+    accountGroups.filter { $0.kind == .collection }
+  }
+
+  private var indexGroups: [AccountListGroup] {
+    accountGroups.filter { $0.kind == .index }
+  }
+
+  private func accountListBandLabel(_ title: String) -> some View {
+    Text(title)
+      .font(.caption.weight(.semibold))
+      .foregroundStyle(.tertiary)
+      .textCase(.uppercase)
+      .tracking(0.8)
+      .padding(.horizontal, 4)
+      .padding(.top, 8)
+      .accessibilityAddTraits(.isHeader)
   }
 
   private var groupManagementItems: [AccountGroupManagementItem] {
