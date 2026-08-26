@@ -73,6 +73,13 @@ select:focus-visible {
   outline-offset: 2px;
 }
 
+/* iOS Safari zooms the page when a focused control is below 16px. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="color"]):not([type="file"]):not([type="image"]),
+select,
+textarea {
+  font-size: 16px;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -435,7 +442,7 @@ select:focus-visible {
   padding: 8px 10px;
   background: var(--paper-raised);
   color: var(--ink);
-  font: 14px var(--font-figures);
+  font: 16px var(--font-figures);
 }
 
 .auth-form button:disabled {
@@ -618,7 +625,7 @@ select:focus-visible {
 
 .custom-range input[type="date"] {
   font-family: var(--font-figures);
-  font-size: 11.5px;
+  font-size: 16px;
   padding: 3px 6px;
   border: 1px solid var(--rule);
   border-radius: 2px;
@@ -683,7 +690,7 @@ select:focus-visible {
 .menu-search input {
   width: 100%;
   font: inherit;
-  font-size: 12px;
+  font-size: 16px;
   padding: 3px 8px;
   border: 1px solid var(--rule);
   border-radius: 2px;
@@ -1140,7 +1147,7 @@ select:focus-visible {
   background: var(--paper);
   color: var(--ink);
   font: inherit;
-  font-size: 12px;
+  font-size: 16px;
 }
 
 .transaction-editor-split-line input[type="number"] {
@@ -1869,7 +1876,7 @@ tr:hover .share-bar {
   border-radius: 2px;
   background: var(--paper-raised);
   color: var(--ink);
-  font: 12px var(--font-figures);
+  font: 16px var(--font-figures);
   text-align: right;
 }
 
@@ -1940,7 +1947,7 @@ tr:hover .share-bar {
   border-radius: 2px;
   background: var(--paper-raised);
   color: var(--ink);
-  font: 11px var(--font-figures);
+  font: 16px var(--font-figures);
 }
 
 .plan-target-clear,
@@ -2060,7 +2067,7 @@ tr:hover .share-bar {
 
 .search-input {
   font: inherit;
-  font-size: 13px;
+  font-size: 16px;
   padding: 5px 10px;
   border: 1px solid var(--rule);
   border-radius: 2px;
@@ -2172,7 +2179,7 @@ tr:hover .share-bar {
 .field input,
 .field select {
   font: inherit;
-  font-size: 15px;
+  font-size: 16px;
   padding: 9px 10px;
   border: 1px solid var(--rule);
   border-radius: 2px;
@@ -2270,7 +2277,7 @@ tr:hover .share-bar {
 .split-line select,
 .split-line input {
   font: inherit;
-  font-size: 13px;
+  font-size: 16px;
   padding: 6px 8px;
   border: 1px solid var(--rule);
   border-radius: 2px;
@@ -2614,7 +2621,7 @@ tr:hover .share-bar {
   background: var(--paper-raised);
   border: 0;
   border-radius: 2px 0 0 2px;
-  font: 12px var(--font-figures);
+  font: 16px var(--font-figures);
 }
 
 .api-token-copy {
@@ -3095,6 +3102,7 @@ tr:hover .share-bar {
   border: 1px solid var(--rule);
   border-radius: 2px;
   font: inherit;
+  font-size: 16px;
 }
 
 .custom-group-form input {
