@@ -71,7 +71,7 @@ export function Shell() {
 
   useEffect(() => {
     setMobileNav("closed");
-  }, [location.pathname]);
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     if (mobileNav === "closed") return;
