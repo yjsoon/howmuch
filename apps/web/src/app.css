@@ -288,6 +288,40 @@ select:focus-visible {
   display: none;
 }
 
+.mobile-nav-toggle {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -8px 0 -8px -8px;
+  color: var(--ink);
+}
+
+.mobile-nav-toggle-icon {
+  display: grid;
+  gap: 5px;
+  width: 18px;
+}
+
+.mobile-nav-toggle-icon span {
+  display: block;
+  height: 1.5px;
+  background: currentColor;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.mobile-nav-open .mobile-nav-toggle-icon span:nth-child(1) {
+  transform: translateY(6.5px) rotate(45deg);
+}
+
+.mobile-nav-open .mobile-nav-toggle-icon span:nth-child(2) {
+  opacity: 0;
+}
+
+.mobile-nav-open .mobile-nav-toggle-icon span:nth-child(3) {
+  transform: translateY(-6.5px) rotate(-45deg);
+}
+
 .mobile-actions {
   display: flex;
   align-items: center;
@@ -543,6 +577,10 @@ select:focus-visible {
     animation: none;
     width: 100%;
     opacity: 0.4;
+  }
+
+  .mobile-nav-toggle-icon span {
+    transition: none;
   }
 }
 
@@ -3258,35 +3296,45 @@ tr:hover .share-bar {
 
   .sidebar {
     position: static;
-    display: block;
+    display: none;
     height: auto;
     border-right: none;
   }
 
+  .mobile-nav-open .sidebar {
+    display: block;
+  }
+
   .sidebar-brand,
   .account-list,
-  .sidebar-footer,
-  .sidebar-section-label {
+  .sidebar-footer {
     display: none;
   }
 
   .sidebar-nav {
     display: flex;
-    gap: 4px;
-    padding: 8px 10px;
-    overflow-x: auto;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px 12px;
+    overflow: visible;
+  }
+
+  .sidebar-primary-link,
+  .sidebar-report-link {
+    flex: none;
+    width: 100%;
+    min-height: 44px;
+    font-size: 14px;
   }
 
   .sidebar-primary-link {
-    flex: 0 0 auto;
-    padding: 6px 9px;
-    font-size: 12px;
+    padding: 10px 12px;
   }
 
   .sidebar-report-link {
-    flex: 0 0 auto;
-    padding: 6px 9px;
-    font-size: 12px;
+    display: flex;
+    align-items: center;
+    padding: 10px 12px 10px 34px;
   }
 
   .sidebar-primary-link .sidebar-balance {
@@ -3296,10 +3344,15 @@ tr:hover .share-bar {
   .mobile-masthead {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     flex-wrap: wrap;
+    gap: 8px;
     padding: 12px;
     border-bottom: 2px solid var(--rule-strong);
+  }
+
+  .mobile-masthead .masthead-title {
+    flex: 1;
+    min-width: 0;
   }
 
   .mobile-actions {
