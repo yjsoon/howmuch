@@ -308,67 +308,40 @@ struct AccountsView: View {
   }
 
   private func accountRow(_ account: Account) -> some View {
-    HStack(spacing: 0) {
-      NavigationLink {
-        RegisterView(scope: .account(account.id))
-      } label: {
-        Group {
-          if dynamicTypeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: 4) {
-              Text(account.name)
-                .foregroundStyle(Theme.textPrimary)
-              accountBalance(account)
-            }
-          } else {
-            HStack {
-              Text(account.name)
-                .foregroundStyle(Theme.textPrimary)
-              Spacer()
-              accountBalance(account)
-            }
+    NavigationLink {
+      RegisterView(scope: .account(account.id))
+    } label: {
+      Group {
+        if dynamicTypeSize.isAccessibilitySize {
+          VStack(alignment: .leading, spacing: 4) {
+            Text(account.name)
+              .foregroundStyle(Theme.textPrimary)
+            accountBalance(account)
+          }
+        } else {
+          HStack {
+            Text(account.name)
+              .foregroundStyle(Theme.textPrimary)
+            Spacer()
+            accountBalance(account)
           }
         }
-        .contentShape(Rectangle())
       }
-      .buttonStyle(.plain)
-      .padding(.leading, 16)
-      .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-      .accessibilityActions {
-        if !account.closed {
-          Button(model.isAccountFavourite(account.id) ? "Remove from Favourites" : "Add to Favourites") {
-            model.toggleAccountFavourite(account.id)
-          }
-        }
-        Button("Groups") {
-          presentedSheet = .memberships(account.id)
-        }
-      }
-
-      Menu {
-        if !account.closed {
-          Button {
-            model.toggleAccountFavourite(account.id)
-          } label: {
-            Label(
-              model.isAccountFavourite(account.id) ? "Remove from Favourites" : "Add to Favourites",
-              systemImage: model.isAccountFavourite(account.id) ? "star.slash" : "star"
-            )
-          }
-        }
-        Button {
-          presentedSheet = .memberships(account.id)
-        } label: {
-          Label("Groups…", systemImage: "folder")
-        }
-      } label: {
-        Image(systemName: "ellipsis")
-          .foregroundStyle(.secondary)
-          .frame(width: 44, height: 44)
-          .contentShape(Rectangle())
-      }
-      .accessibilityLabel("Actions for \(account.name)")
+      .contentShape(Rectangle())
     }
-    .padding(.trailing, 4)
+    .buttonStyle(.plain)
+    .padding(.horizontal, 16)
+    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+    .accessibilityActions {
+      if !account.closed {
+        Button(model.isAccountFavourite(account.id) ? "Remove from Favourites" : "Add to Favourites") {
+          model.toggleAccountFavourite(account.id)
+        }
+      }
+      Button("Groups") {
+        presentedSheet = .memberships(account.id)
+      }
+    }
   }
 
   private func accountBalance(_ account: Account) -> some View {
@@ -690,7 +663,7 @@ private struct NewCustomAccountGroupSheet: View {
   }
 }
 
-private struct AccountMembershipSheet: View {
+struct AccountMembershipSheet: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
   let accountID: String
