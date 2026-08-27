@@ -131,7 +131,7 @@ struct RegisterView: View {
               currencyFormat: model.currencyFormat,
               isBusy: model.isSubmitting,
               onOpen: { editingTransaction = transaction },
-              onToggleCleared: { toggleCleared(transaction) }
+              onChangeStatus: { changeStatus(transaction) }
             )
             .swipeActions(edge: .leading, allowsFullSwipe: true) {
               if !transaction.approved {
@@ -403,6 +403,17 @@ struct RegisterView: View {
       return "All Transactions"
     case .account(let id):
       return model.account(withID: id)?.name ?? "Account"
+    }
+  }
+
+  private func changeStatus(_ transaction: Transaction) {
+    switch transaction.registerStatus.tap {
+    case .approve:
+      approve(transaction)
+    case .toggleCleared:
+      toggleCleared(transaction)
+    case nil:
+      return
     }
   }
 
@@ -883,16 +894,101 @@ private struct AccountReconciliationSheet: View {
   }
 }
 
+enum RegisterStatus: Equatable {
+  case new
+  case uncleared
+  case cleared
+  case reconciled
+
+  enum Tap: Equatable {
+    case approve
+    case toggleCleared
+  }
+
+  init(approved: Bool, cleared: ClearedState) {
+    if !approved {
+      self = .new
+      return
+    }
+    switch cleared {
+    case .reconciled:
+      self = .reconciled
+    case .cleared:
+      self = .cleared
+    case .uncleared:
+      self = .uncleared
+    }
+  }
+
+  var tap: Tap? {
+    switch self {
+    case .new:
+      return .approve
+    case .uncleared, .cleared:
+      return .toggleCleared
+    case .reconciled:
+      return nil
+    }
+  }
+
+  var symbolName: String {
+    switch self {
+    case .new:
+      return "n.circle.fill"
+    case .uncleared:
+      return "c.circle"
+    case .cleared:
+      return "c.circle.fill"
+    case .reconciled:
+      return "lock.fill"
+    }
+  }
+
+  var symbolFont: Font {
+    self == .reconciled ? .caption : .title3
+  }
+
+  var symbolStyle: AnyShapeStyle {
+    switch self {
+    case .new:
+      return AnyShapeStyle(Theme.newBadge)
+    case .uncleared:
+      return AnyShapeStyle(.tertiary)
+    case .cleared, .reconciled:
+      return AnyShapeStyle(Theme.inflow)
+    }
+  }
+
+  func accessibilityLabel(payee: String) -> String {
+    switch self {
+    case .new:
+      return "Approve \(payee)"
+    case .uncleared:
+      return "Mark \(payee) cleared"
+    case .cleared:
+      return "Mark \(payee) uncleared"
+    case .reconciled:
+      return "Reconciled"
+    }
+  }
+}
+
+extension Transaction {
+  var registerStatus: RegisterStatus {
+    RegisterStatus(approved: approved, cleared: cleared)
+  }
+}
+
 struct TransactionRow: View {
   let transaction: Transaction
   let showsAccount: Bool
   let currencyFormat: CurrencyFormat?
   let isBusy: Bool
   let onOpen: () -> Void
-  let onToggleCleared: () -> Void
+  let onChangeStatus: () -> Void
 
   var body: some View {
-    HStack(alignment: .center, spacing: 10) {
+    HStack(alignment: .center, spacing: 4) {
       HStack(alignment: .center, spacing: 10) {
         VStack(alignment: .leading, spacing: 3) {
           Text(payeeDisplay)
@@ -916,22 +1012,10 @@ struct TransactionRow: View {
 
         Spacer()
 
-        VStack(alignment: .trailing, spacing: 2) {
-          if !transaction.approved {
-            Text("New")
-              .font(.caption2.weight(.bold))
-              .foregroundStyle(Color.white)
-              .padding(.horizontal, 6)
-              .padding(.vertical, 3)
-              .background(Theme.newBadge, in: Capsule())
-              .accessibilityLabel("Needs approval")
-          }
-
-          Text(MoneyCodec.signedDisplayString(for: transaction.amount, currencyFormat: currencyFormat))
-            .font(.subheadline.weight(.medium))
-            .monospacedDigit()
-            .foregroundStyle(Theme.registerAmountColour(transaction.amount))
-        }
+        Text(MoneyCodec.signedDisplayString(for: transaction.amount, currencyFormat: currencyFormat))
+          .font(.subheadline.weight(.medium))
+          .monospacedDigit()
+          .foregroundStyle(Theme.registerAmountColour(transaction.amount))
       }
       .contentShape(Rectangle())
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -939,9 +1023,10 @@ struct TransactionRow: View {
       .accessibilityAddTraits(.isButton)
       .accessibilityHint("Opens this transaction.")
 
-      clearedBadge
+      statusControl
     }
-    .padding(.horizontal, 16)
+    .padding(.leading, 16)
+    .padding(.trailing, 8)
     .padding(.vertical, 7)
     .flagRail(Theme.flagColour(named: transaction.flagColor))
     .contentShape(Rectangle())
@@ -972,36 +1057,27 @@ struct TransactionRow: View {
   }
 
   @ViewBuilder
-  private var clearedBadge: some View {
-    switch transaction.cleared {
-    case .reconciled:
-      Image(systemName: "lock.fill")
-        .font(.caption)
-        .foregroundStyle(Theme.inflow)
-        .frame(width: 44, height: 44)
-        .accessibilityLabel("Reconciled")
-    case .cleared:
-      Button(action: onToggleCleared) {
-        Image(systemName: "c.circle.fill")
-          .font(.title3)
-          .foregroundStyle(Theme.inflow)
-          .frame(width: 44, height: 44)
+  private var statusControl: some View {
+    let status = transaction.registerStatus
+    switch status.tap {
+    case nil:
+      statusIcon(status)
+        .accessibilityLabel(status.accessibilityLabel(payee: payeeDisplay))
+    case .approve, .toggleCleared:
+      Button(action: onChangeStatus) {
+        statusIcon(status)
       }
       .buttonStyle(.plain)
       .disabled(isBusy)
-      .accessibilityLabel("Mark \(payeeDisplay) uncleared")
-      .accessibilityHint("Double tap to change this transaction’s status.")
-    case .uncleared:
-      Button(action: onToggleCleared) {
-        Image(systemName: "c.circle")
-          .font(.title3)
-          .foregroundStyle(.tertiary)
-          .frame(width: 44, height: 44)
-      }
-      .buttonStyle(.plain)
-      .disabled(isBusy)
-      .accessibilityLabel("Mark \(payeeDisplay) cleared")
+      .accessibilityLabel(status.accessibilityLabel(payee: payeeDisplay))
       .accessibilityHint("Double tap to change this transaction’s status.")
     }
+  }
+
+  private func statusIcon(_ status: RegisterStatus) -> some View {
+    Image(systemName: status.symbolName)
+      .font(status.symbolFont)
+      .foregroundStyle(status.symbolStyle)
+      .frame(width: 44, height: 44)
   }
 }
