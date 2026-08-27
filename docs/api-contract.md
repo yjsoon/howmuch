@@ -77,12 +77,24 @@ Returns date format, currency format, and custom flag names.
 
 `POST /v1/plans/{plan_id}/accounts`
 
+`PUT /v1/plans/{plan_id}/accounts/{account_id}`
+
+`PATCH /v1/plans/{plan_id}/accounts/{account_id}`
+
 `POST /v1/plans/{plan_id}/accounts/{account_id}/reconcile`
 
-Create body: `{ "account": { "name": "Savings", "type": "savings", "balance": 0 } }`. The
-server generates an id when none is supplied and treats `balance` as the opening
+Create body: `{ "account": { "name": "Savings", "type": "savings", "balance": 0, "icon": "💰" } }`.
+`icon` is optional. A leading or trailing emoji on `name` is lifted into `icon`
+and stripped from the stored name. Accounts without an emoji receive a type
+default such as 🏦 for checking or 💳 for credit cards.
+
+Update body: `{ "account": { "icon": "🐷" } }`. `icon` must be a single emoji.
+This write is presentation-only and is not locked by transition read-only mode.
+
+The server generates an id when none is supplied and treats `balance` as the opening
 balance. Every account also owns a `Transfer : <name>` payee (created on demand
-and backfilled by migration), exposed through `transfer_payee_id`.
+and backfilled by migration), exposed through `transfer_payee_id`. Account
+records include `icon` alongside `name`.
 
 Preview reconciliation for a statement date with:
 

@@ -30,6 +30,7 @@ import {
   nextScheduledOccurrence,
   type EffectiveScheduledTransaction,
 } from "./scheduled-transactions";
+import { parseAccountIcon, resolveAccountPresentation } from "./account-icon";
 
 type Row = Record<string, any>;
 
@@ -294,17 +295,25 @@ export class LedgerRepository {
 
   async upsertAccount(planId: string, account: any): Promise<void> {
     await this.ensurePlan(planId);
+    const existing = await this.db.query("SELECT icon FROM accounts WHERE id = ?").get(account.id) as Row | null;
+    const presentation = resolveAccountPresentation({
+      name: account.name ?? `Account ${account.id}`,
+      icon: account.icon,
+      type: account.type ?? "checking",
+      existingIcon: existing?.icon,
+    });
     await this.db
       .query(
         `INSERT INTO accounts (
-           id, plan_id, name, type, on_budget, closed, opening_balance_milli,
+           id, plan_id, name, icon, type, on_budget, closed, opening_balance_milli,
            balance_milli, cleared_balance_milli, uncleared_balance_milli,
            transfer_payee_id, direct_import_linked, direct_import_in_error,
            external_ynab_id, deleted, updated_at
          )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name,
+           icon = excluded.icon,
            type = excluded.type,
            on_budget = excluded.on_budget,
            closed = excluded.closed,
@@ -322,7 +331,8 @@ export class LedgerRepository {
       .run(
         account.id,
         planId,
-        account.name ?? `Account ${account.id}`,
+        presentation.name,
+        presentation.icon,
         account.type ?? "checking",
         bool(account.on_budget, true),
         bool(account.closed),
@@ -337,6 +347,20 @@ export class LedgerRepository {
         bool(account.deleted),
       );
     await this.ensureTransferPayee(planId, account.id);
+  }
+
+  async updateAccountIcon(planId: string, accountId: string, icon: string): Promise<any> {
+    const parsed = parseAccountIcon(icon);
+    if (!parsed) throw new ValidationError("icon must be a single emoji");
+    const row = await this.db
+      .query("SELECT id FROM accounts WHERE id = ? AND plan_id = ? AND deleted = 0")
+      .get(accountId, planId) as Row | null;
+    if (!row) throw new NotFoundError("Account not found");
+    await this.db
+      .query("UPDATE accounts SET icon = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
+      .run(parsed, accountId, planId);
+    await this.touchPlan(planId);
+    return this.getAccount(planId, accountId);
   }
 
   async listAccounts(planId: string): Promise<any[]> {
@@ -2774,9 +2798,15 @@ function formatPlan(row: Row): any {
 }
 
 function formatAccount(row: Row): any {
+  const presentation = resolveAccountPresentation({
+    name: row.name,
+    icon: row.icon,
+    type: row.type,
+  });
   return {
     id: row.id,
-    name: row.name,
+    name: presentation.name,
+    icon: presentation.icon,
     type: row.type,
     on_budget: toBoolean(row.on_budget),
     closed: toBoolean(row.closed),

@@ -1,5 +1,6 @@
 import { createId } from "./ids";
 import { createHash } from "node:crypto";
+import { parseAccountIcon } from "./account-icon";
 import { LedgerRepository, NotFoundError, ReconciliationMismatchError, TransactionStateConflictError, ValidationError, type TransactionWriteOptions } from "./repository";
 import type { LedgerStore } from "./storage";
 import type { AccountReconciliationOptions, AccountReconciliationPreview, AccountReconciliationResult, MonthCategoryTargetInput, ScheduledTransactionInput, ScheduledWriteOptions, TransactionBatchResult, TransactionBatchUpdate, TransactionInput } from "./types";
@@ -36,6 +37,14 @@ export class D1LedgerRepository extends LedgerRepository {
   override async upsertPlan(planId:string,plan:any,settings?:any):Promise<void>{await this.metadata.upsertPlan(planId,plan,settings,this.context("plan.upsert",planId,planId));}
   override async ensureAccount(planId:string,accountId:string,name?:string):Promise<void>{await this.metadata.ensureAccount(planId,accountId,name,this.context("account.ensure",planId,accountId));}
   override async upsertAccount(planId:string,account:any):Promise<void>{await this.metadata.upsertAccount(planId,account,this.context("account.upsert",planId,account.id));}
+  override async updateAccountIcon(planId:string,accountId:string,icon:string):Promise<any>{
+    const parsed = parseAccountIcon(icon);
+    if (!parsed) throw new ValidationError("icon must be a single emoji");
+    const existing = await this.d1.get("SELECT id FROM accounts WHERE id=? AND plan_id=? AND deleted=0", [accountId, planId]);
+    if (!existing) throw new NotFoundError("Account not found");
+    await this.metadata.updateAccountIcon(planId, accountId, parsed, this.context("account.icon", planId, accountId));
+    return this.getAccount(planId, accountId);
+  }
   override async createAccount(planId:string,account:any):Promise<any>{
     const id=account.id??createId("acct"); const opening=account.opening_balance??account.balance??0;
     await this.metadata.upsertAccount(planId,{...account,id,...(!account.id?{opening_balance:opening,balance:account.balance??opening,cleared_balance:account.cleared_balance??account.balance??opening}: {})},this.context("account.create",planId,id),false,true);

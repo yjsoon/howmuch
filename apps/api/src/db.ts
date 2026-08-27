@@ -86,6 +86,10 @@ export function applyMigrations(db: Database): void {
       version: "015_account_preferences",
       path: join(migrationsDir, "015_account_preferences.sql"),
     },
+    {
+      version: "016_account_icons",
+      path: join(migrationsDir, "016_account_icons.sql"),
+    },
   ];
 
   for (const migration of migrations) {
