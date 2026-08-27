@@ -28,8 +28,12 @@ describe("splitLegacyAccountName", () => {
     expect(splitLegacyAccountName("💳OCBC")).toEqual({ icon: "💳", name: "OCBC" });
   });
 
-  test("lifts a trailing emoji when the name does not start with one", () => {
-    expect(splitLegacyAccountName("Travel ✈️")).toEqual({ icon: "✈️", name: "Travel" });
+  test("leaves a trailing emoji on the name", () => {
+    expect(splitLegacyAccountName("Travel ✈️")).toEqual({ icon: null, name: "Travel ✈️" });
+    expect(splitLegacyAccountName("Banana \u{1F44D}\u{FE0F}")).toEqual({
+      icon: null,
+      name: "Banana \u{1F44D}\u{FE0F}",
+    });
   });
 
   test("keeps a name that is only an emoji", () => {
@@ -64,12 +68,12 @@ describe("resolveAccountPresentation", () => {
       .toEqual({ icon: "💰", name: "Rainy Day" });
   });
 
-  test("lifts a leftover name emoji over a stored type-default icon", () => {
+  test("does not lift a trailing name emoji over a stored type-default icon", () => {
     expect(resolveAccountPresentation({
       name: "Travel ✈️",
       existingIcon: "💳",
       type: "creditCard",
-    })).toEqual({ icon: "✈️", name: "Travel" });
+    })).toEqual({ icon: "💳", name: "Travel ✈️" });
   });
 
   test("lifts a thumbs-up plus space even when the name has trailing spaces", () => {

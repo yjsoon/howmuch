@@ -84,9 +84,10 @@ Returns date format, currency format, and custom flag names.
 `POST /v1/plans/{plan_id}/accounts/{account_id}/reconcile`
 
 Create body: `{ "account": { "name": "Savings", "type": "savings", "balance": 0, "icon": "💰" } }`.
-`icon` is optional. A leading or trailing emoji on `name` is lifted into `icon`
-and stripped from the stored name. Accounts without an emoji receive a type
-default such as 🏦 for checking or 💳 for credit cards.
+`icon` is optional. A leading emoji on `name` is lifted into `icon` and
+stripped from the stored name. A trailing emoji stays on the name. Accounts
+without a leading emoji receive a type default such as 🏦 for checking or 💳
+for credit cards.
 
 Update body: `{ "account": { "icon": "🐷" } }`. `icon` must be a single emoji.
 This write is presentation-only and is not locked by transition read-only mode.

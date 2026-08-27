@@ -1349,7 +1349,7 @@ describe("account icons", () => {
     const travel = await createAccountViaApi({ name: "Travel ✈️", type: "creditCard" });
     expect(card).toMatchObject({ name: "OCBC 365", icon: "💳", type: "creditCard" });
     expect(savings).toMatchObject({ name: "Rainy Day", icon: "💰", type: "savings" });
-    expect(travel).toMatchObject({ name: "Travel", icon: "✈️", type: "creditCard" });
+    expect(travel).toMatchObject({ name: "Travel ✈️", icon: "💳", type: "creditCard" });
 
     const listed = await (await request("/v1/plans/plan-test/accounts")).json();
     const byId = Object.fromEntries(listed.data.accounts.map((account: any) => [account.id, account]));

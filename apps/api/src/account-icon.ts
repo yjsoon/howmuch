@@ -51,18 +51,14 @@ export function splitLegacyAccountName(name: string): { icon: string | null; nam
     const rest = parts.slice(1).join("").trim();
     return { icon: parts[0]!, name: rest || trimmed };
   }
-  if (parts.length > 1 && isEmojiGrapheme(parts.at(-1)!)) {
-    const rest = parts.slice(0, -1).join("").trim();
-    return { icon: parts.at(-1)!, name: rest || trimmed };
-  }
   return { icon: null, name: trimmed };
 }
 
 /**
  * Icon is a first-class field. A supplied icon wins, then a stored custom
- * icon, then an emoji still sitting on the name. A stored type-default does
- * not block lifting a leftover name emoji, so trailing/ZWJ names missed by
- * SQL still resolve correctly.
+ * icon, then a leading emoji still sitting on the name. Trailing emojis stay
+ * on the name. A stored type-default does not block lifting a leftover
+ * leading name emoji, so VS16 names missed by SQL still resolve correctly.
  */
 export function resolveAccountPresentation(input: {
   name?: string | null;

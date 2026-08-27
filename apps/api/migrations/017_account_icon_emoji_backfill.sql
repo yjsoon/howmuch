@@ -1,8 +1,8 @@
--- 0013 skipped emoji+VS16 clusters (common for 👍) and ignored trailing
+-- 0013 skipped emoji+VS16 clusters (common for 👍) and ignored surrounding
 -- spaces, so leftover names such as "👍 Banana" kept the type-default icon.
--- Trim first, then lift a leading or trailing pictograph plus its optional
--- FE0F. Leave ZWJ sequences for the JS resolver. Only overwrite icons that
--- are still the type default so a custom pick is kept.
+-- Trim first, then lift a leading pictograph plus its optional FE0F.
+-- Trailing emojis stay on the name. Leave ZWJ sequences for the JS resolver.
+-- Only overwrite icons that are still the type default so a custom pick is kept.
 
 UPDATE accounts
 SET name = trim(name)
@@ -52,68 +52,7 @@ WHERE deleted = 0
     )
   );
 
-UPDATE accounts
-SET
-  icon = CASE
-    WHEN unicode(substr(name, length(name), 1)) BETWEEN 0xFE00 AND 0xFE0F
-      THEN substr(name, length(name) - 1, 2)
-    ELSE substr(name, length(name), 1)
-  END,
-  name = CASE
-    WHEN unicode(substr(name, length(name), 1)) BETWEEN 0xFE00 AND 0xFE0F
-      THEN CASE
-        WHEN trim(substr(name, 1, length(name) - 2)) = '' THEN name
-        ELSE trim(substr(name, 1, length(name) - 2))
-      END
-    ELSE CASE
-      WHEN trim(substr(name, 1, length(name) - 1)) = '' THEN name
-      ELSE trim(substr(name, 1, length(name) - 1))
-    END
-  END
-WHERE deleted = 0
-  AND length(name) >= 2
-  AND (
-    (
-      unicode(substr(name, length(name), 1)) BETWEEN 0xFE00 AND 0xFE0F
-      AND length(name) >= 3
-      AND (
-        unicode(substr(name, length(name) - 1, 1)) BETWEEN 0x2600 AND 0x27BF
-        OR unicode(substr(name, length(name) - 1, 1)) BETWEEN 0x1F000 AND 0x1FAFF
-      )
-      AND unicode(substr(name, length(name) - 1, 1)) <> 0x200D
-    )
-    OR (
-      (
-        unicode(substr(name, length(name), 1)) BETWEEN 0x2600 AND 0x27BF
-        OR unicode(substr(name, length(name), 1)) BETWEEN 0x1F000 AND 0x1FAFF
-      )
-      AND unicode(substr(name, length(name) - 1, 1)) NOT BETWEEN 0xFE00 AND 0xFE0F
-      AND unicode(substr(name, length(name) - 1, 1)) <> 0x200D
-      AND unicode(substr(name, length(name) - 1, 1)) NOT BETWEEN 0x1F3FB AND 0x1F3FF
-    )
-  )
-  AND (
-    (COALESCE(type, 'checking') = 'checking' AND icon = '🏦')
-    OR (type = 'savings' AND icon = '💰')
-    OR (type = 'cash' AND icon = '💵')
-    OR (type IN ('creditCard', 'lineOfCredit') AND icon = '💳')
-    OR (type = 'otherAsset' AND icon = '📈')
-    OR (type = 'otherLiability' AND icon = '📉')
-    OR (type = 'mortgage' AND icon = '🏠')
-    OR (type = 'autoLoan' AND icon = '🚗')
-    OR (type = 'studentLoan' AND icon = '🎓')
-    OR (type = 'medicalDebt' AND icon = '🏥')
-    OR (type = 'otherLoan' AND icon = '📄')
-    OR (
-      icon = '🏦'
-      AND COALESCE(type, 'checking') NOT IN (
-        'savings', 'cash', 'creditCard', 'lineOfCredit', 'otherAsset',
-        'otherLiability', 'mortgage', 'autoLoan', 'studentLoan', 'medicalDebt', 'otherLoan'
-      )
-    )
-  );
-
--- Strip a leftover name emoji after a custom icon was already chosen.
+-- Strip a leftover leading name emoji after a custom icon was already chosen.
 UPDATE accounts
 SET name = CASE
   WHEN length(name) >= 2 AND unicode(substr(name, 2, 1)) BETWEEN 0xFE00 AND 0xFE0F
@@ -127,35 +66,6 @@ WHERE deleted = 0
     OR unicode(substr(name, 1, 1)) BETWEEN 0x1F000 AND 0x1FAFF
   )
   AND unicode(substr(name, 2, 1)) <> 0x200D;
-
-UPDATE accounts
-SET name = CASE
-  WHEN unicode(substr(name, length(name), 1)) BETWEEN 0xFE00 AND 0xFE0F
-    THEN CASE
-      WHEN trim(substr(name, 1, length(name) - 2)) = '' THEN name
-      ELSE trim(substr(name, 1, length(name) - 2))
-    END
-  ELSE CASE
-    WHEN trim(substr(name, 1, length(name) - 1)) = '' THEN name
-    ELSE trim(substr(name, 1, length(name) - 1))
-  END
-END
-WHERE deleted = 0
-  AND length(name) >= 2
-  AND (
-    (
-      unicode(substr(name, length(name), 1)) BETWEEN 0xFE00 AND 0xFE0F
-      AND length(name) >= 3
-      AND (
-        unicode(substr(name, length(name) - 1, 1)) BETWEEN 0x2600 AND 0x27BF
-        OR unicode(substr(name, length(name) - 1, 1)) BETWEEN 0x1F000 AND 0x1FAFF
-      )
-    )
-    OR (
-      unicode(substr(name, length(name), 1)) BETWEEN 0x2600 AND 0x27BF
-      OR unicode(substr(name, length(name), 1)) BETWEEN 0x1F000 AND 0x1FAFF
-    )
-  );
 
 UPDATE payees
 SET

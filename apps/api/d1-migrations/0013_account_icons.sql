@@ -41,24 +41,6 @@ WHERE deleted = 0
     )
   );
 
--- Lift a simple trailing pictograph left on names such as "Travel 💳".
-UPDATE accounts
-SET
-  icon = substr(name, length(name), 1),
-  name = CASE
-    WHEN trim(substr(name, 1, length(name) - 1)) = '' THEN name
-    ELSE trim(substr(name, 1, length(name) - 1))
-  END
-WHERE deleted = 0
-  AND length(name) >= 2
-  AND (
-    unicode(substr(name, length(name), 1)) BETWEEN 0x2600 AND 0x27BF
-    OR unicode(substr(name, length(name), 1)) BETWEEN 0x1F000 AND 0x1FAFF
-  )
-  AND unicode(substr(name, length(name) - 1, 1)) NOT BETWEEN 0xFE00 AND 0xFE0F
-  AND unicode(substr(name, length(name) - 1, 1)) <> 0x200D
-  AND unicode(substr(name, length(name) - 1, 1)) NOT BETWEEN 0x1F3FB AND 0x1F3FF;
-
 UPDATE payees
 SET
   name = 'Transfer : ' || (SELECT a.name FROM accounts a WHERE a.id = payees.transfer_account_id),

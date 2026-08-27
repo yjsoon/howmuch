@@ -151,7 +151,7 @@ describe("local schema migrations", () => {
     }
   });
 
-  test("account icons split leading and trailing emojis from the name and default the rest by type", () => {
+  test("account icons split a leading emoji from the name and default the rest by type", () => {
     const db = new Database(":memory:");
     try {
       db.exec(`
@@ -201,11 +201,11 @@ describe("local schema migrations", () => {
         { id: "dev", name: "Work", icon: "👩‍💻" },
         { id: "saver", name: "Rainy Day", icon: "💰" },
         { id: "thumbs", name: "Banana", icon: thumbs },
-        { id: "trail", name: "Banana", icon: thumbs },
-        { id: "travel", name: "Travel", icon: "💳" },
+        { id: "trail", name: `Banana ${thumbs}`, icon: "🏦" },
+        { id: "travel", name: "Travel 💳", icon: "💳" },
       ]);
       expect(db.query("SELECT name FROM payees WHERE id='payee-card'").get()).toEqual({ name: "Transfer : OCBC 365" });
-      expect(db.query("SELECT name FROM payees WHERE id='payee-travel'").get()).toEqual({ name: "Transfer : Travel" });
+      expect(db.query("SELECT name FROM payees WHERE id='payee-travel'").get()).toEqual({ name: "Transfer : Travel 💳" });
       expect(db.query("SELECT name FROM payees WHERE id='payee-thumbs'").get()).toEqual({ name: "Transfer : Banana" });
     } finally {
       db.close();
