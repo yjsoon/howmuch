@@ -81,6 +81,10 @@ describe("resolveAccountPresentation", () => {
       icon: "\u{1F44D}\u{FE0F}",
       name: "Banana",
     });
+    expect(splitLegacyAccountName("\u{1F44D}\u{1F3FF} Savings")).toEqual({
+      icon: "\u{1F44D}\u{1F3FF}",
+      name: "Savings",
+    });
   });
 
   test("falls back to the account type", () => {

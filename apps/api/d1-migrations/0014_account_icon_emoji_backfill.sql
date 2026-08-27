@@ -1,6 +1,6 @@
 -- 0013 skipped emoji+VS16 clusters (common for 👍) and ignored surrounding
 -- spaces, so leftover names such as "👍 Banana" kept the type-default icon.
--- Trim first, then lift a leading pictograph plus its optional FE0F.
+-- Trim first, then lift a leading pictograph plus optional FE0F / skin tone.
 -- Trailing emojis stay on the name. Leave ZWJ sequences for the JS resolver.
 -- Only overwrite icons that are still the type default so a custom pick is kept.
 
@@ -12,12 +12,26 @@ WHERE deleted = 0
 UPDATE accounts
 SET
   icon = CASE
-    WHEN length(name) >= 2 AND unicode(substr(name, 2, 1)) BETWEEN 0xFE00 AND 0xFE0F
+    WHEN length(name) >= 3
+      AND unicode(substr(name, 2, 1)) BETWEEN 0xFE00 AND 0xFE0F
+      AND unicode(substr(name, 3, 1)) BETWEEN 0x1F3FB AND 0x1F3FF
+      THEN substr(name, 1, 3)
+    WHEN length(name) >= 2 AND (
+      unicode(substr(name, 2, 1)) BETWEEN 0xFE00 AND 0xFE0F
+      OR unicode(substr(name, 2, 1)) BETWEEN 0x1F3FB AND 0x1F3FF
+    )
       THEN substr(name, 1, 2)
     ELSE substr(name, 1, 1)
   END,
   name = CASE
-    WHEN length(name) >= 2 AND unicode(substr(name, 2, 1)) BETWEEN 0xFE00 AND 0xFE0F
+    WHEN length(name) >= 3
+      AND unicode(substr(name, 2, 1)) BETWEEN 0xFE00 AND 0xFE0F
+      AND unicode(substr(name, 3, 1)) BETWEEN 0x1F3FB AND 0x1F3FF
+      THEN CASE WHEN trim(substr(name, 4)) = '' THEN name ELSE trim(substr(name, 4)) END
+    WHEN length(name) >= 2 AND (
+      unicode(substr(name, 2, 1)) BETWEEN 0xFE00 AND 0xFE0F
+      OR unicode(substr(name, 2, 1)) BETWEEN 0x1F3FB AND 0x1F3FF
+    )
       THEN CASE WHEN trim(substr(name, 3)) = '' THEN name ELSE trim(substr(name, 3)) END
     ELSE CASE WHEN trim(substr(name, 2)) = '' THEN name ELSE trim(substr(name, 2)) END
   END
@@ -55,7 +69,14 @@ WHERE deleted = 0
 -- Strip a leftover leading name emoji after a custom icon was already chosen.
 UPDATE accounts
 SET name = CASE
-  WHEN length(name) >= 2 AND unicode(substr(name, 2, 1)) BETWEEN 0xFE00 AND 0xFE0F
+  WHEN length(name) >= 3
+    AND unicode(substr(name, 2, 1)) BETWEEN 0xFE00 AND 0xFE0F
+    AND unicode(substr(name, 3, 1)) BETWEEN 0x1F3FB AND 0x1F3FF
+    THEN CASE WHEN trim(substr(name, 4)) = '' THEN name ELSE trim(substr(name, 4)) END
+  WHEN length(name) >= 2 AND (
+    unicode(substr(name, 2, 1)) BETWEEN 0xFE00 AND 0xFE0F
+    OR unicode(substr(name, 2, 1)) BETWEEN 0x1F3FB AND 0x1F3FF
+  )
     THEN CASE WHEN trim(substr(name, 3)) = '' THEN name ELSE trim(substr(name, 3)) END
   ELSE CASE WHEN trim(substr(name, 2)) = '' THEN name ELSE trim(substr(name, 2)) END
 END

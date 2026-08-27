@@ -1546,8 +1546,10 @@ describe("D1 foundation", () => {
     }
     const leftover = "\u{1F44D}\u{FE0F} Banana ";
     const thumbs = "\u{1F44D}\u{FE0F}";
+    const darkThumbs = "\u{1F44D}\u{1F3FF}";
     db.run("INSERT INTO plans(id,name,server_knowledge) VALUES ('p','Plan',4)");
     db.run("INSERT INTO accounts(id,plan_id,name,type,icon) VALUES ('thumbs','p',?,'checking','🏦')", leftover);
+    db.run("INSERT INTO accounts(id,plan_id,name,type,icon) VALUES ('tone','p',?,'savings','💰')", `${darkThumbs} Savings`);
     db.run("INSERT INTO payees(id,plan_id,name,transfer_account_id) VALUES ('payee-thumbs','p',?,'thumbs')", `Transfer : ${leftover}`);
     expect(db.query("SELECT name,icon FROM accounts WHERE id='thumbs'").get()).toEqual({
       name: leftover,
@@ -1559,6 +1561,10 @@ describe("D1 foundation", () => {
     expect(db.query("SELECT name,icon FROM accounts WHERE id='thumbs'").get()).toEqual({
       name: "Banana",
       icon: thumbs,
+    });
+    expect(db.query("SELECT name,icon FROM accounts WHERE id='tone'").get()).toEqual({
+      name: "Savings",
+      icon: darkThumbs,
     });
     expect(db.query("SELECT name FROM payees WHERE id='payee-thumbs'").get()).toEqual({ name: "Transfer : Banana" });
     expect(db.query("SELECT server_knowledge FROM plans WHERE id='p'").get()).toEqual({ server_knowledge: 5 });
