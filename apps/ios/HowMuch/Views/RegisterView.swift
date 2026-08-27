@@ -930,47 +930,6 @@ enum RegisterStatus: Equatable {
       return nil
     }
   }
-
-  var symbolName: String {
-    switch self {
-    case .new:
-      return "n.circle.fill"
-    case .uncleared:
-      return "c.circle"
-    case .cleared:
-      return "c.circle.fill"
-    case .reconciled:
-      return "lock.fill"
-    }
-  }
-
-  var symbolFont: Font {
-    self == .reconciled ? .caption : .title3
-  }
-
-  var symbolStyle: AnyShapeStyle {
-    switch self {
-    case .new:
-      return AnyShapeStyle(Theme.newBadge)
-    case .uncleared:
-      return AnyShapeStyle(.tertiary)
-    case .cleared, .reconciled:
-      return AnyShapeStyle(Theme.inflow)
-    }
-  }
-
-  func accessibilityLabel(payee: String) -> String {
-    switch self {
-    case .new:
-      return "Approve \(payee)"
-    case .uncleared:
-      return "Mark \(payee) cleared"
-    case .cleared:
-      return "Mark \(payee) uncleared"
-    case .reconciled:
-      return "Reconciled"
-    }
-  }
 }
 
 extension Transaction {
@@ -1062,22 +1021,55 @@ struct TransactionRow: View {
     switch status.tap {
     case nil:
       statusIcon(status)
-        .accessibilityLabel(status.accessibilityLabel(payee: payeeDisplay))
+        .accessibilityLabel(statusAccessibilityLabel(status))
     case .approve, .toggleCleared:
       Button(action: onChangeStatus) {
         statusIcon(status)
       }
       .buttonStyle(.plain)
       .disabled(isBusy)
-      .accessibilityLabel(status.accessibilityLabel(payee: payeeDisplay))
+      .accessibilityLabel(statusAccessibilityLabel(status))
       .accessibilityHint("Double tap to change this transaction’s status.")
     }
   }
 
   private func statusIcon(_ status: RegisterStatus) -> some View {
-    Image(systemName: status.symbolName)
-      .font(status.symbolFont)
-      .foregroundStyle(status.symbolStyle)
+    statusGlyph(status)
       .frame(width: 44, height: 44)
+  }
+
+  @ViewBuilder
+  private func statusGlyph(_ status: RegisterStatus) -> some View {
+    switch status {
+    case .new:
+      Image(systemName: "n.circle.fill")
+        .font(.title3)
+        .foregroundStyle(Theme.newBadge)
+    case .uncleared:
+      Image(systemName: "c.circle")
+        .font(.title3)
+        .foregroundStyle(.tertiary)
+    case .cleared:
+      Image(systemName: "c.circle.fill")
+        .font(.title3)
+        .foregroundStyle(Theme.inflow)
+    case .reconciled:
+      Image(systemName: "lock.fill")
+        .font(.caption)
+        .foregroundStyle(Theme.inflow)
+    }
+  }
+
+  private func statusAccessibilityLabel(_ status: RegisterStatus) -> String {
+    switch status {
+    case .new:
+      return "Approve \(payeeDisplay)"
+    case .uncleared:
+      return "Mark \(payeeDisplay) cleared"
+    case .cleared:
+      return "Mark \(payeeDisplay) uncleared"
+    case .reconciled:
+      return "Reconciled"
+    }
   }
 }
