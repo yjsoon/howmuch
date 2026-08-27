@@ -50,10 +50,11 @@ describe("D1 foundation", () => {
 
   test("canonical schema applies cleanly with auth constraints and cascades", async () => {
     const db = sqlite();
-    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql", "../d1-migrations/0011_personal_api_tokens.sql", "../d1-migrations/0012_account_preferences.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
+    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql", "../d1-migrations/0011_personal_api_tokens.sql", "../d1-migrations/0012_account_preferences.sql", "../d1-migrations/0013_account_icons.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
     const objects = db.query("SELECT name,type FROM sqlite_master WHERE type IN ('table','index','trigger')").all() as Array<{name:string;type:string}>;
     const names = new Set(objects.map((row) => row.name));
     for (const name of ["plans","import_sessions","import_rows","ynab_raw_objects","plan_month_assignments","plan_month_category_targets","scheduled_transaction_edits","scheduled_subtransaction_edits","scheduled_transaction_snapshot_assertions","account_reconciliation_assertions","users","auth_identities","sessions","personal_api_tokens","account_preferences","plan_memberships","password_credentials","auth_setup","login_rate_limits","sync_runs","sync_attempts","sync_transition_receipts","audit_events","write_state","write_commands","write_assertions","idx_sessions_user","idx_sessions_expiry","idx_personal_api_tokens_user","idx_plan_memberships_user_plan","transactions_assign_ledger_sequence","accounts_transfer_payee_plan_guard"]) expect(names.has(name)).toBeTrue();
+    expect(db.query("SELECT name FROM pragma_table_info('accounts') WHERE name='icon'").get()).toEqual({ name: "icon" });
     expect(names.has("schema_migrations")).toBeFalse();
     expect(names.has("migration_runs")).toBeFalse();
     expect(names.has("migration_chunks")).toBeFalse();
@@ -1502,7 +1503,7 @@ describe("D1 foundation", () => {
 
   test("versioned D1 metadata and import-session writes replay and reject collisions", async () => {
     const db = sqlite();
-    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql"]) {
+    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql", "../d1-migrations/0011_personal_api_tokens.sql", "../d1-migrations/0012_account_preferences.sql", "../d1-migrations/0013_account_icons.sql"]) {
       db.exec(await Bun.file(new URL(path, import.meta.url)).text());
     }
     const metadata = new D1MetadataRepository(new D1Database(fakeD1(db)));
@@ -1515,6 +1516,9 @@ describe("D1 foundation", () => {
     await metadata.upsertAccount("p", { id: "a", name: "Cash", balance: 100 }, { operationId: "account-a" });
     const account = db.query("SELECT transfer_payee_id FROM accounts WHERE id = 'a'").get() as { transfer_payee_id: string };
     expect(db.query("SELECT transfer_account_id FROM payees WHERE id = ?").get(account.transfer_payee_id)).toEqual({ transfer_account_id: "a" });
+    await metadata.upsertAccount("p", { id: "a", name: "💳 OCBC", type: "checking", balance: 100 }, { operationId: "account-a-rename" });
+    expect(db.query("SELECT name, icon FROM accounts WHERE id = 'a'").get()).toEqual({ name: "OCBC", icon: "💳" });
+    expect(db.query("SELECT name FROM payees WHERE id = ?").get(account.transfer_payee_id)).toEqual({ name: "Transfer : OCBC" });
     await metadata.upsertYnabRawObject("p", "month", "2026-06-01", { month: "2026-06-01", budgeted: 42, deleted: false }, 9, { operationId: "raw-month" });
     await metadata.upsertYnabRawObject("p", "month", "2026-06-01", { month: "2026-06-01", budgeted: 43, deleted: true }, 10, { operationId: "raw-month-update" });
     expect(db.query("SELECT payload_json,deleted,server_knowledge FROM ynab_raw_objects").get()).toEqual({ payload_json: '{"month":"2026-06-01","budgeted":43,"deleted":true}', deleted: 1, server_knowledge: 10 });
@@ -1531,7 +1535,7 @@ describe("D1 foundation", () => {
     await metadata.ensurePlan("other", "Other", { operationId: "plan-other" });
     const version = (db.query("SELECT write_version FROM write_state").get() as { write_version: number }).write_version;
     await expect(metadata.upsertAccount("other", { id: "a", name: "Collision" }, { operationId: "account-collision" })).rejects.toThrow("write precondition failed");
-    expect(db.query("SELECT plan_id, name FROM accounts WHERE id = 'a'").get()).toEqual({ plan_id: "p", name: "Cash" });
+    expect(db.query("SELECT plan_id, name FROM accounts WHERE id = 'a'").get()).toEqual({ plan_id: "p", name: "OCBC" });
     expect(db.query("SELECT write_version FROM write_state").get()).toEqual({ write_version: version });
   });
 
@@ -1546,7 +1550,7 @@ describe("D1 foundation", () => {
 
 async function ledgerSqlite(): Promise<Database> {
   const db = sqlite();
-  for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql", "../d1-migrations/0011_personal_api_tokens.sql", "../d1-migrations/0012_account_preferences.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
+  for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql", "../d1-migrations/0011_personal_api_tokens.sql", "../d1-migrations/0012_account_preferences.sql", "../d1-migrations/0013_account_icons.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
   db.run("INSERT INTO plans (id, name) VALUES ('p', 'Plan')");
   db.run("INSERT INTO accounts (id, plan_id, name) VALUES ('a', 'p', 'Cash')");
   return db;

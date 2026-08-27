@@ -248,7 +248,10 @@ function GroupSortList({
               <ol className="account-order-list" aria-label={`Manual order for ${item.label}`}>
                 {accountsInGroup.map((account, index) => (
                   <li key={account.id}>
-                    <span>{account.name}</span>
+                    <span className="account-order-label">
+                      <span className="account-order-icon" aria-hidden="true">{account.icon}</span>
+                      <span>{account.name}</span>
+                    </span>
                     <MoveButtons
                       label={account.name}
                       first={index === 0}

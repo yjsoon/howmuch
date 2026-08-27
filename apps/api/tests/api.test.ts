@@ -864,6 +864,7 @@ describe("YNAB-compatible API", () => {
     expect((await transitionRequest("/v1/plans", "GET")).status).toBe(200);
     expect((await transitionRequest("/v1/plans/plan-test/transactions", "GET")).status).toBe(200);
     expect((await transitionRequest("/api/mobile/not-a-route", "POST")).status).toBe(404);
+    expect((await transitionRequest("/v1/plans/plan-test/accounts/account-1", "PATCH", { account: { icon: "🐷" } })).status).not.toBe(423);
 
     const setup = await transitionHandler(new Request("https://howmuch.test/api/auth/setup", {
       method: "POST",
@@ -1338,6 +1339,52 @@ describe("YNAB-compatible API", () => {
 
     expect(fuzzyDuplicate.data.transaction_ids).toHaveLength(0);
     expect(fuzzyDuplicate.data.duplicate_transaction_ids).toHaveLength(1);
+  });
+});
+
+describe("account icons", () => {
+  test("splits a leading emoji from a created name and defaults the rest by type", async () => {
+    const card = await createAccountViaApi({ name: "💳 OCBC 365", type: "creditCard" });
+    const savings = await createAccountViaApi({ name: "Rainy Day", type: "savings" });
+    const travel = await createAccountViaApi({ name: "Travel ✈️", type: "creditCard" });
+    expect(card).toMatchObject({ name: "OCBC 365", icon: "💳", type: "creditCard" });
+    expect(savings).toMatchObject({ name: "Rainy Day", icon: "💰", type: "savings" });
+    expect(travel).toMatchObject({ name: "Travel", icon: "✈️", type: "creditCard" });
+
+    const listed = await (await request("/v1/plans/plan-test/accounts")).json();
+    const byId = Object.fromEntries(listed.data.accounts.map((account: any) => [account.id, account]));
+    expect(byId[card.id]).toMatchObject({ name: "OCBC 365", icon: "💳" });
+    expect(byId[savings.id]).toMatchObject({ name: "Rainy Day", icon: "💰" });
+  });
+
+  test("lets a user change the icon without renaming the account", async () => {
+    const account = await createAccountViaApi({ name: "Everyday", type: "checking" });
+    expect(account.icon).toBe("🏦");
+
+    const updated = await request(`/v1/plans/plan-test/accounts/${account.id}`, {
+      method: "PATCH",
+      body: { account: { icon: "🐷" } },
+    });
+    expect(updated.status).toBe(200);
+    expect((await updated.json()).data.account).toMatchObject({ name: "Everyday", icon: "🐷" });
+
+    const rejected = await request(`/v1/plans/plan-test/accounts/${account.id}`, {
+      method: "PATCH",
+      body: { account: { icon: "not-an-emoji" } },
+    });
+    expect(rejected.status).toBe(400);
+  });
+
+  test("keeps a custom icon when a later upsert still carries an emoji on the name", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    const account = await createAccountViaApi({ name: "💳 OCBC", type: "creditCard" });
+    await request(`/v1/plans/plan-test/accounts/${account.id}`, {
+      method: "PATCH",
+      body: { account: { icon: "🐷" } },
+    });
+    await repo.upsertAccount("plan-test", { id: account.id, name: "💳 OCBC", type: "creditCard" });
+    const listed = await (await request(`/v1/plans/plan-test/accounts/${account.id}`)).json();
+    expect(listed.data.account).toMatchObject({ name: "OCBC", icon: "🐷" });
   });
 });
 

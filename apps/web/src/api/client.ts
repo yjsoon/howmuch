@@ -175,6 +175,11 @@ export const api = {
     request<{ settings: PlanSettings }>(planUrl(planId, "settings")).then((d) => d.settings),
   accounts: (planId: string) =>
     request<{ accounts: Account[]; server_knowledge: number }>(planUrl(planId, "accounts")),
+  updateAccountIcon: (planId: string, accountId: string, icon: string) =>
+    request<{ account: Account; server_knowledge: number }>(planUrl(planId, "accounts", accountId), {
+      method: "PATCH",
+      body: JSON.stringify({ account: { icon } }),
+    }).then((data) => data.account),
   accountPreferences: (planId: string) =>
     request<AccountPreferencesSnapshot>(planUrl(planId, "account_preferences"))
       .catch((error) => {

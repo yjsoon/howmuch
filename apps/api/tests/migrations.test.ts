@@ -13,6 +13,9 @@ describe("local schema migrations", () => {
         CREATE TABLE accounts (
           id TEXT PRIMARY KEY,
           plan_id TEXT NOT NULL REFERENCES plans(id),
+          name TEXT NOT NULL DEFAULT 'Account',
+          type TEXT NOT NULL DEFAULT 'checking',
+          deleted INTEGER NOT NULL DEFAULT 0,
           transfer_payee_id TEXT,
           opening_balance_milli INTEGER NOT NULL DEFAULT 0,
           balance_milli INTEGER NOT NULL DEFAULT 0,
@@ -85,10 +88,21 @@ describe("local schema migrations", () => {
         CREATE TABLE accounts (
           id TEXT PRIMARY KEY,
           plan_id TEXT NOT NULL REFERENCES plans(id),
+          name TEXT NOT NULL DEFAULT 'Account',
+          type TEXT NOT NULL DEFAULT 'checking',
+          deleted INTEGER NOT NULL DEFAULT 0,
           opening_balance_milli INTEGER NOT NULL DEFAULT 0,
           balance_milli INTEGER NOT NULL DEFAULT 0,
           cleared_balance_milli INTEGER NOT NULL DEFAULT 0,
           uncleared_balance_milli INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE payees (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT,
+          name TEXT NOT NULL,
+          transfer_account_id TEXT,
+          deleted INTEGER NOT NULL DEFAULT 0,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE transactions (
@@ -132,6 +146,60 @@ describe("local schema migrations", () => {
         { name: "account_id" },
         { name: "import_id" },
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("account icons split leading and trailing emojis from the name and default the rest by type", () => {
+    const db = new Database(":memory:");
+    try {
+      db.exec(`
+        CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE plans (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+        CREATE TABLE accounts (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL REFERENCES plans(id),
+          name TEXT NOT NULL,
+          type TEXT NOT NULL DEFAULT 'checking',
+          deleted INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE payees (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT,
+          name TEXT NOT NULL,
+          transfer_account_id TEXT,
+          deleted INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO plans(id,name) VALUES ('p','Plan');
+        INSERT INTO accounts(id,plan_id,name,type) VALUES
+          ('card','p','💳 OCBC 365','creditCard'),
+          ('saver','p','Rainy Day','savings'),
+          ('bank','p','Everyday','checking'),
+          ('travel','p','Travel 💳','creditCard'),
+          ('dev','p','👩‍💻 Work','otherAsset');
+        INSERT INTO payees(id,plan_id,name,transfer_account_id) VALUES
+          ('payee-card','p','Transfer : 💳 OCBC 365','card'),
+          ('payee-travel','p','Transfer : Travel 💳','travel');
+        INSERT INTO schema_migrations(version) VALUES
+          ('001_initial'),('002_transaction_server_knowledge'),('003_transfer_payees'),('004_auth_foundation'),('005_password_auth'),
+          ('006_allow_duplicate_payee_names'),('007_ynab_raw_objects'),('008_plan_month_assignments'),('009_plan_month_category_targets'),
+          ('010_scheduled_transaction_edits'),('011_scheduled_transaction_snapshot_assertions'),('012_account_reconciliation_assertions'),
+          ('013_unique_live_import_id'),('014_personal_api_tokens'),('015_account_preferences');
+      `);
+
+      applyMigrations(db);
+
+      expect(db.query("SELECT id,name,icon FROM accounts ORDER BY id").all()).toEqual([
+        { id: "bank", name: "Everyday", icon: "🏦" },
+        { id: "card", name: "OCBC 365", icon: "💳" },
+        { id: "dev", name: "Work", icon: "👩‍💻" },
+        { id: "saver", name: "Rainy Day", icon: "💰" },
+        { id: "travel", name: "Travel", icon: "💳" },
+      ]);
+      expect(db.query("SELECT name FROM payees WHERE id='payee-card'").get()).toEqual({ name: "Transfer : OCBC 365" });
+      expect(db.query("SELECT name FROM payees WHERE id='payee-travel'").get()).toEqual({ name: "Transfer : Travel" });
     } finally {
       db.close();
     }

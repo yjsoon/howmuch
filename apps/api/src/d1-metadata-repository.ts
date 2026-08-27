@@ -4,6 +4,7 @@ import type { D1Database } from "./d1";
 import type { D1WriteContext } from "./d1-transaction-repository";
 import { D1GuardedCommandExecutor, statement } from "./d1-guarded-command";
 import type { EffectiveScheduledTransaction } from "./scheduled-transactions";
+import { resolveAccountPresentation } from "./account-icon";
 
 /** Exact effective-source snapshot required to merge a scheduled mutation. */
 export type ScheduledMutationSnapshot = Readonly<{
@@ -60,8 +61,15 @@ export class D1MetadataRepository {
   }
 
   async upsertAccount(planId: string, account: any, context?: D1WriteContext, ensureOnly = false, incrementKnowledge = false): Promise<void> {
+    const existing = ensureOnly ? null : await this.db.get<{ icon: string }>("SELECT icon FROM accounts WHERE id=?", [account.id]);
+    const presentation = resolveAccountPresentation({
+      name: account.name ?? `Account ${account.id}`,
+      icon: account.icon,
+      type: account.type ?? "checking",
+      existingIcon: existing?.icon,
+    });
     const payeeId = account.transfer_payee_id ?? transferPayeeId(planId, account.id);
-    const payeeName = `Transfer : ${account.name ?? `Account ${account.id}`}`;
+    const payeeName = `Transfer : ${presentation.name}`;
     const commandId = this.id(context);
     if (ensureOnly) {
       await this.run("metadata.account.ensure", planId, account.id, { account, ensureOnly, incrementKnowledge }, context, [
@@ -71,23 +79,38 @@ export class D1MetadataRepository {
         statement(`INSERT INTO payees(id,plan_id,name,transfer_account_id,external_ynab_id,deleted,updated_at)
           SELECT ?,?,?,?,?,0,CURRENT_TIMESTAMP WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE id=?)
           ON CONFLICT(id) DO NOTHING`, [payeeId, planId, payeeName, account.id, payeeId, account.id]),
-        statement(`INSERT INTO accounts(id,plan_id,name,transfer_payee_id,external_ynab_id)
-          SELECT ?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE id=?)
-          ON CONFLICT(id) DO NOTHING`, [account.id, planId, account.name ?? `Imported account ${account.id.slice(0, 8)}`, payeeId, account.external_ynab_id ?? account.id, account.id]),
+        statement(`INSERT INTO accounts(id,plan_id,name,icon,transfer_payee_id,external_ynab_id)
+          SELECT ?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE id=?)
+          ON CONFLICT(id) DO NOTHING`, [account.id, planId, presentation.name, presentation.icon, payeeId, account.external_ynab_id ?? account.id, account.id]),
       ]);
       return;
     }
-    const conflict = `DO UPDATE SET name=excluded.name,type=excluded.type,on_budget=excluded.on_budget,closed=excluded.closed,opening_balance_milli=excluded.opening_balance_milli,balance_milli=excluded.balance_milli,cleared_balance_milli=excluded.cleared_balance_milli,uncleared_balance_milli=excluded.uncleared_balance_milli,transfer_payee_id=excluded.transfer_payee_id,direct_import_linked=excluded.direct_import_linked,direct_import_in_error=excluded.direct_import_in_error,external_ynab_id=excluded.external_ynab_id,deleted=excluded.deleted,updated_at=CURRENT_TIMESTAMP`;
+    const conflict = `DO UPDATE SET name=excluded.name,icon=excluded.icon,type=excluded.type,on_budget=excluded.on_budget,closed=excluded.closed,opening_balance_milli=excluded.opening_balance_milli,balance_milli=excluded.balance_milli,cleared_balance_milli=excluded.cleared_balance_milli,uncleared_balance_milli=excluded.uncleared_balance_milli,transfer_payee_id=excluded.transfer_payee_id,direct_import_linked=excluded.direct_import_linked,direct_import_in_error=excluded.direct_import_in_error,external_ynab_id=excluded.external_ynab_id,deleted=excluded.deleted,updated_at=CURRENT_TIMESTAMP`;
     await this.run("metadata.account.upsert", planId, account.id, { account, ensureOnly, incrementKnowledge }, context, [
       assertion(commandId, "metadata_plan_exists", planId, planId), assertion(commandId, "metadata_account", account.id, planId), assertion(commandId, "metadata_payee", payeeId, planId),
       // Imported transfer payees arrive before their accounts.  Keep their
       // source name when present; only provision this synthetic record if the
       // account truly has none yet.
       statement(`INSERT INTO payees(id,plan_id,name,transfer_account_id,external_ynab_id,deleted,updated_at) VALUES (?,?,?,?,?,0,CURRENT_TIMESTAMP) ON CONFLICT(id) DO NOTHING`, [payeeId, planId, payeeName, account.id, payeeId]),
-      statement(`INSERT INTO accounts(id,plan_id,name,type,on_budget,closed,opening_balance_milli,balance_milli,cleared_balance_milli,uncleared_balance_milli,transfer_payee_id,direct_import_linked,direct_import_in_error,external_ynab_id,deleted,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) ${conflict}`, [account.id, planId, account.name ?? `Account ${account.id}`, account.type ?? "checking", bool(account.on_budget, true), bool(account.closed), account.opening_balance ?? 0, account.balance ?? 0, account.cleared_balance ?? account.balance ?? 0, account.uncleared_balance ?? 0, payeeId, bool(account.direct_import_linked), bool(account.direct_import_in_error), account.external_ynab_id ?? account.id, bool(account.deleted)]),
+      statement(`INSERT INTO accounts(id,plan_id,name,icon,type,on_budget,closed,opening_balance_milli,balance_milli,cleared_balance_milli,uncleared_balance_milli,transfer_payee_id,direct_import_linked,direct_import_in_error,external_ynab_id,deleted,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) ${conflict}`, [account.id, planId, presentation.name, presentation.icon, account.type ?? "checking", bool(account.on_budget, true), bool(account.closed), account.opening_balance ?? 0, account.balance ?? 0, account.cleared_balance ?? account.balance ?? 0, account.uncleared_balance ?? 0, payeeId, bool(account.direct_import_linked), bool(account.direct_import_in_error), account.external_ynab_id ?? account.id, bool(account.deleted)]),
       statement("UPDATE payees SET transfer_account_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND plan_id=?", [account.id, payeeId, planId]),
+      statement(
+        `UPDATE payees SET name=?,updated_at=CURRENT_TIMESTAMP
+         WHERE plan_id=? AND deleted=0 AND transfer_account_id=? AND name LIKE 'Transfer : %' AND name<>?`,
+        [payeeName, planId, account.id, payeeName],
+      ),
       statement("UPDATE accounts SET transfer_payee_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND plan_id=?", [payeeId, account.id, planId]),
       ...(incrementKnowledge ? [statement("UPDATE plans SET server_knowledge=server_knowledge+1,updated_at=CURRENT_TIMESTAMP WHERE id=?", [planId])] : []),
+    ]);
+  }
+
+  async updateAccountIcon(planId: string, accountId: string, icon: string, context?: D1WriteContext): Promise<void> {
+    const commandId = this.id(context);
+    await this.run("metadata.account.icon", planId, accountId, { icon }, context, [
+      assertion(commandId, "metadata_plan_exists", planId, planId),
+      assertion(commandId, "metadata_account", accountId, planId),
+      statement("UPDATE accounts SET icon=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND plan_id=? AND deleted=0", [icon, accountId, planId]),
+      statement("UPDATE plans SET server_knowledge=server_knowledge+1,updated_at=CURRENT_TIMESTAMP WHERE id=?", [planId]),
     ]);
   }
 

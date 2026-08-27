@@ -224,6 +224,15 @@ async function handleV1(
     if (segments.length === 5 && method === "GET") {
       return json({ data: { account: await repo.getAccount(planId, accountId) } });
     }
+    if (segments.length === 5 && (method === "PATCH" || method === "PUT")) {
+      const body = await readJson(request);
+      const payload = body.account ?? body;
+      if (!payload || typeof payload !== "object" || Array.isArray(payload) || typeof payload.icon !== "string") {
+        throw new ValidationError("account.icon is required");
+      }
+      const account = await repo.updateAccountIcon(planId, accountId, payload.icon);
+      return json({ data: { account, server_knowledge: await repo.getServerKnowledge(planId) } });
+    }
     if (segments.length === 6 && segments[5] === "transactions" && method === "GET") {
       return transactionListResponse(repo, planId, queryFilters(url, { accountId }));
     }

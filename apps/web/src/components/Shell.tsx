@@ -11,6 +11,7 @@ import {
 import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
 import { AccountOrganizationDialog, type AccountUsageState } from "./AccountOrganizationDialog";
+import { AccountIconButton } from "./AccountIconPicker";
 
 const REPORTS = [
   { to: "/spending", label: "Spending breakdown" },
@@ -28,6 +29,7 @@ export function Shell() {
     accountPreferences,
     accountPreferencesSync,
     updateAccountPreferences,
+    updateAccountIcon,
     retryAccountPreferences,
     logout,
   } = usePlan();
@@ -223,13 +225,13 @@ export function Shell() {
           {collections.length > 0 && (
             <div className="account-list-band">
               <p className="account-list-band-label">Your groups</p>
-              <AccountGroupSections groups={collections} selectedAccountId={selectedAccount?.id} />
+              <AccountGroupSections groups={collections} selectedAccountId={selectedAccount?.id} onChangeIcon={updateAccountIcon} />
             </div>
           )}
           {typeIndex.length > 0 && (
             <div className="account-list-band account-list-band-index">
               <p className="account-list-band-label">By type</p>
-              <AccountGroupSections groups={typeIndex} selectedAccountId={selectedAccount?.id} tone="index" />
+              <AccountGroupSections groups={typeIndex} selectedAccountId={selectedAccount?.id} tone="index" onChangeIcon={updateAccountIcon} />
             </div>
           )}
         </div>
@@ -278,10 +280,12 @@ function AccountGroupSections({
   groups,
   selectedAccountId,
   tone,
+  onChangeIcon,
 }: {
   groups: AccountGroup[];
   selectedAccountId: string | undefined;
   tone?: "index";
+  onChangeIcon: (accountId: string, icon: string) => Promise<void>;
 }) {
   return groups.map((group) => (
     <section key={group.id} className={tone === "index" ? "account-group account-group-index" : "account-group"}>
@@ -290,16 +294,22 @@ function AccountGroupSections({
         <span>{formatMoney(group.accounts.reduce((sum, account) => sum + account.balance, 0))}</span>
       </div>
       {group.accounts.map((account) => (
-        <NavLink
-          key={account.id}
-          to={`/transactions?range=all&accounts=${encodeURIComponent(account.id)}`}
-          className={selectedAccountId === account.id ? "account-link sidebar-link-active" : "account-link"}
-        >
-          <span className="account-name" title={account.name}>{account.name}</span>
-          <span className={account.balance < 0 ? "sidebar-balance sidebar-balance-negative" : "sidebar-balance"}>
-            {formatMoney(account.balance)}
-          </span>
-        </NavLink>
+        <div key={account.id} className="account-row">
+          <AccountIconButton
+            accountName={account.name}
+            icon={account.icon}
+            onChange={(icon) => onChangeIcon(account.id, icon)}
+          />
+          <NavLink
+            to={`/transactions?range=all&accounts=${encodeURIComponent(account.id)}`}
+            className={selectedAccountId === account.id ? "account-link sidebar-link-active" : "account-link"}
+          >
+            <span className="account-name" title={account.name}>{account.name}</span>
+            <span className={account.balance < 0 ? "sidebar-balance sidebar-balance-negative" : "sidebar-balance"}>
+              {formatMoney(account.balance)}
+            </span>
+          </NavLink>
+        </div>
       ))}
     </section>
   ));

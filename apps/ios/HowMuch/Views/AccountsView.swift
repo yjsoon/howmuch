@@ -155,6 +155,8 @@ struct AccountsView: View {
         }
       case .reorder(let group):
         AccountGroupReorderSheet(group: group)
+      case .icon(let account):
+        AccountIconPickerSheet(account: account)
       }
     }
     .confirmationDialog(
@@ -317,28 +319,41 @@ struct AccountsView: View {
   }
 
   private func accountRow(_ account: Account) -> some View {
-    NavigationLink {
-      RegisterView(scope: .account(account.id))
-    } label: {
-      Group {
-        if dynamicTypeSize.isAccessibilitySize {
-          VStack(alignment: .leading, spacing: 4) {
-            Text(account.name)
-              .foregroundStyle(Theme.textPrimary)
-            accountBalance(account)
-          }
-        } else {
-          HStack {
-            Text(account.name)
-              .foregroundStyle(Theme.textPrimary)
-            Spacer()
-            accountBalance(account)
+    HStack(alignment: .center, spacing: 8) {
+      Button {
+        presentedSheet = .icon(account)
+      } label: {
+        Text(account.displayIcon)
+          .font(.body)
+          .frame(width: 28, alignment: .center)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Change icon for \(account.name)")
+
+      NavigationLink {
+        RegisterView(scope: .account(account.id))
+      } label: {
+        Group {
+          if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+              Text(account.name)
+                .foregroundStyle(Theme.textPrimary)
+              accountBalance(account)
+            }
+          } else {
+            HStack {
+              Text(account.name)
+                .foregroundStyle(Theme.textPrimary)
+              Spacer()
+              accountBalance(account)
+            }
           }
         }
+        .contentShape(Rectangle())
       }
-      .contentShape(Rectangle())
+      .buttonStyle(.plain)
     }
-    .buttonStyle(.plain)
     .padding(.horizontal, 16)
     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     .accessibilityActions {
@@ -349,6 +364,9 @@ struct AccountsView: View {
       }
       Button("Groups") {
         presentedSheet = .memberships(account.id)
+      }
+      Button("Change Icon") {
+        presentedSheet = .icon(account)
       }
     }
   }
@@ -525,6 +543,7 @@ private enum AccountsSheet: Identifiable {
   case memberships(String)
   case editGroup(CustomAccountGroup)
   case reorder(AccountGroupManagementItem)
+  case icon(Account)
 
   var id: String {
     switch self {
@@ -534,6 +553,7 @@ private enum AccountsSheet: Identifiable {
     case .memberships(let accountID): "memberships-\(accountID)"
     case .editGroup(let group): "edit-\(group.id)"
     case .reorder(let group): "reorder-\(group.id)"
+    case .icon(let account): "icon-\(account.id)"
     }
   }
 }
@@ -605,7 +625,14 @@ private struct ChooseFavouritesSheet: View {
       List {
         Section {
           ForEach(model.openAccounts.sorted(by: accountNameOrder)) { account in
-            Toggle(account.name, isOn: favouriteBinding(account.id))
+            Toggle(isOn: favouriteBinding(account.id)) {
+              Label {
+                Text(account.name)
+              } icon: {
+                Text(account.displayIcon)
+                  .frame(width: 28, alignment: .center)
+              }
+            }
           }
         } footer: {
           Text("Favourites are shown first on Accounts. Closed accounts are excluded.")
@@ -767,7 +794,12 @@ private struct AccountGroupReorderSheet: View {
     NavigationStack {
       List {
         ForEach(accounts) { account in
-          Text(account.name)
+          Label {
+            Text(account.name)
+          } icon: {
+            Text(account.displayIcon)
+              .frame(width: 28, alignment: .center)
+          }
         }
         .onMove { source, destination in
           model.moveAccounts(in: accounts, groupID: group.id, fromOffsets: source, toOffset: destination)
@@ -912,5 +944,76 @@ private struct CustomAccountGroupEditor: View {
 
   private var nameError: String? {
     model.customAccountGroupNameError(name, excluding: group.id)
+  }
+}
+
+private struct AccountIconPickerSheet: View {
+  @Environment(AppModel.self) private var model
+  @Environment(\.dismiss) private var dismiss
+  let account: Account
+  @State private var custom = ""
+  @State private var error: String?
+  @State private var isSaving = false
+
+  private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 6)
+
+  var body: some View {
+    NavigationStack {
+      ScrollView {
+        VStack(alignment: .leading, spacing: 16) {
+          LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(AccountIcon.palette, id: \.self) { icon in
+              Button {
+                Task { await choose(icon) }
+              } label: {
+                Text(icon)
+                  .font(.title2)
+                  .frame(maxWidth: .infinity, minHeight: 44)
+                  .background(icon == account.displayIcon ? Theme.accent.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+              }
+              .buttonStyle(.plain)
+              .accessibilityLabel("Use \(icon)")
+              .disabled(isSaving)
+            }
+          }
+          VStack(alignment: .leading, spacing: 6) {
+            Text("Or type any emoji")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+            TextField("Emoji", text: $custom)
+              .textInputAutocapitalization(.never)
+              .autocorrectionDisabled()
+              .onSubmit {
+                Task { await choose(custom) }
+              }
+          }
+          if let error {
+            Text(error)
+              .font(.footnote)
+              .foregroundStyle(Theme.outflow)
+          }
+        }
+        .padding(16)
+      }
+      .navigationTitle("Icon for \(account.name)")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Cancel") { dismiss() }
+        }
+      }
+    }
+  }
+
+  private func choose(_ icon: String) async {
+    isSaving = true
+    error = nil
+    do {
+      try await model.setAccountIcon(icon, for: account.id)
+      dismiss()
+    } catch {
+      self.error = error.localizedDescription
+      isSaving = false
+    }
   }
 }
