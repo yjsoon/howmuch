@@ -1044,7 +1044,7 @@ struct TransactionRow: View {
     case .new:
       Image(systemName: "n.circle.fill")
         .font(.title3)
-        .foregroundStyle(Theme.newBadge)
+        .foregroundStyle(Theme.newStatus)
     case .uncleared:
       Image(systemName: "c.circle")
         .font(.title3)

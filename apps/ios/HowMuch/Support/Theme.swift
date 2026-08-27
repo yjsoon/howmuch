@@ -26,7 +26,7 @@ enum Theme {
     dark: Color(red: 0.541, green: 0.553, blue: 0.973)
   )
 
-  static let newBadge = Color(
+  static let newStatus = Color(
     light: Color(red: 0.145, green: 0.227, blue: 0.455),
     dark: Color(red: 0.45, green: 0.55, blue: 0.85)
   )
