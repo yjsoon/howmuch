@@ -54,210 +54,13 @@ struct RegisterView: View {
 
   var body: some View {
     List {
-      if let account = scopedAccount {
-        Section {
-          VStack(spacing: 2) {
-            Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
-              .font(.title2.weight(.bold))
-              .monospacedDigit()
-              .contentTransition(.numericText(value: Double(account.balance)))
-              .animation(.snappy, value: account.balance)
-              .foregroundStyle(Theme.amountColour(account.balance))
-            Text("Working Balance")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-          .frame(maxWidth: .infinity)
-          .listRowBackground(Color.clear)
-          .listRowSeparator(.hidden)
-        }
-      }
-
-      if model.transactions.isEmpty, model.ledgerPhase != .loaded {
-        Section {
-          PhasePlaceholder(phase: model.ledgerPhase) {
-            await model.refreshLedger()
-          }
-          .listRowBackground(Color.clear)
-          .listRowSeparator(.hidden)
-        }
-      } else {
-        if showsFilterBanners {
-          Section {
-            VStack(spacing: 8) {
-              if unapprovedCount > 0 || unapprovedOnly {
-                filterBanner(
-                  isOn: $unapprovedOnly,
-                  offLabel: "Review \(unapprovedCount) new transaction\(unapprovedCount == 1 ? "" : "s")",
-                  onLabel: "Showing new transactions to approve"
-                )
-              }
-              if unclearedCount > 0 || unclearedOnly {
-                filterBanner(
-                  isOn: $unclearedOnly,
-                  offLabel: "Show \(unclearedCount) uncleared transactions",
-                  onLabel: "Showing uncleared only"
-                )
-              }
-              if uncategorisedCount > 0 || uncategorisedOnly {
-                filterBanner(
-                  isOn: $uncategorisedOnly,
-                  offLabel: "Show \(uncategorisedCount) uncategorised transactions",
-                  onLabel: "Showing uncategorised only"
-                )
-              }
-            }
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-          }
-        }
-        if isNarrowed, !visibleTransactions.isEmpty {
-          Section {
-            totalsSummary
-              .listRowInsets(EdgeInsets())
-              .listRowBackground(Color.clear)
-              .listRowSeparator(.hidden)
-          }
-        }
-      }
-
-      ForEach(sections, id: \.date) { section in
-        Section {
-          ForEach(section.transactions) { transaction in
-            TransactionRow(
-              transaction: transaction,
-              showsAccount: scope == .all,
-              currencyFormat: model.currencyFormat,
-              isBusy: model.isSubmitting,
-              onOpen: { editingTransaction = transaction },
-              onChangeStatus: { changeStatus(transaction) }
-            )
-            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-              if !transaction.approved {
-                Button {
-                  approve(transaction)
-                } label: {
-                  Label("Approve", systemImage: "checkmark")
-                }
-                .tint(Theme.inflow)
-              }
-            }
-            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-              Button(role: .destructive) {
-                transactionPendingDeletion = transaction
-              } label: {
-                Label("Delete", systemImage: "trash")
-              }
-              .disabled(model.isSubmitting)
-            }
-            .contextMenu {
-              if !transaction.approved {
-                Button {
-                  approve(transaction)
-                } label: {
-                  Label("Approve", systemImage: "checkmark")
-                }
-              }
-              Button {
-                editingTransaction = transaction
-              } label: {
-                Label("Edit", systemImage: "pencil")
-              }
-              Button {
-                duplicatingDraft = DuplicateDraft(draft: TransactionDraft(duplicating: transaction))
-              } label: {
-                Label("Duplicate for Today", systemImage: "plus.square.on.square")
-              }
-              Button(role: .destructive) {
-                transactionPendingDeletion = transaction
-              } label: {
-                Label("Delete", systemImage: "trash")
-              }
-            }
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Theme.card)
-          }
-        } header: {
-          Text(LedgerDate.friendlyString(fromISO: section.date))
-            .font(.footnote.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .textCase(nil)
-        }
-      }
-
-      if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        Section {
-          Text("Search covers \(model.transactions.count) loaded transaction\(model.transactions.count == 1 ? "" : "s"). Scroll to load older ones.")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-        }
-      }
-
-      if visibleTransactions.isEmpty, model.ledgerPhase == .loaded {
-        Section {
-          Group {
-            if searchText.isEmpty {
-              ContentUnavailableView(
-                "No Transactions",
-                systemImage: "tray",
-                description: Text("Transactions you add will appear here.")
-              )
-            } else {
-              ContentUnavailableView.search
-            }
-          }
-          .listRowBackground(Color.clear)
-          .listRowSeparator(.hidden)
-        }
-      }
-
-      if let error = model.olderTransactionsError {
-        Section {
-          VStack(alignment: .leading, spacing: 8) {
-            Text("Couldn’t load older transactions")
-              .font(.subheadline.weight(.semibold))
-            Text(error)
-              .font(.footnote)
-              .foregroundStyle(.secondary)
-            Button("Try Again") {
-              Task { await model.loadOlderTransactions() }
-            }
-            .buttonStyle(.bordered)
-          }
-          .padding(16)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .ynabCard()
-          .accessibilityElement(children: .combine)
-          .listRowInsets(EdgeInsets())
-          .listRowBackground(Color.clear)
-          .listRowSeparator(.hidden)
-        }
-      }
-
-      if model.hasMoreTransactions {
-        Section {
-          Button {
-            Task { await model.loadOlderTransactions() }
-          } label: {
-            HStack(spacing: 8) {
-              if model.isLoadingOlderTransactions {
-                ProgressView()
-              }
-              Text(model.isLoadingOlderTransactions ? "Loading older transactions…" : "Load older transactions")
-            }
-            .frame(maxWidth: .infinity)
-          }
-          .buttonStyle(.borderedProminent)
-          .disabled(model.isLoadingOlderTransactions)
-          .accessibilityHint("Loads the next 100 older transactions into this register.")
-          .listRowBackground(Color.clear)
-          .listRowSeparator(.hidden)
-        }
-      }
+      workingBalanceSection
+      loadingOrFilterSections
+      transactionDateSections
+      searchCoverageSection
+      emptyRegisterSection
+      olderTransactionsErrorSection
+      loadOlderTransactionsSection
     }
     .listStyle(.insetGrouped)
     .scrollContentBackground(.hidden)
@@ -370,6 +173,235 @@ struct RegisterView: View {
     .onDisappear {
       if let accountID = scope.accountID {
         model.endFocusedRegisterAccount(accountID)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var workingBalanceSection: some View {
+    if let account = scopedAccount {
+      Section {
+        VStack(spacing: 2) {
+          Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
+            .font(.title2.weight(.bold))
+            .monospacedDigit()
+            .contentTransition(.numericText(value: Double(account.balance)))
+            .animation(.snappy, value: account.balance)
+            .foregroundStyle(Theme.amountColour(account.balance))
+          Text("Working Balance")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var loadingOrFilterSections: some View {
+    if model.transactions.isEmpty, model.ledgerPhase != .loaded {
+      Section {
+        PhasePlaceholder(phase: model.ledgerPhase) {
+          await model.refreshLedger()
+        }
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+      }
+    } else {
+      if showsFilterBanners {
+        Section {
+          VStack(spacing: 8) {
+            if unapprovedCount > 0 || unapprovedOnly {
+              filterBanner(
+                isOn: $unapprovedOnly,
+                offLabel: "Review \(unapprovedCount) new transaction\(unapprovedCount == 1 ? "" : "s")",
+                onLabel: "Showing new transactions to approve"
+              )
+            }
+            if unclearedCount > 0 || unclearedOnly {
+              filterBanner(
+                isOn: $unclearedOnly,
+                offLabel: "Show \(unclearedCount) uncleared transactions",
+                onLabel: "Showing uncleared only"
+              )
+            }
+            if uncategorisedCount > 0 || uncategorisedOnly {
+              filterBanner(
+                isOn: $uncategorisedOnly,
+                offLabel: "Show \(uncategorisedCount) uncategorised transactions",
+                onLabel: "Showing uncategorised only"
+              )
+            }
+          }
+          .listRowInsets(EdgeInsets())
+          .listRowBackground(Color.clear)
+          .listRowSeparator(.hidden)
+        }
+      }
+      if isNarrowed, !visibleTransactions.isEmpty {
+        Section {
+          totalsSummary
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
+      }
+    }
+  }
+
+  private var transactionDateSections: some View {
+    ForEach(sections, id: \.date) { section in
+      Section {
+        ForEach(section.transactions) { transaction in
+          registerRow(for: transaction)
+        }
+      } header: {
+        Text(LedgerDate.friendlyString(fromISO: section.date))
+          .font(.footnote.weight(.semibold))
+          .foregroundStyle(.secondary)
+          .textCase(nil)
+      }
+    }
+  }
+
+  private func registerRow(for transaction: Transaction) -> some View {
+    TransactionRow(
+      transaction: transaction,
+      showsAccount: scope == .all,
+      currencyFormat: model.currencyFormat,
+      isBusy: model.isSubmitting,
+      onOpen: { editingTransaction = transaction },
+      onChangeStatus: { changeStatus(transaction) }
+    )
+    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+      if !transaction.approved {
+        Button {
+          approve(transaction)
+        } label: {
+          Label("Approve", systemImage: "checkmark")
+        }
+        .tint(Theme.inflow)
+      }
+    }
+    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+      Button(role: .destructive) {
+        transactionPendingDeletion = transaction
+      } label: {
+        Label("Delete", systemImage: "trash")
+      }
+      .disabled(model.isSubmitting)
+    }
+    .contextMenu {
+      if !transaction.approved {
+        Button {
+          approve(transaction)
+        } label: {
+          Label("Approve", systemImage: "checkmark")
+        }
+      }
+      Button {
+        editingTransaction = transaction
+      } label: {
+        Label("Edit", systemImage: "pencil")
+      }
+      Button {
+        duplicatingDraft = DuplicateDraft(draft: TransactionDraft(duplicating: transaction))
+      } label: {
+        Label("Duplicate for Today", systemImage: "plus.square.on.square")
+      }
+      Button(role: .destructive) {
+        transactionPendingDeletion = transaction
+      } label: {
+        Label("Delete", systemImage: "trash")
+      }
+    }
+    .listRowInsets(EdgeInsets())
+    .listRowBackground(Theme.card)
+  }
+
+  @ViewBuilder
+  private var searchCoverageSection: some View {
+    if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      Section {
+        Text("Search covers \(model.transactions.count) loaded transaction\(model.transactions.count == 1 ? "" : "s"). Scroll to load older ones.")
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .listRowBackground(Color.clear)
+          .listRowSeparator(.hidden)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var emptyRegisterSection: some View {
+    if visibleTransactions.isEmpty, model.ledgerPhase == .loaded {
+      Section {
+        Group {
+          if searchText.isEmpty {
+            ContentUnavailableView(
+              "No Transactions",
+              systemImage: "tray",
+              description: Text("Transactions you add will appear here.")
+            )
+          } else {
+            ContentUnavailableView.search
+          }
+        }
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var olderTransactionsErrorSection: some View {
+    if let error = model.olderTransactionsError {
+      Section {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("Couldn’t load older transactions")
+            .font(.subheadline.weight(.semibold))
+          Text(error)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+          Button("Try Again") {
+            Task { await model.loadOlderTransactions() }
+          }
+          .buttonStyle(.bordered)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .ynabCard()
+        .accessibilityElement(children: .combine)
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var loadOlderTransactionsSection: some View {
+    if model.hasMoreTransactions {
+      Section {
+        Button {
+          Task { await model.loadOlderTransactions() }
+        } label: {
+          HStack(spacing: 8) {
+            if model.isLoadingOlderTransactions {
+              ProgressView()
+            }
+            Text(model.isLoadingOlderTransactions ? "Loading older transactions…" : "Load older transactions")
+          }
+          .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(model.isLoadingOlderTransactions)
+        .accessibilityHint("Loads the next 100 older transactions into this register.")
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
       }
     }
   }
