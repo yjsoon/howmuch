@@ -101,10 +101,8 @@ export function sqlForIconRestore(updates: IconRestoreUpdate[]): string {
     return `UPDATE accounts SET icon = '${escapeSql(icon)}', updated_at = CURRENT_TIMESTAMP WHERE deleted = 0 AND id = '${update.howmuchId}';`;
   });
   return [
-    "BEGIN;",
     ...statements,
     "UPDATE plans SET server_knowledge = server_knowledge + 1, updated_at = CURRENT_TIMESTAMP;",
-    "COMMIT;",
     "",
   ].join("\n");
 }

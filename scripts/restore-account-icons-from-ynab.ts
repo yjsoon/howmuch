@@ -119,7 +119,7 @@ async function applySql(target: Target, sql: string) {
   const dir = await mkdtemp(join(tmpdir(), "howmuch-icon-restore-"));
   const file = join(dir, "restore.sql");
   await writeFile(file, sql, "utf8");
-  await wrangler(["d1", "execute", "DB", "--remote", "--yes", "--file", file, ...targetFlags(target)], WORKER_DIR);
+  await wrangler(["d1", "execute", "DB", "--remote", "--file", file, ...targetFlags(target)], WORKER_DIR);
 }
 
 async function d1Query(target: Target, sql: string) {
