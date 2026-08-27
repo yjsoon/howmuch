@@ -1042,15 +1042,15 @@ struct TransactionRow: View {
   private func statusGlyph(_ status: RegisterStatus) -> some View {
     switch status {
     case .new:
-      Image(systemName: "n.circle.fill")
+      Image(systemName: "circle.dotted")
         .font(.title3)
         .foregroundStyle(Theme.newStatus)
     case .uncleared:
-      Image(systemName: "c.circle")
+      Image(systemName: "checkmark.circle")
         .font(.title3)
         .foregroundStyle(.tertiary)
     case .cleared:
-      Image(systemName: "c.circle.fill")
+      Image(systemName: "checkmark.circle.fill")
         .font(.title3)
         .foregroundStyle(Theme.inflow)
     case .reconciled:
