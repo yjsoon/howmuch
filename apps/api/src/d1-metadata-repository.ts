@@ -94,6 +94,11 @@ export class D1MetadataRepository {
       statement(`INSERT INTO payees(id,plan_id,name,transfer_account_id,external_ynab_id,deleted,updated_at) VALUES (?,?,?,?,?,0,CURRENT_TIMESTAMP) ON CONFLICT(id) DO NOTHING`, [payeeId, planId, payeeName, account.id, payeeId]),
       statement(`INSERT INTO accounts(id,plan_id,name,icon,type,on_budget,closed,opening_balance_milli,balance_milli,cleared_balance_milli,uncleared_balance_milli,transfer_payee_id,direct_import_linked,direct_import_in_error,external_ynab_id,deleted,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) ${conflict}`, [account.id, planId, presentation.name, presentation.icon, account.type ?? "checking", bool(account.on_budget, true), bool(account.closed), account.opening_balance ?? 0, account.balance ?? 0, account.cleared_balance ?? account.balance ?? 0, account.uncleared_balance ?? 0, payeeId, bool(account.direct_import_linked), bool(account.direct_import_in_error), account.external_ynab_id ?? account.id, bool(account.deleted)]),
       statement("UPDATE payees SET transfer_account_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND plan_id=?", [account.id, payeeId, planId]),
+      statement(
+        `UPDATE payees SET name=?,updated_at=CURRENT_TIMESTAMP
+         WHERE plan_id=? AND deleted=0 AND transfer_account_id=? AND name LIKE 'Transfer : %' AND name<>?`,
+        [payeeName, planId, account.id, payeeName],
+      ),
       statement("UPDATE accounts SET transfer_payee_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND plan_id=?", [payeeId, account.id, planId]),
       ...(incrementKnowledge ? [statement("UPDATE plans SET server_knowledge=server_knowledge+1,updated_at=CURRENT_TIMESTAMP WHERE id=?", [planId])] : []),
     ]);

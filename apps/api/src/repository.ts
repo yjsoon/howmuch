@@ -2800,7 +2800,7 @@ function formatPlan(row: Row): any {
 function formatAccount(row: Row): any {
   const presentation = resolveAccountPresentation({
     name: row.name,
-    icon: row.icon,
+    existingIcon: row.icon,
     type: row.type,
   });
   return {

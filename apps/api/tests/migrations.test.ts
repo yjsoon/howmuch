@@ -151,7 +151,7 @@ describe("local schema migrations", () => {
     }
   });
 
-  test("account icons split a leading emoji from the name and default the rest by type", () => {
+  test("account icons split leading and trailing emojis from the name and default the rest by type", () => {
     const db = new Database(":memory:");
     try {
       db.exec(`
@@ -176,9 +176,12 @@ describe("local schema migrations", () => {
         INSERT INTO accounts(id,plan_id,name,type) VALUES
           ('card','p','💳 OCBC 365','creditCard'),
           ('saver','p','Rainy Day','savings'),
-          ('bank','p','Everyday','checking');
+          ('bank','p','Everyday','checking'),
+          ('travel','p','Travel 💳','creditCard'),
+          ('dev','p','👩‍💻 Work','otherAsset');
         INSERT INTO payees(id,plan_id,name,transfer_account_id) VALUES
-          ('payee-card','p','Transfer : 💳 OCBC 365','card');
+          ('payee-card','p','Transfer : 💳 OCBC 365','card'),
+          ('payee-travel','p','Transfer : Travel 💳','travel');
         INSERT INTO schema_migrations(version) VALUES
           ('001_initial'),('002_transaction_server_knowledge'),('003_transfer_payees'),('004_auth_foundation'),('005_password_auth'),
           ('006_allow_duplicate_payee_names'),('007_ynab_raw_objects'),('008_plan_month_assignments'),('009_plan_month_category_targets'),
@@ -191,9 +194,12 @@ describe("local schema migrations", () => {
       expect(db.query("SELECT id,name,icon FROM accounts ORDER BY id").all()).toEqual([
         { id: "bank", name: "Everyday", icon: "🏦" },
         { id: "card", name: "OCBC 365", icon: "💳" },
+        { id: "dev", name: "Work", icon: "👩‍💻" },
         { id: "saver", name: "Rainy Day", icon: "💰" },
+        { id: "travel", name: "Travel", icon: "💳" },
       ]);
       expect(db.query("SELECT name FROM payees WHERE id='payee-card'").get()).toEqual({ name: "Transfer : OCBC 365" });
+      expect(db.query("SELECT name FROM payees WHERE id='payee-travel'").get()).toEqual({ name: "Transfer : Travel" });
     } finally {
       db.close();
     }

@@ -1516,6 +1516,9 @@ describe("D1 foundation", () => {
     await metadata.upsertAccount("p", { id: "a", name: "Cash", balance: 100 }, { operationId: "account-a" });
     const account = db.query("SELECT transfer_payee_id FROM accounts WHERE id = 'a'").get() as { transfer_payee_id: string };
     expect(db.query("SELECT transfer_account_id FROM payees WHERE id = ?").get(account.transfer_payee_id)).toEqual({ transfer_account_id: "a" });
+    await metadata.upsertAccount("p", { id: "a", name: "💳 OCBC", type: "checking", balance: 100 }, { operationId: "account-a-rename" });
+    expect(db.query("SELECT name, icon FROM accounts WHERE id = 'a'").get()).toEqual({ name: "OCBC", icon: "💳" });
+    expect(db.query("SELECT name FROM payees WHERE id = ?").get(account.transfer_payee_id)).toEqual({ name: "Transfer : OCBC" });
     await metadata.upsertYnabRawObject("p", "month", "2026-06-01", { month: "2026-06-01", budgeted: 42, deleted: false }, 9, { operationId: "raw-month" });
     await metadata.upsertYnabRawObject("p", "month", "2026-06-01", { month: "2026-06-01", budgeted: 43, deleted: true }, 10, { operationId: "raw-month-update" });
     expect(db.query("SELECT payload_json,deleted,server_knowledge FROM ynab_raw_objects").get()).toEqual({ payload_json: '{"month":"2026-06-01","budgeted":43,"deleted":true}', deleted: 1, server_knowledge: 10 });
@@ -1532,7 +1535,7 @@ describe("D1 foundation", () => {
     await metadata.ensurePlan("other", "Other", { operationId: "plan-other" });
     const version = (db.query("SELECT write_version FROM write_state").get() as { write_version: number }).write_version;
     await expect(metadata.upsertAccount("other", { id: "a", name: "Collision" }, { operationId: "account-collision" })).rejects.toThrow("write precondition failed");
-    expect(db.query("SELECT plan_id, name FROM accounts WHERE id = 'a'").get()).toEqual({ plan_id: "p", name: "Cash" });
+    expect(db.query("SELECT plan_id, name FROM accounts WHERE id = 'a'").get()).toEqual({ plan_id: "p", name: "OCBC" });
     expect(db.query("SELECT write_version FROM write_state").get()).toEqual({ write_version: version });
   });
 

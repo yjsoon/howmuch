@@ -64,6 +64,14 @@ describe("resolveAccountPresentation", () => {
       .toEqual({ icon: "💰", name: "Rainy Day" });
   });
 
+  test("lifts a leftover name emoji over a stored type-default icon", () => {
+    expect(resolveAccountPresentation({
+      name: "Travel ✈️",
+      existingIcon: "💳",
+      type: "creditCard",
+    })).toEqual({ icon: "✈️", name: "Travel" });
+  });
+
   test("falls back to the account type", () => {
     expect(resolveAccountPresentation({ name: "Visa", type: "creditCard" }))
       .toEqual({ icon: "💳", name: "Visa" });

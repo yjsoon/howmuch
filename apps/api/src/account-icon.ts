@@ -59,8 +59,10 @@ export function splitLegacyAccountName(name: string): { icon: string | null; nam
 }
 
 /**
- * Icon is a first-class field. A supplied icon wins, then a stored icon,
- * then an emoji still sitting on the name, then the account type.
+ * Icon is a first-class field. A supplied icon wins, then a stored custom
+ * icon, then an emoji still sitting on the name. A stored type-default does
+ * not block lifting a leftover name emoji, so trailing/ZWJ names missed by
+ * SQL still resolve correctly.
  */
 export function resolveAccountPresentation(input: {
   name?: string | null;
@@ -70,11 +72,14 @@ export function resolveAccountPresentation(input: {
 }): AccountPresentation {
   const rawName = String(input.name ?? "").trim() || "Account";
   const split = splitLegacyAccountName(rawName);
+  const typeDefault = defaultIconForAccountType(input.type);
+  const stored = parseAccountIcon(input.existingIcon);
+  const storedBlocksNameEmoji = stored != null && !(split.icon && stored === typeDefault && split.icon !== stored);
   return {
     icon: parseAccountIcon(input.icon)
-      ?? parseAccountIcon(input.existingIcon)
+      ?? (storedBlocksNameEmoji ? stored : null)
       ?? split.icon
-      ?? defaultIconForAccountType(input.type),
+      ?? typeDefault,
     name: split.name,
   };
 }

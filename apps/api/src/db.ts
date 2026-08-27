@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { dirname, join } from "node:path";
 import { mkdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { resolveAccountPresentation } from "./account-icon";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "migrations");
@@ -116,4 +117,44 @@ export function applyMigrations(db: Database): void {
       throw new Error(`Migration ${migration.version} introduced foreign-key violations`);
     }
   }
+
+  backfillAccountPresentations(db);
+}
+
+function backfillAccountPresentations(db: Database): void {
+  const hasIcon = db.query("SELECT 1 AS ok FROM pragma_table_info('accounts') WHERE name='icon'").get();
+  if (!hasIcon) return;
+
+  const accounts = db.query(
+    "SELECT id, name, icon, type FROM accounts WHERE deleted = 0",
+  ).all() as Array<{ id: string; name: string; icon: string; type: string | null }>;
+
+  for (const account of accounts) {
+    const presentation = resolveAccountPresentation({
+      name: account.name,
+      existingIcon: account.icon,
+      type: account.type,
+    });
+    if (presentation.name === account.name && presentation.icon === account.icon) continue;
+    db.query("UPDATE accounts SET name = ?, icon = ? WHERE id = ?").run(
+      presentation.name,
+      presentation.icon,
+      account.id,
+    );
+  }
+
+  db.run(`
+    UPDATE payees
+    SET
+      name = 'Transfer : ' || (SELECT a.name FROM accounts a WHERE a.id = payees.transfer_account_id),
+      updated_at = CURRENT_TIMESTAMP
+    WHERE deleted = 0
+      AND transfer_account_id IS NOT NULL
+      AND name LIKE 'Transfer : %'
+      AND EXISTS (
+        SELECT 1 FROM accounts a
+        WHERE a.id = payees.transfer_account_id
+          AND payees.name <> 'Transfer : ' || a.name
+      )
+  `);
 }

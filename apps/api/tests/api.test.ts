@@ -1346,8 +1346,10 @@ describe("account icons", () => {
   test("splits a leading emoji from a created name and defaults the rest by type", async () => {
     const card = await createAccountViaApi({ name: "💳 OCBC 365", type: "creditCard" });
     const savings = await createAccountViaApi({ name: "Rainy Day", type: "savings" });
+    const travel = await createAccountViaApi({ name: "Travel ✈️", type: "creditCard" });
     expect(card).toMatchObject({ name: "OCBC 365", icon: "💳", type: "creditCard" });
     expect(savings).toMatchObject({ name: "Rainy Day", icon: "💰", type: "savings" });
+    expect(travel).toMatchObject({ name: "Travel", icon: "✈️", type: "creditCard" });
 
     const listed = await (await request("/v1/plans/plan-test/accounts")).json();
     const byId = Object.fromEntries(listed.data.accounts.map((account: any) => [account.id, account]));
