@@ -26,8 +26,10 @@ enum Theme {
     dark: Color(red: 0.541, green: 0.553, blue: 0.973)
   )
 
-  /// Unapproved “New” badge: white type on a dark blue chip in both appearances.
-  static let newBadge = Color(red: 0.145, green: 0.227, blue: 0.455)
+  static let newStatus = Color(
+    light: Color(red: 0.145, green: 0.227, blue: 0.455),
+    dark: Color(red: 0.45, green: 0.55, blue: 0.85)
+  )
 
   static let textPrimary = Color(
     light: Color(red: 0.106, green: 0.125, blue: 0.227),
