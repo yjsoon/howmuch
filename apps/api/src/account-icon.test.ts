@@ -72,6 +72,13 @@ describe("resolveAccountPresentation", () => {
     })).toEqual({ icon: "✈️", name: "Travel" });
   });
 
+  test("lifts a thumbs-up plus space even when the name has trailing spaces", () => {
+    expect(splitLegacyAccountName("\u{1F44D}\u{FE0F} Banana ")).toEqual({
+      icon: "\u{1F44D}\u{FE0F}",
+      name: "Banana",
+    });
+  });
+
   test("falls back to the account type", () => {
     expect(resolveAccountPresentation({ name: "Visa", type: "creditCard" }))
       .toEqual({ icon: "💳", name: "Visa" });
