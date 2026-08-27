@@ -15,6 +15,7 @@ export interface PlanContextValue {
   accountPreferences: AccountPreferences | null;
   accountPreferencesSync: AccountPreferencesState;
   updateAccountPreferences: (updater: (preferences: AccountPreferences) => AccountPreferences) => void;
+  updateAccountIcon: (accountId: string, icon: string) => Promise<void>;
   retryAccountPreferences: () => void;
   categoryGroups: CategoryGroup[];
   categories: Category[];
@@ -130,6 +131,28 @@ export function PlanProvider({ children }: { children: ReactNode }) {
           accountPreferences: accountPreferencesController ? accountPreferencesSync.preferences : null,
           accountPreferencesSync,
           updateAccountPreferences: (updater) => accountPreferencesController?.update(updater),
+          updateAccountIcon: async (accountId, icon) => {
+            setValue((current) => current?.planId === planId
+              ? {
+                  ...current,
+                  accounts: current.accounts.map((account) =>
+                    account.id === accountId ? { ...account, icon } : account),
+                }
+              : current);
+            try {
+              const updated = await api.updateAccountIcon(planId, accountId, icon);
+              setValue((current) => current?.planId === planId
+                ? {
+                    ...current,
+                    accounts: current.accounts.map((account) =>
+                      account.id === updated.id ? updated : account),
+                  }
+                : current);
+            } catch (cause) {
+              setGeneration((n) => n + 1);
+              throw cause;
+            }
+          },
           retryAccountPreferences: () => accountPreferencesController?.retry(),
           categoryGroups,
           categories,

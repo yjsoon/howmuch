@@ -841,6 +841,22 @@ struct AccountsPayload: Decodable {
   let accounts: [Account]
 }
 
+struct AccountPayload: Decodable {
+  let account: Account
+}
+
+struct AccountIconWriteRequest: Encodable {
+  let account: AccountIconBody
+
+  init(icon: String) {
+    account = AccountIconBody(icon: icon)
+  }
+
+  struct AccountIconBody: Encodable {
+    let icon: String
+  }
+}
+
 struct CategoriesPayload: Decodable {
   let categoryGroups: [CategoryGroup]
 }
@@ -1083,6 +1099,7 @@ struct DisplaySettings: Decodable {
 struct Account: Decodable, Identifiable, Hashable {
   let id: String
   let name: String
+  let icon: String?
   let type: String
   let onBudget: Bool
   let closed: Bool
@@ -1090,6 +1107,25 @@ struct Account: Decodable, Identifiable, Hashable {
   let clearedBalance: Int
   let unclearedBalance: Int
   let deleted: Bool
+
+  var displayIcon: String {
+    AccountIcon.resolved(icon, type: type)
+  }
+
+  func withIcon(_ icon: String) -> Account {
+    Account(
+      id: id,
+      name: name,
+      icon: icon,
+      type: type,
+      onBudget: onBudget,
+      closed: closed,
+      balance: balance,
+      clearedBalance: clearedBalance,
+      unclearedBalance: unclearedBalance,
+      deleted: deleted
+    )
+  }
 }
 
 struct CategoryGroup: Decodable, Identifiable, Hashable {

@@ -1,0 +1,21 @@
+export const ACCOUNT_ICON_PALETTE = [
+  "🏦", "💳", "💰", "💵", "💸", "🏠", "🚗", "✈️",
+  "📈", "📉", "💼", "🛒", "🎓", "🏥", "📱", "💻",
+  "⭐", "🌴", "☕", "🍔", "🎮", "🐱", "🐶", "🐷",
+] as const;
+
+export function accountIcon(account: { icon?: string | null }): string {
+  const icon = account.icon?.trim();
+  return icon || "🏦";
+}
+
+export function parseAccountIconInput(value: string): string | null {
+  const trimmed = value.trim();
+  const parts = [...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(trimmed)];
+  if (parts.length !== 1) return null;
+  const grapheme = parts[0]!.segment;
+  if (/\p{L}|\p{Nd}/u.test(grapheme)) return null;
+  return /\p{Extended_Pictographic}/u.test(grapheme) || /\p{Emoji_Presentation}/u.test(grapheme)
+    ? grapheme
+    : null;
+}

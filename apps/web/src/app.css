@@ -190,10 +190,13 @@ textarea {
 
 .sidebar-primary-link:hover,
 .sidebar-report-link:hover,
-.account-link:hover,
-.sidebar-link-active {
+.sidebar-link-active:not(.account-link) {
   color: #fff;
   background: #ffffff18;
+}
+
+.account-link.sidebar-link-active {
+  color: #fff;
 }
 
 .sidebar a:focus-visible,
@@ -266,11 +269,123 @@ textarea {
   white-space: nowrap;
 }
 
+.account-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  border-radius: 3px;
+}
+
+.account-row:hover,
+.account-row:has(.sidebar-link-active) {
+  color: #fff;
+  background: #ffffff18;
+}
+
+.account-icon-picker {
+  position: relative;
+  flex: 0 0 1.75rem;
+}
+
+.account-icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.account-icon-button:hover,
+.account-icon-button:focus-visible {
+  border-radius: 3px;
+  background: #ffffff22;
+}
+
+.account-icon-popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 15.5rem;
+  padding: 10px;
+  border: 1px solid #4a4c44;
+  border-radius: 8px;
+  background: #2c2d28;
+  box-shadow: 0 10px 24px #00000055;
+  color: #f2f1eb;
+}
+
+.account-icon-popover-title {
+  margin: 0 0 8px;
+  color: #c4c5bd;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.account-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+}
+
+.account-icon-choice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: #ffffff10;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.account-icon-choice:hover,
+.account-icon-choice-active {
+  border-color: #d5d4ce;
+  background: #ffffff22;
+}
+
+.account-icon-custom {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  color: #c4c5bd;
+  font-size: 11px;
+}
+
+.account-icon-custom input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #5a5c54;
+  border-radius: 4px;
+  background: #1f201c;
+  color: #f2f1eb;
+  font-size: 16px;
+}
+
+.account-icon-error {
+  margin: 6px 0 0;
+  color: #f0aaa4;
+  font-size: 11px;
+}
+
 .account-link {
   display: flex;
   align-items: baseline;
+  flex: 1;
+  min-width: 0;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 6px 10px 6px 4px;
   color: #e1e0da;
   font-size: 12.5px;
 }
@@ -3255,7 +3370,20 @@ tr:hover .share-bar {
   border-bottom: 1px solid var(--rule);
 }
 
-.account-order-list li > span:first-child {
+.account-order-list li > span:first-child,
+.account-order-label {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.account-order-icon {
+  flex: 0 0 1.75rem;
+  text-align: center;
+}
+
+.account-order-label > span:last-child {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

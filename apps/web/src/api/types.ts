@@ -24,6 +24,7 @@ export interface PlanSettings {
 export interface Account {
   id: string;
   name: string;
+  icon: string;
   type: string | null;
   on_budget: boolean;
   closed: boolean;

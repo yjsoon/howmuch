@@ -108,6 +108,15 @@ struct APIClient {
     return response.data.accounts.filter { !$0.deleted }
   }
 
+  func updateAccountIcon(planID: String, accountID: String, icon: String) async throws -> Account {
+    let response: APIEnvelope<AccountPayload> = try await request(
+      path: "/v1/plans/\(planID)/accounts/\(accountID)",
+      method: "PATCH",
+      body: AccountIconWriteRequest(icon: icon)
+    )
+    return response.data.account
+  }
+
   func fetchAccountPreferences(planID: String) async throws -> SyncedAccountPreferences? {
     do {
       let response: APIEnvelope<AccountPreferencesPayload> = try await request(

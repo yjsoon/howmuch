@@ -226,6 +226,35 @@ final class AppModel {
     saveViewPrefs()
   }
 
+  func setAccountIcon(_ icon: String, for accountID: String) async throws {
+    guard let parsed = AccountIcon.parse(icon) else {
+      throw APIClientError.validation("icon must be a single emoji")
+    }
+    guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {
+      throw APIClientError.validation("Account not found")
+    }
+    let previous = accounts[index]
+    accounts[index] = previous.withIcon(parsed)
+    rebuildLookups()
+    do {
+      let updated = try await apiClient.updateAccountIcon(
+        planID: settings.planID,
+        accountID: accountID,
+        icon: parsed
+      )
+      if let current = accounts.firstIndex(where: { $0.id == accountID }) {
+        accounts[current] = updated
+        rebuildLookups()
+      }
+    } catch {
+      if let current = accounts.firstIndex(where: { $0.id == accountID }) {
+        accounts[current] = previous
+        rebuildLookups()
+      }
+      throw error
+    }
+  }
+
   var customAccountGroups: [CustomAccountGroup] {
     viewPrefs.customAccountGroups
   }
