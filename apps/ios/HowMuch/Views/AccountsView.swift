@@ -157,6 +157,7 @@ struct AccountsView: View {
         AccountGroupReorderSheet(group: group)
       case .icon(let account):
         AccountIconPickerSheet(account: account)
+          .presentationDetents([.medium, .large])
       }
     }
     .confirmationDialog(
@@ -319,17 +320,19 @@ struct AccountsView: View {
   }
 
   private func accountRow(_ account: Account) -> some View {
-    HStack(alignment: .center, spacing: 8) {
+    HStack(alignment: .center, spacing: 4) {
       Button {
         presentedSheet = .icon(account)
       } label: {
         Text(account.displayIcon)
-          .font(.body)
-          .frame(width: 28, alignment: .center)
+          .font(.title3)
+          .frame(width: 44, height: 44)
+          .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
           .contentShape(Rectangle())
       }
-      .buttonStyle(.plain)
+      .buttonStyle(.borderless)
       .accessibilityLabel("Change icon for \(account.name)")
+      .accessibilityHint("Opens the icon picker")
 
       NavigationLink {
         RegisterView(scope: .account(account.id))
@@ -354,8 +357,23 @@ struct AccountsView: View {
       }
       .buttonStyle(.plain)
     }
-    .padding(.horizontal, 16)
+    .padding(.horizontal, 12)
     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+    .contextMenu {
+      Button {
+        presentedSheet = .icon(account)
+      } label: {
+        Label("Change Icon", systemImage: "face.smiling")
+      }
+      Button("Groups") {
+        presentedSheet = .memberships(account.id)
+      }
+      if !account.closed {
+        Button(model.isAccountFavourite(account.id) ? "Remove from Favourites" : "Add to Favourites") {
+          model.toggleAccountFavourite(account.id)
+        }
+      }
+    }
     .accessibilityActions {
       if !account.closed {
         Button(model.isAccountFavourite(account.id) ? "Remove from Favourites" : "Add to Favourites") {
@@ -980,12 +998,18 @@ private struct AccountIconPickerSheet: View {
             Text("Or type any emoji")
               .font(.footnote)
               .foregroundStyle(.secondary)
-            TextField("Emoji", text: $custom)
-              .textInputAutocapitalization(.never)
-              .autocorrectionDisabled()
-              .onSubmit {
+            HStack(spacing: 8) {
+              TextField("Emoji", text: $custom)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .onSubmit {
+                  Task { await choose(custom) }
+                }
+              Button("Use") {
                 Task { await choose(custom) }
               }
+              .disabled(isSaving || custom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
           }
           if let error {
             Text(error)
