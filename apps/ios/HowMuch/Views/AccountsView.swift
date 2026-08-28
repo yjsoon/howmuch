@@ -326,7 +326,6 @@ struct AccountsView: View {
         Text(account.displayIcon)
           .font(.title3)
           .frame(width: 44, height: 44)
-          .background(Theme.surfaceMuted, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
           .contentShape(Rectangle())
       }
       .buttonStyle(.borderless)
