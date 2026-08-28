@@ -958,14 +958,14 @@ export function TransactionsPage() {
                   ])}
                 </tbody>
               </table>
-              {rows.length === 0 && (
+              {rows.length === 0 && !page.filling && (
                 <div className="register-empty-state">
                   <p className="status-title">{emptyMessage}</p>
                   <p className="status-detail">Try widening the date range, clearing filters, or shortening the search term.</p>
                 </div>
               )}
             </div>
-          ) : (
+          ) : page.filling ? null : (
             <div className="status-panel">
               <p className="status-title">{emptyMessage}</p>
               <p className="status-detail">Try widening the date range, clearing filters, or shortening the search term.</p>
