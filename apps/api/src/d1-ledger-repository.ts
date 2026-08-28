@@ -38,11 +38,17 @@ export class D1LedgerRepository extends LedgerRepository {
   override async ensureAccount(planId:string,accountId:string,name?:string):Promise<void>{await this.metadata.ensureAccount(planId,accountId,name,this.context("account.ensure",planId,accountId));}
   override async upsertAccount(planId:string,account:any):Promise<void>{await this.metadata.upsertAccount(planId,account,this.context("account.upsert",planId,account.id));}
   override async updateAccountIcon(planId:string,accountId:string,icon:string):Promise<any>{
-    const parsed = parseAccountIcon(icon);
-    if (!parsed) throw new ValidationError("icon must be a single emoji");
+    return this.updateAccount(planId, accountId, { icon });
+  }
+  override async updateAccount(planId:string,accountId:string,patch:{icon?:string;name?:string}):Promise<any>{
+    const parsedIcon = patch.icon === undefined ? undefined : parseAccountIcon(patch.icon);
+    if (patch.icon !== undefined && !parsedIcon) throw new ValidationError("icon must be a single emoji");
+    const parsedName = patch.name === undefined ? undefined : String(patch.name).trim();
+    if (patch.name !== undefined && !parsedName) throw new ValidationError("account.name is required");
+    if (parsedIcon === undefined && parsedName === undefined) throw new ValidationError("account.icon or account.name is required");
     const existing = await this.d1.get("SELECT id FROM accounts WHERE id=? AND plan_id=? AND deleted=0", [accountId, planId]);
     if (!existing) throw new NotFoundError("Account not found");
-    await this.metadata.updateAccountIcon(planId, accountId, parsed, this.context("account.icon", planId, accountId));
+    await this.metadata.updateAccount(planId, accountId, { ...(parsedIcon !== undefined ? { icon: parsedIcon } : {}), ...(parsedName !== undefined ? { name: parsedName } : {}) }, this.context("account.update", planId, accountId));
     return this.getAccount(planId, accountId);
   }
   override async createAccount(planId:string,account:any):Promise<any>{

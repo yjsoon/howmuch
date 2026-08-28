@@ -227,20 +227,29 @@ final class AppModel {
   }
 
   func setAccountIcon(_ icon: String, for accountID: String) async throws {
-    guard let parsed = AccountIcon.parse(icon) else {
+    try await setAccountIdentity(name: nil, icon: icon, for: accountID)
+  }
+
+  func setAccountIdentity(name: String?, icon: String, for accountID: String) async throws {
+    guard let parsedIcon = AccountIcon.parse(icon) else {
       throw APIClientError.validation("icon must be a single emoji")
+    }
+    let parsedName = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let parsedName, parsedName.isEmpty {
+      throw APIClientError.validation("Name cannot be empty")
     }
     guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {
       throw APIClientError.validation("Account not found")
     }
     let previous = accounts[index]
-    accounts[index] = previous.withIcon(parsed)
+    accounts[index] = previous.withIdentity(name: parsedName ?? previous.name, icon: parsedIcon)
     rebuildLookups()
     do {
-      let updated = try await apiClient.updateAccountIcon(
+      let updated = try await apiClient.updateAccount(
         planID: settings.planID,
         accountID: accountID,
-        icon: parsed
+        icon: parsedIcon,
+        name: parsedName
       )
       if let current = accounts.firstIndex(where: { $0.id == accountID }) {
         accounts[current] = updated

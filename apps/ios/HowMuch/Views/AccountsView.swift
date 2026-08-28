@@ -359,21 +359,6 @@ struct AccountsView: View {
     }
     .padding(.horizontal, 12)
     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-    .contextMenu {
-      Button {
-        presentedSheet = .icon(account)
-      } label: {
-        Label("Change Icon", systemImage: "face.smiling")
-      }
-      Button("Groups") {
-        presentedSheet = .memberships(account.id)
-      }
-      if !account.closed {
-        Button(model.isAccountFavourite(account.id) ? "Remove from Favourites" : "Add to Favourites") {
-          model.toggleAccountFavourite(account.id)
-        }
-      }
-    }
     .accessibilityActions {
       if !account.closed {
         Button(model.isAccountFavourite(account.id) ? "Remove from Favourites" : "Add to Favourites") {
@@ -962,6 +947,142 @@ private struct CustomAccountGroupEditor: View {
 
   private var nameError: String? {
     model.customAccountGroupNameError(name, excluding: group.id)
+  }
+}
+
+struct AccountIdentityEditorSheet: View {
+  @Environment(AppModel.self) private var model
+  @Environment(\.dismiss) private var dismiss
+  let account: Account
+  @State private var name: String
+  @State private var icon: String
+  @State private var custom = ""
+  @State private var error: String?
+  @State private var isSaving = false
+
+  private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 6)
+
+  init(account: Account) {
+    self.account = account
+    _name = State(initialValue: account.name)
+    _icon = State(initialValue: account.displayIcon)
+  }
+
+  var body: some View {
+    NavigationStack {
+      List {
+        Section {
+          HStack {
+            Text("Icon")
+            Spacer()
+            Text(icon)
+              .font(.title2)
+              .accessibilityHidden(true)
+          }
+          LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(AccountIcon.palette, id: \.self) { candidate in
+              Button {
+                icon = candidate
+                custom = ""
+                error = nil
+              } label: {
+                Text(candidate)
+                  .font(.title2)
+                  .frame(maxWidth: .infinity, minHeight: 44)
+                  .background(candidate == icon ? Theme.accent.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+              }
+              .buttonStyle(.plain)
+              .accessibilityLabel("Use \(candidate)")
+              .disabled(isSaving)
+            }
+          }
+          .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+          HStack {
+            TextField("Custom emoji", text: $custom)
+              .textInputAutocapitalization(.never)
+              .autocorrectionDisabled()
+              .onSubmit { applyCustom() }
+            Button("Use") { applyCustom() }
+              .disabled(isSaving || AccountIcon.parse(custom) == nil)
+          }
+        }
+        Section {
+          HStack {
+            Text("Name")
+            TextField("Account name", text: $name)
+              .multilineTextAlignment(.trailing)
+              .textInputAutocapitalization(.words)
+              .disabled(isSaving)
+          }
+        }
+        if let error {
+          Section {
+            Text(error)
+              .font(.footnote)
+              .foregroundStyle(Theme.outflow)
+              .listRowBackground(Color.clear)
+          }
+        }
+      }
+      .listStyle(.insetGrouped)
+      .scrollContentBackground(.hidden)
+      .background(Theme.canvas)
+      .navigationTitle("Edit name and icon")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarLeading) {
+          Button {
+            dismiss()
+          } label: {
+            Image(systemName: "xmark")
+              .font(.body.weight(.semibold))
+              .foregroundStyle(.black)
+          }
+          .accessibilityLabel("Cancel")
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+          Button {
+            Task { await save() }
+          } label: {
+            Image(systemName: "checkmark")
+              .font(.body.weight(.semibold))
+              .foregroundStyle(canSave ? Theme.accent : Color.secondary)
+          }
+          .disabled(!canSave || isSaving)
+          .accessibilityLabel("Save")
+        }
+      }
+    }
+  }
+
+  private var trimmedName: String {
+    name.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private var canSave: Bool {
+    AccountIcon.parse(icon) != nil && !trimmedName.isEmpty
+  }
+
+  private func applyCustom() {
+    guard let parsed = AccountIcon.parse(custom) else {
+      error = "Choose a single emoji."
+      return
+    }
+    icon = parsed
+    error = nil
+  }
+
+  private func save() async {
+    guard canSave, let parsed = AccountIcon.parse(icon) else { return }
+    isSaving = true
+    error = nil
+    do {
+      try await model.setAccountIdentity(name: trimmedName, icon: parsed, for: account.id)
+      dismiss()
+    } catch {
+      self.error = error.localizedDescription
+      isSaving = false
+    }
   }
 }
 

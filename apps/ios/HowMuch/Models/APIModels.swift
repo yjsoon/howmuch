@@ -846,14 +846,29 @@ struct AccountPayload: Decodable {
 }
 
 struct AccountIconWriteRequest: Encodable {
-  let account: AccountIconBody
+  let account: AccountWriteBody
 
-  init(icon: String) {
-    account = AccountIconBody(icon: icon)
+  init(icon: String, name: String? = nil) {
+    account = AccountWriteBody(icon: icon, name: name)
   }
 
-  struct AccountIconBody: Encodable {
+  init(name: String, icon: String) {
+    account = AccountWriteBody(icon: icon, name: name)
+  }
+
+  struct AccountWriteBody: Encodable {
     let icon: String
+    let name: String?
+
+    enum CodingKeys: String, CodingKey {
+      case icon, name
+    }
+
+    func encode(to encoder: Encoder) throws {
+      var container = encoder.container(keyedBy: CodingKeys.self)
+      try container.encode(icon, forKey: .icon)
+      try container.encodeIfPresent(name, forKey: .name)
+    }
   }
 }
 
@@ -1113,6 +1128,10 @@ struct Account: Decodable, Identifiable, Hashable {
   }
 
   func withIcon(_ icon: String) -> Account {
+    withIdentity(name: name, icon: icon)
+  }
+
+  func withIdentity(name: String, icon: String) -> Account {
     Account(
       id: id,
       name: name,

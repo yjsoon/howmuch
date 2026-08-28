@@ -105,11 +105,35 @@ export class D1MetadataRepository {
   }
 
   async updateAccountIcon(planId: string, accountId: string, icon: string, context?: D1WriteContext): Promise<void> {
+    return this.updateAccount(planId, accountId, { icon }, context);
+  }
+
+  async updateAccount(planId: string, accountId: string, patch: { icon?: string; name?: string }, context?: D1WriteContext): Promise<void> {
     const commandId = this.id(context);
-    await this.run("metadata.account.icon", planId, accountId, { icon }, context, [
+    const assignments: string[] = [];
+    const values: unknown[] = [];
+    if (patch.icon !== undefined) {
+      assignments.push("icon=?");
+      values.push(patch.icon);
+    }
+    if (patch.name !== undefined) {
+      assignments.push("name=?");
+      values.push(patch.name);
+    }
+    if (assignments.length === 0) throw new Error("account.icon or account.name is required");
+    await this.run("metadata.account.update", planId, accountId, patch, context, [
       assertion(commandId, "metadata_plan_exists", planId, planId),
       assertion(commandId, "metadata_account", accountId, planId),
-      statement("UPDATE accounts SET icon=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND plan_id=? AND deleted=0", [icon, accountId, planId]),
+      statement(
+        `UPDATE accounts SET ${assignments.join(",")},updated_at=CURRENT_TIMESTAMP WHERE id=? AND plan_id=? AND deleted=0`,
+        [...values, accountId, planId],
+      ),
+      ...(patch.name !== undefined
+        ? [statement(
+          "UPDATE payees SET name=?,updated_at=CURRENT_TIMESTAMP WHERE deleted=0 AND transfer_account_id=? AND name LIKE 'Transfer : %'",
+          [`Transfer : ${patch.name}`, accountId],
+        )]
+        : []),
       statement("UPDATE plans SET server_knowledge=server_knowledge+1,updated_at=CURRENT_TIMESTAMP WHERE id=?", [planId]),
     ]);
   }

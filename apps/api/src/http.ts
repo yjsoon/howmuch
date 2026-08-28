@@ -227,10 +227,14 @@ async function handleV1(
     if (segments.length === 5 && (method === "PATCH" || method === "PUT")) {
       const body = await readJson(request);
       const payload = body.account ?? body;
-      if (!payload || typeof payload !== "object" || Array.isArray(payload) || typeof payload.icon !== "string") {
-        throw new ValidationError("account.icon is required");
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new ValidationError("account.icon or account.name is required");
       }
-      const account = await repo.updateAccountIcon(planId, accountId, payload.icon);
+      const patch = {
+        ...(typeof payload.icon === "string" ? { icon: payload.icon } : {}),
+        ...(typeof payload.name === "string" ? { name: payload.name } : {}),
+      };
+      const account = await repo.updateAccount(planId, accountId, patch);
       return json({ data: { account, server_knowledge: await repo.getServerKnowledge(planId) } });
     }
     if (segments.length === 6 && segments[5] === "transactions" && method === "GET") {
