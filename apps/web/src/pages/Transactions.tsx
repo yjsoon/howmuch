@@ -16,9 +16,10 @@ import { CategorySelect } from "../components/CategorySelect";
 import { FlagPicker, FlagTag } from "../components/FlagTag";
 import { FilterRail } from "../components/FilterRail";
 import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
-import { formatDate, todayIso } from "../lib/dates";
+import { formatDate, todayIso, trailingMonthsRange } from "../lib/dates";
 import { stableHash } from "../lib/hash";
 import { formatAmount, formatMilliunitsInput, formatMoney, parseMilliunits } from "../lib/money";
+import { fillRegisterHorizon } from "../lib/register-horizon";
 import { activeSchedulesForAccount, scheduledAmount, scheduleRecurrence, transferScheduleLabel } from "../lib/schedules";
 import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
@@ -42,7 +43,7 @@ type ReconcileDraft = {
 };
 
 export function TransactionsPage() {
-  const { filters, setFilters } = useFilters();
+  const { filters, setFilters } = useFilters({ defaultRange: () => trailingMonthsRange(2) });
   const { accounts, categoryGroups, planId, reload } = usePlan();
   const payees = useApi(planId, () => api.payees(planId));
   const [params] = useSearchParams();
@@ -99,6 +100,7 @@ export function TransactionsPage() {
     hasMore: false,
     nextOffset: null as number | null,
     loading: true,
+    filling: true,
     loadingMore: false,
     loaded: false,
     error: null as string | null,
@@ -171,31 +173,37 @@ export function TransactionsPage() {
    */
   const refreshFirstPage = () => {
     requestVersionRef.current += 1;
-    setPage({ transactions: [], hasMore: false, nextOffset: null, loading: true, loadingMore: false, loaded: false, error: null });
+    setPage({ transactions: [], hasMore: false, nextOffset: null, loading: true, filling: true, loadingMore: false, loaded: false, error: null });
     setRefreshGeneration((generation) => generation + 1);
   };
 
   useEffect(() => {
     let cancelled = false;
     const requestVersion = ++requestVersionRef.current;
-    setPage({ transactions: [], hasMore: false, nextOffset: null, loading: true, loadingMore: false, loaded: false, error: null });
-    fetchTransactionPage(0)
-      .then((first) => {
-        if (!cancelled && requestVersion === requestVersionRef.current) {
-          setPage({
-            transactions: first.transactions,
-            hasMore: first.has_more,
-            nextOffset: first.next_offset,
-            loading: false,
-            loadingMore: false,
-            loaded: true,
-            error: null,
-          });
+    setPage({ transactions: [], hasMore: false, nextOffset: null, loading: true, filling: true, loadingMore: false, loaded: false, error: null });
+    fillRegisterHorizon({
+      today: todayIso(),
+      fetchPage: fetchTransactionPage,
+      isCurrent: () => !cancelled && requestVersion === requestVersionRef.current,
+    })
+      .then((filled) => {
+        if (!filled) {
+          return;
         }
+        setPage({
+          transactions: filled.transactions,
+          hasMore: filled.hasMore,
+          nextOffset: filled.nextOffset,
+          loading: false,
+          filling: false,
+          loadingMore: false,
+          loaded: true,
+          error: null,
+        });
       })
       .catch((error: Error) => {
         if (!cancelled && requestVersion === requestVersionRef.current) {
-          setPage({ transactions: [], hasMore: false, nextOffset: null, loading: false, loadingMore: false, loaded: false, error: error.message });
+          setPage({ transactions: [], hasMore: false, nextOffset: null, loading: false, filling: false, loadingMore: false, loaded: false, error: error.message });
         }
       });
     return () => {
@@ -526,7 +534,7 @@ export function TransactionsPage() {
 
   return (
     <>
-      <FilterRail filters={filters} setFilters={setFilters} busy={page.loading || page.loadingMore} />
+      <FilterRail filters={filters} setFilters={setFilters} busy={page.loading || page.filling || page.loadingMore} />
       <div className="report-header">
         <div>
           <span className="page-eyebrow">{usesActiveBalanceScope ? "All account history" : "Account register"}</span>
@@ -960,7 +968,7 @@ export function TransactionsPage() {
               <p className="status-detail">Try widening the date range, clearing filters, or shortening the search term.</p>
             </div>
           )}
-          {page.hasMore && !unapprovedOnly && (
+          {page.hasMore && !page.filling && !unapprovedOnly && (
             <div className="register-load-more">
               <button type="button" className="register-load-more-button" onClick={loadOlder} disabled={page.loadingMore}>
                 {page.loadingMore ? "Loading older transactions…" : "Load older transactions"}

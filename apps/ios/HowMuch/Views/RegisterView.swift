@@ -384,17 +384,23 @@ struct RegisterView: View {
 
   @ViewBuilder
   private var emptyRegisterSection: some View {
-    if visibleTransactions.isEmpty, visiblePendingRows.isEmpty, model.ledgerPhase == .loaded {
+    if visibleTransactions.isEmpty, visiblePendingRows.isEmpty, model.ledgerPhase == .loaded, !model.isFillingHorizon {
       Section {
         Group {
-          if searchText.isEmpty {
+          if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            ContentUnavailableView.search
+          } else if model.hasMoreTransactions {
+            ContentUnavailableView(
+              "No recent transactions",
+              systemImage: "tray",
+              description: Text("Load older transactions to see earlier activity.")
+            )
+          } else {
             ContentUnavailableView(
               "No Transactions",
               systemImage: "tray",
               description: Text("Transactions you add will appear here.")
             )
-          } else {
-            ContentUnavailableView.search
           }
         }
         .listRowBackground(Color.clear)
@@ -431,7 +437,7 @@ struct RegisterView: View {
 
   @ViewBuilder
   private var loadOlderTransactionsSection: some View {
-    if model.hasMoreTransactions {
+    if model.hasMoreTransactions, !model.isFillingHorizon, model.ledgerPhase == .loaded {
       Section {
         Button {
           Task { await model.loadOlderTransactions() }
@@ -446,7 +452,7 @@ struct RegisterView: View {
         }
         .buttonStyle(.borderedProminent)
         .disabled(model.isLoadingOlderTransactions)
-        .accessibilityHint("Loads the next 100 older transactions into this register.")
+        .accessibilityHint("Loads the next page of older transactions into this register.")
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
       }

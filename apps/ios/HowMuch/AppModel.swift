@@ -43,6 +43,7 @@ final class AppModel {
   private(set) var hasMoreTransactions = false
   private(set) var nextTransactionOffset: Int?
   private(set) var isLoadingOlderTransactions = false
+  private(set) var isFillingHorizon = false
   private(set) var olderTransactionsError: String?
   /// Transaction-frequency counts for the inclusive trailing 30-day window.
   /// This is separate from `transactions`, which is intentionally paged for
@@ -998,6 +999,7 @@ final class AppModel {
     hasMoreTransactions = false
     nextTransactionOffset = nil
     isLoadingOlderTransactions = false
+    isFillingHorizon = false
     olderTransactionsError = nil
     if !quiet {
       ledgerPhase = .loading
@@ -1009,11 +1011,42 @@ final class AppModel {
       guard generation == ledgerPageGeneration, planID == settings.planID else {
         return
       }
+      isFillingHorizon = true
       serverTransactions = sortedUniqueTransactions(page.transactions)
       serverUnapprovedTransactions = sortedUniqueTransactions(unapproved)
-      hasMoreTransactions = page.hasMore && page.nextOffset != nil
-      nextTransactionOffset = hasMoreTransactions ? page.nextOffset : nil
+      applyTransactionPageCursor(page)
       ledgerPhase = .loaded
+      defer {
+        if generation == ledgerPageGeneration, planID == settings.planID {
+          isFillingHorizon = false
+        }
+      }
+      while RegisterHorizon.standard.shouldFetchMore(
+        oldestLoadedDate: serverTransactions.map(\.date).min(),
+        hasMore: hasMoreTransactions,
+        rowCount: serverTransactions.count
+      ) {
+        guard let offset = nextTransactionOffset else {
+          break
+        }
+        do {
+          let older = try await apiClient.fetchTransactions(planID: planID, offset: offset)
+          guard
+            generation == ledgerPageGeneration,
+            planID == settings.planID,
+            nextTransactionOffset == offset
+          else {
+            return
+          }
+          applyOlderTransactionPage(older)
+        } catch {
+          guard generation == ledgerPageGeneration, planID == settings.planID else {
+            return
+          }
+          hasMoreTransactions = true
+          break
+        }
+      }
     } catch {
       guard generation == ledgerPageGeneration, planID == settings.planID else {
         return
@@ -1049,6 +1082,7 @@ final class AppModel {
     hasMoreTransactions = false
     nextTransactionOffset = nil
     isLoadingOlderTransactions = false
+    isFillingHorizon = false
     olderTransactionsError = nil
     referencePhase = .idle
     ledgerPhase = .idle
@@ -1189,7 +1223,8 @@ final class AppModel {
       ledgerPhase == .loaded,
       hasMoreTransactions,
       let offset = nextTransactionOffset,
-      !isLoadingOlderTransactions
+      !isLoadingOlderTransactions,
+      !isFillingHorizon
     else {
       return
     }
@@ -1213,15 +1248,23 @@ final class AppModel {
       else {
         return
       }
-      serverTransactions = sortedUniqueTransactions(serverTransactions + page.transactions)
-      hasMoreTransactions = page.hasMore && page.nextOffset != nil
-      nextTransactionOffset = hasMoreTransactions ? page.nextOffset : nil
+      applyOlderTransactionPage(page)
     } catch {
       guard generation == ledgerPageGeneration, planID == settings.planID else {
         return
       }
       olderTransactionsError = error.localizedDescription
     }
+  }
+
+  private func applyTransactionPageCursor(_ page: TransactionPage) {
+    hasMoreTransactions = page.hasMore && page.nextOffset != nil
+    nextTransactionOffset = hasMoreTransactions ? page.nextOffset : nil
+  }
+
+  private func applyOlderTransactionPage(_ page: TransactionPage) {
+    serverTransactions = sortedUniqueTransactions(serverTransactions + page.transactions)
+    applyTransactionPageCursor(page)
   }
 
   private func sortedUniqueTransactions(_ rows: [Transaction]) -> [Transaction] {
