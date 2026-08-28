@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Cancel is not a case because `View.binaryConfirm` always supplies it.
 struct ConfirmButton {
   fileprivate let label: LocalizedStringKey
   fileprivate let role: ButtonRole?
