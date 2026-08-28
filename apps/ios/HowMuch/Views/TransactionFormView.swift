@@ -260,29 +260,37 @@ struct TransactionFormView: View {
             .padding(20)
         }
       }
-      .confirmationDialog("Delete this transaction?", isPresented: $isConfirmingDelete, titleVisibility: .visible) {
-        Button("Delete Transaction", role: .destructive) {
-          deleteTransaction()
+      .binaryConfirm(
+        "Delete this transaction?",
+        isPresented: $isConfirmingDelete,
+        confirm: .destructive("Delete Transaction"),
+        message: {
+          Text("This also deletes any linked transfer entries. If this transaction or a linked entry has been reconciled, deleting it can make your next reconciliation inaccurate.")
         }
-      } message: {
-        Text("This also deletes any linked transfer entries. If this transaction or a linked entry has been reconciled, deleting it can make your next reconciliation inaccurate.")
+      ) {
+        deleteTransaction()
       }
-      .confirmationDialog("Save transaction changes?", isPresented: $isConfirmingEdit, titleVisibility: .visible) {
-        Button("Save Changes") {
-          submitSave()
+      .binaryConfirm(
+        "Save transaction changes?",
+        isPresented: $isConfirmingEdit,
+        confirm: .proceed("Save Changes"),
+        message: {
+          Text("If this transaction or a linked transfer has been reconciled, its status stays locked, but changing its amount, account, or date can make your next reconciliation inaccurate.")
         }
-        Button("Cancel", role: .cancel) {}
-      } message: {
-        Text("If this transaction or a linked transfer has been reconciled, its status stays locked, but changing its amount, account, or date can make your next reconciliation inaccurate.")
+      ) {
+        submitSave()
       }
-      .confirmationDialog("Remove split allocations?", isPresented: $isConfirmingSplitRemoval, titleVisibility: .visible) {
-        Button("Remove Split", role: .destructive) {
-          withAnimation(.snappy) {
-            draft.disableSplit()
-          }
+      .binaryConfirm(
+        "Remove split allocations?",
+        isPresented: $isConfirmingSplitRemoval,
+        confirm: .destructive("Remove Split"),
+        message: {
+          Text("The split lines will be replaced with their total. Their payees, categories and memos will be removed.")
         }
-      } message: {
-        Text("The split lines will be replaced with their total. Their payees, categories and memos will be removed.")
+      ) {
+        withAnimation(.snappy) {
+          draft.disableSplit()
+        }
       }
       .onChange(of: keypad) {
         draft.amountMagnitudeMilli = keypad.display

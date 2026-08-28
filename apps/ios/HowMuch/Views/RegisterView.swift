@@ -168,24 +168,19 @@ struct RegisterView: View {
     } message: {
       Text(statusError ?? "Refresh and try again.")
     }
-    .confirmationDialog(
+    .binaryConfirm(
       "Delete this transaction?",
-      isPresented: Binding(
-        get: { transactionPendingDeletion != nil },
-        set: { if !$0 { transactionPendingDeletion = nil } }
-      ),
-      titleVisibility: .visible,
-      presenting: transactionPendingDeletion
+      presenting: $transactionPendingDeletion,
+      confirm: .destructive("Delete Transaction"),
+      message: { transaction in
+        if transaction.parentTransactionID != nil {
+          Text("The split line on the other account stays and loses this transfer link.")
+        } else {
+          Text("This also deletes any linked transfer entries. If this transaction or a linked entry has been reconciled, deleting it can make your next reconciliation inaccurate.")
+        }
+      }
     ) { transaction in
-      Button("Delete Transaction", role: .destructive) {
-        delete(transaction)
-      }
-    } message: { transaction in
-      if transaction.parentTransactionID != nil {
-        Text("The split line on the other account stays and loses this transfer link.")
-      } else {
-        Text("This also deletes any linked transfer entries. If this transaction or a linked entry has been reconciled, deleting it can make your next reconciliation inaccurate.")
-      }
+      delete(transaction)
     }
     .alert("Couldn’t delete transaction", isPresented: Binding(
       get: { deleteError != nil },

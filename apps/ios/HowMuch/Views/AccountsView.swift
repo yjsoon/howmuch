@@ -159,30 +159,16 @@ struct AccountsView: View {
         AccountIdentityEditorSheet(account: account)
       }
     }
-    .confirmationDialog(
+    .binaryConfirm(
       "Delete \(groupPendingDeletion?.name ?? "this group")?",
-      isPresented: isConfirmingGroupDeletion,
-      titleVisibility: .visible,
-      presenting: groupPendingDeletion
+      presenting: $groupPendingDeletion,
+      confirm: .destructive("Delete Group"),
+      message: { _ in
+        Text("The accounts and their transactions will not be deleted.")
+      }
     ) { group in
-      Button("Delete Group", role: .destructive) {
-        model.deleteCustomAccountGroup(id: group.id)
-      }
-      Button("Cancel", role: .cancel) {}
-    } message: { _ in
-      Text("The accounts and their transactions will not be deleted.")
+      model.deleteCustomAccountGroup(id: group.id)
     }
-  }
-
-  private var isConfirmingGroupDeletion: Binding<Bool> {
-    Binding(
-      get: { groupPendingDeletion != nil },
-      set: { isPresented in
-        if !isPresented {
-          groupPendingDeletion = nil
-        }
-      }
-    )
   }
 
   private func accountGroupSection(_ group: AccountListGroup) -> some View {
@@ -431,27 +417,13 @@ struct AccountsView: View {
         }
       }
       .ynabCard()
-      .confirmationDialog(
+      .binaryConfirm(
         "Discard this offline transaction? It hasn’t reached the server.",
-        isPresented: isConfirmingDiscard,
-        titleVisibility: .visible,
-        presenting: pendingDiscard
+        presenting: $pendingDiscard,
+        confirm: .destructive("Discard Transaction")
       ) { item in
-        Button("Discard Transaction", role: .destructive) {
-          model.discardPending(item)
-        }
+        model.discardPending(item)
       }
-    }
-
-    private var isConfirmingDiscard: Binding<Bool> {
-      Binding(
-        get: { pendingDiscard != nil },
-        set: { isPresented in
-          if !isPresented {
-            pendingDiscard = nil
-          }
-        }
-      )
     }
 
     private var title: String {
@@ -921,18 +893,16 @@ private struct CustomAccountGroupEditor: View {
         .disabled(nameError != nil)
       }
     }
-    .confirmationDialog(
+    .binaryConfirm(
       "Delete \(group.name)?",
       isPresented: $isConfirmingDelete,
-      titleVisibility: .visible
-    ) {
-      Button("Delete Group", role: .destructive) {
-        model.deleteCustomAccountGroup(id: group.id)
-        dismiss()
+      confirm: .destructive("Delete Group"),
+      message: {
+        Text("The accounts and their transactions will not be deleted.")
       }
-      Button("Cancel", role: .cancel) {}
-    } message: {
-      Text("The accounts and their transactions will not be deleted.")
+    ) {
+      model.deleteCustomAccountGroup(id: group.id)
+      dismiss()
     }
   }
 

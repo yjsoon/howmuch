@@ -454,24 +454,32 @@ struct ScheduledTransactionEditorView: View {
             .disabled(!draft.canSave || model.isSubmitting)
         }
       }
-      .confirmationDialog("Delete this scheduled transaction?", isPresented: $isConfirmingDelete, titleVisibility: .visible) {
-        Button("Delete Scheduled Transaction", role: .destructive) {
-          deleteSchedule()
-        }
+      .binaryConfirm(
+        "Delete this scheduled transaction?",
+        isPresented: $isConfirmingDelete,
+        confirm: .destructive("Delete Scheduled Transaction")
+      ) {
+        deleteSchedule()
       }
-      .confirmationDialog("Remove split allocations?", isPresented: $isConfirmingSplitRemoval, titleVisibility: .visible) {
-        Button("Remove Split", role: .destructive) {
-          draft.disableSplit()
+      .binaryConfirm(
+        "Remove split allocations?",
+        isPresented: $isConfirmingSplitRemoval,
+        confirm: .destructive("Remove Split"),
+        message: {
+          Text("This keeps the current split total as a single scheduled transaction and removes all split-line details.")
         }
-      } message: {
-        Text("This keeps the current split total as a single scheduled transaction and removes all split-line details.")
+      ) {
+        draft.disableSplit()
       }
-      .confirmationDialog("Enter this scheduled transaction now?", isPresented: $isConfirmingEntry, titleVisibility: .visible) {
-        Button("Enter Now") {
-          enterNow()
+      .binaryConfirm(
+        "Enter this scheduled transaction now?",
+        isPresented: $isConfirmingEntry,
+        confirm: .proceed("Enter Now"),
+        message: {
+          Text("This creates the occurrence due \(LedgerDate.friendlyString(fromISO: scheduledOccurrenceDate ?? draft.dateNext.isoDateString)) in today's register and advances the schedule. This cannot be undone here.")
         }
-      } message: {
-        Text("This creates the occurrence due \(LedgerDate.friendlyString(fromISO: scheduledOccurrenceDate ?? draft.dateNext.isoDateString)) in today's register and advances the schedule. This cannot be undone here.")
+      ) {
+        enterNow()
       }
       .task {
         if draft.accountID.isEmpty {
