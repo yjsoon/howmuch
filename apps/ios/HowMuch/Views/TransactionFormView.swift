@@ -502,7 +502,7 @@ struct TransactionFormView: View {
 
   private var splitToggleRow: some View {
     HStack(spacing: 12) {
-      Image(systemName: draft.isSplit ? "square.split.2x1.fill" : "square.split.2x1")
+      Image(systemName: draft.isSplit ? "square.split.1x2.fill" : "square.split.1x2")
         .foregroundStyle(Theme.accent)
         .frame(width: 28)
       Toggle("Split transaction", isOn: Binding(
