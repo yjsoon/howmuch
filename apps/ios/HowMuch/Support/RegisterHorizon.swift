@@ -20,7 +20,6 @@ struct RegisterHorizon: Equatable, Sendable {
     guard hasMore, rowCount < maxFillRows else {
       return false
     }
-    // Keep fetching while every loaded date is still on or after the horizon start.
     return oldestLoadedDate.map { $0 >= startDate(today: today, calendar: calendar) } ?? true
   }
 }

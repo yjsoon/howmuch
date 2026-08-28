@@ -24,7 +24,6 @@ import { activeSchedulesForAccount, scheduledAmount, scheduleRecurrence, transfe
 import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
 
-/** True when the row (or any of its split lines) still needs a category. */
 function hasUncategorisedLine(txn: Transaction): boolean {
   if (txn.subtransactions?.length) {
     return txn.subtransactions.some((sub) => sub.category_id === null && !sub.transfer_account_id);
@@ -60,9 +59,6 @@ export function TransactionsPage() {
     [accounts, filters.accountIds],
   );
   const registerAccountIds = useMemo(() => new Set(visibleAccounts.map((account) => account.id)), [visibleAccounts]);
-  // “All Accounts” includes archived ledger rows, but its cash-on-hand
-  // headline remains an active-account balance rather than resurrecting
-  // balances from closed accounts.
   const balanceAccounts = useMemo(
     () => filters.accountIds.length ? visibleAccounts : visibleAccounts.filter((account) => !account.closed),
     [filters.accountIds.length, visibleAccounts],
@@ -166,11 +162,6 @@ export function TransactionsPage() {
     ? api.accountTransactions(planId, selectedAccountId, { ...pageQuery, offset })
     : api.transactions(planId, { ...pageQuery, offset });
 
-  /**
-   * Offset pagination is only stable while the ledger is unchanged. Invalidate
-   * all pending requests and start again after a write so no older row is
-   * skipped (or a transfer mirror is left stale) in the visible register.
-   */
   const refreshFirstPage = () => {
     requestVersionRef.current += 1;
     setPage({ transactions: [], hasMore: false, nextOffset: null, loading: true, filling: true, loadingMore: false, loaded: false, error: null });
@@ -512,8 +503,6 @@ export function TransactionsPage() {
   const mutationBusy = Boolean(mutatingId);
   const reconciliationBusy = mutationBusy;
   const reviewedStatementBalance = reconcileDraft ? parseMilliunits(reconcileDraft.statementBalance) : null;
-  // `useApi` intentionally keeps its previous response while a new key starts
-  // loading. Never allow that response to authorise a different draft.
   const reconciliationPreviewData = reconciliationPreview.data
     && reconcileDraft
     && reconciliationPreview.data.account.id === reconcileDraft.accountId

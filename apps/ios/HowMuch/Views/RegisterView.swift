@@ -535,7 +535,6 @@ struct RegisterView: View {
       if let accountIDs, !accountIDs.isEmpty, !accountIDs.contains(transaction.accountID) {
         return false
       }
-      // A split matches when any of its lines carries the category, as on the web.
       if let categoryID,
          transaction.categoryID != categoryID,
          !transaction.subtransactions.contains(where: { $0.categoryID == categoryID }) {
@@ -548,8 +547,6 @@ struct RegisterView: View {
     }
   }
 
-  /// True whenever the visible rows are a deliberate slice of the register —
-  /// a search, a filter banner, or a report drill-down.
   private var isNarrowed: Bool {
     !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       || unclearedOnly
@@ -560,8 +557,6 @@ struct RegisterView: View {
       || accountIDs?.isEmpty == false
   }
 
-  /// Money in / money out / net across the visible rows, as in the web
-  /// register header.
   private var totalsSummary: some View {
     let rows = visibleTransactions
     let inflow = rows.filter { $0.amount > 0 }.reduce(0) { $0 + $1.amount }
