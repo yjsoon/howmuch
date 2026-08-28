@@ -220,16 +220,14 @@ describe("D1 foundation", () => {
     expect(wranglerConfig.vars).toEqual({
       HOWMUCH_DEFAULT_PLAN_ID: "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
       HOWMUCH_TIME_ZONE: "Asia/Singapore",
-      HOWMUCH_YNAB_PLAN_ID: "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
       HOWMUCH_TRANSITION_READ_ONLY: "false",
     });
-    expect(wranglerConfig.triggers.crons).toEqual(["10 16 * * *"]);
+    expect(wranglerConfig.triggers.crons).toEqual(["5 16 * * *"]);
     expect(wranglerConfig.env.preview.routes).toEqual([]);
     expect(wranglerConfig.env.preview.triggers.crons).toEqual([]);
     expect(wranglerConfig.env.preview.vars).toEqual({
       HOWMUCH_DEFAULT_PLAN_ID: "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
       HOWMUCH_TIME_ZONE: "Asia/Singapore",
-      HOWMUCH_YNAB_PLAN_ID: "",
       HOWMUCH_TRANSITION_READ_ONLY: "false",
     });
     expect(workerSource).toContain("HOWMUCH_YNAB_TOKEN");

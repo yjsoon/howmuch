@@ -2452,6 +2452,44 @@ export class LedgerRepository {
     return { payeeId, payeeName, categoryId, categoryName };
   }
 
+  async findYnabImportTarget(
+    planId: string,
+    input: { id: string; account_id: string; date: string; amount: number; import_id?: string | null },
+  ): Promise<any | null> {
+    const byId = await this.getTransactionRow(planId, input.id, true);
+    if (byId) {
+      return this.formatTransaction(byId);
+    }
+
+    const byExternal = await this.db
+      .query("SELECT id FROM transactions WHERE plan_id = ? AND deleted = 0 AND external_ynab_id = ? LIMIT 2")
+      .all(planId, input.id) as Array<{ id: string }>;
+    if (byExternal.length === 1) {
+      return this.getTransaction(planId, byExternal[0].id);
+    }
+
+    if (input.import_id && input.account_id) {
+      const byImport = await this.findTransactionByImportId(planId, input.import_id, input.account_id);
+      if (byImport) {
+        return byImport;
+      }
+    }
+
+    const locals = await this.db
+      .query(
+        `SELECT id FROM transactions
+         WHERE plan_id = ? AND deleted = 0 AND account_id = ? AND date = ? AND amount_milli = ?
+           AND (source_kind IS NULL OR source_kind <> 'ynab-import')
+         ORDER BY created_at, id
+         LIMIT 2`,
+      )
+      .all(planId, input.account_id, input.date, input.amount) as Array<{ id: string }>;
+    if (locals.length === 1) {
+      return this.getTransaction(planId, locals[0].id);
+    }
+    return null;
+  }
+
   async findDuplicateTransaction(planId: string, input: TransactionInput): Promise<any | null> {
     if (input.import_id && input.account_id) {
       const importMatch = await this.findTransactionByImportId(planId, input.import_id, input.account_id);

@@ -178,9 +178,18 @@ export async function importYnabFromApi(
       const transactionSubtransactions = fetchedSubtransactions.filter((sub: any) => sub.transaction_id === transaction.id);
       const resolvedSubtransactions = transactionSubtransactions.length ? transactionSubtransactions : transaction.subtransactions ?? [];
       for (const sub of resolvedSubtransactions) await record("subtransaction", compositeId(String(transaction.id), String(sub.id)), sub, transactions.data.server_knowledge ?? serverKnowledge);
-      // YNAB data already contains both sides of every transfer.
+      // YNAB data already contains both sides of every transfer. A HowMuch-local
+      // capture of the same account/date/amount must be adopted, not copied.
+      const existing = await repo.findYnabImportTarget(options.planId, {
+        id: String(transaction.id),
+        account_id: transaction.account_id,
+        date: transaction.date,
+        amount: transaction.amount,
+        import_id: transaction.import_id,
+      });
+      const adoptLocal = existing != null && existing.id !== transaction.id;
       await repo.createTransaction(options.planId, {
-        id: transaction.id,
+        id: existing?.id ?? transaction.id,
         account_id: transaction.account_id,
         date: transaction.date,
         amount: transaction.amount,
@@ -197,8 +206,8 @@ export async function importYnabFromApi(
         approved: transaction.approved,
         flag_color: transaction.flag_color,
         flag_name: transaction.flag_name,
-        transfer_account_id: transaction.transfer_account_id,
-        transfer_transaction_id: transaction.transfer_transaction_id,
+        transfer_account_id: adoptLocal ? existing.transfer_account_id : transaction.transfer_account_id,
+        transfer_transaction_id: adoptLocal ? existing.transfer_transaction_id : transaction.transfer_transaction_id,
         matched_transaction_id: transaction.matched_transaction_id,
         import_id: transaction.import_id,
         import_payee_name: transaction.import_payee_name,
@@ -206,7 +215,7 @@ export async function importYnabFromApi(
         external_ynab_id: transaction.id,
         source_kind: "ynab-import",
         source_ref: sessionId,
-        subtransactions: resolvedSubtransactions.map((sub: any) => ({
+        subtransactions: adoptLocal ? undefined : resolvedSubtransactions.map((sub: any) => ({
           id: sub.id,
           amount: sub.amount,
           payee_id: sub.payee_id,
@@ -218,7 +227,7 @@ export async function importYnabFromApi(
           external_ynab_id: sub.id,
         })),
       }, { autoLink: false });
-      await repo.recordImportRow(sessionId, imported, "imported", transaction, undefined, transaction.id);
+      await repo.recordImportRow(sessionId, imported, "imported", transaction, undefined, existing?.id ?? transaction.id);
       imported += 1;
       await options.progress?.();
     }

@@ -199,6 +199,89 @@ describe("YNAB similarity guard", () => {
     ]);
   });
 
+  test("adopts a HowMuch-local row instead of inserting a second copy", async () => {
+    await repo.ensureAccount("plan-test", "acct-1", "Checking");
+    const local = await repo.createTransaction("plan-test", {
+      account_id: "acct-1",
+      date: "2026-06-01",
+      amount: -94960,
+      payee_name: "Genki Sushi",
+      cleared: "uncleared",
+      approved: false,
+    });
+
+    stubYnabApi([
+      ynabTransaction("ynab-genki", {
+        account_id: "acct-1",
+        amount: -94960,
+        payee_name: "Genki Sushi",
+        approved: false,
+        cleared: "uncleared",
+      }),
+    ]);
+
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test" });
+
+    const rows = db
+      .query("SELECT id, external_ynab_id, source_kind, deleted FROM transactions WHERE plan_id='plan-test' AND deleted=0 ORDER BY id")
+      .all() as Array<{ id: string; external_ynab_id: string | null; source_kind: string | null; deleted: number }>;
+    expect(rows).toEqual([
+      { id: local.id, external_ynab_id: "ynab-genki", source_kind: "ynab-import", deleted: 0 },
+    ]);
+  });
+
+  test("adopts a local transfer when YNAB uses a different payee name", async () => {
+    await repo.ensureAccount("plan-test", "acct-1", "Checking");
+    await repo.ensureAccount("plan-test", "acct-2", "Work Refundables");
+    const workPayee = db
+      .query("SELECT id FROM payees WHERE plan_id='plan-test' AND transfer_account_id='acct-2' AND deleted=0")
+      .get() as { id: string };
+    const local = await repo.createTransaction("plan-test", {
+      account_id: "acct-1",
+      date: "2026-06-01",
+      amount: -36000,
+      payee_id: workPayee.id,
+      cleared: "uncleared",
+      approved: false,
+    });
+
+    stubYnabApi([
+      ynabTransaction("ynab-out", {
+        account_id: "acct-1",
+        amount: -36000,
+        payee_name: "Transfer : Work Refundables",
+        transfer_account_id: "acct-2",
+        transfer_transaction_id: "ynab-in",
+        approved: false,
+        cleared: "uncleared",
+      }),
+      ynabTransaction("ynab-in", {
+        account_id: "acct-2",
+        amount: 36000,
+        payee_name: "Transfer : Checking",
+        transfer_account_id: "acct-1",
+        transfer_transaction_id: "ynab-out",
+        approved: false,
+        cleared: "uncleared",
+      }),
+    ], {
+      accounts: [
+        { id: "acct-1", name: "Checking", type: "checking", on_budget: true },
+        { id: "acct-2", name: "Work Refundables", type: "checking", on_budget: true },
+      ],
+    });
+
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test" });
+
+    const rows = db
+      .query("SELECT id, account_id, amount_milli, external_ynab_id FROM transactions WHERE plan_id='plan-test' AND deleted=0 ORDER BY amount_milli")
+      .all() as Array<{ id: string; account_id: string; amount_milli: number; external_ynab_id: string | null }>;
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.id).sort()).toEqual([local.id, local.transfer_transaction_id].sort());
+    expect(rows.find((row) => row.account_id === "acct-1")?.external_ynab_id).toBe("ynab-out");
+    expect(rows.find((row) => row.account_id === "acct-2")?.external_ynab_id).toBe("ynab-in");
+  });
+
   test("first sync into an empty ledger is never blocked", async () => {
     stubYnabApi([ynabTransaction("txn-1"), ynabTransaction("txn-2")]);
 
