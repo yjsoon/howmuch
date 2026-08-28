@@ -159,7 +159,7 @@ struct AccountIconPicker: View {
   ) -> some View {
     Text(parameters.category.labelText)
       .font(.headline)
-      .foregroundStyle(Theme.textPrimary)
+      .foregroundStyle(.secondary)
       .frame(maxWidth: .infinity, alignment: .leading)
   }
 
