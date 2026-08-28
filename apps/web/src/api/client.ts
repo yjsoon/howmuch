@@ -34,6 +34,19 @@ export class ApiError extends Error {
   }
 }
 
+export const TRANSACTION_WRITE_BATCH = 100;
+
+export class BulkApprovalError extends Error {
+  constructor(
+    message: string,
+    readonly approvedCount: number,
+    cause?: unknown,
+  ) {
+    super(message, { cause });
+    this.name = "BulkApprovalError";
+  }
+}
+
 let onUnauthorized: (() => void) | null = null;
 let requestEpoch = 0;
 
@@ -143,6 +156,21 @@ export interface TransactionPage {
   has_more: boolean;
   next_offset: number | null;
   server_knowledge: number;
+}
+
+async function approveTransactionBatch(planId: string, transactionIds: readonly string[]): Promise<void> {
+  if (transactionIds.length === 0) {
+    throw new Error("Transaction approval batch must not be empty.");
+  }
+  if (transactionIds.length > TRANSACTION_WRITE_BATCH) {
+    throw new Error(`Transaction approval batch cannot exceed ${TRANSACTION_WRITE_BATCH} items.`);
+  }
+  await request<unknown>(planUrl(planId, "transactions"), {
+    method: "PATCH",
+    body: JSON.stringify({
+      transactions: transactionIds.map((id) => ({ id, approved: true })),
+    }),
+  });
 }
 
 export const api = {
@@ -266,6 +294,23 @@ export const api = {
       planUrl(planId, "transactions", transactionId),
       { method: "PATCH", body: JSON.stringify({ transaction }) },
     ).then((data) => data.transaction),
+  approveTransactions: async (planId: string, transactionIds: readonly string[]) => {
+    if (transactionIds.length === 0) {
+      throw new Error("Transactions to approve must not be empty.");
+    }
+    let approvedCount = 0;
+    for (let offset = 0; offset < transactionIds.length; offset += TRANSACTION_WRITE_BATCH) {
+      const chunk = transactionIds.slice(offset, offset + TRANSACTION_WRITE_BATCH);
+      try {
+        await approveTransactionBatch(planId, chunk);
+        approvedCount += chunk.length;
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        throw new BulkApprovalError(message, approvedCount, cause);
+      }
+    }
+    return { approvedCount };
+  },
   updateTransactionCleared: (
     planId: string,
     transactionId: string,

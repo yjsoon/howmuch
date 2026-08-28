@@ -1066,6 +1066,21 @@ textarea {
   min-width: min(360px, 38vw);
 }
 
+.register-bulk-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.register-bulk-count {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .register-load-more {
   display: flex;
   justify-content: center;
@@ -1095,6 +1110,24 @@ textarea {
 
 .register-actions {
   padding-inline: 6px !important;
+}
+
+.register-select-heading,
+.register-select {
+  width: 1%;
+  padding-inline: 7px !important;
+  text-align: center !important;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.register-select-heading input,
+.register-select input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--plan-accent);
+  vertical-align: middle;
 }
 
 .register-row-unapproved {
@@ -2240,6 +2273,11 @@ tr:hover .share-bar {
 .approval-pill-active {
   background: var(--plan-accent);
   color: var(--paper);
+}
+
+.approval-pill:disabled {
+  cursor: progress;
+  opacity: 0.55;
 }
 
 .search-input {
@@ -3815,8 +3853,8 @@ tr:hover .share-bar {
     display: none;
   }
 
-  .register-table th:nth-child(5),
-  .register-table td:nth-child(5) {
+  .register-table th:nth-child(6),
+  .register-table td:nth-child(6) {
     display: none;
   }
 
