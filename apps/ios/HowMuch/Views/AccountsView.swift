@@ -386,7 +386,6 @@ struct AccountsView: View {
     )
   }
 
-  /// Creates waiting to reach the server, with retry and discard.
   private struct OutboxCard: View {
     @Environment(AppModel.self) private var model
     @State private var pendingDiscard: PendingRow?

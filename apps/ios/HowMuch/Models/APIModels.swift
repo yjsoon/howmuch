@@ -1703,10 +1703,6 @@ struct TransactionWriteRequest: Codable, Equatable {
   }
 }
 
-/// A create that has not reached the server, waiting to be replayed.
-/// Kept as the exact write request so the sync sends what the user saved,
-/// stamped with the connection it was captured against so a later change of
-/// server or plan cannot replay it somewhere it does not belong.
 struct PendingTransaction: Codable, Equatable, Identifiable {
   let id: UUID
   let request: TransactionWriteRequest
@@ -1727,8 +1723,6 @@ struct PendingTransaction: Codable, Equatable, Identifiable {
   }
 }
 
-/// Persists the pending-create queue like the connection settings, so
-/// captures survive relaunches until they reach the server.
 enum OutboxStore {
   static let userDefaultsKey = "HowMuch.Outbox"
 
@@ -1759,7 +1753,6 @@ struct SaveMessage: Equatable, Identifiable {
   let kind: Kind
 }
 
-/// Why a draft cannot be committed. Local and immediate: the sheet stays up.
 enum CommitRejection: LocalizedError, Equatable {
   case incomplete
   case invalidSplit(String)
@@ -1786,8 +1779,6 @@ enum CommitRejection: LocalizedError, Equatable {
   }
 }
 
-/// One create the server has not acknowledged. Not a `Transaction`: it has
-/// no server id, so delete, approve, and swipe have nothing to attach to.
 struct PendingRow: Identifiable, Equatable {
   enum Status: Equatable {
     case sending
@@ -1841,8 +1832,6 @@ struct PendingRow: Identifiable, Equatable {
   }
 }
 
-/// Parent-level edit applied to a server row before the write lands.
-/// In memory only, so it cannot be replayed after the process dies.
 struct PendingEdit: Equatable {
   let transactionID: String
   let isoDate: String

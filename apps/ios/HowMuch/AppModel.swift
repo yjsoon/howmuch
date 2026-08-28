@@ -35,10 +35,8 @@ final class AppModel {
   var accounts: [Account] = []
   var categoryGroups: [CategoryGroup] = []
   var payees: [Payee] = []
-  /// Server truth. Read through `transactions`, which merges pending edits.
-  private(set) var serverTransactions: [Transaction] = []
-  /// Server review queue. Read through `unapprovedTransactions`.
-  private(set) var serverUnapprovedTransactions: [Transaction] = []
+  private var serverTransactions: [Transaction] = []
+  private var serverUnapprovedTransactions: [Transaction] = []
   /// Imported YNAB schedules remain an immutable source mirror; local edits
   /// and entered occurrences are reflected through HowMuch overlays.
   var scheduledTransactions: [ScheduledTransaction] = []
@@ -75,7 +73,6 @@ final class AppModel {
   /// Account registers currently on a navigation stack, deepest last.
   /// Capture prefers the visible register over the last account a save used.
   private(set) var focusedRegisterAccountIDs: [String] = []
-  /// Creates waiting to reach the server, oldest first.
   private var pendingTransactions: [PendingTransaction] = OutboxStore.load()
   /// True while a replay pass is running, whoever started it — the outbox
   /// card drives its spinner from this rather than view-local state.
@@ -1570,13 +1567,8 @@ final class AppModel {
 
   private func removePending(_ id: UUID) {
     let next = pendingTransactions.filter { $0.id != id }
-    do {
-      try OutboxStore.save(next)
-      pendingTransactions = next
-    } catch {
-      // Keep memory. A kill may replay; importID collapses a duplicate POST.
-      pendingTransactions = next
-    }
+    pendingTransactions = next
+    try? OutboxStore.save(next)
   }
 
   private func markSyncError(_ message: String, for id: UUID) {
