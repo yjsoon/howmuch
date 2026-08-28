@@ -394,7 +394,7 @@ struct RegisterView: View {
 
   @ViewBuilder
   private var emptyRegisterSection: some View {
-    if visibleTransactions.isEmpty, scopedPendingRows.isEmpty, model.ledgerPhase == .loaded {
+    if visibleTransactions.isEmpty, visiblePendingRows.isEmpty, model.ledgerPhase == .loaded {
       Section {
         Group {
           if searchText.isEmpty {

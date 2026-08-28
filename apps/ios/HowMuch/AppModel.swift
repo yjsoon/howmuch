@@ -1292,13 +1292,15 @@ final class AppModel {
     saveViewPrefs()
     if let transactionID = draft.id {
       applyPendingEdit(draft, transactionID: transactionID)
-    } else {
-      try enqueueCreate(draft)
+      return
     }
+    try enqueueCreate(draft)
+    showSaveMessage(savedMessage(for: draft))
+  }
+
+  private func savedMessage(for draft: TransactionDraft) -> String {
     let payee = draft.payeeName.trimmingCharacters(in: .whitespacesAndNewlines)
-    showSaveMessage(
-      "Saved \(MoneyCodec.displayString(for: draft.signedMilliunits, currencyFormat: currencyFormat)) — \(payee.isEmpty ? "transaction" : payee)"
-    )
+    return "Saved \(MoneyCodec.displayString(for: draft.signedMilliunits, currencyFormat: currencyFormat)) — \(payee.isEmpty ? "transaction" : payee)"
   }
 
   func retryPending(_ id: PendingRow.ID) {
@@ -1309,6 +1311,10 @@ final class AppModel {
   }
 
   func discardPending(_ id: PendingRow.ID) {
+    guard !inFlightCreates.contains(id) else {
+      showSaveMessage("This transaction is still sending. Wait for it to finish.", kind: .failure)
+      return
+    }
     let next = pendingTransactions.filter { $0.id != id }
     do {
       try OutboxStore.save(next)
@@ -1387,6 +1393,7 @@ final class AppModel {
       }
       pendingEdits[transactionID] = nil
       editTasks[transactionID] = nil
+      showSaveMessage(savedMessage(for: draft))
       Task { await refreshLedgerAndInvalidatePlan() }
     } catch {
       guard isCurrentEdit(transactionID, generation: generation, destination: destination) else {
@@ -1528,7 +1535,7 @@ final class AppModel {
       }
       if let pending = coalescedDrainTrigger {
         coalescedDrainTrigger = nil
-        effectiveTrigger = mergeDrainTrigger(effectiveTrigger, pending)
+        effectiveTrigger = mergeDrainTrigger(effectiveTrigger, with: pending)
       }
     } while needsAnotherDrain
 

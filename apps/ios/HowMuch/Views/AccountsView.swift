@@ -494,16 +494,18 @@ struct AccountsView: View {
           .buttonStyle(.plain)
           .accessibilityLabel("Retry \(row.payeeName ?? "transaction")")
         }
-        Button {
-          pendingDiscard = row
-        } label: {
-          Image(systemName: "trash")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .frame(width: 44, height: 44)
+        if row.status != .sending {
+          Button {
+            pendingDiscard = row
+          } label: {
+            Image(systemName: "trash")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+              .frame(width: 44, height: 44)
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("Discard \(row.payeeName ?? "pending transaction")")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Discard \(row.payeeName ?? "pending transaction")")
       }
       .padding(.horizontal, 16)
       .padding(.vertical, 6)
