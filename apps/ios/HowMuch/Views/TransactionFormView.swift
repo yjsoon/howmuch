@@ -181,9 +181,7 @@ struct TransactionFormView: View {
           VStack(spacing: 14) {
             amountHeader
             detailCard
-            if draft.isSplit {
-              splitCard
-            }
+            splitCard
             extrasCard
 
             if isEditing && allowsDeletion {
@@ -279,7 +277,9 @@ struct TransactionFormView: View {
       }
       .confirmationDialog("Remove split allocations?", isPresented: $isConfirmingSplitRemoval, titleVisibility: .visible) {
         Button("Remove Split", role: .destructive) {
-          draft.disableSplit()
+          withAnimation(.snappy) {
+            draft.disableSplit()
+          }
         }
       } message: {
         Text("The split lines will be replaced with their total. Their payees, categories and memos will be removed.")
@@ -442,15 +442,6 @@ struct TransactionFormView: View {
         CardDivider()
       }
 
-      Toggle("Split transaction", isOn: Binding(
-        get: { draft.isSplit },
-        set: setSplit
-      ))
-      .tint(Theme.accent)
-      .padding(.horizontal, 16)
-      .padding(.vertical, 10)
-      CardDivider()
-
       NavigationLink {
         AccountPickerView(
           selectedAccountID: draft.accountID,
@@ -499,6 +490,34 @@ struct TransactionFormView: View {
   }
 
   private var splitCard: some View {
+    VStack(spacing: 0) {
+      splitToggleRow
+      if draft.isSplit {
+        CardDivider()
+        splitAllocations
+      }
+    }
+    .ynabCard()
+  }
+
+  private var splitToggleRow: some View {
+    HStack(spacing: 12) {
+      Image(systemName: draft.isSplit ? "square.split.2x1.fill" : "square.split.2x1")
+        .foregroundStyle(Theme.accent)
+        .frame(width: 28)
+      Toggle("Split transaction", isOn: Binding(
+        get: { draft.isSplit },
+        set: setSplit
+      ))
+      .tint(Theme.accent)
+      .foregroundStyle(Theme.textPrimary)
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 13)
+    .accessibilityElement(children: .combine)
+  }
+
+  private var splitAllocations: some View {
     VStack(spacing: 0) {
       ForEach(draft.subtransactions.indices, id: \.self) { index in
         NavigationLink {
@@ -565,7 +584,6 @@ struct TransactionFormView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
     }
-    .ynabCard()
   }
 
   private func splitLineTitle(_ line: TransactionSubtransactionDraft) -> String {
@@ -588,7 +606,9 @@ struct TransactionFormView: View {
 
   private func setSplit(_ shouldSplit: Bool) {
     if shouldSplit {
-      draft.enableSplit()
+      withAnimation(.snappy) {
+        draft.enableSplit()
+      }
     } else if draft.isSplit {
       isConfirmingSplitRemoval = true
     }
