@@ -36,6 +36,7 @@ export async function fillRegisterHorizon<T extends { id: string; date: string }
   today: string;
   fetchPage: (offset: number) => Promise<RegisterHorizonPage<T>>;
   isCurrent: () => boolean;
+  onProgress?: (update: RegisterHorizonFill<T> & { done: boolean }) => void;
 }): Promise<RegisterHorizonFill<T> | null> {
   const loaded: T[] = [];
   const seen = new Set<string>();
@@ -72,16 +73,18 @@ export async function fillRegisterHorizon<T extends { id: string; date: string }
       (oldest, transaction) => (oldest === null || transaction.date < oldest ? transaction.date : oldest),
       null,
     );
-    if (
+    const fill = { transactions: loaded.slice(), hasMore, nextOffset };
+    const done =
       nextOffset === null
       || !shouldFetchMoreForHorizon({
         oldestLoadedDate,
         hasMore,
         rowCount: loaded.length,
         today: options.today,
-      })
-    ) {
-      return { transactions: loaded, hasMore, nextOffset };
+      });
+    options.onProgress?.({ ...fill, done });
+    if (done) {
+      return fill;
     }
 
     offset = nextOffset;

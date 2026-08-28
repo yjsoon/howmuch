@@ -190,6 +190,25 @@ describe("fillRegisterHorizon", () => {
     expect(filled?.nextOffset).toBe(100);
   });
 
+  test("reports each committed page so the register can paint before the fill ends", async () => {
+    const progress: Array<{ ids: string[]; done: boolean }> = [];
+    await fillRegisterHorizon({
+      today: TODAY,
+      isCurrent: () => true,
+      onProgress: (update) => {
+        progress.push({ ids: update.transactions.map((transaction) => transaction.id), done: update.done });
+      },
+      fetchPage: async (offset) => {
+        if (offset === 0) return page([row("a", "2026-08-20")], true, 100);
+        return page([row("b", "2026-05-01")], true, 200);
+      },
+    });
+    expect(progress).toEqual([
+      { ids: ["a"], done: false },
+      { ids: ["a", "b"], done: true },
+    ]);
+  });
+
   test("throws when page 0 fails", async () => {
     await expect(fillRegisterHorizon({
       today: TODAY,

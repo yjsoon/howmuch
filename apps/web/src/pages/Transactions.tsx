@@ -178,6 +178,18 @@ export function TransactionsPage() {
       today: todayIso(),
       fetchPage: fetchTransactionPage,
       isCurrent: () => !cancelled && requestVersion === requestVersionRef.current,
+      onProgress: (update) => {
+        setPage({
+          transactions: update.transactions,
+          hasMore: update.hasMore,
+          nextOffset: update.nextOffset,
+          loading: false,
+          filling: !update.done,
+          loadingMore: false,
+          loaded: true,
+          error: null,
+        });
+      },
     })
       .then((filled) => {
         if (!filled) {
