@@ -46,6 +46,10 @@ enum Theme {
     dark: Color(red: 0.420, green: 0.780, blue: 0.549)
   )
 
+  /// System red for destructive swipe and cancellation actions.
+  /// The app-wide accent would otherwise recast `role: .destructive` as blurple.
+  static let cancellation = Color.red
+
   /// Lime header behind the amount when entering an inflow.
   static let lime = Color(
     light: Color(red: 0.847, green: 0.949, blue: 0.490),

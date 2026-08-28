@@ -338,6 +338,7 @@ struct RegisterView: View {
       } label: {
         Label("Delete", systemImage: "trash")
       }
+      .tint(Theme.cancellation)
       .disabled(model.isSubmitting)
     }
     .contextMenu {
