@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { api, shouldHandleUnauthorized } from "./client";
+import { api, BulkApprovalError, shouldHandleUnauthorized } from "./client";
 
 describe("shouldHandleUnauthorized", () => {
   test("ignores auth-route failures and stale epochs after a new session starts", () => {
@@ -110,5 +110,77 @@ describe("shouldHandleUnauthorized", () => {
       account_preferences: preferences,
       expected_revision: 1,
     });
+  });
+});
+
+describe("approveTransactions", () => {
+  test("sends 101 ids as sequential batches of 100 and 1", async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    const mockFetch: typeof fetch = async (path, init) => {
+      requests.push({ path: String(path), init });
+      return new Response(JSON.stringify({ data: { transaction_ids: [] } }), {
+        headers: { "content-type": "application/json" },
+      });
+    };
+    globalThis.fetch = mockFetch;
+    try {
+      const ids = Array.from({ length: 101 }, (_, index) => `txn-${index}`);
+      expect(await api.approveTransactions("plan-1", ids)).toEqual({ approvedCount: 101 });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(requests.map((entry) => entry.path)).toEqual([
+      "/v1/plans/plan-1/transactions",
+      "/v1/plans/plan-1/transactions",
+    ]);
+    expect(requests.map((entry) => entry.init?.method)).toEqual(["PATCH", "PATCH"]);
+    const firstBody = JSON.parse(String(requests[0]?.init?.body));
+    const secondBody = JSON.parse(String(requests[1]?.init?.body));
+    expect(firstBody.transactions).toHaveLength(100);
+    expect(firstBody.transactions[0]).toEqual({ id: "txn-0", approved: true });
+    expect(firstBody.transactions[99]).toEqual({ id: "txn-99", approved: true });
+    expect(secondBody).toEqual({ transactions: [{ id: "txn-100", approved: true }] });
+  });
+
+  test("reports completed ids when a later batch fails", async () => {
+    const originalFetch = globalThis.fetch;
+    let requestCount = 0;
+    const mockFetch: typeof fetch = async () => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        return new Response(JSON.stringify({ data: { transaction_ids: [] } }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ error: { detail: "write failed" } }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    globalThis.fetch = mockFetch;
+    let caught: unknown;
+    try {
+      await api.approveTransactions(
+        "plan-1",
+        Array.from({ length: 101 }, (_, index) => `txn-${index}`),
+      );
+    } catch (cause) {
+      caught = cause;
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(requestCount).toBe(2);
+    expect(caught).toBeInstanceOf(BulkApprovalError);
+    if (!(caught instanceof BulkApprovalError)) {
+      throw new Error("Expected BulkApprovalError.");
+    }
+    expect(caught.approvedCount).toBe(100);
+  });
+
+  test("rejects an empty approval", async () => {
+    await expect(api.approveTransactions("plan-1", [])).rejects.toThrow("must not be empty");
   });
 });

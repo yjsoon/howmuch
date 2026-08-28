@@ -1,6 +1,6 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useSearchParams } from "react-router-dom";
-import { ApiError, api, useApi } from "../api/client";
+import { ApiError, api, BulkApprovalError, useApi } from "../api/client";
 import type {
   Account,
   AccountReconciliationPreview,
@@ -19,7 +19,22 @@ import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categorie
 import { formatDate, todayIso, trailingMonthsRange } from "../lib/dates";
 import { stableHash } from "../lib/hash";
 import { formatAmount, formatMilliunitsInput, formatMoney, parseMilliunits } from "../lib/money";
+import {
+  approveAllLabel,
+  approveSelectedLabel,
+  approvedToast,
+  eligibleApprovalIds,
+  interruptedToast,
+  planApproval,
+} from "../lib/register-approval";
 import { fillRegisterHorizon } from "../lib/register-horizon";
+import {
+  emptySelection,
+  headerState,
+  reduceSelection,
+  selectedIds,
+  type RegisterSelectionIntent,
+} from "../lib/register-selection";
 import { activeSchedulesForAccount, scheduledAmount, scheduleRecurrence, transferScheduleLabel } from "../lib/schedules";
 import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
@@ -110,6 +125,7 @@ export function TransactionsPage() {
   const [mutationSuccess, setMutationSuccess] = useState<string | null>(null);
   const [mutatingId, setMutatingId] = useState<string | null>(null);
   const [unapprovedOnly, setUnapprovedOnly] = useState(false);
+  const [selection, setSelection] = useState(() => emptySelection(listKey));
   const mutationLockRef = useRef(false);
   const selectedAccountId = filters.accountIds.length === 1 ? filters.accountIds[0]! : null;
   const schedules = useApi<ScheduledTransaction[]>(
@@ -310,27 +326,6 @@ export function TransactionsPage() {
     }
   };
 
-  const approveTransaction = async (transaction: Transaction) => {
-    if (mutationLockRef.current) return;
-    mutationLockRef.current = true;
-    requestVersionRef.current += 1;
-    setMutatingId(transaction.id);
-    setMutationError(null);
-    setMutationSuccess(null);
-    try {
-      await api.updateTransaction(planId, transaction.id, { approved: true });
-      reload();
-      refreshFirstPage();
-      setMutationSuccess("Transaction approved.");
-    } catch (cause) {
-      setMutationError(cause instanceof Error ? cause.message : String(cause));
-      refreshFirstPage();
-    } finally {
-      mutationLockRef.current = false;
-      setMutatingId(null);
-    }
-  };
-
   const openReconcile = () => {
     setReconcileDraft({
       accountId: selectedAccount?.id ?? "",
@@ -491,6 +486,53 @@ export function TransactionsPage() {
     );
   }, [deferredSearch, scopedRows]);
 
+  const eligibleIds = useMemo(() => eligibleApprovalIds(rows), [rows]);
+  const selectionRows = useMemo(() => eligibleIds.map((id) => ({ id })), [eligibleIds]);
+  const dispatchSelection = (intent: RegisterSelectionIntent) => {
+    setSelection((current) => reduceSelection(current, selectionRows, intent, listKey));
+  };
+  const selectedApprovalIds = useMemo(
+    () => selectedIds(selection, selectionRows, listKey),
+    [listKey, selection, selectionRows],
+  );
+  const selectedApprovalIdSet = useMemo(() => new Set(selectedApprovalIds), [selectedApprovalIds]);
+  const selectionHeader = useMemo(
+    () => headerState(selection, selectionRows, listKey),
+    [listKey, selection, selectionRows],
+  );
+
+  const approveMany = async (transactionIds: readonly string[], bulk = false) => {
+    const plan = planApproval(transactionIds, rows);
+    if (mutationLockRef.current || !plan) return;
+    const plannedIds = plan.flat();
+    mutationLockRef.current = true;
+    requestVersionRef.current += 1;
+    setMutatingId(bulk ? "bulk-approve" : (plannedIds[0] ?? "bulk-approve"));
+    setMutationError(null);
+    setMutationSuccess(null);
+    try {
+      const result = await api.approveTransactions(planId, plannedIds);
+      reload();
+      refreshFirstPage();
+      dispatchSelection({ kind: "none" });
+      setMutationSuccess(approvedToast(result.approvedCount));
+    } catch (cause) {
+      reload();
+      refreshFirstPage();
+      if (cause instanceof BulkApprovalError && cause.approvedCount > 0) {
+        setMutationError(interruptedToast(
+          cause.approvedCount,
+          Math.max(0, plannedIds.length - cause.approvedCount),
+        ));
+      } else {
+        setMutationError(cause instanceof Error ? cause.message : String(cause));
+      }
+    } finally {
+      mutationLockRef.current = false;
+      setMutatingId(null);
+    }
+  };
+
   const totals = useMemo(
     () =>
       rows.reduce(
@@ -586,6 +628,16 @@ export function TransactionsPage() {
               {unapprovedOnly ? "Showing new transactions · clear" : `${unapprovedCount} new to approve`}
             </button>
           )}
+          {unapprovedOnly && eligibleIds.length > 0 && (
+            <button
+              type="button"
+              className="approval-pill"
+              onClick={() => void approveMany(eligibleIds, true)}
+              disabled={mutationBusy}
+            >
+              {mutatingId === "bulk-approve" ? "Approving…" : approveAllLabel(eligibleIds.length)}
+            </button>
+          )}
           {uncategorisedCount > 0 && !wantsUncategorised && (
             <button
               type="button"
@@ -620,6 +672,29 @@ export function TransactionsPage() {
         </div>
       </div>
 
+      {selectedApprovalIds.length > 0 && (
+        <div className="register-bulk-bar" role="group" aria-label="Selected transaction actions">
+          <span className="register-bulk-count">{selectedApprovalIds.length} selected</span>
+          <button
+            type="button"
+            className="approval-pill"
+            onClick={() => void approveMany(selectedApprovalIds, true)}
+            disabled={mutationBusy}
+          >
+            {mutatingId === "bulk-approve"
+              ? "Approving…"
+              : approveSelectedLabel(selectedApprovalIds.length)}
+          </button>
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => dispatchSelection({ kind: "none" })}
+            disabled={mutationBusy}
+          >
+            Clear
+          </button>
+        </div>
+      )}
       {page.error && (
         <div className="status-panel status-panel-error">
           <p className="status-title">Could not load {page.loaded ? "older " : ""}transactions.</p>
@@ -850,6 +925,20 @@ export function TransactionsPage() {
               <table className="ledger-table register-table">
                 <thead>
                   <tr>
+                    <th className="register-select-heading">
+                      <input
+                        type="checkbox"
+                        ref={(node) => {
+                          if (node) node.indeterminate = selectionHeader === "some";
+                        }}
+                        checked={selectionHeader === "all"}
+                        onChange={() => dispatchSelection({
+                          kind: selectionHeader === "all" ? "none" : "all",
+                        })}
+                        disabled={mutationBusy || eligibleIds.length === 0}
+                        aria-label="Select all visible unapproved transactions"
+                      />
+                    </th>
                     <th>Date</th>
                     <th>Account</th>
                     <th>Payee</th>
@@ -875,6 +964,26 @@ export function TransactionsPage() {
                   )}
                   {rows.flatMap((txn) => [
                     <tr key={txn.id} className={txn.approved ? undefined : "register-row-unapproved"}>
+                      <td className="register-select">
+                        {!txn.approved && !txn.deleted && (
+                          <input
+                            type="checkbox"
+                            checked={selectedApprovalIdSet.has(txn.id)}
+                            onClick={(event) => {
+                              const index = eligibleIds.indexOf(txn.id);
+                              if (index >= 0) {
+                                dispatchSelection({
+                                  kind: event.shiftKey ? "extend" : "toggle",
+                                  index,
+                                });
+                              }
+                            }}
+                            onChange={() => {}}
+                            disabled={mutationBusy}
+                            aria-label={`Select ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
+                          />
+                        )}
+                      </td>
                       <td className="nowrap">{formatDate(txn.date)}</td>
                       <td className="muted">{txn.account_name}</td>
                       <td>
@@ -898,8 +1007,8 @@ export function TransactionsPage() {
                           <button
                             type="button"
                             className="register-row-action register-row-action-approve"
-                            onClick={() => void approveTransaction(txn)}
-                            disabled={mutatingId === txn.id}
+                            onClick={() => void approveMany([txn.id])}
+                            disabled={mutationBusy}
                             aria-label={`Approve ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
                           >
                             {mutatingId === txn.id ? "Approving…" : "Approve"}
@@ -940,6 +1049,7 @@ export function TransactionsPage() {
                     </tr>,
                     ...(txn.subtransactions ?? []).map((sub) => (
                       <tr key={sub.id} className="split-line-row">
+                        <td />
                         <td />
                         <td />
                         <td className="muted split-line-cell">↳ {sub.payee_name ?? txn.payee_name ?? "-"}</td>
@@ -1012,7 +1122,7 @@ function AccountScheduledRows({
   return (
     <>
       <tr className="register-scheduled-disclosure-row">
-        <td colSpan={9}>
+        <td colSpan={10}>
           <button
             type="button"
             className="register-scheduled-disclosure"
@@ -1029,13 +1139,13 @@ function AccountScheduledRows({
         </td>
       </tr>
       {expanded && loading && schedules.length === 0 && (
-        <tr className="register-scheduled-message"><td colSpan={9}><span role="status">Loading scheduled transactions…</span></td></tr>
+        <tr className="register-scheduled-message"><td colSpan={10}><span role="status">Loading scheduled transactions…</span></td></tr>
       )}
       {expanded && error && (
-        <tr className="register-scheduled-message"><td colSpan={9}><span role="alert">Could not load scheduled transactions: {error}</span> · <NavLink to="/scheduled">Manage schedules</NavLink></td></tr>
+        <tr className="register-scheduled-message"><td colSpan={10}><span role="alert">Could not load scheduled transactions: {error}</span> · <NavLink to="/scheduled">Manage schedules</NavLink></td></tr>
       )}
       {expanded && !error && !loading && schedules.length === 0 && (
-        <tr className="register-scheduled-message"><td colSpan={9}>No active schedules for this account. <NavLink to="/scheduled">Manage schedules</NavLink></td></tr>
+        <tr className="register-scheduled-message"><td colSpan={10}>No active schedules for this account. <NavLink to="/scheduled">Manage schedules</NavLink></td></tr>
       )}
       {expanded && schedules.flatMap((schedule) => {
         const amount = scheduledAmount(schedule);
@@ -1049,6 +1159,7 @@ function AccountScheduledRows({
           : transfer ?? schedule.category_name ?? (schedule.category_id ? categoryNames.get(schedule.category_id) : null) ?? "Uncategorised";
         return [
           <tr key={schedule.id} className="register-scheduled-row">
+            <td />
             <td className="nowrap">{schedule.date_next ? formatDate(schedule.date_next) : "No next date"}</td>
             <td className="muted">Scheduled · {scheduleRecurrence(schedule.frequency)}</td>
             <td>{payee}</td>
@@ -1062,6 +1173,7 @@ function AccountScheduledRows({
           ...(schedule.subtransactions ?? []).map((line) => {
             const lineTransfer = line.transfer_account_id ? transferScheduleLabel(line.transfer_account_id, accountNames) : null;
             return <tr key={line.id} className="split-line-row register-scheduled-split-row">
+              <td />
               <td />
               <td />
               <td className="muted split-line-cell">↳ {line.payee_name ?? (line.payee_id ? payeeNames.get(line.payee_id) : null) ?? lineTransfer ?? "-"}</td>
