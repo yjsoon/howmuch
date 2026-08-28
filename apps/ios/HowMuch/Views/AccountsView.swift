@@ -941,16 +941,22 @@ struct AccountIdentityEditorSheet: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let account: Account
   @State private var name: String
-  @State private var icon: String
-  @State private var custom = ""
+  @State private var icon: AccountIcon
+  @State private var writesIcon: Bool
   @State private var error: String?
   @State private var isSaving = false
-  @State private var isIconExpanded = true
+  @State private var isPickingIcon = false
 
   init(account: Account) {
     self.account = account
     _name = State(initialValue: account.name)
-    _icon = State(initialValue: account.displayIcon)
+    if let parsed = AccountIcon(rawValue: account.displayIcon) {
+      _icon = State(initialValue: parsed)
+      _writesIcon = State(initialValue: true)
+    } else {
+      _icon = State(initialValue: .default(for: account.type))
+      _writesIcon = State(initialValue: false)
+    }
   }
 
   var body: some View {
@@ -967,7 +973,6 @@ struct AccountIdentityEditorSheet: View {
         }
         .padding(16)
       }
-      .scrollDismissesKeyboard(.immediately)
       .background(Theme.canvas)
       .navigationTitle("Edit name and icon")
       .navigationBarTitleDisplayMode(.inline)
@@ -1033,84 +1038,42 @@ struct AccountIdentityEditorSheet: View {
   }
 
   private var iconCard: some View {
-    VStack(spacing: 0) {
-      Button {
-        withAnimation(.snappy) {
-          isIconExpanded.toggle()
-        }
-      } label: {
-        HStack {
-          Text("Icon")
-            .foregroundStyle(Theme.textPrimary)
-          Spacer()
-          Text(icon)
-            .font(.title3)
-            .accessibilityHidden(true)
-          Image(systemName: "chevron.down")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .rotationEffect(.degrees(isIconExpanded ? 0 : -90))
-            .accessibilityHidden(true)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 13)
-        .contentShape(Rectangle())
+    Button {
+      isPickingIcon = true
+    } label: {
+      HStack {
+        Text("Icon")
+          .foregroundStyle(Theme.textPrimary)
+        Spacer()
+        Text(shownIcon)
+          .font(.title3)
+          .accessibilityHidden(true)
+        Image(systemName: "chevron.right")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.secondary)
+          .accessibilityHidden(true)
       }
-      .buttonStyle(.plain)
-      .disabled(isSaving)
-      .accessibilityLabel("Icon")
-      .accessibilityValue(icon)
-      .accessibilityHint(isIconExpanded ? "Collapses the icon picker" : "Expands the icon picker")
-
-      if isIconExpanded {
-        Divider().padding(.leading, 16)
-        LazyVGrid(columns: paletteColumns, spacing: 8) {
-          ForEach(AccountIcon.palette, id: \.self) { candidate in
-            Button {
-              icon = candidate
-              custom = ""
-              error = nil
-            } label: {
-              Text(candidate)
-                .font(dynamicTypeSize.isAccessibilitySize ? .title2 : .title3)
-                .frame(maxWidth: .infinity, minHeight: paletteCellHeight)
-                .background(
-                  candidate == icon ? Theme.accent.opacity(0.15) : Color.clear,
-                  in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                )
-            }
-            .buttonStyle(.plain)
-            .disabled(isSaving)
-            .accessibilityLabel("Use \(candidate)")
-            .accessibilityAddTraits(candidate == icon ? .isSelected : [])
-          }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
-
-        HStack(spacing: 8) {
-          TextField("Custom emoji", text: $custom)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .onSubmit { applyCustom() }
-            .disabled(isSaving)
-          Button("Use") { applyCustom() }
-            .disabled(isSaving || AccountIcon.parse(custom) == nil)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+      .padding(.horizontal, 16)
+      .padding(.vertical, 13)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .disabled(isSaving)
+    .ynabCard()
+    .accessibilityLabel("Icon")
+    .accessibilityValue(shownIcon)
+    .accessibilityHint("Opens the icon picker")
+    .sheet(isPresented: $isPickingIcon) {
+      AccountIconPicker(selected: writesIcon ? icon : nil) { picked in
+        icon = picked
+        writesIcon = true
+        isPickingIcon = false
       }
     }
-    .ynabCard()
   }
 
-  private var paletteColumns: [GridItem] {
-    let count = dynamicTypeSize.isAccessibilitySize ? 4 : 6
-    Array(repeating: GridItem(.flexible(), spacing: 8), count: count)
-  }
-
-  private var paletteCellHeight: CGFloat {
-    dynamicTypeSize.isAccessibilitySize ? 44 : 36
+  private var shownIcon: String {
+    writesIcon ? icon.rawValue : account.displayIcon
   }
 
   private var trimmedName: String {
@@ -1118,24 +1081,19 @@ struct AccountIdentityEditorSheet: View {
   }
 
   private var canSave: Bool {
-    AccountIcon.parse(icon) != nil && !trimmedName.isEmpty
-  }
-
-  private func applyCustom() {
-    guard let parsed = AccountIcon.parse(custom) else {
-      error = "Choose a single emoji."
-      return
-    }
-    icon = parsed
-    error = nil
+    !trimmedName.isEmpty
   }
 
   private func save() async {
-    guard canSave, let parsed = AccountIcon.parse(icon) else { return }
+    guard canSave else { return }
     isSaving = true
     error = nil
     do {
-      try await model.setAccountIdentity(name: trimmedName, icon: parsed, for: account.id)
+      try await model.setAccountIdentity(
+        name: trimmedName,
+        icon: writesIcon ? icon : nil,
+        for: account.id
+      )
       dismiss()
     } catch {
       self.error = error.localizedDescription

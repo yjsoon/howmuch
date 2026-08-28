@@ -112,7 +112,7 @@ struct APIClient {
     try await updateAccount(planID: planID, accountID: accountID, icon: icon, name: nil)
   }
 
-  func updateAccount(planID: String, accountID: String, icon: String, name: String?) async throws -> Account {
+  func updateAccount(planID: String, accountID: String, icon: String?, name: String?) async throws -> Account {
     let response: APIEnvelope<AccountPayload> = try await request(
       path: "/v1/plans/\(planID)/accounts/\(accountID)",
       method: "PATCH",

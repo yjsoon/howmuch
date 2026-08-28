@@ -227,17 +227,13 @@ final class AppModel {
     saveViewPrefs()
   }
 
-  func setAccountIcon(_ icon: String, for accountID: String) async throws {
-    try await setAccountIdentity(name: nil, icon: icon, for: accountID)
-  }
-
-  func setAccountIdentity(name: String?, icon: String, for accountID: String) async throws {
-    guard let parsedIcon = AccountIcon.parse(icon) else {
-      throw APIClientError.validation("icon must be a single emoji")
-    }
+  func setAccountIdentity(name: String?, icon: AccountIcon?, for accountID: String) async throws {
     let parsedName = name?.trimmingCharacters(in: .whitespacesAndNewlines)
     if let parsedName, parsedName.isEmpty {
       throw APIClientError.validation("Name cannot be empty")
+    }
+    guard parsedName != nil || icon != nil else {
+      throw APIClientError.validation("Name or icon is required")
     }
     guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {
       throw APIClientError.validation("Account not found")
@@ -245,14 +241,15 @@ final class AppModel {
     let previous = accounts[index]
     let previousPayees = payees
     let nextName = parsedName ?? previous.name
-    accounts[index] = previous.withIdentity(name: nextName, icon: parsedIcon)
+    let nextIcon = icon?.rawValue ?? previous.icon ?? previous.displayIcon
+    accounts[index] = previous.withIdentity(name: nextName, icon: nextIcon)
     renameTransferPayee(forAccountID: accountID, to: nextName)
     rebuildLookups()
     do {
       let updated = try await apiClient.updateAccount(
         planID: settings.planID,
         accountID: accountID,
-        icon: parsedIcon,
+        icon: icon?.rawValue,
         name: parsedName
       )
       if let current = accounts.firstIndex(where: { $0.id == accountID }) {
