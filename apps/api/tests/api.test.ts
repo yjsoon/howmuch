@@ -1375,6 +1375,20 @@ describe("account icons", () => {
     expect(rejected.status).toBe(400);
   });
 
+  test("lets a user rename an account without changing its icon", async () => {
+    const account = await createAccountViaApi({ name: "Everyday", type: "checking" });
+    const renamed = await request(`/v1/plans/plan-test/accounts/${account.id}`, {
+      method: "PATCH",
+      body: { account: { name: "Daily Spend" } },
+    });
+    expect(renamed.status).toBe(200);
+    expect((await renamed.json()).data.account).toMatchObject({ name: "Daily Spend", icon: "🏦" });
+
+    const payees = await (await request("/v1/plans/plan-test/payees")).json();
+    const transfer = payees.data.payees.find((payee: any) => payee.id === account.transfer_payee_id);
+    expect(transfer.name).toBe("Transfer : Daily Spend");
+  });
+
   test("keeps a custom icon when a later upsert still carries an emoji on the name", async () => {
     const repo = new LedgerRepository(db, "plan-test");
     const account = await createAccountViaApi({ name: "💳 OCBC", type: "creditCard" });

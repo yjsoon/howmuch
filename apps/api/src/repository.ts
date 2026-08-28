@@ -350,15 +350,37 @@ export class LedgerRepository {
   }
 
   async updateAccountIcon(planId: string, accountId: string, icon: string): Promise<any> {
-    const parsed = parseAccountIcon(icon);
-    if (!parsed) throw new ValidationError("icon must be a single emoji");
+    return this.updateAccount(planId, accountId, { icon });
+  }
+
+  async updateAccount(planId: string, accountId: string, patch: { icon?: string; name?: string }): Promise<any> {
+    const nextIcon = patch.icon === undefined ? undefined : parseAccountIcon(patch.icon);
+    if (patch.icon !== undefined && !nextIcon) throw new ValidationError("icon must be a single emoji");
+    const nextName = patch.name === undefined ? undefined : String(patch.name).trim();
+    if (patch.name !== undefined && !nextName) throw new ValidationError("account.name is required");
+    if (nextIcon === undefined && nextName === undefined) {
+      throw new ValidationError("account.icon or account.name is required");
+    }
     const row = await this.db
       .query("SELECT id FROM accounts WHERE id = ? AND plan_id = ? AND deleted = 0")
       .get(accountId, planId) as Row | null;
     if (!row) throw new NotFoundError("Account not found");
-    await this.db
-      .query("UPDATE accounts SET icon = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
-      .run(parsed, accountId, planId);
+    if (nextIcon !== undefined && nextName !== undefined) {
+      await this.db
+        .query("UPDATE accounts SET icon = ?, name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
+        .run(nextIcon, nextName, accountId, planId);
+    } else if (nextIcon !== undefined) {
+      await this.db
+        .query("UPDATE accounts SET icon = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
+        .run(nextIcon, accountId, planId);
+    } else {
+      await this.db
+        .query("UPDATE accounts SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
+        .run(nextName, accountId, planId);
+    }
+    if (nextName !== undefined) {
+      await this.ensureTransferPayee(planId, accountId);
+    }
     await this.touchPlan(planId);
     return this.getAccount(planId, accountId);
   }

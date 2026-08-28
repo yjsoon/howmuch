@@ -28,6 +28,7 @@ struct RegisterView: View {
   @State private var editingTransaction: Transaction?
   @State private var duplicatingDraft: DuplicateDraft?
   @State private var isShowingReconciliation = false
+  @State private var editingIdentity: Account?
   @State private var membershipsAccount: Account?
   @State private var approvalError: String?
   @State private var statusError: String?
@@ -68,9 +69,35 @@ struct RegisterView: View {
     .navigationTitle(title)
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
+      if let account = scopedAccount {
+        ToolbarItem(placement: .principal) {
+          Button {
+            editingIdentity = account
+          } label: {
+            HStack(spacing: 6) {
+              Text(account.displayIcon)
+              Text(account.name)
+                .font(.headline)
+                .lineLimit(1)
+              Image(systemName: "chevron.down")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            }
+            .foregroundStyle(Theme.textPrimary)
+          }
+          .accessibilityLabel("\(account.displayIcon) \(account.name)")
+          .accessibilityHint("Opens the name and icon editor")
+        }
+      }
       ToolbarItem(placement: .topBarTrailing) {
         if let account = scopedAccount {
           Menu {
+            Button {
+              editingIdentity = account
+            } label: {
+              Label("Edit name and icon", systemImage: "pencil")
+            }
             if !account.closed {
               Button {
                 model.toggleAccountFavourite(account.id)
@@ -97,7 +124,7 @@ struct RegisterView: View {
             Image(systemName: "ellipsis.circle")
           }
           .accessibilityLabel("Actions for \(account.name)")
-          .accessibilityHint(account.closed ? "Groups and reconcile." : "Favourites, groups, and reconcile.")
+          .accessibilityHint(account.closed ? "Edit name and icon, groups, and reconcile." : "Edit name and icon, favourites, groups, and reconcile.")
         } else if !model.accounts.isEmpty {
           Button("Reconcile") {
             isShowingReconciliation = true
@@ -112,6 +139,9 @@ struct RegisterView: View {
     }
     .sheet(isPresented: $isShowingReconciliation) {
       AccountReconciliationSheet(preferredAccountID: scope.accountID)
+    }
+    .sheet(item: $editingIdentity) { account in
+      AccountIdentityEditorSheet(account: account)
     }
     .sheet(item: $membershipsAccount) { account in
       AccountMembershipSheet(accountID: account.id)
