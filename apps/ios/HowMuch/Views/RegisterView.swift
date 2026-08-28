@@ -169,24 +169,19 @@ struct RegisterView: View {
     } message: {
       Text(statusError ?? "Refresh and try again.")
     }
-    .confirmationDialog(
+    .binaryConfirm(
       "Delete this transaction?",
-      isPresented: Binding(
-        get: { transactionPendingDeletion != nil },
-        set: { if !$0 { transactionPendingDeletion = nil } }
-      ),
-      titleVisibility: .visible,
-      presenting: transactionPendingDeletion
+      presenting: $transactionPendingDeletion,
+      confirm: .destructive("Delete Transaction"),
+      message: { transaction in
+        if transaction.parentTransactionID != nil {
+          Text("The split line on the other account stays and loses this transfer link.")
+        } else {
+          Text("This also deletes any linked transfer entries. If this transaction or a linked entry has been reconciled, deleting it can make your next reconciliation inaccurate.")
+        }
+      }
     ) { transaction in
-      Button("Delete Transaction", role: .destructive) {
-        delete(transaction)
-      }
-    } message: { transaction in
-      if transaction.parentTransactionID != nil {
-        Text("The split line on the other account stays and loses this transfer link.")
-      } else {
-        Text("This also deletes any linked transfer entries. If this transaction or a linked entry has been reconciled, deleting it can make your next reconciliation inaccurate.")
-      }
+      delete(transaction)
     }
     .alert("Couldn’t delete transaction", isPresented: Binding(
       get: { deleteError != nil },
@@ -259,32 +254,27 @@ struct RegisterView: View {
     } else {
       if showsFilterBanners {
         Section {
-          VStack(spacing: 8) {
-            if unapprovedCount > 0 || unapprovedOnly {
-              filterBanner(
-                isOn: $unapprovedOnly,
-                offLabel: "Review \(unapprovedCount) new transaction\(unapprovedCount == 1 ? "" : "s")",
-                onLabel: "Showing new transactions to approve"
-              )
-            }
-            if unclearedCount > 0 || unclearedOnly {
-              filterBanner(
-                isOn: $unclearedOnly,
-                offLabel: "Show \(unclearedCount) uncleared transactions",
-                onLabel: "Showing uncleared only"
-              )
-            }
-            if uncategorisedCount > 0 || uncategorisedOnly {
-              filterBanner(
-                isOn: $uncategorisedOnly,
-                offLabel: "Show \(uncategorisedCount) uncategorised transactions",
-                onLabel: "Showing uncategorised only"
-              )
-            }
+          if unapprovedCount > 0 || unapprovedOnly {
+            filterBanner(
+              isOn: $unapprovedOnly,
+              offLabel: "Review \(unapprovedCount) new transaction\(unapprovedCount == 1 ? "" : "s")",
+              onLabel: "Showing new transactions to approve"
+            )
           }
-          .listRowInsets(EdgeInsets())
-          .listRowBackground(Color.clear)
-          .listRowSeparator(.hidden)
+          if unclearedCount > 0 || unclearedOnly {
+            filterBanner(
+              isOn: $unclearedOnly,
+              offLabel: "Show \(unclearedCount) uncleared transactions",
+              onLabel: "Showing uncleared only"
+            )
+          }
+          if uncategorisedCount > 0 || uncategorisedOnly {
+            filterBanner(
+              isOn: $uncategorisedOnly,
+              offLabel: "Show \(uncategorisedCount) uncategorised transactions",
+              onLabel: "Showing uncategorised only"
+            )
+          }
         }
       }
       if isNarrowed, !visibleTransactions.isEmpty {
@@ -619,9 +609,10 @@ struct RegisterView: View {
       }
       .padding(.horizontal, 16)
       .padding(.vertical, 12)
-      .ynabCard()
     }
     .buttonStyle(.plain)
+    .listRowInsets(EdgeInsets())
+    .listRowBackground(Theme.card)
   }
 
   private var showsFilterBanners: Bool {

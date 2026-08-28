@@ -20,6 +20,7 @@
     "test:d1": "bun test apps/api/tests/d1.test.ts",
     "smoke": "bun scripts/smoke.ts",
     "verify:ios-focus-zoom": "bun scripts/verify-ios-focus-zoom.ts",
+    "verify:ios-confirm-presentation": "bun scripts/verify-ios-confirm-presentation.ts",
     "test": "bun test",
     "verify:worker": "bun run --cwd apps/worker build"
   },
