@@ -1703,7 +1703,7 @@ struct TransactionWriteRequest: Codable, Equatable {
   }
 }
 
-/// A capture made while the server was unreachable, waiting to be replayed.
+/// A create that has not reached the server, waiting to be replayed.
 /// Kept as the exact write request so the sync sends what the user saved,
 /// stamped with the connection it was captured against so a later change of
 /// server or plan cannot replay it somewhere it does not belong.
@@ -1727,8 +1727,8 @@ struct PendingTransaction: Codable, Equatable, Identifiable {
   }
 }
 
-/// Persists the offline queue like the connection settings, so captures
-/// survive relaunches until they reach the server.
+/// Persists the pending-create queue like the connection settings, so
+/// captures survive relaunches until they reach the server.
 enum OutboxStore {
   static let userDefaultsKey = "HowMuch.Outbox"
 
@@ -1742,12 +1742,178 @@ enum OutboxStore {
     return decoded
   }
 
-  static func save(_ pending: [PendingTransaction], to defaults: UserDefaults = .standard) {
-    guard let data = try? JSONEncoder().encode(pending) else {
-      return
-    }
+  static func save(_ pending: [PendingTransaction], to defaults: UserDefaults = .standard) throws {
+    let data = try JSONEncoder().encode(pending)
     defaults.set(data, forKey: userDefaultsKey)
   }
+}
+
+struct SaveMessage: Equatable, Identifiable {
+  enum Kind: Equatable {
+    case success
+    case failure
+  }
+
+  let id: Int
+  let text: String
+  let kind: Kind
+}
+
+/// Why a draft cannot be committed. Local and immediate: the sheet stays up.
+enum CommitRejection: LocalizedError, Equatable {
+  case incomplete
+  case invalidSplit(String)
+  case persistFailed
+
+  static func check(_ draft: TransactionDraft) throws {
+    if let message = draft.splitValidationMessage {
+      throw CommitRejection.invalidSplit(message)
+    }
+    guard draft.canSave else {
+      throw CommitRejection.incomplete
+    }
+  }
+
+  var errorDescription: String? {
+    switch self {
+    case .incomplete:
+      return "Enter an amount and pick an account."
+    case .invalidSplit(let message):
+      return message
+    case .persistFailed:
+      return "Couldn’t save this transaction locally. Try again."
+    }
+  }
+}
+
+/// One create the server has not acknowledged. Not a `Transaction`: it has
+/// no server id, so delete, approve, and swipe have nothing to attach to.
+struct PendingRow: Identifiable, Equatable {
+  enum Status: Equatable {
+    case sending
+    case waitingForConnection
+    case rejected(String)
+  }
+
+  typealias ID = UUID
+
+  let id: ID
+  let accountID: String
+  let accountName: String
+  let isoDate: String
+  let signedAmount: Int
+  let payeeName: String?
+  let categoryID: String?
+  let categoryName: String?
+  let memo: String?
+  let flag: FlagColour
+  let splitLineCount: Int
+  let splitCategoryIDs: [String]
+  let isCleared: Bool
+  let status: Status
+
+  init(
+    pending: PendingTransaction,
+    status: Status,
+    accountName: String,
+    categoryName: String?,
+    payeeName: String?
+  ) {
+    let request = pending.request
+    id = pending.id
+    accountID = request.accountID
+    self.accountName = accountName
+    isoDate = request.date
+    signedAmount = request.amount
+    self.payeeName = payeeName ?? request.payeeName
+    categoryID = request.categoryID
+    self.categoryName = categoryName
+    memo = request.memo
+    flag = FlagColour(rawValue: request.flagColor ?? "") ?? .none
+    splitLineCount = request.subtransactions.count
+    splitCategoryIDs = request.subtransactions.compactMap(\.categoryID)
+    isCleared = request.cleared != nil && request.cleared != .uncleared
+    self.status = status
+  }
+
+  func matches(categoryID: String) -> Bool {
+    self.categoryID == categoryID || splitCategoryIDs.contains(categoryID)
+  }
+}
+
+/// Parent-level edit applied to a server row before the write lands.
+/// In memory only, so it cannot be replayed after the process dies.
+struct PendingEdit: Equatable {
+  let transactionID: String
+  let isoDate: String
+  let amount: Int
+  let accountID: String
+  let accountName: String
+  let payeeID: String?
+  let payeeName: String?
+  let categoryID: String?
+  let categoryName: String?
+  let memo: String?
+  let flagColor: String?
+  let cleared: ClearedState?
+
+  init?(
+    draft: TransactionDraft,
+    existing: Transaction,
+    accountName: String,
+    categoryName: String?,
+    payeeName: String?
+  ) {
+    guard draft.isSplit == existing.isSplit else {
+      return nil
+    }
+    transactionID = existing.id
+    isoDate = draft.date.isoDateString
+    amount = draft.signedMilliunits
+    accountID = draft.accountID
+    self.accountName = accountName
+    payeeID = draft.payeeID
+    self.payeeName = payeeName
+    categoryID = draft.isSplit ? existing.categoryID : draft.categoryID
+    self.categoryName = draft.isSplit ? existing.categoryName : categoryName
+    memo = draft.memo.trimmedNil
+    flagColor = draft.flag.rawValue.isEmpty ? nil : draft.flag.rawValue
+    cleared = draft.shouldWriteCleared ? draft.clearedState : nil
+  }
+
+  func applied(to transaction: Transaction) -> Transaction {
+    Transaction(
+      id: transaction.id,
+      date: isoDate,
+      amount: amount,
+      memo: memo,
+      cleared: cleared ?? transaction.cleared,
+      approved: transaction.approved,
+      flagColor: flagColor,
+      flagName: transaction.flagName,
+      accountID: accountID,
+      accountName: accountName,
+      payeeID: payeeID,
+      payeeName: payeeName,
+      categoryID: categoryID,
+      categoryName: categoryName,
+      transferAccountID: transaction.transferAccountID,
+      transferTransactionID: transaction.transferTransactionID,
+      parentTransactionID: transaction.parentTransactionID,
+      matchedTransactionID: transaction.matchedTransactionID,
+      importID: transaction.importID,
+      importPayeeName: transaction.importPayeeName,
+      importPayeeNameOriginal: transaction.importPayeeNameOriginal,
+      deleted: transaction.deleted,
+      subtransactions: transaction.subtransactions
+    )
+  }
+}
+
+enum OutboxDrainTrigger: Equatable {
+  case commit
+  case refresh
+  case manual
 }
 
 enum EntryDirection: String, CaseIterable, Identifiable {
