@@ -186,8 +186,26 @@ export async function importYnabFromApi(
         date: transaction.date,
         amount: transaction.amount,
         import_id: transaction.import_id,
+        deleted: Boolean(transaction.deleted),
       });
+      if (transaction.deleted && !existing) {
+        continue;
+      }
       const adoptLocal = existing != null && existing.id !== transaction.id;
+      const existingSubs = Array.isArray(existing?.subtransactions) ? existing.subtransactions : [];
+      const keepLocalTransfer = Boolean(adoptLocal && (existing.transfer_account_id || existing.transfer_transaction_id));
+      const ynabSubtransactions = resolvedSubtransactions.map((sub: any) => ({
+        id: sub.id,
+        amount: sub.amount,
+        payee_id: sub.payee_id,
+        payee_name: sub.payee_name,
+        category_id: sub.category_id,
+        memo: sub.memo,
+        transfer_account_id: sub.transfer_account_id,
+        transfer_transaction_id: sub.transfer_transaction_id,
+        external_ynab_id: sub.id,
+      }));
+      const subtransactions = adoptLocal && existingSubs.length ? existingSubs : ynabSubtransactions;
       await repo.createTransaction(options.planId, {
         id: existing?.id ?? transaction.id,
         account_id: transaction.account_id,
@@ -200,14 +218,14 @@ export async function importYnabFromApi(
         // its categorisation lives exclusively on the split lines. Passing it
         // into the normalised resolver would create an unused synthetic
         // category, so keep it only in the raw source mirror above.
-        category_id: resolvedSubtransactions.length ? null : transaction.category_id,
+        category_id: subtransactions.length ? null : transaction.category_id,
         memo: transaction.memo,
         cleared: transaction.cleared,
         approved: transaction.approved,
         flag_color: transaction.flag_color,
         flag_name: transaction.flag_name,
-        transfer_account_id: adoptLocal ? existing.transfer_account_id : transaction.transfer_account_id,
-        transfer_transaction_id: adoptLocal ? existing.transfer_transaction_id : transaction.transfer_transaction_id,
+        transfer_account_id: keepLocalTransfer ? existing.transfer_account_id : transaction.transfer_account_id,
+        transfer_transaction_id: keepLocalTransfer ? existing.transfer_transaction_id : transaction.transfer_transaction_id,
         matched_transaction_id: transaction.matched_transaction_id,
         import_id: transaction.import_id,
         import_payee_name: transaction.import_payee_name,
@@ -215,17 +233,7 @@ export async function importYnabFromApi(
         external_ynab_id: transaction.id,
         source_kind: "ynab-import",
         source_ref: sessionId,
-        subtransactions: adoptLocal ? undefined : resolvedSubtransactions.map((sub: any) => ({
-          id: sub.id,
-          amount: sub.amount,
-          payee_id: sub.payee_id,
-          payee_name: sub.payee_name,
-          category_id: sub.category_id,
-          memo: sub.memo,
-          transfer_account_id: sub.transfer_account_id,
-          transfer_transaction_id: sub.transfer_transaction_id,
-          external_ynab_id: sub.id,
-        })),
+        subtransactions,
       }, { autoLink: false });
       await repo.recordImportRow(sessionId, imported, "imported", transaction, undefined, existing?.id ?? transaction.id);
       imported += 1;

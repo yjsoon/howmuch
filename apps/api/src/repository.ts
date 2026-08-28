@@ -2454,7 +2454,7 @@ export class LedgerRepository {
 
   async findYnabImportTarget(
     planId: string,
-    input: { id: string; account_id: string; date: string; amount: number; import_id?: string | null },
+    input: { id: string; account_id: string; date: string; amount: number; import_id?: string | null; deleted?: boolean },
   ): Promise<any | null> {
     const byId = await this.getTransactionRow(planId, input.id, true);
     if (byId) {
@@ -2473,6 +2473,11 @@ export class LedgerRepository {
       if (byImport) {
         return byImport;
       }
+    }
+
+    // A YNAB tombstone must not claim an unrelated HowMuch-local row.
+    if (input.deleted) {
+      return null;
     }
 
     const locals = await this.db
