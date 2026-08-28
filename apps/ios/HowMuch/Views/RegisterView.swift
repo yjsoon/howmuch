@@ -79,11 +79,15 @@ struct RegisterView: View {
               Text(account.name)
                 .font(.headline)
                 .lineLimit(1)
+              Image(systemName: "chevron.down")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             }
             .foregroundStyle(Theme.textPrimary)
           }
           .accessibilityLabel("\(account.displayIcon) \(account.name)")
-          .accessibilityHint("Edits the account name and icon")
+          .accessibilityHint("Opens the name and icon editor")
         }
       }
       ToolbarItem(placement: .topBarTrailing) {

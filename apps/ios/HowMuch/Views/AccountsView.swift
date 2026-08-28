@@ -156,8 +156,7 @@ struct AccountsView: View {
       case .reorder(let group):
         AccountGroupReorderSheet(group: group)
       case .icon(let account):
-        AccountIconPickerSheet(account: account)
-          .presentationDetents([.medium, .large])
+        AccountIdentityEditorSheet(account: account)
       }
     }
     .confirmationDialog(
@@ -327,12 +326,12 @@ struct AccountsView: View {
         Text(account.displayIcon)
           .font(.title3)
           .frame(width: 44, height: 44)
-          .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+          .background(Theme.surfaceMuted, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
           .contentShape(Rectangle())
       }
       .buttonStyle(.borderless)
       .accessibilityLabel("Change icon for \(account.name)")
-      .accessibilityHint("Opens the icon picker")
+      .accessibilityHint("Opens the name and icon editor")
 
       NavigationLink {
         RegisterView(scope: .account(account.id))
@@ -368,7 +367,7 @@ struct AccountsView: View {
       Button("Groups") {
         presentedSheet = .memberships(account.id)
       }
-      Button("Change Icon") {
+      Button("Change icon") {
         presentedSheet = .icon(account)
       }
     }
@@ -953,14 +952,14 @@ private struct CustomAccountGroupEditor: View {
 struct AccountIdentityEditorSheet: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let account: Account
   @State private var name: String
   @State private var icon: String
   @State private var custom = ""
   @State private var error: String?
   @State private var isSaving = false
-
-  private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 6)
+  @State private var isIconExpanded = true
 
   init(account: Account) {
     self.account = account
@@ -970,89 +969,162 @@ struct AccountIdentityEditorSheet: View {
 
   var body: some View {
     NavigationStack {
-      List {
-        Section {
-          HStack {
-            Text("Icon")
-            Spacer()
-            Text(icon)
-              .font(.title2)
-              .accessibilityHidden(true)
-          }
-          LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(AccountIcon.palette, id: \.self) { candidate in
-              Button {
-                icon = candidate
-                custom = ""
-                error = nil
-              } label: {
-                Text(candidate)
-                  .font(.title2)
-                  .frame(maxWidth: .infinity, minHeight: 44)
-                  .background(candidate == icon ? Theme.accent.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-              }
-              .buttonStyle(.plain)
-              .accessibilityLabel("Use \(candidate)")
-              .disabled(isSaving)
-            }
-          }
-          .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-          HStack {
-            TextField("Custom emoji", text: $custom)
-              .textInputAutocapitalization(.never)
-              .autocorrectionDisabled()
-              .onSubmit { applyCustom() }
-            Button("Use") { applyCustom() }
-              .disabled(isSaving || AccountIcon.parse(custom) == nil)
-          }
-        }
-        Section {
-          HStack {
-            Text("Name")
-            TextField("Account name", text: $name)
-              .multilineTextAlignment(.trailing)
-              .textInputAutocapitalization(.words)
-              .disabled(isSaving)
-          }
-        }
-        if let error {
-          Section {
+      ScrollView {
+        VStack(alignment: .leading, spacing: 16) {
+          nameCard
+          iconCard
+          if let error {
             Text(error)
               .font(.footnote)
               .foregroundStyle(Theme.outflow)
-              .listRowBackground(Color.clear)
           }
         }
+        .padding(16)
       }
-      .listStyle(.insetGrouped)
-      .scrollContentBackground(.hidden)
+      .scrollDismissesKeyboard(.immediately)
       .background(Theme.canvas)
       .navigationTitle("Edit name and icon")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
-        ToolbarItem(placement: .topBarLeading) {
+        ToolbarItem(placement: .cancellationAction) {
           Button {
             dismiss()
           } label: {
             Image(systemName: "xmark")
               .font(.body.weight(.semibold))
-              .foregroundStyle(.black)
+              .foregroundStyle(Theme.textPrimary)
           }
+          .disabled(isSaving)
           .accessibilityLabel("Cancel")
         }
-        ToolbarItem(placement: .topBarTrailing) {
-          Button {
-            Task { await save() }
-          } label: {
-            Image(systemName: "checkmark")
-              .font(.body.weight(.semibold))
-              .foregroundStyle(canSave ? Theme.accent : Color.secondary)
+        ToolbarItem(placement: .confirmationAction) {
+          if isSaving {
+            ProgressView()
+              .accessibilityLabel("Saving")
+          } else {
+            Button {
+              Task { await save() }
+            } label: {
+              Image(systemName: "checkmark")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(canSave ? Theme.accent : Color.secondary)
+            }
+            .disabled(!canSave)
+            .accessibilityLabel("Save")
           }
-          .disabled(!canSave || isSaving)
-          .accessibilityLabel("Save")
+        }
+      }
+      .interactiveDismissDisabled(isSaving)
+    }
+  }
+
+  private var nameCard: some View {
+    Group {
+      if dynamicTypeSize.isAccessibilitySize {
+        VStack(alignment: .leading, spacing: 6) {
+          Text("Name")
+            .foregroundStyle(Theme.textPrimary)
+          nameField
+        }
+      } else {
+        HStack {
+          Text("Name")
+            .foregroundStyle(Theme.textPrimary)
+          nameField
+            .multilineTextAlignment(.trailing)
         }
       }
     }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 13)
+    .ynabCard()
+  }
+
+  private var nameField: some View {
+    TextField("Account name", text: $name)
+      .textInputAutocapitalization(.words)
+      .disabled(isSaving)
+  }
+
+  private var iconCard: some View {
+    VStack(spacing: 0) {
+      Button {
+        withAnimation(.snappy) {
+          isIconExpanded.toggle()
+        }
+      } label: {
+        HStack {
+          Text("Icon")
+            .foregroundStyle(Theme.textPrimary)
+          Spacer()
+          Text(icon)
+            .font(.title3)
+            .accessibilityHidden(true)
+          Image(systemName: "chevron.down")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .rotationEffect(.degrees(isIconExpanded ? 0 : -90))
+            .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .disabled(isSaving)
+      .accessibilityLabel("Icon")
+      .accessibilityValue(icon)
+      .accessibilityHint(isIconExpanded ? "Collapses the icon picker" : "Expands the icon picker")
+
+      if isIconExpanded {
+        Divider().padding(.leading, 16)
+        LazyVGrid(columns: paletteColumns, spacing: 8) {
+          ForEach(AccountIcon.palette, id: \.self) { candidate in
+            Button {
+              icon = candidate
+              custom = ""
+              error = nil
+            } label: {
+              Text(candidate)
+                .font(dynamicTypeSize.isAccessibilitySize ? .title2 : .title3)
+                .frame(maxWidth: .infinity, minHeight: paletteCellHeight)
+                .background(
+                  candidate == icon ? Theme.accent.opacity(0.15) : Color.clear,
+                  in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(isSaving)
+            .accessibilityLabel("Use \(candidate)")
+            .accessibilityAddTraits(candidate == icon ? .isSelected : [])
+          }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+
+        HStack(spacing: 8) {
+          TextField("Custom emoji", text: $custom)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .onSubmit { applyCustom() }
+            .disabled(isSaving)
+          Button("Use") { applyCustom() }
+            .disabled(isSaving || AccountIcon.parse(custom) == nil)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+      }
+    }
+    .ynabCard()
+  }
+
+  private var paletteColumns: [GridItem] {
+    let count = dynamicTypeSize.isAccessibilitySize ? 4 : 6
+    Array(repeating: GridItem(.flexible(), spacing: 8), count: count)
+  }
+
+  private var paletteCellHeight: CGFloat {
+    dynamicTypeSize.isAccessibilitySize ? 44 : 36
   }
 
   private var trimmedName: String {
@@ -1078,83 +1150,6 @@ struct AccountIdentityEditorSheet: View {
     error = nil
     do {
       try await model.setAccountIdentity(name: trimmedName, icon: parsed, for: account.id)
-      dismiss()
-    } catch {
-      self.error = error.localizedDescription
-      isSaving = false
-    }
-  }
-}
-
-private struct AccountIconPickerSheet: View {
-  @Environment(AppModel.self) private var model
-  @Environment(\.dismiss) private var dismiss
-  let account: Account
-  @State private var custom = ""
-  @State private var error: String?
-  @State private var isSaving = false
-
-  private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 6)
-
-  var body: some View {
-    NavigationStack {
-      ScrollView {
-        VStack(alignment: .leading, spacing: 16) {
-          LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(AccountIcon.palette, id: \.self) { icon in
-              Button {
-                Task { await choose(icon) }
-              } label: {
-                Text(icon)
-                  .font(.title2)
-                  .frame(maxWidth: .infinity, minHeight: 44)
-                  .background(icon == account.displayIcon ? Theme.accent.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-              }
-              .buttonStyle(.plain)
-              .accessibilityLabel("Use \(icon)")
-              .disabled(isSaving)
-            }
-          }
-          VStack(alignment: .leading, spacing: 6) {
-            Text("Or type any emoji")
-              .font(.footnote)
-              .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-              TextField("Emoji", text: $custom)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .onSubmit {
-                  Task { await choose(custom) }
-                }
-              Button("Use") {
-                Task { await choose(custom) }
-              }
-              .disabled(isSaving || custom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-          }
-          if let error {
-            Text(error)
-              .font(.footnote)
-              .foregroundStyle(Theme.outflow)
-          }
-        }
-        .padding(16)
-      }
-      .navigationTitle("Icon for \(account.name)")
-      .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button("Cancel") { dismiss() }
-        }
-      }
-    }
-  }
-
-  private func choose(_ icon: String) async {
-    isSaving = true
-    error = nil
-    do {
-      try await model.setAccountIcon(icon, for: account.id)
       dismiss()
     } catch {
       self.error = error.localizedDescription
