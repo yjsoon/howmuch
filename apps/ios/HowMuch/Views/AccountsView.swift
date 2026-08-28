@@ -942,6 +942,7 @@ struct AccountIdentityEditorSheet: View {
   let account: Account
   @State private var name: String
   @State private var icon: AccountIcon
+  @State private var writesIcon: Bool
   @State private var error: String?
   @State private var isSaving = false
   @State private var isPickingIcon = false
@@ -949,9 +950,13 @@ struct AccountIdentityEditorSheet: View {
   init(account: Account) {
     self.account = account
     _name = State(initialValue: account.name)
-    _icon = State(
-      initialValue: AccountIcon(rawValue: account.displayIcon) ?? .default(for: account.type)
-    )
+    if let parsed = AccountIcon(rawValue: account.displayIcon) {
+      _icon = State(initialValue: parsed)
+      _writesIcon = State(initialValue: true)
+    } else {
+      _icon = State(initialValue: .default(for: account.type))
+      _writesIcon = State(initialValue: false)
+    }
   }
 
   var body: some View {
@@ -1040,7 +1045,7 @@ struct AccountIdentityEditorSheet: View {
         Text("Icon")
           .foregroundStyle(Theme.textPrimary)
         Spacer()
-        Text(icon.rawValue)
+        Text(shownIcon)
           .font(.title3)
           .accessibilityHidden(true)
         Image(systemName: "chevron.right")
@@ -1056,14 +1061,19 @@ struct AccountIdentityEditorSheet: View {
     .disabled(isSaving)
     .ynabCard()
     .accessibilityLabel("Icon")
-    .accessibilityValue(icon.rawValue)
+    .accessibilityValue(shownIcon)
     .accessibilityHint("Opens the icon picker")
     .sheet(isPresented: $isPickingIcon) {
-      AccountIconPicker(selected: icon) { picked in
+      AccountIconPicker(selected: writesIcon ? icon : nil) { picked in
         icon = picked
+        writesIcon = true
         isPickingIcon = false
       }
     }
+  }
+
+  private var shownIcon: String {
+    writesIcon ? icon.rawValue : account.displayIcon
   }
 
   private var trimmedName: String {
@@ -1079,7 +1089,11 @@ struct AccountIdentityEditorSheet: View {
     isSaving = true
     error = nil
     do {
-      try await model.setAccountIdentity(name: trimmedName, icon: icon, for: account.id)
+      try await model.setAccountIdentity(
+        name: trimmedName,
+        icon: writesIcon ? icon : nil,
+        for: account.id
+      )
       dismiss()
     } catch {
       self.error = error.localizedDescription
