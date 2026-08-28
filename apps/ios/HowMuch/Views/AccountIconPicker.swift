@@ -15,13 +15,14 @@ struct AccountIconPicker: View {
 
     if let selected {
       let emoji = Emoji(selected.rawValue)
-      let category = Self.catalogue.category(withEmoji: emoji)
-      _visibleCategory = State(initialValue: category ?? Self.catalogue.first)
+      let categories = Self.liveCatalogue()
+      let category = categories.category(withEmoji: emoji)
+      _visibleCategory = State(initialValue: category ?? categories.first)
       _gridSelection = State(
         initialValue: category.map { Emoji.GridSelection(emoji: emoji, category: $0) }
       )
     } else {
-      _visibleCategory = State(initialValue: Self.catalogue.first)
+      _visibleCategory = State(initialValue: Self.liveCatalogue().first)
       _gridSelection = State(initialValue: nil)
     }
   }
@@ -84,7 +85,7 @@ struct AccountIconPicker: View {
   private var categoryJumpBar: some View {
     ScrollView(.horizontal, showsIndicators: false) {
       HStack(spacing: 4) {
-        ForEach(Self.catalogue) { category in
+        ForEach(Self.liveCatalogue()) { category in
           let isVisible = visibleCategory?.id == category.id
           Button {
             visibleCategory = category
@@ -108,28 +109,34 @@ struct AccountIconPicker: View {
   }
 
   private var displayedCategories: [EmojiCategory] {
-    query.isEmpty ? Self.catalogue : [Self.searchCategory(query)]
+    query.isEmpty ? Self.liveCatalogue() : [Self.searchCategory(query)]
   }
 
-  private static let catalogue: [EmojiCategory] = {
-    let categories: [EmojiCategory] = .standardGrid
-    return categories.compactMap { category in
-      let emojis = category.emojis
-      let filtered = emojis.filter { AccountIcon(rawValue: $0.char) != nil }
-      if category.id == "frequent", filtered.isEmpty {
-        return nil
-      }
-      if filtered.count == emojis.count {
-        return category
-      }
-      return .custom(
-        id: category.id,
-        name: category.labelText,
-        emojis: filtered,
-        iconName: category.symbolIconName
-      )
-    }
+  private static let standardCatalogue: [EmojiCategory] = {
+    EmojiCategory.standardCategories.map(filtered(_:))
   }()
+
+  private static func liveCatalogue() -> [EmojiCategory] {
+    let frequent = filtered(EmojiCategory.frequent)
+    if frequent.emojis.isEmpty {
+      return standardCatalogue
+    }
+    return [frequent] + standardCatalogue
+  }
+
+  private static func filtered(_ category: EmojiCategory) -> EmojiCategory {
+    let emojis = category.emojis
+    let pickable = emojis.filter { AccountIcon(rawValue: $0.char) != nil }
+    if pickable.count == emojis.count {
+      return category
+    }
+    return .custom(
+      id: category.id,
+      name: category.labelText,
+      emojis: pickable,
+      iconName: category.symbolIconName
+    )
+  }
 
   private static func searchCategory(_ query: String) -> EmojiCategory {
     var seen = Set<String>()
@@ -140,7 +147,7 @@ struct AccountIconPicker: View {
       emojis.append(Emoji(icon.rawValue))
     }
 
-    for emoji in catalogue.flatMap(\.emojis).matching(query) {
+    for emoji in standardCatalogue.flatMap(\.emojis).matching(query) {
       if seen.insert(emoji.char).inserted {
         emojis.append(emoji)
       }
