@@ -12,11 +12,7 @@ struct AccountIcon: RawRepresentable, Equatable, Hashable, Sendable {
     guard !hasLetterOrDigit else { return nil }
     let hasEmoji = trimmed.unicodeScalars.contains { scalar in
       scalar.properties.isEmojiPresentation
-        || (
-          scalar.properties.isEmoji
-            && scalar.value != 0x23
-            && scalar.value != 0x2A
-        )
+        || (scalar.properties.isEmoji && !Self.keycapBases.contains(scalar))
     }
     guard hasEmoji else { return nil }
     self.rawValue = trimmed
@@ -25,6 +21,8 @@ struct AccountIcon: RawRepresentable, Equatable, Hashable, Sendable {
   private init(unchecked rawValue: String) {
     self.rawValue = rawValue
   }
+
+  private static let keycapBases: Set<Unicode.Scalar> = ["#", "*"]
 
   static let fallback = AccountIcon(unchecked: "🏦")
 
