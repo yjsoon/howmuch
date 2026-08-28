@@ -35,11 +35,8 @@ final class AppModel {
   var accounts: [Account] = []
   var categoryGroups: [CategoryGroup] = []
   var payees: [Payee] = []
-  /// Loaded portion of the ledger, newest first. Older pages append on demand.
-  var transactions: [Transaction] = []
-  /// Complete review queue, loaded separately so old unapproved entries do
-  /// not disappear behind the register's bounded first page.
-  private(set) var unapprovedTransactions: [Transaction] = []
+  private var serverTransactions: [Transaction] = []
+  private var serverUnapprovedTransactions: [Transaction] = []
   /// Imported YNAB schedules remain an immutable source mirror; local edits
   /// and entered occurrences are reflected through HowMuch overlays.
   var scheduledTransactions: [ScheduledTransaction] = []
@@ -70,20 +67,22 @@ final class AppModel {
   private(set) var reportsRefreshGeneration = 0
   var reportsPhase: LoadPhase = .idle
   var isSubmitting = false
-  var lastSaveMessage: String?
+  var lastSaveMessage: SaveMessage?
   var isShowingSettings = false
   var isShowingCapture = false
   /// Account registers currently on a navigation stack, deepest last.
   /// Capture prefers the visible register over the last account a save used.
   private(set) var focusedRegisterAccountIDs: [String] = []
-  /// Captures made while the server was unreachable, oldest first.
-  var pendingTransactions: [PendingTransaction] = OutboxStore.load()
-  var pendingTransactionsForLiveConnection: [PendingTransaction] {
-    pendingTransactions.filter { settings.matchesCurrentOrLegacyOutboxStamp($0.connectionFingerprint) }
-  }
+  private var pendingTransactions: [PendingTransaction] = OutboxStore.load()
   /// True while a replay pass is running, whoever started it — the outbox
   /// card drives its spinner from this rather than view-local state.
   var isSyncingOutbox = false
+  private var pendingEdits: [String: PendingEdit] = [:]
+  private var inFlightCreates: Set<PendingRow.ID> = []
+  @ObservationIgnored private var editTasks: [String: Task<Void, Never>] = [:]
+  @ObservationIgnored private var editGenerations: [String: Int] = [:]
+  @ObservationIgnored private var needsAnotherDrain = false
+  @ObservationIgnored private var coalescedDrainTrigger: OutboxDrainTrigger?
   private var accountsByID: [String: Account] = [:]
   private var categoriesByID: [String: Category] = [:]
   private var payeesByID: [String: Payee] = [:]
@@ -147,13 +146,14 @@ final class AppModel {
     accounts = []
     categoryGroups = []
     payees = []
-    transactions = []
-    unapprovedTransactions = []
+    serverTransactions = []
+    serverUnapprovedTransactions = []
     scheduledTransactions = []
     spendingBreakdown = nil
     incomeVsSpending = nil
     netWorth = nil
     ageOfMoney = nil
+    cancelPendingEdits()
     invalidateAccountUsage()
     rebuildLookups()
     referencePhase = .idle
@@ -793,6 +793,56 @@ final class AppModel {
     payeesByID[id]
   }
 
+  var transactions: [Transaction] {
+    overlayingPendingEdits(on: serverTransactions)
+  }
+
+  var unapprovedTransactions: [Transaction] {
+    overlayingPendingEdits(on: serverUnapprovedTransactions)
+  }
+
+  var pendingRows: [PendingRow] {
+    let serverImportIDs = Set(serverTransactions.compactMap(\.importID))
+    return pendingTransactions.compactMap { pending in
+      guard settings.matchesCurrentOrLegacyOutboxStamp(pending.connectionFingerprint) else {
+        return nil
+      }
+      if let importID = pending.request.importID, serverImportIDs.contains(importID) {
+        return nil
+      }
+      return pendingRow(from: pending)
+    }
+  }
+
+  private func overlayingPendingEdits(on rows: [Transaction]) -> [Transaction] {
+    guard !pendingEdits.isEmpty else {
+      return rows
+    }
+    return rows.map { row in
+      pendingEdits[row.id]?.applied(to: row) ?? row
+    }
+    .sorted { ($0.date, $0.id) > ($1.date, $1.id) }
+  }
+
+  private func pendingRow(from pending: PendingTransaction) -> PendingRow {
+    let request = pending.request
+    let status: PendingRow.Status
+    if inFlightCreates.contains(pending.id) {
+      status = .sending
+    } else if let error = pending.lastSyncError {
+      status = .rejected(error)
+    } else {
+      status = .waitingForConnection
+    }
+    return PendingRow(
+      pending: pending,
+      status: status,
+      accountName: account(withID: request.accountID)?.name ?? "",
+      categoryName: categoryName(forID: request.categoryID),
+      payeeName: request.payeeName ?? request.payeeID.flatMap { payee(withID: $0)?.name }
+    )
+  }
+
   /// True when both ids resolve to on-budget accounts; such transfers carry
   /// no category (YNAB semantics).
   func accountsBothOnBudget(_ firstAccountID: String?, _ secondAccountID: String?) -> Bool {
@@ -832,7 +882,7 @@ final class AppModel {
     // an unreachable server must not stall the refresh for a full request
     // timeout. Inserts dedupe by id, so a capture the ledger fetch already
     // returned is never doubled.
-    async let outbox: Int = syncOutbox()
+    async let outbox: Int = drainOutbox(trigger: .refresh)
     async let reference: Void = refreshReferenceData(quiet: quiet)
     async let ledger: Void = refreshLedger(quiet: quiet)
     async let schedules: Void = refreshScheduledTransactions(quiet: quiet)
@@ -959,8 +1009,8 @@ final class AppModel {
       guard generation == ledgerPageGeneration, planID == settings.planID else {
         return
       }
-      transactions = sortedUniqueTransactions(page.transactions)
-      unapprovedTransactions = sortedUniqueTransactions(unapproved)
+      serverTransactions = sortedUniqueTransactions(page.transactions)
+      serverUnapprovedTransactions = sortedUniqueTransactions(unapproved)
       hasMoreTransactions = page.hasMore && page.nextOffset != nil
       nextTransactionOffset = hasMoreTransactions ? page.nextOffset : nil
       ledgerPhase = .loaded
@@ -988,13 +1038,14 @@ final class AppModel {
     accounts = []
     categoryGroups = []
     payees = []
-    transactions = []
-    unapprovedTransactions = []
+    serverTransactions = []
+    serverUnapprovedTransactions = []
     scheduledTransactions = []
     spendingBreakdown = nil
     incomeVsSpending = nil
     netWorth = nil
     ageOfMoney = nil
+    cancelPendingEdits()
     hasMoreTransactions = false
     nextTransactionOffset = nil
     isLoadingOlderTransactions = false
@@ -1162,7 +1213,7 @@ final class AppModel {
       else {
         return
       }
-      transactions = sortedUniqueTransactions(transactions + page.transactions)
+      serverTransactions = sortedUniqueTransactions(serverTransactions + page.transactions)
       hasMoreTransactions = page.hasMore && page.nextOffset != nil
       nextTransactionOffset = hasMoreTransactions ? page.nextOffset : nil
     } catch {
@@ -1235,51 +1286,154 @@ final class AppModel {
     }
   }
 
-  /// Returns the saved transaction, or nil when the capture was queued
-  /// offline. Edits are never queued: replaying a stale update could clobber
-  /// changes made from elsewhere while this device was offline.
-  @discardableResult
-  func saveTransaction(_ draft: TransactionDraft) async throws -> Transaction? {
-    guard !isSubmitting else {
-      throw APIClientError.validation("A save is already in progress.")
-    }
-    isSubmitting = true
-    defer { isSubmitting = false }
-
-    guard draft.canSave else {
-      throw APIClientError.validation("Enter an amount and pick an account.")
-    }
-
-    let request = draft.writeRequest(includeCleared: draft.shouldWriteCleared)
-    let saved: Transaction
-    if let id = draft.id {
-      saved = try await apiClient.updateTransaction(planID: settings.planID, transactionID: id, request: request)
-      if let index = transactions.firstIndex(where: { $0.id == id }) {
-        transactions[index] = saved
-      }
-    } else {
-      do {
-        saved = try await apiClient.createTransaction(planID: settings.planID, request: request)
-      } catch let error where error.isOfflineError {
-        queueOfflineCapture(request)
-        return nil
-      }
-      if let index = transactions.firstIndex(where: { $0.id == saved.id }) {
-        transactions[index] = saved
-      } else {
-        transactions.insert(saved, at: 0)
-      }
-    }
-    transactions.sort { ($0.date, $0.id) > ($1.date, $1.id) }
-
-    viewPrefs.lastUsedAccountID = request.accountID
+  func commit(_ draft: TransactionDraft) throws {
+    try CommitRejection.check(draft)
+    viewPrefs.lastUsedAccountID = draft.accountID
     saveViewPrefs()
-    showSaveMessage("Saved \(MoneyCodec.displayString(for: saved.amount, currencyFormat: currencyFormat)) — \(saved.payeeName ?? "transaction")")
-    Task { await refreshLedgerAndInvalidatePlan() }
-    return saved
+    if let transactionID = draft.id {
+      applyPendingEdit(draft, transactionID: transactionID)
+      return
+    }
+    try enqueueCreate(draft)
+    showSaveMessage(savedMessage(for: draft))
+  }
+
+  private func savedMessage(for draft: TransactionDraft) -> String {
+    let payee = draft.payeeName.trimmingCharacters(in: .whitespacesAndNewlines)
+    return "Saved \(MoneyCodec.displayString(for: draft.signedMilliunits, currencyFormat: currencyFormat)) — \(payee.isEmpty ? "transaction" : payee)"
+  }
+
+  func retryPending(_ id: PendingRow.ID) {
+    guard pendingTransactions.contains(where: { $0.id == id }) else {
+      return
+    }
+    Task { await drainOutbox(trigger: .manual) }
+  }
+
+  func discardPending(_ id: PendingRow.ID) {
+    guard !inFlightCreates.contains(id) else {
+      showSaveMessage("This transaction is still sending. Wait for it to finish.", kind: .failure)
+      return
+    }
+    let next = pendingTransactions.filter { $0.id != id }
+    do {
+      try OutboxStore.save(next)
+      pendingTransactions = next
+    } catch {
+      showSaveMessage("Couldn’t discard this transaction. Try again.", kind: .failure)
+    }
+  }
+
+  private func enqueueCreate(_ draft: TransactionDraft) throws {
+    let request = draft.writeRequest(includeCleared: draft.shouldWriteCleared)
+    let importID = request.importID
+    let alreadyQueued = pendingTransactions.contains { pending in
+      pending.request.importID == importID
+        && importID != nil
+        && settings.matchesCurrentOrLegacyOutboxStamp(pending.connectionFingerprint)
+    }
+    if !alreadyQueued {
+      let next = pendingTransactions + [
+        PendingTransaction(request: request, connectionFingerprint: settings.connectionFingerprint)
+      ]
+      do {
+        try OutboxStore.save(next)
+        pendingTransactions = next
+      } catch {
+        throw CommitRejection.persistFailed
+      }
+    }
+    Task { await drainOutbox(trigger: .commit) }
+  }
+
+  private func applyPendingEdit(_ draft: TransactionDraft, transactionID: String) {
+    editTasks[transactionID]?.cancel()
+    editGenerations[transactionID, default: 0] += 1
+    let generation = editGenerations[transactionID] ?? 1
+    let existing = serverTransactions.first { $0.id == transactionID }
+      ?? serverUnapprovedTransactions.first { $0.id == transactionID }
+    if let existing {
+      pendingEdits[transactionID] = PendingEdit(
+        draft: draft,
+        existing: existing,
+        accountName: account(withID: draft.accountID)?.name ?? existing.accountName,
+        categoryName: categoryName(forID: draft.categoryID),
+        payeeName: draft.payeeName.trimmedNil ?? draft.payeeID.flatMap { payee(withID: $0)?.name }
+      )
+    }
+    let destination = EditDestination(
+      planID: settings.planID,
+      connectionFingerprint: settings.connectionFingerprint,
+      client: apiClient
+    )
+    editTasks[transactionID] = Task {
+      await pushEdit(draft, transactionID: transactionID, generation: generation, destination: destination)
+    }
+  }
+
+  private func pushEdit(
+    _ draft: TransactionDraft,
+    transactionID: String,
+    generation: Int,
+    destination: EditDestination
+  ) async {
+    let request = draft.writeRequest(includeCleared: draft.shouldWriteCleared)
+    do {
+      let saved = try await destination.client.updateTransaction(
+        planID: destination.planID,
+        transactionID: transactionID,
+        request: request
+      )
+      guard isCurrentEdit(transactionID, generation: generation, destination: destination) else {
+        return
+      }
+      if let existing = serverTransactions.first(where: { $0.id == transactionID })
+        ?? serverUnapprovedTransactions.first(where: { $0.id == transactionID }) {
+        applySavedTransaction(saved, replacing: existing)
+      }
+      pendingEdits[transactionID] = nil
+      editTasks[transactionID] = nil
+      showSaveMessage(savedMessage(for: draft))
+      Task { await refreshLedgerAndInvalidatePlan() }
+    } catch {
+      guard isCurrentEdit(transactionID, generation: generation, destination: destination) else {
+        return
+      }
+      pendingEdits[transactionID] = nil
+      editTasks[transactionID] = nil
+      showSaveMessage("Couldn’t save changes — \(error.localizedDescription)", kind: .failure)
+      await refreshLedger(quiet: true)
+    }
+  }
+
+  private func isCurrentEdit(
+    _ transactionID: String,
+    generation: Int,
+    destination: EditDestination
+  ) -> Bool {
+    !Task.isCancelled
+      && editGenerations[transactionID] == generation
+      && destination.planID == settings.planID
+      && destination.connectionFingerprint == settings.connectionFingerprint
+  }
+
+  private func cancelPendingEdits() {
+    for task in editTasks.values {
+      task.cancel()
+    }
+    editTasks.removeAll()
+    editGenerations.removeAll()
+    pendingEdits.removeAll()
+  }
+
+  private func ensureNoPendingEdit(on transaction: Transaction) throws {
+    guard pendingEdits[transaction.id] == nil, editTasks[transaction.id] == nil else {
+      throw APIClientError.validation("This transaction has unsaved changes syncing.")
+    }
   }
 
   func toggleTransactionCleared(_ transaction: Transaction) async throws {
+    try ensureNoPendingEdit(on: transaction)
     guard !isSubmitting else {
       throw APIClientError.validation("Another transaction change is already in progress.")
     }
@@ -1308,11 +1462,11 @@ final class AppModel {
 
   private func applySavedTransaction(_ saved: Transaction, replacing existing: Transaction) {
     let next = saved.preservingParent(from: existing)
-    if let index = transactions.firstIndex(where: { $0.id == existing.id }) {
-      transactions[index] = next
+    if let index = serverTransactions.firstIndex(where: { $0.id == existing.id }) {
+      serverTransactions[index] = next
     }
-    if let index = unapprovedTransactions.firstIndex(where: { $0.id == existing.id }) {
-      unapprovedTransactions[index] = next
+    if let index = serverUnapprovedTransactions.firstIndex(where: { $0.id == existing.id }) {
+      serverUnapprovedTransactions[index] = next
     }
   }
 
@@ -1325,86 +1479,121 @@ final class AppModel {
     reportsRefreshGeneration &+= 1
   }
 
-  /// The server never saw this capture; keep it locally and replay it once a
-  /// refresh reaches the server again.
-  private func queueOfflineCapture(_ request: TransactionWriteRequest) {
-    pendingTransactions.append(PendingTransaction(request: request, connectionFingerprint: settings.connectionFingerprint))
-    OutboxStore.save(pendingTransactions)
-    viewPrefs.lastUsedAccountID = request.accountID
-    saveViewPrefs()
-    showSaveMessage("Saved offline — will sync on next refresh")
-  }
-
-  /// Replays offline captures oldest-first, returning how many synced. Only
-  /// captures made against the current connection are attempted, and only a
-  /// manual pass retries entries the server has already rejected once. The
-  /// queue is persisted after every state change so a kill mid-pass cannot
-  /// replay an already-synced capture. A transport failure ends the pass.
   @discardableResult
-  func syncOutbox(manual: Bool = false) async -> Int {
-    guard !pendingTransactions.isEmpty, !isSyncingOutbox else {
+  func drainOutbox(trigger: OutboxDrainTrigger) async -> Int {
+    guard !pendingTransactions.isEmpty else {
       return 0
     }
+    if isSyncingOutbox {
+      coalescedDrainTrigger = coalescedDrainTrigger.map { mergeDrainTrigger($0, with: trigger) } ?? trigger
+      needsAnotherDrain = true
+      return 0
+    }
+
     isSyncingOutbox = true
-    defer { isSyncingOutbox = false }
+    defer {
+      isSyncingOutbox = false
+      inFlightCreates.removeAll()
+    }
 
     var syncedCount = 0
-    for item in pendingTransactions {
-      let connectionFingerprint = settings.connectionFingerprint
-      guard settings.matchesCurrentOrLegacyOutboxStamp(item.connectionFingerprint) else {
-        continue
-      }
-      guard manual || item.lastSyncError == nil else {
-        continue
-      }
-      do {
-        let planID = settings.planID
-        let client = apiClient
-        var request = item.request
-        if request.importID == nil {
-          request.importID = item.id.uuidString.lowercased()
-        }
-        let saved = try await client.createTransaction(planID: planID, request: request)
-        pendingTransactions.removeAll { $0.id == item.id }
-        OutboxStore.save(pendingTransactions)
-        guard connectionFingerprint == settings.connectionFingerprint else {
+    var effectiveTrigger = trigger
+    repeat {
+      needsAnotherDrain = false
+      let retryRejected = effectiveTrigger == .manual
+      for item in pendingTransactions {
+        let connectionFingerprint = settings.connectionFingerprint
+        guard settings.matchesCurrentOrLegacyOutboxStamp(item.connectionFingerprint) else {
           continue
         }
-        if !transactions.contains(where: { $0.id == saved.id }) {
-          transactions.insert(saved, at: 0)
+        guard retryRejected || item.lastSyncError == nil else {
+          continue
         }
-        syncedCount += 1
-      } catch let error where error.isOfflineError {
-        break
-      } catch {
-        markSyncError(error.localizedDescription, for: item.id)
-        OutboxStore.save(pendingTransactions)
+        inFlightCreates.insert(item.id)
+        defer { inFlightCreates.remove(item.id) }
+        do {
+          let client = apiClient
+          let planID = settings.planID
+          var request = item.request
+          if request.importID == nil {
+            request.importID = item.id.uuidString.lowercased()
+          }
+          let saved = try await client.createTransaction(planID: planID, request: request)
+          removePending(item.id)
+          guard connectionFingerprint == settings.connectionFingerprint else {
+            continue
+          }
+          if !serverTransactions.contains(where: { $0.id == saved.id }) {
+            serverTransactions.insert(saved, at: 0)
+          }
+          syncedCount += 1
+        } catch let error where error.isOfflineError {
+          break
+        } catch {
+          markSyncError(error.localizedDescription, for: item.id)
+        }
       }
-    }
+      if let pending = coalescedDrainTrigger {
+        coalescedDrainTrigger = nil
+        effectiveTrigger = mergeDrainTrigger(effectiveTrigger, with: pending)
+      }
+    } while needsAnotherDrain
+
     if syncedCount > 0 {
-      transactions.sort { ($0.date, $0.id) > ($1.date, $1.id) }
+      serverTransactions = sortedUniqueTransactions(serverTransactions)
       invalidateAccountUsage()
       planRefreshGeneration &+= 1
       reportsRefreshGeneration &+= 1
-      showSaveMessage(syncedCount == 1 ? "Synced 1 offline transaction" : "Synced \(syncedCount) offline transactions")
-    } else if manual, !pendingTransactionsForLiveConnection.isEmpty {
-      showSaveMessage("Couldn’t sync — will retry on the next refresh")
+      if effectiveTrigger != .commit {
+        showSaveMessage(
+          syncedCount == 1 ? "Synced 1 pending transaction" : "Synced \(syncedCount) pending transactions"
+        )
+      }
+      if effectiveTrigger == .commit {
+        Task { await refreshLedgerAndInvalidatePlan() }
+      }
+    } else if effectiveTrigger == .manual, !pendingRows.isEmpty {
+      showSaveMessage("Couldn’t sync — will retry on the next refresh", kind: .failure)
     }
     return syncedCount
   }
 
-  func discardPending(_ item: PendingTransaction) {
-    pendingTransactions.removeAll { $0.id == item.id }
-    OutboxStore.save(pendingTransactions)
+  private func mergeDrainTrigger(
+    _ current: OutboxDrainTrigger,
+    with incoming: OutboxDrainTrigger
+  ) -> OutboxDrainTrigger {
+    switch (current, incoming) {
+    case (.manual, _), (_, .manual):
+      return .manual
+    case (.refresh, _), (_, .refresh):
+      return .refresh
+    case (.commit, .commit):
+      return .commit
+    }
+  }
+
+  private func removePending(_ id: UUID) {
+    let next = pendingTransactions.filter { $0.id != id }
+    pendingTransactions = next
+    try? OutboxStore.save(next)
   }
 
   private func markSyncError(_ message: String, for id: UUID) {
-    if let index = pendingTransactions.firstIndex(where: { $0.id == id }) {
-      pendingTransactions[index].lastSyncError = message
+    var next = pendingTransactions
+    guard let index = next.firstIndex(where: { $0.id == id }) else {
+      return
+    }
+    next[index].lastSyncError = message
+    do {
+      try OutboxStore.save(next)
+      pendingTransactions = next
+    } catch {
+      pendingTransactions = next
     }
   }
 
   func deleteTransaction(_ transaction: Transaction) async throws {
+    try ensureNoPendingEdit(on: transaction)
     isSubmitting = true
     defer { isSubmitting = false }
 
@@ -1422,13 +1611,14 @@ final class AppModel {
         removedIDs.insert(linkedID)
       }
     }
-    transactions.removeAll { removedIDs.contains($0.id) }
-    unapprovedTransactions.removeAll { removedIDs.contains($0.id) }
+    serverTransactions.removeAll { removedIDs.contains($0.id) }
+    serverUnapprovedTransactions.removeAll { removedIDs.contains($0.id) }
     showSaveMessage("Deleted \(transaction.payeeName ?? "transaction")")
     Task { await refreshLedgerAndInvalidatePlan() }
   }
 
   func approveTransaction(_ transaction: Transaction) async throws {
+    try ensureNoPendingEdit(on: transaction)
     guard !transaction.approved else {
       return
     }
@@ -1441,9 +1631,9 @@ final class AppModel {
     await refreshLedger(quiet: true)
   }
 
-  private func showSaveMessage(_ message: String) {
-    lastSaveMessage = message
+  private func showSaveMessage(_ text: String, kind: SaveMessage.Kind = .success) {
     saveMessageToken += 1
+    lastSaveMessage = SaveMessage(id: saveMessageToken, text: text, kind: kind)
     let token = saveMessageToken
     Task {
       try? await Task.sleep(for: .seconds(3))
@@ -1452,4 +1642,10 @@ final class AppModel {
       }
     }
   }
+}
+
+private struct EditDestination {
+  let planID: String
+  let connectionFingerprint: String
+  let client: APIClient
 }

@@ -34,6 +34,7 @@ struct RegisterView: View {
   @State private var statusError: String?
   @State private var transactionPendingDeletion: Transaction?
   @State private var deleteError: String?
+  @State private var pendingRowAction: PendingRow?
 
   /// Identifiable box so sheet(item:) can present a prefilled capture form.
   private struct DuplicateDraft: Identifiable {
@@ -190,6 +191,22 @@ struct RegisterView: View {
     } message: {
       Text(deleteError ?? "Please try again.")
     }
+    .confirmationDialog(
+      "This transaction hasn’t reached the server.",
+      isPresented: Binding(
+        get: { pendingRowAction != nil },
+        set: { if !$0 { pendingRowAction = nil } }
+      ),
+      titleVisibility: .visible,
+      presenting: pendingRowAction
+    ) { row in
+      Button("Retry") {
+        model.retryPending(row.id)
+      }
+      Button("Discard Transaction", role: .destructive) {
+        model.discardPending(row.id)
+      }
+    }
     .onAppear {
       if let accountID = scope.accountID {
         model.beginFocusedRegisterAccount(accountID)
@@ -274,6 +291,16 @@ struct RegisterView: View {
   private var transactionDateSections: some View {
     ForEach(sections, id: \.date) { section in
       Section {
+        ForEach(section.pending) { row in
+          PendingTransactionRow(
+            row: row,
+            showsAccount: scope == .all,
+            currencyFormat: model.currencyFormat,
+            onRejectedTap: { pendingRowAction = row }
+          )
+          .listRowInsets(EdgeInsets())
+          .listRowBackground(Theme.card)
+        }
         ForEach(section.transactions) { transaction in
           registerRow(for: transaction)
         }
@@ -357,7 +384,7 @@ struct RegisterView: View {
 
   @ViewBuilder
   private var emptyRegisterSection: some View {
-    if visibleTransactions.isEmpty, model.ledgerPhase == .loaded {
+    if visibleTransactions.isEmpty, visiblePendingRows.isEmpty, model.ledgerPhase == .loaded {
       Section {
         Group {
           if searchText.isEmpty {
@@ -632,10 +659,50 @@ struct RegisterView: View {
     }
   }
 
-  private var sections: [(date: String, transactions: [Transaction])] {
+  private var scopedPendingRows: [PendingRow] {
+    model.pendingRows.filter { row in
+      if let accountID = scope.accountID, row.accountID != accountID {
+        return false
+      }
+      if let accountIDs, !accountIDs.isEmpty, !accountIDs.contains(row.accountID) {
+        return false
+      }
+      if let categoryID, !row.matches(categoryID: categoryID) {
+        return false
+      }
+      if let dateRange, !dateRange.contains(row.isoDate) {
+        return false
+      }
+      return true
+    }
+  }
+
+  private var visiblePendingRows: [PendingRow] {
+    let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    return scopedPendingRows.filter { row in
+      if unapprovedOnly {
+        return false
+      }
+      if unclearedOnly, row.isCleared {
+        return false
+      }
+      if uncategorisedOnly, row.categoryID != nil || row.splitLineCount > 0 {
+        return false
+      }
+      guard !query.isEmpty else {
+        return true
+      }
+      let haystack = [row.payeeName, row.categoryName, row.memo, row.accountName]
+      return haystack.contains { $0?.localizedStandardContains(query) == true }
+    }
+  }
+
+  private var sections: [(date: String, pending: [PendingRow], transactions: [Transaction])] {
+    let pendingByDate = Dictionary(grouping: visiblePendingRows, by: \.isoDate)
     let grouped = Dictionary(grouping: visibleTransactions, by: \.date)
-    return grouped.keys.sorted(by: >).map { date in
-      (date: date, transactions: grouped[date] ?? [])
+    let dates = Set(grouped.keys).union(pendingByDate.keys)
+    return dates.sorted(by: >).map { date in
+      (date: date, pending: pendingByDate[date] ?? [], transactions: grouped[date] ?? [])
     }
   }
 }
@@ -988,6 +1055,123 @@ enum RegisterStatus: Equatable {
 extension Transaction {
   var registerStatus: RegisterStatus {
     RegisterStatus(approved: approved, cleared: cleared)
+  }
+}
+
+private struct PendingTransactionRow: View {
+  let row: PendingRow
+  let showsAccount: Bool
+  let currencyFormat: CurrencyFormat?
+  let onRejectedTap: () -> Void
+
+  var body: some View {
+    HStack(alignment: .center, spacing: 4) {
+      HStack(alignment: .center, spacing: 10) {
+        VStack(alignment: .leading, spacing: 3) {
+          Text(payeeDisplay)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Theme.textPrimary)
+            .lineLimit(1)
+          Text(detailLine)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+          if let memo = row.memo, !memo.isEmpty {
+            Text(memo)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .padding(.horizontal, 8)
+              .padding(.vertical, 3)
+              .background(Theme.surfaceMuted, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+          }
+        }
+
+        Spacer()
+
+        Text(MoneyCodec.signedDisplayString(for: row.signedAmount, currencyFormat: currencyFormat))
+          .font(.subheadline.weight(.medium))
+          .monospacedDigit()
+          .foregroundStyle(Theme.registerAmountColour(row.signedAmount))
+      }
+      .contentShape(Rectangle())
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .onTapGesture {
+        if case .rejected = row.status {
+          onRejectedTap()
+        }
+      }
+
+      statusGlyph
+    }
+    .padding(.leading, 16)
+    .padding(.trailing, 8)
+    .padding(.vertical, 7)
+    .flagRail(Theme.flagColour(named: row.flag.rawValue))
+    .contentShape(Rectangle())
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(accessibilityLabel)
+    .accessibilityHint(rejectedHint)
+  }
+
+  private var payeeDisplay: String {
+    if let payee = row.payeeName, !payee.isEmpty {
+      return payee
+    }
+    return "(No payee)"
+  }
+
+  private var detailLine: String {
+    let category: String
+    if row.splitLineCount > 0 {
+      category = "Split (\(row.splitLineCount))"
+    } else if let name = row.categoryName {
+      category = name
+    } else {
+      category = "Uncategorised"
+    }
+    if showsAccount, !row.accountName.isEmpty {
+      return "\(category) · \(row.accountName)"
+    }
+    return category
+  }
+
+  @ViewBuilder
+  private var statusGlyph: some View {
+    Group {
+      switch row.status {
+      case .sending:
+        ProgressView()
+          .controlSize(.small)
+      case .waitingForConnection:
+        Image(systemName: "clock")
+          .font(.title3)
+          .foregroundStyle(.tertiary)
+      case .rejected:
+        Image(systemName: "exclamationmark.circle")
+          .font(.title3)
+          .foregroundStyle(Theme.outflow)
+      }
+    }
+    .frame(width: 44, height: 44)
+  }
+
+  private var accessibilityLabel: String {
+    switch row.status {
+    case .sending:
+      return "Sending \(payeeDisplay)"
+    case .waitingForConnection:
+      return "\(payeeDisplay) waiting to sync"
+    case .rejected:
+      return "\(payeeDisplay) failed to sync"
+    }
+  }
+
+  private var rejectedHint: String {
+    if case .rejected = row.status {
+      return "Double tap to retry or discard."
+    }
+    return ""
   }
 }
 

@@ -12,7 +12,7 @@ struct AccountsView: View {
       VStack(alignment: .leading, spacing: 16) {
         ScreenTitle("Accounts")
 
-        if !model.pendingTransactionsForLiveConnection.isEmpty {
+        if !model.pendingRows.isEmpty {
           OutboxCard()
         }
 
@@ -372,28 +372,27 @@ struct AccountsView: View {
     )
   }
 
-  /// Offline captures waiting to reach the server, with retry and discard.
   private struct OutboxCard: View {
     @Environment(AppModel.self) private var model
-    @State private var pendingDiscard: PendingTransaction?
+    @State private var pendingDiscard: PendingRow?
 
     var body: some View {
       VStack(spacing: 0) {
         HStack(spacing: 8) {
-          Image(systemName: "wifi.slash")
+          Image(systemName: "arrow.triangle.2.circlepath")
             .foregroundStyle(.secondary)
           VStack(alignment: .leading, spacing: 1) {
             Text(title)
               .font(.subheadline.weight(.semibold))
               .foregroundStyle(Theme.textPrimary)
-            Text("Shown here until synced")
+            Text("Shown here until they reach the server")
               .font(.caption)
               .foregroundStyle(.secondary)
           }
           Spacer()
           Button {
             Task {
-              if await model.syncOutbox(manual: true) > 0 {
+              if await model.drainOutbox(trigger: .manual) > 0 {
                 await model.refreshLedgerAndInvalidatePlan()
               }
             }
@@ -411,56 +410,74 @@ struct AccountsView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
 
-        ForEach(model.pendingTransactionsForLiveConnection) { item in
+        ForEach(model.pendingRows) { row in
           Divider().padding(.leading, 16)
-          pendingRow(item)
+          pendingRow(row)
         }
       }
       .ynabCard()
       .binaryConfirm(
-        "Discard this offline transaction? It hasn’t reached the server.",
+        "Discard this transaction? It hasn’t reached the server.",
         presenting: $pendingDiscard,
         confirm: .destructive("Discard Transaction")
-      ) { item in
-        model.discardPending(item)
+      ) { row in
+        model.discardPending(row.id)
       }
     }
 
     private var title: String {
-      let count = model.pendingTransactionsForLiveConnection.count
+      let count = model.pendingRows.count
       return count == 1 ? "1 transaction waiting to sync" : "\(count) transactions waiting to sync"
     }
 
-    private func pendingRow(_ item: PendingTransaction) -> some View {
+    private func pendingRow(_ row: PendingRow) -> some View {
       HStack(spacing: 12) {
         VStack(alignment: .leading, spacing: 2) {
-          Text(item.request.payeeName ?? "Transaction")
+          Text(row.payeeName ?? "Transaction")
             .foregroundStyle(Theme.textPrimary)
             .lineLimit(1)
-          Text(LedgerDate.friendlyString(fromISO: item.request.date))
+          Text(LedgerDate.friendlyString(fromISO: row.isoDate))
             .font(.footnote)
             .foregroundStyle(.secondary)
-          if let error = item.lastSyncError {
+          if case .rejected(let error) = row.status {
             Text(error)
               .font(.footnote)
               .foregroundStyle(Theme.outflow)
               .lineLimit(2)
+          } else if row.status == .sending {
+            Text("Sending…")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
           }
         }
         Spacer()
-        Text(MoneyCodec.signedDisplayString(for: item.request.amount, currencyFormat: model.currencyFormat))
+        Text(MoneyCodec.signedDisplayString(for: row.signedAmount, currencyFormat: model.currencyFormat))
           .monospacedDigit()
-          .foregroundStyle(Theme.registerAmountColour(item.request.amount))
-        Button {
-          pendingDiscard = item
-        } label: {
-          Image(systemName: "trash")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .frame(width: 44, height: 44)
+          .foregroundStyle(Theme.registerAmountColour(row.signedAmount))
+        if case .rejected = row.status {
+          Button {
+            model.retryPending(row.id)
+          } label: {
+            Image(systemName: "arrow.clockwise")
+              .font(.footnote)
+              .foregroundStyle(Theme.accent)
+              .frame(width: 44, height: 44)
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("Retry \(row.payeeName ?? "transaction")")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Discard \(item.request.payeeName ?? "offline transaction")")
+        if row.status != .sending {
+          Button {
+            pendingDiscard = row
+          } label: {
+            Image(systemName: "trash")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+              .frame(width: 44, height: 44)
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("Discard \(row.payeeName ?? "pending transaction")")
+        }
       }
       .padding(.horizontal, 16)
       .padding(.vertical, 6)

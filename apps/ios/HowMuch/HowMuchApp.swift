@@ -129,9 +129,9 @@ private struct RootView: View {
     .tabBarMinimizeBehavior(.onScrollDown)
     .overlay(alignment: .bottom) {
       if let message = model.lastSaveMessage {
-        Text(message)
+        Text(message.text)
           .font(.footnote.weight(.medium))
-          .foregroundStyle(Theme.textPrimary)
+          .foregroundStyle(message.kind == .failure ? Theme.outflow : Theme.textPrimary)
           .padding(.horizontal, 16)
           .padding(.vertical, 10)
           .glassEffect(.regular, in: .capsule)
@@ -139,9 +139,16 @@ private struct RootView: View {
           .transition(.move(edge: .bottom).combined(with: .opacity))
       }
     }
-    .animation(.snappy, value: model.lastSaveMessage)
+    .animation(.snappy, value: model.lastSaveMessage?.id)
     .sensoryFeedback(trigger: model.lastSaveMessage) { _, newValue in
-      newValue != nil ? .success : nil
+      switch newValue?.kind {
+      case .failure:
+        return .error
+      case .success:
+        return .success
+      case nil:
+        return nil
+      }
     }
     .task(id: model.settings.connectionFingerprint) {
       await model.refreshAll()

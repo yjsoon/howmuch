@@ -157,6 +157,7 @@ struct TransactionFormView: View {
   @State private var isConfirmingEdit = false
   @State private var isConfirmingSplitRemoval = false
   @State private var isAutoAdvancingToPayee = false
+  @State private var hasCommitted = false
   private let isEditing: Bool
   private let allowsDeletion: Bool
 
@@ -703,12 +704,7 @@ struct TransactionFormView: View {
   private var saveButton: some View {
     Button(action: save) {
       HStack(spacing: 8) {
-        if model.isSubmitting {
-          ProgressView()
-            .tint(.white)
-        } else {
-          Image(systemName: "checkmark.circle.fill")
-        }
+        Image(systemName: "checkmark.circle.fill")
         Text("Save")
           .fontWeight(.semibold)
       }
@@ -717,12 +713,12 @@ struct TransactionFormView: View {
     }
     .buttonStyle(.glassProminent)
     .tint(Theme.accent)
-    .disabled(!draft.canSave || model.isSubmitting)
+    .disabled(!draft.canSave || hasCommitted)
     .opacity(draft.canSave ? 1 : 0.5)
   }
 
   private func save() {
-    guard !model.isSubmitting else {
+    guard !hasCommitted else {
       return
     }
     guard draft.splitValidationMessage == nil else {
@@ -743,14 +739,16 @@ struct TransactionFormView: View {
   }
 
   private func submitSave() {
+    guard !hasCommitted else {
+      return
+    }
     errorMessage = nil
-    Task {
-      do {
-        try await model.saveTransaction(draft)
-        dismiss()
-      } catch {
-        errorMessage = error.localizedDescription
-      }
+    do {
+      try model.commit(draft)
+      hasCommitted = true
+      dismiss()
+    } catch {
+      errorMessage = error.localizedDescription
     }
   }
 
