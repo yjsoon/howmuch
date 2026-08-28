@@ -382,7 +382,10 @@ describe("YNAB similarity guard", () => {
 
     const adopted = await repo.getTransaction("plan-test", local.id);
     expect(adopted.transfer_account_id).toBe("acct-2");
-    expect(adopted.transfer_transaction_id).toBe("ynab-in");
+    expect(adopted.transfer_transaction_id).not.toBe("ynab-out");
+    const counterpart = await repo.getTransaction("plan-test", adopted.transfer_transaction_id);
+    expect(counterpart.account_id).toBe("acct-2");
+    expect(counterpart.transfer_transaction_id).toBe(local.id);
   });
 
   test("does not adopt a local row from an unmatched YNAB tombstone", async () => {

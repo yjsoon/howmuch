@@ -2495,6 +2495,37 @@ export class LedgerRepository {
     return null;
   }
 
+  async relinkYnabTransferTargets(planId: string): Promise<void> {
+    const dangling = await this.db
+      .query(
+        `SELECT id, transfer_transaction_id
+         FROM transactions
+         WHERE plan_id = ? AND deleted = 0 AND transfer_transaction_id IS NOT NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM transactions linked WHERE linked.id = transactions.transfer_transaction_id
+           )`,
+      )
+      .all(planId) as Array<{ id: string; transfer_transaction_id: string }>;
+    if (!dangling.length) {
+      return;
+    }
+
+    const plan = newTransactionMutationPlan();
+    for (const row of dangling) {
+      const matches = await this.db
+        .query("SELECT id FROM transactions WHERE plan_id = ? AND deleted = 0 AND external_ynab_id = ? LIMIT 2")
+        .all(planId, row.transfer_transaction_id) as Array<{ id: string }>;
+      if (matches.length !== 1) {
+        continue;
+      }
+      await this.db
+        .query("UPDATE transactions SET transfer_transaction_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
+        .run(matches[0].id, row.id, planId);
+      plan.touchedTransactionIds.add(row.id);
+    }
+    await this.executeMutationPlan(planId, plan);
+  }
+
   async findDuplicateTransaction(planId: string, input: TransactionInput): Promise<any | null> {
     if (input.import_id && input.account_id) {
       const importMatch = await this.findTransactionByImportId(planId, input.import_id, input.account_id);

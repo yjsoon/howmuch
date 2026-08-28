@@ -240,6 +240,8 @@ export async function importYnabFromApi(
       await options.progress?.();
     }
 
+    await repo.relinkYnabTransferTargets(options.planId);
+
     await repo.finishImportSession(sessionId, "completed", { imported_transactions: imported, raw_objects: rawCounts, server_knowledge: serverKnowledge });
     return { import_session_id: sessionId, imported_transactions: imported, raw_objects: rawCounts, server_knowledge: serverKnowledge };
   } catch (error) {
