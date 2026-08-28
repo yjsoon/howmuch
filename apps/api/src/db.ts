@@ -91,6 +91,10 @@ export function applyMigrations(db: Database): void {
       version: "016_account_icons",
       path: join(migrationsDir, "016_account_icons.sql"),
     },
+    {
+      version: "017_account_icon_emoji_backfill",
+      path: join(migrationsDir, "017_account_icon_emoji_backfill.sql"),
+    },
   ];
 
   for (const migration of migrations) {

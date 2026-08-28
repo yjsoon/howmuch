@@ -151,7 +151,7 @@ describe("local schema migrations", () => {
     }
   });
 
-  test("account icons split leading and trailing emojis from the name and default the rest by type", () => {
+  test("account icons split a leading emoji from the name and default the rest by type", () => {
     const db = new Database(":memory:");
     try {
       db.exec(`
@@ -178,10 +178,13 @@ describe("local schema migrations", () => {
           ('saver','p','Rainy Day','savings'),
           ('bank','p','Everyday','checking'),
           ('travel','p','Travel 💳','creditCard'),
-          ('dev','p','👩‍💻 Work','otherAsset');
+          ('dev','p','👩‍💻 Work','otherAsset'),
+          ('thumbs','p', char(0x1F44D, 0xFE0F) || ' Banana ','checking'),
+          ('trail','p','Banana ' || char(0x1F44D, 0xFE0F) || ' ','checking');
         INSERT INTO payees(id,plan_id,name,transfer_account_id) VALUES
           ('payee-card','p','Transfer : 💳 OCBC 365','card'),
-          ('payee-travel','p','Transfer : Travel 💳','travel');
+          ('payee-travel','p','Transfer : Travel 💳','travel'),
+          ('payee-thumbs','p','Transfer : ' || char(0x1F44D, 0xFE0F) || ' Banana ','thumbs');
         INSERT INTO schema_migrations(version) VALUES
           ('001_initial'),('002_transaction_server_knowledge'),('003_transfer_payees'),('004_auth_foundation'),('005_password_auth'),
           ('006_allow_duplicate_payee_names'),('007_ynab_raw_objects'),('008_plan_month_assignments'),('009_plan_month_category_targets'),
@@ -191,15 +194,19 @@ describe("local schema migrations", () => {
 
       applyMigrations(db);
 
+      const thumbs = "\u{1F44D}\u{FE0F}";
       expect(db.query("SELECT id,name,icon FROM accounts ORDER BY id").all()).toEqual([
         { id: "bank", name: "Everyday", icon: "🏦" },
         { id: "card", name: "OCBC 365", icon: "💳" },
         { id: "dev", name: "Work", icon: "👩‍💻" },
         { id: "saver", name: "Rainy Day", icon: "💰" },
-        { id: "travel", name: "Travel", icon: "💳" },
+        { id: "thumbs", name: "Banana", icon: thumbs },
+        { id: "trail", name: `Banana ${thumbs}`, icon: "🏦" },
+        { id: "travel", name: "Travel 💳", icon: "💳" },
       ]);
       expect(db.query("SELECT name FROM payees WHERE id='payee-card'").get()).toEqual({ name: "Transfer : OCBC 365" });
-      expect(db.query("SELECT name FROM payees WHERE id='payee-travel'").get()).toEqual({ name: "Transfer : Travel" });
+      expect(db.query("SELECT name FROM payees WHERE id='payee-travel'").get()).toEqual({ name: "Transfer : Travel 💳" });
+      expect(db.query("SELECT name FROM payees WHERE id='payee-thumbs'").get()).toEqual({ name: "Transfer : Banana" });
     } finally {
       db.close();
     }
