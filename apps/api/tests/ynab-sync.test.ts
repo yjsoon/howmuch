@@ -311,7 +311,11 @@ describe("YNAB similarity guard", () => {
       external_ynab_id: "ynab-split-parent",
     });
     const adopted = await repo.getTransaction("plan-test", local.id);
-    expect(adopted.subtransactions.map((sub: { amount: number; category_id: string }) => [sub.amount, sub.category_id])).toEqual([
+    expect(
+      adopted.subtransactions
+        .map((sub: { amount: number; category_id: string }) => [sub.amount, sub.category_id])
+        .sort((left: [number, string], right: [number, string]) => left[0] - right[0]),
+    ).toEqual([
       [-600, "cat-food"],
       [-400, "cat-fun"],
     ]);
@@ -386,6 +390,36 @@ describe("YNAB similarity guard", () => {
     const counterpart = await repo.getTransaction("plan-test", adopted.transfer_transaction_id);
     expect(counterpart.account_id).toBe("acct-2");
     expect(counterpart.transfer_transaction_id).toBe(local.id);
+  });
+
+  test("does not adopt a scheduled occurrence as a YNAB import", async () => {
+    await repo.ensureAccount("plan-test", "acct-1", "Checking");
+    const scheduled = await repo.createTransaction("plan-test", {
+      account_id: "acct-1",
+      date: "2026-06-01",
+      amount: -1000,
+      payee_name: "Rent",
+      source_kind: "scheduled-transaction",
+      source_ref: "sched-1:2026-06-01:hash:op",
+    });
+
+    stubYnabApi([
+      ynabTransaction("ynab-rent", {
+        account_id: "acct-1",
+        amount: -1000,
+        payee_name: "Rent",
+      }),
+    ]);
+
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test" });
+
+    expect(db.query("SELECT source_kind, source_ref FROM transactions WHERE id=?").get(scheduled.id)).toEqual({
+      source_kind: "scheduled-transaction",
+      source_ref: "sched-1:2026-06-01:hash:op",
+    });
+    expect(db.query("SELECT id FROM transactions WHERE id='ynab-rent' AND source_kind='ynab-import'").get()).toEqual({
+      id: "ynab-rent",
+    });
   });
 
   test("does not adopt a local row from an unmatched YNAB tombstone", async () => {

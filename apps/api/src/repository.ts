@@ -2484,7 +2484,7 @@ export class LedgerRepository {
       .query(
         `SELECT id FROM transactions
          WHERE plan_id = ? AND deleted = 0 AND account_id = ? AND date = ? AND amount_milli = ?
-           AND (source_kind IS NULL OR source_kind <> 'ynab-import')
+           AND (source_kind IS NULL OR source_kind NOT IN ('ynab-import', 'scheduled-transaction'))
          ORDER BY created_at, id
          LIMIT 2`,
       )
