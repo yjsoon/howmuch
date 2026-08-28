@@ -20,6 +20,7 @@ struct RegisterHorizon: Equatable, Sendable {
     guard hasMore, rowCount < maxFillRows else {
       return false
     }
+    // Inclusive start: a page that lands on the horizon day may still have more rows on that day.
     return oldestLoadedDate.map { $0 >= startDate(today: today, calendar: calendar) } ?? true
   }
 }

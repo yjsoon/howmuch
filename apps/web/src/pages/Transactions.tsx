@@ -59,6 +59,7 @@ export function TransactionsPage() {
     [accounts, filters.accountIds],
   );
   const registerAccountIds = useMemo(() => new Set(visibleAccounts.map((account) => account.id)), [visibleAccounts]);
+  // All Accounts lists closed ledger rows, but the headline stays an active-account balance.
   const balanceAccounts = useMemo(
     () => filters.accountIds.length ? visibleAccounts : visibleAccounts.filter((account) => !account.closed),
     [filters.accountIds.length, visibleAccounts],
@@ -162,6 +163,7 @@ export function TransactionsPage() {
     ? api.accountTransactions(planId, selectedAccountId, { ...pageQuery, offset })
     : api.transactions(planId, { ...pageQuery, offset });
 
+  // Offset pages are only stable while the ledger is unchanged. A write must restart from offset 0.
   const refreshFirstPage = () => {
     requestVersionRef.current += 1;
     setPage({ transactions: [], hasMore: false, nextOffset: null, loading: true, filling: true, loadingMore: false, loaded: false, error: null });
