@@ -16,14 +16,14 @@ import { CategorySelect } from "../components/CategorySelect";
 import { FlagPicker, FlagTag } from "../components/FlagTag";
 import { FilterRail } from "../components/FilterRail";
 import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
-import { formatDate, todayIso } from "../lib/dates";
+import { formatDate, todayIso, trailingMonthsRange } from "../lib/dates";
 import { stableHash } from "../lib/hash";
 import { formatAmount, formatMilliunitsInput, formatMoney, parseMilliunits } from "../lib/money";
+import { fillRegisterHorizon } from "../lib/register-horizon";
 import { activeSchedulesForAccount, scheduledAmount, scheduleRecurrence, transferScheduleLabel } from "../lib/schedules";
 import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
 
-/** True when the row (or any of its split lines) still needs a category. */
 function hasUncategorisedLine(txn: Transaction): boolean {
   if (txn.subtransactions?.length) {
     return txn.subtransactions.some((sub) => sub.category_id === null && !sub.transfer_account_id);
@@ -42,7 +42,7 @@ type ReconcileDraft = {
 };
 
 export function TransactionsPage() {
-  const { filters, setFilters } = useFilters();
+  const { filters, setFilters } = useFilters({ defaultRange: () => trailingMonthsRange(2) });
   const { accounts, categoryGroups, planId, reload } = usePlan();
   const payees = useApi(planId, () => api.payees(planId));
   const [params] = useSearchParams();
@@ -59,9 +59,7 @@ export function TransactionsPage() {
     [accounts, filters.accountIds],
   );
   const registerAccountIds = useMemo(() => new Set(visibleAccounts.map((account) => account.id)), [visibleAccounts]);
-  // “All Accounts” includes archived ledger rows, but its cash-on-hand
-  // headline remains an active-account balance rather than resurrecting
-  // balances from closed accounts.
+  // All Accounts lists closed ledger rows, but the headline stays an active-account balance.
   const balanceAccounts = useMemo(
     () => filters.accountIds.length ? visibleAccounts : visibleAccounts.filter((account) => !account.closed),
     [filters.accountIds.length, visibleAccounts],
@@ -99,6 +97,7 @@ export function TransactionsPage() {
     hasMore: false,
     nextOffset: null as number | null,
     loading: true,
+    filling: true,
     loadingMore: false,
     loaded: false,
     error: null as string | null,
@@ -164,38 +163,52 @@ export function TransactionsPage() {
     ? api.accountTransactions(planId, selectedAccountId, { ...pageQuery, offset })
     : api.transactions(planId, { ...pageQuery, offset });
 
-  /**
-   * Offset pagination is only stable while the ledger is unchanged. Invalidate
-   * all pending requests and start again after a write so no older row is
-   * skipped (or a transfer mirror is left stale) in the visible register.
-   */
+  // Offset pages are only stable while the ledger is unchanged. A write must restart from offset 0.
   const refreshFirstPage = () => {
     requestVersionRef.current += 1;
-    setPage({ transactions: [], hasMore: false, nextOffset: null, loading: true, loadingMore: false, loaded: false, error: null });
+    setPage({ transactions: [], hasMore: false, nextOffset: null, loading: true, filling: true, loadingMore: false, loaded: false, error: null });
     setRefreshGeneration((generation) => generation + 1);
   };
 
   useEffect(() => {
     let cancelled = false;
     const requestVersion = ++requestVersionRef.current;
-    setPage({ transactions: [], hasMore: false, nextOffset: null, loading: true, loadingMore: false, loaded: false, error: null });
-    fetchTransactionPage(0)
-      .then((first) => {
-        if (!cancelled && requestVersion === requestVersionRef.current) {
-          setPage({
-            transactions: first.transactions,
-            hasMore: first.has_more,
-            nextOffset: first.next_offset,
-            loading: false,
-            loadingMore: false,
-            loaded: true,
-            error: null,
-          });
+    setPage({ transactions: [], hasMore: false, nextOffset: null, loading: true, filling: true, loadingMore: false, loaded: false, error: null });
+    fillRegisterHorizon({
+      today: todayIso(),
+      fetchPage: fetchTransactionPage,
+      isCurrent: () => !cancelled && requestVersion === requestVersionRef.current,
+      onProgress: (update) => {
+        setPage({
+          transactions: update.transactions,
+          hasMore: update.hasMore,
+          nextOffset: update.nextOffset,
+          loading: false,
+          filling: !update.done,
+          loadingMore: false,
+          loaded: true,
+          error: null,
+        });
+      },
+    })
+      .then((filled) => {
+        if (!filled) {
+          return;
         }
+        setPage({
+          transactions: filled.transactions,
+          hasMore: filled.hasMore,
+          nextOffset: filled.nextOffset,
+          loading: false,
+          filling: false,
+          loadingMore: false,
+          loaded: true,
+          error: null,
+        });
       })
       .catch((error: Error) => {
         if (!cancelled && requestVersion === requestVersionRef.current) {
-          setPage({ transactions: [], hasMore: false, nextOffset: null, loading: false, loadingMore: false, loaded: false, error: error.message });
+          setPage({ transactions: [], hasMore: false, nextOffset: null, loading: false, filling: false, loadingMore: false, loaded: false, error: error.message });
         }
       });
     return () => {
@@ -504,8 +517,6 @@ export function TransactionsPage() {
   const mutationBusy = Boolean(mutatingId);
   const reconciliationBusy = mutationBusy;
   const reviewedStatementBalance = reconcileDraft ? parseMilliunits(reconcileDraft.statementBalance) : null;
-  // `useApi` intentionally keeps its previous response while a new key starts
-  // loading. Never allow that response to authorise a different draft.
   const reconciliationPreviewData = reconciliationPreview.data
     && reconcileDraft
     && reconciliationPreview.data.account.id === reconcileDraft.accountId
@@ -526,7 +537,7 @@ export function TransactionsPage() {
 
   return (
     <>
-      <FilterRail filters={filters} setFilters={setFilters} busy={page.loading || page.loadingMore} />
+      <FilterRail filters={filters} setFilters={setFilters} busy={page.loading || page.filling || page.loadingMore} />
       <div className="report-header">
         <div>
           <span className="page-eyebrow">{usesActiveBalanceScope ? "All account history" : "Account register"}</span>
@@ -947,20 +958,20 @@ export function TransactionsPage() {
                   ])}
                 </tbody>
               </table>
-              {rows.length === 0 && (
+              {rows.length === 0 && !page.filling && (
                 <div className="register-empty-state">
                   <p className="status-title">{emptyMessage}</p>
                   <p className="status-detail">Try widening the date range, clearing filters, or shortening the search term.</p>
                 </div>
               )}
             </div>
-          ) : (
+          ) : page.filling ? null : (
             <div className="status-panel">
               <p className="status-title">{emptyMessage}</p>
               <p className="status-detail">Try widening the date range, clearing filters, or shortening the search term.</p>
             </div>
           )}
-          {page.hasMore && !unapprovedOnly && (
+          {page.hasMore && !page.filling && !unapprovedOnly && (
             <div className="register-load-more">
               <button type="button" className="register-load-more-button" onClick={loadOlder} disabled={page.loadingMore}>
                 {page.loadingMore ? "Loading older transactions…" : "Load older transactions"}

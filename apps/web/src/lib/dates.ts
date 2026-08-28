@@ -38,8 +38,8 @@ export function ytdRange(): { from: string; to: string } {
   return { from: `${new Date().getFullYear()}-01-01`, to: todayIso() };
 }
 
-export function trailingMonthsRange(months: number): { from: string; to: string } {
-  return { from: iso(shiftMonths(new Date(), -months)), to: todayIso() };
+export function trailingMonthsRange(months: number, today: Date = new Date()): { from: string; to: string } {
+  return { from: iso(shiftMonths(today, -months)), to: iso(today) };
 }
 
 /** "2026-06" when from–to spans exactly that calendar month, else null. */
@@ -68,6 +68,7 @@ export interface RangePreset {
 export const RANGE_PRESETS: RangePreset[] = [
   { id: "this-month", label: "This month", range: () => monthRange(0) },
   { id: "last-month", label: "Last month", range: () => monthRange(-1) },
+  { id: "2m", label: "2M", range: () => trailingMonthsRange(2) },
   { id: "3m", label: "3M", range: () => trailingMonthsRange(3) },
   { id: "ytd", label: "YTD", range: () => ytdRange() },
   { id: "1y", label: "1Y", range: () => trailingMonthsRange(12) },
