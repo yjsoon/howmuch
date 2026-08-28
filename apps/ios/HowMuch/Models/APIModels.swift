@@ -1028,6 +1028,10 @@ struct Payee: Decodable, Identifiable, Hashable {
   var isTransferPayee: Bool {
     transferAccountId != nil
   }
+
+  func withName(_ name: String) -> Payee {
+    Payee(id: id, name: name, transferAccountId: transferAccountId, deleted: deleted)
+  }
 }
 
 struct TransactionsPayload: Decodable {

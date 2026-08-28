@@ -242,7 +242,10 @@ final class AppModel {
       throw APIClientError.validation("Account not found")
     }
     let previous = accounts[index]
-    accounts[index] = previous.withIdentity(name: parsedName ?? previous.name, icon: parsedIcon)
+    let previousPayees = payees
+    let nextName = parsedName ?? previous.name
+    accounts[index] = previous.withIdentity(name: nextName, icon: parsedIcon)
+    renameTransferPayee(forAccountID: accountID, to: nextName)
     rebuildLookups()
     do {
       let updated = try await apiClient.updateAccount(
@@ -253,14 +256,28 @@ final class AppModel {
       )
       if let current = accounts.firstIndex(where: { $0.id == accountID }) {
         accounts[current] = updated
+        renameTransferPayee(forAccountID: accountID, to: updated.name)
         rebuildLookups()
       }
     } catch {
       if let current = accounts.firstIndex(where: { $0.id == accountID }) {
         accounts[current] = previous
+        payees = previousPayees
         rebuildLookups()
       }
       throw error
+    }
+  }
+
+  /// Keep the local "Transfer : …" payee in step with a renamed account so
+  /// the payee picker does not keep showing the previous name.
+  private func renameTransferPayee(forAccountID accountID: String, to accountName: String) {
+    let expectedName = "Transfer : \(accountName)"
+    payees = payees.map { payee in
+      guard payee.transferAccountId == accountID, payee.name.hasPrefix("Transfer : ") else {
+        return payee
+      }
+      return payee.withName(expectedName)
     }
   }
 
