@@ -36,7 +36,7 @@ Keep `HOWMUCH_API_TOKEN` as an encrypted secret. Use the local, validated import
 
 ## Temporary YNAB transition mode
 
-Production has an explicitly authorised, temporary YNAB-primary transition configuration. `HOWMUCH_TRANSITION_READ_ONLY=true`, `HOWMUCH_YNAB_PLAN_ID=80bc6db0-d926-4635-a37a-1ba0787c4c4e`, and cron `10 16 * * *` route one daily delta at `00:10 Asia/Singapore`. `HOWMUCH_YNAB_TOKEN` must exist only as an encrypted Worker secret; it must never appear in `wrangler.jsonc`, command output, logs, or verification notes. Preview has `HOWMUCH_TRANSITION_READ_ONLY=false`, no YNAB plan or token, and no cron. Local configuration is writable unless the variable is the literal string `true`.
+Production has finished the YNAB-primary transition. `HOWMUCH_TRANSITION_READ_ONLY=false`, there is no `HOWMUCH_YNAB_PLAN_ID`, and the only cron is HowMuch scheduled materialisation at `5 16 * * *` (`00:05 Asia/Singapore`). Do not add `HOWMUCH_YNAB_PLAN_ID` or the `10 16 * * *` YNAB delta cron again unless a new transition is explicitly authorised. `HOWMUCH_YNAB_TOKEN` must not exist as a Worker secret. Preview stays writable with no YNAB plan, token, or cron. Local configuration is writable unless the variable is the literal string `true`.
 
 Before enabling the production secret or deploying a transition configuration, verify Wrangler profile `yj` is using account `YJ` (`810a0c404daff0737f4a2a97a7aab092`) and D1 database `howmuch-production` (`57dc5569-d639-44c1-bb9d-6214f43a43b8`). A current D1 Time Travel bookmark is a required recovery gate. From `apps/worker`, record the private bookmark returned by:
 

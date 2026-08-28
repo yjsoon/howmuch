@@ -2452,6 +2452,80 @@ export class LedgerRepository {
     return { payeeId, payeeName, categoryId, categoryName };
   }
 
+  async findYnabImportTarget(
+    planId: string,
+    input: { id: string; account_id: string; date: string; amount: number; import_id?: string | null; deleted?: boolean },
+  ): Promise<any | null> {
+    const byId = await this.getTransactionRow(planId, input.id, true);
+    if (byId) {
+      return this.formatTransaction(byId);
+    }
+
+    const byExternal = await this.db
+      .query("SELECT id FROM transactions WHERE plan_id = ? AND deleted = 0 AND external_ynab_id = ? LIMIT 2")
+      .all(planId, input.id) as Array<{ id: string }>;
+    if (byExternal.length === 1) {
+      return this.getTransaction(planId, byExternal[0].id);
+    }
+
+    if (input.import_id && input.account_id) {
+      const byImport = await this.findTransactionByImportId(planId, input.import_id, input.account_id);
+      if (byImport) {
+        return byImport;
+      }
+    }
+
+    // A YNAB tombstone must not claim an unrelated HowMuch-local row.
+    if (input.deleted) {
+      return null;
+    }
+
+    const locals = await this.db
+      .query(
+        `SELECT id FROM transactions
+         WHERE plan_id = ? AND deleted = 0 AND account_id = ? AND date = ? AND amount_milli = ?
+           AND (source_kind IS NULL OR source_kind NOT IN ('ynab-import', 'scheduled-transaction'))
+         ORDER BY created_at, id
+         LIMIT 2`,
+      )
+      .all(planId, input.account_id, input.date, input.amount) as Array<{ id: string }>;
+    if (locals.length === 1) {
+      return this.getTransaction(planId, locals[0].id);
+    }
+    return null;
+  }
+
+  async relinkYnabTransferTargets(planId: string): Promise<void> {
+    const dangling = await this.db
+      .query(
+        `SELECT id, transfer_transaction_id
+         FROM transactions
+         WHERE plan_id = ? AND deleted = 0 AND transfer_transaction_id IS NOT NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM transactions linked WHERE linked.id = transactions.transfer_transaction_id
+           )`,
+      )
+      .all(planId) as Array<{ id: string; transfer_transaction_id: string }>;
+    if (!dangling.length) {
+      return;
+    }
+
+    const plan = newTransactionMutationPlan();
+    for (const row of dangling) {
+      const matches = await this.db
+        .query("SELECT id FROM transactions WHERE plan_id = ? AND deleted = 0 AND external_ynab_id = ? LIMIT 2")
+        .all(planId, row.transfer_transaction_id) as Array<{ id: string }>;
+      if (matches.length !== 1) {
+        continue;
+      }
+      await this.db
+        .query("UPDATE transactions SET transfer_transaction_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
+        .run(matches[0].id, row.id, planId);
+      plan.touchedTransactionIds.add(row.id);
+    }
+    await this.executeMutationPlan(planId, plan);
+  }
+
   async findDuplicateTransaction(planId: string, input: TransactionInput): Promise<any | null> {
     if (input.import_id && input.account_id) {
       const importMatch = await this.findTransactionByImportId(planId, input.import_id, input.account_id);

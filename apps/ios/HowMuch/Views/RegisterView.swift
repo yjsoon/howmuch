@@ -1187,38 +1187,39 @@ struct TransactionRow: View {
 
   var body: some View {
     HStack(alignment: .center, spacing: 4) {
-      HStack(alignment: .center, spacing: 10) {
-        VStack(alignment: .leading, spacing: 3) {
-          Text(payeeDisplay)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Theme.textPrimary)
-            .lineLimit(1)
-          Text(detailLine)
-            .font(.footnote)
-            .foregroundStyle(transaction.isUncategorised ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
-            .lineLimit(1)
-          if let memo = transaction.memo, !memo.isEmpty {
-            Text(memo)
-              .font(.caption)
-              .foregroundStyle(.secondary)
+      Button(action: onOpen) {
+        HStack(alignment: .center, spacing: 10) {
+          VStack(alignment: .leading, spacing: 3) {
+            Text(payeeDisplay)
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(Theme.textPrimary)
               .lineLimit(1)
-              .padding(.horizontal, 8)
-              .padding(.vertical, 3)
-              .background(Theme.surfaceMuted, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            Text(detailLine)
+              .font(.footnote)
+              .foregroundStyle(transaction.isUncategorised ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
+              .lineLimit(1)
+            if let memo = transaction.memo, !memo.isEmpty {
+              Text(memo)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Theme.surfaceMuted, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
           }
+
+          Spacer()
+
+          Text(MoneyCodec.signedDisplayString(for: transaction.amount, currencyFormat: currencyFormat))
+            .font(.subheadline.weight(.medium))
+            .monospacedDigit()
+            .foregroundStyle(Theme.registerAmountColour(transaction.amount))
         }
-
-        Spacer()
-
-        Text(MoneyCodec.signedDisplayString(for: transaction.amount, currencyFormat: currencyFormat))
-          .font(.subheadline.weight(.medium))
-          .monospacedDigit()
-          .foregroundStyle(Theme.registerAmountColour(transaction.amount))
+        .contentShape(Rectangle())
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .contentShape(Rectangle())
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .onTapGesture(perform: onOpen)
-      .accessibilityAddTraits(.isButton)
+      .buttonStyle(.plain)
       .accessibilityHint("Opens this transaction.")
 
       statusControl
@@ -1262,13 +1263,16 @@ struct TransactionRow: View {
       statusIcon(status)
         .accessibilityLabel(statusAccessibilityLabel(status))
     case .approve, .toggleCleared:
-      Button(action: onChangeStatus) {
-        statusIcon(status)
-      }
-      .buttonStyle(.plain)
-      .disabled(isBusy)
-      .accessibilityLabel(statusAccessibilityLabel(status))
-      .accessibilityHint("Double tap to change this transaction’s status.")
+      statusIcon(status)
+        .contentShape(Rectangle())
+        .onTapGesture {
+          if !isBusy {
+            onChangeStatus()
+          }
+        }
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(statusAccessibilityLabel(status))
+        .accessibilityHint("Double tap to change this transaction’s status.")
     }
   }
 

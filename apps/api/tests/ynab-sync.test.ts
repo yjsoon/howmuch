@@ -199,6 +199,256 @@ describe("YNAB similarity guard", () => {
     ]);
   });
 
+  test("adopts a HowMuch-local row instead of inserting a second copy", async () => {
+    await repo.ensureAccount("plan-test", "acct-1", "Checking");
+    const local = await repo.createTransaction("plan-test", {
+      account_id: "acct-1",
+      date: "2026-06-01",
+      amount: -94960,
+      payee_name: "Genki Sushi",
+      cleared: "uncleared",
+      approved: false,
+    });
+
+    stubYnabApi([
+      ynabTransaction("ynab-genki", {
+        account_id: "acct-1",
+        amount: -94960,
+        payee_name: "Genki Sushi",
+        approved: false,
+        cleared: "uncleared",
+      }),
+    ]);
+
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test" });
+
+    const rows = db
+      .query("SELECT id, external_ynab_id, source_kind, deleted FROM transactions WHERE plan_id='plan-test' AND deleted=0 ORDER BY id")
+      .all() as Array<{ id: string; external_ynab_id: string | null; source_kind: string | null; deleted: number }>;
+    expect(rows).toEqual([
+      { id: local.id, external_ynab_id: "ynab-genki", source_kind: "ynab-import", deleted: 0 },
+    ]);
+  });
+
+  test("adopts a local transfer when YNAB uses a different payee name", async () => {
+    await repo.ensureAccount("plan-test", "acct-1", "Checking");
+    await repo.ensureAccount("plan-test", "acct-2", "Work Refundables");
+    const workPayee = db
+      .query("SELECT id FROM payees WHERE plan_id='plan-test' AND transfer_account_id='acct-2' AND deleted=0")
+      .get() as { id: string };
+    const local = await repo.createTransaction("plan-test", {
+      account_id: "acct-1",
+      date: "2026-06-01",
+      amount: -36000,
+      payee_id: workPayee.id,
+      cleared: "uncleared",
+      approved: false,
+    });
+
+    stubYnabApi([
+      ynabTransaction("ynab-out", {
+        account_id: "acct-1",
+        amount: -36000,
+        payee_name: "Transfer : Work Refundables",
+        transfer_account_id: "acct-2",
+        transfer_transaction_id: "ynab-in",
+        approved: false,
+        cleared: "uncleared",
+      }),
+      ynabTransaction("ynab-in", {
+        account_id: "acct-2",
+        amount: 36000,
+        payee_name: "Transfer : Checking",
+        transfer_account_id: "acct-1",
+        transfer_transaction_id: "ynab-out",
+        approved: false,
+        cleared: "uncleared",
+      }),
+    ], {
+      accounts: [
+        { id: "acct-1", name: "Checking", type: "checking", on_budget: true },
+        { id: "acct-2", name: "Work Refundables", type: "checking", on_budget: true },
+      ],
+    });
+
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test" });
+
+    const rows = db
+      .query("SELECT id, account_id, amount_milli, external_ynab_id FROM transactions WHERE plan_id='plan-test' AND deleted=0 ORDER BY amount_milli")
+      .all() as Array<{ id: string; account_id: string; amount_milli: number; external_ynab_id: string | null }>;
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.id).sort()).toEqual([local.id, local.transfer_transaction_id].sort());
+    expect(rows.find((row) => row.account_id === "acct-1")?.external_ynab_id).toBe("ynab-out");
+    expect(rows.find((row) => row.account_id === "acct-2")?.external_ynab_id).toBe("ynab-in");
+  });
+
+  test("keeps local split lines when YNAB adopts the parent", async () => {
+    await repo.ensureAccount("plan-test", "acct-1", "Checking");
+    await repo.ensureCategory("plan-test", "cat-food", "Food");
+    await repo.ensureCategory("plan-test", "cat-fun", "Fun");
+    const local = await repo.createTransaction("plan-test", {
+      account_id: "acct-1",
+      date: "2026-06-01",
+      amount: -1000,
+      payee_name: "Split shop",
+      subtransactions: [
+        { amount: -600, category_id: "cat-food" },
+        { amount: -400, category_id: "cat-fun" },
+      ],
+    });
+
+    stubYnabApi([
+      ynabTransaction("ynab-split-parent", {
+        account_id: "acct-1",
+        amount: -1000,
+        payee_name: "Split shop",
+      }),
+    ]);
+
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test" });
+
+    expect(db.query("SELECT external_ynab_id FROM transactions WHERE id=?").get(local.id)).toEqual({
+      external_ynab_id: "ynab-split-parent",
+    });
+    const adopted = await repo.getTransaction("plan-test", local.id);
+    expect(
+      adopted.subtransactions
+        .map((sub: { amount: number; category_id: string }) => [sub.amount, sub.category_id])
+        .sort((left: [number, string], right: [number, string]) => left[0] - right[0]),
+    ).toEqual([
+      [-600, "cat-food"],
+      [-400, "cat-fun"],
+    ]);
+  });
+
+  test("applies YNAB split lines when the adopted local row has none", async () => {
+    await repo.ensureAccount("plan-test", "acct-1", "Checking");
+    const local = await repo.createTransaction("plan-test", {
+      account_id: "acct-1",
+      date: "2026-06-01",
+      amount: -1000,
+      payee_name: "Later split",
+    });
+
+    stubYnabApi([
+      ynabTransaction("ynab-later-split", {
+        account_id: "acct-1",
+        amount: -1000,
+        payee_name: "Later split",
+        category_id: "ignored-parent",
+        subtransactions: [
+          { id: "sub-a", transaction_id: "ynab-later-split", amount: -700, category_id: "cat-a" },
+          { id: "sub-b", transaction_id: "ynab-later-split", amount: -300, category_id: "cat-b" },
+        ],
+      }),
+    ]);
+
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test" });
+
+    const adopted = await repo.getTransaction("plan-test", local.id);
+    expect(adopted.subtransactions.map((sub: { amount: number }) => sub.amount).sort()).toEqual([-700, -300].sort());
+    expect(adopted.category_id).toBeNull();
+  });
+
+  test("keeps a YNAB transfer link when the adopted local row is not a transfer", async () => {
+    await repo.ensureAccount("plan-test", "acct-1", "Checking");
+    await repo.ensureAccount("plan-test", "acct-2", "Savings");
+    const local = await repo.createTransaction("plan-test", {
+      account_id: "acct-1",
+      date: "2026-06-01",
+      amount: -25000,
+      payee_name: "Moved",
+    });
+
+    stubYnabApi([
+      ynabTransaction("ynab-out", {
+        account_id: "acct-1",
+        amount: -25000,
+        payee_name: "Transfer : Savings",
+        transfer_account_id: "acct-2",
+        transfer_transaction_id: "ynab-in",
+      }),
+      ynabTransaction("ynab-in", {
+        account_id: "acct-2",
+        amount: 25000,
+        payee_name: "Transfer : Checking",
+        transfer_account_id: "acct-1",
+        transfer_transaction_id: "ynab-out",
+      }),
+    ], {
+      accounts: [
+        { id: "acct-1", name: "Checking", type: "checking", on_budget: true },
+        { id: "acct-2", name: "Savings", type: "checking", on_budget: true },
+      ],
+    });
+
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test" });
+
+    const adopted = await repo.getTransaction("plan-test", local.id);
+    expect(adopted.transfer_account_id).toBe("acct-2");
+    expect(adopted.transfer_transaction_id).not.toBe("ynab-out");
+    const counterpart = await repo.getTransaction("plan-test", adopted.transfer_transaction_id);
+    expect(counterpart.account_id).toBe("acct-2");
+    expect(counterpart.transfer_transaction_id).toBe(local.id);
+  });
+
+  test("does not adopt a scheduled occurrence as a YNAB import", async () => {
+    await repo.ensureAccount("plan-test", "acct-1", "Checking");
+    const scheduled = await repo.createTransaction("plan-test", {
+      account_id: "acct-1",
+      date: "2026-06-01",
+      amount: -1000,
+      payee_name: "Rent",
+      source_kind: "scheduled-transaction",
+      source_ref: "sched-1:2026-06-01:hash:op",
+    });
+
+    stubYnabApi([
+      ynabTransaction("ynab-rent", {
+        account_id: "acct-1",
+        amount: -1000,
+        payee_name: "Rent",
+      }),
+    ]);
+
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test" });
+
+    expect(db.query("SELECT source_kind, source_ref FROM transactions WHERE id=?").get(scheduled.id)).toEqual({
+      source_kind: "scheduled-transaction",
+      source_ref: "sched-1:2026-06-01:hash:op",
+    });
+    expect(db.query("SELECT id FROM transactions WHERE id='ynab-rent' AND source_kind='ynab-import'").get()).toEqual({
+      id: "ynab-rent",
+    });
+  });
+
+  test("does not adopt a local row from an unmatched YNAB tombstone", async () => {
+    await repo.ensureAccount("plan-test", "acct-1", "Checking");
+    const local = await repo.createTransaction("plan-test", {
+      account_id: "acct-1",
+      date: "2026-06-01",
+      amount: -1000,
+      payee_name: "Keep me",
+    });
+
+    stubYnabApi([
+      ynabTransaction("ynab-gone", {
+        account_id: "acct-1",
+        amount: -1000,
+        payee_name: "Gone in YNAB",
+        deleted: true,
+      }),
+    ]);
+
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test" });
+
+    expect(db.query("SELECT deleted, external_ynab_id FROM transactions WHERE id=?").get(local.id)).toEqual({
+      deleted: 0,
+      external_ynab_id: local.id,
+    });
+    expect(db.query("SELECT id FROM transactions WHERE id='ynab-gone'").get()).toBeNull();
+  });
+
   test("first sync into an empty ledger is never blocked", async () => {
     stubYnabApi([ynabTransaction("txn-1"), ynabTransaction("txn-2")]);
 

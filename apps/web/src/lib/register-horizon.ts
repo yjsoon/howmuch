@@ -83,7 +83,7 @@ export async function fillRegisterHorizon<T extends { id: string; date: string }
         today: options.today,
       });
     options.onProgress?.({ ...fill, done });
-    if (done) {
+    if (done || nextOffset === null) {
       return fill;
     }
 
