@@ -17,6 +17,7 @@
 		A10000000000000000000027 /* RegisterHorizon.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* RegisterHorizon.swift */; };
 		A10000000000000000000060 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000070 /* Components.swift */; };
 		A1000000000000000000006A /* Confirm.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000007A /* Confirm.swift */; };
+		A1000000000000000000006B /* AccountIconPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000007B /* AccountIconPicker.swift */; };
 		A10000000000000000000061 /* AccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000071 /* AccountsView.swift */; };
 		A10000000000000000000062 /* RegisterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000072 /* RegisterView.swift */; };
 		A10000000000000000000063 /* TransactionFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000073 /* TransactionFormView.swift */; };
@@ -29,6 +30,7 @@
 		A10000000000000000000028 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* SettingsView.swift */; };
 		A10000000000000000000029 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000019 /* Theme.swift */; };
 		A1000000000000000000002A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001A /* Assets.xcassets */; };
+		A10000000000000000000092 /* EmojiKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000091 /* EmojiKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -43,6 +45,7 @@
 		A10000000000000000000017 /* RegisterHorizon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterHorizon.swift; sourceTree = "<group>"; };
 		A10000000000000000000070 /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		A1000000000000000000007A /* Confirm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Confirm.swift; sourceTree = "<group>"; };
+		A1000000000000000000007B /* AccountIconPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountIconPicker.swift; sourceTree = "<group>"; };
 		A10000000000000000000071 /* AccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountsView.swift; sourceTree = "<group>"; };
 		A10000000000000000000072 /* RegisterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterView.swift; sourceTree = "<group>"; };
 		A10000000000000000000073 /* TransactionFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionFormView.swift; sourceTree = "<group>"; };
@@ -63,6 +66,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000092 /* EmojiKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -133,6 +137,7 @@
 			children = (
 				A10000000000000000000070 /* Components.swift */,
 				A1000000000000000000007A /* Confirm.swift */,
+				A1000000000000000000007B /* AccountIconPicker.swift */,
 				A10000000000000000000071 /* AccountsView.swift */,
 				A10000000000000000000072 /* RegisterView.swift */,
 				A10000000000000000000077 /* CategoriesView.swift */,
@@ -163,6 +168,9 @@
 			dependencies = (
 			);
 			name = HowMuch;
+			packageProductDependencies = (
+				A10000000000000000000091 /* EmojiKit */,
+			);
 			productName = HowMuch;
 			productReference = A10000000000000000000001 /* HowMuch.app */;
 			productType = "com.apple.product-type.application";
@@ -191,6 +199,9 @@
 				Base,
 			);
 			mainGroup = A10000000000000000000002;
+			packageReferences = (
+				A10000000000000000000090 /* XCRemoteSwiftPackageReference "EmojiKit" */,
+			);
 			productRefGroup = A10000000000000000000004 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -226,6 +237,7 @@
 				A10000000000000000000029 /* Theme.swift in Sources */,
 				A10000000000000000000060 /* Components.swift in Sources */,
 				A1000000000000000000006A /* Confirm.swift in Sources */,
+				A1000000000000000000006B /* AccountIconPicker.swift in Sources */,
 				A10000000000000000000061 /* AccountsView.swift in Sources */,
 				A10000000000000000000062 /* RegisterView.swift in Sources */,
 				A10000000000000000000063 /* TransactionFormView.swift in Sources */,
@@ -372,6 +384,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A10000000000000000000090 /* XCRemoteSwiftPackageReference "EmojiKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/danielsaidi/EmojiKit.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.0.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A10000000000000000000091 /* EmojiKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000090 /* XCRemoteSwiftPackageReference "EmojiKit" */;
+			productName = EmojiKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A1000000000000000000000A /* Project object */;
 }

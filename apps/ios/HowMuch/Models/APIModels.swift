@@ -1128,7 +1128,7 @@ struct Account: Decodable, Identifiable, Hashable {
   let deleted: Bool
 
   var displayIcon: String {
-    AccountIcon.resolved(icon, type: type)
+    AccountIcon.displayGlyph(stored: icon, accountType: type)
   }
 
   func withIcon(_ icon: String) -> Account {
