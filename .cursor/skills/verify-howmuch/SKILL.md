@@ -88,7 +88,8 @@ Stable handles:
 | Auth submit | `Create account` / `Sign in` |
 | Primary nav | `nav` named `Primary navigation` |
 | Plan / reports / register | links `Plan`, `Spending breakdown`, `Income v Spending`, `Net Worth`, `Age of Money`, `All Accounts` |
-| Quick entry | `+ Add transaction` or route `/add` |
+| Quick entry | sidebar `+ Add transaction` or route `/add` |
+| Register compose | account register toolbar `+ Add transaction` |
 | Sign out | button `Sign out` |
 | Date range | group `Date range`, buttons `This month`, `Last month`, `2M`, `3M`, `YTD`, `1Y`, `All` |
 | Custom dates | `From date`, `To date` |

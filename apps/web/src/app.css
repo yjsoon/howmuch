@@ -1042,9 +1042,20 @@ textarea {
 
 .register-add-link {
   flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: none;
   color: var(--green);
+  font: inherit;
   font-size: 13px;
   font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.register-add-link:disabled {
+  color: var(--ink-faint);
+  cursor: default;
   text-decoration: none;
 }
 
@@ -1176,6 +1187,86 @@ textarea {
 
 .register-status {
   vertical-align: middle !important;
+}
+
+.register-compose-row td,
+.register-compose-actions-row td,
+.register-compose-error-row td {
+  vertical-align: middle;
+  background: var(--plan-accent-wash);
+  box-shadow: inset 3px 0 var(--plan-accent);
+}
+
+.ledger-table tbody tr.register-compose-row:hover td,
+.ledger-table tbody tr.register-compose-actions-row:hover td,
+.ledger-table tbody tr.register-compose-error-row:hover td {
+  background: var(--plan-accent-wash);
+}
+
+.register-compose-actions-row td {
+  text-align: right;
+  padding-block: 8px;
+}
+
+.register-compose-row input,
+.register-compose-row select {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 2px;
+  background: var(--paper);
+  font: inherit;
+}
+
+.register-compose-row .num input {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.register-compose-locked-account,
+.register-compose-transfer {
+  color: var(--ink);
+}
+
+.register-compose-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.register-compose-save,
+.register-compose-cancel {
+  padding: 5px 10px;
+  border-radius: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.register-compose-save {
+  border: 0;
+  background: var(--plan-accent);
+  color: var(--paper);
+}
+
+.register-compose-cancel {
+  border: 1px solid var(--plan-accent);
+  background: var(--paper);
+  color: var(--plan-accent);
+}
+
+.register-compose-save:disabled,
+.register-compose-cancel:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.register-compose-error {
+  margin: 0;
+  color: var(--red);
+  font-size: 12px;
 }
 
 .cleared-status {

@@ -6,6 +6,7 @@ export function CategorySelect({
   groups,
   allowEmpty = true,
   emptyLabel = "Uncategorised",
+  disabled = false,
   "aria-label": ariaLabel,
 }: {
   value: string;
@@ -13,6 +14,7 @@ export function CategorySelect({
   groups: ReturnType<typeof splitCategoryGroups>;
   allowEmpty?: boolean;
   emptyLabel?: string;
+  disabled?: boolean;
   "aria-label"?: string;
 }) {
   return (
@@ -20,6 +22,7 @@ export function CategorySelect({
       value={value}
       onChange={(event) => onChange(event.target.value)}
       aria-label={ariaLabel}
+      disabled={disabled}
     >
       {allowEmpty && <option value="">{emptyLabel}</option>}
       {[...groups.primary, ...groups.quiet].map((group) => (
