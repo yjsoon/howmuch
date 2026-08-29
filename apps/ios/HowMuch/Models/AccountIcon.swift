@@ -10,10 +10,8 @@ struct AccountIcon: RawRepresentable, Equatable, Hashable, Sendable {
       self.rawValue = trimmed
       return
     }
-    let hasLetterOrDigit = trimmed.unicodeScalars.contains { scalar in
-      CharacterSet.letters.contains(scalar) || CharacterSet.decimalDigits.contains(scalar)
-    }
-    guard !hasLetterOrDigit else { return nil }
+    let hasAsciiDigit = trimmed.unicodeScalars.contains { CharacterSet.decimalDigits.contains($0) }
+    guard !hasAsciiDigit else { return nil }
     let hasEmoji = trimmed.unicodeScalars.contains { scalar in
       scalar.properties.isEmojiPresentation
         || (scalar.properties.isEmoji && !Self.bareKeycapBases.contains(scalar))

@@ -30,7 +30,7 @@ export function isAccountIcon(value: string): boolean {
   return parseAccountIcon(value) !== null;
 }
 
-/** A single emoji grapheme, including ZWJ sequences and keycaps. */
+/** A single emoji grapheme. */
 export function parseAccountIcon(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -88,6 +88,5 @@ function isKeycapGrapheme(value: string): boolean {
 
 function isEmojiGrapheme(value: string): boolean {
   if (isKeycapGrapheme(value)) return true;
-  if (/\p{L}|\p{Nd}/u.test(value)) return false;
   return /\p{Extended_Pictographic}/u.test(value) || /\p{Emoji_Presentation}/u.test(value);
 }

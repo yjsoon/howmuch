@@ -2,6 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { parseAccountIconInput } from "./account-icon";
 
 describe("parseAccountIconInput", () => {
+  test("accepts letter-like emoji", () => {
+    expect(parseAccountIconInput("ℹ️")).toBe("ℹ️");
+  });
+
   test("accepts emoji keycaps", () => {
     expect(parseAccountIconInput("1️⃣")).toBe("1️⃣");
     expect(parseAccountIconInput("#️⃣")).toBe("#️⃣");

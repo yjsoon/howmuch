@@ -17,7 +17,6 @@ export function parseAccountIconInput(value: string): string | null {
   if (parts.length !== 1) return null;
   const grapheme = parts[0]!.segment;
   if (KEYCAP_GRAPHEME.test(grapheme)) return grapheme;
-  if (/\p{L}|\p{Nd}/u.test(grapheme)) return null;
   return /\p{Extended_Pictographic}/u.test(grapheme) || /\p{Emoji_Presentation}/u.test(grapheme)
     ? grapheme
     : null;

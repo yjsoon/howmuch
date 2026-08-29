@@ -13,6 +13,11 @@ describe("parseAccountIcon", () => {
     expect(parseAccountIcon("👩‍💻")).toBe("👩‍💻");
   });
 
+  test("accepts letter-like emoji", () => {
+    expect(parseAccountIcon("ℹ️")).toBe("ℹ️");
+    expect(parseAccountIcon("Ⓜ️")).toBe("Ⓜ️");
+  });
+
   test("accepts emoji keycaps", () => {
     expect(parseAccountIcon("1️⃣")).toBe("1️⃣");
     expect(parseAccountIcon("0️⃣")).toBe("0️⃣");
