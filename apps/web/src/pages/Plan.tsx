@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, useApi } from "../api/client";
 import type { CategoryGroup, PlanMonth, PlanMonthCategory } from "../api/types";
@@ -23,7 +23,6 @@ export function PlanPage() {
   const [savingCategoryId, setSavingCategoryId] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [monthData, setMonthData] = useState<PlanMonth | null>(null);
-  const planWriteRef = useRef(0);
   const result = useApi(`${planId}:${month}`, () => api.month(planId, month));
 
   useEffect(() => {
@@ -41,8 +40,8 @@ export function PlanPage() {
   }, [month, result.data]);
 
   const visibleMonth = monthData && monthData.month.slice(0, 7) === month ? monthData : null;
-  const applyReturnedMonth = (assignedMonth: string, token: number, next: PlanMonth, categoryId: string, field: "assignment" | "target") => {
-    if (assignedMonth !== month || token !== planWriteRef.current) {
+  const applyReturnedMonth = (assignedMonth: string, next: PlanMonth, categoryId: string, field: "assignment" | "target") => {
+    if (assignedMonth !== month) {
       return;
     }
     setMonthData(next);
@@ -55,7 +54,6 @@ export function PlanPage() {
   const beginPlanWrite = (categoryId: string) => {
     setSavingCategoryId(categoryId);
     setPlanError(null);
-    return ++planWriteRef.current;
   };
   const endPlanWrite = (categoryId: string) => {
     setSavingCategoryId((current) => (current === categoryId ? null : current));
@@ -83,10 +81,10 @@ export function PlanPage() {
       return;
     }
     const assignedMonth = month;
-    const token = beginPlanWrite(category.id);
+    beginPlanWrite(category.id);
     try {
       const next = await api.setMonthCategoryAssignment(planId, assignedMonth, category.id, budgeted);
-      applyReturnedMonth(assignedMonth, token, next, category.id, "assignment");
+      applyReturnedMonth(assignedMonth, next, category.id, "assignment");
     } catch (cause) {
       setPlanError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -114,14 +112,14 @@ export function PlanPage() {
       return;
     }
     const assignedMonth = month;
-    const token = beginPlanWrite(category.id);
+    beginPlanWrite(category.id);
     try {
       const next = await api.setMonthCategoryTarget(planId, assignedMonth, category.id, {
         goal_type: editingTarget.type,
         goal_target: target,
         goal_target_month: editingTarget.month || null,
       });
-      applyReturnedMonth(assignedMonth, token, next, category.id, "target");
+      applyReturnedMonth(assignedMonth, next, category.id, "target");
     } catch (cause) {
       setPlanError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -130,10 +128,10 @@ export function PlanPage() {
   };
   const clearTarget = async (category: PlanMonthCategory) => {
     const assignedMonth = month;
-    const token = beginPlanWrite(category.id);
+    beginPlanWrite(category.id);
     try {
       const next = await api.setMonthCategoryTarget(planId, assignedMonth, category.id, null);
-      applyReturnedMonth(assignedMonth, token, next, category.id, "target");
+      applyReturnedMonth(assignedMonth, next, category.id, "target");
     } catch (cause) {
       setPlanError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -142,10 +140,10 @@ export function PlanPage() {
   };
   const restoreTarget = async (category: PlanMonthCategory) => {
     const assignedMonth = month;
-    const token = beginPlanWrite(category.id);
+    beginPlanWrite(category.id);
     try {
       const next = await api.restoreMonthCategoryTarget(planId, assignedMonth, category.id);
-      applyReturnedMonth(assignedMonth, token, next, category.id, "target");
+      applyReturnedMonth(assignedMonth, next, category.id, "target");
     } catch (cause) {
       setPlanError(cause instanceof Error ? cause.message : String(cause));
     } finally {
