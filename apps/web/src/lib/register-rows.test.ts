@@ -4,6 +4,7 @@ import {
   deletedIdsForRemoval,
   markDeletedByIds,
   replaceRowById,
+  unlinkSplitMirrorParent,
 } from "./register-rows";
 
 function row(id: string, deleted = false, cleared = "uncleared") {
@@ -23,6 +24,22 @@ describe("register rows", () => {
   test("deletedIdsForRemoval includes the transfer pair when present", () => {
     expect(deletedIdsForRemoval({ id: "a" })).toEqual(["a"]);
     expect(deletedIdsForRemoval({ id: "a", transfer_transaction_id: "b" })).toEqual(["a", "b"]);
+  });
+
+  test("unlinkSplitMirrorParent clears the matching split transfer line", () => {
+    const groceries = { id: "sub-food", transfer_account_id: null, transfer_transaction_id: null };
+    const stash = { id: "sub-stash", transfer_account_id: "saver", transfer_transaction_id: "mirror" };
+    const parent = { id: "parent", subtransactions: [groceries, stash] };
+    const other = { id: "other", subtransactions: [{ id: "plain" }] };
+    expect(unlinkSplitMirrorParent([other, parent], { id: "mirror", parent_transaction_id: "parent" })).toEqual({
+      id: "parent",
+      subtransactions: [groceries, { id: "sub-stash", transfer_account_id: null, transfer_transaction_id: null }],
+    });
+    expect(unlinkSplitMirrorParent([parent], { id: "mirror", transfer_transaction_id: "sub-stash" })).toEqual({
+      id: "parent",
+      subtransactions: [groceries, { id: "sub-stash", transfer_account_id: null, transfer_transaction_id: null }],
+    });
+    expect(unlinkSplitMirrorParent([parent], { id: "unrelated" })).toBeNull();
   });
 
   test("deletedIdsForRemoval includes split-line transfer mirrors", () => {

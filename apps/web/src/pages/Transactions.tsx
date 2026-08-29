@@ -36,7 +36,7 @@ import {
   type RegisterComposeState,
 } from "../lib/register-compose";
 import { fillRegisterHorizon } from "../lib/register-horizon";
-import { applyRegisterPatches, deletedIdsForRemoval } from "../lib/register-rows";
+import { applyRegisterPatches, deletedIdsForRemoval, unlinkSplitMirrorParent } from "../lib/register-rows";
 import {
   emptySelection,
   headerState,
@@ -330,7 +330,26 @@ export function TransactionsPage() {
         ...deletedIdsForRemoval(transaction),
         ...(deleted.id ? deletedIdsForRemoval(deleted) : []),
       ]);
+      const mirror = {
+        id: deleted.id || transaction.id,
+        parent_transaction_id: deleted.parent_transaction_id ?? transaction.parent_transaction_id,
+        transfer_transaction_id: deleted.transfer_transaction_id ?? transaction.transfer_transaction_id,
+      };
       setDeletedIds((current) => new Set([...current, ...removed]));
+      setReplacements((current) => {
+        const byId = new Map<string, Transaction>();
+        for (const row of page.transactions) {
+          byId.set(row.id, row);
+        }
+        for (const row of approvalQueue.data ?? []) {
+          byId.set(row.id, row);
+        }
+        for (const [id, row] of current) {
+          byId.set(id, row);
+        }
+        const parent = unlinkSplitMirrorParent([...byId.values()], mirror);
+        return parent ? new Map(current).set(parent.id, parent) : current;
+      });
       setEditing((current) => (current && removed.has(current.id) ? null : current));
       setPendingDeletion((current) => (current && removed.has(current.id) ? null : current));
       reload();
