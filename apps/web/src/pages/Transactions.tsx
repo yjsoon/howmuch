@@ -36,6 +36,7 @@ import {
   type RegisterComposeState,
 } from "../lib/register-compose";
 import { fillRegisterHorizon } from "../lib/register-horizon";
+import { applyRegisterPatches, deletedIdsForRemoval } from "../lib/register-rows";
 import {
   emptySelection,
   headerState,
@@ -82,7 +83,6 @@ export function TransactionsPage() {
     [accounts, filters.accountIds],
   );
   const registerAccountIds = useMemo(() => new Set(visibleAccounts.map((account) => account.id)), [visibleAccounts]);
-  // All Accounts lists closed ledger rows, but the headline stays an active-account balance.
   const balanceAccounts = useMemo(
     () => filters.accountIds.length ? visibleAccounts : visibleAccounts.filter((account) => !account.closed),
     [filters.accountIds.length, visibleAccounts],
@@ -134,9 +134,12 @@ export function TransactionsPage() {
   const [mutatingId, setMutatingId] = useState<string | null>(null);
   const [unapprovedOnly, setUnapprovedOnly] = useState(false);
   const [selection, setSelection] = useState(() => emptySelection(listKey));
+  const [replacements, setReplacements] = useState<ReadonlyMap<string, Transaction>>(() => new Map());
+  const [deletedIds, setDeletedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [compose, setCompose] = useState<RegisterComposeState>(closedCompose);
   const [composeFocus, setComposeFocus] = useState(0);
   const mutationLockRef = useRef(false);
+  const [writeLocked, setWriteLocked] = useState(false);
   const selectedAccountId = filters.accountIds.length === 1 ? filters.accountIds[0]! : null;
   const composeScope = selectedAccountId ?? (filters.accountIds.join(",") || "all");
   useEffect(() => {
@@ -193,7 +196,6 @@ export function TransactionsPage() {
     ? api.accountTransactions(planId, selectedAccountId, { ...pageQuery, offset })
     : api.transactions(planId, { ...pageQuery, offset });
 
-  // Offset pages are only stable while the ledger is unchanged. A write must restart from offset 0.
   const refreshFirstPage = () => {
     requestVersionRef.current += 1;
     setPage({ transactions: [], hasMore: false, nextOffset: null, loading: true, filling: true, loadingMore: false, loaded: false, error: null });
@@ -246,6 +248,11 @@ export function TransactionsPage() {
     };
   }, [listKey, refreshGeneration]);
 
+  useEffect(() => {
+    setReplacements(new Map());
+    setDeletedIds(new Set());
+  }, [listKey, refreshGeneration]);
+
   const loadOlder = async () => {
     if (page.loadingMore || !page.hasMore || page.nextOffset === null) return;
     const requestedOffset = page.nextOffset;
@@ -274,6 +281,7 @@ export function TransactionsPage() {
     if (mutationLockRef.current) return;
     mutationLockRef.current = true;
     requestVersionRef.current += 1;
+    setWriteLocked(true);
     setMutatingId(transactionId);
     setMutationError(null);
     setMutationSuccess(null);
@@ -288,6 +296,7 @@ export function TransactionsPage() {
       refreshFirstPage();
     } finally {
       mutationLockRef.current = false;
+      setWriteLocked(false);
       setMutatingId(null);
     }
   };
@@ -295,48 +304,41 @@ export function TransactionsPage() {
   const toggleCleared = async (transaction: Transaction) => {
     if (mutationLockRef.current || (transaction.cleared !== "uncleared" && transaction.cleared !== "cleared")) return;
     const cleared = transaction.cleared === "cleared" ? "uncleared" : "cleared";
-    mutationLockRef.current = true;
-    requestVersionRef.current += 1;
     setMutatingId(transaction.id);
     setMutationError(null);
     setMutationSuccess(null);
     try {
-      await api.updateTransactionCleared(planId, transaction.id, transaction.cleared, cleared);
+      const updated = await api.updateTransactionCleared(planId, transaction.id, transaction.cleared, cleared);
+      setReplacements((current) => new Map(current).set(updated.id, updated));
       reload();
-      refreshFirstPage();
       setReconciliationPreviewGeneration((generation) => generation + 1);
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause.message : String(cause));
-      refreshFirstPage();
-      reload();
     } finally {
-      mutationLockRef.current = false;
-      setMutatingId(null);
+      setMutatingId((current) => (current === transaction.id ? null : current));
     }
   };
 
   const deleteTransaction = async (transaction: Transaction) => {
     if (mutationLockRef.current) return;
-    mutationLockRef.current = true;
-    requestVersionRef.current += 1;
     setMutatingId(transaction.id);
     setMutationError(null);
     setMutationSuccess(null);
     try {
-      await api.deleteTransaction(planId, transaction.id, transaction.approved ? undefined : false);
-      if (editing?.id === transaction.id) {
-        setEditing(null);
-      }
-      setPendingDeletion(null);
+      const deleted = await api.deleteTransaction(planId, transaction.id, transaction.approved ? undefined : false);
+      const removed = new Set([
+        ...deletedIdsForRemoval(transaction),
+        ...(deleted.id ? deletedIdsForRemoval(deleted) : []),
+      ]);
+      setDeletedIds((current) => new Set([...current, ...removed]));
+      setEditing((current) => (current && removed.has(current.id) ? null : current));
+      setPendingDeletion((current) => (current && removed.has(current.id) ? null : current));
       reload();
-      refreshFirstPage();
       setReconciliationPreviewGeneration((generation) => generation + 1);
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause.message : String(cause));
-      refreshFirstPage();
     } finally {
-      mutationLockRef.current = false;
-      setMutatingId(null);
+      setMutatingId((current) => (current === transaction.id ? null : current));
     }
   };
 
@@ -363,6 +365,7 @@ export function TransactionsPage() {
       return;
     }
     mutationLockRef.current = true;
+    setWriteLocked(true);
     setMutatingId("compose");
     setMutationError(null);
     setMutationSuccess(null);
@@ -397,6 +400,7 @@ export function TransactionsPage() {
       }));
     } finally {
       mutationLockRef.current = false;
+      setWriteLocked(false);
       setMutatingId(null);
     }
   };
@@ -470,6 +474,7 @@ export function TransactionsPage() {
     const mutationId = `reconcile:${reconcileDraft.accountId}`;
     mutationLockRef.current = true;
     requestVersionRef.current += 1;
+    setWriteLocked(true);
     setMutatingId(mutationId);
     setMutationError(null);
     setMutationSuccess(null);
@@ -497,6 +502,7 @@ export function TransactionsPage() {
       }
     } finally {
       mutationLockRef.current = false;
+      setWriteLocked(false);
       setMutatingId(null);
     }
   };
@@ -507,18 +513,26 @@ export function TransactionsPage() {
     [filters.categoryIds],
   );
 
+  const patchedQueue = useMemo(
+    () => applyRegisterPatches(approvalQueue.data ?? [], replacements, deletedIds),
+    [approvalQueue.data, deletedIds, replacements],
+  );
+  const patchedPage = useMemo(
+    () => applyRegisterPatches(page.transactions, replacements, deletedIds),
+    [deletedIds, page.transactions, replacements],
+  );
   const inScope = useMemo(
     () =>
-      (unapprovedOnly ? (approvalQueue.data ?? []) : page.transactions)
+      (unapprovedOnly ? patchedQueue : patchedPage)
         .filter((txn) => !txn.deleted)
         .filter((txn) => registerAccountIds.has(txn.account_id)),
-    [approvalQueue.data, page.transactions, registerAccountIds, unapprovedOnly],
+    [patchedPage, patchedQueue, registerAccountIds, unapprovedOnly],
   );
 
   const uncategorisedCount = useMemo(() => inScope.filter(hasUncategorisedLine).length, [inScope]);
   const unapprovedCount = useMemo(
-    () => (approvalQueue.data ?? []).filter((transaction) => !transaction.deleted && registerAccountIds.has(transaction.account_id)).length,
-    [approvalQueue.data, registerAccountIds],
+    () => patchedQueue.filter((transaction) => !transaction.deleted && registerAccountIds.has(transaction.account_id)).length,
+    [patchedQueue, registerAccountIds],
   );
 
   const scopedRows = useMemo(() => {
@@ -582,6 +596,7 @@ export function TransactionsPage() {
     const plannedIds = plan.flat();
     mutationLockRef.current = true;
     requestVersionRef.current += 1;
+    setWriteLocked(true);
     setMutatingId(bulk ? "bulk-approve" : (plannedIds[0] ?? "bulk-approve"));
     setMutationError(null);
     setMutationSuccess(null);
@@ -604,6 +619,7 @@ export function TransactionsPage() {
       }
     } finally {
       mutationLockRef.current = false;
+      setWriteLocked(false);
       setMutatingId(null);
     }
   };
@@ -631,7 +647,7 @@ export function TransactionsPage() {
       : deferredSearch.trim()
         ? "No transactions match this search."
         : "No transactions match these filters.";
-  const mutationBusy = Boolean(mutatingId);
+  const mutationBusy = writeLocked || Boolean(mutatingId);
   const lockedComposeAccount = selectedAccount && !selectedAccount.closed ? selectedAccount : null;
   const composeAccounts = useMemo(
     () => visibleAccounts.filter((account) => !account.closed),
@@ -973,8 +989,8 @@ export function TransactionsPage() {
             </p>
           </div>
           <div className="transaction-delete-confirm-actions">
-            <button type="button" className="text-button" onClick={() => setPendingDeletion(null)} disabled={mutationBusy}>Cancel</button>
-            <button type="button" className="transaction-delete-button" onClick={() => void deleteTransaction(pendingDeletion)} disabled={mutationBusy}>
+            <button type="button" className="text-button" onClick={() => setPendingDeletion(null)} disabled={writeLocked || mutatingId === pendingDeletion.id}>Cancel</button>
+            <button type="button" className="transaction-delete-button" onClick={() => void deleteTransaction(pendingDeletion)} disabled={writeLocked || mutatingId === pendingDeletion.id}>
               {mutatingId === pendingDeletion.id ? "Removing..." : pendingDeletion.approved ? "Delete transaction" : "Reject transaction"}
             </button>
           </div>
@@ -1114,7 +1130,7 @@ export function TransactionsPage() {
                             type="button"
                             className="register-row-action register-row-action-approve"
                             onClick={() => void approveMany([txn.id])}
-                            disabled={mutationBusy}
+                            disabled={writeLocked || mutatingId === txn.id || mutatingId === "bulk-approve"}
                             aria-label={`Approve ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
                           >
                             {mutatingId === txn.id ? "Approving…" : "Approve"}
@@ -1127,7 +1143,7 @@ export function TransactionsPage() {
                             setEditing(txn);
                             setMutationError(null);
                           }}
-                          disabled={Boolean(mutatingId)}
+                          disabled={writeLocked || mutatingId === txn.id}
                           aria-label={`Edit ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
                         >
                           Edit
@@ -1139,7 +1155,7 @@ export function TransactionsPage() {
                             setPendingDeletion(txn);
                             setMutationError(null);
                           }}
-                          disabled={Boolean(mutatingId)}
+                          disabled={writeLocked || mutatingId === txn.id}
                           aria-label={`${txn.approved ? "Delete" : "Reject"} ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
                         >
                           {txn.approved ? "Delete" : "Reject"}
@@ -1148,7 +1164,7 @@ export function TransactionsPage() {
                       <td className="register-status">
                         <ClearedStatus
                           transaction={txn}
-                          busy={Boolean(mutatingId)}
+                          busy={writeLocked || mutatingId === txn.id}
                           onToggle={() => void toggleCleared(txn)}
                         />
                       </td>

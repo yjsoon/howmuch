@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, useApi } from "../api/client";
-import type { CategoryGroup, PlanMonthCategory } from "../api/types";
+import type { CategoryGroup, PlanMonth, PlanMonthCategory } from "../api/types";
 import { isQuietGroup, isQuietGroupName } from "../lib/categories";
 import { formatMilliunitsInput, formatMoney, parseMilliunits } from "../lib/money";
 import { usePlan } from "../state/plan";
@@ -18,20 +18,47 @@ export function PlanPage() {
   const [month, setMonth] = useState(currentMonth());
   const [showQuiet, setShowQuiet] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const [revision, setRevision] = useState(0);
   const [editing, setEditing] = useState<{ categoryId: string; value: string } | null>(null);
   const [editingTarget, setEditingTarget] = useState<{ categoryId: string; value: string; type: string; month: string } | null>(null);
   const [savingCategoryId, setSavingCategoryId] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
-  const result = useApi(`${planId}:${month}:${revision}`, () => api.month(planId, month));
+  const [monthData, setMonthData] = useState<PlanMonth | null>(null);
+  const result = useApi(`${planId}:${month}`, () => api.month(planId, month));
 
   useEffect(() => {
     setEditing(null);
     setEditingTarget(null);
     setPlanError(null);
-  }, [month]);
+    setMonthData(null);
+  }, [month, planId]);
 
-  const groups = useMemo(() => groupMonth(result.data?.categories ?? [], categoryGroups), [result.data, categoryGroups]);
+  useEffect(() => {
+    if (!result.data || result.data.month.slice(0, 7) !== month) {
+      return;
+    }
+    setMonthData((current) => (current && current.month.slice(0, 7) === month ? current : result.data));
+  }, [month, result.data]);
+
+  const visibleMonth = monthData && monthData.month.slice(0, 7) === month ? monthData : null;
+  const applyReturnedMonth = (assignedMonth: string, next: PlanMonth, categoryId: string, field: "assignment" | "target") => {
+    if (assignedMonth !== month) {
+      return;
+    }
+    setMonthData(next);
+    if (field === "assignment") {
+      setEditing((current) => (current?.categoryId === categoryId ? null : current));
+    } else {
+      setEditingTarget((current) => (current?.categoryId === categoryId ? null : current));
+    }
+  };
+  const beginPlanWrite = (categoryId: string) => {
+    setSavingCategoryId(categoryId);
+    setPlanError(null);
+  };
+  const endPlanWrite = (categoryId: string) => {
+    setSavingCategoryId((current) => (current === categoryId ? null : current));
+  };
+  const groups = useMemo(() => groupMonth(visibleMonth?.categories ?? [], categoryGroups), [categoryGroups, visibleMonth]);
   const primaryGroups = groups.filter((group) => !group.quiet);
   const quietGroups = groups.filter((group) => group.quiet);
   const toggleGroup = (id: string) => {
@@ -53,16 +80,15 @@ export function PlanPage() {
       setPlanError("Enter a valid amount with no more than three decimal places.");
       return;
     }
-    setSavingCategoryId(category.id);
-    setPlanError(null);
+    const assignedMonth = month;
+    beginPlanWrite(category.id);
     try {
-      await api.setMonthCategoryAssignment(planId, month, category.id, budgeted);
-      setEditing(null);
-      setRevision((value) => value + 1);
+      const next = await api.setMonthCategoryAssignment(planId, assignedMonth, category.id, budgeted);
+      applyReturnedMonth(assignedMonth, next, category.id, "assignment");
     } catch (cause) {
       setPlanError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setSavingCategoryId(null);
+      endPlanWrite(category.id);
     }
   };
   const startTarget = (category: PlanMonthCategory) => {
@@ -85,33 +111,44 @@ export function PlanPage() {
       setPlanError("Use a month like 2026-08.");
       return;
     }
-    setSavingCategoryId(category.id); setPlanError(null);
+    const assignedMonth = month;
+    beginPlanWrite(category.id);
     try {
-      await api.setMonthCategoryTarget(planId, month, category.id, {
+      const next = await api.setMonthCategoryTarget(planId, assignedMonth, category.id, {
         goal_type: editingTarget.type,
         goal_target: target,
         goal_target_month: editingTarget.month || null,
       });
-      setEditingTarget(null); setRevision((value) => value + 1);
+      applyReturnedMonth(assignedMonth, next, category.id, "target");
     } catch (cause) {
       setPlanError(cause instanceof Error ? cause.message : String(cause));
-    } finally { setSavingCategoryId(null); }
+    } finally {
+      endPlanWrite(category.id);
+    }
   };
   const clearTarget = async (category: PlanMonthCategory) => {
-    setSavingCategoryId(category.id); setPlanError(null);
+    const assignedMonth = month;
+    beginPlanWrite(category.id);
     try {
-      await api.setMonthCategoryTarget(planId, month, category.id, null);
-      setEditingTarget(null); setRevision((value) => value + 1);
-    } catch (cause) { setPlanError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setSavingCategoryId(null); }
+      const next = await api.setMonthCategoryTarget(planId, assignedMonth, category.id, null);
+      applyReturnedMonth(assignedMonth, next, category.id, "target");
+    } catch (cause) {
+      setPlanError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      endPlanWrite(category.id);
+    }
   };
   const restoreTarget = async (category: PlanMonthCategory) => {
-    setSavingCategoryId(category.id); setPlanError(null);
+    const assignedMonth = month;
+    beginPlanWrite(category.id);
     try {
-      await api.restoreMonthCategoryTarget(planId, month, category.id);
-      setEditingTarget(null); setRevision((value) => value + 1);
-    } catch (cause) { setPlanError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setSavingCategoryId(null); }
+      const next = await api.restoreMonthCategoryTarget(planId, assignedMonth, category.id);
+      applyReturnedMonth(assignedMonth, next, category.id, "target");
+    } catch (cause) {
+      setPlanError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      endPlanWrite(category.id);
+    }
   };
 
   return (
@@ -149,16 +186,16 @@ export function PlanPage() {
           <p className="status-detail">{result.error}</p>
         </div>
       )}
-      {result.loading && !result.data && (
+      {result.loading && !visibleMonth && (
         <div className="status-panel"><p className="status-title">Loading monthly plan…</p></div>
       )}
 
-      {result.data && (
+      {visibleMonth && (
         <>
           <section className="plan-summary" aria-label="Plan summary">
-            <PlanFigure label="Ready to assign" amount={result.data.to_be_budgeted ?? 0} tone={(result.data.to_be_budgeted ?? 0) < 0 ? "negative" : "accent"} />
-            <PlanFigure label="Assigned" amount={result.data.budgeted ?? 0} />
-            <PlanFigure label="Activity" amount={result.data.activity ?? 0} tone={(result.data.activity ?? 0) < 0 ? "negative" : "positive"} />
+            <PlanFigure label="Ready to assign" amount={visibleMonth.to_be_budgeted ?? 0} tone={(visibleMonth.to_be_budgeted ?? 0) < 0 ? "negative" : "accent"} />
+            <PlanFigure label="Assigned" amount={visibleMonth.budgeted ?? 0} />
+            <PlanFigure label="Activity" amount={visibleMonth.activity ?? 0} tone={(visibleMonth.activity ?? 0) < 0 ? "negative" : "positive"} />
           </section>
 
           {planError && <div className="status-panel status-panel-error compact-panel"><p className="status-title">Plan change was not saved.</p><p className="status-detail">{planError}</p></div>}
