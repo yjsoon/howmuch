@@ -110,12 +110,38 @@ export function reduceCompose(state: RegisterComposeState, action: RegisterCompo
   }
 }
 
+function payeeKey(name: string): string {
+  return name.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 export function findTransferPayee(payees: readonly Payee[], name: string): Payee | undefined {
-  const trimmed = name.trim();
-  if (!trimmed) {
+  const key = payeeKey(name);
+  if (!key) {
     return undefined;
   }
-  return payees.find((payee) => !payee.deleted && payee.transfer_account_id && payee.name === trimmed);
+  return payees.find((payee) => !payee.deleted && payee.transfer_account_id && payeeKey(payee.name) === key);
+}
+
+export function canonicalPayeeName(payees: readonly Payee[], name: string): string {
+  const key = payeeKey(name);
+  if (!key) {
+    return "";
+  }
+  const matched = payees.find((payee) => !payee.deleted && payeeKey(payee.name) === key);
+  return matched?.name ?? name.trim().replace(/\s+/g, " ");
+}
+
+export function formatComposeAmount(value: string): string {
+  const parsed = parseMilliunits(value);
+  if (parsed === null || parsed <= 0) {
+    return value.trim();
+  }
+  const formatted = formatMilliunitsInput(parsed);
+  if (!formatted.includes(".")) {
+    return `${formatted}.00`;
+  }
+  const [whole, fraction = ""] = formatted.split(".");
+  return `${whole}.${fraction.padEnd(2, "0")}`;
 }
 
 export function composePayload(
@@ -140,7 +166,7 @@ export function composePayload(
     return { ok: false, error: "Enter an outflow or an inflow." };
   }
 
-  const payeeName = draft.payeeName.trim();
+  const payeeName = canonicalPayeeName(payees, draft.payeeName);
   const transfer = findTransferPayee(payees, payeeName);
   if (!payeeName) {
     return { ok: false, error: "Enter a payee." };

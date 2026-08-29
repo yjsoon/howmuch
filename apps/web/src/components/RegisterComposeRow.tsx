@@ -3,7 +3,9 @@ import type { Account, CategoryGroup, Payee } from "../api/types";
 import { CategorySelect } from "./CategorySelect";
 import { splitCategoryGroups } from "../lib/categories";
 import {
+  canonicalPayeeName,
   findTransferPayee,
+  formatComposeAmount,
   reduceCompose,
   type RegisterComposeState,
 } from "../lib/register-compose";
@@ -116,6 +118,12 @@ export function RegisterComposeRow({
             list="register-compose-payees"
             value={state.draft.payeeName}
             onChange={(event) => patch({ payeeName: event.target.value })}
+            onBlur={() => {
+              const snapped = canonicalPayeeName(payees, state.draft.payeeName);
+              if (snapped !== state.draft.payeeName) {
+                patch({ payeeName: snapped });
+              }
+            }}
             placeholder="Payee"
             autoComplete="off"
             disabled={busy}
@@ -163,6 +171,12 @@ export function RegisterComposeRow({
             name="outflow"
             value={state.draft.outflow}
             onChange={(event) => onChange(reduceCompose(state, { type: "set-outflow", value: event.target.value }))}
+            onBlur={() => {
+              const next = formatComposeAmount(state.draft.outflow);
+              if (next !== state.draft.outflow) {
+                onChange(reduceCompose(state, { type: "set-outflow", value: next }));
+              }
+            }}
             placeholder="0.00"
             disabled={busy}
           />
@@ -176,6 +190,12 @@ export function RegisterComposeRow({
             name="inflow"
             value={state.draft.inflow}
             onChange={(event) => onChange(reduceCompose(state, { type: "set-inflow", value: event.target.value }))}
+            onBlur={() => {
+              const next = formatComposeAmount(state.draft.inflow);
+              if (next !== state.draft.inflow) {
+                onChange(reduceCompose(state, { type: "set-inflow", value: next }));
+              }
+            }}
             placeholder="0.00"
             disabled={busy}
           />

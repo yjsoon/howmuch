@@ -2,10 +2,13 @@ import { describe, expect, test } from "bun:test";
 import type { Payee } from "../api/types";
 import {
   addEntryHref,
+  canonicalPayeeName,
   closedCompose,
   composePayload,
   dateInFilterRange,
   emptyComposeDraft,
+  findTransferPayee,
+  formatComposeAmount,
   reduceCompose,
   resolvePostingAccountId,
   type RegisterComposeState,
@@ -151,6 +154,23 @@ describe("register compose", () => {
     state = reduceCompose(state, { type: "failed", error: "network" });
     expect(state.status === "open" && state.draft.clientId).toBe(firstId);
     expect(state.status === "open" && state.error).toBe("network");
+  });
+
+  test("matches transfer payees without caring about case or extra spaces", () => {
+    const transferPayee = payee("p-xfer", "Transfer : Rainy Day Saver", "acct-saver");
+    expect(findTransferPayee([transferPayee], "transfer : rainy day saver")?.id).toBe("p-xfer");
+    expect(canonicalPayeeName([transferPayee], "  TRANSFER :  Rainy Day Saver ")).toBe("Transfer : Rainy Day Saver");
+    const result = composePayload(
+      { ...emptyComposeDraft("acct-everyday", "2026-08-29"), payeeName: "transfer : rainy day saver", outflow: "25" },
+      [transferPayee],
+    );
+    expect(result.ok && result.input.payee_id).toBe("p-xfer");
+  });
+
+  test("formats a compose amount to two decimals", () => {
+    expect(formatComposeAmount("4.2")).toBe("4.20");
+    expect(formatComposeAmount("10")).toBe("10.00");
+    expect(formatComposeAmount("nope")).toBe("nope");
   });
 
   test("a late save does not reopen a cancelled row", () => {
