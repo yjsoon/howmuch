@@ -5,7 +5,7 @@ A brand-new HowMuch database has no user. The first visitor creates the owner ac
 ## Sub-features
 
 - `setup-form` shows **Set up HowMuch** with Username, Password, and Setup token.
-- `setup-create` accepts `verifier` / `howmuch-verify-15` / `howmuch-verify-bootstrap` and lands on Plan.
+- `setup-create` accepts `verifier` / `howmuch-verify-15` / `howmuch-verify-bootstrap` and lands on All Accounts.
 - `setup-reject-short-password` keeps **Create account** disabled while the password is under 15 characters.
 - `signin-return` shows **Sign in to HowMuch** after sign out (setup is no longer offered).
 - `signout` returns to the sign-in form and drops the session.
@@ -26,16 +26,16 @@ Preconditions:
 
 - **Open setup.** Go to `{web_url}`. The heading is `Set up HowMuch` and the submit button is `Create account`.
 - **Short password.** Fill Username `verifier` and Password `short`. `Create account` stays disabled. The page does not navigate.
-- **Create owner.** Fill Username `verifier`, Password `howmuch-verify-15`, Setup token `howmuch-verify-bootstrap`. Choose `Create account`. The button reads `Please wait…`, then the shell appears with masthead `HowMuch` and heading `Plan`. Title is `Plan · HowMuch`.
+- **Create owner.** Fill Username `verifier`, Password `howmuch-verify-15`, Setup token `howmuch-verify-bootstrap`. Choose `Create account`. The button reads `Please wait…`, then the shell appears with masthead `HowMuch` and heading `All Accounts`. Title is `All Accounts · HowMuch`.
 - **Confirm session.** `control-howmuch http GET /api/auth/status` still reports `setup_required: false` (token is not a browser session). Proof that a user exists: `control-howmuch http GET /v1/plans` returns plan id `local-plan` and name `HowMuch Demo`.
 - **Sign out.** Choose `Sign out`. Heading becomes `Sign in to HowMuch`. There is no Setup token field.
-- **Sign in.** Fill Username `verifier` and Password `howmuch-verify-15`. Choose `Sign in`. Plan loads again.
-- **Proof.** Screenshot the Plan shell after create (`artifacts/first-owner-setup/plan-after-setup.png`) and the sign-in form after sign out (`artifacts/first-owner-setup/sign-in.png`). Both show HowMuch identity.
+- **Sign in.** Fill Username `verifier` and Password `howmuch-verify-15`. Choose `Sign in`. All Accounts loads again.
+- **Proof.** Screenshot the All Accounts shell after create (`artifacts/first-owner-setup/all-accounts-after-setup.png`) and the sign-in form after sign out (`artifacts/first-owner-setup/sign-in.png`). Both show HowMuch identity.
 
 ## Gotchas
 
 - If the heading is already `Sign in to HowMuch`, this database has an owner. Do not call that setup. Cleanup and launch a new instance.
 - `Create account` stays disabled until Username is non-empty, the password is ≥15 characters, and the setup token is non-empty (the verify stack always sets `HOWMUCH_API_TOKEN`, so the token field is present).
-- scrypt is slow. Wait for Plan, not a fixed 200ms sleep.
+- scrypt is slow. Wait for All Accounts, not a fixed 200ms sleep.
 - Opening `/plan` without a session still renders the setup/sign-in form. That is not a routing bug.
 - Do not POST `/api/auth/setup` from `control-howmuch http` and call the feature verified.

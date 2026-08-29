@@ -46,7 +46,7 @@ The aesthetic is a broadsheet ledger: ink on paper, hairline rules, controlled d
 
 | Route | View |
 | --- | --- |
-| `/` | redirect to `/plan` |
+| `/` | redirect to `/transactions?range=all&accounts=all` |
 | `/plan` | Monthly Plan: edit category assignments and local targets, see Ready to assign, Assigned, Activity, category availability, and target progress; category drill-down opens the register |
 | `/spending` | Spending Breakdown: total, share bars per category grouped by category group, click-through to filtered transactions |
 | `/income` | Income vs Spending: paired columns per period, table with income / spending / net / cumulative net |
