@@ -2071,7 +2071,7 @@ struct TransactionDraft: Equatable {
       guard let dest = line.transferAccountID else {
         return nil
       }
-      return "\(dest)|\(line.amount)"
+      return "\(line.transferTransactionID ?? "")|\(dest)|\(line.amount)"
     }
     linkedTransferIDs = transaction.linkedTransferIDs
     flag = FlagColour(rawValue: transaction.flagColor ?? "") ?? .none
@@ -2165,7 +2165,7 @@ struct TransactionDraft: Equatable {
       guard let dest = line.transferAccountID else {
         return nil
       }
-      return "\(dest)|\(line.amount ?? 0)"
+      return "\(line.transferTransactionID ?? "")|\(dest)|\(line.amount ?? 0)"
     }
     return signedMilliunits != loadedAmountMilli
       || accountID != loadedAccountID
