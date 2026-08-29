@@ -1292,12 +1292,15 @@ extension Transaction {
   }
 
   func deleteConfirmationDetail(linkedReconciled: Bool) -> String? {
+    let reconciledRisk = cleared == .reconciled || linkedReconciled
     if parentTransactionID != nil {
+      if reconciledRisk {
+        return "The split line on the other account stays and loses this transfer link. This side has been reconciled, so deleting it can make your next reconciliation inaccurate."
+      }
       return "The split line on the other account stays and loses this transfer link."
     }
     let isTransfer = transferTransactionID != nil
       || subtransactions.contains { $0.transferTransactionID != nil }
-    let reconciledRisk = cleared == .reconciled || linkedReconciled
     switch (isTransfer, reconciledRisk) {
     case (true, true):
       return "This also deletes any linked transfer entries. Deleting a reconciled transfer can make your next reconciliation inaccurate."
@@ -2034,7 +2037,7 @@ struct TransactionDraft: Equatable {
   var loadedAccountID: String?
   var loadedDateISO: String?
   var loadedTransferAccountID: String?
-  var loadedSplitTransferKeys: [String] = []
+  var loadedTransferLineSignatures: [String] = []
   var linkedTransferIDs: [String] = []
   var flag: FlagColour = .none
   var memo = ""
@@ -2064,7 +2067,12 @@ struct TransactionDraft: Equatable {
     loadedAccountID = transaction.accountID
     loadedDateISO = transaction.date
     loadedTransferAccountID = transaction.isSplit ? nil : transaction.transferAccountID
-    loadedSplitTransferKeys = transaction.subtransactions.map { $0.transferAccountID ?? "" }
+    loadedTransferLineSignatures = transaction.subtransactions.compactMap { line in
+      guard let dest = line.transferAccountID else {
+        return nil
+      }
+      return "\(dest)|\(line.amount)"
+    }
     linkedTransferIDs = transaction.linkedTransferIDs
     flag = FlagColour(rawValue: transaction.flagColor ?? "") ?? .none
     memo = transaction.memo ?? ""
@@ -2153,11 +2161,17 @@ struct TransactionDraft: Equatable {
     guard let loadedAmountMilli, let loadedAccountID, let loadedDateISO else {
       return false
     }
+    let transferLineSignatures = subtransactions.compactMap { line -> String? in
+      guard let dest = line.transferAccountID else {
+        return nil
+      }
+      return "\(dest)|\(line.amount ?? 0)"
+    }
     return signedMilliunits != loadedAmountMilli
       || accountID != loadedAccountID
       || date.isoDateString != loadedDateISO
       || transferAccountID != loadedTransferAccountID
-      || subtransactions.map { $0.transferAccountID ?? "" } != loadedSplitTransferKeys
+      || transferLineSignatures != loadedTransferLineSignatures
   }
 
   func needsEditWarning(linkedReconciled: Bool) -> Bool {
