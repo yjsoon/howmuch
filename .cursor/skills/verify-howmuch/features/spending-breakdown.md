@@ -25,7 +25,7 @@ Preconditions:
 - Demo ledger still contains the seeded March–May 2026 outflows.
 
 - **Open report.** Choose `Spending breakdown`. Title is `Spending breakdown · HowMuch`. Heading is `Spending breakdown`. Filter rail shows group `Date range`.
-- **Default empty.** If today is 2026-08 (or any month outside March–May 2026) and the active preset is `This month`, `Total spending` is `0.00` and largest line is `-`. Status title `No spending in this range.` with detail `Adjust the dates or clear category filters to show more transactions.` Groceries is absent. This is the correct empty state.
+- **Default empty.** If today is 2026-08 (or any month outside March–May 2026) and the active preset is `This month`, `Total spending` is `$0.00` and largest line is `-`. Status title `No spending in this range.` with detail `Adjust the dates or clear category filters to show more transactions.` Groceries is absent. This is the correct empty state. Headline `Average transaction` is also present.
 - **All range.** Choose `All` in `Date range`. URL becomes `/spending?range=all`. `Total spending` is `$3,292.30`. Largest line is `Utilities`. Category detail lists Home (`Utilities` `$1,974.50`, `Groceries` `$357.10`, `Dining Out` `$125.40`), Travel (`Holiday` `$488.90`), and Living (`Shopping`, `Health`, `Transport`).
 - **Custom range.** Choose `From date` `2026-03-01` and `To date` `2026-05-31`. Groceries remains visible. Summary text includes those dates.
 - **HTTP match.** `control-howmuch http GET "/api/reports/spending-breakdown?plan_id=local-plan&from=2026-03-01&to=2026-05-31"` returns `data.total > 0` and a group whose `category_name` is `Groceries`.

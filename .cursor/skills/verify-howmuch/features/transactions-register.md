@@ -7,7 +7,7 @@ The register is a dense list of ledger rows with the same filter rail as reports
 - `register-all` opens every account via **All Accounts**.
 - `register-account` opens one account from the sidebar (Everyday Account).
 - `register-default-empty` is empty on the default trailing-two-month window when today is 2026-08.
-- `register-search` filters loaded rows by payee (FairPrice Finest).
+- `register-search` filters loaded rows by payee, memo, category, or account (FairPrice Finest).
 - `register-balances` shows cleared / uncleared / working figures in the header.
 
 ## How to get to it (user POV)
@@ -26,7 +26,7 @@ Preconditions:
 
 - **All Accounts.** Choose `All Accounts`. Title is `All Accounts · HowMuch`. Heading / register label is `All Accounts`. Header shows `Active cleared balance`, `Active uncleared balance`, `Active working balance`.
 - **See demo rows.** `All Accounts` already sets `range=all`. FairPrice Finest, Candlenut, and Scoot are visible without another range click. If you arrived via `/transactions` with no `range=all`, choose `All` in `Date range` first.
-- **Search.** Type `FairPrice` into `Search transactions`. Visible rows include `FairPrice Finest` and exclude `Scoot`. Search meta reads `Showing 1 of …` (or the loaded match count).
+- **Search.** Type `FairPrice` into `Search transactions`. Visible rows include `FairPrice Finest` and exclude `Scoot`. Search meta reads `Showing 1 of … loaded filtered entries`.
 - **Clear search.** Clear the searchbox. Scoot returns.
 - **Account scope.** Choose `Everyday Account`. Title becomes `Everyday Account · HowMuch`. Travel Card spend (Scoot, Candlenut) is absent. FairPrice Finest remains.
 - **HTTP match.** `control-howmuch http GET "/v1/plans/local-plan/transactions?since_date=2026-03-01&until_date=2026-05-31"` returns a transaction whose `payee_name` is `FairPrice Finest`.
@@ -39,3 +39,4 @@ Preconditions:
 - Multi-account filtered views may say `Load older entries to extend this multi-account result.` Scroll/load if a row you expect is missing.
 - Sidebar **Travel Card** is a credit account. Its outflows are on that register, not Everyday Account.
 - Choosing **All Accounts** after an account scope is the way back; the browser Back button also works but leaves leftover query params.
+- Flags, scheduled disclosure, approve, uncategorised, reconcile, and inline edit of existing rows live on this page. Drive those via [Register maintenance](./register-maintenance.md), not this recipe.
