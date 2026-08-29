@@ -47,3 +47,4 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Spending breakdown](./spending-breakdown.md) covers the empty current-month default, All-range totals, and category drill-down.
 - [Transactions register](./transactions-register.md) covers All Accounts, payee search, and account-scoped register.
 - [Quick entry](./quick-entry.md) covers posting a spend from `/add` and seeing it in the register.
+- [Register compose](./register-compose.md) covers the inline add row on an account register.

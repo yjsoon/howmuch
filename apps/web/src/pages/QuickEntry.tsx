@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, useApi } from "../api/client";
 import type { QuickEntrySplitLine, Transaction } from "../api/types";
 import { CategorySelect } from "../components/CategorySelect";
 import { splitCategoryGroups } from "../lib/categories";
 import { formatDate, todayIso, yesterdayIso } from "../lib/dates";
 import { formatMilliunitsInput, formatMoney, parseMilliunits } from "../lib/money";
+import { resolvePostingAccountId } from "../lib/register-compose";
 import { usePlan } from "../state/plan";
 
 type Direction = "spend" | "income" | "transfer";
@@ -24,6 +25,8 @@ function newSplitLine(): SplitLineDraft {
 export function QuickEntryPage() {
   const { planId, accounts, categoryGroups } = usePlan();
   const payees = useApi(planId, () => api.payees(planId));
+  const [params] = useSearchParams();
+  const requestedAccountId = params.get("account") ?? "";
 
   const openAccounts = useMemo(() => accounts.filter((account) => !account.closed), [accounts]);
   const orderedGroups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
@@ -51,7 +54,11 @@ export function QuickEntryPage() {
   }, []);
 
   const isTransfer = direction === "transfer";
-  const selectedAccount = accountId || openAccounts[0]?.id || "";
+  const selectedAccount = resolvePostingAccountId(
+    openAccounts.map((account) => account.id),
+    requestedAccountId,
+    accountId,
+  );
   const selectedAccountName =
     openAccounts.find((account) => account.id === selectedAccount)?.name ?? "No open account";
   const transferTargets = useMemo(

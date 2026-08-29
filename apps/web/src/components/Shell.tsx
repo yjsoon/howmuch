@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { ApiError, api, type TransactionPage } from "../api/client";
 import type { AccountPreferences } from "../api/types";
 import { formatMoney } from "../lib/money";
+import { addEntryHref } from "../lib/register-compose";
 import {
   accountGroups as buildAccountGroups,
   partitionAccountGroups,
@@ -158,7 +159,7 @@ export function Shell() {
             className="mobile-organizer-entry"
             onClick={(event) => openOrganizer(event.currentTarget)}
           >Organise</button>
-          <NavLink to="/add" className="add-button">+ Add</NavLink>
+          <NavLink to={addEntryHref(selectedAccount && !selectedAccount.closed ? selectedAccount.id : null)} className="add-button">+ Add</NavLink>
           <button type="button" className="sign-out-button" onClick={handleLogout}>Sign out</button>
         </div>
         {logoutError && <span className="mobile-masthead-error" role="alert">{logoutError}</span>}
@@ -237,7 +238,7 @@ export function Shell() {
         </div>
 
         <div className="sidebar-footer">
-          <NavLink to="/add" className="add-button">+ Add transaction</NavLink>
+          <NavLink to={addEntryHref(selectedAccount && !selectedAccount.closed ? selectedAccount.id : null)} className="add-button">+ Add transaction</NavLink>
           <button
             type="button"
             className="sign-out-button"

@@ -15,6 +15,7 @@ import type {
 import { CategorySelect } from "../components/CategorySelect";
 import { FlagPicker, FlagTag } from "../components/FlagTag";
 import { FilterRail } from "../components/FilterRail";
+import { RegisterComposeRow } from "../components/RegisterComposeRow";
 import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
 import { formatDate, todayIso, trailingMonthsRange } from "../lib/dates";
 import { stableHash } from "../lib/hash";
@@ -27,6 +28,13 @@ import {
   interruptedToast,
   planApproval,
 } from "../lib/register-approval";
+import {
+  closedCompose,
+  composePayload,
+  dateInFilterRange,
+  reduceCompose,
+  type RegisterComposeState,
+} from "../lib/register-compose";
 import { fillRegisterHorizon } from "../lib/register-horizon";
 import {
   emptySelection,
@@ -126,8 +134,14 @@ export function TransactionsPage() {
   const [mutatingId, setMutatingId] = useState<string | null>(null);
   const [unapprovedOnly, setUnapprovedOnly] = useState(false);
   const [selection, setSelection] = useState(() => emptySelection(listKey));
+  const [compose, setCompose] = useState<RegisterComposeState>(closedCompose);
+  const [composeFocus, setComposeFocus] = useState(0);
   const mutationLockRef = useRef(false);
   const selectedAccountId = filters.accountIds.length === 1 ? filters.accountIds[0]! : null;
+  const composeScope = selectedAccountId ?? (filters.accountIds.join(",") || "all");
+  useEffect(() => {
+    setCompose(closedCompose());
+  }, [composeScope]);
   const schedules = useApi<ScheduledTransaction[]>(
     selectedAccountId ? `${planId}:account-schedules:${selectedAccountId}` : `${planId}:account-schedules-idle`,
     () => selectedAccountId ? api.scheduledTransactions(planId) : Promise.resolve([]),
@@ -320,6 +334,67 @@ export function TransactionsPage() {
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause.message : String(cause));
       refreshFirstPage();
+    } finally {
+      mutationLockRef.current = false;
+      setMutatingId(null);
+    }
+  };
+
+  const openCompose = () => {
+    if (!canCompose) {
+      return;
+    }
+    setCompose((current) => reduceCompose(current, {
+      type: "open",
+      accountId: lockedComposeAccount?.id ?? "",
+    }));
+    setComposeFocus((nonce) => nonce + 1);
+    setMutationError(null);
+    setMutationSuccess(null);
+  };
+
+  const saveCompose = async (keepOpen: boolean) => {
+    if (compose.status !== "open" || mutationLockRef.current) {
+      return;
+    }
+    const result = composePayload(compose.draft, payees.data ?? []);
+    if (!result.ok) {
+      setCompose((current) => reduceCompose(current, { type: "failed", error: result.error }));
+      return;
+    }
+    mutationLockRef.current = true;
+    setMutatingId("compose");
+    setMutationError(null);
+    setMutationSuccess(null);
+    setCompose((current) => reduceCompose(current, { type: "saving" }));
+    try {
+      const transaction = await api.quickEntry(result.input);
+      reload();
+      setPage((current) => {
+        if (!current.loaded || current.transactions.some((row) => row.id === transaction.id)) {
+          return current;
+        }
+        if (!registerAccountIds.has(transaction.account_id) || !dateInFilterRange(transaction.date, filters.from, filters.to)) {
+          return current;
+        }
+        return { ...current, transactions: [transaction, ...current.transactions] };
+      });
+      setReconciliationPreviewGeneration((generation) => generation + 1);
+      const savedName = transaction.payee_name ?? "Entry";
+      setMutationSuccess(
+        dateInFilterRange(transaction.date, filters.from, filters.to)
+          ? `${savedName} saved.`
+          : `${savedName} saved. It is outside this date range.`,
+      );
+      setCompose((current) => reduceCompose(current, { type: "saved", keepOpen }));
+      if (keepOpen) {
+        setComposeFocus((nonce) => nonce + 1);
+      }
+    } catch (cause) {
+      setCompose((current) => reduceCompose(current, {
+        type: "failed",
+        error: cause instanceof Error ? cause.message : String(cause),
+      }));
     } finally {
       mutationLockRef.current = false;
       setMutatingId(null);
@@ -557,6 +632,12 @@ export function TransactionsPage() {
         ? "No transactions match this search."
         : "No transactions match these filters.";
   const mutationBusy = Boolean(mutatingId);
+  const lockedComposeAccount = selectedAccount && !selectedAccount.closed ? selectedAccount : null;
+  const composeAccounts = useMemo(
+    () => visibleAccounts.filter((account) => !account.closed),
+    [visibleAccounts],
+  );
+  const canCompose = Boolean(lockedComposeAccount || composeAccounts.length);
   const reconciliationBusy = mutationBusy;
   const reviewedStatementBalance = reconcileDraft ? parseMilliunits(reconcileDraft.statementBalance) : null;
   const reconciliationPreviewData = reconciliationPreview.data
@@ -608,7 +689,15 @@ export function TransactionsPage() {
       </div>
       <div className="register-toolbar">
         <div className="register-toolbar-actions">
-          <NavLink to="/add" className="register-add-link">+ Add transaction</NavLink>
+          <button
+            type="button"
+            className="register-add-link"
+            onClick={openCompose}
+            disabled={!canCompose || mutationBusy}
+            title={!canCompose && selectedAccount?.closed ? "This account is closed" : undefined}
+          >
+            + Add transaction
+          </button>
           <button
             type="button"
             className="register-add-link register-secondary-action"
@@ -920,7 +1009,7 @@ export function TransactionsPage() {
               {rows.length} transactions · {formatMoney(totals.inflow)} in · {formatMoney(totals.outflow)} out · {formatMoney(totals.net, { sign: true })} net
             </span>
           </div>
-          {rows.length > 0 || selectedAccountId ? (
+          {rows.length > 0 || selectedAccountId || compose.status === "open" ? (
             <div className="table-wrap table-wrap-wide">
               <table className="ledger-table register-table">
                 <thead>
@@ -951,6 +1040,23 @@ export function TransactionsPage() {
                   </tr>
                 </thead>
                 <tbody>
+                  {compose.status === "open" && (
+                    <RegisterComposeRow
+                      state={compose}
+                      accounts={composeAccounts}
+                      lockedAccount={lockedComposeAccount}
+                      payees={payees.data ?? []}
+                      categoryGroups={categoryGroups}
+                      disabled={mutationBusy && mutatingId !== "compose"}
+                      focusNonce={composeFocus}
+                      onChange={setCompose}
+                      onCancel={() => {
+                        setCompose(closedCompose());
+                        setMutationError(null);
+                      }}
+                      onSave={(keepOpen) => void saveCompose(keepOpen)}
+                    />
+                  )}
                   {selectedAccountId && (
                     <AccountScheduledRows
                       key={selectedAccountId}
@@ -1068,7 +1174,7 @@ export function TransactionsPage() {
                   ])}
                 </tbody>
               </table>
-              {rows.length === 0 && !page.filling && (
+              {rows.length === 0 && !page.filling && compose.status !== "open" && (
                 <div className="register-empty-state">
                   <p className="status-title">{emptyMessage}</p>
                   <p className="status-detail">Try widening the date range, clearing filters, or shortening the search term.</p>

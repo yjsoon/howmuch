@@ -15,6 +15,7 @@ Quick entry is the thumb-reach `/add` form. A spend needs amount, payee, and acc
 - Choose **+ Add transaction** in the sidebar footer.
 - Choose **+ Add** in the mobile masthead.
 - Open `{web_url}/add` directly.
+- From an account register, the sidebar and masthead links keep `?account=` so the posting account matches that register. The register toolbar **+ Add transaction** opens the inline row instead. See [Register compose](./register-compose.md).
 
 ## Driving it with control-howmuch
 
