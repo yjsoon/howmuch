@@ -3,9 +3,14 @@ import {
   approveAllLabel,
   approveSelectedLabel,
   approvedToast,
+  beginApproval,
   eligibleApprovalIds,
+  emptyApprovalSession,
+  failApproval,
+  finishApproval,
   interruptedToast,
   planApproval,
+  rowLooksApproved,
   type ApprovalRow,
 } from "./register-approval";
 
@@ -46,5 +51,46 @@ describe("register approval", () => {
     expect(approvedToast(1)).toBe("1 transaction approved.");
     expect(approvedToast(3)).toBe("3 transactions approved.");
     expect(interruptedToast(2, 1)).toBe("2 transactions approved. 1 may not have been approved.");
+  });
+
+  test("beginApproval adds pending and rejects empty or already-pending ids", () => {
+    expect(beginApproval(emptyApprovalSession(), [])).toBeNull();
+    const started = beginApproval(emptyApprovalSession(), ["a", "b"]);
+    expect(started).not.toBeNull();
+    expect([...started!.pending]).toEqual(["a", "b"]);
+    expect(started!.confirmed.size).toBe(0);
+    expect(beginApproval(started!, ["b", "c"])).toBeNull();
+  });
+
+  test("finishApproval moves ids from pending to confirmed", () => {
+    const started = beginApproval(emptyApprovalSession(), ["a", "b"]);
+    expect(started).not.toBeNull();
+    const finished = finishApproval(started!, ["a"]);
+    expect([...finished.pending]).toEqual(["b"]);
+    expect([...finished.confirmed]).toEqual(["a"]);
+    expect(started!.pending.has("a")).toBe(true);
+    expect(started!.confirmed.has("a")).toBe(false);
+  });
+
+  test("failApproval drops pending and confirms the accepted prefix", () => {
+    const started = beginApproval(emptyApprovalSession(), ["a", "b", "c"]);
+    expect(started).not.toBeNull();
+    const interrupted = failApproval(started!, ["a", "b", "c"], 2);
+    expect(interrupted.pending.size).toBe(0);
+    expect([...interrupted.confirmed]).toEqual(["a", "b"]);
+    expect([...failApproval(started!, ["a", "b", "c"], 0).confirmed]).toEqual([]);
+  });
+
+  test("rowLooksApproved uses the confirmed overlay", () => {
+    const session = finishApproval(beginApproval(emptyApprovalSession(), ["a"])!, ["a"]);
+    expect(rowLooksApproved(row("a"), session)).toBe(true);
+    expect(rowLooksApproved(row("b"), session)).toBe(false);
+    expect(rowLooksApproved(row("b", true), emptyApprovalSession())).toBe(true);
+  });
+
+  test("eligibleApprovalIds skips confirmed overlay rows when a session is passed", () => {
+    const session = finishApproval(beginApproval(emptyApprovalSession(), ["a"])!, ["a"]);
+    expect(eligibleApprovalIds([row("a"), row("d")], session)).toEqual(["d"]);
+    expect(eligibleApprovalIds([row("a"), row("d")])).toEqual(["a", "d"]);
   });
 });

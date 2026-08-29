@@ -24,9 +24,14 @@ import {
   approveAllLabel,
   approveSelectedLabel,
   approvedToast,
+  beginApproval,
   eligibleApprovalIds,
+  emptyApprovalSession,
+  failApproval,
+  finishApproval,
   interruptedToast,
   planApproval,
+  rowLooksApproved,
 } from "../lib/register-approval";
 import {
   closedCompose,
@@ -136,6 +141,8 @@ export function TransactionsPage() {
   const [selection, setSelection] = useState(() => emptySelection(listKey));
   const [replacements, setReplacements] = useState<ReadonlyMap<string, Transaction>>(() => new Map());
   const [deletedIds, setDeletedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [approvalSession, setApprovalSession] = useState(emptyApprovalSession);
+  const approvalSessionRef = useRef(approvalSession);
   const [compose, setCompose] = useState<RegisterComposeState>(closedCompose);
   const [composeFocus, setComposeFocus] = useState(0);
   const mutationLockRef = useRef(false);
@@ -251,6 +258,9 @@ export function TransactionsPage() {
   useEffect(() => {
     setReplacements(new Map());
     setDeletedIds(new Set());
+    const empty = emptyApprovalSession();
+    approvalSessionRef.current = empty;
+    setApprovalSession(empty);
   }, [listKey, refreshGeneration]);
 
   const loadOlder = async () => {
@@ -533,12 +543,18 @@ export function TransactionsPage() {
   );
 
   const patchedQueue = useMemo(
-    () => applyRegisterPatches(approvalQueue.data ?? [], replacements, deletedIds),
-    [approvalQueue.data, deletedIds, replacements],
+    () =>
+      applyRegisterPatches(approvalQueue.data ?? [], replacements, deletedIds).map((txn) =>
+        !txn.approved && rowLooksApproved(txn, approvalSession) ? { ...txn, approved: true } : txn,
+      ),
+    [approvalQueue.data, approvalSession, deletedIds, replacements],
   );
   const patchedPage = useMemo(
-    () => applyRegisterPatches(page.transactions, replacements, deletedIds),
-    [deletedIds, page.transactions, replacements],
+    () =>
+      applyRegisterPatches(page.transactions, replacements, deletedIds).map((txn) =>
+        !txn.approved && rowLooksApproved(txn, approvalSession) ? { ...txn, approved: true } : txn,
+      ),
+    [approvalSession, deletedIds, page.transactions, replacements],
   );
   const inScope = useMemo(
     () =>
@@ -550,7 +566,10 @@ export function TransactionsPage() {
 
   const uncategorisedCount = useMemo(() => inScope.filter(hasUncategorisedLine).length, [inScope]);
   const unapprovedCount = useMemo(
-    () => patchedQueue.filter((transaction) => !transaction.deleted && registerAccountIds.has(transaction.account_id)).length,
+    () =>
+      patchedQueue.filter(
+        (transaction) => !transaction.deleted && registerAccountIds.has(transaction.account_id) && !transaction.approved,
+      ).length,
     [patchedQueue, registerAccountIds],
   );
 
@@ -594,7 +613,7 @@ export function TransactionsPage() {
     );
   }, [deferredSearch, scopedRows]);
 
-  const eligibleIds = useMemo(() => eligibleApprovalIds(rows), [rows]);
+  const eligibleIds = useMemo(() => eligibleApprovalIds(rows, approvalSession), [approvalSession, rows]);
   const selectionRows = useMemo(() => eligibleIds.map((id) => ({ id })), [eligibleIds]);
   const dispatchSelection = (intent: RegisterSelectionIntent) => {
     setSelection((current) => reduceSelection(current, selectionRows, intent, listKey));
@@ -609,25 +628,28 @@ export function TransactionsPage() {
     [listKey, selection, selectionRows],
   );
 
-  const approveMany = async (transactionIds: readonly string[], bulk = false) => {
-    const plan = planApproval(transactionIds, rows);
+  const approveMany = async (transactionIds: readonly string[]) => {
+    const plan = planApproval(transactionIds, rows, approvalSessionRef.current);
     if (mutationLockRef.current || !plan) return;
     const plannedIds = plan.flat();
-    mutationLockRef.current = true;
-    requestVersionRef.current += 1;
-    setWriteLocked(true);
-    setMutatingId(bulk ? "bulk-approve" : (plannedIds[0] ?? "bulk-approve"));
+    const started = beginApproval(approvalSessionRef.current, plannedIds);
+    if (!started) return;
+    approvalSessionRef.current = started;
+    setApprovalSession(started);
     setMutationError(null);
     setMutationSuccess(null);
     try {
       const result = await api.approveTransactions(planId, plannedIds);
-      reload();
-      refreshFirstPage();
+      const finished = finishApproval(approvalSessionRef.current, plannedIds);
+      approvalSessionRef.current = finished;
+      setApprovalSession(finished);
       dispatchSelection({ kind: "none" });
       setMutationSuccess(approvedToast(result.approvedCount));
     } catch (cause) {
-      reload();
-      refreshFirstPage();
+      const approvedCount = cause instanceof BulkApprovalError ? cause.approvedCount : 0;
+      const failed = failApproval(approvalSessionRef.current, plannedIds, approvedCount);
+      approvalSessionRef.current = failed;
+      setApprovalSession(failed);
       if (cause instanceof BulkApprovalError && cause.approvedCount > 0) {
         setMutationError(interruptedToast(
           cause.approvedCount,
@@ -636,10 +658,6 @@ export function TransactionsPage() {
       } else {
         setMutationError(cause instanceof Error ? cause.message : String(cause));
       }
-    } finally {
-      mutationLockRef.current = false;
-      setWriteLocked(false);
-      setMutatingId(null);
     }
   };
 
@@ -756,10 +774,12 @@ export function TransactionsPage() {
             <button
               type="button"
               className="approval-pill"
-              onClick={() => void approveMany(eligibleIds, true)}
-              disabled={mutationBusy}
+              onClick={() => void approveMany(eligibleIds)}
+              disabled={writeLocked || eligibleIds.some((id) => approvalSession.pending.has(id))}
             >
-              {mutatingId === "bulk-approve" ? "Approving…" : approveAllLabel(eligibleIds.length)}
+              {eligibleIds.some((id) => approvalSession.pending.has(id))
+                ? "Approving…"
+                : approveAllLabel(eligibleIds.length)}
             </button>
           )}
           {uncategorisedCount > 0 && !wantsUncategorised && (
@@ -802,10 +822,10 @@ export function TransactionsPage() {
           <button
             type="button"
             className="approval-pill"
-            onClick={() => void approveMany(selectedApprovalIds, true)}
-            disabled={mutationBusy}
+            onClick={() => void approveMany(selectedApprovalIds)}
+            disabled={writeLocked || selectedApprovalIds.some((id) => approvalSession.pending.has(id))}
           >
-            {mutatingId === "bulk-approve"
+            {selectedApprovalIds.some((id) => approvalSession.pending.has(id))
               ? "Approving…"
               : approveSelectedLabel(selectedApprovalIds.length)}
           </button>
@@ -1149,10 +1169,10 @@ export function TransactionsPage() {
                             type="button"
                             className="register-row-action register-row-action-approve"
                             onClick={() => void approveMany([txn.id])}
-                            disabled={writeLocked || mutatingId === txn.id || mutatingId === "bulk-approve"}
+                            disabled={writeLocked || approvalSession.pending.has(txn.id)}
                             aria-label={`Approve ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
                           >
-                            {mutatingId === txn.id ? "Approving…" : "Approve"}
+                            {approvalSession.pending.has(txn.id) ? "Approving…" : "Approve"}
                           </button>
                         )}
                         <button
