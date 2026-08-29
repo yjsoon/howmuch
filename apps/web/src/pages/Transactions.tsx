@@ -75,7 +75,6 @@ export function TransactionsPage() {
     [accounts, filters.accountIds],
   );
   const registerAccountIds = useMemo(() => new Set(visibleAccounts.map((account) => account.id)), [visibleAccounts]);
-  // All Accounts lists closed ledger rows, but the headline stays an active-account balance.
   const balanceAccounts = useMemo(
     () => filters.accountIds.length ? visibleAccounts : visibleAccounts.filter((account) => !account.closed),
     [filters.accountIds.length, visibleAccounts],
@@ -127,8 +126,8 @@ export function TransactionsPage() {
   const [mutatingId, setMutatingId] = useState<string | null>(null);
   const [unapprovedOnly, setUnapprovedOnly] = useState(false);
   const [selection, setSelection] = useState(() => emptySelection(listKey));
-  const [rowReplacements, setRowReplacements] = useState(() => new Map<string, Transaction>());
-  const [deletedIds, setDeletedIds] = useState(() => new Set<string>());
+  const [replacements, setReplacements] = useState<ReadonlyMap<string, Transaction>>(() => new Map());
+  const [deletedIds, setDeletedIds] = useState<ReadonlySet<string>>(() => new Set());
   const mutationLockRef = useRef(false);
   const selectedAccountId = filters.accountIds.length === 1 ? filters.accountIds[0]! : null;
   const schedules = useApi<ScheduledTransaction[]>(
@@ -182,7 +181,6 @@ export function TransactionsPage() {
     ? api.accountTransactions(planId, selectedAccountId, { ...pageQuery, offset })
     : api.transactions(planId, { ...pageQuery, offset });
 
-  // Offset pages are only stable while the ledger is unchanged. A write must restart from offset 0.
   const refreshFirstPage = () => {
     requestVersionRef.current += 1;
     setPage({ transactions: [], hasMore: false, nextOffset: null, loading: true, filling: true, loadingMore: false, loaded: false, error: null });
@@ -236,7 +234,7 @@ export function TransactionsPage() {
   }, [listKey, refreshGeneration]);
 
   useEffect(() => {
-    setRowReplacements(new Map());
+    setReplacements(new Map());
     setDeletedIds(new Set());
   }, [listKey]);
 
@@ -294,7 +292,7 @@ export function TransactionsPage() {
     setMutationSuccess(null);
     try {
       const updated = await api.updateTransactionCleared(planId, transaction.id, transaction.cleared, cleared);
-      setRowReplacements((current) => new Map(current).set(updated.id, updated));
+      setReplacements((current) => new Map(current).set(updated.id, updated));
       reload();
       setReconciliationPreviewGeneration((generation) => generation + 1);
     } catch (cause) {
@@ -311,7 +309,7 @@ export function TransactionsPage() {
     setMutationSuccess(null);
     try {
       const deleted = await api.deleteTransaction(planId, transaction.id, transaction.approved ? undefined : false);
-      const removed = deletedIdsForRemoval(deleted);
+      const removed = deletedIdsForRemoval(deleted.id ? deleted : transaction);
       setDeletedIds((current) => new Set([...current, ...removed]));
       if (editing?.id === transaction.id || (transaction.transfer_transaction_id && editing?.id === transaction.transfer_transaction_id)) {
         setEditing(null);
@@ -433,12 +431,12 @@ export function TransactionsPage() {
   );
 
   const patchedQueue = useMemo(
-    () => applyRegisterPatches(approvalQueue.data ?? [], rowReplacements, deletedIds),
-    [approvalQueue.data, deletedIds, rowReplacements],
+    () => applyRegisterPatches(approvalQueue.data ?? [], replacements, deletedIds),
+    [approvalQueue.data, deletedIds, replacements],
   );
   const patchedPage = useMemo(
-    () => applyRegisterPatches(page.transactions, rowReplacements, deletedIds),
-    [deletedIds, page.transactions, rowReplacements],
+    () => applyRegisterPatches(page.transactions, replacements, deletedIds),
+    [deletedIds, page.transactions, replacements],
   );
   const inScope = useMemo(
     () =>
@@ -892,8 +890,8 @@ export function TransactionsPage() {
             </p>
           </div>
           <div className="transaction-delete-confirm-actions">
-            <button type="button" className="text-button" onClick={() => setPendingDeletion(null)} disabled={mutationBusy}>Cancel</button>
-            <button type="button" className="transaction-delete-button" onClick={() => void deleteTransaction(pendingDeletion)} disabled={mutationBusy}>
+            <button type="button" className="text-button" onClick={() => setPendingDeletion(null)} disabled={mutatingId === pendingDeletion.id}>Cancel</button>
+            <button type="button" className="transaction-delete-button" onClick={() => void deleteTransaction(pendingDeletion)} disabled={mutatingId === pendingDeletion.id}>
               {mutatingId === pendingDeletion.id ? "Removing..." : pendingDeletion.approved ? "Delete transaction" : "Reject transaction"}
             </button>
           </div>
