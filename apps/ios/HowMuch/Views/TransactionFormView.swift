@@ -266,7 +266,9 @@ struct TransactionFormView: View {
         isPresented: $isConfirmingDelete,
         confirm: .destructive("Delete Transaction"),
         message: {
-          Text("This also deletes any linked transfer entries. If this transaction or a linked entry has been reconciled, deleting it can make your next reconciliation inaccurate.")
+          if let deleteConfirmationDetail {
+            Text(deleteConfirmationDetail)
+          }
         }
       ) {
         deleteTransaction()
@@ -276,7 +278,7 @@ struct TransactionFormView: View {
         isPresented: $isConfirmingEdit,
         confirm: .proceed("Save Changes"),
         message: {
-          Text("If this transaction or a linked transfer has been reconciled, its status stays locked, but changing its amount, account, or date can make your next reconciliation inaccurate.")
+          Text("This transaction or a linked transfer has been reconciled. Its status stays locked, but changing its amount, account, date, or transfer destination can make your next reconciliation inaccurate.")
         }
       ) {
         submitSave()
@@ -701,6 +703,16 @@ struct TransactionFormView: View {
     .accessibilityHint(draft.wasReconciled ? "Reconciled transactions stay locked." : "Marks this transaction cleared when on.")
   }
 
+  private var deleteConfirmationDetail: String? {
+    guard let id = draft.id,
+          let transaction = (model.transactions + model.unapprovedTransactions).first(where: { $0.id == id }) else {
+      return nil
+    }
+    return transaction.deleteConfirmationDetail(
+      linkedReconciled: model.hasReconciledLinkedTransfer(ids: transaction.linkedTransferIDs)
+    )
+  }
+
   private var saveButton: some View {
     Button(action: save) {
       HStack(spacing: 8) {
@@ -727,11 +739,9 @@ struct TransactionFormView: View {
     }
     draft.amountMagnitudeMilli = keypad.commitValue()
     if hidesCategory {
-      // The row is hidden, so a category left over from an earlier account
-      // choice would be sent (and discarded) invisibly.
       draft.categoryID = nil
     }
-    if isEditing {
+    if draft.needsEditWarning(linkedReconciled: model.hasReconciledLinkedTransfer(ids: draft.linkedTransferIDs)) {
       isConfirmingEdit = true
       return
     }
