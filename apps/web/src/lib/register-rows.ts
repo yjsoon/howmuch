@@ -13,10 +13,20 @@ export function replaceRowById<T extends { readonly id: string }>(
 export function deletedIdsForRemoval(transaction: {
   readonly id: string;
   readonly transfer_transaction_id?: string | null;
+  readonly subtransactions?: ReadonlyArray<{
+    readonly transfer_transaction_id?: string | null;
+  }>;
 }): readonly string[] {
-  return transaction.transfer_transaction_id
-    ? [transaction.id, transaction.transfer_transaction_id]
-    : [transaction.id];
+  const ids = [transaction.id];
+  if (transaction.transfer_transaction_id) {
+    ids.push(transaction.transfer_transaction_id);
+  }
+  for (const line of transaction.subtransactions ?? []) {
+    if (line.transfer_transaction_id) {
+      ids.push(line.transfer_transaction_id);
+    }
+  }
+  return ids;
 }
 
 export function markDeletedByIds<T extends RegisterRow>(

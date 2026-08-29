@@ -38,7 +38,8 @@ export function PlanPage() {
     }
   }, [result.data]);
 
-  const groups = useMemo(() => groupMonth(monthData?.categories ?? [], categoryGroups), [categoryGroups, monthData]);
+  const visibleMonth = monthData && monthData.month.slice(0, 7) === month ? monthData : null;
+  const groups = useMemo(() => groupMonth(visibleMonth?.categories ?? [], categoryGroups), [categoryGroups, visibleMonth]);
   const primaryGroups = groups.filter((group) => !group.quiet);
   const quietGroups = groups.filter((group) => group.quiet);
   const toggleGroup = (id: string) => {
@@ -171,16 +172,16 @@ export function PlanPage() {
           <p className="status-detail">{result.error}</p>
         </div>
       )}
-      {result.loading && !monthData && (
+      {result.loading && !visibleMonth && (
         <div className="status-panel"><p className="status-title">Loading monthly plan…</p></div>
       )}
 
-      {monthData && (
+      {visibleMonth && (
         <>
           <section className="plan-summary" aria-label="Plan summary">
-            <PlanFigure label="Ready to assign" amount={monthData.to_be_budgeted ?? 0} tone={(monthData.to_be_budgeted ?? 0) < 0 ? "negative" : "accent"} />
-            <PlanFigure label="Assigned" amount={monthData.budgeted ?? 0} />
-            <PlanFigure label="Activity" amount={monthData.activity ?? 0} tone={(monthData.activity ?? 0) < 0 ? "negative" : "positive"} />
+            <PlanFigure label="Ready to assign" amount={visibleMonth.to_be_budgeted ?? 0} tone={(visibleMonth.to_be_budgeted ?? 0) < 0 ? "negative" : "accent"} />
+            <PlanFigure label="Assigned" amount={visibleMonth.budgeted ?? 0} />
+            <PlanFigure label="Activity" amount={visibleMonth.activity ?? 0} tone={(visibleMonth.activity ?? 0) < 0 ? "negative" : "positive"} />
           </section>
 
           {planError && <div className="status-panel status-panel-error compact-panel"><p className="status-title">Plan change was not saved.</p><p className="status-detail">{planError}</p></div>}

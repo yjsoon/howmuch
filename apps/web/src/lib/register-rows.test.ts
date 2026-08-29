@@ -25,6 +25,19 @@ describe("register rows", () => {
     expect(deletedIdsForRemoval({ id: "a", transfer_transaction_id: "b" })).toEqual(["a", "b"]);
   });
 
+  test("deletedIdsForRemoval includes split-line transfer mirrors", () => {
+    expect(
+      deletedIdsForRemoval({
+        id: "parent",
+        subtransactions: [
+          { transfer_transaction_id: "mirror-a" },
+          {},
+          { transfer_transaction_id: "mirror-b" },
+        ],
+      }),
+    ).toEqual(["parent", "mirror-a", "mirror-b"]);
+  });
+
   test("markDeletedByIds flips only the named live rows", () => {
     expect(markDeletedByIds([row("a"), row("b", true), row("c")], new Set(["a", "b"]))).toEqual([
       row("a", true),

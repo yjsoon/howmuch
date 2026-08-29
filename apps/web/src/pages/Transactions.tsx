@@ -309,8 +309,11 @@ export function TransactionsPage() {
     setMutationSuccess(null);
     try {
       const deleted = await api.deleteTransaction(planId, transaction.id, transaction.approved ? undefined : false);
-      const removed = deletedIdsForRemoval(deleted.id ? deleted : transaction);
-      setDeletedIds((current) => new Set([...current, ...removed]));
+      setDeletedIds((current) => new Set([
+        ...current,
+        ...deletedIdsForRemoval(transaction),
+        ...(deleted.id ? deletedIdsForRemoval(deleted) : []),
+      ]));
       if (editing?.id === transaction.id || (transaction.transfer_transaction_id && editing?.id === transaction.transfer_transaction_id)) {
         setEditing(null);
       }
