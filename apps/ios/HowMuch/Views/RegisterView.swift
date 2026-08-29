@@ -174,10 +174,10 @@ struct RegisterView: View {
       presenting: $transactionPendingDeletion,
       confirm: .destructive("Delete Transaction"),
       message: { transaction in
-        if transaction.parentTransactionID != nil {
-          Text("The split line on the other account stays and loses this transfer link.")
-        } else {
-          Text("This also deletes any linked transfer entries. If this transaction or a linked entry has been reconciled, deleting it can make your next reconciliation inaccurate.")
+        if let detail = transaction.deleteConfirmationDetail(
+          linkedReconciled: model.hasReconciledLinkedTransfer(ids: transaction.linkedTransferIDs)
+        ) {
+          Text(detail)
         }
       }
     ) { transaction in

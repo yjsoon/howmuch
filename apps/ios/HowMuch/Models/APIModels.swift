@@ -1287,6 +1287,32 @@ extension Transaction {
     !subtransactions.isEmpty
   }
 
+  var linkedTransferIDs: [String] {
+    ([transferTransactionID] + subtransactions.map(\.transferTransactionID)).compactMap { $0 }
+  }
+
+  func deleteConfirmationDetail(linkedReconciled: Bool) -> String? {
+    let reconciledRisk = cleared == .reconciled || linkedReconciled
+    if parentTransactionID != nil {
+      if reconciledRisk {
+        return "The split line on the other account stays and loses this transfer link. This side has been reconciled, so deleting it can make your next reconciliation inaccurate."
+      }
+      return "The split line on the other account stays and loses this transfer link."
+    }
+    let isTransfer = transferTransactionID != nil
+      || subtransactions.contains { $0.transferTransactionID != nil }
+    switch (isTransfer, reconciledRisk) {
+    case (true, true):
+      return "This also deletes any linked transfer entries. Deleting a reconciled transfer can make your next reconciliation inaccurate."
+    case (true, false):
+      return "This also deletes any linked transfer entries."
+    case (false, true):
+      return "This transaction has been reconciled. Deleting it can make your next reconciliation inaccurate."
+    case (false, false):
+      return nil
+    }
+  }
+
   /// Single-transaction writes can omit `parentTransactionID`. Keep the list value.
   func preservingParent(from existing: Transaction) -> Transaction {
     guard parentTransactionID == nil, let parentTransactionID = existing.parentTransactionID else {
@@ -2007,6 +2033,12 @@ struct TransactionDraft: Equatable {
   /// Cleared state when the editor opened. New captures have none, so Save
   /// always sends the toggle. Edits send it only when this differs.
   var loadedCleared: ClearedState?
+  var loadedAmountMilli: Int?
+  var loadedAccountID: String?
+  var loadedDateISO: String?
+  var loadedTransferAccountID: String?
+  var loadedTransferLineSignatures: [String] = []
+  var linkedTransferIDs: [String] = []
   var flag: FlagColour = .none
   var memo = ""
 
@@ -2031,6 +2063,17 @@ struct TransactionDraft: Equatable {
     isCleared = transaction.cleared != .uncleared
     wasReconciled = transaction.cleared == .reconciled
     loadedCleared = transaction.cleared
+    loadedAmountMilli = transaction.amount
+    loadedAccountID = transaction.accountID
+    loadedDateISO = transaction.date
+    loadedTransferAccountID = transaction.isSplit ? nil : transaction.transferAccountID
+    loadedTransferLineSignatures = transaction.subtransactions.compactMap { line in
+      guard let dest = line.transferAccountID else {
+        return nil
+      }
+      return "\(line.transferTransactionID ?? "")|\(dest)|\(line.amount)"
+    }
+    linkedTransferIDs = transaction.linkedTransferIDs
     flag = FlagColour(rawValue: transaction.flagColor ?? "") ?? .none
     memo = transaction.memo ?? ""
   }
@@ -2112,6 +2155,27 @@ struct TransactionDraft: Equatable {
     // correction. New non-split zero captures remain invalid; zero-net splits
     // are legal YNAB reallocations.
     !accountID.isEmpty && splitValidationMessage == nil && (id != nil || amountMagnitudeMilli > 0 || isSplit)
+  }
+
+  var changesReconciliationGraph: Bool {
+    guard let loadedAmountMilli, let loadedAccountID, let loadedDateISO else {
+      return false
+    }
+    let transferLineSignatures = subtransactions.compactMap { line -> String? in
+      guard let dest = line.transferAccountID else {
+        return nil
+      }
+      return "\(line.transferTransactionID ?? "")|\(dest)|\(line.amount ?? 0)"
+    }
+    return signedMilliunits != loadedAmountMilli
+      || accountID != loadedAccountID
+      || date.isoDateString != loadedDateISO
+      || transferAccountID != loadedTransferAccountID
+      || transferLineSignatures != loadedTransferLineSignatures
+  }
+
+  func needsEditWarning(linkedReconciled: Bool) -> Bool {
+    id != nil && changesReconciliationGraph && (wasReconciled || linkedReconciled)
   }
 
   /// Editing keeps a reconciled transaction reconciled while the toggle is on.

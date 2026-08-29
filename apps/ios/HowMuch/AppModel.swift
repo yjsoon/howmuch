@@ -1472,6 +1472,16 @@ final class AppModel {
     }
   }
 
+  func hasReconciledLinkedTransfer(ids: [String]) -> Bool {
+    guard !ids.isEmpty else {
+      return false
+    }
+    let rows = transactions + unapprovedTransactions
+    return ids.contains { id in
+      rows.contains { $0.id == id && $0.cleared == .reconciled }
+    }
+  }
+
   func toggleTransactionCleared(_ transaction: Transaction) async throws {
     try ensureNoPendingEdit(on: transaction)
     guard !isSubmitting else {
