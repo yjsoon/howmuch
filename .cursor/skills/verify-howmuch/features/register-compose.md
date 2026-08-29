@@ -8,7 +8,7 @@ On a register, **+ Add transaction** opens an inline row. The posting account is
 - `compose-account-lock` shows Everyday Account as the posting account, not a picker defaulting to another account.
 - `compose-save` saves an outflow and shows the new row on that register.
 - `compose-add-another` keeps the row open after **Save and add another**.
-- `compose-all-accounts` on All Accounts still posts to the account chosen in the row.
+- `compose-all-accounts` on All Accounts requires an account in the row before Save.
 
 ## How to get to it (user POV)
 
@@ -37,6 +37,6 @@ Preconditions:
 ## Gotchas
 
 - Register **+ Add transaction** no longer navigates to `/add`. The sidebar footer and mobile **+ Add** still do.
-- Demo rows sit in 2026-03 through 2026-05. A save dated today appears on the default two-month window. A back-dated save needs **All** or a matching From/To.
+- Demo rows sit in 2026-03 through 2026-05. A save dated today appears on the default two-month window. A save outside the current From/To still writes, and the toast says it is outside this date range.
 - Outflow and inflow clear each other. Do not fill both.
 - Travel Card is a different account. A compose opened there must post to `acct-credit`, not Everyday Account.

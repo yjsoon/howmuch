@@ -3,6 +3,7 @@ import { todayIso } from "./dates";
 import { formatMilliunitsInput, parseMilliunits } from "./money";
 
 export type RegisterComposeDraft = {
+  clientId: string;
   date: string;
   accountId: string;
   payeeName: string;
@@ -23,7 +24,7 @@ export type RegisterComposeAction =
   | { type: "set-outflow"; value: string }
   | { type: "set-inflow"; value: string }
   | { type: "saving" }
-  | { type: "saved"; keepOpen: boolean; accountId: string }
+  | { type: "saved"; keepOpen: boolean }
   | { type: "failed"; error: string };
 
 export type ComposePayload =
@@ -32,6 +33,7 @@ export type ComposePayload =
 
 export function emptyComposeDraft(accountId: string, date = todayIso()): RegisterComposeDraft {
   return {
+    clientId: crypto.randomUUID(),
     date,
     accountId,
     payeeName: "",
@@ -49,11 +51,8 @@ export function closedCompose(): RegisterComposeState {
 export function reduceCompose(state: RegisterComposeState, action: RegisterComposeAction): RegisterComposeState {
   switch (action.type) {
     case "open":
-      if (state.status === "open" && state.saving) {
-        return state;
-      }
-      if (state.status === "open" && state.draft.accountId === action.accountId) {
-        return { ...state, error: null };
+      if (state.status === "open") {
+        return state.saving ? state : { ...state, error: null };
       }
       return { status: "open", draft: emptyComposeDraft(action.accountId), saving: false, error: null };
     case "close":
@@ -87,12 +86,15 @@ export function reduceCompose(state: RegisterComposeState, action: RegisterCompo
       }
       return { ...state, saving: true, error: null };
     case "saved":
+      if (state.status !== "open") {
+        return state;
+      }
       if (!action.keepOpen) {
         return { status: "closed" };
       }
       return {
         status: "open",
-        draft: emptyComposeDraft(action.accountId, state.status === "open" ? state.draft.date : todayIso()),
+        draft: emptyComposeDraft(state.draft.accountId, state.draft.date),
         saving: false,
         error: null,
       };
@@ -119,7 +121,6 @@ export function findTransferPayee(payees: readonly Payee[], name: string): Payee
 export function composePayload(
   draft: RegisterComposeDraft,
   payees: readonly Payee[],
-  clientId: string,
 ): ComposePayload {
   if (!draft.accountId) {
     return { ok: false, error: "Choose the posting account." };
@@ -149,7 +150,7 @@ export function composePayload(
   return {
     ok: true,
     input: {
-      client_id: clientId,
+      client_id: draft.clientId,
       account_id: draft.accountId,
       date: draft.date,
       amount: formatMilliunitsInput(signedAmount),
@@ -178,4 +179,14 @@ export function resolvePostingAccountId(
 
 export function addEntryHref(accountId?: string | null): string {
   return accountId ? `/add?account=${encodeURIComponent(accountId)}` : "/add";
+}
+
+export function dateInFilterRange(date: string, from?: string, to?: string): boolean {
+  if (from && date < from) {
+    return false;
+  }
+  if (to && date > to) {
+    return false;
+  }
+  return true;
 }

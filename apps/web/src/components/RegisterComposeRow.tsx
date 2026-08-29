@@ -3,7 +3,6 @@ import type { Account, CategoryGroup, Payee } from "../api/types";
 import { CategorySelect } from "./CategorySelect";
 import { splitCategoryGroups } from "../lib/categories";
 import {
-  composePayload,
   findTransferPayee,
   reduceCompose,
   type RegisterComposeState,
@@ -35,9 +34,7 @@ export function RegisterComposeRow({
   const dateRef = useRef<HTMLInputElement>(null);
   const orderedGroups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
   const transfer = findTransferPayee(payees, state.draft.payeeName);
-  const preview = composePayload(state.draft, payees, "preview");
   const busy = state.saving || disabled;
-  const canSave = preview.ok && !busy;
 
   useEffect(() => {
     dateRef.current?.focus();
@@ -59,12 +56,15 @@ export function RegisterComposeRow({
         className="register-compose-row"
         onKeyDown={(event) => {
           if (event.key === "Escape") {
+            if (busy) {
+              return;
+            }
             event.preventDefault();
             onCancel();
           }
-          if (event.key === "Enter" && event.target instanceof HTMLInputElement) {
+          if (event.key === "Enter" && (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement)) {
             event.preventDefault();
-            if (canSave) {
+            if (!busy) {
               onSave(false);
             }
           }
@@ -180,20 +180,23 @@ export function RegisterComposeRow({
             disabled={busy}
           />
         </td>
-        <td className="register-actions">
+        <td className="register-actions" />
+        <td className="register-status" />
+      </tr>
+      <tr className="register-compose-actions-row">
+        <td colSpan={10}>
           <div className="register-compose-actions">
             <button type="button" className="register-compose-cancel" onClick={onCancel} disabled={busy}>
               Cancel
             </button>
-            <button type="button" className="register-compose-save" onClick={() => onSave(false)} disabled={!canSave}>
+            <button type="button" className="register-compose-save" onClick={() => onSave(false)} disabled={busy}>
               {state.saving ? "Saving…" : "Save"}
             </button>
-            <button type="button" className="register-compose-save" onClick={() => onSave(true)} disabled={!canSave}>
+            <button type="button" className="register-compose-save" onClick={() => onSave(true)} disabled={busy}>
               Save and add another
             </button>
           </div>
         </td>
-        <td className="register-status" />
       </tr>
       {state.error && (
         <tr className="register-compose-error-row">

@@ -31,6 +31,7 @@ import {
 import {
   closedCompose,
   composePayload,
+  dateInFilterRange,
   reduceCompose,
   type RegisterComposeState,
 } from "../lib/register-compose";
@@ -137,9 +138,10 @@ export function TransactionsPage() {
   const [composeFocus, setComposeFocus] = useState(0);
   const mutationLockRef = useRef(false);
   const selectedAccountId = filters.accountIds.length === 1 ? filters.accountIds[0]! : null;
+  const composeScope = selectedAccountId ?? (filters.accountIds.join(",") || "all");
   useEffect(() => {
     setCompose(closedCompose());
-  }, [selectedAccountId]);
+  }, [composeScope]);
   const schedules = useApi<ScheduledTransaction[]>(
     selectedAccountId ? `${planId}:account-schedules:${selectedAccountId}` : `${planId}:account-schedules-idle`,
     () => selectedAccountId ? api.scheduledTransactions(planId) : Promise.resolve([]),
@@ -344,7 +346,7 @@ export function TransactionsPage() {
     }
     setCompose((current) => reduceCompose(current, {
       type: "open",
-      accountId: lockedComposeAccount?.id ?? composeAccounts[0]?.id ?? "",
+      accountId: lockedComposeAccount?.id ?? "",
     }));
     setComposeFocus((nonce) => nonce + 1);
     setMutationError(null);
@@ -355,13 +357,12 @@ export function TransactionsPage() {
     if (compose.status !== "open" || mutationLockRef.current) {
       return;
     }
-    const result = composePayload(compose.draft, payees.data ?? [], crypto.randomUUID());
+    const result = composePayload(compose.draft, payees.data ?? []);
     if (!result.ok) {
       setCompose((current) => reduceCompose(current, { type: "failed", error: result.error }));
       return;
     }
     mutationLockRef.current = true;
-    requestVersionRef.current += 1;
     setMutatingId("compose");
     setMutationError(null);
     setMutationSuccess(null);
@@ -369,14 +370,26 @@ export function TransactionsPage() {
     try {
       const transaction = await api.quickEntry(result.input);
       reload();
-      refreshFirstPage();
+      setPage((current) => {
+        if (!current.loaded || current.transactions.some((row) => row.id === transaction.id)) {
+          return current;
+        }
+        if (!registerAccountIds.has(transaction.account_id) || !dateInFilterRange(transaction.date, filters.from, filters.to)) {
+          return current;
+        }
+        return { ...current, transactions: [transaction, ...current.transactions] };
+      });
       setReconciliationPreviewGeneration((generation) => generation + 1);
-      setMutationSuccess(`${transaction.payee_name ?? "Entry"} saved.`);
-      setCompose((current) => reduceCompose(current, {
-        type: "saved",
-        keepOpen,
-        accountId: result.input.account_id,
-      }));
+      const savedName = transaction.payee_name ?? "Entry";
+      setMutationSuccess(
+        dateInFilterRange(transaction.date, filters.from, filters.to)
+          ? `${savedName} saved.`
+          : `${savedName} saved. It is outside this date range.`,
+      );
+      setCompose((current) => reduceCompose(current, { type: "saved", keepOpen }));
+      if (keepOpen) {
+        setComposeFocus((nonce) => nonce + 1);
+      }
     } catch (cause) {
       setCompose((current) => reduceCompose(current, {
         type: "failed",
@@ -681,6 +694,7 @@ export function TransactionsPage() {
             className="register-add-link"
             onClick={openCompose}
             disabled={!canCompose || mutationBusy}
+            title={!canCompose && selectedAccount?.closed ? "This account is closed" : undefined}
           >
             + Add transaction
           </button>
@@ -1160,7 +1174,7 @@ export function TransactionsPage() {
                   ])}
                 </tbody>
               </table>
-              {rows.length === 0 && !page.filling && (
+              {rows.length === 0 && !page.filling && compose.status !== "open" && (
                 <div className="register-empty-state">
                   <p className="status-title">{emptyMessage}</p>
                   <p className="status-detail">Try widening the date range, clearing filters, or shortening the search term.</p>

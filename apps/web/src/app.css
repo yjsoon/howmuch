@@ -1190,6 +1190,7 @@ textarea {
 }
 
 .register-compose-row td,
+.register-compose-actions-row td,
 .register-compose-error-row td {
   vertical-align: middle;
   background: var(--plan-accent-wash);
@@ -1197,8 +1198,14 @@ textarea {
 }
 
 .ledger-table tbody tr.register-compose-row:hover td,
+.ledger-table tbody tr.register-compose-actions-row:hover td,
 .ledger-table tbody tr.register-compose-error-row:hover td {
   background: var(--plan-accent-wash);
+}
+
+.register-compose-actions-row td {
+  text-align: right;
+  padding-block: 8px;
 }
 
 .register-compose-row input,

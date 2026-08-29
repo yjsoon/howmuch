@@ -4,6 +4,7 @@ import {
   addEntryHref,
   closedCompose,
   composePayload,
+  dateInFilterRange,
   emptyComposeDraft,
   reduceCompose,
   resolvePostingAccountId,
@@ -30,23 +31,14 @@ describe("register compose", () => {
     expect(state.saving).toBe(false);
   });
 
-  test("keeps the draft when Add is pressed again on the same account", () => {
+  test("keeps the draft when Add is pressed again", () => {
     let state = openDraft("acct-everyday");
     if (state.status === "open") {
-      state = reduceCompose(state, { type: "patch", draft: { payeeName: "Toast Box" } });
+      state = reduceCompose(state, { type: "patch", draft: { payeeName: "Toast Box", accountId: "acct-saver" } });
     }
     state = reduceCompose(state, { type: "open", accountId: "acct-everyday" });
     expect(state.status === "open" && state.draft.payeeName).toBe("Toast Box");
-  });
-
-  test("resets when the posting account changes", () => {
-    let state = openDraft("acct-everyday");
-    if (state.status === "open") {
-      state = reduceCompose(state, { type: "patch", draft: { payeeName: "Toast Box" } });
-    }
-    state = reduceCompose(state, { type: "open", accountId: "acct-saver" });
     expect(state.status === "open" && state.draft.accountId).toBe("acct-saver");
-    expect(state.status === "open" && state.draft.payeeName).toBe("");
   });
 
   test("typing an outflow clears the inflow", () => {
@@ -60,12 +52,13 @@ describe("register compose", () => {
   test("builds a spend against the posting account", () => {
     const draft = {
       ...emptyComposeDraft("acct-everyday", "2026-08-29"),
+      clientId: "client-1",
       payeeName: "Toast Box",
       categoryId: "cat-dining",
       memo: "lunch",
       outflow: "6.80",
     };
-    const result = composePayload(draft, [payee("p1", "Toast Box")], "client-1");
+    const result = composePayload(draft, [payee("p1", "Toast Box")]);
     expect(result).toEqual({
       ok: true,
       input: {
@@ -86,7 +79,6 @@ describe("register compose", () => {
     const income = composePayload(
       { ...emptyComposeDraft("acct-everyday", "2026-08-29"), payeeName: "Payroll", inflow: "10" },
       [payee("p-pay", "Payroll")],
-      "c-in",
     );
     expect(income.ok && income.input.amount).toBe("10");
     expect(income.ok && income.input.account_id).toBe("acct-everyday");
@@ -94,7 +86,6 @@ describe("register compose", () => {
     const transfer = composePayload(
       { ...emptyComposeDraft("acct-everyday", "2026-08-29"), payeeName: "Transfer : Rainy Day Saver", outflow: "25" },
       [payee("p-xfer", "Transfer : Rainy Day Saver", "acct-saver")],
-      "c-xfer",
     );
     expect(transfer.ok && transfer.input.payee_id).toBe("p-xfer");
     expect(transfer.ok && transfer.input.payee_name).toBeNull();
@@ -102,14 +93,13 @@ describe("register compose", () => {
   });
 
   test("rejects a missing account, both amounts, and an empty payee", () => {
-    expect(composePayload(emptyComposeDraft(""), [], "c")).toEqual({
+    expect(composePayload(emptyComposeDraft(""), [])).toEqual({
       ok: false,
       error: "Choose the posting account.",
     });
     expect(composePayload(
       { ...emptyComposeDraft("acct-everyday"), outflow: "1", inflow: "2", payeeName: "X" },
       [],
-      "c",
     )).toEqual({
       ok: false,
       error: "Enter an outflow or an inflow, not both.",
@@ -117,7 +107,6 @@ describe("register compose", () => {
     expect(composePayload(
       { ...emptyComposeDraft("acct-everyday"), outflow: "1" },
       [],
-      "c",
     )).toEqual({
       ok: false,
       error: "Enter a payee.",
@@ -136,14 +125,39 @@ describe("register compose", () => {
     expect(addEntryHref(null)).toBe("/add");
   });
 
-  test("save-and-add-another keeps the date and account", () => {
+  test("save-and-add-another keeps the date and account and remints the client id", () => {
     let state = openDraft("acct-credit");
+    const firstId = state.status === "open" ? state.draft.clientId : "";
     state = reduceCompose(state, { type: "patch", draft: { date: "2026-08-01", payeeName: "Toast Box" } });
     state = reduceCompose(state, { type: "saving" });
-    state = reduceCompose(state, { type: "saved", keepOpen: true, accountId: "acct-credit" });
+    state = reduceCompose(state, { type: "saved", keepOpen: true });
     expect(state.status === "open" && state.draft.accountId).toBe("acct-credit");
     expect(state.status === "open" && state.draft.date).toBe("2026-08-01");
     expect(state.status === "open" && state.draft.payeeName).toBe("");
+    expect(state.status === "open" && state.draft.clientId).not.toBe(firstId);
     expect(state.saving).toBe(false);
+  });
+
+  test("dateInFilterRange treats an open end as unbounded", () => {
+    expect(dateInFilterRange("2026-08-29", "2026-08-01", "2026-08-31")).toBe(true);
+    expect(dateInFilterRange("2026-07-01", "2026-08-01", "2026-08-31")).toBe(false);
+    expect(dateInFilterRange("2026-03-01", undefined, undefined)).toBe(true);
+  });
+
+  test("a failed save keeps the same client id for retry", () => {
+    let state = openDraft("acct-credit");
+    const firstId = state.status === "open" ? state.draft.clientId : "";
+    state = reduceCompose(state, { type: "saving" });
+    state = reduceCompose(state, { type: "failed", error: "network" });
+    expect(state.status === "open" && state.draft.clientId).toBe(firstId);
+    expect(state.status === "open" && state.error).toBe("network");
+  });
+
+  test("a late save does not reopen a cancelled row", () => {
+    let state = openDraft("acct-credit");
+    state = reduceCompose(state, { type: "saving" });
+    state = reduceCompose(state, { type: "close" });
+    state = reduceCompose(state, { type: "saved", keepOpen: true });
+    expect(state.status).toBe("closed");
   });
 });
