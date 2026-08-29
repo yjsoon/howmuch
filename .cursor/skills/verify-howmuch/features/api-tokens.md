@@ -28,7 +28,7 @@ Preconditions:
 - **Dismiss.** Choose `I’ve saved it`. Active tokens shows `Verify browser`.
 - **Revoke.** Choose `Revoke`, then confirm `Revoke`. The name moves under `Revoked tokens (1)`.
 - **HTTP match.** `control-howmuch http GET /api/auth/status` is not the token list. After create (before revoke), the UI is the proof; do not POST a token from `control-howmuch http` and call the page verified.
-- **Proof.** Screenshot the reveal panel (`artifacts/api-tokens/revealed.png`) and the active row (`artifacts/api-tokens/active.png`). Do not commit the secret value into notes.
+- **Proof.** Screenshot the active row after dismiss (`artifacts/api-tokens/active.png`). Do not save or commit the reveal panel; the secret is shown once.
 
 ## Gotchas
 

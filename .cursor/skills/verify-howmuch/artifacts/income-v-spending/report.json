@@ -1,0 +1,10 @@
+{
+  "data": {
+    "interval": "month",
+    "periods": [
+      {"period": "2026-03", "income": 5500000, "spending": 2057500, "net": 3442500, "cumulative_net": 3442500},
+      {"period": "2026-04", "income": 5770000, "spending": 783000, "net": 4987000, "cumulative_net": 8429500},
+      {"period": "2026-05", "income": 5700000, "spending": 451800, "net": 5248200, "cumulative_net": 13677700}
+    ]
+  }
+}

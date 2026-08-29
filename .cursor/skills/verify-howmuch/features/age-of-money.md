@@ -24,7 +24,7 @@ Preconditions:
 - Demo ledger still contains both inflows and outflows.
 
 - **Open report.** Open `{web_url}/age-of-money` (no query). Title is `Age of Money · HowMuch`. Heading is `Age of money`. Filter rail hides the category picker. Active preset is `All`.
-- **Default figure.** Latest headline is `{n} days` (not `—`). `Spending matched` is non-zero. History includes Mar / Apr / May 2026.
+- **Default figure.** Latest headline is `67 days` (May 2026 is the last measured demo month). `Spending matched` is `$3,292.30`. History includes Mar / Apr / May 2026.
 - **This month empty.** Choose `This month`. If today is outside March–May 2026, status title is `No spending in this range.` with detail `Need both income and spending before age of money can be calculated.`
 - **Return to All.** Choose `All`. The days figure returns.
 - **HTTP match.** `control-howmuch http GET "/api/reports/age-of-money?plan_id=local-plan"` returns `data.periods` with at least one `age_of_money_days` that is not null.

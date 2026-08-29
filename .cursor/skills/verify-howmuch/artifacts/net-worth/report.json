@@ -1,0 +1,39 @@
+{
+  "data": {
+    "periods": [
+      {
+        "period": "2026-03",
+        "end_date": "2026-03-31",
+        "net_worth": 544442500,
+        "delta": null,
+        "accounts": [
+          {"account_id": "acct-everyday", "account_name": "Everyday Account", "closed": false, "balance": 187818900},
+          {"account_id": "acct-saver", "account_name": "Rainy Day Saver", "closed": false, "balance": 420650000},
+          {"account_id": "acct-credit", "account_name": "Travel Card", "closed": false, "balance": -64026400}
+        ]
+      },
+      {
+        "period": "2026-04",
+        "end_date": "2026-04-30",
+        "net_worth": 549429500,
+        "delta": 4987000,
+        "accounts": [
+          {"account_id": "acct-everyday", "account_name": "Everyday Account", "closed": false, "balance": 193294800},
+          {"account_id": "acct-saver", "account_name": "Rainy Day Saver", "closed": false, "balance": 420650000},
+          {"account_id": "acct-credit", "account_name": "Travel Card", "closed": false, "balance": -64515300}
+        ]
+      },
+      {
+        "period": "2026-05",
+        "end_date": "2026-05-31",
+        "net_worth": 554677700,
+        "delta": 5248200,
+        "accounts": [
+          {"account_id": "acct-everyday", "account_name": "Everyday Account", "closed": false, "balance": 198008500},
+          {"account_id": "acct-saver", "account_name": "Rainy Day Saver", "closed": false, "balance": 421500000},
+          {"account_id": "acct-credit", "account_name": "Travel Card", "closed": false, "balance": -64830800}
+        ]
+      }
+    ]
+  }
+}

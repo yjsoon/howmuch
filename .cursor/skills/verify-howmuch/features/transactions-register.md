@@ -26,7 +26,7 @@ Preconditions:
 
 - **All Accounts.** Choose `All Accounts`. Title is `All Accounts · HowMuch`. Heading / register label is `All Accounts`. Header shows `Active cleared balance`, `Active uncleared balance`, `Active working balance`.
 - **See demo rows.** `All Accounts` already sets `range=all`. FairPrice Finest, Candlenut, and Scoot are visible without another range click. If you arrived via `/transactions` with no `range=all`, choose `All` in `Date range` first.
-- **Search.** Type `FairPrice` into `Search transactions`. Visible rows include `FairPrice Finest` and exclude `Scoot`. Search meta reads `Showing 1 of … loaded filtered entries`.
+- **Search.** Type `FairPrice` into `Search transactions`. Visible rows are FairPrice Finest only (Scoot and Candlenut gone). Search meta reads `Showing {n} of … loaded filtered entries`. `{n}` is 1 on a fresh demo; it rises if this run already entered a FairPrice schedule.
 - **Clear search.** Clear the searchbox. Scoot returns.
 - **Account scope.** Choose `Everyday Account`. Title becomes `Everyday Account · HowMuch`. Travel Card spend (Scoot, Candlenut) is absent. FairPrice Finest remains.
 - **HTTP match.** `control-howmuch http GET "/v1/plans/local-plan/transactions?since_date=2026-03-01&until_date=2026-05-31"` returns a transaction whose `payee_name` is `FairPrice Finest`.
