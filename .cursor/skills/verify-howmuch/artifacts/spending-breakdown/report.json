@@ -1,0 +1,102 @@
+{
+    "data": {
+        "total": 3292300,
+        "groups": [
+            {
+                "category_id": "cat-utilities",
+                "category_name": "Utilities",
+                "category_group_id": "grp-home",
+                "category_group_name": "Home",
+                "amount": 1974500,
+                "share": 0.5997327096558637,
+                "transaction_count": 2
+            },
+            {
+                "category_id": "cat-holiday",
+                "category_name": "Holiday",
+                "category_group_id": "grp-travel",
+                "category_group_name": "Travel",
+                "amount": 488900,
+                "share": 0.14849801050937034,
+                "transaction_count": 1
+            },
+            {
+                "category_id": "cat-groceries",
+                "category_name": "Groceries",
+                "category_group_id": "grp-home",
+                "category_group_name": "Home",
+                "amount": 357100,
+                "share": 0.10846520669440816,
+                "transaction_count": 3
+            },
+            {
+                "category_id": "cat-shopping",
+                "category_name": "Shopping",
+                "category_group_id": "grp-living",
+                "category_group_name": "Living",
+                "amount": 228900,
+                "share": 0.06952586337818546,
+                "transaction_count": 1
+            },
+            {
+                "category_id": "cat-dining",
+                "category_name": "Dining Out",
+                "category_group_id": "grp-home",
+                "category_group_name": "Home",
+                "amount": 125400,
+                "share": 0.038088874039425326,
+                "transaction_count": 2
+            },
+            {
+                "category_id": "cat-health",
+                "category_name": "Health",
+                "category_group_id": "grp-living",
+                "category_group_name": "Living",
+                "amount": 73500,
+                "share": 0.022324818515931114,
+                "transaction_count": 1
+            },
+            {
+                "category_id": "cat-transport",
+                "category_name": "Transport",
+                "category_group_id": "grp-living",
+                "category_group_name": "Living",
+                "amount": 44000,
+                "share": 0.013364517206815904,
+                "transaction_count": 2
+            }
+        ],
+        "top_payees": [
+            {
+                "payee_id": "payee_ac7cb305-debb-4aa1-b03b-2b1a0df60616",
+                "payee_name": "Straits View Residences",
+                "amount": 1850000,
+                "share": 0.5619172007411233
+            },
+            {
+                "payee_id": "payee_32498762-2962-45e5-a63b-f03472e0c71a",
+                "payee_name": "Scoot",
+                "amount": 488900,
+                "share": 0.14849801050937034
+            },
+            {
+                "payee_id": "payee_46ae0cb9-57d4-4db7-add4-576e92f4a7d9",
+                "payee_name": "MUJI",
+                "amount": 228900,
+                "share": 0.06952586337818546
+            },
+            {
+                "payee_id": "payee_5c13bec1-fa4a-4624-92e2-67afaf822c66",
+                "payee_name": "FairPrice Finest",
+                "amount": 142300,
+                "share": 0.043222063602952346
+            },
+            {
+                "payee_id": "payee_74b26028-1d4c-48b4-8017-37f29dfb5bfa",
+                "payee_name": "SP Services",
+                "amount": 124500,
+                "share": 0.037815508914740455
+            }
+        ]
+    }
+}

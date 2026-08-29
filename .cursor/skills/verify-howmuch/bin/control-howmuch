@@ -1,0 +1,297 @@
+#!/usr/bin/env bash
+# Isolated launch/doctor/cleanup for HowMuch web verification.
+# Never attach to the developer's `howmuch-dev` tmux session or the default
+# data/howmuch.sqlite file.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
+STATE_ROOT="${HOWMUCH_VERIFY_STATE_ROOT:-/tmp/howmuch-verify}"
+CURRENT_LINK="$STATE_ROOT/current"
+DEFAULT_USERNAME="verifier"
+DEFAULT_PASSWORD="howmuch-verify-15"
+DEFAULT_TOKEN="howmuch-verify-bootstrap"
+DEFAULT_PLAN_ID="local-plan"
+
+usage() {
+  cat <<'EOF'
+control-howmuch — isolated HowMuch verification helper
+
+Usage:
+  control-howmuch launch
+  control-howmuch doctor
+  control-howmuch state
+  control-howmuch http METHOD PATH
+  control-howmuch cleanup
+
+Environment:
+  HOWMUCH_VERIFY_RUN_ID   optional stable run id
+  HOWMUCH_VERIFY_STATE_ROOT  default /tmp/howmuch-verify
+EOF
+}
+
+need_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "error: missing $1" >&2
+    if [[ "$1" == bun ]]; then
+      echo "install bun, then run: bun install" >&2
+    fi
+    exit 1
+  fi
+}
+
+run_dir() {
+  if [[ ! -L "$CURRENT_LINK" && ! -f "$CURRENT_LINK" ]]; then
+    echo "error: no verification instance. run: control-howmuch launch" >&2
+    exit 1
+  fi
+  local dir
+  dir="$(readlink -f "$CURRENT_LINK")"
+  if [[ ! -d "$dir" ]]; then
+    echo "error: current pointer is stale: $CURRENT_LINK" >&2
+    exit 1
+  fi
+  printf '%s\n' "$dir"
+}
+
+state_file() {
+  printf '%s/state.json\n' "$(run_dir)"
+}
+
+read_state() {
+  local key="$1"
+  python3 - "$(state_file)" "$key" <<'PY'
+import json, sys
+state = json.load(open(sys.argv[1]))
+print(state[sys.argv[2]])
+PY
+}
+
+pick_port() {
+  python3 - <<'PY'
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+}
+
+wait_http() {
+  local url="$1"
+  local needle="${2-}"
+  local i
+  for i in $(seq 1 160); do
+    if body="$(curl -fsS --max-time 2 "$url" 2>/dev/null)"; then
+      if [[ -z "$needle" || "$body" == *"$needle"* ]]; then
+        return 0
+      fi
+    fi
+    sleep 0.25
+  done
+  echo "error: timed out waiting for $url" >&2
+  return 1
+}
+
+cmd_launch() {
+  need_cmd bun
+  need_cmd tmux
+  need_cmd curl
+  need_cmd python3
+
+  if [[ ! -d "$ROOT/node_modules" || ! -d "$ROOT/apps/web/node_modules" && ! -e "$ROOT/node_modules/vite" ]]; then
+    echo "error: dependencies missing. from repo root run: bun install" >&2
+    exit 1
+  fi
+
+  if [[ -L "$CURRENT_LINK" || -f "$CURRENT_LINK" ]]; then
+    local existing
+    existing="$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)"
+    if [[ -n "$existing" && -f "$existing/state.json" ]]; then
+      if HOWMUCH_VERIFY_ALLOW_REUSE=1 "$0" doctor >/dev/null 2>&1; then
+        echo "error: a healthy verification instance already exists at $existing" >&2
+        echo "drive that instance, or run control-howmuch cleanup first." >&2
+        exit 1
+      fi
+      echo "discarding stale verification instance at $existing"
+      "$0" cleanup >/dev/null || true
+    fi
+  fi
+
+  local run_id="${HOWMUCH_VERIFY_RUN_ID:-$(date +%Y%m%dT%H%M%S)-$$}"
+  local dir="$STATE_ROOT/$run_id"
+  local session="howmuch-verify-$run_id"
+  if [[ "$session" == "howmuch-dev" ]]; then
+    echo "error: refused to use the shared howmuch-dev session" >&2
+    exit 1
+  fi
+  if tmux has-session -t "$session" 2>/dev/null; then
+    echo "error: tmux session $session already exists" >&2
+    exit 1
+  fi
+
+  mkdir -p "$dir"
+  local db_path="$dir/howmuch.sqlite"
+  local api_port web_port
+  api_port="$(pick_port)"
+  web_port="$(pick_port)"
+  (
+    cd "$ROOT"
+    HOWMUCH_DB_PATH="$db_path" HOWMUCH_DEFAULT_PLAN_ID="$DEFAULT_PLAN_ID" bun run demo:seed
+  )
+
+  tmux new-session -d -s "$session" -c "$ROOT" \
+    "export HOWMUCH_DB_PATH='$db_path' HOWMUCH_PORT='$api_port' PORT='$api_port' HOWMUCH_API_TOKEN='$DEFAULT_TOKEN' HOWMUCH_DEFAULT_PLAN_ID='$DEFAULT_PLAN_ID' HOWMUCH_TRANSITION_READ_ONLY=false; bun run api:dev"
+  tmux rename-window -t "$session" api
+  tmux new-window -t "$session" -n web -c "$ROOT/apps/web" \
+    "export HOWMUCH_API_URL='http://127.0.0.1:$api_port'; bun run dev -- --host 127.0.0.1 --port $web_port --strictPort"
+
+  python3 - "$dir/state.json" <<PY
+import json
+json.dump({
+  "run_id": "$run_id",
+  "session": "$session",
+  "web_url": "http://127.0.0.1:$web_port",
+  "api_url": "http://127.0.0.1:$api_port",
+  "api_port": $api_port,
+  "web_port": $web_port,
+  "db_path": "$db_path",
+  "plan_id": "$DEFAULT_PLAN_ID",
+  "username": "$DEFAULT_USERNAME",
+  "password": "$DEFAULT_PASSWORD",
+  "api_token": "$DEFAULT_TOKEN",
+  "root": "$ROOT",
+}, open("$dir/state.json", "w"), indent=2)
+print("wrote $dir/state.json")
+PY
+  mkdir -p "$STATE_ROOT"
+  ln -sfn "$dir" "$CURRENT_LINK"
+
+  wait_http "http://127.0.0.1:$api_port/health" '"ok":true'
+  wait_http "http://127.0.0.1:$web_port/" "<div id=\"root\">"
+
+  echo "launched $session"
+  echo "web  http://127.0.0.1:$web_port"
+  echo "api  http://127.0.0.1:$api_port"
+  echo "db   $db_path"
+  echo "user $DEFAULT_USERNAME"
+  echo "ready. run control-howmuch doctor before driving."
+}
+
+cmd_doctor() {
+  need_cmd curl
+  local dir file session api_url web_url db_path api_port web_port
+  dir="$(run_dir)"
+  file="$dir/state.json"
+  session="$(read_state session)"
+  api_url="$(read_state api_url)"
+  web_url="$(read_state web_url)"
+  db_path="$(read_state db_path)"
+  api_port="$(read_state api_port)"
+  web_port="$(read_state web_port)"
+
+  if [[ "$session" == "howmuch-dev" ]]; then
+    echo "fail session is the shared howmuch-dev session" >&2
+    exit 1
+  fi
+  if [[ "$db_path" == "$ROOT/data/howmuch.sqlite" || "$db_path" == "data/howmuch.sqlite" ]]; then
+    echo "fail db path is the shared default ledger" >&2
+    exit 1
+  fi
+  case "$db_path" in
+    "$dir"/*) ;;
+    *)
+      echo "fail db path $db_path is outside this run directory" >&2
+      exit 1
+      ;;
+  esac
+  if ! tmux has-session -t "$session" 2>/dev/null; then
+    echo "fail tmux session $session is not running" >&2
+    exit 1
+  fi
+
+  local health status html
+  health="$(curl -fsS --max-time 3 "$api_url/health")"
+  if [[ "$health" != *'"ok":true'* ]]; then
+    echo "fail health: $health" >&2
+    exit 1
+  fi
+  status="$(curl -fsS --max-time 3 "$api_url/api/auth/status")"
+  html="$(curl -fsS --max-time 3 "$web_url/")"
+  if [[ "$html" != *"<title>HowMuch</title>"* ]]; then
+    echo "fail web did not serve HowMuch at $web_url" >&2
+    exit 1
+  fi
+
+  echo "ok session=$session"
+  echo "ok web=$web_url"
+  echo "ok api=$api_url"
+  echo "ok db=$db_path"
+  echo "ok health=$health"
+  echo "ok auth_status=$status"
+  echo "ok web_title=HowMuch"
+}
+
+cmd_state() {
+  python3 -m json.tool "$(state_file)"
+}
+
+cmd_http() {
+  local method="${1-}"
+  local path="${2-}"
+  if [[ -z "$method" || -z "$path" ]]; then
+    echo "usage: control-howmuch http METHOD PATH" >&2
+    exit 1
+  fi
+  local api_url token
+  api_url="$(read_state api_url)"
+  token="$(read_state api_token)"
+  shift 2 || true
+  curl -sS -X "$method" \
+    -H "authorization: Bearer $token" \
+    -H "origin: $api_url" \
+    -H "content-type: application/json" \
+    "$api_url$path" "$@"
+  echo
+}
+
+cmd_cleanup() {
+  if [[ ! -L "$CURRENT_LINK" && ! -f "$CURRENT_LINK" ]]; then
+    echo "no verification instance to clean"
+    return 0
+  fi
+  local dir session
+  dir="$(readlink -f "$CURRENT_LINK")"
+  if [[ -f "$dir/state.json" ]]; then
+    session="$(python3 -c "import json; print(json.load(open('$dir/state.json'))['session'])")"
+    if [[ "$session" == "howmuch-dev" ]]; then
+      echo "error: refusing to kill the shared howmuch-dev session" >&2
+      exit 1
+    fi
+    if [[ "$session" == howmuch-verify-* ]] && tmux has-session -t "$session" 2>/dev/null; then
+      tmux kill-session -t "$session"
+    fi
+  fi
+  rm -f "$CURRENT_LINK"
+  if [[ -d "$dir" ]]; then
+    rm -rf "$dir"
+  fi
+  echo "cleaned $dir"
+  echo "left proof artifacts in place"
+}
+
+case "${1-}" in
+  launch) cmd_launch ;;
+  doctor) cmd_doctor ;;
+  state) cmd_state ;;
+  http)
+    shift
+    cmd_http "$@"
+    ;;
+  cleanup) cmd_cleanup ;;
+  -h|--help|help|"") usage ;;
+  *)
+    echo "error: unknown command ${1-}" >&2
+    usage >&2
+    exit 1
+    ;;
+esac
