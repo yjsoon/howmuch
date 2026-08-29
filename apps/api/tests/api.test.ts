@@ -144,6 +144,7 @@ describe("YNAB-compatible API", () => {
     await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
     await repo.upsertAccount("plan-test", { id: "bank", name: "Bank", opening_balance: 1000 });
     await repo.upsertAccount("plan-test", { id: "other", name: "Other" });
+    await repo.upsertAccount("plan-test", { id: "fresh", name: "Fresh" });
     await repo.createTransaction("plan-test", { id: "prior", account_id: "bank", date: "2026-07-01", amount: 100, cleared: "reconciled" });
     await repo.createTransaction("plan-test", { id: "eligible", account_id: "bank", date: "2026-08-20", amount: -200, cleared: "cleared" });
     await repo.createTransaction("plan-test", { id: "future", account_id: "bank", date: "2026-09-01", amount: -300, cleared: "cleared" });
@@ -234,6 +235,7 @@ describe("YNAB-compatible API", () => {
     const byId = Object.fromEntries(listed.data.accounts.map((account: { id: string }) => [account.id, account]));
     expect(byId.bank.last_reconciled_date).toBe("2026-08-31");
     expect(byId.other.last_reconciled_date).toBe("2026-08-15");
+    expect(byId.fresh.last_reconciled_date).toBeNull();
     expect((await (await request("/v1/plans/plan-test/accounts/bank")).json()).data.account.last_reconciled_date).toBe("2026-08-31");
   });
 

@@ -43,6 +43,12 @@ enum Theme {
     dark: Color(red: 0.420, green: 0.780, blue: 0.549)
   )
 
+  /// Uncategorised register detail, tuned for the cream canvas.
+  static let uncategorised = Color(
+    light: Color(red: 0.690, green: 0.400, blue: 0.110),
+    dark: Color(red: 0.945, green: 0.710, blue: 0.400)
+  )
+
   /// System red for destructive swipe and cancellation actions.
   /// The app-wide accent would otherwise recast `role: .destructive` as blurple.
   static let cancellation = Color.red

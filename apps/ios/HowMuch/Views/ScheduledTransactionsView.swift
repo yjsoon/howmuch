@@ -101,36 +101,64 @@ struct ScheduledTransactionRow: View {
   @Environment(AppModel.self) private var model
   let schedule: ScheduledTransaction
   var showsAccount: Bool = true
+  var showsNextDate: Bool = false
 
   var body: some View {
-    HStack(alignment: .center, spacing: 10) {
-      VStack(alignment: .leading, spacing: 3) {
-        Text(payeeLabel)
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(Theme.textPrimary)
-          .lineLimit(1)
-        Text(showsAccount ? "\(accountLabel) · \(categoryLabel)" : categoryLabel)
-          .font(.footnote)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-        Label(schedule.recurrenceLabel, systemImage: "arrow.triangle.2.circlepath")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
+    HStack(alignment: .center, spacing: 4) {
+      HStack(alignment: .center, spacing: 10) {
+        VStack(alignment: .leading, spacing: 3) {
+          Text(payeeLabel)
+            .font(.body.weight(.semibold))
+            .foregroundStyle(Theme.textPrimary)
+            .lineLimit(1)
+          Text(detailLine)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+
+        Spacer(minLength: 8)
+
+        VStack(alignment: .trailing, spacing: 2) {
+          Text(MoneyCodec.signedDisplayString(for: schedule.amount, currencyFormat: model.currencyFormat))
+            .font(.subheadline.weight(.medium))
+            .monospacedDigit()
+            .foregroundStyle(Theme.registerAmountColour(schedule.amount))
+          Text(schedule.recurrenceLabel)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
       }
 
-      Spacer(minLength: 8)
-
-      Text(MoneyCodec.signedDisplayString(for: schedule.amount, currencyFormat: model.currencyFormat))
-        .font(.subheadline.weight(.medium))
-        .monospacedDigit()
-        .foregroundStyle(Theme.registerAmountColour(schedule.amount))
-        .multilineTextAlignment(.trailing)
+      Image(systemName: "calendar")
+        .font(.title3)
+        .foregroundStyle(.tertiary)
+        .frame(width: 44, height: 44)
+        .accessibilityHidden(true)
     }
-    .padding(.horizontal, 16)
-    .padding(.vertical, 11)
+    .padding(.leading, 16)
+    .padding(.trailing, 8)
+    .padding(.vertical, 10)
     .flagRail(Theme.flagColour(named: schedule.flagColor))
     .accessibilityElement(children: .combine)
+    .accessibilityLabel(accessibilityLabel)
+  }
+
+  private var detailLine: String {
+    var parts: [String] = []
+    if showsNextDate {
+      parts.append(LedgerDate.friendlyString(fromISO: schedule.dateNext))
+    }
+    if showsAccount {
+      parts.append(accountLabel)
+    }
+    parts.append(categoryLabel)
+    return parts.joined(separator: " · ")
+  }
+
+  private var accessibilityLabel: String {
+    "\(payeeLabel), \(detailLine), \(schedule.recurrenceLabel)"
   }
 
   private var accountLabel: String {

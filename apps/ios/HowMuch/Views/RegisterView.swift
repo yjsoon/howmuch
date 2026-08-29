@@ -33,7 +33,7 @@ struct RegisterView: View {
   @State private var transactionPendingDeletion: Transaction?
   @State private var deleteError: String?
   @State private var pendingRowAction: PendingRow?
-  @State private var isScheduledExpanded = false
+  @SceneStorage("howmuch.register.scheduledExpanded") private var expandedScheduleAccountIDs = ""
   @State private var editingSchedule: ScheduledTransaction?
 
   private struct DuplicateDraft: Identifiable {
@@ -212,10 +212,15 @@ struct RegisterView: View {
       }
     }
     .task {
-      guard scope.accountID != nil, model.scheduledTransactionsPhase == .idle else {
+      guard scope.accountID != nil else {
         return
       }
-      await model.refreshScheduledTransactions()
+      switch model.scheduledTransactionsPhase {
+      case .idle, .failed:
+        await model.refreshScheduledTransactions()
+      case .loading, .loaded:
+        break
+      }
     }
     .onAppear {
       if let accountID = scope.accountID {
@@ -233,22 +238,65 @@ struct RegisterView: View {
   private var workingBalanceSection: some View {
     if let account = scopedAccount {
       Section {
-        VStack(spacing: 2) {
-          Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
-            .font(.title2.weight(.bold))
-            .monospacedDigit()
-            .contentTransition(.numericText(value: Double(account.balance)))
-            .animation(.snappy, value: account.balance)
-            .foregroundStyle(Theme.amountColour(account.balance))
-          Text(lastReconciledSubtitle)
-            .font(.caption)
-            .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+          HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
+              Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
+                .font(.title2.weight(.bold))
+                .monospacedDigit()
+                .contentTransition(.numericText(value: Double(account.balance)))
+                .animation(.snappy, value: account.balance)
+                .foregroundStyle(Theme.textPrimary)
+              Text("Working Balance")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 6) {
+              headerSideFigure("Cleared", account.clearedBalance)
+              headerSideFigure("Uncleared", account.unclearedBalance)
+            }
+          }
+          .accessibilityElement(children: .combine)
+          .accessibilityLabel(workingBalanceAccessibilityLabel(account))
+
+          Button {
+            isShowingReconciliation = true
+          } label: {
+            Text(lastReconciledSubtitle)
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+          }
+          .buttonStyle(.plain)
+          .accessibilityHint("Opens reconcile.")
         }
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .listRowInsets(EdgeInsets())
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
       }
     }
+  }
+
+  private func headerSideFigure(_ label: String, _ amount: Int) -> some View {
+    VStack(alignment: .trailing, spacing: 1) {
+      Text(label)
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+      Text(MoneyCodec.displayString(for: amount, currencyFormat: model.currencyFormat))
+        .font(.footnote.weight(.semibold))
+        .monospacedDigit()
+        .foregroundStyle(Theme.textPrimary)
+    }
+  }
+
+  private func workingBalanceAccessibilityLabel(_ account: Account) -> String {
+    let working = MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat)
+    let cleared = MoneyCodec.displayString(for: account.clearedBalance, currencyFormat: model.currencyFormat)
+    let uncleared = MoneyCodec.displayString(for: account.unclearedBalance, currencyFormat: model.currencyFormat)
+    return "Working balance \(working). Cleared \(cleared). Uncleared \(uncleared)."
   }
 
   @ViewBuilder
@@ -267,23 +315,34 @@ struct RegisterView: View {
           if unapprovedCount > 0 || unapprovedOnly {
             filterBanner(
               isOn: $unapprovedOnly,
-              offLabel: "Review new transactions",
               onLabel: "Showing new transactions to approve",
-              countBadge: unapprovedCount
+              count: unapprovedCount,
+              prefix: "Review",
+              singular: "new transaction",
+              plural: "new transactions",
+              style: .newBadge
             )
           }
           if unclearedCount > 0 || unclearedOnly {
             filterBanner(
               isOn: $unclearedOnly,
-              offLabel: "Show \(unclearedCount) uncleared transactions",
-              onLabel: "Showing uncleared only"
+              onLabel: "Showing uncleared only",
+              count: unclearedCount,
+              prefix: "Show",
+              singular: "uncleared transaction",
+              plural: "uncleared transactions",
+              style: .emphasizedCount
             )
           }
           if uncategorisedCount > 0 || uncategorisedOnly {
             filterBanner(
               isOn: $uncategorisedOnly,
-              offLabel: "Show \(uncategorisedCount) uncategorised transactions",
-              onLabel: "Showing uncategorised only"
+              onLabel: "Showing uncategorised only",
+              count: uncategorisedCount,
+              prefix: "Show",
+              singular: "uncategorised transaction",
+              plural: "uncategorised transactions",
+              style: .emphasizedCount
             )
           }
         }
@@ -309,17 +368,21 @@ struct RegisterView: View {
             currencyFormat: model.currencyFormat,
             onRejectedTap: { pendingRowAction = row }
           )
-          .listRowInsets(EdgeInsets())
-          .listRowBackground(Theme.canvas)
+          .registerRowChrome()
         }
         ForEach(section.transactions) { transaction in
           registerRow(for: transaction)
         }
       } header: {
         Text(LedgerDate.friendlyString(fromISO: section.date))
-          .font(.footnote.weight(.semibold))
-          .foregroundStyle(.secondary)
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(Theme.textPrimary)
           .textCase(nil)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.horizontal, 16)
+          .padding(.vertical, 6)
+          .background(Theme.surfaceMuted)
+          .listRowInsets(EdgeInsets())
       }
     }
   }
@@ -376,8 +439,7 @@ struct RegisterView: View {
         Label("Delete", systemImage: "trash")
       }
     }
-    .listRowInsets(EdgeInsets())
-    .listRowBackground(Theme.canvas)
+    .registerRowChrome()
   }
 
   @ViewBuilder
@@ -535,16 +597,53 @@ struct RegisterView: View {
     if let date = scopedAccount?.lastReconciledDate {
       return "Last reconciled: \(LedgerDate.friendlyString(fromISO: date))"
     }
-    return "Last reconciled: never"
+    return "Not reconciled yet"
   }
 
   @ViewBuilder
   private var scheduledDisclosureSection: some View {
-    if shouldShowScheduled {
+    if showsScheduledFailure {
+      Section {
+        Button {
+          Task { await model.refreshScheduledTransactions() }
+        } label: {
+          HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+              Text("Couldn’t load scheduled transactions")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.textPrimary)
+              if let message = model.scheduledTransactionsPhase.errorMessage {
+                Text(message)
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                  .lineLimit(2)
+              }
+            }
+            Spacer()
+            if model.scheduledTransactionsPhase.isLoading {
+              ProgressView()
+                .controlSize(.small)
+            } else {
+              Text("Try Again")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.accent)
+            }
+          }
+          .padding(.horizontal, 16)
+          .padding(.vertical, 12)
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Theme.canvas)
+        .listRowSeparator(.hidden)
+        .accessibilityLabel("Couldn’t load scheduled transactions")
+        .accessibilityHint("Double tap to try again.")
+      }
+    } else if shouldShowScheduled {
       Section {
         Button {
           withAnimation(.snappy) {
-            isScheduledExpanded.toggle()
+            toggleScheduledExpanded()
           }
         } label: {
           HStack(spacing: 10) {
@@ -556,21 +655,17 @@ struct RegisterView: View {
               .font(.subheadline.weight(.semibold))
               .foregroundStyle(Theme.textPrimary)
             Spacer()
-            if model.scheduledTransactionsPhase.isLoading && accountSchedules.isEmpty {
-              ProgressView()
-                .controlSize(.small)
-            } else {
-              Text("\(accountSchedules.count)")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            }
+            Text("\(accountSchedules.count)")
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
           }
           .padding(.horizontal, 16)
           .padding(.vertical, 12)
         }
         .buttonStyle(.plain)
         .listRowInsets(EdgeInsets())
-        .listRowBackground(Theme.surfaceMuted)
+        .listRowBackground(Theme.canvas)
+        .listRowSeparator(.hidden)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel("Scheduled")
         .accessibilityValue(scheduledAccessibilityValue)
@@ -581,27 +676,55 @@ struct RegisterView: View {
             Button {
               editingSchedule = schedule
             } label: {
-              ScheduledTransactionRow(schedule: schedule, showsAccount: false)
+              ScheduledTransactionRow(schedule: schedule, showsAccount: false, showsNextDate: true)
             }
             .buttonStyle(.plain)
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Theme.canvas)
+            .registerRowChrome()
           }
         }
       }
     }
   }
 
+  private var showsScheduledFailure: Bool {
+    scope.accountID != nil && model.scheduledTransactionsPhase.errorMessage != nil
+  }
+
   private var shouldShowScheduled: Bool {
     scope.accountID != nil
-      && (!accountSchedules.isEmpty || model.scheduledTransactionsPhase.isLoading || model.scheduledTransactionsPhase == .idle)
+      && model.scheduledTransactionsPhase == .loaded
+      && !accountSchedules.isEmpty
+  }
+
+  private var isScheduledExpanded: Bool {
+    guard let accountID = scope.accountID else {
+      return false
+    }
+    return scheduledExpandedAccountIDs.contains(accountID)
+  }
+
+  private var scheduledExpandedAccountIDs: Set<String> {
+    Set(expandedScheduleAccountIDs.split(separator: ",", omittingEmptySubsequences: true).map(String.init))
+  }
+
+  private func toggleScheduledExpanded() {
+    guard let accountID = scope.accountID else {
+      return
+    }
+    var ids = scheduledExpandedAccountIDs
+    if ids.contains(accountID) {
+      ids.remove(accountID)
+    } else {
+      ids.insert(accountID)
+    }
+    expandedScheduleAccountIDs = ids.sorted().joined(separator: ",")
   }
 
   private var scheduledAccessibilityValue: String {
     if isScheduledExpanded {
-      return accountSchedules.isEmpty ? "Expanded" : "Expanded, \(accountSchedules.count)"
+      return "Expanded, \(accountSchedules.count)"
     }
-    return accountSchedules.isEmpty ? "Collapsed" : "Collapsed, \(accountSchedules.count)"
+    return "Collapsed, \(accountSchedules.count)"
   }
 
   private var accountSchedules: [ScheduledTransaction] {
@@ -692,8 +815,23 @@ struct RegisterView: View {
     }
   }
 
-  private func filterBanner(isOn: Binding<Bool>, offLabel: String, onLabel: String, countBadge: Int? = nil) -> some View {
-    Button {
+  private enum FilterBannerStyle {
+    case newBadge
+    case emphasizedCount
+  }
+
+  private func filterBanner(
+    isOn: Binding<Bool>,
+    onLabel: String,
+    count: Int,
+    prefix: String,
+    singular: String,
+    plural: String,
+    style: FilterBannerStyle
+  ) -> some View {
+    let noun = count == 1 ? singular : plural
+    let offLabel = "\(prefix) \(count) \(noun)"
+    return Button {
       withAnimation(.snappy) {
         isOn.wrappedValue.toggle()
       }
@@ -703,23 +841,27 @@ struct RegisterView: View {
           Text(onLabel)
             .font(.subheadline)
             .foregroundStyle(Theme.textPrimary)
-        } else if let countBadge {
-          Text("Review")
+        } else if style == .newBadge {
+          Text(prefix)
             .font(.subheadline)
             .foregroundStyle(Theme.textPrimary)
-          Text("\(countBadge)")
+          Text("\(count)")
             .font(.caption.weight(.semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(Theme.newStatus, in: Capsule())
-          Text(countBadge == 1 ? "new transaction" : "new transactions")
+          Text(noun)
             .font(.subheadline)
             .foregroundStyle(Theme.textPrimary)
         } else {
-          Text(offLabel)
-            .font(.subheadline)
-            .foregroundStyle(Theme.textPrimary)
+          (
+            Text("\(prefix) ")
+            + Text("\(count)").fontWeight(.semibold)
+            + Text(" \(noun)")
+          )
+          .font(.subheadline)
+          .foregroundStyle(Theme.textPrimary)
         }
         Spacer()
         Image(systemName: isOn.wrappedValue ? "xmark.circle.fill" : "chevron.right")
@@ -732,18 +874,9 @@ struct RegisterView: View {
     .buttonStyle(.plain)
     .listRowInsets(EdgeInsets())
     .listRowBackground(Theme.surfaceMuted)
+    .listRowSeparator(.hidden)
     .accessibilityElement(children: .combine)
-    .accessibilityLabel(bannerAccessibilityLabel(isOn: isOn.wrappedValue, offLabel: offLabel, onLabel: onLabel, countBadge: countBadge))
-  }
-
-  private func bannerAccessibilityLabel(isOn: Bool, offLabel: String, onLabel: String, countBadge: Int?) -> String {
-    if isOn {
-      return onLabel
-    }
-    if let countBadge {
-      return countBadge == 1 ? "Review 1 new transaction" : "Review \(countBadge) new transactions"
-    }
-    return offLabel
+    .accessibilityLabel(isOn.wrappedValue ? onLabel : offLabel)
   }
 
   private var showsFilterBanners: Bool {
@@ -1200,21 +1333,18 @@ private struct PendingTransactionRow: View {
       HStack(alignment: .center, spacing: 10) {
         VStack(alignment: .leading, spacing: 3) {
           Text(payeeDisplay)
-            .font(.subheadline.weight(.semibold))
+            .font(.body.weight(.semibold))
             .foregroundStyle(Theme.textPrimary)
             .lineLimit(1)
           Text(detailLine)
             .font(.footnote)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(row.categoryID == nil && row.splitLineCount == 0 ? AnyShapeStyle(Theme.uncategorised) : AnyShapeStyle(.secondary))
             .lineLimit(1)
           if let memo = row.memo, !memo.isEmpty {
             Text(memo)
-              .font(.caption)
+              .font(.footnote)
               .foregroundStyle(.secondary)
-              .lineLimit(1)
-              .padding(.horizontal, 8)
-              .padding(.vertical, 3)
-              .background(Theme.surfaceMuted, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+              .lineLimit(2)
           }
         }
 
@@ -1237,7 +1367,7 @@ private struct PendingTransactionRow: View {
     }
     .padding(.leading, 16)
     .padding(.trailing, 8)
-    .padding(.vertical, 7)
+    .padding(.vertical, 10)
     .flagRail(Theme.flagColour(named: row.flag.rawValue))
     .contentShape(Rectangle())
     .accessibilityElement(children: .combine)
@@ -1320,21 +1450,18 @@ struct TransactionRow: View {
         HStack(alignment: .center, spacing: 10) {
           VStack(alignment: .leading, spacing: 3) {
             Text(payeeDisplay)
-              .font(.subheadline.weight(.semibold))
+              .font(.body.weight(.semibold))
               .foregroundStyle(Theme.textPrimary)
               .lineLimit(1)
             Text(detailLine)
               .font(.footnote)
-              .foregroundStyle(transaction.isUncategorised ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
+              .foregroundStyle(transaction.isUncategorised ? AnyShapeStyle(Theme.uncategorised) : AnyShapeStyle(.secondary))
               .lineLimit(1)
             if let memo = transaction.memo, !memo.isEmpty {
               Text(memo)
-                .font(.caption)
+                .font(.footnote)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Theme.surfaceMuted, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .lineLimit(2)
             }
           }
 
@@ -1355,7 +1482,7 @@ struct TransactionRow: View {
     }
     .padding(.leading, 16)
     .padding(.trailing, 8)
-    .padding(.vertical, 7)
+    .padding(.vertical, 10)
     .flagRail(Theme.flagColour(named: transaction.flagColor))
     .contentShape(Rectangle())
   }
@@ -1443,5 +1570,13 @@ struct TransactionRow: View {
     case .reconciled:
       return "Reconciled"
     }
+  }
+}
+
+private extension View {
+  func registerRowChrome() -> some View {
+    listRowInsets(EdgeInsets())
+      .listRowBackground(Theme.card)
+      .listRowSeparator(.hidden)
   }
 }
