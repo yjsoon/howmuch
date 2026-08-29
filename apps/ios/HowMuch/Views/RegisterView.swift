@@ -622,7 +622,7 @@ struct RegisterView: View {
     if let date = lastReconciledISODate {
       return "Last reconciled: \(LedgerDate.friendlyString(fromISO: date))"
     }
-    if model.ledgerPhase == .loading || model.ledgerPhase == .idle || model.isFillingHorizon {
+    if model.ledgerPhase != .loaded || model.isFillingHorizon {
       return "Last reconciled: …"
     }
     return "Not reconciled yet"
