@@ -26,10 +26,7 @@ enum Theme {
     dark: Color(red: 0.541, green: 0.553, blue: 0.973)
   )
 
-  static let newStatus = Color(
-    light: Color(red: 0.145, green: 0.227, blue: 0.455),
-    dark: Color(red: 0.45, green: 0.55, blue: 0.85)
-  )
+  static let newStatus = accent
 
   static let textPrimary = Color(
     light: Color(red: 0.106, green: 0.125, blue: 0.227),
@@ -44,6 +41,12 @@ enum Theme {
   static let inflow = Color(
     light: Color(red: 0.133, green: 0.545, blue: 0.341),
     dark: Color(red: 0.420, green: 0.780, blue: 0.549)
+  )
+
+  /// Uncategorised register detail, tuned for the cream canvas.
+  static let uncategorised = Color(
+    light: Color(red: 0.690, green: 0.400, blue: 0.110),
+    dark: Color(red: 0.945, green: 0.710, blue: 0.400)
   )
 
   /// System red for destructive swipe and cancellation actions.

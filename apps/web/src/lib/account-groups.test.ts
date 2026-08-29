@@ -3,9 +3,9 @@ import type { Account, AccountPreferences } from "../api/types";
 import { accountGroups, partitionAccountGroups } from "./account-groups";
 
 const accounts: Account[] = [
-  { id: "cash", name: "Wallet", icon: "💵", type: "cash", on_budget: true, closed: false, balance: 1000, cleared_balance: 1000, uncleared_balance: 0, transfer_payee_id: null, deleted: false },
-  { id: "card", name: "Visa", icon: "💳", type: "creditCard", on_budget: true, closed: false, balance: -500, cleared_balance: -500, uncleared_balance: 0, transfer_payee_id: null, deleted: false },
-  { id: "loan", name: "Loan", icon: "📉", type: "otherLiability", on_budget: false, closed: false, balance: -5000, cleared_balance: -5000, uncleared_balance: 0, transfer_payee_id: null, deleted: false },
+  { id: "cash", name: "Wallet", icon: "💵", type: "cash", on_budget: true, closed: false, balance: 1000, cleared_balance: 1000, uncleared_balance: 0, last_reconciled_date: null, transfer_payee_id: null, deleted: false },
+  { id: "card", name: "Visa", icon: "💳", type: "creditCard", on_budget: true, closed: false, balance: -500, cleared_balance: -500, uncleared_balance: 0, last_reconciled_date: null, transfer_payee_id: null, deleted: false },
+  { id: "loan", name: "Loan", icon: "📉", type: "otherLiability", on_budget: false, closed: false, balance: -5000, cleared_balance: -5000, uncleared_balance: 0, last_reconciled_date: null, transfer_payee_id: null, deleted: false },
 ];
 
 const preferences: AccountPreferences = {

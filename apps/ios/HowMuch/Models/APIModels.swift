@@ -1121,6 +1121,7 @@ struct Account: Decodable, Identifiable, Hashable {
   let balance: Int
   let clearedBalance: Int
   let unclearedBalance: Int
+  let lastReconciledDate: String?
   let deleted: Bool
 
   var displayIcon: String {
@@ -1142,6 +1143,7 @@ struct Account: Decodable, Identifiable, Hashable {
       balance: balance,
       clearedBalance: clearedBalance,
       unclearedBalance: unclearedBalance,
+      lastReconciledDate: lastReconciledDate,
       deleted: deleted
     )
   }
@@ -1374,8 +1376,6 @@ struct Subtransaction: Decodable, Hashable {
   }
 }
 
-/// An imported YNAB scheduled transaction. The API deliberately exposes this
-/// as a read-only source mirror, so the app never offers an edit action here.
 struct ScheduledTransaction: Decodable, Identifiable, Hashable {
   let id: String
   let dateFirst: String

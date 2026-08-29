@@ -144,6 +144,7 @@ describe("YNAB-compatible API", () => {
     await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
     await repo.upsertAccount("plan-test", { id: "bank", name: "Bank", opening_balance: 1000 });
     await repo.upsertAccount("plan-test", { id: "other", name: "Other" });
+    await repo.upsertAccount("plan-test", { id: "fresh", name: "Fresh" });
     await repo.createTransaction("plan-test", { id: "prior", account_id: "bank", date: "2026-07-01", amount: 100, cleared: "reconciled" });
     await repo.createTransaction("plan-test", { id: "eligible", account_id: "bank", date: "2026-08-20", amount: -200, cleared: "cleared" });
     await repo.createTransaction("plan-test", { id: "future", account_id: "bank", date: "2026-09-01", amount: -300, cleared: "cleared" });
@@ -151,6 +152,8 @@ describe("YNAB-compatible API", () => {
     await repo.createTransaction("plan-test", { id: "deleted", account_id: "bank", date: "2026-08-10", amount: -500, cleared: "cleared" });
     await repo.deleteTransaction("plan-test", "deleted");
     await repo.createTransaction("plan-test", { id: "other-row", account_id: "other", date: "2026-08-10", amount: 700, cleared: "cleared" });
+    await repo.createTransaction("plan-test", { id: "imported-old", account_id: "other", date: "2026-06-01", amount: 50, cleared: "reconciled" });
+    await repo.createTransaction("plan-test", { id: "imported-new", account_id: "other", date: "2026-08-15", amount: 25, cleared: "reconciled" });
     const route = "/v1/plans/plan-test/accounts/bank/reconcile";
 
     expect((await handler(new Request(`http://howmuch.test${route}`, {
@@ -228,6 +231,12 @@ describe("YNAB-compatible API", () => {
       current_reconciled_balance: 900, projected_reconciled_balance: 900,
       candidate_transaction_ids: [], candidate_transaction_count: 0,
     });
+    const listed = await (await request("/v1/plans/plan-test/accounts")).json();
+    const byId = Object.fromEntries(listed.data.accounts.map((account: { id: string }) => [account.id, account]));
+    expect(byId.bank.last_reconciled_date).toBe("2026-08-31");
+    expect(byId.other.last_reconciled_date).toBe("2026-08-15");
+    expect(byId.fresh.last_reconciled_date).toBeNull();
+    expect((await (await request("/v1/plans/plan-test/accounts/bank")).json()).data.account.last_reconciled_date).toBe("2026-08-31");
   });
 
   test("rejects a stale SQLite reconciliation snapshot before any workflow mutation", async () => {

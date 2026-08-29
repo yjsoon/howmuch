@@ -31,6 +31,7 @@ export interface Account {
   balance: number;
   cleared_balance: number;
   uncleared_balance: number;
+  last_reconciled_date: string | null;
   transfer_payee_id: string | null;
   deleted: boolean;
 }
