@@ -59,7 +59,7 @@ state_file() {
 
 read_state() {
   local key="$1"
-  python3 - "$state_file" "$key" <<'PY'
+  python3 - "$(state_file)" "$key" <<'PY'
 import json, sys
 state = json.load(open(sys.argv[1]))
 print(state[sys.argv[2]])
