@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// The schedule is imported from YNAB, while changes live as HowMuch overlays
-/// until direct YNAB write-back is introduced.
 struct ScheduledTransactionsView: View {
   @Environment(AppModel.self) private var model
   @State private var editingSchedule: ScheduledTransaction?

@@ -1350,8 +1350,6 @@ struct Subtransaction: Decodable, Hashable {
   }
 }
 
-/// An imported YNAB scheduled transaction. The API deliberately exposes this
-/// as a read-only source mirror, so the app never offers an edit action here.
 struct ScheduledTransaction: Decodable, Identifiable, Hashable {
   let id: String
   let dateFirst: String

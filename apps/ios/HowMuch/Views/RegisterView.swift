@@ -15,10 +15,8 @@ enum RegisterScope: Hashable {
 struct RegisterView: View {
   @Environment(AppModel.self) private var model
   let scope: RegisterScope
-  /// Optional pre-filter, used when drilling in from a Reflect category row.
   var categoryID: String?
   var dateRange: ClosedRange<String>?
-  /// Optional account scoping carried through from a report's account filter.
   var accountIDs: Set<String>?
 
   @State private var searchText = ""
@@ -38,7 +36,6 @@ struct RegisterView: View {
   @State private var isScheduledExpanded = false
   @State private var editingSchedule: ScheduledTransaction?
 
-  /// Identifiable box so sheet(item:) can present a prefilled capture form.
   private struct DuplicateDraft: Identifiable {
     let id = UUID()
     let draft: TransactionDraft
