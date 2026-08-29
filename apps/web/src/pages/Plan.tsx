@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, useApi } from "../api/client";
-import type { CategoryGroup, PlanMonthCategory } from "../api/types";
+import type { CategoryGroup, PlanMonth, PlanMonthCategory } from "../api/types";
 import { isQuietGroup, isQuietGroupName } from "../lib/categories";
 import { formatMilliunitsInput, formatMoney, parseMilliunits } from "../lib/money";
 import { usePlan } from "../state/plan";
@@ -18,20 +18,27 @@ export function PlanPage() {
   const [month, setMonth] = useState(currentMonth());
   const [showQuiet, setShowQuiet] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const [revision, setRevision] = useState(0);
   const [editing, setEditing] = useState<{ categoryId: string; value: string } | null>(null);
   const [editingTarget, setEditingTarget] = useState<{ categoryId: string; value: string; type: string; month: string } | null>(null);
   const [savingCategoryId, setSavingCategoryId] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
-  const result = useApi(`${planId}:${month}:${revision}`, () => api.month(planId, month));
+  const [monthData, setMonthData] = useState<PlanMonth | null>(null);
+  const result = useApi(`${planId}:${month}`, () => api.month(planId, month));
 
   useEffect(() => {
     setEditing(null);
     setEditingTarget(null);
     setPlanError(null);
-  }, [month]);
+    setMonthData(null);
+  }, [month, planId]);
 
-  const groups = useMemo(() => groupMonth(result.data?.categories ?? [], categoryGroups), [result.data, categoryGroups]);
+  useEffect(() => {
+    if (result.data) {
+      setMonthData(result.data);
+    }
+  }, [result.data]);
+
+  const groups = useMemo(() => groupMonth(monthData?.categories ?? [], categoryGroups), [categoryGroups, monthData]);
   const primaryGroups = groups.filter((group) => !group.quiet);
   const quietGroups = groups.filter((group) => group.quiet);
   const toggleGroup = (id: string) => {
@@ -55,10 +62,13 @@ export function PlanPage() {
     }
     setSavingCategoryId(category.id);
     setPlanError(null);
+    const assignedMonth = month;
     try {
-      await api.setMonthCategoryAssignment(planId, month, category.id, budgeted);
-      setEditing(null);
-      setRevision((value) => value + 1);
+      const next = await api.setMonthCategoryAssignment(planId, assignedMonth, category.id, budgeted);
+      if (assignedMonth === month) {
+        setMonthData(next);
+        setEditing(null);
+      }
     } catch (cause) {
       setPlanError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -86,30 +96,42 @@ export function PlanPage() {
       return;
     }
     setSavingCategoryId(category.id); setPlanError(null);
+    const assignedMonth = month;
     try {
-      await api.setMonthCategoryTarget(planId, month, category.id, {
+      const next = await api.setMonthCategoryTarget(planId, assignedMonth, category.id, {
         goal_type: editingTarget.type,
         goal_target: target,
         goal_target_month: editingTarget.month || null,
       });
-      setEditingTarget(null); setRevision((value) => value + 1);
+      if (assignedMonth === month) {
+        setMonthData(next);
+        setEditingTarget(null);
+      }
     } catch (cause) {
       setPlanError(cause instanceof Error ? cause.message : String(cause));
     } finally { setSavingCategoryId(null); }
   };
   const clearTarget = async (category: PlanMonthCategory) => {
     setSavingCategoryId(category.id); setPlanError(null);
+    const assignedMonth = month;
     try {
-      await api.setMonthCategoryTarget(planId, month, category.id, null);
-      setEditingTarget(null); setRevision((value) => value + 1);
+      const next = await api.setMonthCategoryTarget(planId, assignedMonth, category.id, null);
+      if (assignedMonth === month) {
+        setMonthData(next);
+        setEditingTarget(null);
+      }
     } catch (cause) { setPlanError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setSavingCategoryId(null); }
   };
   const restoreTarget = async (category: PlanMonthCategory) => {
     setSavingCategoryId(category.id); setPlanError(null);
+    const assignedMonth = month;
     try {
-      await api.restoreMonthCategoryTarget(planId, month, category.id);
-      setEditingTarget(null); setRevision((value) => value + 1);
+      const next = await api.restoreMonthCategoryTarget(planId, assignedMonth, category.id);
+      if (assignedMonth === month) {
+        setMonthData(next);
+        setEditingTarget(null);
+      }
     } catch (cause) { setPlanError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setSavingCategoryId(null); }
   };
@@ -149,16 +171,16 @@ export function PlanPage() {
           <p className="status-detail">{result.error}</p>
         </div>
       )}
-      {result.loading && !result.data && (
+      {result.loading && !monthData && (
         <div className="status-panel"><p className="status-title">Loading monthly plan…</p></div>
       )}
 
-      {result.data && (
+      {monthData && (
         <>
           <section className="plan-summary" aria-label="Plan summary">
-            <PlanFigure label="Ready to assign" amount={result.data.to_be_budgeted ?? 0} tone={(result.data.to_be_budgeted ?? 0) < 0 ? "negative" : "accent"} />
-            <PlanFigure label="Assigned" amount={result.data.budgeted ?? 0} />
-            <PlanFigure label="Activity" amount={result.data.activity ?? 0} tone={(result.data.activity ?? 0) < 0 ? "negative" : "positive"} />
+            <PlanFigure label="Ready to assign" amount={monthData.to_be_budgeted ?? 0} tone={(monthData.to_be_budgeted ?? 0) < 0 ? "negative" : "accent"} />
+            <PlanFigure label="Assigned" amount={monthData.budgeted ?? 0} />
+            <PlanFigure label="Activity" amount={monthData.activity ?? 0} tone={(monthData.activity ?? 0) < 0 ? "negative" : "positive"} />
           </section>
 
           {planError && <div className="status-panel status-panel-error compact-panel"><p className="status-title">Plan change was not saved.</p><p className="status-detail">{planError}</p></div>}
