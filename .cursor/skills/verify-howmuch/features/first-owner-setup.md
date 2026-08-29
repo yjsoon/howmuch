@@ -35,7 +35,7 @@ Preconditions:
 ## Gotchas
 
 - If the heading is already `Sign in to HowMuch`, this database has an owner. Do not call that setup. Cleanup and launch a new instance.
-- `Create account` stays disabled until the password is ≥15 characters and the setup token is non-empty.
+- `Create account` stays disabled until Username is non-empty, the password is ≥15 characters, and the setup token is non-empty (the verify stack always sets `HOWMUCH_API_TOKEN`, so the token field is present).
 - scrypt is slow. Wait for Plan, not a fixed 200ms sleep.
 - Opening `/plan` without a session still renders the setup/sign-in form. That is not a routing bug.
 - Do not POST `/api/auth/setup` from `control-howmuch http` and call the feature verified.

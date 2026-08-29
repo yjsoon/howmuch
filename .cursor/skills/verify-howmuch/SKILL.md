@@ -5,12 +5,13 @@ description: Drive the HowMuch web ledger in a real browser against an isolated 
 
 # Verify HowMuch
 
-HowMuch's primary surface is the React web app (`apps/web`). A user signs in, edits a monthly Plan, reads four Reflect reports, searches the register, and posts a quick entry. This skill drives that path in a browser against a disposable local API.
+HowMuch's primary surface is the React web app (`apps/web`). A user signs in, edits a monthly Plan, reads four Reflect reports, searches the register, posts a quick entry, manages schedules and API tokens, and organises sidebar accounts. This skill drives that path in a browser against a disposable local API.
 
 Secondary surfaces, not covered here:
 
 - iOS (`apps/ios`) — Xcode / simulator only
 - Hosted Worker + D1 — production/preview. Do not point verification at `howmuch.soon.sg` or run Wrangler deploys for this skill.
+- YNAB Rewards Tracker (`yjsoon/ynab-rewards-tracker`) — not in this repo. There is no rewards screen, points balance, or rewards-export import to drive.
 
 There is no Playwright/Cypress harness. Drive the UI with Cursor browser / computer-use against the URL `control-howmuch state` prints. Use `control-howmuch http` as a second, read-only view of stored data.
 
@@ -87,7 +88,7 @@ Stable handles:
 | Auth fields | labels `Username`, `Password`, `Setup token` |
 | Auth submit | `Create account` / `Sign in` |
 | Primary nav | `nav` named `Primary navigation` |
-| Plan / reports / register | links `Plan`, `Spending breakdown`, `Income v Spending`, `Net Worth`, `Age of Money`, `All Accounts` |
+| Plan / reports / register | links `Plan`, `Scheduled`, `API tokens`, `Spending breakdown`, `Income v Spending`, `Net Worth`, `Age of Money`, `All Accounts`, `Organise accounts` |
 | Quick entry | sidebar `+ Add transaction` or route `/add` |
 | Register compose | account register toolbar `+ Add transaction` |
 | Sign out | button `Sign out` |

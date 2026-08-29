@@ -45,6 +45,13 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [First-owner setup](./first-owner-setup.md) covers the empty-database account form, sign-in on a later visit, and sign out.
 - [Monthly plan](./monthly-plan.md) covers month stepping, Ready to assign, and saving an assignment.
 - [Spending breakdown](./spending-breakdown.md) covers the empty current-month default, All-range totals, and category drill-down.
+- [Income v Spending](./income-v-spending.md) covers the YTD default, This-month empty state, and income versus spending headlines.
+- [Net Worth](./net-worth.md) covers the trailing-year series and per-account balance columns.
+- [Age of Money](./age-of-money.md) covers the all-history default and the latest age in days.
 - [Transactions register](./transactions-register.md) covers All Accounts, payee search, and account-scoped register.
-- [Quick entry](./quick-entry.md) covers posting a spend from `/add` and seeing it in the register.
 - [Register compose](./register-compose.md) covers the inline add row on an account register.
+- [Register maintenance](./register-maintenance.md) covers the uncategorised pill, approval, inline edit, and opening Reconcile.
+- [Quick entry](./quick-entry.md) covers posting a spend from `/add` and seeing it in the register.
+- [Scheduled transactions](./scheduled-transactions.md) covers the empty demo list, adding a monthly schedule, and entering it.
+- [API tokens](./api-tokens.md) covers minting a personal token and revoking it.
+- [Organise accounts](./organise-accounts.md) covers favourites, a custom group, and the sidebar after close.

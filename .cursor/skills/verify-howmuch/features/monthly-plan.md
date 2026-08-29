@@ -39,3 +39,4 @@ Preconditions:
 - Click the assigned amount, not the Groceries name. The name is a drill-link to the register.
 - `Save` is the assignment submit; `Cancel` discards the draft and must leave the previous value.
 - Month state is React state, not the URL. Reload jumps back to the current month.
+- On a fixture-seeded demo, Save can fail with `Imported month not found`. The Plan page still offers the editor. That is a product gap (assignments require imported YNAB month rows the seed does not write). Do not rewrite this recipe around the error, and do not mark `plan-assign` verified when it appears.
