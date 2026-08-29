@@ -35,6 +35,8 @@ struct RegisterView: View {
   @State private var transactionPendingDeletion: Transaction?
   @State private var deleteError: String?
   @State private var pendingRowAction: PendingRow?
+  @State private var isScheduledExpanded = false
+  @State private var editingSchedule: ScheduledTransaction?
 
   /// Identifiable box so sheet(item:) can present a prefilled capture form.
   private struct DuplicateDraft: Identifiable {
@@ -58,13 +60,14 @@ struct RegisterView: View {
     List {
       workingBalanceSection
       loadingOrFilterSections
+      scheduledDisclosureSection
       transactionDateSections
       searchCoverageSection
       emptyRegisterSection
       olderTransactionsErrorSection
       loadOlderTransactionsSection
     }
-    .listStyle(.insetGrouped)
+    .listStyle(.plain)
     .scrollContentBackground(.hidden)
     .background(Theme.canvas)
     .navigationTitle(title)
@@ -153,6 +156,9 @@ struct RegisterView: View {
     .sheet(item: $duplicatingDraft) { duplicate in
       TransactionFormView(draft: duplicate.draft, isEditing: false)
     }
+    .sheet(item: $editingSchedule) { schedule in
+      ScheduledTransactionEditorView(schedule: schedule)
+    }
     .alert("Couldn’t approve transaction", isPresented: Binding(
       get: { approvalError != nil },
       set: { if !$0 { approvalError = nil } }
@@ -207,6 +213,12 @@ struct RegisterView: View {
         model.discardPending(row.id)
       }
     }
+    .task {
+      guard scope.accountID != nil, model.scheduledTransactionsPhase == .idle else {
+        return
+      }
+      await model.refreshScheduledTransactions()
+    }
     .onAppear {
       if let accountID = scope.accountID {
         model.beginFocusedRegisterAccount(accountID)
@@ -230,7 +242,7 @@ struct RegisterView: View {
             .contentTransition(.numericText(value: Double(account.balance)))
             .animation(.snappy, value: account.balance)
             .foregroundStyle(Theme.amountColour(account.balance))
-          Text("Working Balance")
+          Text(lastReconciledSubtitle)
             .font(.caption)
             .foregroundStyle(.secondary)
         }
@@ -257,8 +269,9 @@ struct RegisterView: View {
           if unapprovedCount > 0 || unapprovedOnly {
             filterBanner(
               isOn: $unapprovedOnly,
-              offLabel: "Review \(unapprovedCount) new transaction\(unapprovedCount == 1 ? "" : "s")",
-              onLabel: "Showing new transactions to approve"
+              offLabel: "Review new transactions",
+              onLabel: "Showing new transactions to approve",
+              countBadge: unapprovedCount
             )
           }
           if unclearedCount > 0 || unclearedOnly {
@@ -299,7 +312,7 @@ struct RegisterView: View {
             onRejectedTap: { pendingRowAction = row }
           )
           .listRowInsets(EdgeInsets())
-          .listRowBackground(Theme.card)
+          .listRowBackground(Theme.canvas)
         }
         ForEach(section.transactions) { transaction in
           registerRow(for: transaction)
@@ -366,7 +379,7 @@ struct RegisterView: View {
       }
     }
     .listRowInsets(EdgeInsets())
-    .listRowBackground(Theme.card)
+    .listRowBackground(Theme.canvas)
   }
 
   @ViewBuilder
@@ -520,6 +533,75 @@ struct RegisterView: View {
     return model.account(withID: id)
   }
 
+  private var lastReconciledSubtitle: String {
+    if let date = scopedAccount?.lastReconciledDate {
+      return "Last reconciled: \(LedgerDate.friendlyString(fromISO: date))"
+    }
+    return "Last reconciled: never"
+  }
+
+  @ViewBuilder
+  private var scheduledDisclosureSection: some View {
+    if scope.accountID != nil {
+      Section {
+        Button {
+          withAnimation(.snappy) {
+            isScheduledExpanded.toggle()
+          }
+        } label: {
+          HStack(spacing: 10) {
+            Image(systemName: "chevron.right")
+              .font(.footnote.weight(.semibold))
+              .foregroundStyle(.secondary)
+              .rotationEffect(.degrees(isScheduledExpanded ? 90 : 0))
+            Text("Scheduled")
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(Theme.textPrimary)
+            Spacer()
+            Text("\(accountSchedules.count)")
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+          }
+          .padding(.horizontal, 16)
+          .padding(.vertical, 12)
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Theme.surfaceMuted)
+        .accessibilityLabel("Scheduled")
+        .accessibilityValue("\(accountSchedules.count)")
+        .accessibilityHint(isScheduledExpanded ? "Collapses scheduled transactions." : "Expands scheduled transactions.")
+
+        if isScheduledExpanded {
+          ForEach(accountSchedules) { schedule in
+            Button {
+              editingSchedule = schedule
+            } label: {
+              ScheduledTransactionRow(schedule: schedule, showsAccount: false)
+            }
+            .buttonStyle(.plain)
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Theme.canvas)
+          }
+        }
+      }
+    }
+  }
+
+  private var accountSchedules: [ScheduledTransaction] {
+    guard let accountID = scope.accountID else {
+      return []
+    }
+    return model.scheduledTransactions
+      .filter { !$0.deleted && $0.accountID == accountID }
+      .sorted { left, right in
+        if left.dateNext != right.dateNext {
+          return left.dateNext < right.dateNext
+        }
+        return left.id < right.id
+      }
+  }
+
   private var scopedTransactions: [Transaction] {
     scoped(model.transactions)
   }
@@ -594,16 +676,35 @@ struct RegisterView: View {
     }
   }
 
-  private func filterBanner(isOn: Binding<Bool>, offLabel: String, onLabel: String) -> some View {
+  private func filterBanner(isOn: Binding<Bool>, offLabel: String, onLabel: String, countBadge: Int? = nil) -> some View {
     Button {
       withAnimation(.snappy) {
         isOn.wrappedValue.toggle()
       }
     } label: {
-      HStack {
-        Text(isOn.wrappedValue ? onLabel : offLabel)
-          .font(.subheadline)
-          .foregroundStyle(Theme.textPrimary)
+      HStack(spacing: 6) {
+        if isOn.wrappedValue {
+          Text(onLabel)
+            .font(.subheadline)
+            .foregroundStyle(Theme.textPrimary)
+        } else if let countBadge {
+          Text("Review")
+            .font(.subheadline)
+            .foregroundStyle(Theme.textPrimary)
+          Text("\(countBadge)")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Theme.newStatus, in: Capsule())
+          Text(countBadge == 1 ? "new transaction" : "new transactions")
+            .font(.subheadline)
+            .foregroundStyle(Theme.textPrimary)
+        } else {
+          Text(offLabel)
+            .font(.subheadline)
+            .foregroundStyle(Theme.textPrimary)
+        }
         Spacer()
         Image(systemName: isOn.wrappedValue ? "xmark.circle.fill" : "chevron.right")
           .font(.footnote.weight(.semibold))
@@ -614,7 +715,7 @@ struct RegisterView: View {
     }
     .buttonStyle(.plain)
     .listRowInsets(EdgeInsets())
-    .listRowBackground(Theme.card)
+    .listRowBackground(Theme.surfaceMuted)
   }
 
   private var showsFilterBanners: Bool {

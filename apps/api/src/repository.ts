@@ -388,13 +388,13 @@ export class LedgerRepository {
   async listAccounts(planId: string): Promise<any[]> {
     await this.ensurePlan(planId);
     return (await this.db
-      .query("SELECT * FROM accounts WHERE plan_id = ? AND deleted = 0 ORDER BY closed, name")
+      .query(`${ACCOUNT_SELECT_SQL} WHERE plan_id = ? AND deleted = 0 ORDER BY closed, name`)
       .all(planId)).map(formatAccount);
   }
 
   async getAccount(planId: string, accountId: string): Promise<any> {
     await this.ensureAccount(planId, accountId);
-    const row = await this.db.query("SELECT * FROM accounts WHERE id = ? AND plan_id = ?").get(accountId, planId) as Row;
+    const row = await this.db.query(`${ACCOUNT_SELECT_SQL} WHERE id = ? AND plan_id = ?`).get(accountId, planId) as Row;
     return formatAccount(row);
   }
 
@@ -485,7 +485,7 @@ export class LedgerRepository {
   }
 
   private async accountReconciliationSnapshot(planId: string, accountId: string, statementDate: string): Promise<AccountReconciliationSnapshot> {
-    const account = await this.db.query("SELECT * FROM accounts WHERE id=? AND plan_id=? AND deleted=0").get(accountId, planId) as Row | null;
+    const account = await this.db.query(`${ACCOUNT_SELECT_SQL} WHERE id=? AND plan_id=? AND deleted=0`).get(accountId, planId) as Row | null;
     if (!account) throw new NotFoundError("Account not found");
     const balances = await this.db.query(
       `SELECT
@@ -2893,6 +2893,17 @@ function formatPlan(row: Row): any {
   };
 }
 
+const ACCOUNT_SELECT_SQL = `SELECT accounts.*, (
+  SELECT COALESCE(
+    (SELECT MAX(statement_date) FROM account_reconciliation_assertions
+      WHERE plan_id = accounts.plan_id AND account_id = accounts.id),
+    (SELECT MAX(date) FROM transactions
+      WHERE plan_id = accounts.plan_id AND account_id = accounts.id
+        AND deleted = 0 AND cleared = 'reconciled')
+  )
+) AS last_reconciled_date
+FROM accounts`;
+
 function formatAccount(row: Row): any {
   const presentation = resolveAccountPresentation({
     name: row.name,
@@ -2909,6 +2920,7 @@ function formatAccount(row: Row): any {
     balance: Number(row.balance_milli),
     cleared_balance: Number(row.cleared_balance_milli),
     uncleared_balance: Number(row.uncleared_balance_milli),
+    last_reconciled_date: row.last_reconciled_date ?? null,
     transfer_payee_id: row.transfer_payee_id,
     direct_import_linked: toBoolean(row.direct_import_linked),
     direct_import_in_error: toBoolean(row.direct_import_in_error),

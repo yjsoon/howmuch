@@ -1121,6 +1121,7 @@ struct Account: Decodable, Identifiable, Hashable {
   let balance: Int
   let clearedBalance: Int
   let unclearedBalance: Int
+  let lastReconciledDate: String?
   let deleted: Bool
 
   var displayIcon: String {
@@ -1142,6 +1143,7 @@ struct Account: Decodable, Identifiable, Hashable {
       balance: balance,
       clearedBalance: clearedBalance,
       unclearedBalance: unclearedBalance,
+      lastReconciledDate: lastReconciledDate,
       deleted: deleted
     )
   }

@@ -39,7 +39,7 @@ struct ScheduledTransactionsView: View {
                   Button {
                     editingSchedule = schedule
                   } label: {
-                    ScheduledTransactionRow(schedule: schedule)
+                    ScheduledTransactionRow(schedule: schedule, showsAccount: true)
                   }
                   .buttonStyle(.plain)
                   if index < section.schedules.count - 1 {
@@ -99,9 +99,10 @@ struct ScheduledTransactionsView: View {
   }
 }
 
-private struct ScheduledTransactionRow: View {
+struct ScheduledTransactionRow: View {
   @Environment(AppModel.self) private var model
   let schedule: ScheduledTransaction
+  var showsAccount: Bool = true
 
   var body: some View {
     HStack(alignment: .center, spacing: 10) {
@@ -110,7 +111,7 @@ private struct ScheduledTransactionRow: View {
           .font(.subheadline.weight(.semibold))
           .foregroundStyle(Theme.textPrimary)
           .lineLimit(1)
-        Text("\(accountLabel) · \(categoryLabel)")
+        Text(showsAccount ? "\(accountLabel) · \(categoryLabel)" : categoryLabel)
           .font(.footnote)
           .foregroundStyle(.secondary)
           .lineLimit(1)
