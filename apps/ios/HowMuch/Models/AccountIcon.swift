@@ -6,13 +6,17 @@ struct AccountIcon: RawRepresentable, Equatable, Hashable, Sendable {
   init?(rawValue: String) {
     let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
     guard trimmed.count == 1 else { return nil }
+    if Self.isKeycap(trimmed) {
+      self.rawValue = trimmed
+      return
+    }
     let hasLetterOrDigit = trimmed.unicodeScalars.contains { scalar in
       CharacterSet.letters.contains(scalar) || CharacterSet.decimalDigits.contains(scalar)
     }
     guard !hasLetterOrDigit else { return nil }
     let hasEmoji = trimmed.unicodeScalars.contains { scalar in
       scalar.properties.isEmojiPresentation
-        || (scalar.properties.isEmoji && !Self.keycapBases.contains(scalar))
+        || (scalar.properties.isEmoji && !Self.bareKeycapBases.contains(scalar))
     }
     guard hasEmoji else { return nil }
     self.rawValue = trimmed
@@ -22,7 +26,24 @@ struct AccountIcon: RawRepresentable, Equatable, Hashable, Sendable {
     self.rawValue = rawValue
   }
 
-  private static let keycapBases: Set<Unicode.Scalar> = ["#", "*"]
+  private static let bareKeycapBases: Set<Unicode.Scalar> = ["#", "*"]
+  private static let keycapBases: Set<Unicode.Scalar> = [
+    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "#", "*",
+  ]
+  private static let variationSelector16 = Unicode.Scalar(0xFE0F)!
+  private static let combiningEnclosingKeycap = Unicode.Scalar(0x20E3)!
+
+  private static func isKeycap(_ value: String) -> Bool {
+    let scalars = Array(value.unicodeScalars)
+    guard let base = scalars.first, keycapBases.contains(base) else { return false }
+    if scalars.count == 2 {
+      return scalars[1] == combiningEnclosingKeycap
+    }
+    if scalars.count == 3 {
+      return scalars[1] == variationSelector16 && scalars[2] == combiningEnclosingKeycap
+    }
+    return false
+  }
 
   static let fallback = AccountIcon(unchecked: "🏦")
 
