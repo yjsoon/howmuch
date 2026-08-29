@@ -92,47 +92,8 @@ struct RegisterView: View {
           .accessibilityHint("Opens the name and icon editor")
         }
       }
-      ToolbarItem(placement: .topBarTrailing) {
-        if let account = scopedAccount {
-          Menu {
-            Button {
-              editingIdentity = account
-            } label: {
-              Label("Edit name and icon", systemImage: "pencil")
-            }
-            if !account.closed {
-              Button {
-                model.toggleAccountFavourite(account.id)
-              } label: {
-                Label(
-                  model.isAccountFavourite(account.id) ? "Remove from Favourites" : "Add to Favourites",
-                  systemImage: model.isAccountFavourite(account.id) ? "star.slash" : "star"
-                )
-              }
-            }
-            Button {
-              membershipsAccount = account
-            } label: {
-              Label("Groups…", systemImage: "folder")
-            }
-            Divider()
-            Button {
-              isShowingReconciliation = true
-            } label: {
-              Label("Reconcile", systemImage: "checkmark.circle")
-            }
-            .accessibilityHint("Enter a statement date and statement balance before confirming a reconciliation.")
-          } label: {
-            Image(systemName: "ellipsis.circle")
-          }
-          .accessibilityLabel("Actions for \(account.name)")
-          .accessibilityHint(account.closed ? "Edit name and icon, groups, and reconcile." : "Edit name and icon, favourites, groups, and reconcile.")
-        } else if !model.accounts.isEmpty {
-          Button("Reconcile") {
-            isShowingReconciliation = true
-          }
-          .accessibilityHint("Choose an account, statement date, and statement balance before confirming a reconciliation.")
-        }
+      ToolbarItemGroup(placement: .topBarTrailing) {
+        registerOverflowMenu
       }
     }
     .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search Transactions")
@@ -235,68 +196,135 @@ struct RegisterView: View {
   }
 
   @ViewBuilder
+  private var registerOverflowMenu: some View {
+    if let account = scopedAccount {
+      Menu {
+        Button {
+          editingIdentity = account
+        } label: {
+          Label("Edit name and icon", systemImage: "pencil")
+        }
+        if !account.closed {
+          Button {
+            model.toggleAccountFavourite(account.id)
+          } label: {
+            Label(
+              model.isAccountFavourite(account.id) ? "Remove from Favourites" : "Add to Favourites",
+              systemImage: model.isAccountFavourite(account.id) ? "star.slash" : "star"
+            )
+          }
+        }
+        Button {
+          membershipsAccount = account
+        } label: {
+          Label("Groups…", systemImage: "folder")
+        }
+        if showsRegisterFilterMenu {
+          Divider()
+          registerFilterMenuItems
+        }
+        Divider()
+        reconcileMenuButton
+      } label: {
+        Image(systemName: "ellipsis.circle")
+      }
+      .accessibilityLabel("Actions for \(account.name)")
+      .accessibilityHint(accountOverflowHint(account))
+    } else {
+      if showsRegisterFilterMenu {
+        Menu {
+          registerFilterMenuItems
+        } label: {
+          Image(systemName: "line.3.horizontal.decrease.circle")
+        }
+        .accessibilityLabel("Register filters")
+        .accessibilityHint("Review new, uncleared, or uncategorised transactions.")
+      }
+      if !model.accounts.isEmpty {
+        Button("Reconcile") {
+          isShowingReconciliation = true
+        }
+        .accessibilityHint("Choose an account, statement date, and statement balance before confirming a reconciliation.")
+      }
+    }
+  }
+
+  private var reconcileMenuButton: some View {
+    Button {
+      isShowingReconciliation = true
+    } label: {
+      Label("Reconcile", systemImage: "checkmark.circle")
+    }
+    .accessibilityHint("Enter a statement date and statement balance before confirming a reconciliation.")
+  }
+
+  @ViewBuilder
+  private var registerFilterMenuItems: some View {
+    if unapprovedCount > 0 || unapprovedOnly {
+      Toggle(isOn: $unapprovedOnly) {
+        Label(reviewNewMenuTitle, systemImage: "sparkles")
+      }
+      .menuActionDismissBehavior(.disabled)
+    }
+    if unclearedCount > 0 || unclearedOnly {
+      Toggle(isOn: $unclearedOnly) {
+        Label(unclearedMenuTitle, systemImage: "circle")
+      }
+      .menuActionDismissBehavior(.disabled)
+    }
+    if uncategorisedCount > 0 || uncategorisedOnly {
+      Toggle(isOn: $uncategorisedOnly) {
+        Label(uncategorisedMenuTitle, systemImage: "tag.slash")
+      }
+      .menuActionDismissBehavior(.disabled)
+    }
+  }
+
+  private func accountOverflowHint(_ account: Account) -> String {
+    var parts = ["Edit name and icon"]
+    if !account.closed {
+      parts.append("favourites")
+    }
+    if showsRegisterFilterMenu {
+      parts.append("filters")
+    }
+    parts.append("groups")
+    parts.append("reconcile")
+    let head = parts.dropLast().joined(separator: ", ")
+    return "\(head), and \(parts.last ?? "reconcile")."
+  }
+
+  @ViewBuilder
   private var workingBalanceSection: some View {
     if let account = scopedAccount {
       Section {
-        VStack(alignment: .leading, spacing: 8) {
-          HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 2) {
-              Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
-                .font(.title2.weight(.bold))
-                .monospacedDigit()
-                .contentTransition(.numericText(value: Double(account.balance)))
-                .animation(.snappy, value: account.balance)
-                .foregroundStyle(Theme.textPrimary)
-              Text("Working Balance")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 6) {
-              headerSideFigure("Cleared", account.clearedBalance)
-              headerSideFigure("Uncleared", account.unclearedBalance)
-            }
-          }
-          .accessibilityElement(children: .combine)
-          .accessibilityLabel(workingBalanceAccessibilityLabel(account))
-
+        VStack(alignment: .leading, spacing: 2) {
+          Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
+            .font(.title2.weight(.bold))
+            .monospacedDigit()
+            .contentTransition(.numericText(value: Double(account.balance)))
+            .animation(.snappy, value: account.balance)
+            .foregroundStyle(Theme.textPrimary)
           Button {
             isShowingReconciliation = true
           } label: {
             Text(lastReconciledSubtitle)
-              .font(.caption2)
+              .font(.caption)
               .foregroundStyle(.secondary)
+              .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
           }
           .buttonStyle(.plain)
+          .accessibilityLabel(lastReconciledSubtitle)
           .accessibilityHint("Opens reconcile.")
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .listRowInsets(EdgeInsets())
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
       }
     }
-  }
-
-  private func headerSideFigure(_ label: String, _ amount: Int) -> some View {
-    VStack(alignment: .trailing, spacing: 1) {
-      Text(label)
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-      Text(MoneyCodec.displayString(for: amount, currencyFormat: model.currencyFormat))
-        .font(.footnote.weight(.semibold))
-        .monospacedDigit()
-        .foregroundStyle(Theme.textPrimary)
-    }
-  }
-
-  private func workingBalanceAccessibilityLabel(_ account: Account) -> String {
-    let working = MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat)
-    let cleared = MoneyCodec.displayString(for: account.clearedBalance, currencyFormat: model.currencyFormat)
-    let uncleared = MoneyCodec.displayString(for: account.unclearedBalance, currencyFormat: model.currencyFormat)
-    return "Working balance \(working). Cleared \(cleared). Uncleared \(uncleared)."
   }
 
   @ViewBuilder
@@ -310,41 +338,28 @@ struct RegisterView: View {
         .listRowSeparator(.hidden)
       }
     } else {
-      if showsFilterBanners {
+      if let summary = activeRegisterFilterSummary {
         Section {
-          if unapprovedCount > 0 || unapprovedOnly {
-            filterBanner(
-              isOn: $unapprovedOnly,
-              onLabel: "Showing new transactions to approve",
-              count: unapprovedCount,
-              prefix: "Review",
-              singular: "new transaction",
-              plural: "new transactions",
-              style: .newBadge
-            )
+          HStack(spacing: 8) {
+            Text(summary)
+              .font(.subheadline)
+              .foregroundStyle(Theme.textPrimary)
+            Spacer(minLength: 8)
+            Button("Clear") {
+              withAnimation(.snappy) {
+                clearRegisterFilters()
+              }
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Theme.accent)
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityLabel("Clear filters")
           }
-          if unclearedCount > 0 || unclearedOnly {
-            filterBanner(
-              isOn: $unclearedOnly,
-              onLabel: "Showing uncleared only",
-              count: unclearedCount,
-              prefix: "Show",
-              singular: "uncleared transaction",
-              plural: "uncleared transactions",
-              style: .emphasizedCount
-            )
-          }
-          if uncategorisedCount > 0 || uncategorisedOnly {
-            filterBanner(
-              isOn: $uncategorisedOnly,
-              onLabel: "Showing uncategorised only",
-              count: uncategorisedCount,
-              prefix: "Show",
-              singular: "uncategorised transaction",
-              plural: "uncategorised transactions",
-              style: .emphasizedCount
-            )
-          }
+          .padding(.horizontal, 16)
+          .padding(.vertical, 8)
+          .listRowInsets(EdgeInsets())
+          .listRowBackground(Theme.surfaceMuted)
+          .listRowSeparator(.hidden)
         }
       }
       if isNarrowed, !visibleTransactions.isEmpty {
@@ -463,6 +478,16 @@ struct RegisterView: View {
         Group {
           if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             ContentUnavailableView.search
+          } else if unapprovedOnly || unclearedOnly || uncategorisedOnly {
+            ContentUnavailableView(
+              "Nothing matches",
+              systemImage: "line.3.horizontal.decrease",
+              description: Text(
+                model.hasMoreTransactions
+                  ? "Clear the filter, or load older transactions."
+                  : "Clear the filter to see transactions again."
+              )
+            )
           } else if model.hasMoreTransactions {
             ContentUnavailableView(
               "No recent transactions",
@@ -594,10 +619,29 @@ struct RegisterView: View {
   }
 
   private var lastReconciledSubtitle: String {
-    if let date = scopedAccount?.lastReconciledDate {
+    if let date = lastReconciledISODate {
       return "Last reconciled: \(LedgerDate.friendlyString(fromISO: date))"
     }
+    if model.ledgerPhase != .loaded || model.isFillingHorizon {
+      return "Last reconciled: …"
+    }
     return "Not reconciled yet"
+  }
+
+  /// Prefer `last_reconciled_date` from the accounts payload. If that field is
+  /// missing (older Worker) or null, use the newest loaded reconciled row so
+  /// a YNAB import still shows a date.
+  private var lastReconciledISODate: String? {
+    if let date = scopedAccount?.lastReconciledDate, !date.isEmpty {
+      return date
+    }
+    guard let accountID = scope.accountID else {
+      return nil
+    }
+    return (model.transactions + model.unapprovedTransactions)
+      .filter { $0.accountID == accountID && $0.cleared == .reconciled }
+      .map(\.date)
+      .max()
   }
 
   @ViewBuilder
@@ -815,74 +859,52 @@ struct RegisterView: View {
     }
   }
 
-  private enum FilterBannerStyle {
-    case newBadge
-    case emphasizedCount
-  }
-
-  private func filterBanner(
-    isOn: Binding<Bool>,
-    onLabel: String,
-    count: Int,
-    prefix: String,
-    singular: String,
-    plural: String,
-    style: FilterBannerStyle
-  ) -> some View {
-    let noun = count == 1 ? singular : plural
-    let offLabel = "\(prefix) \(count) \(noun)"
-    return Button {
-      withAnimation(.snappy) {
-        isOn.wrappedValue.toggle()
-      }
-    } label: {
-      HStack(spacing: 6) {
-        if isOn.wrappedValue {
-          Text(onLabel)
-            .font(.subheadline)
-            .foregroundStyle(Theme.textPrimary)
-        } else if style == .newBadge {
-          Text(prefix)
-            .font(.subheadline)
-            .foregroundStyle(Theme.textPrimary)
-          Text("\(count)")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Theme.newStatus, in: Capsule())
-          Text(noun)
-            .font(.subheadline)
-            .foregroundStyle(Theme.textPrimary)
-        } else {
-          (
-            Text("\(prefix) ")
-            + Text("\(count)").fontWeight(.semibold)
-            + Text(" \(noun)")
-          )
-          .font(.subheadline)
-          .foregroundStyle(Theme.textPrimary)
-        }
-        Spacer()
-        Image(systemName: isOn.wrappedValue ? "xmark.circle.fill" : "chevron.right")
-          .font(.footnote.weight(.semibold))
-          .foregroundStyle(.tertiary)
-      }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 12)
-    }
-    .buttonStyle(.plain)
-    .listRowInsets(EdgeInsets())
-    .listRowBackground(Theme.surfaceMuted)
-    .listRowSeparator(.hidden)
-    .accessibilityElement(children: .combine)
-    .accessibilityLabel(isOn.wrappedValue ? onLabel : offLabel)
-  }
-
-  private var showsFilterBanners: Bool {
+  private var showsRegisterFilterMenu: Bool {
     unapprovedCount > 0 || unapprovedOnly
       || unclearedCount > 0 || unclearedOnly
       || uncategorisedCount > 0 || uncategorisedOnly
+  }
+
+  private var reviewNewMenuTitle: String {
+    unapprovedCount == 0
+      ? "Review new transactions"
+      : "Review \(unapprovedCount) new transaction\(unapprovedCount == 1 ? "" : "s")"
+  }
+
+  private var unclearedMenuTitle: String {
+    unclearedCount == 0
+      ? "Show uncleared"
+      : "Show \(unclearedCount) uncleared"
+  }
+
+  private var uncategorisedMenuTitle: String {
+    uncategorisedCount == 0
+      ? "Show uncategorised"
+      : "Show \(uncategorisedCount) uncategorised"
+  }
+
+  private var activeRegisterFilterSummary: String? {
+    var parts: [String] = []
+    if unapprovedOnly { parts.append("new") }
+    if unclearedOnly { parts.append("uncleared") }
+    if uncategorisedOnly { parts.append("uncategorised") }
+    guard !parts.isEmpty else {
+      return nil
+    }
+    if parts.count == 1 {
+      switch parts[0] {
+      case "new": return "Showing new transactions"
+      case "uncleared": return "Showing uncleared transactions"
+      default: return "Showing uncategorised transactions"
+      }
+    }
+    return "Showing \(ListFormatter.localizedString(byJoining: parts)) transactions"
+  }
+
+  private func clearRegisterFilters() {
+    unapprovedOnly = false
+    unclearedOnly = false
+    uncategorisedOnly = false
   }
 
   private var unclearedCount: Int {
