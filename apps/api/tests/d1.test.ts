@@ -517,7 +517,7 @@ describe("D1 foundation", () => {
     const versionBefore = (db.query("SELECT write_version FROM write_state").get() as { write_version: number }).write_version;
     const first = await repo.reconcileAccount("p", "a", "2026-08-31", 999, { operationId: "d1-reconcile-august" });
     expect(first).toMatchObject({
-      account: { id: "a" }, reconciled_transaction_count: 101,
+      account: { id: "a", last_reconciled_date: "2026-08-31" }, reconciled_transaction_count: 101,
       statement_date: "2026-08-31", statement_balance: 999,
       prior_reconciled_balance: 1100, final_reconciled_balance: 999,
       replayed: false,

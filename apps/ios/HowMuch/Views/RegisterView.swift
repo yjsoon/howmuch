@@ -68,6 +68,7 @@ struct RegisterView: View {
       loadOlderTransactionsSection
     }
     .listStyle(.plain)
+    .listSectionSpacing(.compact)
     .scrollContentBackground(.hidden)
     .background(Theme.canvas)
     .navigationTitle(title)
@@ -542,7 +543,7 @@ struct RegisterView: View {
 
   @ViewBuilder
   private var scheduledDisclosureSection: some View {
-    if scope.accountID != nil {
+    if shouldShowScheduled {
       Section {
         Button {
           withAnimation(.snappy) {
@@ -558,9 +559,14 @@ struct RegisterView: View {
               .font(.subheadline.weight(.semibold))
               .foregroundStyle(Theme.textPrimary)
             Spacer()
-            Text("\(accountSchedules.count)")
-              .font(.subheadline)
-              .foregroundStyle(.secondary)
+            if model.scheduledTransactionsPhase.isLoading && accountSchedules.isEmpty {
+              ProgressView()
+                .controlSize(.small)
+            } else {
+              Text("\(accountSchedules.count)")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
           }
           .padding(.horizontal, 16)
           .padding(.vertical, 12)
@@ -568,8 +574,9 @@ struct RegisterView: View {
         .buttonStyle(.plain)
         .listRowInsets(EdgeInsets())
         .listRowBackground(Theme.surfaceMuted)
+        .accessibilityAddTraits(.isButton)
         .accessibilityLabel("Scheduled")
-        .accessibilityValue("\(accountSchedules.count)")
+        .accessibilityValue(scheduledAccessibilityValue)
         .accessibilityHint(isScheduledExpanded ? "Collapses scheduled transactions." : "Expands scheduled transactions.")
 
         if isScheduledExpanded {
@@ -586,6 +593,18 @@ struct RegisterView: View {
         }
       }
     }
+  }
+
+  private var shouldShowScheduled: Bool {
+    scope.accountID != nil
+      && (!accountSchedules.isEmpty || model.scheduledTransactionsPhase.isLoading || model.scheduledTransactionsPhase == .idle)
+  }
+
+  private var scheduledAccessibilityValue: String {
+    if isScheduledExpanded {
+      return accountSchedules.isEmpty ? "Expanded" : "Expanded, \(accountSchedules.count)"
+    }
+    return accountSchedules.isEmpty ? "Collapsed" : "Collapsed, \(accountSchedules.count)"
   }
 
   private var accountSchedules: [ScheduledTransaction] {
@@ -716,6 +735,18 @@ struct RegisterView: View {
     .buttonStyle(.plain)
     .listRowInsets(EdgeInsets())
     .listRowBackground(Theme.surfaceMuted)
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(bannerAccessibilityLabel(isOn: isOn.wrappedValue, offLabel: offLabel, onLabel: onLabel, countBadge: countBadge))
+  }
+
+  private func bannerAccessibilityLabel(isOn: Bool, offLabel: String, onLabel: String, countBadge: Int?) -> String {
+    if isOn {
+      return onLabel
+    }
+    if let countBadge {
+      return countBadge == 1 ? "Review 1 new transaction" : "Review \(countBadge) new transactions"
+    }
+    return offLabel
   }
 
   private var showsFilterBanners: Bool {
