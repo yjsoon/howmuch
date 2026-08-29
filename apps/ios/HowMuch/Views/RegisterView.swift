@@ -229,9 +229,7 @@ struct RegisterView: View {
         Image(systemName: "ellipsis.circle")
       }
       .accessibilityLabel("Actions for \(account.name)")
-      .accessibilityHint(account.closed
-        ? "Edit name and icon, filters, groups, and reconcile."
-        : "Edit name and icon, favourites, filters, groups, and reconcile.")
+      .accessibilityHint(accountOverflowHint(account))
     } else {
       if showsRegisterFilterMenu {
         Menu {
@@ -266,54 +264,67 @@ struct RegisterView: View {
       Toggle(isOn: $unapprovedOnly) {
         Label(reviewNewMenuTitle, systemImage: "sparkles")
       }
+      .menuActionDismissBehavior(.disabled)
     }
     if unclearedCount > 0 || unclearedOnly {
       Toggle(isOn: $unclearedOnly) {
         Label(unclearedMenuTitle, systemImage: "circle")
       }
+      .menuActionDismissBehavior(.disabled)
     }
     if uncategorisedCount > 0 || uncategorisedOnly {
       Toggle(isOn: $uncategorisedOnly) {
         Label(uncategorisedMenuTitle, systemImage: "tag.slash")
       }
+      .menuActionDismissBehavior(.disabled)
     }
+  }
+
+  private func accountOverflowHint(_ account: Account) -> String {
+    var parts = ["Edit name and icon"]
+    if !account.closed {
+      parts.append("favourites")
+    }
+    if showsRegisterFilterMenu {
+      parts.append("filters")
+    }
+    parts.append("groups")
+    parts.append("reconcile")
+    let head = parts.dropLast().joined(separator: ", ")
+    return "\(head), and \(parts.last ?? "reconcile")."
   }
 
   @ViewBuilder
   private var workingBalanceSection: some View {
     if let account = scopedAccount {
       Section {
-        Button {
-          isShowingReconciliation = true
-        } label: {
-          VStack(alignment: .leading, spacing: 2) {
-            Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
-              .font(.title2.weight(.bold))
-              .monospacedDigit()
-              .contentTransition(.numericText(value: Double(account.balance)))
-              .animation(.snappy, value: account.balance)
-              .foregroundStyle(Theme.textPrimary)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
+            .font(.title2.weight(.bold))
+            .monospacedDigit()
+            .contentTransition(.numericText(value: Double(account.balance)))
+            .animation(.snappy, value: account.balance)
+            .foregroundStyle(Theme.textPrimary)
+          Button {
+            isShowingReconciliation = true
+          } label: {
             Text(lastReconciledSubtitle)
               .font(.caption)
               .foregroundStyle(.secondary)
+              .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
           }
-          .padding(.horizontal, 16)
-          .padding(.vertical, 12)
-          .frame(maxWidth: .infinity, alignment: .leading)
+          .buttonStyle(.plain)
+          .accessibilityLabel(lastReconciledSubtitle)
+          .accessibilityHint("Opens reconcile.")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(workingBalanceAccessibilityLabel(account))
-        .accessibilityHint("Opens reconcile.")
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .listRowInsets(EdgeInsets())
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
       }
     }
-  }
-
-  private func workingBalanceAccessibilityLabel(_ account: Account) -> String {
-    let working = MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat)
-    return "\(working). \(lastReconciledSubtitle)."
   }
 
   @ViewBuilder
@@ -341,6 +352,8 @@ struct RegisterView: View {
             }
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(Theme.accent)
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityLabel("Clear filters")
           }
           .padding(.horizontal, 16)
           .padding(.vertical, 8)
@@ -465,6 +478,16 @@ struct RegisterView: View {
         Group {
           if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             ContentUnavailableView.search
+          } else if unapprovedOnly || unclearedOnly || uncategorisedOnly {
+            ContentUnavailableView(
+              "Nothing matches",
+              systemImage: "line.3.horizontal.decrease",
+              description: Text(
+                model.hasMoreTransactions
+                  ? "Clear the filter, or load older transactions."
+                  : "Clear the filter to see transactions again."
+              )
+            )
           } else if model.hasMoreTransactions {
             ContentUnavailableView(
               "No recent transactions",
@@ -598,6 +621,9 @@ struct RegisterView: View {
   private var lastReconciledSubtitle: String {
     if let date = lastReconciledISODate {
       return "Last reconciled: \(LedgerDate.friendlyString(fromISO: date))"
+    }
+    if model.ledgerPhase == .loading || model.ledgerPhase == .idle || model.isFillingHorizon {
+      return "Last reconciled: …"
     }
     return "Not reconciled yet"
   }
@@ -868,11 +894,11 @@ struct RegisterView: View {
     if parts.count == 1 {
       switch parts[0] {
       case "new": return "Showing new transactions"
-      case "uncleared": return "Showing uncleared"
-      default: return "Showing uncategorised"
+      case "uncleared": return "Showing uncleared transactions"
+      default: return "Showing uncategorised transactions"
       }
     }
-    return "Showing \(parts.joined(separator: " · "))"
+    return "Showing \(ListFormatter.localizedString(byJoining: parts)) transactions"
   }
 
   private func clearRegisterFilters() {
