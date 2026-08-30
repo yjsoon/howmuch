@@ -76,7 +76,7 @@ Browser:
 - Open `{web_url}` from `control-howmuch state`.
 - Prefer visible names, `aria-label`s, and routes over CSS or coordinates.
 - Viewport ≤720px hides the sidebar. Click the button named **Open menu** before any nav link.
-- After setup, `document.title` is `{page} · HowMuch` (e.g. `Plan · HowMuch`).
+- After setup, `document.title` is `{page} · HowMuch` (e.g. `All Accounts · HowMuch`).
 - Demo rows are dated **2026-03-01 through 2026-05-24**. Default report/register windows follow today's calendar, so in 2026-08 they are empty until you choose **All** or set From/To to that span.
 
 Stable handles:

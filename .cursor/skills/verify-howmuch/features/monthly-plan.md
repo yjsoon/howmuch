@@ -4,7 +4,7 @@ Plan is the monthly assignment sheet: Ready to assign, Assigned, Activity, and p
 
 ## Sub-features
 
-- `plan-open` opens Plan from `/` (redirect) and from the Plan nav link.
+- `plan-open` opens Plan from the Plan nav link and from `/plan`.
 - `plan-month` steps between months without leaving Plan.
 - `plan-empty-activity` shows $0.00 activity for a month with no demo rows (e.g. the current month in 2026-08).
 - `plan-activity` shows non-zero Activity after stepping to May 2026.
@@ -12,7 +12,6 @@ Plan is the monthly assignment sheet: Ready to assign, Assigned, Activity, and p
 
 ## How to get to it (user POV)
 
-- Open `{web_url}` / `{web_url}/` — redirects to `/plan`.
 - Choose **Plan** in Primary navigation.
 - Open `{web_url}/plan` directly.
 
@@ -24,7 +23,7 @@ Preconditions:
 - Owner `verifier` is signed in (see first-owner-setup).
 - Demo categories include Groceries.
 
-- **Redirect entry.** Open `{web_url}/`. Title becomes `Plan · HowMuch`. Heading is `Plan`. Region `Plan summary` shows `Ready to assign`, `Assigned`, and `Activity`.
+- **Direct entry.** Open `{web_url}/plan`. Title becomes `Plan · HowMuch`. Heading is `Plan`. Region `Plan summary` shows `Ready to assign`, `Assigned`, and `Activity`.
 - **Nav entry.** Choose `Spending breakdown`, then `Plan`. Plan returns. Query string from the report, if any, is preserved on the Plan link.
 - **Current month.** Group `Plan month` shows today's month name. Groceries is listed. Activity for Groceries is `0.00` when the month is outside March–May 2026.
 - **May 2026 activity.** Choose `Previous month` until the label is `May 2026`. Groceries Activity is not `0.00` (demo has Cold Storage on 2026-05-08).

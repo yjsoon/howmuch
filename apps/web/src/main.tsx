@@ -28,11 +28,13 @@ function RouteFallback() {
   return <div className="boot-message">Loading…</div>;
 }
 
+const home = "/transactions?range=all&accounts=all";
+
 const router = createBrowserRouter([
   {
     element: <PlanProvider><Shell /></PlanProvider>,
     children: [
-      { path: "/", element: <Navigate to="/plan" replace /> },
+      { path: "/", element: <Navigate to={home} replace /> },
       { path: "/plan", element: <PlanPage /> },
       { path: "/scheduled", element: <ScheduledTransactionsPage /> },
       { path: "/api-tokens", element: <ApiTokensPage /> },
@@ -41,7 +43,7 @@ const router = createBrowserRouter([
       { path: "/net-worth", element: <NetWorthPage /> },
       { path: "/age-of-money", element: <AgeOfMoneyPage /> },
       { path: "/transactions", element: <TransactionsPage /> },
-      { path: "*", element: <Navigate to="/plan" replace /> },
+      { path: "*", element: <Navigate to={home} replace /> },
     ],
   },
   { path: "/add", element: <PlanProvider><Suspense fallback={<RouteFallback />}><QuickEntryPage /></Suspense></PlanProvider> },
