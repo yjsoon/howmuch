@@ -1209,7 +1209,9 @@ textarea {
 }
 
 .register-compose-row input,
-.register-compose-row select {
+.register-compose-row select,
+.register-cell-editing input,
+.register-cell-editing select {
   width: 100%;
   min-width: 0;
   padding: 4px 6px;
@@ -1219,9 +1221,17 @@ textarea {
   font: inherit;
 }
 
-.register-compose-row .num input {
+.register-compose-row .num input,
+.register-cell-editing.num input {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.register-cell-error {
+  display: block;
+  margin-top: 4px;
+  color: var(--red);
+  font-size: 12px;
 }
 
 .register-compose-locked-account,

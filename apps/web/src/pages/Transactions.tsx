@@ -16,6 +16,7 @@ import { CategorySelect } from "../components/CategorySelect";
 import { FlagPicker, FlagTag } from "../components/FlagTag";
 import { FilterRail } from "../components/FilterRail";
 import { RegisterComposeRow } from "../components/RegisterComposeRow";
+import { RegisterEditableCell, type CellEditSurface } from "../components/RegisterEditableCell";
 import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
 import { formatDate, todayIso, trailingMonthsRange } from "../lib/dates";
 import { stableHash } from "../lib/hash";
@@ -40,6 +41,17 @@ import {
   reduceCompose,
   type RegisterComposeState,
 } from "../lib/register-compose";
+import {
+  cellRowId,
+  idleCellEdit,
+  payeeInput,
+  planCellCommit,
+  postedCell,
+  reduceCellEdit,
+  splitCell,
+  type CellEditAction,
+  type CellEditSession,
+} from "../lib/register-cell-edit";
 import { fillRegisterHorizon } from "../lib/register-horizon";
 import { applyRegisterPatches, deletedIdsForRemoval, unlinkSplitMirrorParent } from "../lib/register-rows";
 import {
@@ -140,11 +152,18 @@ export function TransactionsPage() {
   const [unapprovedOnly, setUnapprovedOnly] = useState(false);
   const [selection, setSelection] = useState(() => emptySelection(listKey));
   const [replacements, setReplacements] = useState<ReadonlyMap<string, Transaction>>(() => new Map());
+  const [cellEdit, setCellEdit] = useState<CellEditSession>(idleCellEdit);
+  const cellEditRef = useRef(cellEdit);
+  const replaceCellEdit = (next: CellEditSession) => {
+    cellEditRef.current = next;
+    setCellEdit(next);
+  };
   const [deletedIds, setDeletedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [approvalSession, setApprovalSession] = useState(emptyApprovalSession);
   const approvalSessionRef = useRef(approvalSession);
   const [compose, setCompose] = useState<RegisterComposeState>(closedCompose);
   const [composeFocus, setComposeFocus] = useState(0);
+  const [editorFocus, setEditorFocus] = useState(0);
   const mutationLockRef = useRef(false);
   const [writeLocked, setWriteLocked] = useState(false);
   const selectedAccountId = filters.accountIds.length === 1 ? filters.accountIds[0]! : null;
@@ -258,6 +277,7 @@ export function TransactionsPage() {
   useEffect(() => {
     setReplacements(new Map());
     setDeletedIds(new Set());
+    replaceCellEdit(idleCellEdit());
     const empty = emptyApprovalSession();
     approvalSessionRef.current = empty;
     setApprovalSession(empty);
@@ -382,6 +402,53 @@ export function TransactionsPage() {
     setComposeFocus((nonce) => nonce + 1);
     setMutationError(null);
     setMutationSuccess(null);
+  };
+
+  const openEditor = (transaction: Transaction): void => {
+    replaceCellEdit(idleCellEdit());
+    setEditing(transaction);
+    setMutationError(null);
+    setEditorFocus((nonce) => nonce + 1);
+  };
+
+  const dispatchCellEdit = (action: CellEditAction) => {
+    replaceCellEdit(reduceCellEdit(cellEditRef.current, action));
+  };
+
+  const commitCellEdit = async () => {
+    const session = cellEditRef.current;
+    if (session.status !== "editing" || mutationLockRef.current) {
+      return;
+    }
+    const plan = planCellCommit(session.cell, session.draft, payees.data ?? []);
+    if (plan.kind === "unchanged") {
+      dispatchCellEdit({ type: "cancel" });
+      return;
+    }
+    if (plan.kind === "invalid") {
+      dispatchCellEdit({ type: "invalid", message: plan.message });
+      return;
+    }
+    mutationLockRef.current = true;
+    setWriteLocked(true);
+    setMutatingId(cellRowId(session.cell));
+    dispatchCellEdit({ type: "committing" });
+    try {
+      const updated = await api.updateTransaction(planId, plan.transactionId, plan.input);
+      setReplacements((current) => new Map(current).set(updated.id, updated));
+      reload();
+      setReconciliationPreviewGeneration((generation) => generation + 1);
+      dispatchCellEdit({ type: "committed" });
+    } catch (cause) {
+      dispatchCellEdit({
+        type: "failed",
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
+    } finally {
+      mutationLockRef.current = false;
+      setWriteLocked(false);
+      setMutatingId(null);
+    }
   };
 
   const saveCompose = async (keepOpen: boolean) => {
@@ -560,8 +627,9 @@ export function TransactionsPage() {
     () =>
       (unapprovedOnly ? patchedQueue : patchedPage)
         .filter((txn) => !txn.deleted)
-        .filter((txn) => registerAccountIds.has(txn.account_id)),
-    [patchedPage, patchedQueue, registerAccountIds, unapprovedOnly],
+        .filter((txn) => registerAccountIds.has(txn.account_id))
+        .filter((txn) => unapprovedOnly || dateInFilterRange(txn.date, filters.from, filters.to)),
+    [filters.from, filters.to, patchedPage, patchedQueue, registerAccountIds, unapprovedOnly],
   );
 
   const uncategorisedCount = useMemo(() => inScope.filter(hasUncategorisedLine).length, [inScope]);
@@ -685,6 +753,19 @@ export function TransactionsPage() {
         ? "No transactions match this search."
         : "No transactions match these filters.";
   const mutationBusy = writeLocked || Boolean(mutatingId);
+  const orderedGroups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
+  const cellSurface: CellEditSurface = {
+    session: cellEdit,
+    context: { writeLocked, mutatingId },
+    payees: payees.data ?? [],
+    groups: orderedGroups,
+    begin: dispatchCellEdit,
+    draft: (value) => dispatchCellEdit({ type: "draft", value }),
+    commit: () => {
+      void commitCellEdit();
+    },
+    cancel: () => dispatchCellEdit({ type: "cancel" }),
+  };
   const lockedComposeAccount = selectedAccount && !selectedAccount.closed ? selectedAccount : null;
   const composeAccounts = useMemo(
     () => visibleAccounts.filter((account) => !account.closed),
@@ -1037,6 +1118,8 @@ export function TransactionsPage() {
       )}
       {editing && (
         <TransactionEditor
+          key={editing.id}
+          focusNonce={editorFocus}
           transaction={editing}
           payees={payees.data ?? []}
           categoryGroups={categoryGroups}
@@ -1145,24 +1228,35 @@ export function TransactionsPage() {
                           />
                         )}
                       </td>
-                      <td className="nowrap">{formatDate(txn.date)}</td>
+                      <RegisterEditableCell cell={postedCell(txn, "date")} surface={cellSurface} className="nowrap">
+                        {formatDate(txn.date)}
+                      </RegisterEditableCell>
                       <td className="muted">{txn.account_name}</td>
-                      <td>
+                      <RegisterEditableCell cell={postedCell(txn, "payee")} surface={cellSurface}>
                         {txn.payee_name ?? (txn.transfer_account_id ? "Transfer" : "-")}
                         <FlagTag colour={txn.flag_color} name={txn.flag_name} />
-                      </td>
-                      <td className="muted">
+                      </RegisterEditableCell>
+                      <RegisterEditableCell cell={postedCell(txn, "category")} surface={cellSurface} className="muted">
                         {txn.subtransactions?.length
                           ? `Split · ${txn.subtransactions.length} lines`
                           : txn.transfer_account_id
                             ? "Transfer"
                             : (txn.category_name ?? "Uncategorised")}
-                      </td>
-                      <td className="muted memo-cell" title={txn.memo ?? ""}>
+                      </RegisterEditableCell>
+                      <RegisterEditableCell
+                        cell={postedCell(txn, "memo")}
+                        surface={cellSurface}
+                        className="muted memo-cell"
+                        title={txn.memo ?? ""}
+                      >
                         {txn.memo ?? "-"}
-                      </td>
-                      <td className="num amount-negative">{txn.amount < 0 ? formatAmount(txn.amount) : ""}</td>
-                      <td className="num amount-positive">{txn.amount > 0 ? formatAmount(txn.amount) : ""}</td>
+                      </RegisterEditableCell>
+                      <RegisterEditableCell cell={postedCell(txn, "outflow")} surface={cellSurface} className="num amount-negative">
+                        {txn.amount < 0 ? formatAmount(txn.amount) : ""}
+                      </RegisterEditableCell>
+                      <RegisterEditableCell cell={postedCell(txn, "inflow")} surface={cellSurface} className="num amount-positive">
+                        {txn.amount > 0 ? formatAmount(txn.amount) : ""}
+                      </RegisterEditableCell>
                       <td className="register-actions">
                         {!txn.approved && (
                           <button
@@ -1178,10 +1272,7 @@ export function TransactionsPage() {
                         <button
                           type="button"
                           className="register-row-action"
-                          onClick={() => {
-                            setEditing(txn);
-                            setMutationError(null);
-                          }}
+                          onClick={() => openEditor(txn)}
                           disabled={writeLocked || mutatingId === txn.id}
                           aria-label={`Edit ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
                         >
@@ -1213,15 +1304,26 @@ export function TransactionsPage() {
                         <td />
                         <td />
                         <td />
-                        <td className="muted split-line-cell">↳ {sub.payee_name ?? txn.payee_name ?? "-"}</td>
-                        <td className="muted">
+                        <RegisterEditableCell cell={splitCell(txn, sub.id, "payee")} surface={cellSurface} className="muted split-line-cell">
+                          ↳ {sub.payee_name ?? txn.payee_name ?? "-"}
+                        </RegisterEditableCell>
+                        <RegisterEditableCell cell={splitCell(txn, sub.id, "category")} surface={cellSurface} className="muted">
                           {sub.transfer_account_id ? "Transfer" : (sub.category_name ?? "Uncategorised")}
-                        </td>
-                        <td className="muted memo-cell" title={sub.memo ?? ""}>
+                        </RegisterEditableCell>
+                        <RegisterEditableCell
+                          cell={splitCell(txn, sub.id, "memo")}
+                          surface={cellSurface}
+                          className="muted memo-cell"
+                          title={sub.memo ?? ""}
+                        >
                           {sub.memo ?? "-"}
-                        </td>
-                        <td className="num amount-negative">{sub.amount < 0 ? formatAmount(sub.amount) : ""}</td>
-                        <td className="num amount-positive">{sub.amount > 0 ? formatAmount(sub.amount) : ""}</td>
+                        </RegisterEditableCell>
+                        <RegisterEditableCell cell={splitCell(txn, sub.id, "outflow")} surface={cellSurface} className="num amount-negative">
+                          {sub.amount < 0 ? formatAmount(sub.amount) : ""}
+                        </RegisterEditableCell>
+                        <RegisterEditableCell cell={splitCell(txn, sub.id, "inflow")} surface={cellSurface} className="num amount-positive">
+                          {sub.amount > 0 ? formatAmount(sub.amount) : ""}
+                        </RegisterEditableCell>
                         <td />
                         <td />
                       </tr>
@@ -1430,18 +1532,6 @@ function reconciliationSuccess(result: AccountReconciliationResult): string {
   return `${accountName} reconciled through ${formatDate(result.statement_date)}. ${count} cleared transaction${count === 1 ? "" : "s"} matched ${formatMoney(result.statement_balance)}.`;
 }
 
-function payeeInput(name: string, originalId: string | null, originalName: string, payees: Payee[]): Pick<TransactionUpdateInput, "payee_id" | "payee_name"> {
-  const trimmed = name.trim();
-  if (!trimmed) {
-    return { payee_id: null, payee_name: null };
-  }
-  if (trimmed === originalName && originalId) {
-    return { payee_id: originalId, payee_name: trimmed };
-  }
-  const matched = payees.find((payee) => !payee.deleted && !payee.transfer_account_id && payee.name === trimmed);
-  return { payee_id: matched?.id ?? null, payee_name: trimmed };
-}
-
 function TransactionEditor({
   transaction,
   payees,
@@ -1449,6 +1539,7 @@ function TransactionEditor({
   accounts,
   saving,
   disabled,
+  focusNonce,
   onCancel,
   onSave,
 }: {
@@ -1458,6 +1549,7 @@ function TransactionEditor({
   accounts: Account[];
   saving: boolean;
   disabled: boolean;
+  focusNonce?: number;
   onCancel: () => void;
   onSave: (transactionId: string, input: TransactionUpdateInput) => Promise<void>;
 }) {
@@ -1484,7 +1576,14 @@ function TransactionEditor({
     transferTransactionId: line.transfer_transaction_id ?? null,
   })));
   const orderedGroups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
+  const sectionRef = useRef<HTMLElement>(null);
+  const dateRef = useRef<HTMLInputElement>(null);
   const transferTarget = accounts.find((account) => account.id === transaction.transfer_account_id)?.name ?? "linked account";
+
+  useEffect(() => {
+    sectionRef.current?.scrollIntoView({ block: "nearest" });
+    dateRef.current?.focus({ preventScroll: true });
+  }, [focusNonce]);
   const parentAmount = parseMilliunits(amount);
   const splitTotal = splitLines.reduce((total, line) => total + (parseMilliunits(line.amount) ?? 0), 0);
 
@@ -1546,7 +1645,7 @@ function TransactionEditor({
   };
 
   return (
-    <section className="transaction-editor" aria-labelledby="edit-transaction-heading">
+    <section ref={sectionRef} className="transaction-editor" aria-labelledby="edit-transaction-heading">
       <div className="section-heading">
         <div>
           <span className="section-title" id="edit-transaction-heading">Edit transaction</span>
@@ -1558,7 +1657,7 @@ function TransactionEditor({
         <div className="field-row transaction-editor-top-row">
           <label className="field">
             <span className="field-label">Date</span>
-            <input type="date" value={date} onChange={(event) => setDate(event.target.value)} required />
+            <input ref={dateRef} type="date" value={date} onChange={(event) => setDate(event.target.value)} required />
           </label>
           <label className="field">
             <span className="field-label">Amount</span>

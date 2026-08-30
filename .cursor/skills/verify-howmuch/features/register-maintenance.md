@@ -6,7 +6,7 @@ The register can approve new rows, filter uncategorised lines, reconcile an acco
 
 - `maintain-uncategorised` shows the uncategorised pill after a row with no category.
 - `maintain-approve` shows `{n} new to approve` when a row is not approved.
-- `maintain-edit` assigns a category on the inline editor and saves.
+- `maintain-edit` double-clicks the category cell on the `Needs Category Verify` row, chooses Dining Out, and commits with Enter or blur. The Edit button still opens the panel.
 - `maintain-reconcile-open` opens **Reconcile account** and cancels without writing.
 
 ## How to get to it (user POV)
@@ -26,7 +26,7 @@ Preconditions:
 - **Compose messy row.** On Everyday Account choose `+ Add transaction`. Payee `Needs Category Verify`. Outflow `3.40`. Leave category Uncategorised. Save. Toast includes `Needs Category Verify saved.`
 - **Pills.** Toolbar shows `1 uncategorised`. If the new row is unapproved, also `{n} new to approve`.
 - **Filter.** Choose `1 uncategorised`. The register shows `Needs Category Verify`. Control reads `Showing uncategorised · clear`.
-- **Edit.** Choose the `Needs Category Verify` row. The inline editor opens. Category `Dining Out`. If an `Approved` checkbox is off, tick it. Choose `Save changes`. Category cell reads `Dining Out`.
+- **Edit.** Double-click the category cell on `Needs Category Verify`. Choose `Dining Out`. Press Enter or click away. The cell reads `Dining Out`. Choose **Edit**. The transaction editor opens. Choose **Cancel**.
 - **Clear filter.** Choose `Showing uncategorised · clear`. The pill is gone (or the count dropped).
 - **Reconcile open.** Choose `Reconcile account`. Heading is `Reconcile account`. Fields `Account`, statement date, and statement balance are present. Choose `Cancel`. The editor closes. Working balance is unchanged.
 - **HTTP match.** `control-howmuch http GET "/v1/plans/local-plan/transactions?since_date={today}&until_date={today}"` includes `payee_name` `Needs Category Verify`, `amount` `-3400`, and a non-null `category_id` after save.
@@ -38,3 +38,4 @@ Preconditions:
 - Do not finish a reconciliation in this recipe. Confirm writes cleared/reconciled state and is easy to strand.
 - Register toolbar `+ Add transaction` is compose, not `/add`.
 - Search also matches memo and category. After you assign Dining Out, search `Needs Category` still finds the row.
+- Double-click a cell, not the row. The Edit button is the only way to open the panel.
