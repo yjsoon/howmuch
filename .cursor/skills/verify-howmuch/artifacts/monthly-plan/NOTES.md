@@ -1,3 +1,5 @@
+Historical proof from when Plan was a default web route. The feature file is gone. `/plan` now redirects to All Accounts.
+
 Drove monthly-plan after the same signed-in session.
 
 - Direct `/plan` (no query) opened heading `Plan`, title `Plan · HowMuch`.
