@@ -1,6 +1,6 @@
 # HowMuch Web
 
-Report-first dashboard for the HowMuch ledger. See `docs/frontend/brief.md` for the design brief.
+Ledger and Reflect dashboard for the HowMuch web app. See `docs/frontend/brief.md` for the design brief.
 
 ## Development
 
@@ -22,8 +22,11 @@ Typechecks then emits a static bundle to `dist/`.
 
 ## Routes
 
-- `/spending`, `/income`, `/net-worth`, `/age-of-money` — the four reports
+- `/` and unknown paths redirect to All Accounts (`/transactions?range=all&accounts=all`)
+- `/spending`, `/income`, `/net-worth`, `/age-of-money` — the four Reflect reports
 - `/transactions` — register with search and drill-down from reports
+- `/scheduled` — recurring transactions
+- `/api-tokens` — personal API tokens
 - `/add` — mobile quick entry (posts to `/api/mobile/quick-entry`)
 
 Filters (date range, accounts, categories, interval) live in the query string and carry across tabs.

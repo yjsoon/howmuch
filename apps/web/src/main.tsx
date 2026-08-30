@@ -18,7 +18,6 @@ const ApiDocsPage = lazy(() => import("./pages/ApiDocs").then((module) => ({ def
 const ApiTokensPage = lazy(() => import("./pages/ApiTokens").then((module) => ({ default: module.ApiTokensPage })));
 const IncomePage = lazy(() => import("./pages/Income").then((module) => ({ default: module.IncomePage })));
 const NetWorthPage = lazy(() => import("./pages/NetWorth").then((module) => ({ default: module.NetWorthPage })));
-const PlanPage = lazy(() => import("./pages/Plan").then((module) => ({ default: module.PlanPage })));
 const QuickEntryPage = lazy(() => import("./pages/QuickEntry").then((module) => ({ default: module.QuickEntryPage })));
 const ScheduledTransactionsPage = lazy(() => import("./pages/ScheduledTransactions").then((module) => ({ default: module.ScheduledTransactionsPage })));
 const SpendingPage = lazy(() => import("./pages/Spending").then((module) => ({ default: module.SpendingPage })));
@@ -35,7 +34,6 @@ const router = createBrowserRouter([
     element: <PlanProvider><Shell /></PlanProvider>,
     children: [
       { path: "/", element: <Navigate to={home} replace /> },
-      { path: "/plan", element: <PlanPage /> },
       { path: "/scheduled", element: <ScheduledTransactionsPage /> },
       { path: "/api-tokens", element: <ApiTokensPage /> },
       { path: "/spending", element: <SpendingPage /> },

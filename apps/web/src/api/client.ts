@@ -11,7 +11,6 @@ import type {
   NetWorthReport,
   Payee,
   Plan,
-  PlanMonth,
   PlanSettings,
   QuickEntryInput,
   ReconciliationMismatchDetail,
@@ -262,25 +261,6 @@ export const api = {
         body: JSON.stringify({ statement_date: statementDate, statement_balance: statementBalance }),
       },
     ),
-  month: (planId: string, month: string) =>
-    request<{ month: PlanMonth }>(planUrl(planId, "months", month)).then(
-      (d) => d.month,
-    ),
-  setMonthCategoryAssignment: (planId: string, month: string, categoryId: string, budgeted: number) =>
-    request<{ month: PlanMonth }>(
-      planUrl(planId, "months", month, "categories", categoryId),
-      { method: "PATCH", body: JSON.stringify({ category: { budgeted } }) },
-    ).then((d) => d.month),
-  setMonthCategoryTarget: (planId: string, month: string, categoryId: string, target: { goal_type: string; goal_target: number; goal_target_month?: string | null } | null) =>
-    request<{ month: PlanMonth }>(
-      planUrl(planId, "months", month, "categories", categoryId),
-      { method: "PATCH", body: JSON.stringify({ category: { target } }) },
-    ).then((d) => d.month),
-  restoreMonthCategoryTarget: (planId: string, month: string, categoryId: string) =>
-    request<{ month: PlanMonth }>(
-      planUrl(planId, "months", month, "categories", categoryId),
-      { method: "PATCH", body: JSON.stringify({ category: { restore_target: true } }) },
-    ).then((d) => d.month),
   transactions: (planId: string, params: { since_date?: string; until_date?: string; type?: "unapproved"; limit?: number; offset?: number }) =>
     request<TransactionPage>(
       `${planUrl(planId, "transactions")}${query(params)}`,
@@ -347,12 +327,6 @@ export interface ApiState<T> {
   error: string | null;
 }
 
-/**
- * Fetches whenever `key` changes; stale responses are discarded so rapid
- * filter changes never paint out of order. Data from a previous key is not
- * returned, so month/report mutations cannot target a different window than
- * the figures on screen.
- */
 export function useApi<T>(key: string, fetcher: () => Promise<T>): ApiState<T> {
   const [state, setState] = useState<ApiState<T> & { key: string }>({
     data: null,
