@@ -719,6 +719,7 @@ export function TransactionsPage() {
     session: rowEdit,
     context: { writeLocked, mutatingId },
     payees: payees.data ?? [],
+    accounts,
     groups: orderedGroups,
     begin: dispatchRowEdit,
     dispatch: dispatchRowEdit,

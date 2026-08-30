@@ -4,11 +4,14 @@ import {
   beginRowEdit,
   idleRowEdit,
   parseAmountEntry,
+  payeeListEntries,
   planRowCommit,
+  postingAccountId,
   reduceRowEdit,
   rowGestureHandlers,
   rowId,
   sameRow,
+  transferOptionLabel,
   type RegisterRowDraft,
   type RegisterRowEditAction,
   type RegisterRowFocus,
@@ -93,6 +96,7 @@ const shopDraft: RegisterRowDraft = {
   memo: "coffee",
   outflow: "3.40",
   inflow: "",
+  flagColor: "",
 };
 
 function gestureEvent(detail = 1): RowGestureEvent & { prevented: boolean } {
@@ -339,9 +343,20 @@ describe("beginRowEdit", () => {
           memo: "lunch",
           outflow: "2.00",
           inflow: "",
+          flagColor: "",
         },
         focus: "memo",
       },
+    });
+  });
+
+  test("seeds flag colour from the posted row and from the parent on a split line", () => {
+    expect(beginRowEdit(posted(txn({ flag_color: "red" })), "memo", unlocked)).toMatchObject({
+      action: { draft: { flagColor: "red" } },
+    });
+    const parent = splitParent([line()], { flag_color: "blue" });
+    expect(beginRowEdit(splitLine(parent, "line-1"), "memo", unlocked)).toMatchObject({
+      action: { draft: { flagColor: "blue" } },
     });
   });
 
@@ -357,6 +372,7 @@ describe("beginRowEdit", () => {
           memo: "lunch",
           outflow: "2.00",
           inflow: "",
+          flagColor: "",
         },
       },
     });
@@ -453,14 +469,67 @@ describe("planRowCommit", () => {
     });
   });
 
-  test("rejects a transfer payee name", () => {
-    expect(planRowCommit(posted(txn()), { ...shopDraft, payeeName: "transfer : rainy day saver" }, payees)).toEqual({
-      kind: "invalid",
-      message: "Create a transfer from compose, not by renaming a payee.",
+  test("plans a transfer payee on a posted row and clears category", () => {
+    expect(planRowCommit(posted(txn()), { ...shopDraft, payeeName: "Transfer : Rainy Day Saver" }, payees)).toEqual({
+      kind: "patch",
+      transactionId: "txn-1",
+      input: { payee_id: "p-xfer", payee_name: "Transfer : Rainy Day Saver", category_id: null },
     });
   });
 
-  test("does not patch payee or category on a transfer posted row", () => {
+  test("rejects a self-transfer payee", () => {
+    const self = payee("p-self", "Transfer : Everyday", "acct");
+    expect(planRowCommit(posted(txn()), { ...shopDraft, payeeName: "Transfer : Everyday" }, [...payees, self])).toEqual({
+      kind: "invalid",
+      message: "Transfer to the same account is not allowed.",
+    });
+  });
+
+  test("rejects a transfer payee on a split parent", () => {
+    const parent = splitParent([line(), line({ id: "line-2", amount: -1400 })]);
+    expect(planRowCommit(posted(parent), {
+      date: "2026-08-01",
+      payeeName: "Transfer : Rainy Day Saver",
+      categoryId: "",
+      memo: "coffee",
+      outflow: "3.40",
+      inflow: "",
+      flagColor: "",
+    }, payees)).toEqual({
+      kind: "invalid",
+      message: "A split cannot itself be a transfer.",
+    });
+  });
+
+  test("rejects retargeting an existing transfer to a different transfer payee", () => {
+    const other = payee("p-travel", "Transfer : Travel Card", "acct-travel");
+    const row = posted(txn({
+      transfer_account_id: "acct-saver",
+      payee_id: "p-xfer",
+      payee_name: "Transfer : Rainy Day Saver",
+      category_id: null,
+    }));
+    expect(planRowCommit(row, { ...shopDraft, payeeName: "Transfer : Travel Card", categoryId: "" }, [...payees, other])).toEqual({
+      kind: "invalid",
+      message: "This transfer already has a destination. Choose a regular payee, or cancel.",
+    });
+  });
+
+  test("plans a regular payee on an existing transfer posted row", () => {
+    const row = posted(txn({
+      transfer_account_id: "acct-saver",
+      payee_id: "p-xfer",
+      payee_name: "Transfer : Rainy Day Saver",
+      category_id: null,
+    }));
+    expect(planRowCommit(row, { ...shopDraft, payeeName: "Coffee" }, payees)).toEqual({
+      kind: "patch",
+      transactionId: "txn-1",
+      input: { payee_id: "p-coffee", payee_name: "Coffee", category_id: "cat-dining" },
+    });
+  });
+
+  test("does not patch payee or category on a transfer posted row when the draft stays a transfer", () => {
     const row = posted(txn({
       transfer_account_id: "acct-saver",
       payee_id: "p-xfer",
@@ -469,17 +538,61 @@ describe("planRowCommit", () => {
     }));
     const draft: RegisterRowDraft = {
       date: "2026-08-15",
-      payeeName: "Coffee",
+      payeeName: "Transfer : Rainy Day Saver",
       categoryId: "cat-dining",
       memo: "moved",
       outflow: "3.40",
       inflow: "",
+      flagColor: "",
     };
     expect(planRowCommit(row, draft, payees)).toEqual({
       kind: "patch",
       transactionId: "txn-1",
       input: { date: "2026-08-15", memo: "moved" },
     });
+  });
+
+  test("omits an unchanged flag", () => {
+    expect(planRowCommit(posted(txn()), shopDraft, payees)).toEqual({ kind: "unchanged" });
+    expect(planRowCommit(posted(txn({ flag_color: "red" })), { ...shopDraft, flagColor: "red" }, payees)).toEqual({
+      kind: "unchanged",
+    });
+  });
+
+  test("plans a red flag", () => {
+    expect(planRowCommit(posted(txn()), { ...shopDraft, flagColor: "red" }, payees)).toEqual({
+      kind: "patch",
+      transactionId: "txn-1",
+      input: { flag_color: "red" },
+    });
+  });
+
+  test("clears a red flag", () => {
+    expect(planRowCommit(posted(txn({ flag_color: "red" })), shopDraft, payees)).toEqual({
+      kind: "patch",
+      transactionId: "txn-1",
+      input: { flag_color: null },
+    });
+  });
+
+  test("never includes flag_color on a split-line commit", () => {
+    const parent = splitParent([line()], { flag_color: "red" });
+    const plan = planRowCommit(splitLine(parent, "line-1"), {
+      date: "2026-08-01",
+      payeeName: "Shop",
+      categoryId: "cat-dining",
+      memo: "updated",
+      outflow: "2.00",
+      inflow: "",
+      flagColor: "",
+    }, payees);
+    expect(plan).toMatchObject({
+      kind: "patch",
+      input: {
+        subtransactions: [{ id: "line-1", memo: "updated" }],
+      },
+    });
+    expect(plan.kind === "patch" && "flag_color" in plan.input).toBe(false);
   });
 
   test("does not patch category or amount on a split parent", () => {
@@ -492,6 +605,7 @@ describe("planRowCommit", () => {
       memo: "coffee",
       outflow: "9.99",
       inflow: "1.00",
+      flagColor: "",
     }, payees)).toEqual({ kind: "unchanged" });
     expect(planRowCommit(row, {
       date: "2026-08-15",
@@ -500,6 +614,7 @@ describe("planRowCommit", () => {
       memo: "updated",
       outflow: "9.99",
       inflow: "",
+      flagColor: "",
     }, payees)).toEqual({
       kind: "patch",
       transactionId: "txn-split",
@@ -533,6 +648,7 @@ describe("planRowCommit", () => {
       memo: "updated",
       outflow: "2.00",
       inflow: "",
+      flagColor: "",
     }, payees)).toEqual({
       kind: "patch",
       transactionId: "txn-split",
@@ -574,6 +690,7 @@ describe("planRowCommit", () => {
       memo: "",
       outflow: "3.00",
       inflow: "",
+      flagColor: "",
     }, payees)).toEqual({
       kind: "patch",
       transactionId: "txn-split",
@@ -605,7 +722,7 @@ describe("planRowCommit", () => {
     });
   });
 
-  test("passes transfer fields through on a split-line rebuild and ignores payee and category", () => {
+  test("passes transfer fields through on a split-line rebuild and ignores category while the draft is a transfer", () => {
     const transferLine = line({
       id: "line-xfer",
       amount: -1400,
@@ -619,11 +736,12 @@ describe("planRowCommit", () => {
     const parent = splitParent([line(), transferLine]);
     const plan = planRowCommit(splitLine(parent, "line-xfer"), {
       date: "2026-08-01",
-      payeeName: "Coffee",
+      payeeName: "Transfer : Rainy Day Saver",
       categoryId: "cat-dining",
       memo: "moved",
       outflow: "1.40",
       inflow: "",
+      flagColor: "",
     }, payees);
     expect(plan).toMatchObject({
       kind: "patch",
@@ -642,6 +760,63 @@ describe("planRowCommit", () => {
         ],
       },
     });
+  });
+
+  test("sets transfer_account_id on a split line that becomes a transfer", () => {
+    const parent = splitParent([line(), line({ id: "line-2", amount: -1400 })]);
+    expect(planRowCommit(splitLine(parent, "line-1"), {
+      date: "2026-08-01",
+      payeeName: "Transfer : Rainy Day Saver",
+      categoryId: "cat-dining",
+      memo: "lunch",
+      outflow: "2.00",
+      inflow: "",
+      flagColor: "",
+    }, payees)).toMatchObject({
+      kind: "patch",
+      input: {
+        subtransactions: [
+          {
+            id: "line-1",
+            payee_id: "p-xfer",
+            payee_name: "Transfer : Rainy Day Saver",
+            category_id: null,
+            transfer_account_id: "acct-saver",
+          },
+          { id: "line-2" },
+        ],
+      },
+    });
+  });
+});
+
+describe("payeeListEntries", () => {
+  const everyday = { id: "acct", name: "Everyday Account" };
+  const saver = { id: "acct-saver", name: "Rainy Day Saver" };
+  const self = payee("p-self", "Transfer : Everyday Account", "acct");
+  const listed = [shop, coffee, transfer, self];
+
+  test("labels transfer options from account names and keeps payee.name as the value", () => {
+    expect(transferOptionLabel("Rainy Day Saver")).toBe("Transfer to Rainy Day Saver");
+    expect(payeeListEntries(listed, [everyday, saver], "acct")).toEqual([
+      { id: "p-shop", value: "Shop" },
+      { id: "p-coffee", value: "Coffee" },
+      { id: "p-xfer", value: "Transfer : Rainy Day Saver", label: "Transfer to Rainy Day Saver" },
+    ]);
+  });
+
+  test("omits the transfer payee for the posting account", () => {
+    expect(payeeListEntries(listed, [everyday, saver], postingAccountId(posted(txn()))).map((entry) => entry.id))
+      .not.toContain("p-self");
+    expect(payeeListEntries(listed, [everyday, saver], "acct-saver").map((entry) => entry.value)).toEqual([
+      "Shop",
+      "Coffee",
+      "Transfer : Everyday Account",
+    ]);
+  });
+
+  test("omits a transfer whose account name is unknown", () => {
+    expect(payeeListEntries([transfer], [everyday], "acct")).toEqual([]);
   });
 });
 

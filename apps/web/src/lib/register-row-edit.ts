@@ -9,6 +9,18 @@ export type RegisterRowDraft = {
   readonly memo: string;
   readonly outflow: string;
   readonly inflow: string;
+  readonly flagColor: string;
+};
+
+export type RowEditAccount = {
+  readonly id: string;
+  readonly name: string;
+};
+
+export type PayeeListEntry = {
+  readonly id: string;
+  readonly value: string;
+  readonly label?: string;
 };
 
 export type RegisterRowRef =
@@ -36,7 +48,7 @@ export type RegisterRowEditSession =
 
 export type RegisterRowEditAction =
   | { readonly type: "begin"; readonly row: RegisterRowRef; readonly draft: RegisterRowDraft; readonly focus: RegisterRowFocus }
-  | { readonly type: "patch"; readonly draft: Partial<Pick<RegisterRowDraft, "date" | "payeeName" | "categoryId" | "memo">> }
+  | { readonly type: "patch"; readonly draft: Partial<Pick<RegisterRowDraft, "date" | "payeeName" | "categoryId" | "memo" | "flagColor">> }
   | { readonly type: "set-outflow"; readonly value: string }
   | { readonly type: "set-inflow"; readonly value: string }
   | { readonly type: "invalid"; readonly message: string }
@@ -163,15 +175,15 @@ export type RowBeginDecision =
   | { readonly kind: "begin"; readonly action: Extract<RegisterRowEditAction, { type: "begin" }> }
   | { readonly kind: "refuse"; readonly reason: RowBeginRefusal };
 
-export function rowFieldWritable(row: RegisterRowRef, field: RegisterRowFocus): boolean {
+export function rowFieldWritable(
+  row: RegisterRowRef,
+  field: RegisterRowFocus,
+  draft?: RegisterRowDraft,
+  payees: readonly Payee[] = [],
+): boolean {
   if (row.kind === "posted") {
-    const txn = row.transaction;
-    const transfer = Boolean(txn.transfer_account_id);
-    const splitParent = Boolean(txn.subtransactions?.length);
-    if (field === "payee" && transfer) {
-      return false;
-    }
-    if (field === "category" && (transfer || splitParent)) {
+    const splitParent = Boolean(row.transaction.subtransactions?.length);
+    if (field === "category" && (splitParent || draftIsTransfer(draft, payees))) {
       return false;
     }
     if ((field === "outflow" || field === "inflow") && splitParent) {
@@ -182,15 +194,56 @@ export function rowFieldWritable(row: RegisterRowRef, field: RegisterRowFocus): 
   if (field === "date") {
     return false;
   }
-  const line = findLine(row.parent, row.lineId);
-  if (!line) {
+  if (!findLine(row.parent, row.lineId)) {
     return false;
   }
-  const transfer = Boolean(line.transfer_account_id);
-  if ((field === "payee" || field === "category") && transfer) {
+  if (field === "category" && draftIsTransfer(draft, payees)) {
     return false;
   }
   return true;
+}
+
+function draftIsTransfer(draft: RegisterRowDraft | undefined, payees: readonly Payee[]): boolean {
+  return Boolean(draft && findTransferPayee(payees, draft.payeeName));
+}
+
+export function postingAccountId(row: RegisterRowRef): string {
+  return row.kind === "posted" ? row.transaction.account_id : row.parent.account_id;
+}
+
+export function transferOptionLabel(accountName: string): string {
+  return `Transfer to ${accountName}`;
+}
+
+export function payeeListEntries(
+  payees: readonly Payee[],
+  accounts: readonly RowEditAccount[],
+  accountId: string,
+): readonly PayeeListEntry[] {
+  const names = new Map(accounts.map((account) => [account.id, account.name]));
+  const entries: PayeeListEntry[] = [];
+  for (const payee of payees) {
+    if (payee.deleted) {
+      continue;
+    }
+    if (!payee.transfer_account_id) {
+      entries.push({ id: payee.id, value: payee.name });
+      continue;
+    }
+    if (payee.transfer_account_id === accountId) {
+      continue;
+    }
+    const accountName = names.get(payee.transfer_account_id);
+    if (!accountName) {
+      continue;
+    }
+    entries.push({
+      id: payee.id,
+      value: payee.name,
+      label: transferOptionLabel(accountName),
+    });
+  }
+  return entries;
 }
 
 export function beginRowEdit(
@@ -226,6 +279,7 @@ function postedDraft(txn: Transaction): RegisterRowDraft {
     payeeName: txn.payee_name ?? "",
     categoryId: txn.category_id ?? "",
     memo: txn.memo ?? "",
+    flagColor: txn.flag_color ?? "",
     ...amountDraft(txn.amount),
   };
 }
@@ -236,6 +290,7 @@ function splitDraft(parent: Transaction, line: Subtransaction): RegisterRowDraft
     payeeName: line.payee_name ?? "",
     categoryId: line.category_id ?? "",
     memo: line.memo ?? "",
+    flagColor: parent.flag_color ?? "",
     ...amountDraft(line.amount),
   };
 }
@@ -289,7 +344,7 @@ function planPostedCommit(
   const txn = row.transaction;
   const input: TransactionUpdateInput = {};
 
-  if (rowFieldWritable(row, "date")) {
+  if (rowFieldWritable(row, "date", draft, payees)) {
     const date = draft.date.trim();
     if (!date) {
       return { kind: "invalid", message: "Choose a date." };
@@ -299,8 +354,13 @@ function planPostedCommit(
     }
   }
 
-  if (rowFieldWritable(row, "payee")) {
-    const payee = planPayeeChange(draft.payeeName, txn.payee_id, txn.payee_name ?? "", payees);
+  if (rowFieldWritable(row, "payee", draft, payees)) {
+    const payee = planPayeeChange(draft.payeeName, txn.payee_id, txn.payee_name ?? "", payees, {
+      accountId: txn.account_id,
+      splitParent: Boolean(txn.subtransactions?.length),
+      currentTransferAccountId: txn.transfer_account_id ?? null,
+      splitLine: false,
+    });
     if (payee.kind === "invalid") {
       return payee;
     }
@@ -309,21 +369,26 @@ function planPostedCommit(
     }
   }
 
-  if (rowFieldWritable(row, "category")) {
+  if (rowFieldWritable(row, "category", draft, payees)) {
     const categoryId = draft.categoryId || null;
     if (categoryId !== (txn.category_id ?? null)) {
       input.category_id = categoryId;
     }
   }
 
-  if (rowFieldWritable(row, "memo")) {
+  if (rowFieldWritable(row, "memo", draft, payees)) {
     const memo = draft.memo.trim() || null;
     if (memo !== (txn.memo ?? null)) {
       input.memo = memo;
     }
   }
 
-  if (rowFieldWritable(row, "outflow") || rowFieldWritable(row, "inflow")) {
+  const flagColor = draft.flagColor || null;
+  if (flagColor !== (txn.flag_color ?? null)) {
+    input.flag_color = flagColor;
+  }
+
+  if (rowFieldWritable(row, "outflow", draft, payees) || rowFieldWritable(row, "inflow", draft, payees)) {
     const amount = planAmountChange(draft, txn.amount);
     if (amount.kind === "invalid") {
       return amount;
@@ -360,8 +425,13 @@ function planSplitCommit(
 
   const patch: Partial<SplitLineInput> = {};
 
-  if (rowFieldWritable(row, "payee")) {
-    const payee = planPayeeChange(draft.payeeName, line.payee_id, line.payee_name ?? "", payees);
+  if (rowFieldWritable(row, "payee", draft, payees)) {
+    const payee = planPayeeChange(draft.payeeName, line.payee_id, line.payee_name ?? "", payees, {
+      accountId: parent.account_id,
+      splitParent: false,
+      currentTransferAccountId: line.transfer_account_id ?? null,
+      splitLine: true,
+    });
     if (payee.kind === "invalid") {
       return payee;
     }
@@ -370,14 +440,14 @@ function planSplitCommit(
     }
   }
 
-  if (rowFieldWritable(row, "category")) {
+  if (rowFieldWritable(row, "category", draft, payees)) {
     const categoryId = draft.categoryId || null;
     if (categoryId !== (line.category_id ?? null)) {
       patch.category_id = categoryId;
     }
   }
 
-  if (rowFieldWritable(row, "memo")) {
+  if (rowFieldWritable(row, "memo", draft, payees)) {
     const memo = draft.memo.trim() || null;
     if (memo !== (line.memo ?? null)) {
       patch.memo = memo;
@@ -385,7 +455,7 @@ function planSplitCommit(
   }
 
   let moveParentAmount = false;
-  if (rowFieldWritable(row, "outflow") || rowFieldWritable(row, "inflow")) {
+  if (rowFieldWritable(row, "outflow", draft, payees) || rowFieldWritable(row, "inflow", draft, payees)) {
     const amount = planAmountChange(draft, line.amount);
     if (amount.kind === "invalid") {
       return amount;
@@ -413,24 +483,58 @@ function planSplitCommit(
     : { kind: "patch", transactionId: parent.id, input };
 }
 
+type PayeeChangeInput = Pick<TransactionUpdateInput, "payee_id" | "payee_name" | "category_id"> & {
+  transfer_account_id?: string | null;
+};
+
+type PayeeChangeContext = {
+  readonly accountId: string;
+  readonly splitParent: boolean;
+  readonly currentTransferAccountId: string | null;
+  readonly splitLine: boolean;
+};
+
 function planPayeeChange(
   draft: string,
   originalId: string | null,
   originalName: string,
   payees: readonly Payee[],
+  context: PayeeChangeContext,
 ):
   | { readonly kind: "same" }
-  | { readonly kind: "changed"; readonly input: Pick<TransactionUpdateInput, "payee_id" | "payee_name"> }
+  | { readonly kind: "changed"; readonly input: PayeeChangeInput }
   | { readonly kind: "invalid"; readonly message: string } {
   const name = canonicalPayeeName(payees, draft);
   const currentName = canonicalPayeeName(payees, originalName);
   if (name === currentName) {
     return { kind: "same" };
   }
-  if (findTransferPayee(payees, name)) {
-    return { kind: "invalid", message: "Create a transfer from compose, not by renaming a payee." };
+  const transfer = findTransferPayee(payees, name);
+  if (transfer) {
+    if (transfer.transfer_account_id === context.accountId) {
+      return { kind: "invalid", message: "Transfer to the same account is not allowed." };
+    }
+    if (context.splitParent) {
+      return { kind: "invalid", message: "A split cannot itself be a transfer." };
+    }
+    if (context.currentTransferAccountId && context.currentTransferAccountId !== transfer.transfer_account_id) {
+      return { kind: "invalid", message: "This transfer already has a destination. Choose a regular payee, or cancel." };
+    }
+    const input: PayeeChangeInput = {
+      payee_id: transfer.id,
+      payee_name: transfer.name,
+      category_id: null,
+    };
+    if (context.splitLine) {
+      input.transfer_account_id = transfer.transfer_account_id ?? null;
+    }
+    return { kind: "changed", input };
   }
-  return { kind: "changed", input: payeeInput(name, originalId, originalName, payees) };
+  const input: PayeeChangeInput = payeeInput(name, originalId, originalName, payees);
+  if (context.splitLine && context.currentTransferAccountId) {
+    input.transfer_account_id = null;
+  }
+  return { kind: "changed", input };
 }
 
 function planAmountChange(

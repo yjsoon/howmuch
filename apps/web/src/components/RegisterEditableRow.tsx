@@ -1,10 +1,12 @@
 import { useEffect, useRef, type ReactElement, type ReactNode } from "react";
-import type { Payee, Subtransaction, Transaction } from "../api/types";
+import type { Account, Payee, Subtransaction, Transaction } from "../api/types";
 import type { splitCategoryGroups } from "../lib/categories";
 import { formatDate } from "../lib/dates";
 import { formatAmount } from "../lib/money";
-import { canonicalPayeeName, formatComposeAmount } from "../lib/register-compose";
+import { canonicalPayeeName, findTransferPayee, formatComposeAmount } from "../lib/register-compose";
 import {
+  payeeListEntries,
+  postingAccountId,
   rowApproved,
   rowFieldWritable,
   rowGestureHandlers,
@@ -16,11 +18,13 @@ import {
   type RowEditContext,
 } from "../lib/register-row-edit";
 import { CategorySelect } from "./CategorySelect";
+import { FlagPicker } from "./FlagTag";
 
 export type RowEditSurface = {
   readonly session: RegisterRowEditSession;
   readonly context: RowEditContext;
   readonly payees: readonly Payee[];
+  readonly accounts: readonly Account[];
   readonly groups: ReturnType<typeof splitCategoryGroups>;
   begin(action: Extract<RegisterRowEditAction, { type: "begin" }>): void;
   dispatch(action: RegisterRowEditAction): void;
@@ -146,7 +150,7 @@ export function RegisterEditableRow(props: {
         <td className="register-select">{split ? null : leading}</td>
         {split ? <td /> : (
           <td>
-            {rowFieldWritable(row, "date") ? (
+            {rowFieldWritable(row, "date", draft, surface.payees) ? (
               <RowInput
                 id={`${fieldId}-date`}
                 focus="date"
@@ -163,22 +167,25 @@ export function RegisterEditableRow(props: {
         )}
         <td className="muted">{split ? null : account}</td>
         <td className={split ? "muted split-line-cell" : undefined}>
-          {rowFieldWritable(row, "payee") ? (
+          {rowFieldWritable(row, "payee", draft, surface.payees) ? (
             <PayeeInput
               id={`${fieldId}-payee`}
               listId={`${fieldId}-payees`}
               value={draft.payeeName}
               disabled={busy}
               payees={surface.payees}
+              accounts={surface.accounts}
+              postingAccountId={postingAccountId(row)}
               onChange={(payeeName) => surface.dispatch({ type: "patch", draft: { payeeName } })}
             />
           ) : (
             idlePayee(row, line)
           )}
-          {payeeExtra}
         </td>
         <td className="muted">
-          {rowFieldWritable(row, "category") ? (
+          {findTransferPayee(surface.payees, draft.payeeName) ? (
+            <span className="register-compose-transfer">Transfer</span>
+          ) : rowFieldWritable(row, "category", draft, surface.payees) ? (
             <span data-row-focus="category">
               <CategorySelect
                 aria-label="Category"
@@ -193,7 +200,7 @@ export function RegisterEditableRow(props: {
           )}
         </td>
         <td>
-          {rowFieldWritable(row, "memo") ? (
+          {rowFieldWritable(row, "memo", draft, surface.payees) ? (
             <RowInput
               id={`${fieldId}-memo`}
               focus="memo"
@@ -209,7 +216,7 @@ export function RegisterEditableRow(props: {
           )}
         </td>
         <td className="num">
-          {rowFieldWritable(row, "outflow") ? (
+          {rowFieldWritable(row, "outflow", draft, surface.payees) ? (
             <AmountInput
               id={`${fieldId}-outflow`}
               focus="outflow"
@@ -223,7 +230,7 @@ export function RegisterEditableRow(props: {
           )}
         </td>
         <td className="num">
-          {rowFieldWritable(row, "inflow") ? (
+          {rowFieldWritable(row, "inflow", draft, surface.payees) ? (
             <AmountInput
               id={`${fieldId}-inflow`}
               focus="inflow"
@@ -242,6 +249,17 @@ export function RegisterEditableRow(props: {
       <tr className="register-compose-actions-row">
         <td colSpan={10}>
           <div className="register-compose-actions">
+            {split ? null : (
+              <>
+                <span className="field-label" id={`${fieldId}-flag-label`}>Flag</span>
+                <FlagPicker
+                  labelledBy={`${fieldId}-flag-label`}
+                  value={draft.flagColor}
+                  onChange={(flagColor) => surface.dispatch({ type: "patch", draft: { flagColor } })}
+                  disabled={busy}
+                />
+              </>
+            )}
             <button type="button" className="register-compose-cancel" onClick={surface.cancel} disabled={busy}>
               Cancel
             </button>
@@ -337,6 +355,8 @@ function PayeeInput({
   value,
   disabled,
   payees,
+  accounts,
+  postingAccountId: accountId,
   onChange,
 }: {
   id: string;
@@ -344,6 +364,8 @@ function PayeeInput({
   value: string;
   disabled: boolean;
   payees: readonly Payee[];
+  accounts: readonly Account[];
+  postingAccountId: string;
   onChange: (value: string) => void;
 }): ReactElement {
   return (
@@ -368,11 +390,11 @@ function PayeeInput({
         }}
       />
       <datalist id={listId}>
-        {payees
-          .filter((payee) => !payee.deleted && !payee.transfer_account_id)
-          .map((payee) => (
-            <option key={payee.id} value={payee.name} />
-          ))}
+        {payeeListEntries(payees, accounts, accountId).map((entry) => (
+          <option key={entry.id} value={entry.value}>
+            {entry.label}
+          </option>
+        ))}
       </datalist>
     </>
   );
