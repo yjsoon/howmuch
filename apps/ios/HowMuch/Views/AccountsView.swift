@@ -19,57 +19,7 @@ struct AccountsView: View {
             await model.refreshReferenceData()
           }
         } else {
-          NavigationLink {
-            RegisterView(scope: .all)
-          } label: {
-            HStack {
-              Text("All Transactions")
-                .foregroundStyle(Theme.textPrimary)
-              Spacer()
-              Image(systemName: "chevron.right")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.tertiary)
-            }
-            .padding(16)
-            .ynabCard()
-          }
-          .buttonStyle(.plain)
-
-          NavigationLink {
-            ScheduledTransactionsView()
-          } label: {
-            HStack(spacing: 12) {
-              Image(systemName: "calendar.badge.clock")
-                .font(.title3)
-                .foregroundStyle(Theme.accent)
-                .frame(width: 28)
-              VStack(alignment: .leading, spacing: 2) {
-                Text("Scheduled Transactions")
-                  .foregroundStyle(Theme.textPrimary)
-                if model.scheduledTransactionsPhase == .loaded {
-                  let count = model.scheduledTransactions.count
-                  Text(count == 1 ? "1 upcoming transaction" : "\(count) upcoming transactions")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                } else if model.scheduledTransactionsPhase.isLoading {
-                  Text("Loading upcoming transactions")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                }
-              }
-              Spacer()
-              if model.scheduledTransactionsPhase.isLoading {
-                ProgressView()
-              } else {
-                Image(systemName: "chevron.right")
-                  .font(.footnote.weight(.semibold))
-                  .foregroundStyle(.tertiary)
-              }
-            }
-            .padding(16)
-            .ynabCard()
-          }
-          .buttonStyle(.plain)
+          ledgerShortcuts
 
           if !collectionGroups.isEmpty {
             accountListBandLabel("Your groups")
@@ -168,6 +118,47 @@ struct AccountsView: View {
     ) { group in
       model.deleteCustomAccountGroup(id: group.id)
     }
+  }
+
+  private var ledgerShortcuts: some View {
+    let allTransactions = LedgerShortcutTile(
+      icon: "list.bullet.rectangle",
+      title: "All Transactions",
+      status: .quiet
+    ) {
+      RegisterView(scope: .all)
+    }
+
+    let scheduled = LedgerShortcutTile(
+      icon: "calendar.badge.clock",
+      title: "Scheduled Transactions",
+      status: LedgerShortcutStatus.scheduled(
+        phase: model.scheduledTransactionsPhase,
+        count: model.scheduledTransactions.count
+      )
+    ) {
+      ScheduledTransactionsView()
+    }
+
+    return Grid(horizontalSpacing: 12, verticalSpacing: 12) {
+      if usesColumnShortcuts {
+        GridRow {
+          allTransactions
+          scheduled
+        }
+      } else {
+        GridRow {
+          allTransactions
+        }
+        GridRow {
+          scheduled
+        }
+      }
+    }
+  }
+
+  private var usesColumnShortcuts: Bool {
+    dynamicTypeSize < .xxLarge
   }
 
   private func accountGroupSection(_ group: AccountListGroup) -> some View {
@@ -369,6 +360,80 @@ struct AccountsView: View {
       get: { model.sortForAccountGroup(groupID) },
       set: { model.setSort($0, forAccountGroup: groupID) }
     )
+  }
+
+  /// Spinner and loading copy are one case, so a spinner cannot appear without text.
+  private enum LedgerShortcutStatus {
+    case quiet
+    case detail(String)
+    case busy(String)
+
+    static func scheduled(phase: LoadPhase, count: Int) -> LedgerShortcutStatus {
+      switch phase {
+      case .loaded:
+        .detail(count == 1 ? "1 upcoming transaction" : "\(count) upcoming transactions")
+      case .loading:
+        .busy("Loading upcoming transactions")
+      case .idle, .failed:
+        .quiet
+      }
+    }
+
+    var detail: String? {
+      switch self {
+      case .quiet: nil
+      case .detail(let text), .busy(let text): text
+      }
+    }
+
+    var isBusy: Bool {
+      if case .busy = self { true } else { false }
+    }
+  }
+
+  private struct LedgerShortcutTile<Destination: View>: View {
+    let icon: String
+    let title: String
+    let status: LedgerShortcutStatus
+    @ViewBuilder let destination: () -> Destination
+
+    var body: some View {
+      NavigationLink {
+        destination()
+      } label: {
+        VStack(alignment: .leading, spacing: 10) {
+          HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+              .font(.title2)
+              .foregroundStyle(Theme.accent)
+              .accessibilityHidden(true)
+            Spacer(minLength: 0)
+            if status.isBusy {
+              ProgressView()
+                .controlSize(.small)
+                .accessibilityHidden(true)
+            }
+          }
+
+          VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(Theme.textPrimary)
+            if let detail = status.detail {
+              Text(detail)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+          }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .ynabCard()
+        .accessibilityElement(children: .combine)
+      }
+      .buttonStyle(.plain)
+    }
   }
 
   private struct OutboxCard: View {
