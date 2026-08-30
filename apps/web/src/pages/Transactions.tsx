@@ -14,7 +14,7 @@ import type {
 import { FlagTag } from "../components/FlagTag";
 import { FilterRail } from "../components/FilterRail";
 import { RegisterComposeRow } from "../components/RegisterComposeRow";
-import { RegisterEditableCell, type CellEditSurface } from "../components/RegisterEditableCell";
+import { RegisterEditableRow, type RowEditSurface } from "../components/RegisterEditableRow";
 import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
 import { formatDate, todayIso, trailingMonthsRange } from "../lib/dates";
 import { stableHash } from "../lib/hash";
@@ -40,15 +40,13 @@ import {
   type RegisterComposeState,
 } from "../lib/register-compose";
 import {
-  cellRowId,
-  idleCellEdit,
-  planCellCommit,
-  postedCell,
-  reduceCellEdit,
-  splitCell,
-  type CellEditAction,
-  type CellEditSession,
-} from "../lib/register-cell-edit";
+  idleRowEdit,
+  planRowCommit,
+  reduceRowEdit,
+  rowId,
+  type RegisterRowEditAction,
+  type RegisterRowEditSession,
+} from "../lib/register-row-edit";
 import { fillRegisterHorizon } from "../lib/register-horizon";
 import { applyRegisterPatches, deletedIdsForRemoval, unlinkSplitMirrorParent } from "../lib/register-rows";
 import {
@@ -148,11 +146,11 @@ export function TransactionsPage() {
   const [unapprovedOnly, setUnapprovedOnly] = useState(false);
   const [selection, setSelection] = useState(() => emptySelection(listKey));
   const [replacements, setReplacements] = useState<ReadonlyMap<string, Transaction>>(() => new Map());
-  const [cellEdit, setCellEdit] = useState<CellEditSession>(idleCellEdit);
-  const cellEditRef = useRef(cellEdit);
-  const replaceCellEdit = (next: CellEditSession) => {
-    cellEditRef.current = next;
-    setCellEdit(next);
+  const [rowEdit, setRowEdit] = useState<RegisterRowEditSession>(idleRowEdit);
+  const rowEditRef = useRef(rowEdit);
+  const replaceRowEdit = (next: RegisterRowEditSession) => {
+    rowEditRef.current = next;
+    setRowEdit(next);
   };
   const [deletedIds, setDeletedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [approvalSession, setApprovalSession] = useState(emptyApprovalSession);
@@ -272,7 +270,7 @@ export function TransactionsPage() {
   useEffect(() => {
     setReplacements(new Map());
     setDeletedIds(new Set());
-    replaceCellEdit(idleCellEdit());
+    replaceRowEdit(idleRowEdit());
     const empty = emptyApprovalSession();
     approvalSessionRef.current = empty;
     setApprovalSession(empty);
@@ -374,36 +372,36 @@ export function TransactionsPage() {
     setMutationSuccess(null);
   };
 
-  const dispatchCellEdit = (action: CellEditAction) => {
-    replaceCellEdit(reduceCellEdit(cellEditRef.current, action));
+  const dispatchRowEdit = (action: RegisterRowEditAction) => {
+    replaceRowEdit(reduceRowEdit(rowEditRef.current, action));
   };
 
-  const commitCellEdit = async () => {
-    const session = cellEditRef.current;
+  const commitRowEdit = async (options: { approve: boolean }) => {
+    const session = rowEditRef.current;
     if (session.status !== "editing" || mutationLockRef.current) {
       return;
     }
-    const plan = planCellCommit(session.cell, session.draft, payees.data ?? []);
+    const plan = planRowCommit(session.row, session.draft, payees.data ?? [], options);
     if (plan.kind === "unchanged") {
-      dispatchCellEdit({ type: "cancel" });
+      dispatchRowEdit({ type: "cancel" });
       return;
     }
     if (plan.kind === "invalid") {
-      dispatchCellEdit({ type: "invalid", message: plan.message });
+      dispatchRowEdit({ type: "invalid", message: plan.message });
       return;
     }
     mutationLockRef.current = true;
     setWriteLocked(true);
-    setMutatingId(cellRowId(session.cell));
-    dispatchCellEdit({ type: "committing" });
+    setMutatingId(rowId(session.row));
+    dispatchRowEdit({ type: "committing" });
     try {
       const updated = await api.updateTransaction(planId, plan.transactionId, plan.input);
       setReplacements((current) => new Map(current).set(updated.id, updated));
       reload();
       setReconciliationPreviewGeneration((generation) => generation + 1);
-      dispatchCellEdit({ type: "committed" });
+      dispatchRowEdit({ type: "committed" });
     } catch (cause) {
-      dispatchCellEdit({
+      dispatchRowEdit({
         type: "failed",
         message: cause instanceof Error ? cause.message : String(cause),
       });
@@ -717,17 +715,17 @@ export function TransactionsPage() {
         : "No transactions match these filters.";
   const mutationBusy = writeLocked || Boolean(mutatingId);
   const orderedGroups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
-  const cellSurface: CellEditSurface = {
-    session: cellEdit,
+  const rowSurface: RowEditSurface = {
+    session: rowEdit,
     context: { writeLocked, mutatingId },
     payees: payees.data ?? [],
     groups: orderedGroups,
-    begin: dispatchCellEdit,
-    draft: (value) => dispatchCellEdit({ type: "draft", value }),
-    commit: () => {
-      void commitCellEdit();
+    begin: dispatchRowEdit,
+    dispatch: dispatchRowEdit,
+    commit: (options) => {
+      void commitRowEdit(options);
     },
-    cancel: () => dispatchCellEdit({ type: "cancel" }),
+    cancel: () => dispatchRowEdit({ type: "cancel" }),
   };
   const lockedComposeAccount = selectedAccount && !selectedAccount.closed ? selectedAccount : null;
   const composeAccounts = useMemo(
@@ -1153,117 +1151,75 @@ export function TransactionsPage() {
                     />
                   )}
                   {rows.flatMap((txn) => [
-                    <tr key={txn.id} className={txn.approved ? undefined : "register-row-unapproved"}>
-                      <td className="register-select">
-                        {!txn.approved && !txn.deleted && (
-                          <input
-                            type="checkbox"
-                            checked={selectedApprovalIdSet.has(txn.id)}
-                            onClick={(event) => {
-                              const index = eligibleIds.indexOf(txn.id);
-                              if (index >= 0) {
-                                dispatchSelection({
-                                  kind: event.shiftKey ? "extend" : "toggle",
-                                  index,
-                                });
-                              }
-                            }}
-                            onChange={() => {}}
-                            disabled={mutationBusy}
-                            aria-label={`Select ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
-                          />
-                        )}
-                      </td>
-                      <RegisterEditableCell cell={postedCell(txn, "date")} surface={cellSurface} className="nowrap">
-                        {formatDate(txn.date)}
-                      </RegisterEditableCell>
-                      <td className="muted">{txn.account_name}</td>
-                      <RegisterEditableCell cell={postedCell(txn, "payee")} surface={cellSurface}>
-                        {txn.payee_name ?? (txn.transfer_account_id ? "Transfer" : "-")}
-                        <FlagTag colour={txn.flag_color} name={txn.flag_name} />
-                      </RegisterEditableCell>
-                      <RegisterEditableCell cell={postedCell(txn, "category")} surface={cellSurface} className="muted">
-                        {txn.subtransactions?.length
-                          ? `Split · ${txn.subtransactions.length} lines`
-                          : txn.transfer_account_id
-                            ? "Transfer"
-                            : (txn.category_name ?? "Uncategorised")}
-                      </RegisterEditableCell>
-                      <RegisterEditableCell
-                        cell={postedCell(txn, "memo")}
-                        surface={cellSurface}
-                        className="muted memo-cell"
-                        title={txn.memo ?? ""}
-                      >
-                        {txn.memo ?? "-"}
-                      </RegisterEditableCell>
-                      <RegisterEditableCell cell={postedCell(txn, "outflow")} surface={cellSurface} className="num amount-negative">
-                        {txn.amount < 0 ? formatAmount(txn.amount) : ""}
-                      </RegisterEditableCell>
-                      <RegisterEditableCell cell={postedCell(txn, "inflow")} surface={cellSurface} className="num amount-positive">
-                        {txn.amount > 0 ? formatAmount(txn.amount) : ""}
-                      </RegisterEditableCell>
-                      <td className="register-actions">
-                        {!txn.approved && (
+                    <RegisterEditableRow
+                      key={txn.id}
+                      row={{ kind: "posted", transaction: txn }}
+                      surface={rowSurface}
+                      leading={!txn.approved && !txn.deleted ? (
+                        <input
+                          type="checkbox"
+                          checked={selectedApprovalIdSet.has(txn.id)}
+                          onClick={(event) => {
+                            const index = eligibleIds.indexOf(txn.id);
+                            if (index >= 0) {
+                              dispatchSelection({
+                                kind: event.shiftKey ? "extend" : "toggle",
+                                index,
+                              });
+                            }
+                          }}
+                          onChange={() => {}}
+                          disabled={mutationBusy}
+                          aria-label={`Select ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
+                        />
+                      ) : null}
+                      account={txn.account_name}
+                      actions={(
+                        <>
+                          {!txn.approved && (
+                            <button
+                              type="button"
+                              className="register-row-action register-row-action-approve"
+                              onClick={() => void approveMany([txn.id])}
+                              disabled={writeLocked || approvalSession.pending.has(txn.id)}
+                              aria-label={`Approve ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
+                            >
+                              {approvalSession.pending.has(txn.id) ? "Approving…" : "Approve"}
+                            </button>
+                          )}
                           <button
                             type="button"
-                            className="register-row-action register-row-action-approve"
-                            onClick={() => void approveMany([txn.id])}
-                            disabled={writeLocked || approvalSession.pending.has(txn.id)}
-                            aria-label={`Approve ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
+                            className="register-row-action register-row-action-danger"
+                            onClick={() => {
+                              setPendingDeletion(txn);
+                              setMutationError(null);
+                            }}
+                            disabled={writeLocked || mutatingId === txn.id}
+                            aria-label={`${txn.approved ? "Delete" : "Reject"} ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
                           >
-                            {approvalSession.pending.has(txn.id) ? "Approving…" : "Approve"}
+                            {txn.approved ? "Delete" : "Reject"}
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          className="register-row-action register-row-action-danger"
-                          onClick={() => {
-                            setPendingDeletion(txn);
-                            setMutationError(null);
-                          }}
-                          disabled={writeLocked || mutatingId === txn.id}
-                          aria-label={`${txn.approved ? "Delete" : "Reject"} ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
-                        >
-                          {txn.approved ? "Delete" : "Reject"}
-                        </button>
-                      </td>
-                      <td className="register-status">
+                        </>
+                      )}
+                      status={(
                         <ClearedStatus
                           transaction={txn}
                           busy={writeLocked || mutatingId === txn.id}
                           onToggle={() => void toggleCleared(txn)}
                         />
-                      </td>
-                    </tr>,
+                      )}
+                      payeeExtra={<FlagTag colour={txn.flag_color} name={txn.flag_name} />}
+                    />,
                     ...(txn.subtransactions ?? []).map((sub) => (
-                      <tr key={sub.id} className="split-line-row">
-                        <td />
-                        <td />
-                        <td />
-                        <RegisterEditableCell cell={splitCell(txn, sub.id, "payee")} surface={cellSurface} className="muted split-line-cell">
-                          ↳ {sub.payee_name ?? txn.payee_name ?? "-"}
-                        </RegisterEditableCell>
-                        <RegisterEditableCell cell={splitCell(txn, sub.id, "category")} surface={cellSurface} className="muted">
-                          {sub.transfer_account_id ? "Transfer" : (sub.category_name ?? "Uncategorised")}
-                        </RegisterEditableCell>
-                        <RegisterEditableCell
-                          cell={splitCell(txn, sub.id, "memo")}
-                          surface={cellSurface}
-                          className="muted memo-cell"
-                          title={sub.memo ?? ""}
-                        >
-                          {sub.memo ?? "-"}
-                        </RegisterEditableCell>
-                        <RegisterEditableCell cell={splitCell(txn, sub.id, "outflow")} surface={cellSurface} className="num amount-negative">
-                          {sub.amount < 0 ? formatAmount(sub.amount) : ""}
-                        </RegisterEditableCell>
-                        <RegisterEditableCell cell={splitCell(txn, sub.id, "inflow")} surface={cellSurface} className="num amount-positive">
-                          {sub.amount > 0 ? formatAmount(sub.amount) : ""}
-                        </RegisterEditableCell>
-                        <td />
-                        <td />
-                      </tr>
+                      <RegisterEditableRow
+                        key={sub.id}
+                        row={{ kind: "split-line", parent: txn, lineId: sub.id }}
+                        surface={rowSurface}
+                        leading={null}
+                        account={null}
+                        actions={null}
+                        status={null}
+                      />
                     )),
                   ])}
                 </tbody>
