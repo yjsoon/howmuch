@@ -15,7 +15,6 @@ struct CategoriesView: View {
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
-        ScreenTitle("Plan")
         MonthStepper(monthAnchor: $monthAnchor)
 
         if let planMonth {
@@ -49,7 +48,8 @@ struct CategoriesView: View {
       .padding(.bottom, 24)
     }
     .background(Theme.canvas)
-    .navigationBarTitleDisplayMode(.inline)
+    .navigationTitle("Plan")
+    .navigationBarTitleDisplayMode(.large)
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
         Button {
