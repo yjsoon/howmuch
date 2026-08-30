@@ -362,7 +362,6 @@ struct AccountsView: View {
     )
   }
 
-  /// Spinner and loading copy are one case, so a spinner cannot appear without text.
   private enum LedgerShortcutStatus {
     case quiet
     case detail(String)
