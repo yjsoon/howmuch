@@ -339,8 +339,8 @@ describe("beginCellEdit", () => {
 
   test("puts British copy on every refusal reason", () => {
     expect(cellBeginHint("empty-amount-side")).toBe("Edit the amount in the other column.");
-    expect(cellBeginHint("transfer-payee")).toBe("Use Edit to change this transfer.");
-    expect(cellBeginHint("split-parent-amount")).toBe("Use Edit to rebalance split amounts.");
+    expect(cellBeginHint("transfer-payee")).toBe("Transfers keep their linked account.");
+    expect(cellBeginHint("split-parent-amount")).toBe("Change a split line instead.");
   });
 });
 
@@ -418,7 +418,7 @@ describe("planCellCommit", () => {
   test("rejects a transfer payee name", () => {
     expect(planCellCommit(postedCell(txn(), "payee"), "transfer : rainy day saver", payees)).toEqual({
       kind: "invalid",
-      message: "Use Edit to change this into a transfer.",
+      message: "Create a transfer from compose, not by renaming a payee.",
     });
   });
 

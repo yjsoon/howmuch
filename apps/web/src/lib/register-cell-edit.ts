@@ -121,10 +121,10 @@ export type CellBeginRefusal =
 export const CELL_BEGIN_HINT = {
   locked: "Wait until the current change finishes.",
   "row-busy": "Wait until the current change finishes.",
-  "transfer-payee": "Use Edit to change this transfer.",
+  "transfer-payee": "Transfers keep their linked account.",
   "transfer-category": "Transfers do not have a category.",
-  "split-parent-category": "Use Edit to change the split lines.",
-  "split-parent-amount": "Use Edit to rebalance split amounts.",
+  "split-parent-category": "Change a split line instead.",
+  "split-parent-amount": "Change a split line instead.",
   "missing-line": "This split line is no longer here.",
   "empty-amount-side": "Edit the amount in the other column.",
 } satisfies Record<CellBeginRefusal, string>;
@@ -372,7 +372,7 @@ function planPayeeCommit(
     return { kind: "unchanged" };
   }
   if (findTransferPayee(payees, name)) {
-    return { kind: "invalid", message: "Use Edit to change this into a transfer." };
+    return { kind: "invalid", message: "Create a transfer from compose, not by renaming a payee." };
   }
   return {
     kind: "patch",
