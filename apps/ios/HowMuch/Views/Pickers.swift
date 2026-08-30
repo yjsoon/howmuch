@@ -171,7 +171,8 @@ struct CategoryPickerView: View {
       isSelected: { $0.id == draft.categoryID },
       searchText: $searchText,
       searchPrompt: "Search categories",
-      title: "Category"
+      title: "Category",
+      presentsSearchOnAppear: true
     ) { category in
       draft.categoryID = category.id
       dismiss()
@@ -285,6 +286,7 @@ struct CategorisedPickerList<Group: Identifiable, Item: Identifiable, Header: Vi
   var title: String
   let onSelect: (Item) -> Void
   let header: () -> Header
+  @State private var isSearchPresented: Bool
 
   init(
     groups: [Group],
@@ -296,6 +298,7 @@ struct CategorisedPickerList<Group: Identifiable, Item: Identifiable, Header: Vi
     searchText: Binding<String>,
     searchPrompt: String,
     title: String,
+    presentsSearchOnAppear: Bool = false,
     onSelect: @escaping (Item) -> Void,
     @ViewBuilder header: @escaping () -> Header
   ) {
@@ -310,6 +313,7 @@ struct CategorisedPickerList<Group: Identifiable, Item: Identifiable, Header: Vi
     self.title = title
     self.onSelect = onSelect
     self.header = header
+    _isSearchPresented = State(initialValue: presentsSearchOnAppear)
   }
 
   var body: some View {
@@ -332,7 +336,12 @@ struct CategorisedPickerList<Group: Identifiable, Item: Identifiable, Header: Vi
     .listStyle(.insetGrouped)
     .scrollContentBackground(.hidden)
     .background(Theme.canvas)
-    .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: searchPrompt)
+    .searchable(
+      text: $searchText,
+      isPresented: $isSearchPresented,
+      placement: .navigationBarDrawer(displayMode: .always),
+      prompt: searchPrompt
+    )
     .navigationTitle(title)
     .navigationBarTitleDisplayMode(.inline)
   }
@@ -349,6 +358,7 @@ extension CategorisedPickerList where Header == EmptyView {
     searchText: Binding<String>,
     searchPrompt: String,
     title: String,
+    presentsSearchOnAppear: Bool = false,
     onSelect: @escaping (Item) -> Void
   ) {
     self.init(
@@ -361,6 +371,7 @@ extension CategorisedPickerList where Header == EmptyView {
       searchText: searchText,
       searchPrompt: searchPrompt,
       title: title,
+      presentsSearchOnAppear: presentsSearchOnAppear,
       onSelect: onSelect,
       header: { EmptyView() }
     )

@@ -996,7 +996,8 @@ private struct TransactionSplitCategoryPicker: View {
       isSelected: { $0.id == line.categoryID },
       searchText: $searchText,
       searchPrompt: "Search categories",
-      title: "Category"
+      title: "Category",
+      presentsSearchOnAppear: true
     ) { category in
       line.categoryID = category.id
       line.transferAccountID = nil
