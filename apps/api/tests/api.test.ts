@@ -969,6 +969,27 @@ describe("YNAB-compatible API", () => {
     });
   });
 
+  test("deletes unapproved rows when expected_approved is accidentally encoded into the path", async () => {
+    const created = await (await request("/v1/plans/plan-test/transactions", {
+      method: "POST",
+      body: { transaction: { account_id: "acct-1", date: "2026-08-30", amount: -16560, payee_name: "fp*Food Panda" } },
+    })).json();
+    const transactionId = created.data.transaction.id;
+    expect(created.data.transaction.approved).toBe(false);
+
+    const mangled = await request(
+      `/v1/plans/plan-test/transactions/${transactionId}%3Fexpected_approved=false`,
+      { method: "DELETE" },
+    );
+    expect(mangled.status).toBe(200);
+    expect((await mangled.json()).data.transaction).toMatchObject({
+      id: transactionId,
+      deleted: true,
+      approved: false,
+      payee_name: "fp*Food Panda",
+    });
+  });
+
   test("rejects only transactions that are still unapproved", async () => {
     const created = await (await request("/v1/plans/plan-test/transactions", {
       method: "POST",

@@ -442,7 +442,7 @@ async function handleV1(
       return json({ data: result }, 201);
     }
 
-    const transactionId = segments[4];
+    const { transactionId, expectedApprovedParameter } = transactionItemRef(segments[4], url);
     if (segments.length === 5 && method === "GET") {
       return json({ data: { transaction: await repo.getTransaction(planId, transactionId), server_knowledge: await repo.getServerKnowledge(planId) } });
     }
@@ -460,7 +460,6 @@ async function handleV1(
       return json({ data: { transaction: updated, server_knowledge: await repo.getServerKnowledge(planId) } });
     }
     if (segments.length === 5 && method === "DELETE") {
-      const expectedApprovedParameter = url.searchParams.get("expected_approved");
       if (expectedApprovedParameter !== null && expectedApprovedParameter !== "true" && expectedApprovedParameter !== "false") {
         throw new ValidationError("expected_approved must be true or false");
       }
@@ -1023,6 +1022,27 @@ function authorizePlan(principal: Principal, planId: string, defaultPlanId: stri
     return apiError(403, "forbidden", "Plan is read-only");
   }
   return null;
+}
+
+/**
+ * iOS used to concatenate `?expected_approved=` onto the path. `encodedPath`
+ * then percent-encodes `?` as `%3F`, so the last segment is `id%3Fexpected_approved=false`
+ * and a lookup of that string 404s. Split the embedded query back out.
+ */
+function transactionItemRef(segment: string, url: URL): { transactionId: string; expectedApprovedParameter: string | null } {
+  let decoded = segment;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    decoded = segment;
+  }
+  const cut = decoded.indexOf("?");
+  const transactionId = cut === -1 ? decoded : decoded.slice(0, cut);
+  const embedded = cut === -1 ? new URLSearchParams() : new URLSearchParams(decoded.slice(cut + 1));
+  return {
+    transactionId,
+    expectedApprovedParameter: url.searchParams.get("expected_approved") ?? embedded.get("expected_approved"),
+  };
 }
 
 function authorizePlanAdministration(principal: Principal, planId: string): Response | null {

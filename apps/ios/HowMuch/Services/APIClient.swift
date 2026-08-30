@@ -446,9 +446,13 @@ struct APIClient {
   }
 
   func deleteTransaction(planID: String, transactionID: String, expectedApproved: Bool? = nil) async throws -> Transaction {
-    let expectation = expectedApproved.map { "?expected_approved=\($0)" } ?? ""
+    var queryItems: [URLQueryItem] = []
+    if let expectedApproved {
+      queryItems.append(URLQueryItem(name: "expected_approved", value: expectedApproved ? "true" : "false"))
+    }
     let response: APIEnvelope<TransactionPayload> = try await request(
-      path: "/v1/plans/\(planID)/transactions/\(transactionID)\(expectation)",
+      path: "/v1/plans/\(planID)/transactions/\(transactionID)",
+      queryItems: queryItems,
       method: "DELETE"
     )
     return response.data.transaction
@@ -604,6 +608,8 @@ struct APIClient {
     return url
   }
 
+  /// Encodes path segments only. Put query in `queryItems`, not in `path` —
+  /// `?` is not url-path-allowed, so it becomes `%3F` and the server 404s.
   private static func encodedPath(_ path: String) -> String {
     let trimmed = path.hasPrefix("/") ? String(path.dropFirst()) : path
     let segments = trimmed.split(separator: "/", omittingEmptySubsequences: false).map { segment in
