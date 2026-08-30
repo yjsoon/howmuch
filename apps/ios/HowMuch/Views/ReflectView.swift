@@ -6,8 +6,6 @@ struct ReflectView: View {
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
-        ScreenTitle("Reflect")
-
         if model.spendingBreakdown == nil, model.reportsPhase != .loaded {
           PhasePlaceholder(phase: model.reportsPhase) {
             await model.refreshReflectOverview()
@@ -42,7 +40,8 @@ struct ReflectView: View {
       .padding(.bottom, 24)
     }
     .background(Theme.canvas)
-    .navigationBarTitleDisplayMode(.inline)
+    .navigationTitle("Reflect")
+    .navigationBarTitleDisplayMode(.large)
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
         Button {

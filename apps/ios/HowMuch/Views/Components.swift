@@ -19,22 +19,6 @@ extension View {
   }
 }
 
-/// Large left-aligned screen title, as on YNAB's Accounts and Reflect tabs.
-struct ScreenTitle: View {
-  let text: String
-
-  init(_ text: String) {
-    self.text = text
-  }
-
-  var body: some View {
-    Text(text)
-      .font(.system(size: 32, weight: .bold))
-      .foregroundStyle(Theme.textPrimary)
-      .frame(maxWidth: .infinity, alignment: .leading)
-  }
-}
-
 /// Form row with a leading icon that shows a caption + value once filled,
 /// or just a placeholder before that.
 struct DisclosureValueRow: View {
