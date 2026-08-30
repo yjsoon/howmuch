@@ -23,6 +23,7 @@
     "verify:ios-confirm-presentation": "bun scripts/verify-ios-confirm-presentation.ts",
     "verify:ios-register-swipe": "bun scripts/verify-ios-register-swipe.ts",
     "verify:ios-transaction-delete": "bun scripts/verify-ios-transaction-delete.ts",
+    "verify:ios-accounts-shortcuts": "bun scripts/verify-ios-accounts-shortcuts.ts",
     "test": "bun test",
     "verify:worker": "bun run --cwd apps/worker build"
   },
