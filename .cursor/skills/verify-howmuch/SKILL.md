@@ -1,11 +1,11 @@
 ---
 name: verify-howmuch
-description: Drive the HowMuch web ledger in a real browser against an isolated local Bun/SQLite stack. Use when proving user-facing behaviour (first-owner setup, Plan, reports, register, quick entry) or after changing apps/web, the local API, or auth.
+description: Drive the HowMuch web ledger in a real browser against an isolated local Bun/SQLite stack. Use when proving user-facing behaviour (first-owner setup, Reflect reports, register, quick entry, schedules, tokens) or after changing apps/web, the local API, or auth.
 ---
 
 # Verify HowMuch
 
-HowMuch's primary surface is the React web app (`apps/web`). A user signs in, edits a monthly Plan, reads four Reflect reports, searches the register, posts a quick entry, manages schedules and API tokens, and organises sidebar accounts. This skill drives that path in a browser against a disposable local API.
+HowMuch's primary surface is the React web app (`apps/web`). A user signs in, reads four Reflect reports, searches the register, posts a quick entry, manages schedules and API tokens, and organises sidebar accounts. There is no monthly Plan edit. This skill drives that path in a browser against a disposable local API.
 
 Secondary surfaces, not covered here:
 
@@ -88,15 +88,13 @@ Stable handles:
 | Auth fields | labels `Username`, `Password`, `Setup token` |
 | Auth submit | `Create account` / `Sign in` |
 | Primary nav | `nav` named `Primary navigation` |
-| Plan / reports / register | links `Plan`, `Scheduled`, `API tokens`, `Spending breakdown`, `Income v Spending`, `Net Worth`, `Age of Money`, `All Accounts`, `Organise accounts` |
+| Nav links | `Scheduled`, `API tokens`, Reflect reports (`Spending breakdown`, `Income v Spending`, `Net Worth`, `Age of Money`), `All Accounts`, `Organise accounts` |
 | Quick entry | sidebar `+ Add transaction` or route `/add` |
 | Register compose | account register toolbar `+ Add transaction` |
 | Sign out | button `Sign out` |
 | Date range | group `Date range`, buttons `This month`, `Last month`, `2M`, `3M`, `YTD`, `1Y`, `All` |
 | Custom dates | `From date`, `To date` |
 | Register search | searchbox `Search transactions` |
-| Plan month | group `Plan month`, buttons `Previous month` / `Next month` / `Current` |
-| Assignment | button `Edit assigned amount for {Category}` |
 
 HTTP second view (Bearer token from state, not a substitute for the UI path):
 

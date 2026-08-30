@@ -96,7 +96,6 @@ export function Shell() {
   useEffect(() => {
     const report = REPORTS.find((entry) => entry.to === location.pathname);
     const label = (location.pathname === "/transactions" ? registerLabel : null)
-      ?? (location.pathname === "/plan" ? "Plan" : null)
       ?? (location.pathname === "/scheduled" ? "Scheduled transactions" : null)
       ?? (location.pathname === "/api-tokens" ? "API tokens" : null)
       ?? report?.label;
@@ -174,12 +173,6 @@ export function Shell() {
         </div>
 
         <nav id="primary-navigation" className="sidebar-nav" aria-label="Primary navigation">
-          <NavLink
-            to={{ pathname: "/plan", search: location.search }}
-            className={({ isActive }) => isActive ? "sidebar-primary-link sidebar-link-active" : "sidebar-primary-link"}
-          >
-            <span aria-hidden="true">▦</span> Plan
-          </NavLink>
           <NavLink
             to={{ pathname: "/scheduled", search: location.search }}
             className={({ isActive }) => isActive ? "sidebar-primary-link sidebar-link-active" : "sidebar-primary-link"}

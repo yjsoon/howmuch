@@ -73,49 +73,6 @@ export interface Category {
   deleted?: boolean;
 }
 
-/** Monthly envelope data imported from YNAB, with local assignments overlaid. All amounts are milliunits. */
-export interface PlanMonthCategory {
-  id: string;
-  name: string;
-  category_group_id: string;
-  hidden?: boolean;
-  original_category_group_id?: string | null;
-  note?: string | null;
-  budgeted?: number | null;
-  source_budgeted?: number | null;
-  assignment_source?: string | null;
-  activity?: number | null;
-  balance?: number | null;
-  goal_type?: string | null;
-  goal_day?: number | null;
-  goal_cadence?: number | null;
-  goal_cadence_frequency?: number | null;
-  goal_creation_month?: string | null;
-  goal_target?: number | null;
-  goal_target_month?: string | null;
-  goal_percentage_complete?: number | null;
-  goal_months_to_budget?: number | null;
-  goal_under_funded?: number | null;
-  goal_overall_funded?: number | null;
-  goal_overall_left?: number | null;
-  goal_needed_for_spending?: number | null;
-  goal_needs_whole_amount?: boolean | null;
-  target_source?: string | null;
-  deleted?: boolean;
-}
-
-export interface PlanMonth {
-  month: string;
-  note?: string | null;
-  income?: number | null;
-  budgeted?: number | null;
-  activity?: number | null;
-  to_be_budgeted?: number | null;
-  age_of_money?: number | null;
-  deleted?: boolean;
-  categories: PlanMonthCategory[];
-}
-
 export interface Payee {
   id: string;
   name: string;

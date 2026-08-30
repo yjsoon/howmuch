@@ -2,11 +2,11 @@
 
 ## Purpose
 
-A quiet, dense, Plan-and-report dashboard for a single user's self-hosted ledger. It is a working tool, not a marketing page: an editable monthly Plan, four Reflect-style reports, transaction drill-down, and mobile quick entry make up the product.
+A quiet, dense ledger and Reflect dashboard for a single self-hosted user. It is a working tool, not a marketing page: four Reflect reports, the register, scheduled transactions, API tokens, and mobile quick entry make up the product.
 
 ## Non-Goals
 
-- No YNAB write-back or credit-card-specific handling. Category assignments and targets are saved locally in HowMuch as overlays; imported source values remain intact and a local target can be restored to its imported value.
+- No YNAB write-back or credit-card-specific handling. Month-assignment and target overlays stay on the API for iOS. The web app does not edit them.
 - No onboarding, marketing, or empty-state theatre.
 - No multi-user auth UI (version one is a single bearer token).
 
@@ -31,8 +31,8 @@ The aesthetic is a broadsheet ledger: ink on paper, hairline rules, controlled d
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ HOWMUCH        Plan · Spending · Income v Spending · Net      │
-│                Age of Money · Transactions          [+ Add]   │
+│ HOWMUCH        Scheduled · Tokens · Spending · Income         │
+│                Net Worth · Age of Money · All Accounts [+ Add]│
 ├──────────────────────────────────────────────────────────────┤
 │ Filter rail: date-range presets (1m/3m/12m/YTD/All/custom),   │
 │ accounts multi-select, categories multi-select, interval      │
@@ -47,7 +47,9 @@ The aesthetic is a broadsheet ledger: ink on paper, hairline rules, controlled d
 | Route | View |
 | --- | --- |
 | `/` | redirect to `/transactions?range=all&accounts=all` |
-| `/plan` | Monthly Plan: edit category assignments and local targets, see Ready to assign, Assigned, Activity, category availability, and target progress; category drill-down opens the register |
+| `*` | same redirect as `/` |
+| `/scheduled` | Recurring transactions: list, add, enter now |
+| `/api-tokens` | Personal API tokens: mint and revoke |
 | `/spending` | Spending Breakdown: total, share bars per category grouped by category group, click-through to filtered transactions |
 | `/income` | Income vs Spending: paired columns per period, table with income / spending / net / cumulative net |
 | `/net-worth` | Net Worth: stepped area chart, per-account balance table per period, account filter |
@@ -73,7 +75,6 @@ Endpoints consumed:
 
 - `GET /api/reports/spending-breakdown | income-vs-spending | net-worth | age-of-money`
 - `GET /v1/plans/{id}/accounts`, `/categories`, `/payees`, `/settings` (filter options and formatting)
-- `GET /v1/plans/{id}/months/{YYYY-MM}` and `PATCH /v1/plans/{id}/months/{YYYY-MM}/categories/{id}` for the monthly Plan
 - `GET /v1/plans/{id}/transactions` (+ scoped variants) for the register
 - `POST /api/mobile/quick-entry` for quick entry
 - `PATCH /v1/plans/{id}/transactions/{id}` for inline edits later
@@ -95,8 +96,8 @@ apps/web/
     state/filters.ts    # URL ↔ Filters codec, hook
     components/         # FilterRail, SegmentedControl, MultiSelect,
                         # DataTable, charts/ (ShareBars, Columns, Area, Line)
-    pages/              # Plan, Spending, Income, NetWorth, AgeOfMoney,
-                        # Transactions, QuickEntry
+    pages/              # Spending, Income, NetWorth, AgeOfMoney,
+                        # Transactions, QuickEntry, Scheduled, ApiTokens
 ```
 
 ## Open Questions (for later, not blockers)

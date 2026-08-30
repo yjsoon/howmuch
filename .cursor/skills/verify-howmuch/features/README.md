@@ -42,8 +42,7 @@ Keep implementation details out of the map. Name only user paths, stable handles
 
 ## Features
 
-- [First-owner setup](./first-owner-setup.md) covers the empty-database account form, sign-in on a later visit, and sign out.
-- [Monthly plan](./monthly-plan.md) covers month stepping, Ready to assign, and saving an assignment.
+- [First-owner setup](./first-owner-setup.md) covers the empty-database account form, sign-in on a later visit, sign out, and that signed-in home has no Plan.
 - [Spending breakdown](./spending-breakdown.md) covers the empty current-month default, All-range totals, and category drill-down.
 - [Income v Spending](./income-v-spending.md) covers the YTD default, This-month empty state, and income versus spending headlines.
 - [Net Worth](./net-worth.md) covers the trailing-year series and per-account balance columns.
