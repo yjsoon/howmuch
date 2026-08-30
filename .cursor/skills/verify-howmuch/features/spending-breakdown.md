@@ -36,5 +36,5 @@ Preconditions:
 
 - Proving spending on `This month` in 2026-08 is a false fail. Switch to `All` or the demo dates first.
 - `Include` / `Exclude` toggles hidden & non-personal categories. Demo groups are ordinary (Home, Living, Travel); leave the toggle alone unless you are proving it.
-- Filter query strings persist across Reflect tabs. A leftover `from`/`to` on Plan→Spending can hide the empty-default sub-feature. Use `This month` or a fresh load of `/spending` with no query to prove that path.
+- Filter query strings persist across Reflect tabs. Leftover `from`/`to` from another report can hide the empty-default sub-feature. Use `This month` or a fresh load of `/spending` with no query to prove that path.
 - Report amounts are absolute outflows. Income (Tinkermind Payroll) does not appear here.
