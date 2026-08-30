@@ -26,8 +26,7 @@ Preconditions:
 - **Compose messy row.** On Everyday Account choose `+ Add transaction`. Payee `Needs Category Verify`. Outflow `3.40`. Leave category Uncategorised. Save. Toast includes `Needs Category Verify saved.`
 - **Pills.** Toolbar shows `1 uncategorised`. If the new row is unapproved, also `{n} new to approve`.
 - **Filter.** Choose `1 uncategorised`. The register shows `Needs Category Verify`. Control reads `Showing uncategorised · clear`.
-- **Edit.** Double-click the category cell on `Needs Category Verify`. Choose `Dining Out`. Press Enter or click away. The cell reads `Dining Out`. Choose **Edit**. The transaction editor opens. Choose **Cancel**.
-- **Clear filter.** Choose `Showing uncategorised · clear`. The pill is gone (or the count dropped).
+- **Edit.** Double-click the category cell on `Needs Category Verify`. Choose `Dining Out`. Press Enter or click away. The cell reads `Dining Out`. The row then leaves this uncategorised list. Choose `Showing uncategorised · clear`. The row is back with Dining Out. Choose **Edit**. The transaction editor opens. Choose **Cancel**.
 - **Reconcile open.** Choose `Reconcile account`. Heading is `Reconcile account`. Fields `Account`, statement date, and statement balance are present. Choose `Cancel`. The editor closes. Working balance is unchanged.
 - **HTTP match.** `control-howmuch http GET "/v1/plans/local-plan/transactions?since_date={today}&until_date={today}"` includes `payee_name` `Needs Category Verify`, `amount` `-3400`, and a non-null `category_id` after save.
 - **Proof.** Screenshot the uncategorised pill (`artifacts/register-maintenance/uncategorised.png`), the editor (`artifacts/register-maintenance/edit.png`), and the open reconcile sheet (`artifacts/register-maintenance/reconcile.png`).
