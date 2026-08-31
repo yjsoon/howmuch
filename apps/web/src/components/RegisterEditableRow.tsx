@@ -5,6 +5,7 @@ import { formatDate } from "../lib/dates";
 import { formatAmount } from "../lib/money";
 import { canonicalPayeeName, findTransferPayee, formatComposeAmount } from "../lib/register-compose";
 import {
+  beginRowEdit,
   payeeListEntries,
   postingAccountId,
   rowApproved,
@@ -68,6 +69,11 @@ export function RegisterEditableRow(props: {
       : marked?.querySelector("input, select");
     if (control instanceof HTMLElement) {
       control.focus();
+      return;
+    }
+    const fallback = rowRef.current?.querySelector("input, select");
+    if (fallback instanceof HTMLElement) {
+      fallback.focus();
     }
   }, [active, focus]);
 
@@ -81,7 +87,23 @@ export function RegisterEditableRow(props: {
       !split && !approved ? "register-row-unapproved" : null,
     ].filter(Boolean).join(" ") || undefined;
     return (
-      <tr className={className}>
+      <tr
+        className={className}
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== "F2") {
+            return;
+          }
+          if (event.target !== event.currentTarget) {
+            return;
+          }
+          event.preventDefault();
+          const decision = beginRowEdit(row, "date", surface.context);
+          if (decision.kind === "begin") {
+            surface.begin(decision.action);
+          }
+        }}
+      >
         <td className="register-select">{split ? null : leading}</td>
         {split ? <td /> : (
           <IdleCell row={row} focus="date" surface={surface} className="nowrap">
@@ -139,6 +161,9 @@ export function RegisterEditableRow(props: {
             event.preventDefault();
             surface.cancel();
           }
+          if (event.nativeEvent.isComposing || event.keyCode === 229) {
+            return;
+          }
           if (event.key === "Enter" && (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement)) {
             event.preventDefault();
             if (!busy) {
@@ -181,6 +206,7 @@ export function RegisterEditableRow(props: {
           ) : (
             idlePayee(row, line)
           )}
+          {payeeExtra}
         </td>
         <td className="muted">
           {findTransferPayee(surface.payees, draft.payeeName) ? (
@@ -243,10 +269,19 @@ export function RegisterEditableRow(props: {
             idleInflow(row, line)
           )}
         </td>
-        <td className="register-actions">{split ? null : actions}</td>
-        <td className="register-status">{split ? null : status}</td>
+        <td className="register-actions" />
+        <td className="register-status" />
       </tr>
-      <tr className="register-compose-actions-row">
+      <tr
+        className="register-compose-actions-row"
+        onKeyDown={(event) => {
+          if (event.key !== "Escape" || busy) {
+            return;
+          }
+          event.preventDefault();
+          surface.cancel();
+        }}
+      >
         <td colSpan={10}>
           <div className="register-compose-actions">
             {split ? null : (
@@ -382,6 +417,15 @@ function PayeeInput({
         placeholder="Payee"
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter") {
+            return;
+          }
+          event.stopPropagation();
+          if (event.nativeEvent.isComposing || event.keyCode === 229) {
+            return;
+          }
+        }}
         onBlur={() => {
           const snapped = canonicalPayeeName(payees, value);
           if (snapped !== value) {

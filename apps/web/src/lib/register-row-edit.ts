@@ -149,7 +149,7 @@ export function reduceRowEdit(
         status: "editing",
         row: session.row,
         draft: session.draft,
-        focus: defaultFocus(session.row),
+        focus: writableFocus(session.row, defaultFocus(session.row), session.draft),
         error: action.message,
       };
     case "cancel":
@@ -169,11 +169,20 @@ export type RowEditContext = {
   readonly mutatingId: string | null;
 };
 
-export type RowBeginRefusal = "locked" | "row-busy" | "missing-line";
+export type RowBeginRefusal = "locked" | "row-busy" | "missing-line" | "linked-mirror";
 
 export type RowBeginDecision =
   | { readonly kind: "begin"; readonly action: Extract<RegisterRowEditAction, { type: "begin" }> }
   | { readonly kind: "refuse"; readonly reason: RowBeginRefusal };
+
+const FOCUS_ORDER: readonly RegisterRowFocus[] = [
+  "date",
+  "payee",
+  "category",
+  "memo",
+  "outflow",
+  "inflow",
+];
 
 export function rowFieldWritable(
   row: RegisterRowRef,
@@ -183,7 +192,11 @@ export function rowFieldWritable(
 ): boolean {
   if (row.kind === "posted") {
     const splitParent = Boolean(row.transaction.subtransactions?.length);
-    if (field === "category" && (splitParent || draftIsTransfer(draft, payees))) {
+    const savedTransfer = Boolean(row.transaction.transfer_account_id);
+    if (field === "payee" && savedTransfer) {
+      return false;
+    }
+    if (field === "category" && (splitParent || savedTransfer || draftIsTransfer(draft, payees))) {
       return false;
     }
     if ((field === "outflow" || field === "inflow") && splitParent) {
@@ -194,13 +207,44 @@ export function rowFieldWritable(
   if (field === "date") {
     return false;
   }
-  if (!findLine(row.parent, row.lineId)) {
+  const line = findLine(row.parent, row.lineId);
+  if (!line) {
     return false;
   }
-  if (field === "category" && draftIsTransfer(draft, payees)) {
+  if (field === "payee" && line.transfer_account_id) {
+    return false;
+  }
+  if (field === "category" && (line.transfer_account_id || draftIsTransfer(draft, payees))) {
     return false;
   }
   return true;
+}
+
+export function writableFocus(
+  row: RegisterRowRef,
+  requested: RegisterRowFocus,
+  draft?: RegisterRowDraft,
+  payees: readonly Payee[] = [],
+): RegisterRowFocus {
+  if (rowFieldWritable(row, requested, draft, payees)) {
+    return requested;
+  }
+  for (const field of FOCUS_ORDER) {
+    if (rowFieldWritable(row, field, draft, payees)) {
+      return field;
+    }
+  }
+  return requested;
+}
+
+export function sessionRowGone(
+  session: RegisterRowEditSession,
+  presentIds: ReadonlySet<string>,
+): boolean {
+  if (session.status !== "editing") {
+    return false;
+  }
+  return !presentIds.has(rowId(session.row));
 }
 
 function draftIsTransfer(draft: RegisterRowDraft | undefined, payees: readonly Payee[]): boolean {
@@ -258,18 +302,23 @@ export function beginRowEdit(
     return { kind: "refuse", reason: "row-busy" };
   }
   if (row.kind === "posted") {
+    if (row.transaction.parent_transaction_id) {
+      return { kind: "refuse", reason: "linked-mirror" };
+    }
+    const draft = postedDraft(row.transaction);
     return {
       kind: "begin",
-      action: { type: "begin", row, draft: postedDraft(row.transaction), focus },
+      action: { type: "begin", row, draft, focus: writableFocus(row, focus, draft) },
     };
   }
   const line = findLine(row.parent, row.lineId);
   if (!line) {
     return { kind: "refuse", reason: "missing-line" };
   }
+  const draft = splitDraft(row.parent, line);
   return {
     kind: "begin",
-    action: { type: "begin", row, draft: splitDraft(row.parent, line), focus },
+    action: { type: "begin", row, draft, focus: writableFocus(row, focus, draft) },
   };
 }
 

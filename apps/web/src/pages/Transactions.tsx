@@ -44,6 +44,7 @@ import {
   planRowCommit,
   reduceRowEdit,
   rowId,
+  sessionRowGone,
   type RegisterRowEditAction,
   type RegisterRowEditSession,
 } from "../lib/register-row-edit";
@@ -350,6 +351,10 @@ export function TransactionsPage() {
         return parent ? new Map(current).set(parent.id, parent) : current;
       });
       setPendingDeletion((current) => (current && removed.has(current.id) ? null : current));
+      const session = rowEditRef.current;
+      if (session.status !== "idle" && removed.has(rowId(session.row))) {
+        replaceRowEdit(idleRowEdit());
+      }
       reload();
       setReconciliationPreviewGeneration((generation) => generation + 1);
     } catch (cause) {
@@ -393,12 +398,20 @@ export function TransactionsPage() {
     mutationLockRef.current = true;
     setWriteLocked(true);
     setMutatingId(rowId(session.row));
+    setMutationError(null);
+    setMutationSuccess(null);
     dispatchRowEdit({ type: "committing" });
     try {
       const updated = await api.updateTransaction(planId, plan.transactionId, plan.input);
       setReplacements((current) => new Map(current).set(updated.id, updated));
       reload();
       setReconciliationPreviewGeneration((generation) => generation + 1);
+      const savedName = (updated.payee_name ?? session.draft.payeeName).trim() || "Entry";
+      setMutationSuccess(
+        dateInFilterRange(updated.date, filters.from, filters.to)
+          ? `${savedName} saved.`
+          : `${savedName} saved. It is outside this date range.`,
+      );
       dispatchRowEdit({ type: "committed" });
     } catch (cause) {
       dispatchRowEdit({
@@ -641,6 +654,13 @@ export function TransactionsPage() {
         ),
     );
   }, [deferredSearch, scopedRows]);
+
+  useEffect(() => {
+    const present = new Set(rows.map((txn) => txn.id));
+    if (sessionRowGone(rowEdit, present)) {
+      replaceRowEdit(idleRowEdit());
+    }
+  }, [rowEdit, rows]);
 
   const eligibleIds = useMemo(() => eligibleApprovalIds(rows, approvalSession), [approvalSession, rows]);
   const selectionRows = useMemo(() => eligibleIds.map((id) => ({ id })), [eligibleIds]);

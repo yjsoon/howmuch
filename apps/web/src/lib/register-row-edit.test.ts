@@ -8,10 +8,13 @@ import {
   planRowCommit,
   postingAccountId,
   reduceRowEdit,
+  rowFieldWritable,
   rowGestureHandlers,
   rowId,
   sameRow,
+  sessionRowGone,
   transferOptionLabel,
+  writableFocus,
   type RegisterRowDraft,
   type RegisterRowEditAction,
   type RegisterRowFocus,
@@ -314,6 +317,27 @@ describe("beginRowEdit", () => {
     });
   });
 
+  test("refuses a linked split-mirror posted row", () => {
+    expect(beginRowEdit(posted(txn({ parent_transaction_id: "txn-split" })), "memo", unlocked)).toEqual({
+      kind: "refuse",
+      reason: "linked-mirror",
+    });
+  });
+
+  test("snaps begin focus off a locked transfer payee onto the first writable field", () => {
+    const row = posted(txn({
+      transfer_account_id: "acct-saver",
+      payee_name: "Transfer : Rainy Day Saver",
+      category_id: null,
+    }));
+    expect(beginRowEdit(row, "payee", unlocked)).toMatchObject({
+      action: { focus: "date" },
+    });
+    expect(beginRowEdit(row, "category", unlocked)).toMatchObject({
+      action: { focus: "date" },
+    });
+  });
+
   test("refuses a missing split line", () => {
     const parent = splitParent([line()]);
     expect(beginRowEdit(splitLine(parent, "gone"), "memo", unlocked)).toEqual({
@@ -501,7 +525,7 @@ describe("planRowCommit", () => {
     });
   });
 
-  test("rejects retargeting an existing transfer to a different transfer payee", () => {
+  test("does not patch payee on a transfer posted row", () => {
     const other = payee("p-travel", "Transfer : Travel Card", "acct-travel");
     const row = posted(txn({
       transfer_account_id: "acct-saver",
@@ -509,23 +533,11 @@ describe("planRowCommit", () => {
       payee_name: "Transfer : Rainy Day Saver",
       category_id: null,
     }));
-    expect(planRowCommit(row, { ...shopDraft, payeeName: "Transfer : Travel Card", categoryId: "" }, [...payees, other])).toEqual({
-      kind: "invalid",
-      message: "This transfer already has a destination. Choose a regular payee, or cancel.",
+    expect(planRowCommit(row, { ...shopDraft, payeeName: "Coffee", categoryId: "cat-dining" }, payees)).toEqual({
+      kind: "unchanged",
     });
-  });
-
-  test("plans a regular payee on an existing transfer posted row", () => {
-    const row = posted(txn({
-      transfer_account_id: "acct-saver",
-      payee_id: "p-xfer",
-      payee_name: "Transfer : Rainy Day Saver",
-      category_id: null,
-    }));
-    expect(planRowCommit(row, { ...shopDraft, payeeName: "Coffee" }, payees)).toEqual({
-      kind: "patch",
-      transactionId: "txn-1",
-      input: { payee_id: "p-coffee", payee_name: "Coffee", category_id: "cat-dining" },
+    expect(planRowCommit(row, { ...shopDraft, payeeName: "Transfer : Travel Card", categoryId: "" }, [...payees, other])).toEqual({
+      kind: "unchanged",
     });
   });
 
@@ -874,14 +886,14 @@ describe("rowGestureHandlers", () => {
     expect(started).toEqual([{ row, focus: "memo" }]);
   });
 
-  test("begins a transfer posted row from the payee cell", () => {
+  test("begins a transfer posted row from the payee cell with focus snapped to date", () => {
     const started: RegisterRowFocus[] = [];
     const row = posted(txn({ transfer_account_id: "acct-saver" }));
     const handlers = rowGestureHandlers(row, "payee", unlocked, (action) => {
       started.push(action.focus);
     });
     handlers.onDoubleClick(gestureEvent());
-    expect(started).toEqual(["payee"]);
+    expect(started).toEqual(["date"]);
   });
 
   test("stays silent on a refused double-click", () => {
@@ -891,5 +903,62 @@ describe("rowGestureHandlers", () => {
     });
     handlers.onDoubleClick(gestureEvent());
     expect(started).toEqual([]);
+  });
+});
+
+describe("rowFieldWritable and writableFocus", () => {
+  test("locks payee and category on a saved transfer and snaps focus to date", () => {
+    const row = posted(txn({
+      transfer_account_id: "acct-saver",
+      payee_name: "Transfer : Rainy Day Saver",
+      category_id: null,
+    }));
+    expect(rowFieldWritable(row, "payee")).toBeFalse();
+    expect(rowFieldWritable(row, "category")).toBeFalse();
+    expect(rowFieldWritable(row, "date")).toBeTrue();
+    expect(rowFieldWritable(row, "memo")).toBeTrue();
+    expect(writableFocus(row, "payee")).toBe("date");
+    expect(writableFocus(row, "category")).toBe("date");
+    expect(writableFocus(row, "memo")).toBe("memo");
+  });
+
+  test("keeps payee writable on a regular row so a transfer list pick can commit", () => {
+    const row = posted(txn());
+    expect(rowFieldWritable(row, "payee", { ...shopDraft, payeeName: "Transfer : Rainy Day Saver" }, payees)).toBeTrue();
+    expect(rowFieldWritable(row, "category", { ...shopDraft, payeeName: "Transfer : Rainy Day Saver" }, payees)).toBeFalse();
+    expect(writableFocus(row, "payee")).toBe("payee");
+  });
+
+  test("locks payee on a saved transfer split line", () => {
+    const transferLine = line({
+      id: "line-xfer",
+      transfer_account_id: "acct-saver",
+      payee_name: "Transfer : Rainy Day Saver",
+      category_id: null,
+    });
+    const row = splitLine(splitParent([line(), transferLine]), "line-xfer");
+    expect(rowFieldWritable(row, "payee")).toBeFalse();
+    expect(rowFieldWritable(row, "date")).toBeFalse();
+    expect(writableFocus(row, "payee")).toBe("memo");
+  });
+});
+
+describe("sessionRowGone", () => {
+  const editing = reduceRowEdit(idleRowEdit(), {
+    type: "begin",
+    row: posted(txn()),
+    draft: shopDraft,
+    focus: "memo",
+  });
+
+  test("is false while idle or committing", () => {
+    expect(sessionRowGone(idleRowEdit(), new Set())).toBeFalse();
+    const committing = reduceRowEdit(editing, { type: "committing" });
+    expect(sessionRowGone(committing, new Set())).toBeFalse();
+  });
+
+  test("is true only when the editing row is missing", () => {
+    expect(sessionRowGone(editing, new Set(["txn-1"]))).toBeFalse();
+    expect(sessionRowGone(editing, new Set(["other"]))).toBeTrue();
   });
 });
