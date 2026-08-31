@@ -645,10 +645,14 @@ export function TransactionsPage() {
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   }, [categoryIds, filters.categoryIds.length, flow, inScope, unapprovedOnly, wantsUncategorised]);
 
+  const editingRowId = rowEdit.status === "idle" ? null : rowId(rowEdit.row);
   const rows = useMemo(() => {
     const needle = deferredSearch.trim().toLowerCase();
-    return scopedRows.filter(
-      (txn) =>
+    return scopedRows.filter((txn) => {
+      if (editingRowId && txn.id === editingRowId) {
+        return true;
+      }
+      return (
         !needle ||
         txn.payee_name?.toLowerCase().includes(needle) ||
         txn.memo?.toLowerCase().includes(needle) ||
@@ -659,9 +663,10 @@ export function TransactionsPage() {
             sub.payee_name?.toLowerCase().includes(needle) ||
             sub.memo?.toLowerCase().includes(needle) ||
             sub.category_name?.toLowerCase().includes(needle),
-        ),
-    );
-  }, [deferredSearch, scopedRows]);
+        )
+      );
+    });
+  }, [deferredSearch, editingRowId, scopedRows]);
 
   useEffect(() => {
     const present = new Set(scopedRows.map((txn) => txn.id));
