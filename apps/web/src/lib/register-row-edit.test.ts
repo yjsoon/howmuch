@@ -536,7 +536,7 @@ describe("planRowCommit", () => {
     expect(planRowCommit(row, { ...shopDraft, payeeName: "Coffee" }, payees)).toEqual({
       kind: "patch",
       transactionId: "txn-1",
-      input: { payee_id: "p-coffee", payee_name: "Coffee", category_id: "cat-dining" },
+      input: { payee_id: "p-coffee", payee_name: "Coffee", category_id: "cat-dining", transfer_account_id: null },
     });
   });
 

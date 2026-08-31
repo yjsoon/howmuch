@@ -612,7 +612,7 @@ function planPayeeChange(
     return { kind: "changed", input };
   }
   const input: PayeeChangeInput = payeeInput(name, originalId, originalName, payees);
-  if (context.splitLine && context.currentTransferAccountId) {
+  if (context.currentTransferAccountId) {
     input.transfer_account_id = null;
   }
   return { kind: "changed", input };

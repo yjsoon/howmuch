@@ -369,6 +369,9 @@ export function TransactionsPage() {
     if (!canCompose) {
       return;
     }
+    if (rowEditRef.current.status === "editing") {
+      replaceRowEdit(idleRowEdit());
+    }
     setCompose((current) => reduceCompose(current, {
       type: "open",
       accountId: lockedComposeAccount?.id ?? "",
@@ -661,11 +664,11 @@ export function TransactionsPage() {
   }, [deferredSearch, scopedRows]);
 
   useEffect(() => {
-    const present = new Set(rows.map((txn) => txn.id));
+    const present = new Set(scopedRows.map((txn) => txn.id));
     if (sessionRowGone(rowEdit, present)) {
       replaceRowEdit(idleRowEdit());
     }
-  }, [rowEdit, rows]);
+  }, [rowEdit, scopedRows]);
 
   const eligibleIds = useMemo(() => eligibleApprovalIds(rows, approvalSession), [approvalSession, rows]);
   const selectionRows = useMemo(() => eligibleIds.map((id) => ({ id })), [eligibleIds]);
@@ -746,7 +749,14 @@ export function TransactionsPage() {
     payees: payees.data ?? [],
     accounts,
     groups: orderedGroups,
-    begin: dispatchRowEdit,
+    begin: (action) => {
+      setCompose((current) => (
+        current.status === "open" && !current.saving
+          ? reduceCompose(current, { type: "close" })
+          : current
+      ));
+      dispatchRowEdit(action);
+    },
     dispatch: dispatchRowEdit,
     commit: (options) => {
       void commitRowEdit(options);
