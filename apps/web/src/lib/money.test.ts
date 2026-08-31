@@ -12,6 +12,8 @@ describe("parseMilliunits", () => {
     expect(parseMilliunits("-.29")).toBe(-290);
     expect(parseMilliunits("1.")).toBe(1_000);
     expect(parseMilliunits("+1.135")).toBe(1_135);
+    expect(parseMilliunits("1,200.50")).toBe(1_200_500);
+    expect(parseMilliunits("1,200")).toBe(1_200_000);
   });
 
   test("rejects scientific notation, extra decimals, and empty values", () => {

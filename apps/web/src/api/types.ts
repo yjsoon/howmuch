@@ -226,6 +226,7 @@ export interface TransactionUpdateInput {
   payee_id?: string | null;
   payee_name?: string | null;
   category_id?: string | null;
+  transfer_account_id?: string | null;
   subtransactions?: Array<{
     id: string;
     amount: number;

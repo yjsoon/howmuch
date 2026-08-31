@@ -10,16 +10,15 @@ import type {
   ReconciliationMismatchDetail,
   ScheduledTransaction,
   Transaction,
-  TransactionUpdateInput,
 } from "../api/types";
-import { CategorySelect } from "../components/CategorySelect";
-import { FlagPicker, FlagTag } from "../components/FlagTag";
+import { FlagTag } from "../components/FlagTag";
 import { FilterRail } from "../components/FilterRail";
 import { RegisterComposeRow } from "../components/RegisterComposeRow";
+import { RegisterEditableRow, type RowEditSurface } from "../components/RegisterEditableRow";
 import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
 import { formatDate, todayIso, trailingMonthsRange } from "../lib/dates";
 import { stableHash } from "../lib/hash";
-import { formatAmount, formatMilliunitsInput, formatMoney, parseMilliunits } from "../lib/money";
+import { formatAmount, formatMoney, parseMilliunits } from "../lib/money";
 import {
   approveAllLabel,
   approveSelectedLabel,
@@ -40,6 +39,16 @@ import {
   reduceCompose,
   type RegisterComposeState,
 } from "../lib/register-compose";
+import {
+  focusForRowError,
+  idleRowEdit,
+  planRowCommit,
+  reduceRowEdit,
+  rowId,
+  sessionRowGone,
+  type RegisterRowEditAction,
+  type RegisterRowEditSession,
+} from "../lib/register-row-edit";
 import { fillRegisterHorizon } from "../lib/register-horizon";
 import { applyRegisterPatches, deletedIdsForRemoval, unlinkSplitMirrorParent } from "../lib/register-rows";
 import {
@@ -130,7 +139,6 @@ export function TransactionsPage() {
     loaded: false,
     error: null as string | null,
   });
-  const [editing, setEditing] = useState<Transaction | null>(null);
   const [pendingDeletion, setPendingDeletion] = useState<Transaction | null>(null);
   const [reconcileDraft, setReconcileDraft] = useState<ReconcileDraft | null>(null);
   const [reconciliationPreviewGeneration, setReconciliationPreviewGeneration] = useState(0);
@@ -140,6 +148,12 @@ export function TransactionsPage() {
   const [unapprovedOnly, setUnapprovedOnly] = useState(false);
   const [selection, setSelection] = useState(() => emptySelection(listKey));
   const [replacements, setReplacements] = useState<ReadonlyMap<string, Transaction>>(() => new Map());
+  const [rowEdit, setRowEdit] = useState<RegisterRowEditSession>(idleRowEdit);
+  const rowEditRef = useRef(rowEdit);
+  const replaceRowEdit = (next: RegisterRowEditSession) => {
+    rowEditRef.current = next;
+    setRowEdit(next);
+  };
   const [deletedIds, setDeletedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [approvalSession, setApprovalSession] = useState(emptyApprovalSession);
   const approvalSessionRef = useRef(approvalSession);
@@ -258,6 +272,7 @@ export function TransactionsPage() {
   useEffect(() => {
     setReplacements(new Map());
     setDeletedIds(new Set());
+    replaceRowEdit(idleRowEdit());
     const empty = emptyApprovalSession();
     approvalSessionRef.current = empty;
     setApprovalSession(empty);
@@ -284,30 +299,6 @@ export function TransactionsPage() {
       setPage((current) => requestVersion !== requestVersionRef.current || current.nextOffset !== requestedOffset
         ? current
         : { ...current, loadingMore: false, error: (error as Error).message });
-    }
-  };
-
-  const saveTransaction = async (transactionId: string, input: TransactionUpdateInput) => {
-    if (mutationLockRef.current) return;
-    mutationLockRef.current = true;
-    requestVersionRef.current += 1;
-    setWriteLocked(true);
-    setMutatingId(transactionId);
-    setMutationError(null);
-    setMutationSuccess(null);
-    try {
-      await api.updateTransaction(planId, transactionId, input);
-      setEditing(null);
-      reload();
-      refreshFirstPage();
-      setReconciliationPreviewGeneration((generation) => generation + 1);
-    } catch (cause) {
-      setMutationError(cause instanceof Error ? cause.message : String(cause));
-      refreshFirstPage();
-    } finally {
-      mutationLockRef.current = false;
-      setWriteLocked(false);
-      setMutatingId(null);
     }
   };
 
@@ -360,8 +351,11 @@ export function TransactionsPage() {
         const parent = unlinkSplitMirrorParent([...byId.values()], mirror);
         return parent ? new Map(current).set(parent.id, parent) : current;
       });
-      setEditing((current) => (current && removed.has(current.id) ? null : current));
       setPendingDeletion((current) => (current && removed.has(current.id) ? null : current));
+      const session = rowEditRef.current;
+      if (session.status !== "idle" && removed.has(rowId(session.row))) {
+        replaceRowEdit(idleRowEdit());
+      }
       reload();
       setReconciliationPreviewGeneration((generation) => generation + 1);
     } catch (cause) {
@@ -375,6 +369,9 @@ export function TransactionsPage() {
     if (!canCompose) {
       return;
     }
+    if (rowEditRef.current.status === "editing") {
+      replaceRowEdit(idleRowEdit());
+    }
     setCompose((current) => reduceCompose(current, {
       type: "open",
       accountId: lockedComposeAccount?.id ?? "",
@@ -382,6 +379,72 @@ export function TransactionsPage() {
     setComposeFocus((nonce) => nonce + 1);
     setMutationError(null);
     setMutationSuccess(null);
+  };
+
+  const dispatchRowEdit = (action: RegisterRowEditAction) => {
+    replaceRowEdit(reduceRowEdit(rowEditRef.current, action));
+  };
+
+  const commitRowEdit = async (options: { approve: boolean }) => {
+    const session = rowEditRef.current;
+    if (session.status !== "editing" || mutationLockRef.current) {
+      return;
+    }
+    const plan = planRowCommit(session.row, session.draft, payees.data ?? [], options);
+    if (plan.kind === "unchanged") {
+      dispatchRowEdit({ type: "cancel" });
+      return;
+    }
+    if (plan.kind === "invalid") {
+      dispatchRowEdit({
+        type: "invalid",
+        message: plan.message,
+        focus: focusForRowError(plan.message, session.row, session.draft, payees.data ?? []),
+      });
+      return;
+    }
+    mutationLockRef.current = true;
+    setWriteLocked(true);
+    setMutatingId(rowId(session.row));
+    setMutationError(null);
+    setMutationSuccess(null);
+    dispatchRowEdit({ type: "committing" });
+    try {
+      const updated = await api.updateTransaction(planId, plan.transactionId, plan.input);
+      setReplacements((current) => new Map(current).set(updated.id, updated));
+      const prior = session.row.kind === "posted" ? session.row.transaction : session.row.parent;
+      const priorMirrors = [
+        prior.transfer_transaction_id,
+        ...(prior.subtransactions ?? []).map((line) => line.transfer_transaction_id),
+      ].filter((id): id is string => Boolean(id));
+      const nextMirrors = new Set([
+        updated.transfer_transaction_id,
+        ...(updated.subtransactions ?? []).map((line) => line.transfer_transaction_id),
+      ].filter((id): id is string => Boolean(id)));
+      const dropped = priorMirrors.filter((id) => !nextMirrors.has(id));
+      if (dropped.length > 0) {
+        setDeletedIds((current) => new Set([...current, ...dropped]));
+      }
+      reload();
+      refreshFirstPage();
+      setReconciliationPreviewGeneration((generation) => generation + 1);
+      const savedName = (updated.payee_name ?? session.draft.payeeName).trim() || "Entry";
+      setMutationSuccess(
+        dateInFilterRange(updated.date, filters.from, filters.to)
+          ? `${savedName} saved.`
+          : `${savedName} saved. It is outside this date range.`,
+      );
+      dispatchRowEdit({ type: "committed" });
+    } catch (cause) {
+      dispatchRowEdit({
+        type: "failed",
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
+    } finally {
+      mutationLockRef.current = false;
+      setWriteLocked(false);
+      setMutatingId(null);
+    }
   };
 
   const saveCompose = async (keepOpen: boolean) => {
@@ -560,8 +623,9 @@ export function TransactionsPage() {
     () =>
       (unapprovedOnly ? patchedQueue : patchedPage)
         .filter((txn) => !txn.deleted)
-        .filter((txn) => registerAccountIds.has(txn.account_id)),
-    [patchedPage, patchedQueue, registerAccountIds, unapprovedOnly],
+        .filter((txn) => registerAccountIds.has(txn.account_id))
+        .filter((txn) => unapprovedOnly || dateInFilterRange(txn.date, filters.from, filters.to)),
+    [filters.from, filters.to, patchedPage, patchedQueue, registerAccountIds, unapprovedOnly],
   );
 
   const uncategorisedCount = useMemo(() => inScope.filter(hasUncategorisedLine).length, [inScope]);
@@ -595,10 +659,14 @@ export function TransactionsPage() {
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   }, [categoryIds, filters.categoryIds.length, flow, inScope, unapprovedOnly, wantsUncategorised]);
 
+  const editingRowId = rowEdit.status === "idle" ? null : rowId(rowEdit.row);
   const rows = useMemo(() => {
     const needle = deferredSearch.trim().toLowerCase();
-    return scopedRows.filter(
-      (txn) =>
+    return scopedRows.filter((txn) => {
+      if (editingRowId && txn.id === editingRowId) {
+        return true;
+      }
+      return (
         !needle ||
         txn.payee_name?.toLowerCase().includes(needle) ||
         txn.memo?.toLowerCase().includes(needle) ||
@@ -609,9 +677,17 @@ export function TransactionsPage() {
             sub.payee_name?.toLowerCase().includes(needle) ||
             sub.memo?.toLowerCase().includes(needle) ||
             sub.category_name?.toLowerCase().includes(needle),
-        ),
-    );
-  }, [deferredSearch, scopedRows]);
+        )
+      );
+    });
+  }, [deferredSearch, editingRowId, scopedRows]);
+
+  useEffect(() => {
+    const present = new Set(scopedRows.map((txn) => txn.id));
+    if (sessionRowGone(rowEdit, present)) {
+      replaceRowEdit(idleRowEdit());
+    }
+  }, [rowEdit, scopedRows]);
 
   const eligibleIds = useMemo(() => eligibleApprovalIds(rows, approvalSession), [approvalSession, rows]);
   const selectionRows = useMemo(() => eligibleIds.map((id) => ({ id })), [eligibleIds]);
@@ -685,6 +761,27 @@ export function TransactionsPage() {
         ? "No transactions match this search."
         : "No transactions match these filters.";
   const mutationBusy = writeLocked || Boolean(mutatingId);
+  const orderedGroups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
+  const rowSurface: RowEditSurface = {
+    session: rowEdit,
+    context: { writeLocked, mutatingId },
+    payees: payees.data ?? [],
+    accounts,
+    groups: orderedGroups,
+    begin: (action) => {
+      setCompose((current) => (
+        current.status === "open" && !current.saving
+          ? reduceCompose(current, { type: "close" })
+          : current
+      ));
+      dispatchRowEdit(action);
+    },
+    dispatch: dispatchRowEdit,
+    commit: (options) => {
+      void commitRowEdit(options);
+    },
+    cancel: () => dispatchRowEdit({ type: "cancel" }),
+  };
   const lockedComposeAccount = selectedAccount && !selectedAccount.closed ? selectedAccount : null;
   const composeAccounts = useMemo(
     () => visibleAccounts.filter((account) => !account.closed),
@@ -1035,21 +1132,6 @@ export function TransactionsPage() {
           </div>
         </section>
       )}
-      {editing && (
-        <TransactionEditor
-          transaction={editing}
-          payees={payees.data ?? []}
-          categoryGroups={categoryGroups}
-          accounts={accounts}
-          saving={mutatingId === editing.id}
-          disabled={mutationBusy}
-          onCancel={() => {
-            setEditing(null);
-            setMutationError(null);
-          }}
-          onSave={saveTransaction}
-        />
-      )}
       {page.loading && !page.loaded && (
         <div className="status-panel">
           <p className="status-title">Loading transactions...</p>
@@ -1124,107 +1206,75 @@ export function TransactionsPage() {
                     />
                   )}
                   {rows.flatMap((txn) => [
-                    <tr key={txn.id} className={txn.approved ? undefined : "register-row-unapproved"}>
-                      <td className="register-select">
-                        {!txn.approved && !txn.deleted && (
-                          <input
-                            type="checkbox"
-                            checked={selectedApprovalIdSet.has(txn.id)}
-                            onClick={(event) => {
-                              const index = eligibleIds.indexOf(txn.id);
-                              if (index >= 0) {
-                                dispatchSelection({
-                                  kind: event.shiftKey ? "extend" : "toggle",
-                                  index,
-                                });
-                              }
-                            }}
-                            onChange={() => {}}
-                            disabled={mutationBusy}
-                            aria-label={`Select ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
-                          />
-                        )}
-                      </td>
-                      <td className="nowrap">{formatDate(txn.date)}</td>
-                      <td className="muted">{txn.account_name}</td>
-                      <td>
-                        {txn.payee_name ?? (txn.transfer_account_id ? "Transfer" : "-")}
-                        <FlagTag colour={txn.flag_color} name={txn.flag_name} />
-                      </td>
-                      <td className="muted">
-                        {txn.subtransactions?.length
-                          ? `Split · ${txn.subtransactions.length} lines`
-                          : txn.transfer_account_id
-                            ? "Transfer"
-                            : (txn.category_name ?? "Uncategorised")}
-                      </td>
-                      <td className="muted memo-cell" title={txn.memo ?? ""}>
-                        {txn.memo ?? "-"}
-                      </td>
-                      <td className="num amount-negative">{txn.amount < 0 ? formatAmount(txn.amount) : ""}</td>
-                      <td className="num amount-positive">{txn.amount > 0 ? formatAmount(txn.amount) : ""}</td>
-                      <td className="register-actions">
-                        {!txn.approved && (
+                    <RegisterEditableRow
+                      key={txn.id}
+                      row={{ kind: "posted", transaction: txn }}
+                      surface={rowSurface}
+                      leading={!txn.approved && !txn.deleted ? (
+                        <input
+                          type="checkbox"
+                          checked={selectedApprovalIdSet.has(txn.id)}
+                          onClick={(event) => {
+                            const index = eligibleIds.indexOf(txn.id);
+                            if (index >= 0) {
+                              dispatchSelection({
+                                kind: event.shiftKey ? "extend" : "toggle",
+                                index,
+                              });
+                            }
+                          }}
+                          onChange={() => {}}
+                          disabled={mutationBusy}
+                          aria-label={`Select ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
+                        />
+                      ) : null}
+                      account={txn.account_name}
+                      actions={(
+                        <>
+                          {!txn.approved && (
+                            <button
+                              type="button"
+                              className="register-row-action register-row-action-approve"
+                              onClick={() => void approveMany([txn.id])}
+                              disabled={writeLocked || approvalSession.pending.has(txn.id)}
+                              aria-label={`Approve ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
+                            >
+                              {approvalSession.pending.has(txn.id) ? "Approving…" : "Approve"}
+                            </button>
+                          )}
                           <button
                             type="button"
-                            className="register-row-action register-row-action-approve"
-                            onClick={() => void approveMany([txn.id])}
-                            disabled={writeLocked || approvalSession.pending.has(txn.id)}
-                            aria-label={`Approve ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
+                            className="register-row-action register-row-action-danger"
+                            onClick={() => {
+                              setPendingDeletion(txn);
+                              setMutationError(null);
+                            }}
+                            disabled={writeLocked || mutatingId === txn.id}
+                            aria-label={`${txn.approved ? "Delete" : "Reject"} ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
                           >
-                            {approvalSession.pending.has(txn.id) ? "Approving…" : "Approve"}
+                            {txn.approved ? "Delete" : "Reject"}
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          className="register-row-action"
-                          onClick={() => {
-                            setEditing(txn);
-                            setMutationError(null);
-                          }}
-                          disabled={writeLocked || mutatingId === txn.id}
-                          aria-label={`Edit ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="register-row-action register-row-action-danger"
-                          onClick={() => {
-                            setPendingDeletion(txn);
-                            setMutationError(null);
-                          }}
-                          disabled={writeLocked || mutatingId === txn.id}
-                          aria-label={`${txn.approved ? "Delete" : "Reject"} ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
-                        >
-                          {txn.approved ? "Delete" : "Reject"}
-                        </button>
-                      </td>
-                      <td className="register-status">
+                        </>
+                      )}
+                      status={(
                         <ClearedStatus
                           transaction={txn}
                           busy={writeLocked || mutatingId === txn.id}
                           onToggle={() => void toggleCleared(txn)}
                         />
-                      </td>
-                    </tr>,
+                      )}
+                      payeeExtra={<FlagTag colour={txn.flag_color} name={txn.flag_name} />}
+                    />,
                     ...(txn.subtransactions ?? []).map((sub) => (
-                      <tr key={sub.id} className="split-line-row">
-                        <td />
-                        <td />
-                        <td />
-                        <td className="muted split-line-cell">↳ {sub.payee_name ?? txn.payee_name ?? "-"}</td>
-                        <td className="muted">
-                          {sub.transfer_account_id ? "Transfer" : (sub.category_name ?? "Uncategorised")}
-                        </td>
-                        <td className="muted memo-cell" title={sub.memo ?? ""}>
-                          {sub.memo ?? "-"}
-                        </td>
-                        <td className="num amount-negative">{sub.amount < 0 ? formatAmount(sub.amount) : ""}</td>
-                        <td className="num amount-positive">{sub.amount > 0 ? formatAmount(sub.amount) : ""}</td>
-                        <td />
-                        <td />
-                      </tr>
+                      <RegisterEditableRow
+                        key={sub.id}
+                        row={{ kind: "split-line", parent: txn, lineId: sub.id }}
+                        surface={rowSurface}
+                        leading={null}
+                        account={null}
+                        actions={null}
+                        status={null}
+                      />
                     )),
                   ])}
                 </tbody>
@@ -1397,18 +1447,6 @@ function ReviewFigure({ label, value, tone }: { label: string; value: string; to
   );
 }
 
-type SplitDraft = {
-  id: string;
-  amount: string;
-  payeeId: string | null;
-  originalPayeeName: string;
-  payeeName: string;
-  categoryId: string;
-  memo: string;
-  transferAccountId: string | null;
-  transferTransactionId: string | null;
-};
-
 function isReconciliationMismatchDetail(value: unknown): value is ReconciliationMismatchDetail {
   if (!value || typeof value !== "object") {
     return false;
@@ -1428,227 +1466,4 @@ function reconciliationSuccess(result: AccountReconciliationResult): string {
   const accountName = result.account?.name ?? "account";
   const count = result.reconciled_transaction_count;
   return `${accountName} reconciled through ${formatDate(result.statement_date)}. ${count} cleared transaction${count === 1 ? "" : "s"} matched ${formatMoney(result.statement_balance)}.`;
-}
-
-function payeeInput(name: string, originalId: string | null, originalName: string, payees: Payee[]): Pick<TransactionUpdateInput, "payee_id" | "payee_name"> {
-  const trimmed = name.trim();
-  if (!trimmed) {
-    return { payee_id: null, payee_name: null };
-  }
-  if (trimmed === originalName && originalId) {
-    return { payee_id: originalId, payee_name: trimmed };
-  }
-  const matched = payees.find((payee) => !payee.deleted && !payee.transfer_account_id && payee.name === trimmed);
-  return { payee_id: matched?.id ?? null, payee_name: trimmed };
-}
-
-function TransactionEditor({
-  transaction,
-  payees,
-  categoryGroups,
-  accounts,
-  saving,
-  disabled,
-  onCancel,
-  onSave,
-}: {
-  transaction: Transaction;
-  payees: Payee[];
-  categoryGroups: CategoryGroup[];
-  accounts: Account[];
-  saving: boolean;
-  disabled: boolean;
-  onCancel: () => void;
-  onSave: (transactionId: string, input: TransactionUpdateInput) => Promise<void>;
-}) {
-  const isSplit = Boolean(transaction.subtransactions?.length);
-  const isTransfer = Boolean(transaction.transfer_account_id);
-  const direction = transaction.amount < 0 ? -1 : 1;
-  const [date, setDate] = useState(transaction.date);
-  const [amount, setAmount] = useState(formatMilliunitsInput(Math.abs(transaction.amount)));
-  const [payeeName, setPayeeName] = useState(transaction.payee_name ?? "");
-  const [categoryId, setCategoryId] = useState(transaction.category_id ?? "");
-  const [memo, setMemo] = useState(transaction.memo ?? "");
-  const [approved, setApproved] = useState(transaction.approved);
-  const [flagColor, setFlagColor] = useState(transaction.flag_color ?? "");
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const [splitLines, setSplitLines] = useState<SplitDraft[]>(() => (transaction.subtransactions ?? []).map((line) => ({
-    id: line.id,
-    amount: formatMilliunitsInput(line.amount),
-    payeeId: line.payee_id,
-    originalPayeeName: line.payee_name ?? "",
-    payeeName: line.payee_name ?? "",
-    categoryId: line.category_id ?? "",
-    memo: line.memo ?? "",
-    transferAccountId: line.transfer_account_id ?? null,
-    transferTransactionId: line.transfer_transaction_id ?? null,
-  })));
-  const orderedGroups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
-  const transferTarget = accounts.find((account) => account.id === transaction.transfer_account_id)?.name ?? "linked account";
-  const parentAmount = parseMilliunits(amount);
-  const splitTotal = splitLines.reduce((total, line) => total + (parseMilliunits(line.amount) ?? 0), 0);
-
-  const updateSplit = (id: string, patch: Partial<SplitDraft>) => {
-    setValidationError(null);
-    setSplitLines((lines) => lines.map((line) => line.id === id ? { ...line, ...patch } : line));
-  };
-
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const parsedAmount = parseMilliunits(amount);
-    if (parsedAmount === null || parsedAmount < 0) {
-      setValidationError("Enter zero or a positive amount.");
-      return;
-    }
-    const signedAmount = direction * parsedAmount;
-    const input: TransactionUpdateInput = {
-      date,
-      amount: signedAmount,
-      memo: memo.trim() || null,
-      approved,
-      flag_color: flagColor || null,
-    };
-
-    if (isSplit) {
-      const parsedLines = splitLines.map((line) => ({ line, amount: parseMilliunits(line.amount) }));
-      if (parsedLines.some((item) => item.amount === null)) {
-        setValidationError("Every split line needs a valid signed amount.");
-        return;
-      }
-      if (parsedLines.reduce((total, item) => total + (item.amount ?? 0), 0) !== signedAmount) {
-        setValidationError("Split lines must add up exactly to the transaction total.");
-        return;
-      }
-      input.subtransactions = parsedLines.map(({ line, amount: lineAmount }) => ({
-        id: line.id,
-        amount: lineAmount!,
-        ...line.transferAccountId
-          ? {
-              transfer_account_id: line.transferAccountId,
-              transfer_transaction_id: line.transferTransactionId,
-              payee_id: line.payeeId,
-              category_id: line.categoryId || null,
-            }
-          : {
-              ...payeeInput(line.payeeName, line.payeeId, line.originalPayeeName, payees),
-              category_id: line.categoryId || null,
-            },
-        memo: line.memo.trim() || null,
-      }));
-    } else if (!isTransfer) {
-      Object.assign(input, payeeInput(payeeName, transaction.payee_id, transaction.payee_name ?? "", payees), {
-        category_id: categoryId || null,
-      });
-    }
-
-    setValidationError(null);
-    await onSave(transaction.id, input);
-  };
-
-  return (
-    <section className="transaction-editor" aria-labelledby="edit-transaction-heading">
-      <div className="section-heading">
-        <div>
-          <span className="section-title" id="edit-transaction-heading">Edit transaction</span>
-          <span className="section-meta">{transaction.account_name ?? "Account"} · {isTransfer ? `Transfer to ${transferTarget}` : isSplit ? "Split transaction" : "Posted transaction"}</span>
-        </div>
-        <button type="button" className="text-button" onClick={onCancel} disabled={disabled}>Cancel</button>
-      </div>
-      <form className="transaction-editor-form" onSubmit={(event) => void submit(event)}>
-        <div className="field-row transaction-editor-top-row">
-          <label className="field">
-            <span className="field-label">Date</span>
-            <input type="date" value={date} onChange={(event) => setDate(event.target.value)} required />
-          </label>
-          <label className="field">
-            <span className="field-label">Amount</span>
-            <input
-              type="number"
-              inputMode="decimal"
-              step="0.001"
-              min="0"
-              value={amount}
-              onChange={(event) => setAmount(event.target.value)}
-              required
-            />
-            <span className="field-note">{direction < 0 ? "Outflow" : "Inflow"}; direction and posting account stay unchanged.</span>
-          </label>
-        </div>
-
-        {!isTransfer && !isSplit && (
-          <>
-            <label className="field">
-              <span className="field-label">Payee</span>
-              <input list="editor-payee-options" value={payeeName} onChange={(event) => setPayeeName(event.target.value)} placeholder="Payee" autoComplete="off" />
-            </label>
-            <label className="field">
-              <span className="field-label">Category</span>
-              <CategorySelect value={categoryId} onChange={setCategoryId} groups={orderedGroups} />
-            </label>
-          </>
-        )}
-
-        {isSplit && (
-          <fieldset className="transaction-editor-splits">
-            <legend>Split lines</legend>
-            <p className={splitTotal === (direction * (parentAmount ?? 0)) ? "split-remainder split-remainder-ok" : "split-remainder"}>
-              {splitTotal === (direction * (parentAmount ?? 0)) ? "Lines match the total." : "Lines must add up exactly to the total."}
-            </p>
-            {splitLines.map((line, index) => {
-              const lineTransferTarget = accounts.find((account) => account.id === line.transferAccountId)?.name ?? "linked account";
-              return (
-                <div key={line.id} className="transaction-editor-split-line">
-                  <label>
-                    <span className="sr-only">Split line {index + 1} amount</span>
-                    <input type="number" inputMode="decimal" step="0.001" value={line.amount} onChange={(event) => updateSplit(line.id, { amount: event.target.value })} />
-                  </label>
-                  {line.transferAccountId ? (
-                    <span className="transaction-editor-transfer-line">Transfer to {lineTransferTarget}</span>
-                  ) : (
-                    <>
-                      <label>
-                        <span className="sr-only">Split line {index + 1} payee</span>
-                        <input value={line.payeeName} onChange={(event) => updateSplit(line.id, { payeeName: event.target.value })} placeholder="Payee" list="editor-payee-options" />
-                      </label>
-                      <label>
-                        <span className="sr-only">Split line {index + 1} category</span>
-                        <CategorySelect value={line.categoryId} onChange={(value) => updateSplit(line.id, { categoryId: value })} groups={orderedGroups} />
-                      </label>
-                    </>
-                  )}
-                  <label>
-                    <span className="sr-only">Split line {index + 1} memo</span>
-                    <input value={line.memo} onChange={(event) => updateSplit(line.id, { memo: event.target.value })} placeholder="Line memo" />
-                  </label>
-                </div>
-              );
-            })}
-          </fieldset>
-        )}
-
-        <label className="field">
-          <span className="field-label">Memo</span>
-          <input value={memo} onChange={(event) => setMemo(event.target.value)} placeholder="Note" />
-        </label>
-        <div className="transaction-editor-status-row">
-          <div className="field">
-            <span className="field-label" id="transaction-flag-label">Flag</span>
-            <FlagPicker labelledBy="transaction-flag-label" value={flagColor} onChange={setFlagColor} disabled={disabled} />
-          </div>
-          <label className="transaction-editor-checkbox">
-            <input type="checkbox" checked={approved} onChange={(event) => setApproved(event.target.checked)} />
-            Approved
-          </label>
-        </div>
-        {validationError && <p className="transaction-editor-error" role="alert">{validationError}</p>}
-        <div className="transaction-editor-actions">
-          <button type="button" className="text-button" onClick={onCancel} disabled={disabled}>Cancel</button>
-          <button type="submit" className="save-button" disabled={disabled}>{saving ? "Saving..." : "Save changes"}</button>
-        </div>
-        <datalist id="editor-payee-options">
-          {payees.filter((payee) => !payee.deleted && !payee.transfer_account_id).map((payee) => <option key={payee.id} value={payee.name} />)}
-        </datalist>
-      </form>
-    </section>
-  );
 }

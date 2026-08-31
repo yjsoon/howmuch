@@ -11,6 +11,7 @@ export type RegisterComposeDraft = {
   memo: string;
   outflow: string;
   inflow: string;
+  flagColor: string;
 };
 
 export type RegisterComposeState =
@@ -20,7 +21,7 @@ export type RegisterComposeState =
 export type RegisterComposeAction =
   | { type: "open"; accountId: string }
   | { type: "close" }
-  | { type: "patch"; draft: Partial<Pick<RegisterComposeDraft, "date" | "accountId" | "payeeName" | "categoryId" | "memo">> }
+  | { type: "patch"; draft: Partial<Pick<RegisterComposeDraft, "date" | "accountId" | "payeeName" | "categoryId" | "memo" | "flagColor">> }
   | { type: "set-outflow"; value: string }
   | { type: "set-inflow"; value: string }
   | { type: "saving" }
@@ -41,6 +42,7 @@ export function emptyComposeDraft(accountId: string, date = todayIso()): Registe
     memo: "",
     outflow: "",
     inflow: "",
+    flagColor: "",
   };
 }
 
@@ -184,7 +186,7 @@ export function composePayload(
       payee_name: transfer ? null : payeeName,
       category_id: transfer ? null : draft.categoryId || null,
       memo: draft.memo.trim() || null,
-      flag_color: null,
+      flag_color: draft.flagColor || null,
     },
   };
 }
