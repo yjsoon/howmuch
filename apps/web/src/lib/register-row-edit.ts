@@ -566,6 +566,7 @@ function planSplitCommit(
 
 type PayeeChangeInput = Pick<TransactionUpdateInput, "payee_id" | "payee_name" | "category_id"> & {
   transfer_account_id?: string | null;
+  transfer_transaction_id?: string | null;
 };
 
 type PayeeChangeContext = {
@@ -614,6 +615,9 @@ function planPayeeChange(
   const input: PayeeChangeInput = payeeInput(name, originalId, originalName, payees);
   if (context.currentTransferAccountId) {
     input.transfer_account_id = null;
+    if (context.splitLine) {
+      input.transfer_transaction_id = null;
+    }
   }
   return { kind: "changed", input };
 }

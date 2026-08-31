@@ -787,6 +787,42 @@ describe("planRowCommit", () => {
     });
   });
 
+  test("clears transfer ids on a split line that becomes a regular payee", () => {
+    const transferLine = line({
+      id: "line-xfer",
+      transfer_account_id: "acct-saver",
+      transfer_transaction_id: "txn-mirror",
+      payee_id: "p-xfer",
+      payee_name: "Transfer : Rainy Day Saver",
+      category_id: null,
+    });
+    const parent = splitParent([line(), transferLine]);
+    expect(planRowCommit(splitLine(parent, "line-xfer"), {
+      date: "2026-08-01",
+      payeeName: "Coffee",
+      categoryId: "cat-dining",
+      memo: "lunch",
+      outflow: "2.00",
+      inflow: "",
+      flagColor: "",
+    }, payees)).toMatchObject({
+      kind: "patch",
+      input: {
+        subtransactions: [
+          { id: "line-1" },
+          {
+            id: "line-xfer",
+            payee_id: "p-coffee",
+            payee_name: "Coffee",
+            category_id: "cat-dining",
+            transfer_account_id: null,
+            transfer_transaction_id: null,
+          },
+        ],
+      },
+    });
+  });
+
   test("sets transfer_account_id on a split line that becomes a transfer", () => {
     const parent = splitParent([line(), line({ id: "line-2", amount: -1400 })]);
     expect(planRowCommit(splitLine(parent, "line-1"), {
