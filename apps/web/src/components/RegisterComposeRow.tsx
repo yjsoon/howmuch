@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { Account, CategoryGroup, Payee } from "../api/types";
 import { CategorySelect } from "./CategorySelect";
+import { FlagPicker } from "./FlagTag";
 import { splitCategoryGroups } from "../lib/categories";
 import {
   canonicalPayeeName,
@@ -9,6 +10,7 @@ import {
   reduceCompose,
   type RegisterComposeState,
 } from "../lib/register-compose";
+import { payeeListEntries } from "../lib/register-row-edit";
 
 export function RegisterComposeRow({
   state,
@@ -48,6 +50,7 @@ export function RegisterComposeRow({
     payeeName?: string;
     categoryId?: string;
     memo?: string;
+    flagColor?: string;
   }) => {
     onChange(reduceCompose(state, { type: "patch", draft }));
   };
@@ -128,13 +131,22 @@ export function RegisterComposeRow({
             autoComplete="off"
             disabled={busy}
             required
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") {
+                return;
+              }
+              event.stopPropagation();
+              if (event.nativeEvent.isComposing || event.keyCode === 229) {
+                return;
+              }
+            }}
           />
           <datalist id="register-compose-payees">
-            {payees
-              .filter((payee) => !payee.deleted)
-              .map((payee) => (
-                <option key={payee.id} value={payee.name} />
-              ))}
+            {payeeListEntries(payees, accounts, state.draft.accountId).map((entry) => (
+              <option key={entry.id} value={entry.value}>
+                {entry.label}
+              </option>
+            ))}
           </datalist>
         </td>
         <td>
@@ -206,6 +218,13 @@ export function RegisterComposeRow({
       <tr className="register-compose-actions-row">
         <td colSpan={10}>
           <div className="register-compose-actions">
+            <span className="field-label" id="register-compose-flag-label">Flag</span>
+            <FlagPicker
+              labelledBy="register-compose-flag-label"
+              value={state.draft.flagColor}
+              onChange={(flagColor) => patch({ flagColor })}
+              disabled={busy}
+            />
             <button type="button" className="register-compose-cancel" onClick={onCancel} disabled={busy}>
               Cancel
             </button>

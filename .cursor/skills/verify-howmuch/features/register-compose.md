@@ -7,6 +7,7 @@ On a register, **+ Add transaction** opens an inline row. The posting account is
 - `compose-open` opens the inline row from **+ Add transaction** on Everyday Account.
 - `compose-account-lock` shows Everyday Account as the posting account, not a picker defaulting to another account.
 - `compose-save` saves an outflow and shows the new row on that register.
+- `compose-flag` can set a colour on the compose actions row before Save.
 - `compose-add-another` keeps the row open after **Save and add another**.
 - `compose-all-accounts` on All Accounts requires an account in the row before Save.
 
@@ -26,7 +27,7 @@ Preconditions:
 
 - **Open account register.** Choose `Everyday Account`. Title is `Everyday Account · HowMuch`.
 - **Open compose.** Choose `+ Add transaction` in the register toolbar. The first register row is the compose form. Date is focused. Account cell reads `Everyday Account`. There is no account `<select>`.
-- **Fill outflow.** Date `Today`. Payee `Inline Toast Verify`. Category `Dining Out` if offered, otherwise leave Uncategorised. Memo `verify inline compose`. Outflow `4.20`. Leave Inflow empty.
+- **Fill outflow.** Date `Today`. Payee `Inline Toast Verify`. Category `Dining Out` if offered, otherwise leave Uncategorised. Memo `verify inline compose`. Outflow `4.20`. Leave Inflow empty. Flag is on the actions row; leave None unless proving `compose-flag`.
 - **Save.** Choose `Save`. Status `Inline Toast Verify saved.` The compose row closes. A register row for `Inline Toast Verify` shows today's date and outflow `4.20` on Everyday Account.
 - **Add another.** Choose `+ Add transaction` again. Fill payee `Inline Toast Two` and outflow `1.10`. Choose `Save and add another`. The first row stays a compose form. Payee is empty. Account is still Everyday Account.
 - **Cancel.** Choose `Cancel`. The compose row closes.

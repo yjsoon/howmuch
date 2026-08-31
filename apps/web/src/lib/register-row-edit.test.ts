@@ -6,6 +6,7 @@ import {
   parseAmountEntry,
   payeeListEntries,
   planRowCommit,
+  focusForRowError,
   postingAccountId,
   reduceRowEdit,
   rowFieldWritable,
@@ -324,14 +325,14 @@ describe("beginRowEdit", () => {
     });
   });
 
-  test("snaps begin focus off a locked transfer payee onto the first writable field", () => {
+  test("keeps payee focus on a saved transfer and snaps category onto date", () => {
     const row = posted(txn({
       transfer_account_id: "acct-saver",
       payee_name: "Transfer : Rainy Day Saver",
       category_id: null,
     }));
     expect(beginRowEdit(row, "payee", unlocked)).toMatchObject({
-      action: { focus: "date" },
+      action: { focus: "payee" },
     });
     expect(beginRowEdit(row, "category", unlocked)).toMatchObject({
       action: { focus: "date" },
@@ -525,7 +526,21 @@ describe("planRowCommit", () => {
     });
   });
 
-  test("does not patch payee on a transfer posted row", () => {
+  test("plans a regular payee on an existing transfer posted row", () => {
+    const row = posted(txn({
+      transfer_account_id: "acct-saver",
+      payee_id: "p-xfer",
+      payee_name: "Transfer : Rainy Day Saver",
+      category_id: null,
+    }));
+    expect(planRowCommit(row, { ...shopDraft, payeeName: "Coffee" }, payees)).toEqual({
+      kind: "patch",
+      transactionId: "txn-1",
+      input: { payee_id: "p-coffee", payee_name: "Coffee", category_id: "cat-dining" },
+    });
+  });
+
+  test("rejects retargeting an existing transfer to a different transfer payee", () => {
     const other = payee("p-travel", "Transfer : Travel Card", "acct-travel");
     const row = posted(txn({
       transfer_account_id: "acct-saver",
@@ -533,11 +548,9 @@ describe("planRowCommit", () => {
       payee_name: "Transfer : Rainy Day Saver",
       category_id: null,
     }));
-    expect(planRowCommit(row, { ...shopDraft, payeeName: "Coffee", categoryId: "cat-dining" }, payees)).toEqual({
-      kind: "unchanged",
-    });
     expect(planRowCommit(row, { ...shopDraft, payeeName: "Transfer : Travel Card", categoryId: "" }, [...payees, other])).toEqual({
-      kind: "unchanged",
+      kind: "invalid",
+      message: "This transfer already has a destination. Choose a regular payee, or cancel.",
     });
   });
 
@@ -830,6 +843,13 @@ describe("payeeListEntries", () => {
   test("omits a transfer whose account name is unknown", () => {
     expect(payeeListEntries([transfer], [everyday], "acct")).toEqual([]);
   });
+
+  test("omits a transfer to a closed account", () => {
+    expect(payeeListEntries(listed, [everyday, { ...saver, closed: true }], "acct")).toEqual([
+      { id: "p-shop", value: "Shop" },
+      { id: "p-coffee", value: "Coffee" },
+    ]);
+  });
 });
 
 describe("parseAmountEntry", () => {
@@ -886,14 +906,14 @@ describe("rowGestureHandlers", () => {
     expect(started).toEqual([{ row, focus: "memo" }]);
   });
 
-  test("begins a transfer posted row from the payee cell with focus snapped to date", () => {
+  test("begins a transfer posted row from the payee cell", () => {
     const started: RegisterRowFocus[] = [];
     const row = posted(txn({ transfer_account_id: "acct-saver" }));
     const handlers = rowGestureHandlers(row, "payee", unlocked, (action) => {
       started.push(action.focus);
     });
     handlers.onDoubleClick(gestureEvent());
-    expect(started).toEqual(["date"]);
+    expect(started).toEqual(["payee"]);
   });
 
   test("stays silent on a refused double-click", () => {
@@ -907,19 +927,17 @@ describe("rowGestureHandlers", () => {
 });
 
 describe("rowFieldWritable and writableFocus", () => {
-  test("locks payee and category on a saved transfer and snaps focus to date", () => {
+  test("keeps payee writable on a saved transfer and locks category", () => {
     const row = posted(txn({
       transfer_account_id: "acct-saver",
       payee_name: "Transfer : Rainy Day Saver",
       category_id: null,
     }));
-    expect(rowFieldWritable(row, "payee")).toBeFalse();
+    expect(rowFieldWritable(row, "payee")).toBeTrue();
     expect(rowFieldWritable(row, "category")).toBeFalse();
     expect(rowFieldWritable(row, "date")).toBeTrue();
-    expect(rowFieldWritable(row, "memo")).toBeTrue();
-    expect(writableFocus(row, "payee")).toBe("date");
+    expect(writableFocus(row, "payee")).toBe("payee");
     expect(writableFocus(row, "category")).toBe("date");
-    expect(writableFocus(row, "memo")).toBe("memo");
   });
 
   test("keeps payee writable on a regular row so a transfer list pick can commit", () => {
@@ -929,7 +947,7 @@ describe("rowFieldWritable and writableFocus", () => {
     expect(writableFocus(row, "payee")).toBe("payee");
   });
 
-  test("locks payee on a saved transfer split line", () => {
+  test("keeps payee writable on a saved transfer split line", () => {
     const transferLine = line({
       id: "line-xfer",
       transfer_account_id: "acct-saver",
@@ -937,9 +955,19 @@ describe("rowFieldWritable and writableFocus", () => {
       category_id: null,
     });
     const row = splitLine(splitParent([line(), transferLine]), "line-xfer");
-    expect(rowFieldWritable(row, "payee")).toBeFalse();
+    expect(rowFieldWritable(row, "payee")).toBeTrue();
     expect(rowFieldWritable(row, "date")).toBeFalse();
-    expect(writableFocus(row, "payee")).toBe("memo");
+    expect(writableFocus(row, "category")).toBe("payee");
+  });
+});
+
+describe("focusForRowError", () => {
+  test("points at the field named in the message", () => {
+    const row = posted(txn());
+    expect(focusForRowError("Choose a date.", row, shopDraft)).toBe("date");
+    expect(focusForRowError("Enter an outflow or an inflow.", row, shopDraft)).toBe("outflow");
+    expect(focusForRowError("Enter an outflow or an inflow.", row, { ...shopDraft, outflow: "", inflow: "1.00" })).toBe("inflow");
+    expect(focusForRowError("This transfer already has a destination. Choose a regular payee, or cancel.", row, shopDraft)).toBe("payee");
   });
 });
 

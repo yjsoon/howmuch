@@ -19,7 +19,7 @@ export function configureMoney(format?: CurrencyFormat): void {
  * values such as 1.135 cannot be represented in binary floating point.
  */
 export function parseMilliunits(value: string): number | null {
-  const match = value.trim().match(/^([+-]?)(?:(\d+)(?:\.(\d{0,3}))?|\.(\d{1,3}))$/);
+  const match = value.trim().replace(/,/g, "").match(/^([+-]?)(?:(\d+)(?:\.(\d{0,3}))?|\.(\d{1,3}))$/);
   if (!match) {
     return null;
   }

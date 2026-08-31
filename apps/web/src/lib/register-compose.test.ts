@@ -95,6 +95,14 @@ describe("register compose", () => {
     expect(transfer.ok && transfer.input.category_id).toBeNull();
   });
 
+  test("passes a flag colour through on save", () => {
+    const result = composePayload(
+      { ...emptyComposeDraft("acct-everyday", "2026-08-29"), payeeName: "Toast Box", outflow: "6.80", flagColor: "red" },
+      [payee("p1", "Toast Box")],
+    );
+    expect(result.ok && result.input.flag_color).toBe("red");
+  });
+
   test("rejects a missing account, both amounts, and an empty payee", () => {
     expect(composePayload(emptyComposeDraft(""), [])).toEqual({
       ok: false,

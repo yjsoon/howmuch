@@ -40,6 +40,7 @@ import {
   type RegisterComposeState,
 } from "../lib/register-compose";
 import {
+  focusForRowError,
   idleRowEdit,
   planRowCommit,
   reduceRowEdit,
@@ -392,7 +393,11 @@ export function TransactionsPage() {
       return;
     }
     if (plan.kind === "invalid") {
-      dispatchRowEdit({ type: "invalid", message: plan.message });
+      dispatchRowEdit({
+        type: "invalid",
+        message: plan.message,
+        focus: focusForRowError(plan.message, session.row, session.draft, payees.data ?? []),
+      });
       return;
     }
     mutationLockRef.current = true;

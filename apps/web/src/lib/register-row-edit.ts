@@ -15,6 +15,7 @@ export type RegisterRowDraft = {
 export type RowEditAccount = {
   readonly id: string;
   readonly name: string;
+  readonly closed?: boolean;
 };
 
 export type PayeeListEntry = {
@@ -51,10 +52,10 @@ export type RegisterRowEditAction =
   | { readonly type: "patch"; readonly draft: Partial<Pick<RegisterRowDraft, "date" | "payeeName" | "categoryId" | "memo" | "flagColor">> }
   | { readonly type: "set-outflow"; readonly value: string }
   | { readonly type: "set-inflow"; readonly value: string }
-  | { readonly type: "invalid"; readonly message: string }
+  | { readonly type: "invalid"; readonly message: string; readonly focus?: RegisterRowFocus }
   | { readonly type: "committing" }
   | { readonly type: "committed" }
-  | { readonly type: "failed"; readonly message: string }
+  | { readonly type: "failed"; readonly message: string; readonly focus?: RegisterRowFocus }
   | { readonly type: "cancel" };
 
 export function idleRowEdit(): RegisterRowEditSession {
@@ -130,7 +131,7 @@ export function reduceRowEdit(
       if (session.status !== "editing") {
         return session;
       }
-      return { ...session, error: action.message };
+      return { ...session, error: action.message, focus: action.focus ?? session.focus };
     case "committing":
       if (session.status !== "editing") {
         return session;
@@ -149,7 +150,7 @@ export function reduceRowEdit(
         status: "editing",
         row: session.row,
         draft: session.draft,
-        focus: writableFocus(session.row, defaultFocus(session.row), session.draft),
+        focus: action.focus ?? writableFocus(session.row, defaultFocus(session.row), session.draft),
         error: action.message,
       };
     case "cancel":
@@ -193,10 +194,7 @@ export function rowFieldWritable(
   if (row.kind === "posted") {
     const splitParent = Boolean(row.transaction.subtransactions?.length);
     const savedTransfer = Boolean(row.transaction.transfer_account_id);
-    if (field === "payee" && savedTransfer) {
-      return false;
-    }
-    if (field === "category" && (splitParent || savedTransfer || draftIsTransfer(draft, payees))) {
+    if (field === "category" && (splitParent || categoryLocked(savedTransfer, row.transaction.payee_name ?? "", draft, payees))) {
       return false;
     }
     if ((field === "outflow" || field === "inflow") && splitParent) {
@@ -211,10 +209,7 @@ export function rowFieldWritable(
   if (!line) {
     return false;
   }
-  if (field === "payee" && line.transfer_account_id) {
-    return false;
-  }
-  if (field === "category" && (line.transfer_account_id || draftIsTransfer(draft, payees))) {
+  if (field === "category" && categoryLocked(Boolean(line.transfer_account_id), line.payee_name ?? "", draft, payees)) {
     return false;
   }
   return true;
@@ -237,6 +232,25 @@ export function writableFocus(
   return requested;
 }
 
+export function focusForRowError(
+  message: string,
+  row: RegisterRowRef,
+  draft: RegisterRowDraft,
+  payees: readonly Payee[] = [],
+): RegisterRowFocus {
+  const text = message.toLowerCase();
+  if (text.includes("date")) {
+    return writableFocus(row, "date", draft, payees);
+  }
+  if (text.includes("payee") || text.includes("transfer") || text.includes("destination")) {
+    return writableFocus(row, "payee", draft, payees);
+  }
+  if (text.includes("outflow") || text.includes("inflow") || text.includes("amount")) {
+    return writableFocus(row, draft.outflow.trim() ? "outflow" : "inflow", draft, payees);
+  }
+  return writableFocus(row, defaultFocus(row), draft, payees);
+}
+
 export function sessionRowGone(
   session: RegisterRowEditSession,
   presentIds: ReadonlySet<string>,
@@ -249,6 +263,24 @@ export function sessionRowGone(
 
 function draftIsTransfer(draft: RegisterRowDraft | undefined, payees: readonly Payee[]): boolean {
   return Boolean(draft && findTransferPayee(payees, draft.payeeName));
+}
+
+function categoryLocked(
+  savedTransfer: boolean,
+  savedPayeeName: string,
+  draft: RegisterRowDraft | undefined,
+  payees: readonly Payee[],
+): boolean {
+  if (draftIsTransfer(draft, payees)) {
+    return true;
+  }
+  if (!savedTransfer) {
+    return false;
+  }
+  if (!draft) {
+    return true;
+  }
+  return canonicalPayeeName(payees, draft.payeeName) === canonicalPayeeName(payees, savedPayeeName);
 }
 
 export function postingAccountId(row: RegisterRowRef): string {
@@ -264,7 +296,7 @@ export function payeeListEntries(
   accounts: readonly RowEditAccount[],
   accountId: string,
 ): readonly PayeeListEntry[] {
-  const names = new Map(accounts.map((account) => [account.id, account.name]));
+  const byId = new Map(accounts.map((account) => [account.id, account]));
   const entries: PayeeListEntry[] = [];
   for (const payee of payees) {
     if (payee.deleted) {
@@ -277,14 +309,14 @@ export function payeeListEntries(
     if (payee.transfer_account_id === accountId) {
       continue;
     }
-    const accountName = names.get(payee.transfer_account_id);
-    if (!accountName) {
+    const account = byId.get(payee.transfer_account_id);
+    if (!account || account.closed) {
       continue;
     }
     entries.push({
       id: payee.id,
       value: payee.name,
-      label: transferOptionLabel(accountName),
+      label: transferOptionLabel(account.name),
     });
   }
   return entries;
