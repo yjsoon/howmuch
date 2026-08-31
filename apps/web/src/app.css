@@ -1194,6 +1194,12 @@ textarea {
 .register-compose-error-row td {
   vertical-align: middle;
   background: var(--plan-accent-wash);
+  border-bottom-color: transparent;
+}
+
+.register-compose-row td:first-child,
+.register-compose-actions-row td:first-child,
+.register-compose-error-row td:first-child {
   box-shadow: inset 3px 0 var(--plan-accent);
 }
 
@@ -1212,11 +1218,17 @@ textarea {
 .register-compose-row select {
   width: 100%;
   min-width: 0;
-  padding: 4px 6px;
-  border: 1px solid var(--rule-strong);
+  padding: 3px 5px;
+  border: 0;
   border-radius: 2px;
   background: var(--paper);
   font: inherit;
+}
+
+.register-compose-row input:focus,
+.register-compose-row select:focus {
+  outline: 2px solid var(--plan-accent);
+  outline-offset: -1px;
 }
 
 .register-compose-row .num input {
