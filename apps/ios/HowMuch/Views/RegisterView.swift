@@ -1563,7 +1563,7 @@ struct TransactionRow: View {
   private func statusGlyph(_ status: RegisterStatus) -> some View {
     switch status {
     case .new:
-      Image(systemName: "circle.dotted")
+      Image(systemName: "circle.fill")
         .font(.title3)
         .foregroundStyle(Theme.newStatus)
     case .uncleared:
