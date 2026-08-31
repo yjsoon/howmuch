@@ -412,7 +412,21 @@ export function TransactionsPage() {
     try {
       const updated = await api.updateTransaction(planId, plan.transactionId, plan.input);
       setReplacements((current) => new Map(current).set(updated.id, updated));
+      const prior = session.row.kind === "posted" ? session.row.transaction : session.row.parent;
+      const priorMirrors = [
+        prior.transfer_transaction_id,
+        ...(prior.subtransactions ?? []).map((line) => line.transfer_transaction_id),
+      ].filter((id): id is string => Boolean(id));
+      const nextMirrors = new Set([
+        updated.transfer_transaction_id,
+        ...(updated.subtransactions ?? []).map((line) => line.transfer_transaction_id),
+      ].filter((id): id is string => Boolean(id)));
+      const dropped = priorMirrors.filter((id) => !nextMirrors.has(id));
+      if (dropped.length > 0) {
+        setDeletedIds((current) => new Set([...current, ...dropped]));
+      }
       reload();
+      refreshFirstPage();
       setReconciliationPreviewGeneration((generation) => generation + 1);
       const savedName = (updated.payee_name ?? session.draft.payeeName).trim() || "Entry";
       setMutationSuccess(
