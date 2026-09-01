@@ -1315,6 +1315,34 @@ extension Transaction {
     }
   }
 
+  func withCleared(_ cleared: ClearedState) -> Transaction {
+    Transaction(
+      id: id,
+      date: date,
+      amount: amount,
+      memo: memo,
+      cleared: cleared,
+      approved: approved,
+      flagColor: flagColor,
+      flagName: flagName,
+      accountID: accountID,
+      accountName: accountName,
+      payeeID: payeeID,
+      payeeName: payeeName,
+      categoryID: categoryID,
+      categoryName: categoryName,
+      transferAccountID: transferAccountID,
+      transferTransactionID: transferTransactionID,
+      parentTransactionID: parentTransactionID,
+      matchedTransactionID: matchedTransactionID,
+      importID: importID,
+      importPayeeName: importPayeeName,
+      importPayeeNameOriginal: importPayeeNameOriginal,
+      deleted: deleted,
+      subtransactions: subtransactions
+    )
+  }
+
   /// Single-transaction writes can omit `parentTransactionID`. Keep the list value.
   func preservingParent(from existing: Transaction) -> Transaction {
     guard parentTransactionID == nil, let parentTransactionID = existing.parentTransactionID else {

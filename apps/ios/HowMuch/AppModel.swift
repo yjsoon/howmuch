@@ -85,6 +85,10 @@ final class AppModel {
   private var inFlightCreates: Set<PendingRow.ID> = []
   @ObservationIgnored private var editTasks: [String: Task<Void, Never>] = [:]
   @ObservationIgnored private var editGenerations: [String: Int] = [:]
+  @ObservationIgnored private var clearedTogglesInFlight: Set<String> = []
+  /// Flipped cleared values that must survive `refreshLedger` replacing
+  /// `serverTransactions` with a fetch that still has the pre-PATCH row.
+  private var clearedToggleOverlays: [String: ClearedState] = [:]
   @ObservationIgnored private var needsAnotherDrain = false
   @ObservationIgnored private var coalescedDrainTrigger: OutboxDrainTrigger?
   private var accountsByID: [String: Account] = [:]
@@ -152,6 +156,8 @@ final class AppModel {
     payees = []
     serverTransactions = []
     serverUnapprovedTransactions = []
+    clearedToggleOverlays.removeAll()
+    clearedTogglesInFlight.removeAll()
     scheduledTransactions = []
     spendingBreakdown = nil
     incomeVsSpending = nil
@@ -796,11 +802,11 @@ final class AppModel {
   }
 
   var transactions: [Transaction] {
-    overlayingPendingEdits(on: serverTransactions)
+    overlayingClearedToggles(on: overlayingPendingEdits(on: serverTransactions))
   }
 
   var unapprovedTransactions: [Transaction] {
-    overlayingPendingEdits(on: serverUnapprovedTransactions)
+    overlayingClearedToggles(on: overlayingPendingEdits(on: serverUnapprovedTransactions))
   }
 
   var pendingRows: [PendingRow] {
@@ -824,6 +830,41 @@ final class AppModel {
       pendingEdits[row.id]?.applied(to: row) ?? row
     }
     .sorted { ($0.date, $0.id) > ($1.date, $1.id) }
+  }
+
+  private func overlayingClearedToggles(on rows: [Transaction]) -> [Transaction] {
+    guard !clearedToggleOverlays.isEmpty else {
+      return rows
+    }
+    return rows.map { row in
+      guard let cleared = clearedToggleOverlays[row.id] else {
+        return row
+      }
+      return row.withCleared(cleared)
+    }
+  }
+
+  /// Keep an in-flight (or just-acked) flip when a fetch still has the old
+  /// `cleared` value. Drop it once the server snapshot matches, but never
+  /// while the PATCH is still outstanding.
+  private func reconcileClearedToggleOverlays() {
+    guard !clearedToggleOverlays.isEmpty else {
+      return
+    }
+    for (id, cleared) in clearedToggleOverlays {
+      if clearedTogglesInFlight.contains(id) {
+        continue
+      }
+      let snapshots = [serverTransactions, serverUnapprovedTransactions].compactMap { rows in
+        rows.first { $0.id == id }
+      }
+      if snapshots.isEmpty {
+        continue
+      }
+      if snapshots.allSatisfy({ $0.cleared == cleared }) {
+        clearedToggleOverlays[id] = nil
+      }
+    }
   }
 
   private func pendingRow(from pending: PendingTransaction) -> PendingRow {
@@ -1016,6 +1057,7 @@ final class AppModel {
       pushHorizonFill()
       serverTransactions = sortedUniqueTransactions(page.transactions)
       serverUnapprovedTransactions = sortedUniqueTransactions(unapproved)
+      reconcileClearedToggleOverlays()
       applyTransactionPageCursor(page)
       ledgerPhase = .loaded
       defer {
@@ -1078,6 +1120,8 @@ final class AppModel {
     payees = []
     serverTransactions = []
     serverUnapprovedTransactions = []
+    clearedToggleOverlays.removeAll()
+    clearedTogglesInFlight.removeAll()
     scheduledTransactions = []
     spendingBreakdown = nil
     incomeVsSpending = nil
@@ -1354,6 +1398,7 @@ final class AppModel {
 
   private func applyOlderTransactionPage(_ page: TransactionPage) {
     serverTransactions = sortedUniqueTransactions(serverTransactions + page.transactions)
+    reconcileClearedToggleOverlays()
     applyTransactionPageCursor(page)
   }
 
@@ -1583,10 +1628,14 @@ final class AppModel {
     guard transaction.cleared != .reconciled else {
       throw APIClientError.validation("Reconciled transactions stay locked.")
     }
+    guard !clearedTogglesInFlight.contains(transaction.id) else {
+      return
+    }
 
-    isSubmitting = true
-    defer { isSubmitting = false }
     let cleared: ClearedState = transaction.cleared == .cleared ? .uncleared : .cleared
+    clearedTogglesInFlight.insert(transaction.id)
+    clearedToggleOverlays[transaction.id] = cleared
+    defer { clearedTogglesInFlight.remove(transaction.id) }
     do {
       let saved = try await apiClient.updateTransactionCleared(
         planID: settings.planID,
@@ -1598,6 +1647,9 @@ final class AppModel {
       showSaveMessage(cleared == .cleared ? "Marked transaction cleared" : "Marked transaction uncleared")
       Task { await refreshLedgerAndInvalidatePlan() }
     } catch {
+      if clearedToggleOverlays[transaction.id] == cleared {
+        clearedToggleOverlays[transaction.id] = nil
+      }
       await refreshLedger(quiet: true)
       throw error
     }

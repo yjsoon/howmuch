@@ -94,3 +94,49 @@ export function applyRegisterPatches<T extends RegisterRow>(
     deletedIds,
   );
 }
+
+export type ClearedOverlayRow = {
+  readonly id: string;
+  readonly cleared: string;
+};
+
+export function retainInFlightPatches<T>(
+  current: ReadonlyMap<string, T>,
+  inFlightIds: Iterable<string>,
+): Map<string, T> {
+  const next = new Map<string, T>();
+  for (const id of inFlightIds) {
+    const row = current.get(id);
+    if (row !== undefined) next.set(id, row);
+  }
+  return next;
+}
+
+export function applyClearedOverlays<T extends ClearedOverlayRow>(
+  rows: readonly T[],
+  overlays: ReadonlyMap<string, string>,
+): T[] {
+  if (overlays.size === 0) return [...rows];
+  return rows.map((row) => {
+    const cleared = overlays.get(row.id);
+    return cleared !== undefined && cleared !== row.cleared ? { ...row, cleared } : row;
+  });
+}
+
+export function reconcileClearedOverlays<T extends ClearedOverlayRow>(
+  overlays: ReadonlyMap<string, string>,
+  sources: ReadonlyArray<readonly T[]>,
+  inFlightIds: ReadonlySet<string>,
+): Map<string, string> {
+  const next = new Map(overlays);
+  for (const [id, cleared] of overlays) {
+    if (inFlightIds.has(id)) continue;
+    const present = sources.flatMap((rows) => {
+      const row = rows.find((candidate) => candidate.id === id);
+      return row ? [row] : [];
+    });
+    if (present.length === 0) continue;
+    if (present.every((row) => row.cleared === cleared)) next.delete(id);
+  }
+  return next;
+}

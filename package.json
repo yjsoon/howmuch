@@ -25,6 +25,7 @@
     "verify:ios-transaction-delete": "bun scripts/verify-ios-transaction-delete.ts",
     "verify:ios-accounts-shortcuts": "bun scripts/verify-ios-accounts-shortcuts.ts",
     "verify:ios-future-register": "bun scripts/verify-ios-future-register.ts",
+    "verify:cleared-status-toggle": "bun scripts/verify-cleared-status-toggle.ts",
     "test": "bun test",
     "verify:worker": "bun run --cwd apps/worker build"
   },

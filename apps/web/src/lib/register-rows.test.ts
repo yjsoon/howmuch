@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+  applyClearedOverlays,
   applyRegisterPatches,
   deletedIdsForRemoval,
   markDeletedByIds,
+  reconcileClearedOverlays,
   replaceRowById,
+  retainInFlightPatches,
   unlinkSplitMirrorParent,
 } from "./register-rows";
 
@@ -70,5 +73,56 @@ describe("register rows", () => {
       row("b", false, "cleared"),
       row("c", true),
     ]);
+  });
+
+  test("retainInFlightPatches keeps only ids still in flight", () => {
+    const current = new Map([
+      ["a", row("a")],
+      ["b", row("b", false, "cleared")],
+      ["c", row("c")],
+    ]);
+    expect([...retainInFlightPatches(current, new Set(["b", "missing"]))]).toEqual([
+      ["b", row("b", false, "cleared")],
+    ]);
+  });
+
+  test("applyClearedOverlays flips only the overlaid cleared field", () => {
+    const overlays = new Map([["b", "cleared"]]);
+    expect(applyClearedOverlays([row("a"), row("b"), row("c")], overlays)).toEqual([
+      row("a"),
+      row("b", false, "cleared"),
+      row("c"),
+    ]);
+  });
+
+  test("reconcileClearedOverlays keeps in-flight and stale-fetch flips", () => {
+    const overlays = new Map([
+      ["in-flight", "cleared"],
+      ["acked-stale", "cleared"],
+      ["acked-matched", "cleared"],
+    ]);
+    const rows = [
+      row("in-flight"),
+      row("acked-stale"),
+      row("acked-matched", false, "cleared"),
+    ];
+    expect(
+      [...reconcileClearedOverlays(overlays, [rows], new Set(["in-flight"]))],
+    ).toEqual([
+      ["in-flight", "cleared"],
+      ["acked-stale", "cleared"],
+    ]);
+  });
+
+  test("reconcileClearedOverlays keeps the flip until every snapshot matches", () => {
+    const overlays = new Map([["row", "cleared"]]);
+    const stalePage = [row("row")];
+    const freshQueue = [row("row", false, "cleared")];
+    expect(
+      [...reconcileClearedOverlays(overlays, [stalePage, freshQueue], new Set())],
+    ).toEqual([["row", "cleared"]]);
+    expect(
+      [...reconcileClearedOverlays(overlays, [freshQueue, freshQueue], new Set())],
+    ).toEqual([]);
   });
 });

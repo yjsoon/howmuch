@@ -50,7 +50,7 @@ import {
   type RegisterRowEditSession,
 } from "../lib/register-row-edit";
 import { fillRegisterHorizon } from "../lib/register-horizon";
-import { applyRegisterPatches, deletedIdsForRemoval, unlinkSplitMirrorParent } from "../lib/register-rows";
+import { applyClearedOverlays, applyRegisterPatches, deletedIdsForRemoval, reconcileClearedOverlays, retainInFlightPatches, unlinkSplitMirrorParent } from "../lib/register-rows";
 import {
   emptySelection,
   headerState,
@@ -148,6 +148,7 @@ export function TransactionsPage() {
   const [unapprovedOnly, setUnapprovedOnly] = useState(false);
   const [selection, setSelection] = useState(() => emptySelection(listKey));
   const [replacements, setReplacements] = useState<ReadonlyMap<string, Transaction>>(() => new Map());
+  const [clearedOverlays, setClearedOverlays] = useState<ReadonlyMap<string, Transaction["cleared"]>>(() => new Map());
   const [rowEdit, setRowEdit] = useState<RegisterRowEditSession>(idleRowEdit);
   const rowEditRef = useRef(rowEdit);
   const replaceRowEdit = (next: RegisterRowEditSession) => {
@@ -160,6 +161,7 @@ export function TransactionsPage() {
   const [compose, setCompose] = useState<RegisterComposeState>(closedCompose);
   const [composeFocus, setComposeFocus] = useState(0);
   const mutationLockRef = useRef(false);
+  const clearedInFlightRef = useRef(new Set<string>());
   const [writeLocked, setWriteLocked] = useState(false);
   const selectedAccountId = filters.accountIds.length === 1 ? filters.accountIds[0]! : null;
   const composeScope = selectedAccountId ?? (filters.accountIds.join(",") || "all");
@@ -271,13 +273,35 @@ export function TransactionsPage() {
   }, [listKey, refreshGeneration]);
 
   useEffect(() => {
-    setReplacements(new Map());
+    setReplacements((current) => retainInFlightPatches(current, clearedInFlightRef.current));
     setDeletedIds(new Set());
     replaceRowEdit(idleRowEdit());
     const empty = emptyApprovalSession();
     approvalSessionRef.current = empty;
     setApprovalSession(empty);
   }, [listKey, refreshGeneration]);
+
+  useEffect(() => {
+    setClearedOverlays((current) => {
+      if (current.size === 0) return current;
+      const next = reconcileClearedOverlays(
+        current,
+        [page.transactions, approvalQueue.data ?? []],
+        clearedInFlightRef.current,
+      );
+      if (next.size === current.size) {
+        let same = true;
+        for (const [id, cleared] of next) {
+          if (current.get(id) !== cleared) {
+            same = false;
+            break;
+          }
+        }
+        if (same) return current;
+      }
+      return next;
+    });
+  }, [approvalQueue.data, page.transactions]);
 
   const loadOlder = async () => {
     if (page.loadingMore || !page.hasMore || page.nextOffset === null) return;
@@ -305,7 +329,12 @@ export function TransactionsPage() {
 
   const toggleCleared = async (transaction: Transaction) => {
     if (mutationLockRef.current || (transaction.cleared !== "uncleared" && transaction.cleared !== "cleared")) return;
+    if (clearedInFlightRef.current.has(transaction.id)) return;
     const cleared = transaction.cleared === "cleared" ? "uncleared" : "cleared";
+    const overlay = { ...transaction, cleared };
+    clearedInFlightRef.current.add(transaction.id);
+    setClearedOverlays((current) => new Map(current).set(transaction.id, cleared));
+    setReplacements((current) => new Map(current).set(transaction.id, overlay));
     setMutatingId(transaction.id);
     setMutationError(null);
     setMutationSuccess(null);
@@ -315,8 +344,15 @@ export function TransactionsPage() {
       reload();
       setReconciliationPreviewGeneration((generation) => generation + 1);
     } catch (cause) {
+      setClearedOverlays((current) => {
+        const next = new Map(current);
+        next.delete(transaction.id);
+        return next;
+      });
+      setReplacements((current) => new Map(current).set(transaction.id, transaction));
       setMutationError(cause instanceof Error ? cause.message : String(cause));
     } finally {
+      clearedInFlightRef.current.delete(transaction.id);
       setMutatingId((current) => (current === transaction.id ? null : current));
     }
   };
@@ -608,17 +644,23 @@ export function TransactionsPage() {
 
   const patchedQueue = useMemo(
     () =>
-      applyRegisterPatches(approvalQueue.data ?? [], replacements, deletedIds).map((txn) =>
-        !txn.approved && rowLooksApproved(txn, approvalSession) ? { ...txn, approved: true } : txn,
+      applyClearedOverlays(
+        applyRegisterPatches(approvalQueue.data ?? [], replacements, deletedIds).map((txn) =>
+          !txn.approved && rowLooksApproved(txn, approvalSession) ? { ...txn, approved: true } : txn,
+        ),
+        clearedOverlays,
       ),
-    [approvalQueue.data, approvalSession, deletedIds, replacements],
+    [approvalQueue.data, approvalSession, clearedOverlays, deletedIds, replacements],
   );
   const patchedPage = useMemo(
     () =>
-      applyRegisterPatches(page.transactions, replacements, deletedIds).map((txn) =>
-        !txn.approved && rowLooksApproved(txn, approvalSession) ? { ...txn, approved: true } : txn,
+      applyClearedOverlays(
+        applyRegisterPatches(page.transactions, replacements, deletedIds).map((txn) =>
+          !txn.approved && rowLooksApproved(txn, approvalSession) ? { ...txn, approved: true } : txn,
+        ),
+        clearedOverlays,
       ),
-    [approvalSession, deletedIds, page.transactions, replacements],
+    [approvalSession, clearedOverlays, deletedIds, page.transactions, replacements],
   );
   const inScope = useMemo(
     () =>
