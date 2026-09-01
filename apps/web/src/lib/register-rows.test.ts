@@ -107,10 +107,22 @@ describe("register rows", () => {
       row("acked-matched", false, "cleared"),
     ];
     expect(
-      [...reconcileClearedOverlays(overlays, rows, new Set(["in-flight"]))],
+      [...reconcileClearedOverlays(overlays, [rows], new Set(["in-flight"]))],
     ).toEqual([
       ["in-flight", "cleared"],
       ["acked-stale", "cleared"],
     ]);
+  });
+
+  test("reconcileClearedOverlays keeps the flip until every snapshot matches", () => {
+    const overlays = new Map([["row", "cleared"]]);
+    const stalePage = [row("row")];
+    const freshQueue = [row("row", false, "cleared")];
+    expect(
+      [...reconcileClearedOverlays(overlays, [stalePage, freshQueue], new Set())],
+    ).toEqual([["row", "cleared"]]);
+    expect(
+      [...reconcileClearedOverlays(overlays, [freshQueue, freshQueue], new Set())],
+    ).toEqual([]);
   });
 });

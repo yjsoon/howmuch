@@ -286,7 +286,7 @@ export function TransactionsPage() {
       if (current.size === 0) return current;
       const next = reconcileClearedOverlays(
         current,
-        [...page.transactions, ...(approvalQueue.data ?? [])],
+        [page.transactions, approvalQueue.data ?? []],
         clearedInFlightRef.current,
       );
       if (next.size === current.size) {

@@ -855,9 +855,13 @@ final class AppModel {
       if clearedTogglesInFlight.contains(id) {
         continue
       }
-      let row = serverTransactions.first { $0.id == id }
-        ?? serverUnapprovedTransactions.first { $0.id == id }
-      if row?.cleared == cleared {
+      let snapshots = [serverTransactions, serverUnapprovedTransactions].compactMap { rows in
+        rows.first { $0.id == id }
+      }
+      if snapshots.isEmpty {
+        continue
+      }
+      if snapshots.allSatisfy({ $0.cleared == cleared }) {
         clearedToggleOverlays[id] = nil
       }
     }

@@ -125,14 +125,18 @@ export function applyClearedOverlays<T extends ClearedOverlayRow>(
 
 export function reconcileClearedOverlays<T extends ClearedOverlayRow>(
   overlays: ReadonlyMap<string, string>,
-  rows: readonly T[],
+  sources: ReadonlyArray<readonly T[]>,
   inFlightIds: ReadonlySet<string>,
 ): Map<string, string> {
   const next = new Map(overlays);
-  const byId = new Map(rows.map((row) => [row.id, row] as const));
   for (const [id, cleared] of overlays) {
     if (inFlightIds.has(id)) continue;
-    if (byId.get(id)?.cleared === cleared) next.delete(id);
+    const present = sources.flatMap((rows) => {
+      const row = rows.find((candidate) => candidate.id === id);
+      return row ? [row] : [];
+    });
+    if (present.length === 0) continue;
+    if (present.every((row) => row.cleared === cleared)) next.delete(id);
   }
   return next;
 }
