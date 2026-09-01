@@ -33,15 +33,23 @@ const iosAwait = iosToggle.indexOf("await apiClient.updateTransactionCleared");
 if (iosAwait < 0) {
   failures.push("iOS toggleTransactionCleared must still PATCH via apiClient.updateTransactionCleared.");
 } else {
-  const overlay = iosToggle.indexOf("applySavedTransaction");
+  const overlay = iosToggle.indexOf("clearedToggleOverlays[transaction.id]");
   if (overlay < 0 || overlay > iosAwait) {
     failures.push(
-      "iOS toggleTransactionCleared must apply the flipped cleared state to the register before awaiting the PATCH.",
+      "iOS toggleTransactionCleared must record the flipped cleared overlay before awaiting the PATCH.",
     );
   }
 }
 if (iosToggle.includes("isSubmitting = true")) {
   failures.push("iOS toggleTransactionCleared must not take the global isSubmitting lock; that freezes every status icon.");
+}
+if (!iosModel.includes("overlayingClearedToggles(on: overlayingPendingEdits(on: serverTransactions))")) {
+  failures.push(
+    "iOS must overlay in-flight cleared flips on top of serverTransactions so refreshLedger cannot snap the icon back.",
+  );
+}
+if (!iosModel.includes("reconcileClearedToggleOverlays()")) {
+  failures.push("iOS must reconcile cleared overlays after a ledger fetch so a stale snapshot cannot stick forever.");
 }
 
 const iosRow = readFileSync(join(root, "apps/ios/HowMuch/Views/RegisterView.swift"), "utf8");
@@ -61,12 +69,27 @@ const webAwait = webToggle.indexOf("await api.updateTransactionCleared");
 if (webAwait < 0) {
   failures.push("Web toggleCleared must still PATCH via api.updateTransactionCleared.");
 } else {
-  const overlay = webToggle.indexOf("setReplacements");
+  const overlay = webToggle.indexOf("setClearedOverlays");
+  const replacements = webToggle.indexOf("setReplacements");
   if (overlay < 0 || overlay > webAwait) {
+    failures.push(
+      "Web toggleCleared must record the flipped cleared overlay before awaiting the PATCH.",
+    );
+  }
+  if (replacements < 0 || replacements > webAwait) {
     failures.push(
       "Web toggleCleared must overlay the flipped cleared state with setReplacements before awaiting the PATCH.",
     );
   }
+}
+if (!webPage.includes("applyClearedOverlays(")) {
+  failures.push("Web must apply cleared overlays when rendering register rows so a list refetch cannot snap the icon back.");
+}
+if (!webPage.includes("retainInFlightPatches(")) {
+  failures.push("Web must keep in-flight cleared replacements when refreshGeneration wipes other patches.");
+}
+if (webPage.includes("setReplacements(new Map())")) {
+  failures.push("Web must not wipe every register replacement on refresh while a cleared PATCH is in flight.");
 }
 
 if (failures.length) {

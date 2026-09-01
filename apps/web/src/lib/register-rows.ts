@@ -94,3 +94,45 @@ export function applyRegisterPatches<T extends RegisterRow>(
     deletedIds,
   );
 }
+
+export type ClearedOverlayRow = {
+  readonly id: string;
+  readonly cleared: string;
+};
+
+export function retainInFlightPatches<T>(
+  current: ReadonlyMap<string, T>,
+  inFlightIds: Iterable<string>,
+): Map<string, T> {
+  const next = new Map<string, T>();
+  for (const id of inFlightIds) {
+    const row = current.get(id);
+    if (row !== undefined) next.set(id, row);
+  }
+  return next;
+}
+
+export function applyClearedOverlays<T extends ClearedOverlayRow>(
+  rows: readonly T[],
+  overlays: ReadonlyMap<string, string>,
+): T[] {
+  if (overlays.size === 0) return [...rows];
+  return rows.map((row) => {
+    const cleared = overlays.get(row.id);
+    return cleared !== undefined && cleared !== row.cleared ? { ...row, cleared } : row;
+  });
+}
+
+export function reconcileClearedOverlays<T extends ClearedOverlayRow>(
+  overlays: ReadonlyMap<string, string>,
+  rows: readonly T[],
+  inFlightIds: ReadonlySet<string>,
+): Map<string, string> {
+  const next = new Map(overlays);
+  const byId = new Map(rows.map((row) => [row.id, row] as const));
+  for (const [id, cleared] of overlays) {
+    if (inFlightIds.has(id)) continue;
+    if (byId.get(id)?.cleared === cleared) next.delete(id);
+  }
+  return next;
+}
