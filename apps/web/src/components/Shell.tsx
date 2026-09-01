@@ -230,18 +230,20 @@ export function Shell() {
 
         <div className="sidebar-footer">
           <NavLink to={addEntryHref(selectedAccount && !selectedAccount.closed ? selectedAccount.id : null)} className="add-button">+ Add transaction</NavLink>
-          <SettingsLink
-            className={({ isActive }) =>
-              isActive ? "sidebar-settings-link sidebar-link-active" : "sidebar-settings-link"
-            }
-          />
-          <button
-            type="button"
-            className="sign-out-button"
-            onClick={handleLogout}
-          >
-            Sign out
-          </button>
+          <div className="sidebar-footer-utilities">
+            <SettingsLink
+              className={({ isActive }) =>
+                isActive ? "sidebar-settings-link sidebar-link-active" : "sidebar-settings-link"
+              }
+            />
+            <button
+              type="button"
+              className="sign-out-button"
+              onClick={handleLogout}
+            >
+              Sign out
+            </button>
+          </div>
           {logoutError && <span className="masthead-error" role="alert">{logoutError}</span>}
         </div>
       </aside>
