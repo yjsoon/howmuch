@@ -4,7 +4,7 @@ import { SettingsCrumb } from "../components/SettingsCrumb";
 import { usePlan } from "../state/plan";
 
 export function RewardsImportPage() {
-  const { planId } = usePlan();
+  const { planId, reload } = usePlan();
   const [generation, setGeneration] = useState(0);
   const [fileName, setFileName] = useState<string | null>(null);
   const [payload, setPayload] = useState<unknown>(null);
@@ -32,10 +32,12 @@ export function RewardsImportPage() {
     if (payload == null || busy) return;
     setBusy(true);
     setError(null);
+    setResult(null);
     try {
       const imported = await api.importRewardsTracker(planId, payload);
       setResult(imported);
       setGeneration((value) => value + 1);
+      reload();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
