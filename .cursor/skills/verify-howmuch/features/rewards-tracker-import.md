@@ -23,7 +23,7 @@ Preconditions:
 - Owner `verifier` is signed in.
 - Use the repo file `fixtures/rewards-tracker-export.json`. Do not invent a different export.
 
-- **Open page.** Choose `Settings`, then `Rewards import`. Title is `Rewards import · HowMuch`. Heading is `Rewards import`. Breadcrumb is `Settings / Rewards import`. Choose `Settings` in the breadcrumb to return to the hub. Empty copy is `No Rewards Tracker cards stored yet.` Primary navigation has no `Rewards import` link.
+- **Open page.** Choose `Settings`, then `Rewards import`. Title is `Rewards import · HowMuch`. Heading is `Rewards import`. Breadcrumb is `← Settings / Rewards import`. Choose `Settings` in the breadcrumb to return to the hub. Empty copy is `No Rewards Tracker cards stored yet.` Primary navigation has no `Rewards import` link.
 - **Choose file.** Field `Rewards Tracker export` accepts the JSON file. After choosing `fixtures/rewards-tracker-export.json`, status is `Selected rewards-tracker-export.json`. `Import export` is enabled.
 - **Import.** Choose `Import export`. The button reads `Importing…`, then `Imported this session` shows Cards `1`, Tag mappings `2`, Accounts upserted `1`, Transactions imported `0`. Stored cards lists `Travel Card` with `DBS · miles`.
 - **Replay.** Choose the same file again. Choose `Import export`. Cards stays `1`. Stored cards still has one `Travel Card` row.

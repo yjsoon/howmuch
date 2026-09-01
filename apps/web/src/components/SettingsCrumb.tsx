@@ -5,7 +5,7 @@ export function SettingsCrumb({ current }: { current: string }) {
     <nav className="settings-crumb" aria-label="Breadcrumb">
       <ol>
         <li>
-          <NavLink to="/settings">Settings</NavLink>
+          <NavLink to="/settings"><span aria-hidden="true">← </span>Settings</NavLink>
         </li>
         <li aria-current="page">
           <h1>{current}</h1>

@@ -1007,19 +1007,17 @@ textarea {
 }
 
 .settings-crumb a {
-  color: var(--ink-soft);
+  color: var(--ink);
   font-family: var(--font-display);
   font-size: 22px;
   font-weight: 500;
   line-height: 1.1;
   text-decoration: underline;
-  text-decoration-style: dotted;
   text-underline-offset: 4px;
 }
 
 .settings-crumb a:hover {
-  color: var(--ink);
-  text-decoration-style: solid;
+  color: var(--ink-soft);
 }
 
 .page-eyebrow {

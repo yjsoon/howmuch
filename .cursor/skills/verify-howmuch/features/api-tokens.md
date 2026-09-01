@@ -24,7 +24,7 @@ Preconditions:
 - Owner `verifier` is signed in.
 - Use token name `Verify browser` so the row is unique.
 
-- **Open page.** Choose `Settings`, then `API tokens`. Title is `API tokens · HowMuch`. Heading is `API tokens`. Breadcrumb is `Settings / API tokens`. Choose `Settings` in the breadcrumb to return to the hub. Base URL code includes `/v1`. Empty copy is `No active tokens. Create one when an app needs direct access to HowMuch.` Primary navigation has no `API tokens` link.
+- **Open page.** Choose `Settings`, then `API tokens`. Title is `API tokens · HowMuch`. Heading is `API tokens`. Breadcrumb is `← Settings / API tokens`. Choose `Settings` in the breadcrumb to return to the hub. Base URL code includes `/v1`. Empty copy is `No active tokens. Create one when an app needs direct access to HowMuch.` Primary navigation has no `API tokens` link.
 - **Create.** Token name `Verify browser`. `Create token` is disabled while the name is blank. Choose `Create token`. Heading `Save this token now` appears. Field `New personal API token` is a non-empty secret. Active list is hidden until you dismiss.
 - **Dismiss.** Choose `I’ve saved it`. Active tokens shows `Verify browser`.
 - **Revoke.** Choose `Revoke`, then confirm `Revoke`. The name moves under `Revoked tokens (1)`.

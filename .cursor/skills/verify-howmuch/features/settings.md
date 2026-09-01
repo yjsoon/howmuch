@@ -8,7 +8,7 @@ Settings is the home for account plumbing: API tokens and Rewards import. Those 
 - `settings-tokens` follows **API tokens** to the token page.
 - `settings-rewards` follows **Rewards import** to the importer.
 - `settings-not-primary` keeps **API tokens** and **Rewards import** out of Primary navigation.
-- `settings-crumb` returns to the hub from the `Settings / …` breadcrumb on a tool page.
+- `settings-crumb` returns to the hub from the `← Settings / …` breadcrumb on a tool page.
 
 ## How to get to it (user POV)
 
@@ -25,7 +25,7 @@ Preconditions:
 
 - **Open hub.** Choose `Settings`. Title is `Settings · HowMuch`. Heading is `Settings`. The tools list has `API tokens` and `Rewards import`.
 - **Primary nav.** `Primary navigation` has `Scheduled` and the Reflect reports. It has no `API tokens` link and no `Rewards import` link.
-- **API tokens.** Choose `API tokens`. Title is `API tokens · HowMuch`. Breadcrumb is `Settings / API tokens`. Choose `Settings` in the breadcrumb to return to the hub.
+- **API tokens.** Choose `API tokens`. Title is `API tokens · HowMuch`. Breadcrumb is `← Settings / API tokens`. Choose `Settings` in the breadcrumb to return to the hub.
 - **Rewards import.** From the hub, choose `Rewards import`. Title is `Rewards import · HowMuch`. Heading is `Rewards import`.
 - **Proof.** Screenshot the hub (`artifacts/settings/hub.png`) and the All Accounts sidebar showing Settings in the footer, not above Reflect (`artifacts/settings/sidebar.png`).
 
