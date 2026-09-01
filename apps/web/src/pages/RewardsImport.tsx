@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { NavLink } from "react-router-dom";
 import { api, useApi, type RewardsTrackerImportResult } from "../api/client";
+import { SettingsCrumb } from "../components/SettingsCrumb";
 import { usePlan } from "../state/plan";
 
 export function RewardsImportPage() {
@@ -48,10 +48,7 @@ export function RewardsImportPage() {
   return (
     <>
       <header className="report-header">
-        <div>
-          <NavLink to="/settings" className="page-eyebrow">Settings</NavLink>
-          <h1>Rewards import</h1>
-        </div>
+        <SettingsCrumb current="Rewards import" />
       </header>
 
       <p className="diagnostic-note">

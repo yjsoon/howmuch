@@ -981,6 +981,47 @@ textarea {
   margin: 0;
 }
 
+.settings-crumb ol {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35em 0.55em;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-crumb li:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55em;
+}
+
+.settings-crumb li:first-child::after {
+  content: "/";
+  color: var(--ink-faint);
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.1;
+}
+
+.settings-crumb a {
+  color: var(--ink-soft);
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.1;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 4px;
+}
+
+.settings-crumb a:hover {
+  color: var(--ink);
+  text-decoration-style: solid;
+}
+
 .page-eyebrow {
   display: block;
   margin-bottom: 4px;
@@ -3596,6 +3637,11 @@ tr:hover .share-bar {
 
   .report-header h1 {
     font-size: 22px;
+  }
+
+  .settings-crumb a,
+  .settings-crumb li:first-child::after {
+    font-size: 18px;
   }
 
   .headline-row {

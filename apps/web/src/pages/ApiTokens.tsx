@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { NavLink } from "react-router-dom";
 import { api, useApi, type CreatedPersonalApiToken } from "../api/client";
+import { SettingsCrumb } from "../components/SettingsCrumb";
 
 export function ApiTokensPage() {
   const [generation, setGeneration] = useState(0);
@@ -59,10 +59,7 @@ export function ApiTokensPage() {
   return (
     <>
       <header className="report-header api-token-header">
-        <div>
-          <NavLink to="/settings" className="page-eyebrow">Settings</NavLink>
-          <h1>API tokens</h1>
-        </div>
+        <SettingsCrumb current="API tokens" />
         <p className="api-token-endpoint">
           <span>Base URL</span>
           <code>{window.location.origin}/v1</code>
