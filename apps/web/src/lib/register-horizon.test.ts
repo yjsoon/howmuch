@@ -218,4 +218,44 @@ describe("fillRegisterHorizon", () => {
       },
     })).rejects.toThrow("page 0 failed");
   });
+
+  test("keeps fetching when the focused account's oldest loaded date is still inside the horizon", async () => {
+    const TODAY_SEP = "2026-09-01";
+    type Row = { id: string; date: string; account_id: string };
+    const row = (id: string, date: string, account_id: string): Row => ({ id, date, account_id });
+    const offsets: number[] = [];
+    const filled = await fillRegisterHorizon({
+      today: TODAY_SEP,
+      accountId: "joey",
+      isCurrent: () => true,
+      fetchPage: async (offset) => {
+        offsets.push(offset);
+        if (offset === 0) {
+          return {
+            transactions: [
+              row("future", "2026-09-08", "joey"),
+              row("other-aug", "2026-08-20", "other"),
+              row("grab", "2026-08-29", "joey"),
+              row("other-june", "2026-06-15", "other"),
+            ],
+            has_more: true,
+            next_offset: 100,
+          };
+        }
+        return {
+          transactions: [row("july-groceries", "2026-07-20", "joey")],
+          has_more: true,
+          next_offset: 200,
+        };
+      },
+    });
+    expect(offsets).toEqual([0, 100]);
+    expect(filled?.transactions.map((transaction) => transaction.id)).toEqual([
+      "future",
+      "other-aug",
+      "grab",
+      "other-june",
+      "july-groceries",
+    ]);
+  });
 });
