@@ -31,8 +31,9 @@ The aesthetic is a broadsheet ledger: ink on paper, hairline rules, controlled d
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ HOWMUCH        Scheduled · Tokens · Spending · Income         │
-│                Net Worth · Age of Money · All Accounts [+ Add]│
+│ HOWMUCH        Scheduled · Spending · Income · Net Worth      │
+│                Age of Money · All Accounts [+ Add]            │
+│                footer: Settings · Sign out                    │
 ├──────────────────────────────────────────────────────────────┤
 │ Filter rail: date-range presets (1m/3m/12m/YTD/All/custom),   │
 │ accounts multi-select, categories multi-select, interval      │
@@ -49,7 +50,9 @@ The aesthetic is a broadsheet ledger: ink on paper, hairline rules, controlled d
 | `/` | redirect to `/transactions?range=all&accounts=all` |
 | `*` | same redirect as `/` |
 | `/scheduled` | Recurring transactions: list, add, enter now |
+| `/settings` | Settings hub: API tokens and Rewards import |
 | `/api-tokens` | Personal API tokens: mint and revoke |
+| `/import/rewards` | Rewards Tracker settings export import |
 | `/spending` | Spending Breakdown: total, share bars per category grouped by category group, click-through to filtered transactions |
 | `/income` | Income vs Spending: paired columns per period, table with income / spending / net / cumulative net |
 | `/net-worth` | Net Worth: stepped area chart, per-account balance table per period, account filter |

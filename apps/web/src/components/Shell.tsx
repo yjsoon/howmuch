@@ -98,6 +98,7 @@ export function Shell() {
     const report = REPORTS.find((entry) => entry.to === location.pathname);
     const label = (location.pathname === "/transactions" ? registerLabel : null)
       ?? (location.pathname === "/scheduled" ? "Scheduled transactions" : null)
+      ?? (location.pathname === "/settings" ? "Settings" : null)
       ?? (location.pathname === "/api-tokens" ? "API tokens" : null)
       ?? (location.pathname === "/import/rewards" ? "Rewards import" : null)
       ?? report?.label;
@@ -177,18 +178,6 @@ export function Shell() {
           >
             <span aria-hidden="true">◷</span> Scheduled
           </NavLink>
-          <NavLink
-            to="/api-tokens"
-            className={({ isActive }) => isActive ? "sidebar-primary-link sidebar-link-active" : "sidebar-primary-link"}
-          >
-            <span aria-hidden="true">⌁</span> API tokens
-          </NavLink>
-          <NavLink
-            to="/import/rewards"
-            className={({ isActive }) => isActive ? "sidebar-primary-link sidebar-link-active" : "sidebar-primary-link"}
-          >
-            <span aria-hidden="true">⇣</span> Rewards import
-          </NavLink>
           <div className="sidebar-section-label">Reflect</div>
           {REPORTS.map((report) => (
             <NavLink
@@ -217,6 +206,11 @@ export function Shell() {
           >
             <span aria-hidden="true">☷</span> Organise accounts
           </button>
+          <SettingsLink
+            className={({ isActive }) =>
+              isActive ? "sidebar-primary-link sidebar-settings-nav sidebar-link-active" : "sidebar-primary-link sidebar-settings-nav"
+            }
+          />
         </nav>
 
         <div className="account-list">
@@ -236,6 +230,11 @@ export function Shell() {
 
         <div className="sidebar-footer">
           <NavLink to={addEntryHref(selectedAccount && !selectedAccount.closed ? selectedAccount.id : null)} className="add-button">+ Add transaction</NavLink>
+          <SettingsLink
+            className={({ isActive }) =>
+              isActive ? "sidebar-settings-link sidebar-link-active" : "sidebar-settings-link"
+            }
+          />
           <button
             type="button"
             className="sign-out-button"
@@ -271,6 +270,19 @@ export function Shell() {
         />
       )}
     </div>
+  );
+}
+
+function isSettingsPath(pathname: string): boolean {
+  return pathname === "/settings" || pathname === "/api-tokens" || pathname === "/import/rewards";
+}
+
+function SettingsLink({ className }: { className: (state: { isActive: boolean }) => string }) {
+  const { pathname } = useLocation();
+  return (
+    <NavLink to="/settings" className={() => className({ isActive: isSettingsPath(pathname) })}>
+      Settings
+    </NavLink>
   );
 }
 

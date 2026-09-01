@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { NavLink } from "react-router-dom";
 import { api, useApi, type RewardsTrackerImportResult } from "../api/client";
 import { usePlan } from "../state/plan";
 
@@ -48,7 +49,7 @@ export function RewardsImportPage() {
     <>
       <header className="report-header">
         <div>
-          <span className="page-eyebrow">Cutover</span>
+          <NavLink to="/settings" className="page-eyebrow">Settings</NavLink>
           <h1>Rewards import</h1>
         </div>
       </header>

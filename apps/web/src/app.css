@@ -430,6 +430,22 @@ textarea {
   color: #c4c5be;
 }
 
+.sidebar-settings-nav {
+  display: none;
+}
+
+.sidebar-settings-link {
+  color: #c4c5be;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.sidebar-settings-link:hover,
+.sidebar-settings-link.sidebar-link-active {
+  color: #fff;
+}
+
 .workspace {
   min-width: 0;
 }
@@ -967,6 +983,11 @@ textarea {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+  text-decoration: none;
+}
+
+a.page-eyebrow:hover {
+  color: var(--ink);
 }
 
 .headline-row {
@@ -2755,6 +2776,39 @@ tr:hover .share-bar {
   font-size: 13px;
 }
 
+.settings-tool-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--rule);
+}
+
+.settings-tool-list li {
+  border-bottom: 1px solid var(--rule);
+}
+
+.settings-tool-link {
+  display: grid;
+  gap: 4px;
+  padding: 14px 0;
+  text-decoration: none;
+}
+
+.settings-tool-link strong {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.settings-tool-link span {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.settings-tool-link:hover strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .api-token-empty {
   margin: 0;
   padding: 24px 0;
@@ -3370,6 +3424,11 @@ tr:hover .share-bar {
   .account-list,
   .sidebar-footer {
     display: none;
+  }
+
+  .sidebar-settings-nav {
+    display: flex;
+    margin-top: 8px;
   }
 
   .sidebar-nav {

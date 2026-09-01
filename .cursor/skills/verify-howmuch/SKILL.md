@@ -88,7 +88,8 @@ Stable handles:
 | Auth fields | labels `Username`, `Password`, `Setup token` |
 | Auth submit | `Create account` / `Sign in` |
 | Primary nav | `nav` named `Primary navigation` |
-| Nav links | `Scheduled`, `API tokens`, `Rewards import`, Reflect reports (`Spending breakdown`, `Income v Spending`, `Net Worth`, `Age of Money`), `All Accounts`, `Organise accounts` |
+| Nav links | `Scheduled`, Reflect reports (`Spending breakdown`, `Income v Spending`, `Net Worth`, `Age of Money`), `All Accounts`, `Organise accounts` |
+| Settings | sidebar footer link `Settings` (drawer bottom on viewport ≤720px). Hub lists `API tokens` and `Rewards import` |
 | Quick entry | sidebar `+ Add transaction` or route `/add` |
 | Register compose | account register toolbar `+ Add transaction` |
 | Sign out | button `Sign out` |

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { NavLink } from "react-router-dom";
 import { api, useApi, type CreatedPersonalApiToken } from "../api/client";
 
 export function ApiTokensPage() {
@@ -59,7 +60,7 @@ export function ApiTokensPage() {
     <>
       <header className="report-header api-token-header">
         <div>
-          <span className="page-eyebrow">Account access</span>
+          <NavLink to="/settings" className="page-eyebrow">Settings</NavLink>
           <h1>API tokens</h1>
         </div>
         <p className="api-token-endpoint">
