@@ -214,6 +214,7 @@ struct APIClient {
 
   func fetchTransactions(
     planID: String,
+    accountID: String? = nil,
     offset: Int = 0,
     sinceDate: String? = nil,
     untilDate: String? = nil,
@@ -232,8 +233,10 @@ struct APIClient {
     if let type {
       queryItems.append(URLQueryItem(name: "type", value: type))
     }
+    let path = accountID.map { "/v1/plans/\(planID)/accounts/\($0)/transactions" }
+      ?? "/v1/plans/\(planID)/transactions"
     let response: APIEnvelope<TransactionsPayload> = try await request(
-      path: "/v1/plans/\(planID)/transactions",
+      path: path,
       queryItems: queryItems
     )
     return TransactionPage(

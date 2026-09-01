@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   fillRegisterHorizon,
   horizonStartDate,
+  oldestDateForHorizonCoverage,
   REGISTER_HORIZON_MAX_ROWS,
   shouldFetchMoreForHorizon,
 } from "./register-horizon";
@@ -86,6 +87,23 @@ describe("shouldFetchMoreForHorizon", () => {
       rowCount: 10,
       today: TODAY,
     })).toBe(false);
+  });
+});
+
+describe("oldestDateForHorizonCoverage", () => {
+  test("ignores other accounts when a focused account id is set", () => {
+    expect(oldestDateForHorizonCoverage([
+      { date: "2026-09-08", account_id: "joey" },
+      { date: "2026-06-15", account_id: "other" },
+      { date: "2026-08-29", account_id: "joey" },
+    ], "joey")).toBe("2026-08-29");
+  });
+
+  test("uses every loaded date when no account is focused", () => {
+    expect(oldestDateForHorizonCoverage([
+      { date: "2026-09-08" },
+      { date: "2026-06-15" },
+    ])).toBe("2026-06-15");
   });
 });
 
@@ -244,8 +262,8 @@ describe("fillRegisterHorizon", () => {
         }
         return {
           transactions: [row("july-groceries", "2026-07-20", "joey")],
-          has_more: true,
-          next_offset: 200,
+          has_more: false,
+          next_offset: null,
         };
       },
     });

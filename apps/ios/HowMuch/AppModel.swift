@@ -44,6 +44,9 @@ final class AppModel {
   private(set) var nextTransactionOffset: Int?
   private(set) var isLoadingOlderTransactions = false
   private(set) var isFillingHorizon = false
+  /// Nested plan-wide and focused-account fills share the spinner; each push
+  /// must pop, including when a newer `ledgerPageGeneration` aborts the older one.
+  private var horizonFillCount = 0
   private(set) var olderTransactionsError: String?
   /// Transaction-frequency counts for the inclusive trailing 30-day window.
   /// This is separate from `transactions`, which is intentionally paged for
@@ -184,6 +187,7 @@ final class AppModel {
 
   func beginFocusedRegisterAccount(_ accountID: String) {
     focusedRegisterAccountIDs.append(accountID)
+    Task { await fillFocusedAccountHorizon() }
   }
 
   func endFocusedRegisterAccount(_ accountID: String) {
@@ -997,6 +1001,7 @@ final class AppModel {
     nextTransactionOffset = nil
     isLoadingOlderTransactions = false
     isFillingHorizon = false
+    horizonFillCount = 0
     olderTransactionsError = nil
     if !quiet {
       ledgerPhase = .loading
@@ -1008,40 +1013,42 @@ final class AppModel {
       guard generation == ledgerPageGeneration, planID == settings.planID else {
         return
       }
-      isFillingHorizon = true
+      pushHorizonFill()
       serverTransactions = sortedUniqueTransactions(page.transactions)
       serverUnapprovedTransactions = sortedUniqueTransactions(unapproved)
       applyTransactionPageCursor(page)
       ledgerPhase = .loaded
       defer {
-        if generation == ledgerPageGeneration, planID == settings.planID {
-          isFillingHorizon = false
-        }
+        popHorizonFill()
       }
-      while RegisterHorizon.standard.shouldFetchMore(
-        oldestLoadedDate: serverTransactions.map(\.date).min(),
-        hasMore: hasMoreTransactions,
-        rowCount: serverTransactions.count
-      ) {
-        guard let offset = nextTransactionOffset else {
-          break
-        }
-        do {
-          let older = try await apiClient.fetchTransactions(planID: planID, offset: offset)
-          guard
-            generation == ledgerPageGeneration,
-            planID == settings.planID,
-            nextTransactionOffset == offset
-          else {
-            return
+      if focusedRegisterAccountIDs.last != nil {
+        await fillFocusedAccountHorizon(generation: generation, planID: planID)
+      } else {
+        while RegisterHorizon.standard.shouldFetchMore(
+          oldestLoadedDate: RegisterHorizon.coverageOldestDate(in: serverTransactions, accountID: nil),
+          hasMore: hasMoreTransactions,
+          rowCount: serverTransactions.count
+        ) {
+          guard let offset = nextTransactionOffset else {
+            break
           }
-          applyOlderTransactionPage(older)
-        } catch {
-          guard generation == ledgerPageGeneration, planID == settings.planID else {
-            return
+          do {
+            let older = try await apiClient.fetchTransactions(planID: planID, offset: offset)
+            guard
+              generation == ledgerPageGeneration,
+              planID == settings.planID,
+              nextTransactionOffset == offset
+            else {
+              return
+            }
+            applyOlderTransactionPage(older)
+          } catch {
+            guard generation == ledgerPageGeneration, planID == settings.planID else {
+              return
+            }
+            hasMoreTransactions = true
+            break
           }
-          hasMoreTransactions = true
-          break
         }
       }
     } catch {
@@ -1080,6 +1087,7 @@ final class AppModel {
     nextTransactionOffset = nil
     isLoadingOlderTransactions = false
     isFillingHorizon = false
+    horizonFillCount = 0
     olderTransactionsError = nil
     referencePhase = .idle
     ledgerPhase = .idle
@@ -1210,6 +1218,76 @@ final class AppModel {
       accountID: accountID,
       statementDate: statementDate
     )
+  }
+
+  /// Account registers filter the shared cache locally, but a busy plan-wide
+  /// first page can hide a quieter account's last two months. Fill that
+  /// account's own cursor (bounded by `since_date`) and merge it in. Leave
+  /// the plan-wide Load older offset alone.
+  func fillFocusedAccountHorizon() async {
+    await fillFocusedAccountHorizon(generation: ledgerPageGeneration, planID: settings.planID)
+  }
+
+  private func fillFocusedAccountHorizon(generation: Int, planID: String) async {
+    guard let accountID = focusedRegisterAccountIDs.last else {
+      return
+    }
+    let ownsFill = horizonFillCount == 0
+    if ownsFill {
+      pushHorizonFill()
+    }
+    defer {
+      if ownsFill, generation == ledgerPageGeneration {
+        popHorizonFill()
+      }
+    }
+
+    let horizon = RegisterHorizon.standard
+    let startDate = horizon.startDate()
+    var loaded = serverTransactions.filter { $0.accountID == accountID }
+    var offset = 0
+    var hasMore = true
+
+    while horizon.shouldFetchMore(
+      oldestLoadedDate: RegisterHorizon.coverageOldestDate(in: loaded, accountID: accountID),
+      hasMore: hasMore,
+      rowCount: loaded.count
+    ) {
+      do {
+        let page = try await apiClient.fetchTransactions(
+          planID: planID,
+          accountID: accountID,
+          offset: offset,
+          sinceDate: startDate
+        )
+        guard
+          generation == ledgerPageGeneration,
+          planID == settings.planID,
+          focusedRegisterAccountIDs.last == accountID
+        else {
+          return
+        }
+        loaded = sortedUniqueTransactions(loaded + page.transactions).filter { $0.accountID == accountID }
+        serverTransactions = sortedUniqueTransactions(serverTransactions + page.transactions)
+        offset = page.nextOffset ?? loaded.count
+        hasMore = page.hasMore && page.nextOffset != nil
+      } catch {
+        guard generation == ledgerPageGeneration, planID == settings.planID else {
+          return
+        }
+        return
+      }
+    }
+  }
+
+  private func pushHorizonFill() {
+    horizonFillCount += 1
+    isFillingHorizon = true
+  }
+
+  private func popHorizonFill() {
+    horizonFillCount = max(0, horizonFillCount - 1)
+    isFillingHorizon = horizonFillCount > 0
   }
 
   /// Appends one older page to the current, unfiltered ledger cursor. Register
