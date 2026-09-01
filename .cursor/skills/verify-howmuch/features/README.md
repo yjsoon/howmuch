@@ -53,4 +53,5 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Quick entry](./quick-entry.md) covers posting a spend from `/add` and seeing it in the register.
 - [Scheduled transactions](./scheduled-transactions.md) covers the empty demo list, adding a monthly schedule, and entering it.
 - [API tokens](./api-tokens.md) covers minting a personal token and revoking it.
+- [Rewards import](./rewards-tracker-import.md) covers uploading a Rewards Tracker settings export and replaying it without duplicates.
 - [Organise accounts](./organise-accounts.md) covers favourites, a custom group, and the sidebar after close.

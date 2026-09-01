@@ -2252,6 +2252,94 @@ export class LedgerRepository {
       .all(planId) as Array<{ external_ynab_id: string; date: string; amount_milli: number }>;
   }
 
+  async upsertRewardsTrackerSnapshot(planId: string, payload: unknown): Promise<void> {
+    await this.ensurePlan(planId);
+    const json = JSON.stringify(payload);
+    if (json === undefined) throw new ValidationError("Rewards Tracker snapshot must be JSON serialisable");
+    const cards = Array.isArray((payload as { cards?: unknown }).cards) ? (payload as { cards: unknown[] }).cards : [];
+    await this.db
+      .query(
+        `INSERT INTO rewards_tracker_snapshots (plan_id, payload_json, source_kind, imported_at, updated_at)
+         VALUES (?, ?, 'rewards-tracker-export', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+         ON CONFLICT(plan_id) DO UPDATE SET
+           payload_json = excluded.payload_json,
+           source_kind = excluded.source_kind,
+           updated_at = CURRENT_TIMESTAMP`,
+      )
+      .run(planId, json);
+
+    const keepIds: string[] = [];
+    for (const entry of cards) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const card = entry as Record<string, unknown>;
+      const id = typeof card.id === "string" ? card.id.trim() : "";
+      const name = typeof card.name === "string" ? card.name.trim() : "";
+      const accountId = typeof card.ynabAccountId === "string" ? card.ynabAccountId.trim() : "";
+      if (!id || !name || !accountId) continue;
+      keepIds.push(id);
+      await this.db
+        .query(
+          `INSERT INTO rewards_tracker_cards (
+             plan_id, id, account_id, name, issuer, type, payload_json, deleted, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
+           ON CONFLICT(plan_id, id) DO UPDATE SET
+             account_id = excluded.account_id,
+             name = excluded.name,
+             issuer = excluded.issuer,
+             type = excluded.type,
+             payload_json = excluded.payload_json,
+             deleted = 0,
+             updated_at = CURRENT_TIMESTAMP`,
+        )
+        .run(
+          planId,
+          id,
+          accountId,
+          name,
+          typeof card.issuer === "string" ? card.issuer : "",
+          typeof card.type === "string" ? card.type : "cashback",
+          JSON.stringify(card),
+        );
+    }
+
+    if (keepIds.length === 0) {
+      await this.db.query("UPDATE rewards_tracker_cards SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE plan_id = ?").run(planId);
+    } else {
+      const placeholders = keepIds.map(() => "?").join(", ");
+      await this.db
+        .query(
+          `UPDATE rewards_tracker_cards
+           SET deleted = 1, updated_at = CURRENT_TIMESTAMP
+           WHERE plan_id = ? AND id NOT IN (${placeholders})`,
+        )
+        .run(planId, ...keepIds);
+    }
+  }
+
+  async getRewardsTrackerSnapshot(planId: string): Promise<{
+    snapshot: unknown | null;
+    cards: unknown[];
+    imported_at: string | null;
+    updated_at: string | null;
+  }> {
+    const row = await this.db
+      .query("SELECT payload_json, imported_at, updated_at FROM rewards_tracker_snapshots WHERE plan_id = ?")
+      .get(planId) as Row | null;
+    const cards = await this.db
+      .query(
+        `SELECT payload_json FROM rewards_tracker_cards
+         WHERE plan_id = ? AND deleted = 0
+         ORDER BY name, id`,
+      )
+      .all(planId) as Array<{ payload_json: string }>;
+    return {
+      snapshot: row ? JSON.parse(String(row.payload_json)) : null,
+      cards: cards.map((card) => JSON.parse(String(card.payload_json))),
+      imported_at: row ? String(row.imported_at) : null,
+      updated_at: row ? String(row.updated_at) : null,
+    };
+  }
+
   async recordImportRow(sessionId: string, rowIndex: number, status: string, payload: unknown, error?: string, transactionId?: string): Promise<void> {
     await this.db
       .query(
