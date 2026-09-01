@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import apiContract from "../../../../docs/api-contract.md?raw";
+import { BrandLockup } from "../components/Brand";
 
 export function ApiDocsPage() {
   useEffect(() => {
@@ -14,13 +15,7 @@ export function ApiDocsPage() {
   return (
     <div className="api-docs-page">
       <header className="api-docs-header">
-        <a className="api-docs-brand" href="/">
-          <span className="brand-mark" aria-hidden="true">H</span>
-          <span>
-            <strong>HowMuch</strong>
-            <small>API documentation</small>
-          </span>
-        </a>
+        <BrandLockup tagline="API documentation" href="/" />
         <a
           className="api-docs-source"
           href="https://github.com/yjsoon/howmuch/blob/main/docs/api-contract.md"

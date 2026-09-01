@@ -25,6 +25,9 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    fs: {
+      allow: ["../.."],
+    },
     allowedHosts: [".e2b.app", ".onamp.dev"],
     proxy: {
       "/api": apiProxy,

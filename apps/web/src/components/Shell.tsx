@@ -13,6 +13,7 @@ import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
 import { AccountOrganizationDialog, type AccountUsageState } from "./AccountOrganizationDialog";
 import { AccountIconButton } from "./AccountIconPicker";
+import { BrandLockup } from "./Brand";
 
 const REPORTS = [
   { to: "/spending", label: "Spending breakdown" },
@@ -165,11 +166,7 @@ export function Shell() {
       </header>
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <span className="brand-mark" aria-hidden="true">H</span>
-          <span>
-            <strong>HowMuch</strong>
-            <small>Your money, clearly</small>
-          </span>
+          <BrandLockup tagline="Your money, clearly" />
         </div>
 
         <nav id="primary-navigation" className="sidebar-nav" aria-label="Primary navigation">
