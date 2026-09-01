@@ -1019,7 +1019,9 @@ final class AppModel {
       applyTransactionPageCursor(page)
       ledgerPhase = .loaded
       defer {
-        popHorizonFill()
+        if generation == ledgerPageGeneration, planID == settings.planID {
+          popHorizonFill()
+        }
       }
       while RegisterHorizon.standard.shouldFetchMore(
         oldestLoadedDate: RegisterHorizon.coverageOldestDate(in: serverTransactions, accountID: nil),

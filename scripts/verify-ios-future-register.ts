@@ -29,6 +29,10 @@ if (!appModel.includes("accountID: nil") || !appModel.includes("await fillFocuse
   failures.push("refreshLedger skips the plan-wide two-month fill when an account is focused, dropping other accounts' loaded history.");
 }
 
+if (/defer \{\s*popHorizonFill\(\)\s*\}/.test(appModel)) {
+  failures.push("refreshLedger defer pops the horizon fill without a generation guard, so a stale refresh can clear a newer fill.");
+}
+
 if (!appModel.includes("olderTransactionsError = error.localizedDescription")
   || !appModel.includes("retryIncompleteRegisterFill")
   || !register.includes("retryIncompleteRegisterFill")) {
