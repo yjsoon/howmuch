@@ -25,6 +25,16 @@ if (!appModel.includes("fillFocusedAccountHorizon") || !apiClient.includes("/acc
   failures.push("Focused account fill still uses the plan-wide transactions cursor instead of the account-scoped page.");
 }
 
+if (!appModel.includes("accountID: nil") || !appModel.includes("await fillFocusedAccountHorizon(generation:")) {
+  failures.push("refreshLedger skips the plan-wide two-month fill when an account is focused, dropping other accounts' loaded history.");
+}
+
+if (!appModel.includes("olderTransactionsError = error.localizedDescription")
+  || !appModel.includes("retryIncompleteRegisterFill")
+  || !register.includes("retryIncompleteRegisterFill")) {
+  failures.push("Focused account fill still swallows fetch errors with no Try Again path.");
+}
+
 if (!register.includes("Upcoming") && !register.includes("upcoming")) {
   failures.push("RegisterView has no Upcoming partition; future-dated rows render as ordinary current sections.");
 }

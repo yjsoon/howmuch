@@ -1021,35 +1021,34 @@ final class AppModel {
       defer {
         popHorizonFill()
       }
+      while RegisterHorizon.standard.shouldFetchMore(
+        oldestLoadedDate: RegisterHorizon.coverageOldestDate(in: serverTransactions, accountID: nil),
+        hasMore: hasMoreTransactions,
+        rowCount: serverTransactions.count
+      ) {
+        guard let offset = nextTransactionOffset else {
+          break
+        }
+        do {
+          let older = try await apiClient.fetchTransactions(planID: planID, offset: offset)
+          guard
+            generation == ledgerPageGeneration,
+            planID == settings.planID,
+            nextTransactionOffset == offset
+          else {
+            return
+          }
+          applyOlderTransactionPage(older)
+        } catch {
+          guard generation == ledgerPageGeneration, planID == settings.planID else {
+            return
+          }
+          hasMoreTransactions = true
+          break
+        }
+      }
       if focusedRegisterAccountIDs.last != nil {
         await fillFocusedAccountHorizon(generation: generation, planID: planID)
-      } else {
-        while RegisterHorizon.standard.shouldFetchMore(
-          oldestLoadedDate: RegisterHorizon.coverageOldestDate(in: serverTransactions, accountID: nil),
-          hasMore: hasMoreTransactions,
-          rowCount: serverTransactions.count
-        ) {
-          guard let offset = nextTransactionOffset else {
-            break
-          }
-          do {
-            let older = try await apiClient.fetchTransactions(planID: planID, offset: offset)
-            guard
-              generation == ledgerPageGeneration,
-              planID == settings.planID,
-              nextTransactionOffset == offset
-            else {
-              return
-            }
-            applyOlderTransactionPage(older)
-          } catch {
-            guard generation == ledgerPageGeneration, planID == settings.planID else {
-              return
-            }
-            hasMoreTransactions = true
-            break
-          }
-        }
       }
     } catch {
       guard generation == ledgerPageGeneration, planID == settings.planID else {
@@ -1228,6 +1227,17 @@ final class AppModel {
     await fillFocusedAccountHorizon(generation: ledgerPageGeneration, planID: settings.planID)
   }
 
+  func retryIncompleteRegisterFill() async {
+    olderTransactionsError = nil
+    if focusedRegisterAccountIDs.last != nil {
+      await fillFocusedAccountHorizon()
+      if olderTransactionsError != nil {
+        return
+      }
+    }
+    await loadOlderTransactions()
+  }
+
   private func fillFocusedAccountHorizon(generation: Int, planID: String) async {
     guard let accountID = focusedRegisterAccountIDs.last else {
       return
@@ -1275,6 +1285,7 @@ final class AppModel {
         guard generation == ledgerPageGeneration, planID == settings.planID else {
           return
         }
+        olderTransactionsError = error.localizedDescription
         return
       }
     }

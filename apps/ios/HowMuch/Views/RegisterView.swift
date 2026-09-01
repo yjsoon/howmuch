@@ -562,7 +562,7 @@ struct RegisterView: View {
             .font(.footnote)
             .foregroundStyle(.secondary)
           Button("Try Again") {
-            Task { await model.loadOlderTransactions() }
+            Task { await model.retryIncompleteRegisterFill() }
           }
           .buttonStyle(.bordered)
         }
