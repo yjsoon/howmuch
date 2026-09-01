@@ -122,7 +122,7 @@ export async function importRewardsTrackerExport(
 
     const accountIds = new Set<string>();
     for (const account of parsed.accounts) {
-      if (account.fromCache) {
+      if (account.fromCache && typeof account.balance === "number") {
         await repo.upsertAccount(planId, {
           id: account.id,
           name: account.name,
@@ -323,7 +323,7 @@ function rememberAccount(byId: Map<string, RewardsTrackerAccount>, value: unknow
     on_budget: typeof account.on_budget === "boolean" ? account.on_budget : undefined,
     closed: typeof account.closed === "boolean" ? account.closed : undefined,
     balance: typeof account.balance === "number" ? account.balance : undefined,
-    fromCache: true,
+    fromCache: typeof account.balance === "number",
   };
   const existing = byId.get(id);
   if (!existing) {
@@ -333,7 +333,7 @@ function rememberAccount(byId: Map<string, RewardsTrackerAccount>, value: unknow
   byId.set(id, {
     ...existing,
     ...Object.fromEntries(Object.entries(next).filter(([, value]) => value !== undefined)),
-    fromCache: true,
+    fromCache: existing.fromCache || next.fromCache,
   });
 }
 

@@ -74,6 +74,23 @@ describe("importRewardsTrackerExport", () => {
     expect(db.query("SELECT balance_milli FROM accounts WHERE id='acct-credit'").get()).toEqual({ balance_milli: -64000000 });
   });
 
+  test("does not zero an existing HowMuch account when a fat dump only names it", async () => {
+    await repo.upsertAccount("plan-test", { id: "acct-credit", name: "Travel Card", type: "creditCard", opening_balance: -64000000, balance: -64000000 });
+    await importRewardsTrackerExport(repo, "plan-test", {
+      ...officialExport,
+      cachedData: {
+        dashboardTransactions: [
+          {
+            budgetId: "plan-test",
+            accounts: [{ id: "acct-credit", name: "Travel Card" }],
+            transactions: [],
+          },
+        ],
+      },
+    });
+    expect(db.query("SELECT balance_milli FROM accounts WHERE id='acct-credit'").get()).toEqual({ balance_milli: -64000000 });
+  });
+
   test("upserts cached YNAB-shaped transactions without duplicating on replay", async () => {
     const first = await importRewardsTrackerExport(repo, "plan-test", fatExport);
     const second = await importRewardsTrackerExport(repo, "plan-test", {
