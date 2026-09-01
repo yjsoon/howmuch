@@ -1254,6 +1254,8 @@ final class AppModel {
       }
     }
 
+    olderTransactionsError = nil
+
     let horizon = RegisterHorizon.standard
     let startDate = horizon.startDate()
     var loaded = serverTransactions.filter { $0.accountID == accountID }

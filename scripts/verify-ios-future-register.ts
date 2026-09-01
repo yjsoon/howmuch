@@ -39,6 +39,11 @@ if (!appModel.includes("olderTransactionsError = error.localizedDescription")
   failures.push("Focused account fill still swallows fetch errors with no Try Again path.");
 }
 
+if (!appModel.includes("olderTransactionsError = nil\n\n    let horizon = RegisterHorizon.standard")
+  && !appModel.includes("olderTransactionsError = nil\n    let horizon = RegisterHorizon.standard")) {
+  failures.push("Focused account fill never clears a stale load error after a later successful fill.");
+}
+
 if (!register.includes("Upcoming") && !register.includes("upcoming")) {
   failures.push("RegisterView has no Upcoming partition; future-dated rows render as ordinary current sections.");
 }
