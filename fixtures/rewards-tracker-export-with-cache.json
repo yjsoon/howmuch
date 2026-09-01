@@ -1,0 +1,92 @@
+{
+  "ynab": {
+    "selectedBudgetId": "plan-test",
+    "selectedBudgetName": "Rewards cutover",
+    "trackedAccountIds": ["acct-rewards"]
+  },
+  "cards": [
+    {
+      "id": "card-rewards",
+      "name": "Rewards Card",
+      "issuer": "UOB",
+      "type": "cashback",
+      "ynabAccountId": "acct-rewards",
+      "featured": true,
+      "earningRate": 1.5
+    }
+  ],
+  "rules": [
+    {
+      "id": "rule-weekend",
+      "cardId": "card-rewards",
+      "name": "Weekend dining",
+      "rewardType": "cashback",
+      "rewardValue": 4,
+      "startDate": "2026-01-01",
+      "endDate": "2026-12-31",
+      "active": true,
+      "priority": 1
+    }
+  ],
+  "tagMappings": [
+    {
+      "id": "map-rewards-dining",
+      "cardId": "card-rewards",
+      "ynabTag": "orange",
+      "rewardCategory": "Dining"
+    }
+  ],
+  "calculations": [],
+  "themeGroups": [],
+  "hiddenCards": [],
+  "settings": {
+    "currency": "SGD",
+    "milesValuation": 0.01
+  },
+  "cachedData": {
+    "flagNames": {
+      "orange": "Dining",
+      "green": "Groceries"
+    },
+    "accounts": [
+      {
+        "budgetId": "plan-test",
+        "fetchedAt": "2026-05-20T00:00:00.000Z",
+        "accounts": [
+          {
+            "id": "acct-rewards",
+            "name": "Rewards Card",
+            "type": "creditCard",
+            "on_budget": true,
+            "closed": false,
+            "balance": -12850000
+          }
+        ]
+      }
+    ],
+    "dashboardTransactions": [
+      {
+        "budgetId": "plan-test",
+        "sinceDate": "2026-03-01",
+        "fetchedAt": "2026-05-20T00:00:00.000Z",
+        "trackedAccountIds": ["acct-rewards"],
+        "isComplete": true,
+        "accounts": [{ "id": "acct-rewards", "name": "Rewards Card" }],
+        "transactions": [
+          {
+            "id": "txn-candlenut",
+            "date": "2026-05-12",
+            "amount": -8600000,
+            "account_id": "acct-rewards",
+            "payee_name": "Candlenut",
+            "category_name": "Dining Out",
+            "flag_color": "orange",
+            "flag_name": "Dining",
+            "cleared": "cleared",
+            "approved": true
+          }
+        ]
+      }
+    ]
+  }
+}

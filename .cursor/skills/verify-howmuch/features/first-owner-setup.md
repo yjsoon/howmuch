@@ -7,7 +7,7 @@ A brand-new HowMuch database has no user. The first visitor creates the owner ac
 - `setup-form` shows **Set up HowMuch** with Username, Password, and Setup token.
 - `setup-create` accepts `verifier` / `howmuch-verify-15` / `howmuch-verify-bootstrap` and lands on All Accounts.
 - `setup-reject-short-password` keeps **Create account** disabled while the password is under 15 characters.
-- `ia-no-plan` after create or sign-in: heading All Accounts, Primary navigation has no link named `Plan`, `{web_url}/plan` and `{web_url}/no-such-route` both land on All Accounts, and page text has no `Ready to assign`.
+- `ia-no-plan` after create or sign-in: heading All Accounts, Primary navigation has no `Plan`, `API tokens`, or `Rewards import`, `{web_url}/plan` and `{web_url}/no-such-route` both land on All Accounts, and page text has no `Ready to assign`.
 - `signin-return` shows **Sign in to HowMuch** after sign out (setup is no longer offered).
 - `signout` returns to the sign-in form and drops the session.
 
@@ -29,7 +29,7 @@ Preconditions:
 - **Open setup.** Go to `{web_url}`. The heading is `Set up HowMuch` and the submit button is `Create account`.
 - **Short password.** Fill Username `verifier` and Password `short`. `Create account` stays disabled. The page does not navigate.
 - **Create owner.** Fill Username `verifier`, Password `howmuch-verify-15`, Setup token `howmuch-verify-bootstrap`. Choose `Create account`. The button reads `Please wait…`, then the shell appears with masthead `HowMuch` and heading `All Accounts`. Title is `All Accounts · HowMuch`.
-- **Home IA.** `Primary navigation` has no link named `Plan`. Open `{web_url}/plan`. Lands on All Accounts. Open `{web_url}/no-such-route`. Lands on All Accounts. Page text has no `Ready to assign`.
+- **Home IA.** `Primary navigation` has no link named `Plan`, `API tokens`, or `Rewards import`. `Settings` is in the sidebar footer. Open `{web_url}/plan`. Lands on All Accounts. Open `{web_url}/no-such-route`. Lands on All Accounts. Page text has no `Ready to assign`.
 - **Confirm session.** `control-howmuch http GET /api/auth/status` still reports `setup_required: false` (token is not a browser session). Proof that a user exists: `control-howmuch http GET /v1/plans` returns plan id `local-plan` and name `HowMuch Demo`.
 - **Sign out.** Choose `Sign out`. Heading becomes `Sign in to HowMuch`. There is no Setup token field.
 - **Sign in.** Fill Username `verifier` and Password `howmuch-verify-15`. Choose `Sign in`. All Accounts loads again.

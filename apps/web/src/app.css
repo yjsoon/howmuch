@@ -413,21 +413,43 @@ textarea {
 
 .sidebar-footer {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 14px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   padding: 14px 18px 18px;
   border-top: 1px solid #ffffff20;
 }
 
 .sidebar-footer .add-button {
-  flex: 1;
   text-align: center;
   color: var(--ink);
 }
 
+.sidebar-footer-utilities {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .sidebar-footer .sign-out-button {
   color: #c4c5be;
+}
+
+.sidebar-settings-nav {
+  display: none;
+}
+
+.sidebar-settings-link {
+  color: #c4c5be;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.sidebar-settings-link:hover,
+.sidebar-settings-link.sidebar-link-active {
+  color: #fff;
 }
 
 .workspace {
@@ -959,6 +981,45 @@ textarea {
   margin: 0;
 }
 
+.settings-crumb ol {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35em 0.55em;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-crumb li:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55em;
+}
+
+.settings-crumb li:first-child::after {
+  content: "/";
+  color: var(--ink-faint);
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.1;
+}
+
+.settings-crumb a {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.1;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.settings-crumb a:hover {
+  color: var(--ink-soft);
+}
+
 .page-eyebrow {
   display: block;
   margin-bottom: 4px;
@@ -967,6 +1028,11 @@ textarea {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+  text-decoration: none;
+}
+
+a.page-eyebrow:hover {
+  color: var(--ink);
 }
 
 .headline-row {
@@ -2691,6 +2757,103 @@ tr:hover .share-bar {
   font-size: 13px;
 }
 
+.rewards-import-form {
+  display: grid;
+  grid-template-columns: minmax(240px, 520px) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.rewards-import-form .field {
+  margin: 0;
+}
+
+.rewards-import-form .save-button {
+  width: auto;
+  min-width: 132px;
+  margin: 0 3px 3px 0;
+  padding: 10px 18px;
+  font-size: 13px;
+}
+
+.rewards-import-file,
+.rewards-import-empty {
+  margin: 12px 0 0;
+  color: var(--ink-soft);
+}
+
+.rewards-import-counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px 18px;
+  margin: 0;
+}
+
+.rewards-import-counts dt {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.rewards-import-counts dd {
+  margin: 2px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.rewards-card-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--rule);
+}
+
+.rewards-card-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.rewards-card-list span {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.settings-tool-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--rule);
+}
+
+.settings-tool-list li {
+  border-bottom: 1px solid var(--rule);
+}
+
+.settings-tool-link {
+  display: grid;
+  gap: 4px;
+  padding: 14px 0;
+  text-decoration: none;
+}
+
+.settings-tool-link strong {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.settings-tool-link span {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.settings-tool-link:hover strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .api-token-empty {
   margin: 0;
   padding: 24px 0;
@@ -3308,6 +3471,11 @@ tr:hover .share-bar {
     display: none;
   }
 
+  .sidebar-settings-nav {
+    display: flex;
+    margin-top: 8px;
+  }
+
   .sidebar-nav {
     display: flex;
     flex-direction: column;
@@ -3469,6 +3637,11 @@ tr:hover .share-bar {
     font-size: 22px;
   }
 
+  .settings-crumb a,
+  .settings-crumb li:first-child::after {
+    font-size: 18px;
+  }
+
   .headline-row {
     gap: 22px;
   }
@@ -3493,7 +3666,8 @@ tr:hover .share-bar {
   }
 
   .api-token-secret-row,
-  .api-token-form {
+  .api-token-form,
+  .rewards-import-form {
     display: grid;
     grid-template-columns: 1fr;
   }

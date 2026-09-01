@@ -26,7 +26,9 @@ Typechecks then emits a static bundle to `dist/`.
 - `/spending`, `/income`, `/net-worth`, `/age-of-money` — the four Reflect reports
 - `/transactions` — register with search and drill-down from reports
 - `/scheduled` — recurring transactions
+- `/settings` — Settings hub (API tokens, Rewards import)
 - `/api-tokens` — personal API tokens
+- `/import/rewards` — Rewards Tracker settings import
 - `/add` — mobile quick entry (posts to `/api/mobile/quick-entry`)
 
 Filters (date range, accounts, categories, interval) live in the query string and carry across tabs.

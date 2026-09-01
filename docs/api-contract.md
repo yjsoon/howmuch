@@ -506,6 +506,14 @@ Returns a normal YNAB-compatible transaction envelope.
 
 Starts a YNAB migration using a supplied token and plan id. The importer should fetch full history explicitly.
 
+`POST /api/import/rewards-tracker`
+
+Accepts a Rewards Tracker for YNAB settings export (`cards` required). Official Settings exports are the Cloud Sync portable payload: cards, rules, tag mappings, theme groups, hidden cards, and budget selection. Older localStorage dumps may also include `cachedData` with YNAB-shaped accounts, flag names, and dashboard transactions. Those objects are upserted through the same ledger IDs the tracker already syncs over `/v1`. Secrets (`pat`, `howmuchToken`, Cloud Sync phrases, formatter API keys) are stripped. Replaying the same file updates existing cards and transactions instead of duplicating them.
+
+`GET /api/import/rewards-tracker`
+
+Returns the stored portable snapshot and live cards for the plan.
+
 `POST /api/import/csv`
 
 Accepts rows shaped like:

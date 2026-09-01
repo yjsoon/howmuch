@@ -52,5 +52,7 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Register maintenance](./register-maintenance.md) covers the uncategorised pill, approval, inline edit, and opening Reconcile.
 - [Quick entry](./quick-entry.md) covers posting a spend from `/add` and seeing it in the register.
 - [Scheduled transactions](./scheduled-transactions.md) covers the empty demo list, adding a monthly schedule, and entering it.
+- [Settings](./settings.md) covers the footer Settings hub and that API tokens and Rewards import are not top-level nav.
 - [API tokens](./api-tokens.md) covers minting a personal token and revoking it.
+- [Rewards import](./rewards-tracker-import.md) covers uploading a Rewards Tracker settings export and replaying it without duplicates.
 - [Organise accounts](./organise-accounts.md) covers favourites, a custom group, and the sidebar after close.

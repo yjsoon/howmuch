@@ -19,7 +19,9 @@ const ApiTokensPage = lazy(() => import("./pages/ApiTokens").then((module) => ({
 const IncomePage = lazy(() => import("./pages/Income").then((module) => ({ default: module.IncomePage })));
 const NetWorthPage = lazy(() => import("./pages/NetWorth").then((module) => ({ default: module.NetWorthPage })));
 const QuickEntryPage = lazy(() => import("./pages/QuickEntry").then((module) => ({ default: module.QuickEntryPage })));
+const RewardsImportPage = lazy(() => import("./pages/RewardsImport").then((module) => ({ default: module.RewardsImportPage })));
 const ScheduledTransactionsPage = lazy(() => import("./pages/ScheduledTransactions").then((module) => ({ default: module.ScheduledTransactionsPage })));
+const SettingsPage = lazy(() => import("./pages/Settings").then((module) => ({ default: module.SettingsPage })));
 const SpendingPage = lazy(() => import("./pages/Spending").then((module) => ({ default: module.SpendingPage })));
 const TransactionsPage = lazy(() => import("./pages/Transactions").then((module) => ({ default: module.TransactionsPage })));
 
@@ -35,7 +37,9 @@ const router = createBrowserRouter([
     children: [
       { path: "/", element: <Navigate to={home} replace /> },
       { path: "/scheduled", element: <ScheduledTransactionsPage /> },
+      { path: "/settings", element: <SettingsPage /> },
       { path: "/api-tokens", element: <ApiTokensPage /> },
+      { path: "/import/rewards", element: <RewardsImportPage /> },
       { path: "/spending", element: <SpendingPage /> },
       { path: "/income", element: <IncomePage /> },
       { path: "/net-worth", element: <NetWorthPage /> },
