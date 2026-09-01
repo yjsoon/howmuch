@@ -32,7 +32,9 @@ warm amber light.
   the Xcode project via `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon`.
 - **Web**: `apps/web/public/favicon.svg` (the light master), plus
   `icon-192.png`, `icon-512.png`, and `apple-touch-icon.png` (180px), linked
-  from `apps/web/index.html`.
+  from `apps/web/index.html`. The in-app mark is the same light master,
+  imported by `apps/web/src/components/Brand.tsx` into the sidebar, the API
+  docs header, and the sign-in / setup screen.
 
 ## Re-exporting
 

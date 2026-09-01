@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { ApiError, api, bumpRequestEpoch, setUnauthorizedHandler } from "../api/client";
 import type { Account, AccountPreferences, Category, CategoryGroup } from "../api/types";
 import { configureMoney } from "../lib/money";
+import { HalationMark } from "../components/Brand";
 import {
   AccountPreferencesController,
   emptyAccountPreferences,
@@ -258,6 +259,7 @@ function AuthForm({
         }
       }}
     >
+      <HalationMark size="hero" />
       <h1>{setup ? "Set up HowMuch" : "Sign in to HowMuch"}</h1>
       <p>{setup ? "Create your account." : "Enter your username and password."}</p>
       <label>
