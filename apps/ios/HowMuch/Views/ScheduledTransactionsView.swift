@@ -158,7 +158,8 @@ struct ScheduledTransactionRow: View {
   }
 
   private var accessibilityLabel: String {
-    "\(payeeLabel), \(detailLine), \(schedule.recurrenceLabel)"
+    let amount = MoneyCodec.signedDisplayString(for: schedule.amount, currencyFormat: model.currencyFormat)
+    return "Scheduled, \(payeeLabel), \(detailLine), \(schedule.recurrenceLabel), \(amount)"
   }
 
   private var accountLabel: String {

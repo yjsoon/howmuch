@@ -33,12 +33,25 @@ struct RegisterView: View {
   @State private var transactionPendingDeletion: Transaction?
   @State private var deleteError: String?
   @State private var pendingRowAction: PendingRow?
-  @SceneStorage("howmuch.register.scheduledExpanded") private var expandedScheduleAccountIDs = ""
   @State private var editingSchedule: ScheduledTransaction?
 
   private struct DuplicateDraft: Identifiable {
     let id = UUID()
     let draft: TransactionDraft
+  }
+
+  private struct RegisterDateSection: Identifiable {
+    enum Region: String {
+      case scheduled
+      case current
+    }
+
+    let region: Region
+    let date: String
+    let pending: [PendingRow]
+    let transactions: [Transaction]
+    let schedules: [ScheduledTransaction]
+    var id: String { "\(region.rawValue)-\(date)" }
   }
 
   init(
@@ -57,7 +70,7 @@ struct RegisterView: View {
     List {
       workingBalanceSection
       loadingOrFilterSections
-      scheduledDisclosureSection
+      scheduledLoadErrorSection
       transactionDateSections
       searchCoverageSection
       emptyRegisterSection
@@ -309,7 +322,7 @@ struct RegisterView: View {
             .foregroundStyle(Theme.textPrimary)
             .accessibilityLabel(headlineAccessibilityLabel(current: current, working: working))
           if current != working {
-            Text("Working \(MoneyCodec.displayString(for: working, currencyFormat: model.currencyFormat)) including upcoming")
+            Text("Working \(MoneyCodec.displayString(for: working, currencyFormat: model.currencyFormat)) including posted scheduled")
               .font(.caption)
               .foregroundStyle(.secondary)
               .accessibilityHidden(true)
@@ -384,28 +397,19 @@ struct RegisterView: View {
 
   @ViewBuilder
   private var transactionDateSections: some View {
-    let today = Date.now.isoDateString
-    let partitioned = RegisterCurrent.partitionDates(sections.map(\.date), today: today)
-    let byDate = Dictionary(uniqueKeysWithValues: sections.map { ($0.date, $0) })
+    let scheduled = scheduledDateSections
     Group {
-      ForEach(partitioned.upcoming, id: \.self) { date in
-        if let section = byDate[date] {
-          dateSection(section, showsUpcomingBand: date == partitioned.upcoming.first)
-        }
+      ForEach(scheduled) { section in
+        dateSection(section, showsScheduledBand: section.id == scheduled.first?.id)
       }
-      ForEach(partitioned.current, id: \.self) { date in
-        if let section = byDate[date] {
-          dateSection(section, showsUpcomingBand: false)
-        }
+      ForEach(currentDateSections) { section in
+        dateSection(section, showsScheduledBand: false)
       }
     }
   }
 
   @ViewBuilder
-  private func dateSection(
-    _ section: (date: String, pending: [PendingRow], transactions: [Transaction]),
-    showsUpcomingBand: Bool
-  ) -> some View {
+  private func dateSection(_ section: RegisterDateSection, showsScheduledBand: Bool) -> some View {
     Section {
       ForEach(section.pending) { row in
         PendingTransactionRow(
@@ -419,10 +423,25 @@ struct RegisterView: View {
       ForEach(section.transactions) { transaction in
         registerRow(for: transaction)
       }
+      ForEach(section.schedules) { schedule in
+        Button {
+          editingSchedule = schedule
+        } label: {
+          ScheduledTransactionRow(schedule: schedule, showsAccount: scope == .all, showsNextDate: false)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens this scheduled transaction.")
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+          Button("Edit") {
+            editingSchedule = schedule
+          }
+        }
+        .registerRowChrome()
+      }
     } header: {
       VStack(alignment: .leading, spacing: 0) {
-        if showsUpcomingBand {
-          Text("Upcoming")
+        if showsScheduledBand {
+          Text("Scheduled")
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.secondary)
             .textCase(nil)
@@ -504,7 +523,7 @@ struct RegisterView: View {
   private var searchCoverageSection: some View {
     if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       Section {
-        Text("Search covers \(model.transactions.count) loaded transaction\(model.transactions.count == 1 ? "" : "s"). Scroll to load older ones.")
+        Text(searchCoverageCopy)
           .font(.footnote)
           .foregroundStyle(.secondary)
           .frame(maxWidth: .infinity, alignment: .leading)
@@ -514,9 +533,19 @@ struct RegisterView: View {
     }
   }
 
+  private var searchCoverageCopy: String {
+    let loaded = model.transactions.count
+    let transactionWord = loaded == 1 ? "transaction" : "transactions"
+    if visibleSchedules.isEmpty {
+      return "Search covers \(loaded) loaded \(transactionWord). Scroll to load older ones."
+    }
+    let scheduledWord = visibleSchedules.count == 1 ? "scheduled transaction" : "scheduled transactions"
+    return "Search covers \(loaded) loaded \(transactionWord) and \(visibleSchedules.count) \(scheduledWord). Scroll to load older ones."
+  }
+
   @ViewBuilder
   private var emptyRegisterSection: some View {
-    if visibleTransactions.isEmpty, visiblePendingRows.isEmpty, model.ledgerPhase == .loaded, !model.isFillingHorizon {
+    if visibleTransactions.isEmpty, visiblePendingRows.isEmpty, visibleSchedules.isEmpty, model.ledgerPhase == .loaded, !model.isFillingHorizon {
       Section {
         Group {
           if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -686,7 +715,7 @@ struct RegisterView: View {
       return currentText
     }
     let workingText = MoneyCodec.displayString(for: working, currencyFormat: model.currencyFormat)
-    return "\(currentText). Working \(workingText) including upcoming."
+    return "\(currentText). Working \(workingText) including posted scheduled."
   }
 
   /// Prefer `last_reconciled_date` from the accounts payload. If that field is
@@ -706,7 +735,7 @@ struct RegisterView: View {
   }
 
   @ViewBuilder
-  private var scheduledDisclosureSection: some View {
+  private var scheduledLoadErrorSection: some View {
     if showsScheduledFailure {
       Section {
         Button {
@@ -744,92 +773,11 @@ struct RegisterView: View {
         .accessibilityLabel("Couldn’t load scheduled transactions")
         .accessibilityHint("Double tap to try again.")
       }
-    } else if shouldShowScheduled {
-      Section {
-        Button {
-          withAnimation(.snappy) {
-            toggleScheduledExpanded()
-          }
-        } label: {
-          HStack(spacing: 10) {
-            Image(systemName: "chevron.right")
-              .font(.footnote.weight(.semibold))
-              .foregroundStyle(.secondary)
-              .rotationEffect(.degrees(isScheduledExpanded ? 90 : 0))
-            Text("Scheduled")
-              .font(.subheadline.weight(.semibold))
-              .foregroundStyle(Theme.textPrimary)
-            Spacer()
-            Text("\(accountSchedules.count)")
-              .font(.subheadline)
-              .foregroundStyle(.secondary)
-          }
-          .padding(.horizontal, 16)
-          .padding(.vertical, 12)
-        }
-        .buttonStyle(.plain)
-        .listRowInsets(EdgeInsets())
-        .listRowBackground(Theme.canvas)
-        .listRowSeparator(.hidden)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityLabel("Scheduled")
-        .accessibilityValue(scheduledAccessibilityValue)
-        .accessibilityHint(isScheduledExpanded ? "Collapses scheduled transactions." : "Expands scheduled transactions.")
-
-        if isScheduledExpanded {
-          ForEach(accountSchedules) { schedule in
-            Button {
-              editingSchedule = schedule
-            } label: {
-              ScheduledTransactionRow(schedule: schedule, showsAccount: false, showsNextDate: true)
-            }
-            .buttonStyle(.plain)
-            .registerRowChrome()
-          }
-        }
-      }
     }
   }
 
   private var showsScheduledFailure: Bool {
     scope.accountID != nil && model.scheduledTransactionsPhase.errorMessage != nil
-  }
-
-  private var shouldShowScheduled: Bool {
-    scope.accountID != nil
-      && model.scheduledTransactionsPhase == .loaded
-      && !accountSchedules.isEmpty
-  }
-
-  private var isScheduledExpanded: Bool {
-    guard let accountID = scope.accountID else {
-      return false
-    }
-    return scheduledExpandedAccountIDs.contains(accountID)
-  }
-
-  private var scheduledExpandedAccountIDs: Set<String> {
-    Set(expandedScheduleAccountIDs.split(separator: ",", omittingEmptySubsequences: true).map(String.init))
-  }
-
-  private func toggleScheduledExpanded() {
-    guard let accountID = scope.accountID else {
-      return
-    }
-    var ids = scheduledExpandedAccountIDs
-    if ids.contains(accountID) {
-      ids.remove(accountID)
-    } else {
-      ids.insert(accountID)
-    }
-    expandedScheduleAccountIDs = ids.sorted().joined(separator: ",")
-  }
-
-  private var scheduledAccessibilityValue: String {
-    if isScheduledExpanded {
-      return "Expanded, \(accountSchedules.count)"
-    }
-    return "Collapsed, \(accountSchedules.count)"
   }
 
   private var accountSchedules: [ScheduledTransaction] {
@@ -844,6 +792,42 @@ struct RegisterView: View {
         }
         return left.id < right.id
       }
+  }
+
+  private var visibleSchedules: [ScheduledTransaction] {
+    if unapprovedOnly || unclearedOnly || uncategorisedOnly {
+      return []
+    }
+    let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    return accountSchedules.filter { schedule in
+      if let categoryID,
+         schedule.categoryID != categoryID,
+         !schedule.activeSubtransactions.contains(where: { $0.categoryID == categoryID }) {
+        return false
+      }
+      if let dateRange, !dateRange.contains(schedule.dateNext) {
+        return false
+      }
+      return scheduleMatchesSearch(schedule, query: query)
+    }
+  }
+
+  private func scheduleMatchesSearch(_ schedule: ScheduledTransaction, query: String) -> Bool {
+    guard !query.isEmpty else {
+      return true
+    }
+    var haystack: [String?] = [schedule.memo]
+    if let payeeID = schedule.payeeID {
+      haystack.append(model.payee(withID: payeeID)?.name)
+    }
+    haystack.append(model.categoryName(forID: schedule.categoryID))
+    haystack.append(contentsOf: schedule.activeSubtransactions.map { model.categoryName(forID: $0.categoryID) })
+    haystack.append(model.account(withID: schedule.accountID)?.name)
+    if let transferAccountID = schedule.transferAccountID {
+      haystack.append(model.account(withID: transferAccountID)?.name)
+      haystack.append("Transfer")
+    }
+    return haystack.contains { $0?.localizedStandardContains(query) == true }
   }
 
   private var scopedTransactions: [Transaction] {
@@ -1044,12 +1028,44 @@ struct RegisterView: View {
     }
   }
 
-  private var sections: [(date: String, pending: [PendingRow], transactions: [Transaction])] {
-    let pendingByDate = Dictionary(grouping: visiblePendingRows, by: \.isoDate)
-    let grouped = Dictionary(grouping: visibleTransactions, by: \.date)
-    let dates = Set(grouped.keys).union(pendingByDate.keys)
+  private var scheduledDateSections: [RegisterDateSection] {
+    let today = Date.now.isoDateString
+    dateSections(
+      region: .scheduled,
+      pending: visiblePendingRows.filter { $0.isoDate > today },
+      transactions: visibleTransactions.filter { $0.date > today },
+      schedules: visibleSchedules.filter { $0.dateNext > today }
+    )
+  }
+
+  private var currentDateSections: [RegisterDateSection] {
+    let today = Date.now.isoDateString
+    dateSections(
+      region: .current,
+      pending: visiblePendingRows.filter { $0.isoDate <= today },
+      transactions: visibleTransactions.filter { $0.date <= today },
+      schedules: visibleSchedules.filter { $0.dateNext <= today }
+    )
+  }
+
+  private func dateSections(
+    region: RegisterDateSection.Region,
+    pending: [PendingRow],
+    transactions: [Transaction],
+    schedules: [ScheduledTransaction]
+  ) -> [RegisterDateSection] {
+    let pendingByDate = Dictionary(grouping: pending, by: \.isoDate)
+    let postedByDate = Dictionary(grouping: transactions, by: \.date)
+    let schedulesByDate = Dictionary(grouping: schedules, by: \.dateNext)
+    let dates = Set(pendingByDate.keys).union(postedByDate.keys).union(schedulesByDate.keys)
     return dates.sorted(by: >).map { date in
-      (date: date, pending: pendingByDate[date] ?? [], transactions: grouped[date] ?? [])
+      RegisterDateSection(
+        region: region,
+        date: date,
+        pending: pendingByDate[date] ?? [],
+        transactions: postedByDate[date] ?? [],
+        schedules: schedulesByDate[date] ?? []
+      )
     }
   }
 }
