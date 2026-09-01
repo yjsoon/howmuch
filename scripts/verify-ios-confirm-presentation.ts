@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const iosRoot = join(root, "apps/ios");
 const ALLOWED: string[] = [
-  "apps/ios/HowMuch/Views/RegisterView.swift:159", // Retry and discard are two actions
+  "apps/ios/HowMuch/Views/RegisterView.swift:166", // Retry and discard are two actions
 ];
 const pattern = /\.confirmationDialog\s*\(/g;
 

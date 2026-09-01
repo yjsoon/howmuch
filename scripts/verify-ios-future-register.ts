@@ -48,6 +48,14 @@ if (!register.includes("including scheduled") || !register.includes("showsSchedu
   failures.push("RegisterView has no Scheduled partition; future-dated rows render as ordinary current sections.");
 }
 
+if (register.includes("toggleScheduledExpanded") || register.includes("scheduledDisclosureSection")) {
+  failures.push("Recurring schedules still live in a separate collapsed disclosure instead of the Scheduled date list.");
+}
+
+if (!register.includes("visibleSchedules") || !register.includes("scheduledDateSections")) {
+  failures.push("Posted futures and recurrences are not one Scheduled date list.");
+}
+
 if (register.includes("MoneyCodec.displayString(for: account.balance")
   && !register.includes("asOfToday")
   && !register.includes("currentBalance")) {
@@ -68,4 +76,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log("iOS future-dated register: focused-account horizon, Scheduled partition, as-of-today headline.");
+console.log("iOS future-dated register: focused-account horizon, unified Scheduled list, as-of-today headline.");
