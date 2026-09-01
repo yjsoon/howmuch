@@ -44,8 +44,8 @@ if (!appModel.includes("olderTransactionsError = nil\n\n    let horizon = Regist
   failures.push("Focused account fill never clears a stale load error after a later successful fill.");
 }
 
-if (!register.includes("Upcoming") && !register.includes("upcoming")) {
-  failures.push("RegisterView has no Upcoming partition; future-dated rows render as ordinary current sections.");
+if (!register.includes("including scheduled") || !register.includes("showsScheduledBand")) {
+  failures.push("RegisterView has no Scheduled partition; future-dated rows render as ordinary current sections.");
 }
 
 if (register.includes("MoneyCodec.displayString(for: account.balance")
@@ -55,7 +55,7 @@ if (register.includes("MoneyCodec.displayString(for: account.balance")
 }
 
 if (!current.includes("asOfTodayBalance") || !current.includes("partitionDates")) {
-  failures.push("RegisterCurrent.swift is missing the as-of-today balance or Upcoming date split.");
+  failures.push("RegisterCurrent.swift is missing the as-of-today balance or future-dated date split.");
 }
 
 if (!pbxproj.includes("RegisterCurrent.swift")) {
@@ -68,4 +68,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log("iOS future-dated register: focused-account horizon, Upcoming partition, as-of-today headline.");
+console.log("iOS future-dated register: focused-account horizon, Scheduled partition, as-of-today headline.");

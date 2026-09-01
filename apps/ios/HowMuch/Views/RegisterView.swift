@@ -309,7 +309,7 @@ struct RegisterView: View {
             .foregroundStyle(Theme.textPrimary)
             .accessibilityLabel(headlineAccessibilityLabel(current: current, working: working))
           if current != working {
-            Text("Working \(MoneyCodec.displayString(for: working, currencyFormat: model.currencyFormat)) including upcoming")
+            Text("Working \(MoneyCodec.displayString(for: working, currencyFormat: model.currencyFormat)) including scheduled")
               .font(.caption)
               .foregroundStyle(.secondary)
               .accessibilityHidden(true)
@@ -390,12 +390,12 @@ struct RegisterView: View {
     Group {
       ForEach(partitioned.upcoming, id: \.self) { date in
         if let section = byDate[date] {
-          dateSection(section, showsUpcomingBand: date == partitioned.upcoming.first)
+          dateSection(section, showsScheduledBand: date == partitioned.upcoming.first)
         }
       }
       ForEach(partitioned.current, id: \.self) { date in
         if let section = byDate[date] {
-          dateSection(section, showsUpcomingBand: false)
+          dateSection(section, showsScheduledBand: false)
         }
       }
     }
@@ -404,7 +404,7 @@ struct RegisterView: View {
   @ViewBuilder
   private func dateSection(
     _ section: (date: String, pending: [PendingRow], transactions: [Transaction]),
-    showsUpcomingBand: Bool
+    showsScheduledBand: Bool
   ) -> some View {
     Section {
       ForEach(section.pending) { row in
@@ -421,8 +421,8 @@ struct RegisterView: View {
       }
     } header: {
       VStack(alignment: .leading, spacing: 0) {
-        if showsUpcomingBand {
-          Text("Upcoming")
+        if showsScheduledBand {
+          Text("Scheduled")
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.secondary)
             .textCase(nil)
@@ -686,7 +686,7 @@ struct RegisterView: View {
       return currentText
     }
     let workingText = MoneyCodec.displayString(for: working, currencyFormat: model.currencyFormat)
-    return "\(currentText). Working \(workingText) including upcoming."
+    return "\(currentText). Working \(workingText) including scheduled."
   }
 
   /// Prefer `last_reconciled_date` from the accounts payload. If that field is
