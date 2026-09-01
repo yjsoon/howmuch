@@ -160,6 +160,7 @@ export function TransactionsPage() {
   const [compose, setCompose] = useState<RegisterComposeState>(closedCompose);
   const [composeFocus, setComposeFocus] = useState(0);
   const mutationLockRef = useRef(false);
+  const clearedInFlightRef = useRef(new Set<string>());
   const [writeLocked, setWriteLocked] = useState(false);
   const selectedAccountId = filters.accountIds.length === 1 ? filters.accountIds[0]! : null;
   const composeScope = selectedAccountId ?? (filters.accountIds.join(",") || "all");
@@ -305,7 +306,11 @@ export function TransactionsPage() {
 
   const toggleCleared = async (transaction: Transaction) => {
     if (mutationLockRef.current || (transaction.cleared !== "uncleared" && transaction.cleared !== "cleared")) return;
+    if (clearedInFlightRef.current.has(transaction.id)) return;
     const cleared = transaction.cleared === "cleared" ? "uncleared" : "cleared";
+    const overlay = { ...transaction, cleared };
+    clearedInFlightRef.current.add(transaction.id);
+    setReplacements((current) => new Map(current).set(transaction.id, overlay));
     setMutatingId(transaction.id);
     setMutationError(null);
     setMutationSuccess(null);
@@ -315,8 +320,10 @@ export function TransactionsPage() {
       reload();
       setReconciliationPreviewGeneration((generation) => generation + 1);
     } catch (cause) {
+      setReplacements((current) => new Map(current).set(transaction.id, transaction));
       setMutationError(cause instanceof Error ? cause.message : String(cause));
     } finally {
+      clearedInFlightRef.current.delete(transaction.id);
       setMutatingId((current) => (current === transaction.id ? null : current));
     }
   };

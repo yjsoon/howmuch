@@ -85,6 +85,7 @@ final class AppModel {
   private var inFlightCreates: Set<PendingRow.ID> = []
   @ObservationIgnored private var editTasks: [String: Task<Void, Never>] = [:]
   @ObservationIgnored private var editGenerations: [String: Int] = [:]
+  @ObservationIgnored private var clearedTogglesInFlight: Set<String> = []
   @ObservationIgnored private var needsAnotherDrain = false
   @ObservationIgnored private var coalescedDrainTrigger: OutboxDrainTrigger?
   private var accountsByID: [String: Account] = [:]
@@ -1583,10 +1584,15 @@ final class AppModel {
     guard transaction.cleared != .reconciled else {
       throw APIClientError.validation("Reconciled transactions stay locked.")
     }
+    guard !clearedTogglesInFlight.contains(transaction.id) else {
+      return
+    }
 
-    isSubmitting = true
-    defer { isSubmitting = false }
     let cleared: ClearedState = transaction.cleared == .cleared ? .uncleared : .cleared
+    let optimistic = transaction.withCleared(cleared)
+    clearedTogglesInFlight.insert(transaction.id)
+    applySavedTransaction(optimistic, replacing: transaction)
+    defer { clearedTogglesInFlight.remove(transaction.id) }
     do {
       let saved = try await apiClient.updateTransactionCleared(
         planID: settings.planID,
@@ -1594,10 +1600,11 @@ final class AppModel {
         expectedCleared: transaction.cleared,
         cleared: cleared
       )
-      applySavedTransaction(saved, replacing: transaction)
+      applySavedTransaction(saved, replacing: optimistic)
       showSaveMessage(cleared == .cleared ? "Marked transaction cleared" : "Marked transaction uncleared")
       Task { await refreshLedgerAndInvalidatePlan() }
     } catch {
+      applySavedTransaction(transaction, replacing: optimistic)
       await refreshLedger(quiet: true)
       throw error
     }
