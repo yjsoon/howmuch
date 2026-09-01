@@ -319,6 +319,40 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }).then((d) => d.transaction),
+  rewardsTrackerSnapshot: (planId: string) =>
+    request<RewardsTrackerSnapshot>(`/api/import/rewards-tracker${query({ plan_id: planId })}`),
+  importRewardsTracker: (planId: string, payload: unknown) =>
+    request<RewardsTrackerImportResult>("/api/import/rewards-tracker", {
+      method: "POST",
+      body: JSON.stringify({ plan_id: planId, payload }),
+    }),
+};
+
+export type RewardsTrackerCard = {
+  id: string;
+  name: string;
+  issuer?: string;
+  type?: string;
+  ynabAccountId: string;
+};
+
+export type RewardsTrackerSnapshot = {
+  snapshot: { cards?: RewardsTrackerCard[]; settings?: Record<string, unknown> } | null;
+  cards: RewardsTrackerCard[];
+  imported_at: string | null;
+  updated_at: string | null;
+};
+
+export type RewardsTrackerImportResult = {
+  import_session_id: string;
+  cards: number;
+  rules: number;
+  tag_mappings: number;
+  theme_groups: number;
+  accounts_upserted: number;
+  transactions_imported: number;
+  transactions_updated: number;
+  flag_names: number;
 };
 
 export interface ApiState<T> {

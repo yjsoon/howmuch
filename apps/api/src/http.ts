@@ -6,6 +6,7 @@ import { collectionPostIntent, parseTransactionCreates, parseTransactionUpdates 
 import { ReportService } from "./reports";
 import { decimalToMilliunits } from "./money";
 import { importCsvRows } from "./importers/csv";
+import { importRewardsTrackerExport } from "./importers/rewards-tracker";
 import { importYnabFromApi } from "./importers/ynab";
 import type { LedgerStore, ReportStore } from "./storage";
 import { SQLiteAuthStore, type AuthStore, type AuthUser } from "./auth-store";
@@ -645,6 +646,25 @@ async function handleNative(
     return json({ data: result }, 201);
   }
 
+  if (segments[1] === "import" && segments[2] === "rewards-tracker") {
+    const denied = authorizePlan(principal, planId, defaultPlanId, method);
+    if (denied) return denied;
+    await repo.ensurePlan(planId);
+    if (method === "GET") {
+      return json({ data: await repo.getRewardsTrackerSnapshot(planId) });
+    }
+    if (method === "POST") {
+      const body = await readJson(request);
+      const targetPlanId = body.plan_id ?? planId;
+      const targetDenied = authorizePlan(principal, targetPlanId, defaultPlanId, method);
+      if (targetDenied) return targetDenied;
+      await repo.ensurePlan(targetPlanId);
+      const payload = rewardsTrackerPayload(body);
+      const result = await importRewardsTrackerExport(repo, targetPlanId, payload);
+      return json({ data: result }, 201);
+    }
+  }
+
   return apiError(404, "not_found", "Route not found");
 }
 
@@ -730,6 +750,21 @@ function parseNumber(value: string | null): number | undefined {
 
 function normaliseMonthStart(month: string): string {
   return month.length === 7 ? `${month}-01` : month;
+}
+
+function rewardsTrackerPayload(body: Record<string, unknown>): unknown {
+  if (typeof body.payload === "string") {
+    try {
+      return JSON.parse(body.payload);
+    } catch {
+      throw new ValidationError("Rewards Tracker export is not valid JSON");
+    }
+  }
+  if (body.payload && typeof body.payload === "object") {
+    return body.payload;
+  }
+  const { plan_id: _planId, ...exportBody } = body;
+  return exportBody;
 }
 
 async function readJson(request: Request): Promise<any> {
@@ -970,7 +1005,7 @@ function isTransitionFinancialWrite(methodValue: string, segments: string[]): bo
 
   if (segments[0] === "api" && segments.length === 3 && method === "POST") {
     return (segments[1] === "mobile" && segments[2] === "quick-entry")
-      || (segments[1] === "import" && (segments[2] === "csv" || segments[2] === "ynab"));
+      || (segments[1] === "import" && (segments[2] === "csv" || segments[2] === "ynab" || segments[2] === "rewards-tracker"));
   }
 
   if (segments[0] !== "v1" || (segments[1] !== "plans" && segments[1] !== "budgets")) {

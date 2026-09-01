@@ -851,6 +851,7 @@ describe("YNAB-compatible API", () => {
       ["/api/mobile/quick-entry", "POST"],
       ["/api/import/csv", "POST"],
       ["/api/import/ynab", "POST"],
+      ["/api/import/rewards-tracker", "POST"],
     ];
 
     for (const [path, method] of lockedRoutes) {
@@ -1952,6 +1953,75 @@ describe("native reports and imports", () => {
     expect(imported.data.imported).toBe(1);
     expect(imported.data.duplicate).toBe(1);
     expect(imported.data.failed).toBe(0);
+  });
+
+  test("imports a Rewards Tracker export twice without duplicating cards or cached transactions", async () => {
+    const payload = {
+      ynab: { selectedBudgetId: "plan-test", selectedBudgetName: "Cutover", trackedAccountIds: ["acct-rewards"] },
+      cards: [{
+        id: "card-rewards",
+        name: "Rewards Card",
+        issuer: "UOB",
+        type: "cashback",
+        ynabAccountId: "acct-rewards",
+        featured: true,
+        earningRate: 1,
+      }],
+      rules: [],
+      tagMappings: [{ id: "map-1", cardId: "card-rewards", ynabTag: "orange", rewardCategory: "Dining" }],
+      calculations: [],
+      themeGroups: [],
+      settings: { currency: "SGD" },
+      cachedData: {
+        flagNames: { orange: "Dining" },
+        dashboardTransactions: [{
+          budgetId: "plan-test",
+          sinceDate: "2026-03-01",
+          fetchedAt: "2026-05-20T00:00:00.000Z",
+          trackedAccountIds: ["acct-rewards"],
+          isComplete: true,
+          accounts: [{ id: "acct-rewards", name: "Rewards Card" }],
+          transactions: [{
+            id: "txn-rewards-1",
+            date: "2026-05-12",
+            amount: -2500000,
+            account_id: "acct-rewards",
+            payee_name: "Candlenut",
+            flag_color: "orange",
+            flag_name: "Dining",
+            cleared: "cleared",
+            approved: true,
+          }],
+        }],
+      },
+    };
+
+    const first = await request("/api/import/rewards-tracker?plan_id=plan-test", { method: "POST", body: { payload } });
+    expect(first.status).toBe(201);
+    const firstBody = await first.json();
+    expect(firstBody.data).toMatchObject({
+      cards: 1,
+      tag_mappings: 1,
+      accounts_upserted: 1,
+      transactions_imported: 1,
+      transactions_updated: 0,
+    });
+
+    const second = await request("/api/import/rewards-tracker?plan_id=plan-test", { method: "POST", body: { payload } });
+    expect(second.status).toBe(201);
+    expect((await second.json()).data).toMatchObject({
+      cards: 1,
+      transactions_imported: 0,
+      transactions_updated: 1,
+    });
+
+    const stored = await (await request("/api/import/rewards-tracker?plan_id=plan-test")).json();
+    expect(stored.data.cards).toEqual([expect.objectContaining({ id: "card-rewards", ynabAccountId: "acct-rewards" })]);
+    expect(db.query("SELECT COUNT(*) AS count FROM transactions WHERE plan_id='plan-test' AND deleted=0").get()).toEqual({ count: 1 });
+    const register = await (await request("/v1/plans/plan-test/transactions?since_date=2026-05-01")).json();
+    expect(register.data.transactions).toEqual([
+      expect.objectContaining({ id: "txn-rewards-1", payee_name: "Candlenut", flag_color: "orange", amount: -2500000 }),
+    ]);
   });
 
   test("updates account opening balances on reseed", async () => {

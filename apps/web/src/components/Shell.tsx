@@ -98,6 +98,7 @@ export function Shell() {
     const label = (location.pathname === "/transactions" ? registerLabel : null)
       ?? (location.pathname === "/scheduled" ? "Scheduled transactions" : null)
       ?? (location.pathname === "/api-tokens" ? "API tokens" : null)
+      ?? (location.pathname === "/import/rewards" ? "Rewards import" : null)
       ?? report?.label;
     document.title = label ? `${label} · HowMuch` : "HowMuch";
   }, [location.pathname, registerLabel]);
@@ -184,6 +185,12 @@ export function Shell() {
             className={({ isActive }) => isActive ? "sidebar-primary-link sidebar-link-active" : "sidebar-primary-link"}
           >
             <span aria-hidden="true">⌁</span> API tokens
+          </NavLink>
+          <NavLink
+            to="/import/rewards"
+            className={({ isActive }) => isActive ? "sidebar-primary-link sidebar-link-active" : "sidebar-primary-link"}
+          >
+            <span aria-hidden="true">⇣</span> Rewards import
           </NavLink>
           <div className="sidebar-section-label">Reflect</div>
           {REPORTS.map((report) => (
