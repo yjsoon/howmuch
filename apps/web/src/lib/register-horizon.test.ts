@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   fillRegisterHorizon,
   horizonStartDate,
+  oldestDateForHorizonCoverage,
   REGISTER_HORIZON_MAX_ROWS,
   shouldFetchMoreForHorizon,
 } from "./register-horizon";
@@ -86,6 +87,23 @@ describe("shouldFetchMoreForHorizon", () => {
       rowCount: 10,
       today: TODAY,
     })).toBe(false);
+  });
+});
+
+describe("oldestDateForHorizonCoverage", () => {
+  test("ignores other accounts when a focused account id is set", () => {
+    expect(oldestDateForHorizonCoverage([
+      { date: "2026-09-08", account_id: "joey" },
+      { date: "2026-06-15", account_id: "other" },
+      { date: "2026-08-29", account_id: "joey" },
+    ], "joey")).toBe("2026-08-29");
+  });
+
+  test("uses every loaded date when no account is focused", () => {
+    expect(oldestDateForHorizonCoverage([
+      { date: "2026-09-08" },
+      { date: "2026-06-15" },
+    ])).toBe("2026-06-15");
   });
 });
 
@@ -217,5 +235,45 @@ describe("fillRegisterHorizon", () => {
         throw new Error("page 0 failed");
       },
     })).rejects.toThrow("page 0 failed");
+  });
+
+  test("keeps fetching when the focused account's oldest loaded date is still inside the horizon", async () => {
+    const TODAY_SEP = "2026-09-01";
+    type Row = { id: string; date: string; account_id: string };
+    const row = (id: string, date: string, account_id: string): Row => ({ id, date, account_id });
+    const offsets: number[] = [];
+    const filled = await fillRegisterHorizon({
+      today: TODAY_SEP,
+      accountId: "joey",
+      isCurrent: () => true,
+      fetchPage: async (offset) => {
+        offsets.push(offset);
+        if (offset === 0) {
+          return {
+            transactions: [
+              row("future", "2026-09-08", "joey"),
+              row("other-aug", "2026-08-20", "other"),
+              row("grab", "2026-08-29", "joey"),
+              row("other-june", "2026-06-15", "other"),
+            ],
+            has_more: true,
+            next_offset: 100,
+          };
+        }
+        return {
+          transactions: [row("july-groceries", "2026-07-20", "joey")],
+          has_more: false,
+          next_offset: null,
+        };
+      },
+    });
+    expect(offsets).toEqual([0, 100]);
+    expect(filled?.transactions.map((transaction) => transaction.id)).toEqual([
+      "future",
+      "other-aug",
+      "grab",
+      "other-june",
+      "july-groceries",
+    ]);
   });
 });

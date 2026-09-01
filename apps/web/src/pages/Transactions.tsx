@@ -229,6 +229,7 @@ export function TransactionsPage() {
     setPage({ transactions: [], hasMore: false, nextOffset: null, loading: true, filling: true, loadingMore: false, loaded: false, error: null });
     fillRegisterHorizon({
       today: todayIso(),
+      accountId: selectedAccountId,
       fetchPage: fetchTransactionPage,
       isCurrent: () => !cancelled && requestVersion === requestVersionRef.current,
       onProgress: (update) => {

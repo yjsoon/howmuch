@@ -297,14 +297,23 @@ struct RegisterView: View {
   @ViewBuilder
   private var workingBalanceSection: some View {
     if let account = scopedAccount {
+      let working = account.balance
+      let current = currentBalance(for: account)
       Section {
         VStack(alignment: .leading, spacing: 2) {
-          Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
+          Text(MoneyCodec.displayString(for: current, currencyFormat: model.currencyFormat))
             .font(.title2.weight(.bold))
             .monospacedDigit()
-            .contentTransition(.numericText(value: Double(account.balance)))
-            .animation(.snappy, value: account.balance)
+            .contentTransition(.numericText(value: Double(current)))
+            .animation(.snappy, value: current)
             .foregroundStyle(Theme.textPrimary)
+            .accessibilityLabel(headlineAccessibilityLabel(current: current, working: working))
+          if current != working {
+            Text("Working \(MoneyCodec.displayString(for: working, currencyFormat: model.currencyFormat)) including upcoming")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .accessibilityHidden(true)
+          }
           Button {
             isShowingReconciliation = true
           } label: {
@@ -373,22 +382,56 @@ struct RegisterView: View {
     }
   }
 
+  @ViewBuilder
   private var transactionDateSections: some View {
-    ForEach(sections, id: \.date) { section in
-      Section {
-        ForEach(section.pending) { row in
-          PendingTransactionRow(
-            row: row,
-            showsAccount: scope == .all,
-            currencyFormat: model.currencyFormat,
-            onRejectedTap: { pendingRowAction = row }
-          )
-          .registerRowChrome()
+    let today = Date.now.isoDateString
+    let partitioned = RegisterCurrent.partitionDates(sections.map(\.date), today: today)
+    let byDate = Dictionary(uniqueKeysWithValues: sections.map { ($0.date, $0) })
+    Group {
+      ForEach(partitioned.upcoming, id: \.self) { date in
+        if let section = byDate[date] {
+          dateSection(section, showsUpcomingBand: date == partitioned.upcoming.first)
         }
-        ForEach(section.transactions) { transaction in
-          registerRow(for: transaction)
+      }
+      ForEach(partitioned.current, id: \.self) { date in
+        if let section = byDate[date] {
+          dateSection(section, showsUpcomingBand: false)
         }
-      } header: {
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func dateSection(
+    _ section: (date: String, pending: [PendingRow], transactions: [Transaction]),
+    showsUpcomingBand: Bool
+  ) -> some View {
+    Section {
+      ForEach(section.pending) { row in
+        PendingTransactionRow(
+          row: row,
+          showsAccount: scope == .all,
+          currencyFormat: model.currencyFormat,
+          onRejectedTap: { pendingRowAction = row }
+        )
+        .registerRowChrome()
+      }
+      ForEach(section.transactions) { transaction in
+        registerRow(for: transaction)
+      }
+    } header: {
+      VStack(alignment: .leading, spacing: 0) {
+        if showsUpcomingBand {
+          Text("Upcoming")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .textCase(nil)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+            .background(Theme.canvas)
+        }
         Text(LedgerDate.friendlyString(fromISO: section.date))
           .font(.subheadline.weight(.semibold))
           .foregroundStyle(Theme.textPrimary)
@@ -397,8 +440,8 @@ struct RegisterView: View {
           .padding(.horizontal, 16)
           .padding(.vertical, 6)
           .background(Theme.surfaceMuted)
-          .listRowInsets(EdgeInsets())
       }
+      .listRowInsets(EdgeInsets())
     }
   }
 
@@ -519,7 +562,7 @@ struct RegisterView: View {
             .font(.footnote)
             .foregroundStyle(.secondary)
           Button("Try Again") {
-            Task { await model.loadOlderTransactions() }
+            Task { await model.retryIncompleteRegisterFill() }
           }
           .buttonStyle(.bordered)
         }
@@ -626,6 +669,24 @@ struct RegisterView: View {
       return "Last reconciled: …"
     }
     return "Not reconciled yet"
+  }
+
+  private func currentBalance(for account: Account) -> Int {
+    RegisterCurrent.asOfTodayBalance(
+      working: account.balance,
+      transactions: model.transactions,
+      accountID: account.id,
+      today: Date.now.isoDateString
+    )
+  }
+
+  private func headlineAccessibilityLabel(current: Int, working: Int) -> String {
+    let currentText = MoneyCodec.displayString(for: current, currencyFormat: model.currencyFormat)
+    guard current != working else {
+      return currentText
+    }
+    let workingText = MoneyCodec.displayString(for: working, currencyFormat: model.currencyFormat)
+    return "\(currentText). Working \(workingText) including upcoming."
   }
 
   /// Prefer `last_reconciled_date` from the accounts payload. If that field is

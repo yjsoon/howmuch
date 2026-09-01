@@ -8,6 +8,17 @@ export function horizonStartDate(today: string): string {
   return trailingMonthsRange(REGISTER_HORIZON_MONTHS, new Date(year, month - 1, day)).from;
 }
 
+export function oldestDateForHorizonCoverage<T extends { date: string; account_id?: string }>(
+  rows: T[],
+  accountId?: string | null,
+): string | null {
+  const scoped = accountId ? rows.filter((row) => row.account_id === accountId) : rows;
+  return scoped.reduce<string | null>(
+    (oldest, row) => (oldest === null || row.date < oldest ? row.date : oldest),
+    null,
+  );
+}
+
 export function shouldFetchMoreForHorizon(input: {
   oldestLoadedDate: string | null;
   hasMore: boolean;
@@ -32,8 +43,9 @@ export interface RegisterHorizonFill<T extends { id: string; date: string }> {
   nextOffset: number | null;
 }
 
-export async function fillRegisterHorizon<T extends { id: string; date: string }>(options: {
+export async function fillRegisterHorizon<T extends { id: string; date: string; account_id?: string }>(options: {
   today: string;
+  accountId?: string | null;
   fetchPage: (offset: number) => Promise<RegisterHorizonPage<T>>;
   isCurrent: () => boolean;
   onProgress?: (update: RegisterHorizonFill<T> & { done: boolean }) => void;
@@ -69,17 +81,16 @@ export async function fillRegisterHorizon<T extends { id: string; date: string }
 
     hasMore = page.has_more && page.next_offset !== null;
     nextOffset = hasMore ? page.next_offset : null;
-    const oldestLoadedDate = loaded.reduce<string | null>(
-      (oldest, transaction) => (oldest === null || transaction.date < oldest ? transaction.date : oldest),
-      null,
-    );
+    const oldestLoadedDate = oldestDateForHorizonCoverage(loaded, options.accountId);
     const fill = { transactions: loaded.slice(), hasMore, nextOffset };
     const done =
       nextOffset === null
       || !shouldFetchMoreForHorizon({
         oldestLoadedDate,
         hasMore,
-        rowCount: loaded.length,
+        rowCount: options.accountId
+          ? loaded.filter((row) => row.account_id === options.accountId).length
+          : loaded.length,
         today: options.today,
       });
     options.onProgress?.({ ...fill, done });
