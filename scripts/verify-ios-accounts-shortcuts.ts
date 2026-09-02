@@ -43,11 +43,23 @@ if (!source.includes("RegisterView(scope: .all)")) {
 if (!source.includes("ScheduledTransactionsView()")) {
   failures.push("Scheduled destination ScheduledTransactionsView() is missing.");
 }
+if (!shortcuts.includes('title: "Scheduled"')) {
+  failures.push('Scheduled shortcut title must be the one-line label "Scheduled".');
+}
+if (shortcuts.includes('title: "Scheduled Transactions"')) {
+  failures.push("Scheduled shortcut title must not use Scheduled Transactions; that wraps on a half-width tile.");
+}
 if (!source.includes('"1 upcoming transaction"')) {
   failures.push("Singular upcoming copy is missing.");
 }
 if (!source.includes("upcoming transactions")) {
   failures.push("Plural upcoming copy is missing.");
+}
+if (tile.includes("if let detail = status.detail")) {
+  failures.push("Shortcut tiles must not render a subtitle from status.detail.");
+}
+if (!tile.includes("accessibilityValue(status.detail")) {
+  failures.push("Scheduled count must stay on VoiceOver via accessibilityValue.");
 }
 if (!source.includes('"list.bullet.rectangle"')) {
   failures.push("All Transactions icon list.bullet.rectangle is missing.");
@@ -74,4 +86,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log("iOS accounts shortcuts: Grid pair, restack before xxLarge, no chevron, scheduled copy in LedgerShortcutStatus.");
+console.log("iOS accounts shortcuts: Grid pair, one-line Scheduled title, no subtitle, restack before xxLarge, no chevron, scheduled copy in LedgerShortcutStatus.");
