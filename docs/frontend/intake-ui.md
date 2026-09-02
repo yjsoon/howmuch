@@ -4,7 +4,9 @@ Clickable prototype: [`intake-ui.html`](./intake-ui.html) (`?phone=1&screen=typi
 
 Filed against [#87](https://github.com/yjsoon/howmuch/issues/87). Do not treat this as shipped UI. No Swift changes in this slice.
 
-**Type first.** The compose field is a text field. You type `$5 of food on DBS` and hit Return. Paste works in the same box. Dictation is an optional trailing control on that field, not a voice product and not a separate surface.
+**Type first.** The compose field is a text field on the existing sheet. You type a spend and hit Return. Paste works in the same box. System-keyboard dictation already types into that field — **no custom mic in v1.**
+
+Placeholder is **data-driven** from `currencyFormat`, a real category, and the seeded account — e.g. `5 of Groceries on Everyday` — not a hardcoded `$5 of food on DBS`. No helper captions. The placeholder is the affordance; the filled form is the review.
 
 ### Daily path
 
@@ -64,68 +66,68 @@ Copy stays British (Uncategorised, colour). Currency follows the plan formatter,
 
 Today: `AddTransactionSheet` → `TransactionFormView`. Title **Add Transaction**. Leading **Cancel**. Amount header (Outflow/Inflow + 40pt monospaced amount). Detail card (Payee, Category, Account, Date). Split card. Extras. Glass keypad while amount is 0. Trailing glass **Save** when the keypad is down. `canSave` is amount + account; payee is optional.
 
-**Add one text field above the amount header:**
+**Add one text field above the amount header, gated `!isEditing`:**
 
-- White 48pt field. It is a `TextField`, not a voice orb.
-- Placeholder `$5 of food on DBS`.
-- Trailing 32pt **quiet** mic (secondary colour, no blurple fill). Optional. Hidden if speech is unavailable.
-- 12pt caption: `Type a spend. Looks at your accounts.`
+- White 48pt `TextField` in a `ynabCard`.
+- Placeholder built from plan currency, a real category, and the seeded account.
+- **No custom mic** in v1 (system keyboard dictation is enough).
+- **No caption** under the field.
 
-Two focus modes that must not fight:
+Two focus modes that must not fight. Exactly one of {QWERTY, glass keypad}:
 
-| You tap | Keyboard | Amount keypad |
-| --- | --- | --- |
-| Amount | hidden | shown (today) |
-| Compose | system QWERTY (or paste) | hidden |
+| You tap | Keyboard | Amount keypad | Trailing Save |
+| --- | --- | --- | --- |
+| Amount | hidden (compose resigns first) | shown | hidden (today) |
+| Compose | system QWERTY | hidden | **hidden** (Return is the primary) |
 
-Return / go on the text keyboard runs the reader. Do not parse on every keystroke — the form must not jump while you type. Paste into the field is the same path as typing.
+If parse yields no amount, show the keypad with primary `done`, as today. After a successful parse with amount > 0, collapse the keypad the same way Duplicate does.
+
+Return / go on the text keyboard runs the reader. Do not parse on every keystroke. Paste into the field is the same path as typing.
 
 That field is a command line. No reply bubble. The form below is the reply.
 
-Keep the amount keypad for the existing capture path. Duplicate-for-Today still skips it when amount is already set. After a successful parse with amount > 0, collapse the keypad the same way Duplicate does.
-
-Do **not** retitle the sheet “Add expense”. Do **not** replace **Save** with `Save $5.00`. The keypad primary key stays `done` / `next` / `save` as it is now. Do **not** make the mic the visual hero of the sheet.
+Keep the amount keypad for the existing capture path. Do **not** retitle the sheet “Add expense”. Do **not** replace **Save** with `Save $5.00`. The keypad primary key stays `done` / `next` / `save`. Foundation Models `.unavailable(.modelNotReady)` is “downloading”, not off — do not hide compose for that.
 
 ### 2. Typing (the common case)
 
-Caret in the field. System keyboard. Caption: `Return fills the form below. Dictation is optional.` Amount and pickers stay put until Return. Same reader output as a spoken sentence.
+Caret in the field. System keyboard. Amount and pickers stay put until Return. Trailing Save is hidden while compose is focused.
 
-### 3. Optional: listening
+### 3. Optional: listening (after typed parse ships)
 
-Mic fill becomes outflow red, icon becomes stop. Field shows the live transcript in italic. Caption: `Listening · tap to stop`. Amount and pickers do not move until stop. This is the same field, not a Siri sheet. Ship after typed parse works.
+Do not ship a custom mic in v1. If system dictation is inadequate later, a stop-state on the same field is allowed. Not a Siri sheet.
 
 ### 4. Parsed (`N == 1`)
 
-Compose keeps the sentence (typed, pasted, or dictated). Caption: `Looks right? Edit below, then Save.` Amount, direction, category, and account bind onto the existing `TransactionDraft` / `DisclosureValueRow`s. Unresolved fields stay placeholders. **Save** enables when `canSave` is true.
+Compose keeps the sentence. No “Looks right?” caption. Amount, direction, category, and account bind onto the existing `TransactionDraft` / `DisclosureValueRow`s. Unresolved fields stay placeholders. **Save** enables when `canSave` is true.
 
 ### 5. Ambiguous
 
 The model never silent-picks an account or category.
 
-- Compose caption in amber: `Which account? I won’t guess.` (or category, if that is the miss).
+- No first-person copy. Footnote **Which account?** or **Which category?** in `Theme.uncategorised` (ochre). Do not invent amber; red stays `Theme.outflow` errors.
 - The matching `DisclosureValueRow` stays on its placeholder.
-- If two or three live accounts/categories match, wrap chips **inside the same detail card**, under that row, with an amber leading rail on the row.
+- If two or three live matches, tappable capsules on one indented row under that disclosure (56pt `CardDivider` indent). Same muted/accent capsule language as `FilterChip`, **without** the chevron (that glyph means a menu). Chips vanish on selection.
 - **Save** stays disabled until the user taps a chip or the picker.
 
 Nickname resolution (“card x”) is a data problem, not a second UI. Wrong silent match is worse than an empty picker.
 
 ### 6. Apple Intelligence off
 
-Hide the compose field. One caption: `Apple Intelligence is off. The keypad still works — nothing is uploaded.` Fail closed. No Worker fallback.
+Hide the compose field with no residual gap. Layout identical to today’s sheet. Fail closed. No Worker fallback. Do not hide compose merely because the model is still downloading.
 
 ### 7. Reading (inbox / share)
 
-New sheet, same canvas. Title **Reading…**. Thumbnail + `Stays on this device`. No transcript. This is the same sheet that becomes Found N or the capture form.
+Same canvas. Title **Reading…**. Thumbnail + `Stays on this device`. No transcript. This sheet becomes **N Transactions** or the capture form.
 
 ### 8. Review list (`N > 1`)
 
-New sheet. Title **Found {N}**. Leading **Cancel**. Two typed spends in one sentence are enough to open this — screenshots are not required.
+New sheet. Title **{N} Transactions** (noun, like “Add Transaction”). Leading **Cancel**. Two typed spends in one sentence are enough — screenshots are not required.
 
-1. Source strip: thumbnail, or nothing special for typed text (`Typed · just now`).
-2. White card of register rows: include circle, payee, category footnote (ochre if Uncategorised), tabular amount in **register** colour (ink for outflows). Unchecked rows dim and are dropped on commit. Tap a row → `TransactionFormView` for that draft.
-3. Repair line (muted **text** field). Placeholder `everything from Cold Storage is groceries`. Mutates the list. No send arrow, no thread. Same type-then-Return behaviour as compose.
-4. One **Add to** account picker (applies to rows that do not already have an unambiguous account).
-5. Full-width accent pill: `Add {includedCount} to {account}`.
+1. Source strip: thumbnail, or `Typed · just now`.
+2. Register chrome **minus** the trailing status control (that circle already means approve/cleared). Leading include control; all included by default. Payee semibold, category footnote (ochre if Uncategorised), tabular amount in **register** colour (ink for outflows). Unchecked rows dim and drop on commit. Tap a row → `TransactionFormView` for that draft (keypad hidden if amount > 0).
+3. Repair line: muted **text** field, footnote density, not a banner. Placeholder `everything from Cold Storage is groceries`. Mutates the list. Type-then-Return, no send arrow.
+4. One **Add to** account picker for rows without an unambiguous account.
+5. Trailing glass prominent control (same family as Save): `Add {n} to {account}`. Live `n`. Disabled at zero included or while any included row is unsaveable. No 40pt amount header on this sheet.
 
 ### 9. Share sheet (later)
 
@@ -137,14 +139,15 @@ Accounts tab, same card language as `OutboxCard`. Headline `Add these transactio
 
 ## Shared capture door (Shortcuts + intake)
 
-Tab +, Quick Action, Duplicate, compose, share, and App Intents must not each own a sheet. One `CaptureRequest` (`.blank` / `.draft(TransactionDraft)` / `.inbox`) and `AppModel.presentCapture`. Structured Shortcuts fill a draft and present it. Later text/image intents write the same inbox as the share extension, then the density rule above. Spec: [`app-intents.md`](./app-intents.md).
+Tab +, Quick Action, Duplicate, compose, share, and App Intents must not each own a sheet. One identifiable `CaptureRequest` presented with `.sheet(item:)`, handed off through `CaptureRouter.shared`, consumed only when no other sheet is up. Spec: [`app-intents.md`](./app-intents.md).
 
 ## Mapping onto existing types
 
 | UI bit | Code |
 | --- | --- |
-| Compose `TextField` + quiet mic | New view in `TransactionFormView`, above `amountHeader` |
-| Focus compose | Hide amount keypad; system keyboard |
+| Compose `TextField` | New view in `TransactionFormView`, above `amountHeader`, `!isEditing` |
+| Focus compose | Hide amount keypad **and** trailing Save; system keyboard |
+| Ambiguous chips | Muted/accent capsules (FilterChip language, no chevron) + `Theme.uncategorised` footnote |
 | Prefill | `TransactionFormView(draft:)` already exists (Duplicate for Today) |
 | Save one | `AppModel.commit(_:)` |
 | Save many | `commit([drafts])` + one outbox save; not `/transactions/import` |
@@ -155,19 +158,19 @@ Tab +, Quick Action, Duplicate, compose, share, and App Intents must not each ow
 ## Explicit non-UI
 
 - Chat thread, typing indicator, “HowMuch: I found four spends”.
-- Voice-assistant orb, sparkles, Apple Intelligence badge chrome.
-- Mic as the primary call to action.
+- Voice-assistant orb, custom mic in v1, sparkles, Apple Intelligence badge chrome.
+- Helper captions (“Type a spend”, “I won’t guess”).
 - Photos permission in v1.
 - Web paste / web OCR.
 - Model-invented splits. Open the real editor.
 
 ## Build order (UI only)
 
-1. Compose **text field** + stub parse on Return → prefill → existing Save. Prove typing `$5 of food on Everyday`.
+1. Compose **text field** + stub parse on Return → prefill → existing Save. Prove typing a spend fills amount, category, account. No custom mic.
 2. Paste into the same field.
-3. Real on-device text reader; amber empty fields.
+3. Real on-device text reader; ochre empty fields + `FilterChip`s.
 4. `N > 1` list from two spends in one typed sentence.
-5. Optional SpeechAnalyzer into the same field.
+5. Optional custom mic only if system dictation is inadequate.
 6. Share extension (no extra confirmation chrome).
 7. Repair line (typed).
 8. Later: screenshot offer.
