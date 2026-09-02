@@ -33,6 +33,7 @@ struct RegisterView: View {
   @State private var transactionPendingDeletion: Transaction?
   @State private var deleteError: String?
   @State private var pendingRowAction: PendingRow?
+  @SceneStorage("howmuch.register.scheduledExpanded") private var expandedScheduleAccountIDs = ""
   @State private var editingSchedule: ScheduledTransaction?
 
   private struct DuplicateDraft: Identifiable {
@@ -41,17 +42,11 @@ struct RegisterView: View {
   }
 
   private struct RegisterDateSection: Identifiable {
-    enum Region: String {
-      case scheduled
-      case current
-    }
-
-    let region: Region
     let date: String
     let pending: [PendingRow]
     let transactions: [Transaction]
     let schedules: [ScheduledTransaction]
-    var id: String { "\(region.rawValue)-\(date)" }
+    var id: String { date }
   }
 
   init(
@@ -70,7 +65,7 @@ struct RegisterView: View {
     List {
       workingBalanceSection
       loadingOrFilterSections
-      scheduledLoadErrorSection
+      scheduledDisclosureSection
       transactionDateSections
       searchCoverageSection
       emptyRegisterSection
@@ -397,19 +392,13 @@ struct RegisterView: View {
 
   @ViewBuilder
   private var transactionDateSections: some View {
-    let scheduled = scheduledDateSections
-    Group {
-      ForEach(scheduled) { section in
-        dateSection(section, showsScheduledBand: section.id == scheduled.first?.id)
-      }
-      ForEach(currentDateSections) { section in
-        dateSection(section, showsScheduledBand: false)
-      }
+    ForEach(currentDateSections) { section in
+      dateSection(section)
     }
   }
 
   @ViewBuilder
-  private func dateSection(_ section: RegisterDateSection, showsScheduledBand: Bool) -> some View {
+  private func dateSection(_ section: RegisterDateSection) -> some View {
     Section {
       ForEach(section.pending) { row in
         PendingTransactionRow(
@@ -424,44 +413,35 @@ struct RegisterView: View {
         registerRow(for: transaction)
       }
       ForEach(section.schedules) { schedule in
-        Button {
-          editingSchedule = schedule
-        } label: {
-          ScheduledTransactionRow(schedule: schedule, showsAccount: scope == .all, showsNextDate: false)
-        }
-        .buttonStyle(.plain)
-        .accessibilityHint("Opens this scheduled transaction.")
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-          Button("Edit") {
-            editingSchedule = schedule
-          }
-        }
-        .registerRowChrome()
+        scheduleRow(schedule, showsNextDate: false)
       }
     } header: {
-      VStack(alignment: .leading, spacing: 0) {
-        if showsScheduledBand {
-          Text("Scheduled")
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .textCase(nil)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
-            .background(Theme.canvas)
-        }
-        Text(LedgerDate.friendlyString(fromISO: section.date))
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(Theme.textPrimary)
-          .textCase(nil)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .padding(.horizontal, 16)
-          .padding(.vertical, 6)
-          .background(Theme.surfaceMuted)
-      }
-      .listRowInsets(EdgeInsets())
+      Text(LedgerDate.friendlyString(fromISO: section.date))
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(Theme.textPrimary)
+        .textCase(nil)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(Theme.surfaceMuted)
+        .listRowInsets(EdgeInsets())
     }
+  }
+
+  private func scheduleRow(_ schedule: ScheduledTransaction, showsNextDate: Bool) -> some View {
+    Button {
+      editingSchedule = schedule
+    } label: {
+      ScheduledTransactionRow(schedule: schedule, showsAccount: scope == .all, showsNextDate: showsNextDate)
+    }
+    .buttonStyle(.plain)
+    .accessibilityHint("Opens this scheduled transaction.")
+    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+      Button("Edit") {
+        editingSchedule = schedule
+      }
+    }
+    .registerRowChrome()
   }
 
   private func registerRow(for transaction: Transaction) -> some View {
@@ -735,8 +715,8 @@ struct RegisterView: View {
   }
 
   @ViewBuilder
-  private var scheduledLoadErrorSection: some View {
-    if showsScheduledFailure {
+  private var scheduledDisclosureSection: some View {
+    if showsScheduledFailure, disclosureDateSections.isEmpty {
       Section {
         Button {
           Task { await model.refreshScheduledTransactions() }
@@ -773,11 +753,87 @@ struct RegisterView: View {
         .accessibilityLabel("Couldn’t load scheduled transactions")
         .accessibilityHint("Double tap to try again.")
       }
+    } else if shouldShowScheduled {
+      Section {
+        Button {
+          withAnimation(.snappy) {
+            toggleScheduledExpanded()
+          }
+        } label: {
+          HStack(spacing: 10) {
+            Image(systemName: "chevron.right")
+              .font(.footnote.weight(.semibold))
+              .foregroundStyle(.secondary)
+              .rotationEffect(.degrees(isScheduledExpanded ? 90 : 0))
+            Text("Scheduled")
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(Theme.textPrimary)
+            Spacer()
+            Text("\(scheduledDisclosureCount)")
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+          }
+          .padding(.horizontal, 16)
+          .padding(.vertical, 12)
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Theme.canvas)
+        .listRowSeparator(.hidden)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("Scheduled")
+        .accessibilityValue(scheduledAccessibilityValue)
+        .accessibilityHint(isScheduledExpanded ? "Collapses scheduled transactions." : "Expands scheduled transactions.")
+      }
+      if isScheduledExpanded {
+        ForEach(disclosureDateSections) { section in
+          dateSection(section)
+        }
+      }
     }
   }
 
   private var showsScheduledFailure: Bool {
     scope.accountID != nil && model.scheduledTransactionsPhase.errorMessage != nil
+  }
+
+  private var shouldShowScheduled: Bool {
+    scope.accountID != nil && scheduledDisclosureCount > 0
+  }
+
+  private var scheduledDisclosureCount: Int {
+    disclosureDateSections.reduce(0) { $0 + $1.pending.count + $1.transactions.count + $1.schedules.count }
+  }
+
+  private var isScheduledExpanded: Bool {
+    guard let accountID = scope.accountID else {
+      return false
+    }
+    return scheduledExpandedAccountIDs.contains(accountID)
+  }
+
+  private var scheduledExpandedAccountIDs: Set<String> {
+    Set(expandedScheduleAccountIDs.split(separator: ",", omittingEmptySubsequences: true).map(String.init))
+  }
+
+  private func toggleScheduledExpanded() {
+    guard let accountID = scope.accountID else {
+      return
+    }
+    var ids = scheduledExpandedAccountIDs
+    if ids.contains(accountID) {
+      ids.remove(accountID)
+    } else {
+      ids.insert(accountID)
+    }
+    expandedScheduleAccountIDs = ids.sorted().joined(separator: ",")
+  }
+
+  private var scheduledAccessibilityValue: String {
+    if isScheduledExpanded {
+      return "Expanded, \(scheduledDisclosureCount)"
+    }
+    return "Collapsed, \(scheduledDisclosureCount)"
   }
 
   private var accountSchedules: [ScheduledTransaction] {
@@ -1028,28 +1084,26 @@ struct RegisterView: View {
     }
   }
 
-  private var scheduledDateSections: [RegisterDateSection] {
+  private var disclosureDateSections: [RegisterDateSection] {
     let today = Date.now.isoDateString
     dateSections(
-      region: .scheduled,
       pending: visiblePendingRows.filter { $0.isoDate > today },
       transactions: visibleTransactions.filter { $0.date > today },
-      schedules: visibleSchedules.filter { $0.dateNext > today }
+      schedules: visibleSchedules
     )
   }
 
   private var currentDateSections: [RegisterDateSection] {
     let today = Date.now.isoDateString
+    let hideFuturePosted = scope.accountID != nil
     dateSections(
-      region: .current,
-      pending: visiblePendingRows.filter { $0.isoDate <= today },
-      transactions: visibleTransactions.filter { $0.date <= today },
-      schedules: visibleSchedules.filter { $0.dateNext <= today }
+      pending: visiblePendingRows.filter { !hideFuturePosted || $0.isoDate <= today },
+      transactions: visibleTransactions.filter { !hideFuturePosted || $0.date <= today },
+      schedules: []
     )
   }
 
   private func dateSections(
-    region: RegisterDateSection.Region,
     pending: [PendingRow],
     transactions: [Transaction],
     schedules: [ScheduledTransaction]
@@ -1060,7 +1114,6 @@ struct RegisterView: View {
     let dates = Set(pendingByDate.keys).union(postedByDate.keys).union(schedulesByDate.keys)
     return dates.sorted(by: >).map { date in
       RegisterDateSection(
-        region: region,
         date: date,
         pending: pendingByDate[date] ?? [],
         transactions: postedByDate[date] ?? [],
