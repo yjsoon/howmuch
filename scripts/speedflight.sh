@@ -33,7 +33,7 @@ ASC_PRIVATE_KEY_PATH="${ASC_PRIVATE_KEY_PATH:-$HOME/private_keys/AuthKey_$ASC_KE
 PROJECT="apps/ios/HowMuch.xcodeproj"
 SCHEME="HowMuch"
 BUNDLE_ID="sg.soon.howmuch"
-TEAM_ID="XL5JK4F896"
+TEAM_ID="PQ6U5ESLN2"
 BASE="${SPEEDFLIGHT_BASE:-https://speedflight.dev}"
 # The same worker on its workers.dev route, kept as an upload fallback. The
 # page link stays on the custom domain.
