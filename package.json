@@ -26,6 +26,7 @@
     "verify:ios-accounts-shortcuts": "bun scripts/verify-ios-accounts-shortcuts.ts",
     "verify:ios-future-register": "bun scripts/verify-ios-future-register.ts",
     "verify:ios-register-scroll": "bun scripts/verify-ios-register-scroll.ts",
+    "verify:ios-disclosure-chevron": "bun scripts/verify-ios-disclosure-chevron.ts",
     "verify:cleared-status-toggle": "bun scripts/verify-cleared-status-toggle.ts",
     "test": "bun test",
     "verify:worker": "bun run --cwd apps/worker build"

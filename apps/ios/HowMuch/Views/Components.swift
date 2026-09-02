@@ -26,6 +26,9 @@ struct DisclosureValueRow: View {
   let caption: String
   let value: String?
   var placeholder: String
+  /// Card layouts draw this trailing chevron. Form and List `NavigationLink`s
+  /// already supply one, so pass `false` there or the row shows a double `>`.
+  var showsChevron = true
 
   var body: some View {
     HStack(spacing: 12) {
@@ -46,14 +49,16 @@ struct DisclosureValueRow: View {
           .foregroundStyle(Theme.textPrimary.opacity(0.75))
       }
 
-      Spacer()
+      Spacer(minLength: 0)
 
-      Image(systemName: "chevron.right")
-        .font(.footnote.weight(.semibold))
-        .foregroundStyle(.tertiary)
+      if showsChevron {
+        Image(systemName: "chevron.right")
+          .font(.footnote.weight(.semibold))
+          .foregroundStyle(.tertiary)
+      }
     }
-    .padding(.horizontal, 16)
-    .padding(.vertical, 13)
+    .padding(.horizontal, showsChevron ? 16 : 0)
+    .padding(.vertical, showsChevron ? 13 : 0)
     .contentShape(Rectangle())
   }
 }
