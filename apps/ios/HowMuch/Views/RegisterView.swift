@@ -794,22 +794,23 @@ struct RegisterView: View {
   }
 
   private var showsScheduledFailure: Bool {
-    scope.accountID != nil && model.scheduledTransactionsPhase.errorMessage != nil
+    model.scheduledTransactionsPhase.errorMessage != nil
   }
 
   private var shouldShowScheduled: Bool {
-    scope.accountID != nil && scheduledDisclosureCount > 0
+    scheduledDisclosureCount > 0
   }
 
   private var scheduledDisclosureCount: Int {
     disclosureDateSections.reduce(0) { $0 + $1.pending.count + $1.transactions.count + $1.schedules.count }
   }
 
+  private var scheduledExpansionKey: String {
+    scope.accountID ?? "all"
+  }
+
   private var isScheduledExpanded: Bool {
-    guard let accountID = scope.accountID else {
-      return false
-    }
-    return scheduledExpandedAccountIDs.contains(accountID)
+    scheduledExpandedAccountIDs.contains(scheduledExpansionKey)
   }
 
   private var scheduledExpandedAccountIDs: Set<String> {
@@ -817,14 +818,11 @@ struct RegisterView: View {
   }
 
   private func toggleScheduledExpanded() {
-    guard let accountID = scope.accountID else {
-      return
-    }
     var ids = scheduledExpandedAccountIDs
-    if ids.contains(accountID) {
-      ids.remove(accountID)
+    if ids.contains(scheduledExpansionKey) {
+      ids.remove(scheduledExpansionKey)
     } else {
-      ids.insert(accountID)
+      ids.insert(scheduledExpansionKey)
     }
     expandedScheduleAccountIDs = ids.sorted().joined(separator: ",")
   }
@@ -837,11 +835,19 @@ struct RegisterView: View {
   }
 
   private var accountSchedules: [ScheduledTransaction] {
-    guard let accountID = scope.accountID else {
-      return []
-    }
-    return model.scheduledTransactions
-      .filter { !$0.deleted && $0.accountID == accountID }
+    model.scheduledTransactions
+      .filter { schedule in
+        guard !schedule.deleted else {
+          return false
+        }
+        if let accountID = scope.accountID, schedule.accountID != accountID {
+          return false
+        }
+        if let accountIDs, !accountIDs.isEmpty, !accountIDs.contains(schedule.accountID) {
+          return false
+        }
+        return true
+      }
       .sorted { left, right in
         if left.dateNext != right.dateNext {
           return left.dateNext < right.dateNext
@@ -1095,10 +1101,9 @@ struct RegisterView: View {
 
   private var currentDateSections: [RegisterDateSection] {
     let today = Date.now.isoDateString
-    let hideFuturePosted = scope.accountID != nil
     return dateSections(
-      pending: visiblePendingRows.filter { !hideFuturePosted || $0.isoDate <= today },
-      transactions: visibleTransactions.filter { !hideFuturePosted || $0.date <= today },
+      pending: visiblePendingRows.filter { $0.isoDate <= today },
+      transactions: visibleTransactions.filter { $0.date <= today },
       schedules: []
     )
   }
