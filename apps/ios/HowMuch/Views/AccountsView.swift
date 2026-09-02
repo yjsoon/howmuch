@@ -131,7 +131,7 @@ struct AccountsView: View {
 
     let scheduled = LedgerShortcutTile(
       icon: "calendar.badge.clock",
-      title: "Scheduled Transactions",
+      title: "Scheduled",
       status: LedgerShortcutStatus.scheduled(
         phase: model.scheduledTransactionsPhase,
         count: model.scheduledTransactions.count
@@ -140,7 +140,7 @@ struct AccountsView: View {
       ScheduledTransactionsView()
     }
 
-    return Grid(horizontalSpacing: 12, verticalSpacing: 12) {
+    return Grid(alignment: .topLeading, horizontalSpacing: 12, verticalSpacing: 12) {
       if usesColumnShortcuts {
         GridRow {
           allTransactions
@@ -414,24 +414,19 @@ struct AccountsView: View {
             }
           }
 
-          VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-              .font(.subheadline.weight(.semibold))
-              .foregroundStyle(Theme.textPrimary)
-            if let detail = status.detail {
-              Text(detail)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            }
-          }
+          Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Theme.textPrimary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .ynabCard()
         .accessibilityElement(children: .combine)
+        .accessibilityValue(status.detail ?? "")
       }
       .buttonStyle(.plain)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
   }
 
