@@ -2104,7 +2104,7 @@ describe("native reports and imports", () => {
     expect(ageOfMoney.data.periods[1].spent).toBe(0);
   });
 
-  test("imports YNAB plan metadata, preserves deleted transactions, and requests full history by default", async () => {
+  test("imports YNAB plan metadata, skips unmatched deleted transactions, and requests full history by default", async () => {
     const originalFetch = globalThis.fetch;
     const calls: string[] = [];
 
@@ -2190,6 +2190,9 @@ describe("native reports and imports", () => {
       expect(importResponse.status).toBe(201);
       expect(calls).toContain("https://ynab.example/v1/plans/plan-test/settings");
       expect(calls).toContain("https://ynab.example/v1/plans/plan-test/transactions?since_date=1900-01-01");
+      const importBody = await importResponse.json();
+      expect(importBody.data.imported_transactions).toBe(0);
+      expect(importBody.data.raw_objects.transaction).toBe(1);
 
       const plans = await (await request("/v1/plans")).json();
       expect(plans.data.plans[0].name).toBe("Imported Plan");
@@ -2199,9 +2202,7 @@ describe("native reports and imports", () => {
       expect(settings.data.settings.display.flag_names.blue).toBe("Follow up");
 
       const transactions = await (await request("/v1/plans/plan-test/transactions?last_knowledge_of_server=0")).json();
-      expect(transactions.data.transactions).toHaveLength(1);
-      expect(transactions.data.transactions[0].id).toBe("txn-deleted");
-      expect(transactions.data.transactions[0].deleted).toBe(true);
+      expect(transactions.data.transactions).toHaveLength(0);
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -1536,7 +1536,7 @@ describe("D1 foundation", () => {
     await metadata.ensurePlan("other", "Other", { operationId: "plan-other" });
     const version = (db.query("SELECT write_version FROM write_state").get() as { write_version: number }).write_version;
     await expect(metadata.upsertAccount("other", { id: "a", name: "Collision" }, { operationId: "account-collision" })).rejects.toThrow("write precondition failed");
-    expect(db.query("SELECT plan_id, name FROM accounts WHERE id = 'a'").get()).toEqual({ plan_id: "p", name: "OCBC" });
+    expect(db.query("SELECT plan_id, name FROM accounts WHERE id = 'a'").get()).toEqual({ plan_id: "p", name: "Daily" });
     expect(db.query("SELECT write_version FROM write_state").get()).toEqual({ write_version: version });
   });
 
