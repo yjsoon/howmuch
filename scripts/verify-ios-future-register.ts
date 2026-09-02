@@ -65,11 +65,28 @@ if (!register.includes("disclosureDateSections") || !register.includes("visibleS
 }
 
 if (
-  !register.includes("let hideFuturePosted = scope.accountID != nil")
-  || !/transactions: visibleTransactions\.filter \{ !hideFuturePosted \|\| \$0\.date <= today \}/.test(register)
+  register.includes("scope.accountID != nil && scheduledDisclosureCount")
+  || register.includes("scope.accountID != nil && model.scheduledTransactionsPhase.errorMessage")
+  || /guard let accountID = scope\.accountID else \{\s*return \[\]/.test(register)
+  || /guard let accountID = scope\.accountID else \{\s*return false/.test(register)
+) {
+  failures.push("All Transactions still skips the Scheduled disclosure, so posted futures and recurrences never appear there.");
+}
+
+if (
+  register.includes("let hideFuturePosted = scope.accountID != nil")
+  || !/transactions: visibleTransactions\.filter \{ \$0\.date <= today \}/.test(register)
   || !/private var currentDateSections: \[RegisterDateSection\] \{[\s\S]*?schedules: \[\]/.test(register)
 ) {
-  failures.push("Account register still shows future-dated rows or recurrences in the main timeline.");
+  failures.push("Register still leaves future-dated rows or recurrences in the main timeline.");
+}
+
+if (!register.includes('scope.accountID ?? "all"')) {
+  failures.push("All Transactions has no expand state for the Scheduled disclosure.");
+}
+
+if (/task \{\s*guard scope\.accountID != nil else \{\s*return/.test(register)) {
+  failures.push("All Transactions still skips schedule refresh on open, so recurrences can stay missing after a failed load.");
 }
 
 if (!register.includes("Opens this scheduled transaction.") || !register.includes("allowsFullSwipe: false")) {
