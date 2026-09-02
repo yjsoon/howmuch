@@ -85,6 +85,10 @@ if (!register.includes('scope.accountID ?? "all"')) {
   failures.push("All Transactions has no expand state for the Scheduled disclosure.");
 }
 
+if (/task \{\s*guard scope\.accountID != nil else \{\s*return/.test(register)) {
+  failures.push("All Transactions still skips schedule refresh on open, so recurrences can stay missing after a failed load.");
+}
+
 if (!register.includes("Opens this scheduled transaction.") || !register.includes("allowsFullSwipe: false")) {
   failures.push("Schedule rows still have no editor hint or isolated swipe actions.");
 }

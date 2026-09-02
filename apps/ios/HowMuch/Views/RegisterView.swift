@@ -181,9 +181,6 @@ struct RegisterView: View {
       }
     }
     .task {
-      guard scope.accountID != nil else {
-        return
-      }
       switch model.scheduledTransactionsPhase {
       case .idle, .failed:
         await model.refreshScheduledTransactions()
