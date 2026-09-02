@@ -1,0 +1,12 @@
+---
+description: Cut a Speedflight ad hoc iOS build when on a Mac; check signing setup first
+globs: apps/ios/**
+alwaysApply: false
+---
+# iOS Speedflight
+
+On a Mac with Xcode, after HowMuch iOS work the user would want on a physical iPhone that is not plugged in, share a Speedflight build. Do not wait to be asked if that is clearly the handoff.
+
+Read the **iOS Speedflight** section in `AGENTS.md` before running `scripts/speedflight.sh`. Preflight the gitignored `.env.speedflight` and Tinkertanker (`PQ6U5ESLN2`) `.p8`; do not switch `DEVELOPMENT_TEAM` to T Krobot. If this session is not a signed-in Mac, stop and give the setup table from `AGENTS.md`.
+
+Post the Speedflight page URL only in chat, never in the PR.
