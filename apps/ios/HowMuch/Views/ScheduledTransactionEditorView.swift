@@ -323,7 +323,8 @@ struct ScheduledTransactionEditorView: View {
                 icon: draft.transferAccountID == nil ? "person" : "arrow.left.arrow.right",
                 caption: "Payee",
                 value: payeeLabel,
-                placeholder: "No payee"
+                placeholder: "No payee",
+                showsChevron: false
               )
             }
             .buttonStyle(.plain)
@@ -341,7 +342,8 @@ struct ScheduledTransactionEditorView: View {
                 icon: "tag",
                 caption: "Category",
                 value: model.categoryName(forID: draft.categoryID),
-                placeholder: "No category"
+                placeholder: "No category",
+                showsChevron: false
               )
             }
             .buttonStyle(.plain)
@@ -615,7 +617,8 @@ private struct ScheduledSplitLineEditor: View {
             icon: line.transferAccountID == nil ? "person" : "arrow.left.arrow.right",
             caption: "Payee",
             value: payeeLabel,
-            placeholder: "No payee"
+            placeholder: "No payee",
+            showsChevron: false
           )
         }
         .buttonStyle(.plain)
@@ -628,7 +631,8 @@ private struct ScheduledSplitLineEditor: View {
               icon: "tag",
               caption: "Category",
               value: model.categoryName(forID: line.categoryID),
-              placeholder: "No category"
+              placeholder: "No category",
+              showsChevron: false
             )
           }
           .buttonStyle(.plain)
