@@ -1,24 +1,26 @@
 # Intake UI draft
 
-Clickable prototype: [`intake-ui.html`](./intake-ui.html) (`?phone=1&screen=parsed` for a single frame). This file is the layout spec; the HTML is the visual. Phone-frame PNGs live in [`intake-ui/`](./intake-ui/).
+Clickable prototype: [`intake-ui.html`](./intake-ui.html) (`?phone=1&screen=typing` for the daily path). This file is the layout spec; the HTML is the visual. Phone-frame PNGs live in [`intake-ui/`](./intake-ui/).
 
 Filed against [#87](https://github.com/yjsoon/howmuch/issues/87). Do not treat this as shipped UI. No Swift changes in this slice.
 
+**Type first.** The compose field is a text field. You type `$5 of food on DBS` and hit Return. Paste works in the same box. Dictation is an optional trailing control on that field, not a voice product and not a separate surface.
+
 ### Daily path
 
-| Idle | Listening | Parsed `N == 1` |
+| Idle | Typing (the common case) | Parsed `N == 1` |
 | --- | --- | --- |
-| ![Idle capture](./intake-ui/idle.png) | ![Listening](./intake-ui/listen.png) | ![Parsed](./intake-ui/parsed.png) |
+| ![Idle capture](./intake-ui/idle.png) | ![Typing](./intake-ui/typing.png) | ![Parsed](./intake-ui/parsed.png) |
 
 | Ambiguous | Apple Intelligence off |
 | --- | --- |
 | ![Ambiguous account](./intake-ui/ambiguous.png) | ![AI off](./intake-ui/aioff.png) |
 
-### Many rows and later
+### Optional dictate, many rows, later
 
-| Reading | Found N |
+| Dictate | Found N |
 | --- | --- |
-| ![Reading](./intake-ui/reading.png) | ![Review list](./intake-ui/list.png) |
+| ![Listening](./intake-ui/listen.png) | ![Review list](./intake-ui/list.png) |
 
 | Screenshot offer | Share sheet |
 | --- | --- |
@@ -26,7 +28,7 @@ Filed against [#87](https://github.com/yjsoon/howmuch/issues/87). Do not treat t
 
 ## Rule
 
-Input is not confirmation. Saying or pasting a spend is intake. Looking at a `TransactionDraft` is review. A chat thread tries to be both.
+Input is not confirmation. Typing, pasting, or saying a spend is intake. Looking at a `TransactionDraft` is review. A chat thread tries to be both.
 
 Density follows **row count**, not source:
 
@@ -35,7 +37,7 @@ Density follows **row count**, not source:
 | `N == 1` | Existing `AddTransactionSheet` / `TransactionFormView`, prefilled | Trailing glass **Save** (unchanged) |
 | `N > 1` | New review list sheet | Full-width **Add {n} to {account}** |
 
-Mic, keyboard, paste, share image, and later screenshot detection all hit the same reader. Source never picks a third chrome.
+Keyboard, paste, mic, share image, and later screenshot detection all hit the same reader. Source never picks a third chrome.
 
 ## Tokens
 
@@ -46,7 +48,8 @@ Reuse `Theme` from `apps/ios/HowMuch/Support/Theme.swift`. Do not invent a secon
 | Canvas | `#F2EFE6` |
 | Card | white, 12pt continuous corners (`.ynabCard()`) |
 | Muted (compose, keypad, repair) | `#E8E5DB` |
-| Accent / Save / mic | `#5B5AEF` |
+| Accent / Save | `#5B5AEF` |
+| Mic (idle) | secondary ink, no fill |
 | Ink | `#1B203A` |
 | Amount header outflow | `#C7322A` |
 | Register outflow amount | ink (not red) — `Theme.registerAmountColour` |
@@ -61,28 +64,41 @@ Copy stays British (Uncategorised, colour). Currency follows the plan formatter,
 
 Today: `AddTransactionSheet` → `TransactionFormView`. Title **Add Transaction**. Leading **Cancel**. Amount header (Outflow/Inflow + 40pt monospaced amount). Detail card (Payee, Category, Account, Date). Split card. Extras. Glass keypad while amount is 0. Trailing glass **Save** when the keypad is down. `canSave` is amount + account; payee is optional.
 
-**Add one row above the amount header:**
+**Add one text field above the amount header:**
 
-- White (or muted) 48pt field.
+- White 48pt field. It is a `TextField`, not a voice orb.
 - Placeholder `$5 of food on DBS`.
-- Trailing 36pt accent mic.
-- 12pt caption: `Speak or type a spend. Looks at your accounts.`
+- Trailing 32pt **quiet** mic (secondary colour, no blurple fill). Optional. Hidden if speech is unavailable.
+- 12pt caption: `Type a spend. Looks at your accounts.`
+
+Two focus modes that must not fight:
+
+| You tap | Keyboard | Amount keypad |
+| --- | --- | --- |
+| Amount | hidden | shown (today) |
+| Compose | system QWERTY (or paste) | hidden |
+
+Return / go on the text keyboard runs the reader. Do not parse on every keystroke — the form must not jump while you type. Paste into the field is the same path as typing.
 
 That field is a command line. No reply bubble. The form below is the reply.
 
-Keep the keypad. Fresh capture still opens it. Duplicate-for-Today still skips it when amount is already set. After a successful parse with amount > 0, collapse the keypad the same way Duplicate does.
+Keep the amount keypad for the existing capture path. Duplicate-for-Today still skips it when amount is already set. After a successful parse with amount > 0, collapse the keypad the same way Duplicate does.
 
-Do **not** retitle the sheet “Add expense”. Do **not** replace **Save** with `Save $5.00`. The keypad primary key stays `done` / `next` / `save` as it is now.
+Do **not** retitle the sheet “Add expense”. Do **not** replace **Save** with `Save $5.00`. The keypad primary key stays `done` / `next` / `save` as it is now. Do **not** make the mic the visual hero of the sheet.
 
-### 2. Listening
+### 2. Typing (the common case)
 
-Mic fill becomes outflow red, icon becomes stop. Field shows the live transcript in italic. Caption: `Listening · tap to stop`. Amount and pickers do not move until stop (or a short pause after the last token). Keypad may dim; it must not disappear into a voice-assistant orb.
+Caret in the field. System keyboard. Caption: `Return fills the form below. Dictation is optional.` Amount and pickers stay put until Return. Same reader output as a spoken sentence.
 
-### 3. Parsed (`N == 1`)
+### 3. Optional: listening
 
-Compose keeps the utterance. Caption: `Looks right? Edit below, then Save.` Amount, direction, category, and account bind onto the existing `TransactionDraft` / `DisclosureValueRow`s. Unresolved fields stay placeholders. **Save** enables when `canSave` is true.
+Mic fill becomes outflow red, icon becomes stop. Field shows the live transcript in italic. Caption: `Listening · tap to stop`. Amount and pickers do not move until stop. This is the same field, not a Siri sheet. Ship after typed parse works.
 
-### 4. Ambiguous
+### 4. Parsed (`N == 1`)
+
+Compose keeps the sentence (typed, pasted, or dictated). Caption: `Looks right? Edit below, then Save.` Amount, direction, category, and account bind onto the existing `TransactionDraft` / `DisclosureValueRow`s. Unresolved fields stay placeholders. **Save** enables when `canSave` is true.
+
+### 5. Ambiguous
 
 The model never silent-picks an account or category.
 
@@ -93,31 +109,29 @@ The model never silent-picks an account or category.
 
 Nickname resolution (“card x”) is a data problem, not a second UI. Wrong silent match is worse than an empty picker.
 
-### 5. Apple Intelligence off
+### 6. Apple Intelligence off
 
 Hide the compose field. One caption: `Apple Intelligence is off. The keypad still works — nothing is uploaded.` Fail closed. No Worker fallback.
 
-### 6. Reading (inbox / share)
+### 7. Reading (inbox / share)
 
 New sheet, same canvas. Title **Reading…**. Thumbnail + `Stays on this device`. No transcript. This is the same sheet that becomes Found N or the capture form.
 
-### 7. Review list (`N > 1`)
+### 8. Review list (`N > 1`)
 
-New sheet. Title **Found {N}**. Leading **Cancel**.
+New sheet. Title **Found {N}**. Leading **Cancel**. Two typed spends in one sentence are enough to open this — screenshots are not required.
 
-1. Source strip: thumbnail or mic glyph, payee/date or `Spoken · just now`.
+1. Source strip: thumbnail, or nothing special for typed text (`Typed · just now`).
 2. White card of register rows: include circle, payee, category footnote (ochre if Uncategorised), tabular amount in **register** colour (ink for outflows). Unchecked rows dim and are dropped on commit. Tap a row → `TransactionFormView` for that draft.
-3. Repair line (muted field). Placeholder `everything from Cold Storage is groceries`. Mutates the list. No send arrow, no thread.
+3. Repair line (muted **text** field). Placeholder `everything from Cold Storage is groceries`. Mutates the list. No send arrow, no thread. Same type-then-Return behaviour as compose.
 4. One **Add to** account picker (applies to rows that do not already have an unambiguous account).
 5. Full-width accent pill: `Add {includedCount} to {account}`.
 
-Two spends in one sentence is enough to prove this before any image work.
-
-### 8. Share sheet (later)
+### 9. Share sheet (later)
 
 System share sheet. HowMuch in the app row (`public.image`, `public.text`). Extension copies bytes into App Group `group.sg.soon.howmuch` and completes. No Foundation Models in the extension. No custom review UI there. Main app claims `Inbox/` → `Reading/` and applies the density rule.
 
-### 9. Screenshot offer (later, default off)
+### 10. Screenshot offer (later, default off)
 
 Accounts tab, same card language as `OutboxCard`. Headline `Add these transactions?` Caption `Looks like a screenshot · {n} lines`. Trailing **Review** + dismiss. Review is the density rule, not a new parser.
 
@@ -125,7 +139,8 @@ Accounts tab, same card language as `OutboxCard`. Headline `Add these transactio
 
 | UI bit | Code |
 | --- | --- |
-| Compose + mic | New view in `TransactionFormView`, above `amountHeader` |
+| Compose `TextField` + quiet mic | New view in `TransactionFormView`, above `amountHeader` |
+| Focus compose | Hide amount keypad; system keyboard |
 | Prefill | `TransactionFormView(draft:)` already exists (Duplicate for Today) |
 | Save one | `AppModel.commit(_:)` |
 | Save many | `commit([drafts])` + one outbox save; not `/transactions/import` |
@@ -136,17 +151,19 @@ Accounts tab, same card language as `OutboxCard`. Headline `Add these transactio
 ## Explicit non-UI
 
 - Chat thread, typing indicator, “HowMuch: I found four spends”.
-- Sparkles / Apple Intelligence badge chrome.
+- Voice-assistant orb, sparkles, Apple Intelligence badge chrome.
+- Mic as the primary call to action.
 - Photos permission in v1.
 - Web paste / web OCR.
 - Model-invented splits. Open the real editor.
 
 ## Build order (UI only)
 
-1. Compose + stub parse → prefill → existing Save.
-2. Real on-device text reader; amber empty fields.
-3. SpeechAnalyzer into the same field.
-4. `N > 1` list (two spends in one sentence).
-5. Share extension (no extra confirmation chrome).
-6. Repair line.
-7. Later: screenshot offer.
+1. Compose **text field** + stub parse on Return → prefill → existing Save. Prove typing `$5 of food on Everyday`.
+2. Paste into the same field.
+3. Real on-device text reader; amber empty fields.
+4. `N > 1` list from two spends in one typed sentence.
+5. Optional SpeechAnalyzer into the same field.
+6. Share extension (no extra confirmation chrome).
+7. Repair line (typed).
+8. Later: screenshot offer.

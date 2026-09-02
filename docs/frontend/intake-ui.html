@@ -90,13 +90,20 @@
     .compose input, .compose .ghost {
       flex: 1; border: 0; background: transparent; font: inherit; font-size: 16px; color: var(--ink); outline: none;
     }
+    .compose.focus { outline: 2px solid var(--accent); outline-offset: 1px; }
     .compose .ghost { color: var(--secondary); }
     .compose .live { font-style: italic; }
-    .mic {
-      width: 36px; height: 36px; border-radius: 18px; border: 0;
-      background: var(--accent); color: #fff; display: grid; place-items: center; flex-shrink: 0;
+    .caret {
+      display: inline-block; width: 2px; height: 18px; background: var(--accent);
+      margin-left: 1px; vertical-align: -3px; animation: blink 1s step-end infinite;
     }
-    .mic.listen { background: var(--outflow); }
+    @keyframes blink { 50% { opacity: 0; } }
+    .mic {
+      width: 32px; height: 32px; border-radius: 16px; border: 0;
+      background: transparent; color: var(--secondary); display: grid; place-items: center; flex-shrink: 0;
+      font-size: 16px;
+    }
+    .mic.listen { background: var(--outflow); color: #fff; }
     .caption { font-size: 12px; color: var(--secondary); padding: 8px 4px 12px; }
     .caption.warn { color: var(--amber); }
     .caption.ok { color: var(--inflow); }
@@ -142,6 +149,18 @@
     }
     .k.sym { color: var(--accent); font-size: 18px; }
     .k.pri { background: var(--accent); color: #fff; font-size: 17px; font-weight: 600; }
+    .kb {
+      background: #d8d2c6; padding: 8px 4px 12px; border-radius: 12px 12px 0 0;
+    }
+    .kb-row { display: flex; justify-content: center; gap: 5px; margin-bottom: 7px; }
+    .kb-key {
+      min-width: 30px; height: 42px; border: 0; border-radius: 6px; background: #fff;
+      font-size: 16px; font-weight: 500; color: var(--ink); box-shadow: 0 1px 0 rgba(0,0,0,.12);
+      padding: 0 4px;
+    }
+    .kb-key.wide { min-width: 44px; background: #cfc9bb; font-size: 13px; }
+    .kb-key.space { flex: 1; max-width: 180px; }
+    .kb-key.go { background: var(--accent); color: #fff; min-width: 56px; font-weight: 600; }
     .save {
       position: absolute; right: 20px; bottom: 28px;
       background: var(--accent); color: #fff; border: 0; border-radius: 999px;
@@ -212,7 +231,7 @@
   <div class="page">
     <aside>
       <h1>Intake UI draft</h1>
-      <p class="lede">Same reader for mic, type, paste, and later share. Confirmation density follows row count, not source. Chrome matches today’s iOS capture sheet — cream canvas, white cards, blurple accent, glass Save.</p>
+      <p class="lede">The compose field is a text field. Type (or paste) a spend; Return fills the form. Dictation is an optional trailing control, not the product. Same reader for type, paste, mic, and later share.</p>
       <div class="nav" id="nav"></div>
     </aside>
     <div class="phone-wrap">
@@ -223,8 +242,8 @@
         <section class="screen on" data-id="idle">
           <div class="nav-bar"><button class="link">Cancel</button><div class="title">Add Transaction</div><span style="width:52px"></span></div>
           <div class="scroll">
-            <div class="compose"><span class="ghost">$5 of food on DBS</span><button class="mic" aria-label="Dictate">🎙</button></div>
-            <div class="caption">Speak or type a spend. Looks at your accounts.</div>
+            <div class="compose"><span class="ghost">$5 of food on DBS</span><button class="mic" aria-label="Dictate"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 12a7 7 0 0 0 14 0"/><path d="M12 19v2"/></svg></button></div>
+            <div class="caption">Type a spend. Looks at your accounts.</div>
             <div class="amount-header">
               <div class="dir"><span class="on">Outflow</span><span>Inflow</span></div>
               <div class="amt red">−$0.00</div>
@@ -242,6 +261,30 @@
             <div class="krow"><button class="k">4</button><button class="k">5</button><button class="k">6</button><button class="k sym">+</button></div>
             <div class="krow"><button class="k">1</button><button class="k">2</button><button class="k">3</button><button class="k sym">=</button></div>
             <div class="krow"><button class="k sym">✕</button><button class="k">0</button><button class="k sym">⌫</button><button class="k pri">done</button></div>
+          </div>
+        </section>
+
+        <section class="screen" data-id="typing">
+          <div class="nav-bar"><button class="link">Cancel</button><div class="title">Add Transaction</div><span style="width:52px"></span></div>
+          <div class="scroll">
+            <div class="compose focus"><span>$5 of food on DBS<span class="caret"></span></span><button class="mic" aria-label="Dictate"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 12a7 7 0 0 0 14 0"/><path d="M12 19v2"/></svg></button></div>
+            <div class="caption">Return fills the form below. Dictation is optional.</div>
+            <div class="amount-header">
+              <div class="dir"><span class="on">Outflow</span><span>Inflow</span></div>
+              <div class="amt red">−$0.00</div>
+            </div>
+            <div class="card">
+              <div class="row"><span class="icon">👤</span><span class="grow ph">Choose Payee</span><span class="chev">›</span></div>
+              <div class="row"><span class="icon">☰</span><span class="grow ph">Choose Category</span><span class="chev">›</span></div>
+              <div class="row"><span class="icon">🏛</span><div class="grow"><div class="cap">Account</div>Everyday Account</div><span class="chev">›</span></div>
+              <div class="row"><span class="icon">📅</span><div class="grow"><div class="cap">Date</div>1 September 2026</div><span class="chev">›</span></div>
+            </div>
+          </div>
+          <div class="kb">
+            <div class="kb-row"><button class="kb-key">Q</button><button class="kb-key">W</button><button class="kb-key">E</button><button class="kb-key">R</button><button class="kb-key">T</button><button class="kb-key">Y</button><button class="kb-key">U</button><button class="kb-key">I</button><button class="kb-key">O</button><button class="kb-key">P</button></div>
+            <div class="kb-row"><button class="kb-key">A</button><button class="kb-key">S</button><button class="kb-key">D</button><button class="kb-key">F</button><button class="kb-key">G</button><button class="kb-key">H</button><button class="kb-key">J</button><button class="kb-key">K</button><button class="kb-key">L</button></div>
+            <div class="kb-row"><button class="kb-key wide">⇧</button><button class="kb-key">Z</button><button class="kb-key">X</button><button class="kb-key">C</button><button class="kb-key">V</button><button class="kb-key">B</button><button class="kb-key">N</button><button class="kb-key">M</button><button class="kb-key wide">⌫</button></div>
+            <div class="kb-row"><button class="kb-key wide">123</button><button class="kb-key space">space</button><button class="kb-key go">return</button></div>
           </div>
         </section>
 
@@ -272,7 +315,7 @@
         <section class="screen" data-id="parsed">
           <div class="nav-bar"><button class="link">Cancel</button><div class="title">Add Transaction</div><span style="width:52px"></span></div>
           <div class="scroll">
-            <div class="compose"><input value="$5 of food on DBS" readonly /><button class="mic">🎙</button></div>
+            <div class="compose"><input value="$5 of food on DBS" readonly /><button class="mic" aria-label="Dictate"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 12a7 7 0 0 0 14 0"/><path d="M12 19v2"/></svg></button></div>
             <div class="caption ok">Looks right? Edit below, then Save.</div>
             <div class="amount-header">
               <div class="dir"><span class="on">Outflow</span><span>Inflow</span></div>
@@ -292,7 +335,7 @@
         <section class="screen" data-id="ambiguous">
           <div class="nav-bar"><button class="link">Cancel</button><div class="title">Add Transaction</div><span style="width:52px"></span></div>
           <div class="scroll">
-            <div class="compose"><input value="$12 lunch on the card" readonly /><button class="mic">🎙</button></div>
+            <div class="compose"><input value="$12 lunch on the card" readonly /><button class="mic" aria-label="Dictate"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 12a7 7 0 0 0 14 0"/><path d="M12 19v2"/></svg></button></div>
             <div class="caption warn">Which account? I won’t guess.</div>
             <div class="amount-header">
               <div class="dir"><span class="on">Outflow</span><span>Inflow</span></div>
@@ -348,7 +391,7 @@
           <div class="scroll">
             <div class="offer" style="align-items:center">
               <div class="thumb">Cold<br/>Storage</div>
-              <div class="grow"><div class="payee">Cold Storage</div><div class="detail">12 Aug · spoken or screenshot, same list</div></div>
+              <div class="grow"><div class="payee">Cold Storage</div><div class="detail">12 Aug · typed, pasted, or shared — same list</div></div>
             </div>
             <div class="card">
               <div class="list-row">
@@ -433,20 +476,21 @@
   </div>
   <script>
     const screens = [
-      ["idle", "Capture · idle", "Compose field on today’s Add Transaction sheet. Keypad still owns amount. Mic on the right. Nothing parsed yet."],
-      ["listen", "Capture · listening", "Live transcript in the compose field. Form does not mutate until you stop. Keypad dims; it is not a Siri orb."],
-      ["parsed", "Capture · N = 1", "Reader filled amount, category, account. Payee stays optional. Same glass Save as Duplicate for Today. No chat reply."],
+      ["idle", "Capture · idle", "Compose is a text field above the amount. Amount keypad still owns the number. Quiet mic, not a voice CTA."],
+      ["typing", "Capture · typing", "Tap the field: amount keypad hides, QWERTY comes up. Return runs the reader. Paste works in the same box."],
+      ["parsed", "Capture · N = 1", "Typed sentence filled amount, category, account. Payee stays optional. Same glass Save. No chat reply."],
       ["ambiguous", "Capture · won’t guess", "Account stays empty. Candidate chips sit in the existing detail card. Save stays disabled until canSave."],
       ["aioff", "Capture · AI off", "Compose hides. Keypad path unchanged. Fail closed — never upload to the Worker."],
+      ["listen", "Optional · dictate", "Mic is an accessory on the same field. Live transcript, then the same parse as Return. Not the daily path."],
       ["reading", "Review · reading", "Share/inbox handoff. Progress, not a transcript. Same sheet that becomes the list."],
-      ["list", "Review · N > 1", "Register-shaped rows, include/drop, one account, repair line, Add N to {account}. Tap a row into the real editor."],
+      ["list", "Review · N > 1", "Two typed spends, a paste, or a screenshot — same register list. Repair line is typed too."],
       ["accounts", "Later · screenshot offer", "Outbox-card cousin on Accounts. Default off in v1. Review uses the density rule."],
       ["share", "Later · share sheet", "System sheet. Extension copies bytes into the App Group and quits. Parse runs in the main app."],
     ];
     const nav = document.getElementById("nav");
     const note = document.getElementById("note");
     let lastGroup = "";
-    const groups = { idle: "Daily path", listen: "Daily path", parsed: "Daily path", ambiguous: "Daily path", aioff: "Daily path", reading: "Many rows", list: "Many rows", accounts: "Later", share: "Later" };
+    const groups = { idle: "Daily path", typing: "Daily path", parsed: "Daily path", ambiguous: "Daily path", aioff: "Daily path", listen: "Optional", reading: "Many rows", list: "Many rows", accounts: "Later", share: "Later" };
     screens.forEach(([id, label, text], i) => {
       const g = groups[id];
       if (g !== lastGroup) {
