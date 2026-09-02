@@ -37,7 +37,7 @@ Density follows **row count**, not source:
 | `N == 1` | Existing `AddTransactionSheet` / `TransactionFormView`, prefilled | Trailing glass **Save** (unchanged) |
 | `N > 1` | New review list sheet | Full-width **Add {n} to {account}** |
 
-Keyboard, paste, mic, share image, and later screenshot detection all hit the same reader. Source never picks a third chrome.
+Keyboard, paste, mic, share image, and later screenshot detection all hit the same reader. Structured Shortcuts skip the reader (they already are a draft) but still open through `presentCapture`. Spec: [`app-intents.md`](./app-intents.md), issue [#96](https://github.com/yjsoon/howmuch/issues/96).
 
 ## Tokens
 
@@ -134,6 +134,10 @@ System share sheet. HowMuch in the app row (`public.image`, `public.text`). Exte
 ### 10. Screenshot offer (later, default off)
 
 Accounts tab, same card language as `OutboxCard`. Headline `Add these transactions?` Caption `Looks like a screenshot · {n} lines`. Trailing **Review** + dismiss. Review is the density rule, not a new parser.
+
+## Shared capture door (Shortcuts + intake)
+
+Tab +, Quick Action, Duplicate, compose, share, and App Intents must not each own a sheet. One `CaptureRequest` (`.blank` / `.draft(TransactionDraft)` / `.inbox`) and `AppModel.presentCapture`. Structured Shortcuts fill a draft and present it. Later text/image intents write the same inbox as the share extension, then the density rule above. Spec: [`app-intents.md`](./app-intents.md).
 
 ## Mapping onto existing types
 
