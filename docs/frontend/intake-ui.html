@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HowMuch intake UI draft</title>
+  <style>
+    :root {
+      --canvas: #F2EFE6;
+      --card: #ffffff;
+      --muted: #E8E5DB;
+      --accent: #5B5AEF;
+      --ink: #1B203A;
+      --outflow: #C7322A;
+      --inflow: #228B57;
+      --lime: #D8F27D;
+      --lime-deep: #BCDE56;
+      --uncat: #B0661C;
+      --amber: #C9892A;
+      --secondary: rgba(27, 32, 58, 0.55);
+      --tertiary: rgba(27, 32, 58, 0.28);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      background: #d9d4c8;
+      color: var(--ink);
+      min-height: 100vh;
+    }
+    .page {
+      display: grid;
+      grid-template-columns: minmax(240px, 320px) 1fr;
+      gap: 28px;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 28px 24px 64px;
+    }
+    h1 { font-size: 22px; margin: 0 0 8px; }
+    .lede { color: #444; font-size: 13px; line-height: 1.45; margin: 0 0 18px; }
+    .nav { display: flex; flex-direction: column; gap: 6px; }
+    .nav button {
+      text-align: left;
+      border: 0;
+      background: transparent;
+      padding: 9px 10px;
+      border-radius: 10px;
+      font: inherit;
+      color: var(--ink);
+      cursor: pointer;
+    }
+    .nav button small { display: block; color: var(--secondary); font-size: 11px; margin-top: 2px; }
+    .nav button[aria-current="true"] { background: #fff; box-shadow: 0 1px 0 rgba(0,0,0,.06); }
+    .group { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--secondary); margin: 14px 0 4px; }
+    .phone-wrap { display: flex; flex-direction: column; align-items: center; }
+    .phone {
+      width: 390px;
+      height: 844px;
+      background: var(--canvas);
+      border-radius: 44px;
+      overflow: hidden;
+      position: relative;
+      box-shadow: 0 30px 80px rgba(27,32,58,.22);
+      border: 10px solid #1a1c24;
+    }
+    .island {
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      width: 118px; height: 34px; background: #0b0d14; border-radius: 20px; z-index: 5;
+    }
+    .status {
+      height: 54px; padding: 16px 22px 0; display: flex; justify-content: space-between;
+      font-size: 14px; font-weight: 600;
+    }
+    .screen { display: none; height: calc(100% - 54px); flex-direction: column; }
+    .screen.on { display: flex; }
+    .nav-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 4px 16px 10px; min-height: 44px;
+    }
+    .nav-bar .title { font-weight: 600; font-size: 17px; }
+    .link { color: var(--accent); font-weight: 500; background: none; border: 0; font: inherit; cursor: pointer; }
+    .scroll { flex: 1; overflow: auto; padding: 0 16px 24px; }
+    .compose {
+      background: var(--card);
+      border-radius: 14px;
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 8px 8px 14px;
+      min-height: 48px;
+    }
+    .compose input, .compose .ghost {
+      flex: 1; border: 0; background: transparent; font: inherit; font-size: 16px; color: var(--ink); outline: none;
+    }
+    .compose .ghost { color: var(--secondary); }
+    .compose .live { font-style: italic; }
+    .mic {
+      width: 36px; height: 36px; border-radius: 18px; border: 0;
+      background: var(--accent); color: #fff; display: grid; place-items: center; flex-shrink: 0;
+    }
+    .mic.listen { background: var(--outflow); }
+    .caption { font-size: 12px; color: var(--secondary); padding: 8px 4px 12px; }
+    .caption.warn { color: var(--amber); }
+    .caption.ok { color: var(--inflow); }
+    .amount-header { text-align: center; padding: 8px 8px 16px; }
+    .amount-header.lime { background: var(--lime); border-radius: 14px; }
+    .dir {
+      display: flex; background: var(--muted); border-radius: 999px; padding: 3px; margin: 0 32px 14px;
+    }
+    .dir.in { background: var(--lime-deep); }
+    .dir span {
+      flex: 1; text-align: center; padding: 8px 0; font-size: 14px; font-weight: 600; border-radius: 999px;
+    }
+    .dir .on { background: var(--card); }
+    .amt { font-size: 40px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -1px; }
+    .amt.red { color: var(--outflow); }
+    .card {
+      background: var(--card); border-radius: 12px; overflow: hidden; margin-bottom: 14px;
+    }
+    .row {
+      display: flex; align-items: center; gap: 12px; padding: 13px 16px; min-height: 52px;
+    }
+    .row + .row { border-top: 1px solid rgba(27,32,58,.08); margin-top: 0; }
+    .icon { width: 28px; color: var(--accent); text-align: center; font-size: 16px; }
+    .grow { flex: 1; min-width: 0; }
+    .cap { font-size: 11px; color: var(--secondary); }
+    .ph { color: rgba(27,32,58,.75); }
+    .chev { color: var(--tertiary); font-size: 13px; }
+    .amber-row { box-shadow: inset 3px 0 0 var(--amber); background: #fbf6ea; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 12px 56px; }
+    .chip {
+      border: 1px solid rgba(27,32,58,.14); background: var(--canvas); border-radius: 999px;
+      padding: 6px 12px; font-size: 13px;
+    }
+    .chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .keypad {
+      margin: 8px; padding: 10px; border-radius: 28px;
+      background: rgba(255,255,255,.55); backdrop-filter: blur(16px);
+    }
+    .krow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-bottom: 4px; }
+    .k {
+      height: 52px; border: 0; border-radius: 10px; background: rgba(255,255,255,.7);
+      font-size: 22px; font-weight: 500; color: var(--ink);
+    }
+    .k.sym { color: var(--accent); font-size: 18px; }
+    .k.pri { background: var(--accent); color: #fff; font-size: 17px; font-weight: 600; }
+    .save {
+      position: absolute; right: 20px; bottom: 28px;
+      background: var(--accent); color: #fff; border: 0; border-radius: 999px;
+      padding: 10px 16px; font-weight: 600; display: flex; align-items: center; gap: 6px;
+      box-shadow: 0 8px 24px rgba(91,90,239,.35);
+    }
+    .save[disabled] { opacity: .45; box-shadow: none; }
+    .tabbar {
+      display: flex; justify-content: space-around; align-items: flex-end;
+      padding: 8px 8px 18px; background: rgba(255,255,255,.72); backdrop-filter: blur(20px);
+      border-top: 1px solid rgba(27,32,58,.06);
+    }
+    .tab { text-align: center; font-size: 10px; color: var(--secondary); }
+    .tab.on { color: var(--accent); font-weight: 600; }
+    .tab .glyph { font-size: 20px; display: block; margin-bottom: 2px; }
+    .plus { width: 44px; height: 32px; border-radius: 16px; background: var(--muted); display: grid; place-items: center; margin: 0 auto 2px; font-size: 18px; color: var(--ink); }
+    .offer, .outbox { background: var(--card); border-radius: 12px; padding: 12px 16px; margin-bottom: 14px; }
+    .offer { display: flex; gap: 12px; align-items: flex-start; }
+    .thumb {
+      width: 44px; height: 56px; border-radius: 8px; background: #ece7d8;
+      border: 1px solid rgba(27,32,58,.08); font-size: 8px; padding: 4px; color: var(--secondary); overflow: hidden;
+    }
+    .acct { background: var(--card); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; display: flex; justify-content: space-between; }
+    .list-row { display: flex; align-items: center; gap: 10px; padding: 10px 16px; }
+    .list-row + .list-row { border-top: 1px solid rgba(27,32,58,.08); }
+    .check { width: 22px; height: 22px; border-radius: 11px; border: 1.5px solid var(--accent); display: grid; place-items: center; color: #fff; font-size: 12px; flex-shrink: 0; }
+    .check.on { background: var(--accent); }
+    .check.off { border-color: var(--tertiary); }
+    .dim { opacity: .42; }
+    .payee { font-weight: 600; }
+    .detail { font-size: 13px; color: var(--secondary); }
+    .detail.uncat { color: var(--uncat); }
+    .money { font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 500; }
+    .money.in { color: var(--inflow); }
+    .repair {
+      background: var(--muted); border-radius: 12px; padding: 12px 14px; color: var(--secondary); font-size: 15px; margin-bottom: 12px;
+    }
+    .pill {
+      width: 100%; border: 0; background: var(--accent); color: #fff; font-weight: 600;
+      padding: 14px; border-radius: 999px; font-size: 16px;
+    }
+    .share-dim { position: absolute; inset: 0; background: rgba(20,22,30,.45); }
+    .share-sheet {
+      position: absolute; left: 8px; right: 8px; bottom: 8px; background: #f4f1ea;
+      border-radius: 28px; padding: 12px 12px 28px; max-height: 78%;
+    }
+    .apps { display: flex; gap: 14px; padding: 12px 8px 16px; overflow: hidden; }
+    .app { text-align: center; font-size: 11px; width: 64px; }
+    .app i {
+      display: grid; place-items: center; width: 56px; height: 56px; border-radius: 14px;
+      background: #fff; margin: 0 auto 6px; font-style: normal; font-weight: 700;
+    }
+    .app.hm i { background: var(--canvas); color: var(--accent); outline: 2px solid var(--accent); }
+    .action { background: #fff; border-radius: 12px; overflow: hidden; }
+    .action div { padding: 14px 16px; border-top: 1px solid rgba(27,32,58,.08); }
+    .action div:first-child { border-top: 0; }
+    .busy { text-align: center; padding: 40px 16px; color: var(--secondary); }
+    .note { font-size: 12px; color: #555; margin-top: 14px; max-width: 390px; line-height: 1.4; }
+    @media (max-width: 860px) {
+      .page { grid-template-columns: 1fr; }
+    }
+    body.phone-only { background: #d9d4c8; }
+    body.phone-only .page { display: flex; justify-content: center; padding: 16px; }
+    body.phone-only aside, body.phone-only .note { display: none; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <aside>
+      <h1>Intake UI draft</h1>
+      <p class="lede">Same reader for mic, type, paste, and later share. Confirmation density follows row count, not source. Chrome matches today’s iOS capture sheet — cream canvas, white cards, blurple accent, glass Save.</p>
+      <div class="nav" id="nav"></div>
+    </aside>
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="island"></div>
+        <div class="status"><span>9:41</span><span>▮▮▮</span></div>
+
+        <section class="screen on" data-id="idle">
+          <div class="nav-bar"><button class="link">Cancel</button><div class="title">Add Transaction</div><span style="width:52px"></span></div>
+          <div class="scroll">
+            <div class="compose"><span class="ghost">$5 of food on DBS</span><button class="mic" aria-label="Dictate">🎙</button></div>
+            <div class="caption">Speak or type a spend. Looks at your accounts.</div>
+            <div class="amount-header">
+              <div class="dir"><span class="on">Outflow</span><span>Inflow</span></div>
+              <div class="amt red">−$0.00</div>
+            </div>
+            <div class="card">
+              <div class="row"><span class="icon">👤</span><span class="grow ph">Choose Payee</span><span class="chev">›</span></div>
+              <div class="row"><span class="icon">☰</span><span class="grow ph">Choose Category</span><span class="chev">›</span></div>
+              <div class="row"><span class="icon">🏛</span><div class="grow"><div class="cap">Account</div>Everyday Account</div><span class="chev">›</span></div>
+              <div class="row"><span class="icon">📅</span><div class="grow"><div class="cap">Date</div>1 September 2026</div><span class="chev">›</span></div>
+            </div>
+            <div class="card"><div class="row"><span class="icon">⧉</span><span class="grow">Split transaction</span><span style="color:var(--tertiary)">○</span></div></div>
+          </div>
+          <div class="keypad">
+            <div class="krow"><button class="k">7</button><button class="k">8</button><button class="k">9</button><button class="k sym">−</button></div>
+            <div class="krow"><button class="k">4</button><button class="k">5</button><button class="k">6</button><button class="k sym">+</button></div>
+            <div class="krow"><button class="k">1</button><button class="k">2</button><button class="k">3</button><button class="k sym">=</button></div>
+            <div class="krow"><button class="k sym">✕</button><button class="k">0</button><button class="k sym">⌫</button><button class="k pri">done</button></div>
+          </div>
+        </section>
+
+        <section class="screen" data-id="listen">
+          <div class="nav-bar"><button class="link">Cancel</button><div class="title">Add Transaction</div><span style="width:52px"></span></div>
+          <div class="scroll">
+            <div class="compose"><span class="live">five dollars of food on…</span><button class="mic listen" aria-label="Stop">■</button></div>
+            <div class="caption">Listening · tap to stop</div>
+            <div class="amount-header">
+              <div class="dir"><span class="on">Outflow</span><span>Inflow</span></div>
+              <div class="amt red">−$0.00</div>
+            </div>
+            <div class="card">
+              <div class="row"><span class="icon">👤</span><span class="grow ph">Choose Payee</span><span class="chev">›</span></div>
+              <div class="row"><span class="icon">☰</span><span class="grow ph">Choose Category</span><span class="chev">›</span></div>
+              <div class="row"><span class="icon">🏛</span><div class="grow"><div class="cap">Account</div>Everyday Account</div><span class="chev">›</span></div>
+              <div class="row"><span class="icon">📅</span><div class="grow"><div class="cap">Date</div>1 September 2026</div><span class="chev">›</span></div>
+            </div>
+          </div>
+          <div class="keypad" style="opacity:.4">
+            <div class="krow"><button class="k">7</button><button class="k">8</button><button class="k">9</button><button class="k sym">−</button></div>
+            <div class="krow"><button class="k">4</button><button class="k">5</button><button class="k">6</button><button class="k sym">+</button></div>
+            <div class="krow"><button class="k">1</button><button class="k">2</button><button class="k">3</button><button class="k sym">=</button></div>
+            <div class="krow"><button class="k sym">✕</button><button class="k">0</button><button class="k sym">⌫</button><button class="k pri">done</button></div>
+          </div>
+        </section>
+
+        <section class="screen" data-id="parsed">
+          <div class="nav-bar"><button class="link">Cancel</button><div class="title">Add Transaction</div><span style="width:52px"></span></div>
+          <div class="scroll">
+            <div class="compose"><input value="$5 of food on DBS" readonly /><button class="mic">🎙</button></div>
+            <div class="caption ok">Looks right? Edit below, then Save.</div>
+            <div class="amount-header">
+              <div class="dir"><span class="on">Outflow</span><span>Inflow</span></div>
+              <div class="amt red">−$5.00</div>
+            </div>
+            <div class="card">
+              <div class="row"><span class="icon">👤</span><span class="grow ph">Choose Payee</span><span class="chev">›</span></div>
+              <div class="row"><span class="icon">☰</span><div class="grow"><div class="cap">Category</div>Food</div><span class="chev">›</span></div>
+              <div class="row"><span class="icon">🏛</span><div class="grow"><div class="cap">Account</div>DBS</div><span class="chev">›</span></div>
+              <div class="row"><span class="icon">📅</span><div class="grow"><div class="cap">Date</div>1 September 2026</div><span class="chev">›</span></div>
+            </div>
+            <div class="card"><div class="row"><span class="icon">⧉</span><span class="grow">Split transaction</span><span style="color:var(--tertiary)">○</span></div></div>
+          </div>
+          <button class="save">✓ Save</button>
+        </section>
+
+        <section class="screen" data-id="ambiguous">
+          <div class="nav-bar"><button class="link">Cancel</button><div class="title">Add Transaction</div><span style="width:52px"></span></div>
+          <div class="scroll">
+            <div class="compose"><input value="$12 lunch on the card" readonly /><button class="mic">🎙</button></div>
+            <div class="caption warn">Which account? I won’t guess.</div>
+            <div class="amount-header">
+              <div class="dir"><span class="on">Outflow</span><span>Inflow</span></div>
+              <div class="amt red">−$12.00</div>
+            </div>
+            <div class="card">
+              <div class="row"><span class="icon">👤</span><span class="grow ph">Choose Payee</span><span class="chev">›</span></div>
+              <div class="row"><span class="icon">☰</span><div class="grow"><div class="cap">Category</div>Dining Out</div><span class="chev">›</span></div>
+              <div class="row amber-row"><span class="icon">🏛</span><span class="grow ph">Choose Account</span><span class="chev">›</span></div>
+              <div class="chips"><span class="chip">Everyday Account</span><span class="chip">DBS</span></div>
+              <div class="row"><span class="icon">📅</span><div class="grow"><div class="cap">Date</div>1 September 2026</div><span class="chev">›</span></div>
+            </div>
+          </div>
+          <button class="save" disabled>✓ Save</button>
+        </section>
+
+        <section class="screen" data-id="aioff">
+          <div class="nav-bar"><button class="link">Cancel</button><div class="title">Add Transaction</div><span style="width:52px"></span></div>
+          <div class="scroll">
+            <div class="caption" style="padding-top:4px">Apple Intelligence is off. The keypad still works — nothing is uploaded.</div>
+            <div class="amount-header">
+              <div class="dir"><span class="on">Outflow</span><span>Inflow</span></div>
+              <div class="amt red">−$0.00</div>
+            </div>
+            <div class="card">
+              <div class="row"><span class="icon">👤</span><span class="grow ph">Choose Payee</span><span class="chev">›</span></div>
+              <div class="row"><span class="icon">☰</span><span class="grow ph">Choose Category</span><span class="chev">›</span></div>
+              <div class="row"><span class="icon">🏛</span><div class="grow"><div class="cap">Account</div>Everyday Account</div><span class="chev">›</span></div>
+              <div class="row"><span class="icon">📅</span><div class="grow"><div class="cap">Date</div>1 September 2026</div><span class="chev">›</span></div>
+            </div>
+          </div>
+          <div class="keypad">
+            <div class="krow"><button class="k">7</button><button class="k">8</button><button class="k">9</button><button class="k sym">−</button></div>
+            <div class="krow"><button class="k">4</button><button class="k">5</button><button class="k">6</button><button class="k sym">+</button></div>
+            <div class="krow"><button class="k">1</button><button class="k">2</button><button class="k">3</button><button class="k sym">=</button></div>
+            <div class="krow"><button class="k sym">✕</button><button class="k">0</button><button class="k sym">⌫</button><button class="k pri">done</button></div>
+          </div>
+        </section>
+
+        <section class="screen" data-id="reading">
+          <div class="nav-bar"><button class="link">Cancel</button><div class="title">Reading…</div><span style="width:52px"></span></div>
+          <div class="scroll">
+            <div class="offer">
+              <div class="thumb">DBS<br/>−12.80<br/>−8.90</div>
+              <div class="grow"><div class="payee">Stays on this device</div><div class="detail">Screenshot · reading lines</div></div>
+            </div>
+            <div class="busy">No chat. Rows appear here when the reader finishes.</div>
+          </div>
+        </section>
+
+        <section class="screen" data-id="list">
+          <div class="nav-bar"><button class="link">Cancel</button><div class="title">Found 4</div><span style="width:52px"></span></div>
+          <div class="scroll">
+            <div class="offer" style="align-items:center">
+              <div class="thumb">Cold<br/>Storage</div>
+              <div class="grow"><div class="payee">Cold Storage</div><div class="detail">12 Aug · spoken or screenshot, same list</div></div>
+            </div>
+            <div class="card">
+              <div class="list-row">
+                <span class="check on">✓</span>
+                <div class="grow"><div class="payee">Vegetables</div><div class="detail">Groceries</div></div>
+                <div class="money">$3.20</div>
+              </div>
+              <div class="list-row">
+                <span class="check on">✓</span>
+                <div class="grow"><div class="payee">Milk</div><div class="detail">Groceries</div></div>
+                <div class="money">$2.50</div>
+              </div>
+              <div class="list-row dim">
+                <span class="check off"></span>
+                <div class="grow"><div class="payee">Irvins snack</div><div class="detail uncat">Uncategorised</div></div>
+                <div class="money">$1.20</div>
+              </div>
+              <div class="list-row">
+                <span class="check on">✓</span>
+                <div class="grow"><div class="payee">Household</div><div class="detail uncat">Uncategorised</div></div>
+                <div class="money">$4.80</div>
+              </div>
+            </div>
+            <div class="repair">everything from Cold Storage is groceries</div>
+            <div class="card"><div class="row"><span class="icon">🏛</span><div class="grow"><div class="cap">Add to</div>Everyday Account</div><span class="chev">›</span></div></div>
+            <button class="pill">Add 3 to Everyday Account</button>
+          </div>
+        </section>
+
+        <section class="screen" data-id="accounts">
+          <div class="nav-bar" style="justify-content:flex-start; gap:12px; padding-left:20px">
+            <div class="title" style="font-size:32px; font-weight:700; padding-top:8px">Accounts</div>
+          </div>
+          <div class="scroll">
+            <div class="offer">
+              <div class="thumb">DBS<br/>−12.80<br/>−8.90<br/>−23.45</div>
+              <div class="grow">
+                <div class="payee">Add these transactions?</div>
+                <div class="detail">Looks like a DBS screenshot · 3 lines</div>
+                <div style="margin-top:8px"><button class="link">Review</button></div>
+              </div>
+              <button class="link" aria-label="Dismiss">✕</button>
+            </div>
+            <div class="acct"><div><div class="cap">Cash</div><strong>Everyday Account</strong></div><div class="money">$1,240.00</div></div>
+            <div class="acct"><div><div class="cap">Credit Card</div><strong>DBS</strong></div><div class="money">$88.12</div></div>
+          </div>
+          <div class="tabbar">
+            <div class="tab on"><span class="glyph">🏛</span>Accounts</div>
+            <div class="tab"><span class="glyph">▦</span>Plan</div>
+            <div class="tab"><span class="glyph">📊</span>Reflect</div>
+            <div class="tab"><span class="plus">+</span>Transaction</div>
+          </div>
+        </section>
+
+        <section class="screen" data-id="share">
+          <div class="nav-bar" style="justify-content:flex-start; padding-left:20px"><div class="title" style="font-size:32px; font-weight:700">Accounts</div></div>
+          <div class="scroll">
+            <div class="acct"><div><div class="cap">Cash</div><strong>Everyday Account</strong></div><div class="money">$1,240.00</div></div>
+          </div>
+          <div class="share-dim"></div>
+          <div class="share-sheet">
+            <div class="card" style="margin:0 0 12px; padding:10px; display:flex; gap:10px; align-items:center">
+              <div class="thumb">POSB<br/>Passbook</div>
+              <div class="grow"><div class="payee">Screenshot</div><div class="detail">Photos</div></div>
+            </div>
+            <div class="apps">
+              <div class="app"><i>M</i>Messages</div>
+              <div class="app"><i>✉</i>Mail</div>
+              <div class="app hm"><i>HM</i>HowMuch</div>
+              <div class="app"><i>↑</i>Files</div>
+            </div>
+            <div class="action">
+              <div>Copy</div>
+              <div>Save to Files</div>
+              <div style="color:var(--accent); font-weight:600">Add to HowMuch</div>
+            </div>
+          </div>
+        </section>
+      </div>
+      <p class="note" id="note"></p>
+    </div>
+  </div>
+  <script>
+    const screens = [
+      ["idle", "Capture · idle", "Compose field on today’s Add Transaction sheet. Keypad still owns amount. Mic on the right. Nothing parsed yet."],
+      ["listen", "Capture · listening", "Live transcript in the compose field. Form does not mutate until you stop. Keypad dims; it is not a Siri orb."],
+      ["parsed", "Capture · N = 1", "Reader filled amount, category, account. Payee stays optional. Same glass Save as Duplicate for Today. No chat reply."],
+      ["ambiguous", "Capture · won’t guess", "Account stays empty. Candidate chips sit in the existing detail card. Save stays disabled until canSave."],
+      ["aioff", "Capture · AI off", "Compose hides. Keypad path unchanged. Fail closed — never upload to the Worker."],
+      ["reading", "Review · reading", "Share/inbox handoff. Progress, not a transcript. Same sheet that becomes the list."],
+      ["list", "Review · N > 1", "Register-shaped rows, include/drop, one account, repair line, Add N to {account}. Tap a row into the real editor."],
+      ["accounts", "Later · screenshot offer", "Outbox-card cousin on Accounts. Default off in v1. Review uses the density rule."],
+      ["share", "Later · share sheet", "System sheet. Extension copies bytes into the App Group and quits. Parse runs in the main app."],
+    ];
+    const nav = document.getElementById("nav");
+    const note = document.getElementById("note");
+    let lastGroup = "";
+    const groups = { idle: "Daily path", listen: "Daily path", parsed: "Daily path", ambiguous: "Daily path", aioff: "Daily path", reading: "Many rows", list: "Many rows", accounts: "Later", share: "Later" };
+    screens.forEach(([id, label, text], i) => {
+      const g = groups[id];
+      if (g !== lastGroup) {
+        const h = document.createElement("div");
+        h.className = "group";
+        h.textContent = g;
+        nav.appendChild(h);
+        lastGroup = g;
+      }
+      const b = document.createElement("button");
+      b.innerHTML = `${label}<small>${text.split(". ")[0]}.</small>`;
+      if (i === 0) b.setAttribute("aria-current", "true");
+      b.onclick = () => show(id, b, text);
+      nav.appendChild(b);
+    });
+    const params = new URLSearchParams(location.search);
+    if (params.has("phone")) document.body.classList.add("phone-only");
+    const start = params.get("screen") || screens[0][0];
+    const startIdx = Math.max(0, screens.findIndex(([id]) => id === start));
+    const startBtn = nav.querySelectorAll("button")[startIdx];
+    if (startBtn) startBtn.click();
+    else note.textContent = screens[0][2];
+    function show(id, btn, text) {
+      document.querySelectorAll(".screen").forEach((el) => el.classList.toggle("on", el.dataset.id === id));
+      nav.querySelectorAll("button").forEach((el) => el.removeAttribute("aria-current"));
+      btn.setAttribute("aria-current", "true");
+      note.textContent = text;
+    }
+  </script>
+</body>
+</html>
