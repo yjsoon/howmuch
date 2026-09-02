@@ -1086,7 +1086,7 @@ struct RegisterView: View {
 
   private var disclosureDateSections: [RegisterDateSection] {
     let today = Date.now.isoDateString
-    dateSections(
+    return dateSections(
       pending: visiblePendingRows.filter { $0.isoDate > today },
       transactions: visibleTransactions.filter { $0.date > today },
       schedules: visibleSchedules
@@ -1096,7 +1096,7 @@ struct RegisterView: View {
   private var currentDateSections: [RegisterDateSection] {
     let today = Date.now.isoDateString
     let hideFuturePosted = scope.accountID != nil
-    dateSections(
+    return dateSections(
       pending: visiblePendingRows.filter { !hideFuturePosted || $0.isoDate <= today },
       transactions: visibleTransactions.filter { !hideFuturePosted || $0.date <= today },
       schedules: []

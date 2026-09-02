@@ -47,3 +47,5 @@ Build from the repo root:
 ```sh
 xcodebuild -project apps/ios/HowMuch.xcodeproj -scheme HowMuch -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/howmuch-derived CODE_SIGNING_ALLOWED=NO CLANG_MODULE_CACHE_PATH=/tmp/howmuch-module-cache SWIFT_MODULECACHE_PATH=/tmp/howmuch-module-cache build
 ```
+
+To put a signed build on a registered iPhone that is not plugged into this Mac, use Speedflight (`scripts/speedflight.sh`). Standing checks and “Mac is not set up” guidance live in the iOS Speedflight section of `AGENTS.md`.
