@@ -24,7 +24,7 @@ interface Env {
 
 const APP_SITE_ASSOCIATION = JSON.stringify({
   webcredentials: {
-    apps: ["PQ6U5ESLN2.sg.soon.howmuch"],
+    apps: ["PQ6U5ESLN2.sg.soon.howmuch", "XL5JK4F896.sg.soon.howmuch"],
   },
 });
 

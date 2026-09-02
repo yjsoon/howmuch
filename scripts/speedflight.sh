@@ -33,7 +33,7 @@ ASC_PRIVATE_KEY_PATH="${ASC_PRIVATE_KEY_PATH:-$HOME/private_keys/AuthKey_$ASC_KE
 PROJECT="apps/ios/HowMuch.xcodeproj"
 SCHEME="HowMuch"
 BUNDLE_ID="sg.soon.howmuch"
-TEAM_ID="PQ6U5ESLN2"
+TEAM_ID="XL5JK4F896"
 BASE="${SPEEDFLIGHT_BASE:-https://speedflight.dev}"
 # The same worker on its workers.dev route, kept as an upload fallback. The
 # page link stays on the custom domain.
@@ -77,6 +77,8 @@ xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
   -authenticationKeyID "$ASC_KEY_ID" \
   -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
   -authenticationKeyPath "$ASC_PRIVATE_KEY_PATH" \
+  DEVELOPMENT_TEAM="$TEAM_ID" \
+  CODE_SIGN_STYLE=Automatic \
   -quiet archive
 
 cat > "$OUT/ExportOptions.plist" <<PLIST
