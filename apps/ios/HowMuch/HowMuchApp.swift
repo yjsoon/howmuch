@@ -128,18 +128,20 @@ private struct RootView: View {
     }
     .tabBarMinimizeBehavior(.onScrollDown)
     .overlay(alignment: .bottom) {
-      if let message = model.lastSaveMessage {
-        Text(message.text)
-          .font(.footnote.weight(.medium))
-          .foregroundStyle(message.kind == .failure ? Theme.outflow : Theme.textPrimary)
-          .padding(.horizontal, 16)
-          .padding(.vertical, 10)
-          .glassEffect(.regular, in: .capsule)
-          .padding(.bottom, 90)
-          .transition(.move(edge: .bottom).combined(with: .opacity))
+      Group {
+        if let message = model.lastSaveMessage {
+          Text(message.text)
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(message.kind == .failure ? Theme.outflow : Theme.textPrimary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .glassEffect(.regular, in: .capsule)
+            .padding(.bottom, 90)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
       }
+      .animation(.snappy, value: model.lastSaveMessage?.id)
     }
-    .animation(.snappy, value: model.lastSaveMessage?.id)
     .sensoryFeedback(trigger: model.lastSaveMessage) { _, newValue in
       switch newValue?.kind {
       case .failure:

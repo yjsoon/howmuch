@@ -1038,13 +1038,13 @@ final class AppModel {
     ledgerPageGeneration += 1
     let generation = ledgerPageGeneration
     let planID = settings.planID
-    hasMoreTransactions = false
-    nextTransactionOffset = nil
-    isLoadingOlderTransactions = false
-    isFillingHorizon = false
-    horizonFillCount = 0
-    olderTransactionsError = nil
     if !quiet {
+      hasMoreTransactions = false
+      nextTransactionOffset = nil
+      isLoadingOlderTransactions = false
+      isFillingHorizon = false
+      horizonFillCount = 0
+      olderTransactionsError = nil
       ledgerPhase = .loading
     }
     do {
@@ -1055,7 +1055,10 @@ final class AppModel {
         return
       }
       pushHorizonFill()
-      serverTransactions = sortedUniqueTransactions(page.transactions)
+      // Mutation refreshes must not drop already-loaded rows; List would clamp to top.
+      serverTransactions = sortedUniqueTransactions(
+        quiet ? page.transactions + serverTransactions : page.transactions
+      )
       serverUnapprovedTransactions = sortedUniqueTransactions(unapproved)
       reconcileClearedToggleOverlays()
       applyTransactionPageCursor(page)

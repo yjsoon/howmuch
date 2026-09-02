@@ -109,7 +109,7 @@ struct RegisterView: View {
         registerOverflowMenu
       }
     }
-    .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search Transactions")
+    .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search Transactions")
     .refreshable {
       await model.refreshAll()
     }
