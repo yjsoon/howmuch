@@ -738,8 +738,8 @@ export function TransactionsPage() {
     return activeSchedulesForScope(schedules.data ?? [], registerAccountIds).filter((schedule) => {
       if (filters.categoryIds.length) {
         const matchesCategory =
-          (schedule.category_id !== null && categoryIds.has(schedule.category_id))
-          || schedule.subtransactions?.some((line) => line.category_id !== null && categoryIds.has(line.category_id));
+          (typeof schedule.category_id === "string" && categoryIds.has(schedule.category_id))
+          || schedule.subtransactions?.some((line) => typeof line.category_id === "string" && categoryIds.has(line.category_id));
         const uncategorised = !schedule.category_id && !schedule.transfer_account_id
           && !(schedule.subtransactions?.some((line) => line.category_id || line.transfer_account_id));
         if (!matchesCategory && !(wantsUncategorised && uncategorised)) {
@@ -1496,7 +1496,7 @@ function RegisterScheduledDisclosure({
     const category = schedule.subtransactions?.length
       ? `Split · ${schedule.subtransactions.length} lines`
       : transfer ?? schedule.category_name ?? (schedule.category_id ? categoryNames.get(schedule.category_id) : null) ?? "Uncategorised";
-    const accountName = accountNames.get(schedule.account_id) ?? "Account";
+    const accountName = (typeof schedule.account_id === "string" ? accountNames.get(schedule.account_id) : undefined) ?? "Account";
     return [
       <tr key={schedule.id} className="register-scheduled-row">
         <td />
