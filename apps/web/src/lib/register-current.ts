@@ -2,6 +2,30 @@ export function isUpcomingRegisterDate(date: string, today: string): boolean {
   return date > today;
 }
 
+/** Omit `until_date` when the visible window includes today, so posted futures still load. */
+export function registerFetchUntilDate(to: string | undefined, today: string): string | undefined {
+  if (!to || to >= today) {
+    return undefined;
+  }
+  return to;
+}
+
+export function dateInRegisterWindow(
+  date: string,
+  from: string | undefined,
+  to: string | undefined,
+  today: string,
+): boolean {
+  if (from && date < from) {
+    return false;
+  }
+  const until = registerFetchUntilDate(to, today);
+  if (until && date > until) {
+    return false;
+  }
+  return true;
+}
+
 export function asOfTodayBalance(
   working: number,
   rows: Array<{ account_id: string; date: string; amount: number; deleted?: boolean }>,

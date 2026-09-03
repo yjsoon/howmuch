@@ -295,22 +295,15 @@ struct AccountsView: View {
   }
 
   private func accountRow(_ account: Account) -> some View {
-    HStack(alignment: .center, spacing: 4) {
-      Button {
-        presentedSheet = .icon(account)
-      } label: {
+    NavigationLink {
+      RegisterView(scope: .account(account.id))
+    } label: {
+      HStack(alignment: .center, spacing: 8) {
         Text(account.displayIcon)
           .font(.title3)
-          .frame(width: 44, height: 44)
-          .contentShape(Rectangle())
-      }
-      .buttonStyle(.borderless)
-      .accessibilityLabel("Change icon for \(account.name)")
-      .accessibilityHint("Opens the name and icon editor")
+          .frame(width: 32)
+          .accessibilityHidden(true)
 
-      NavigationLink {
-        RegisterView(scope: .account(account.id))
-      } label: {
         Group {
           if dynamicTypeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: 4) {
@@ -327,12 +320,15 @@ struct AccountsView: View {
             }
           }
         }
-        .contentShape(Rectangle())
       }
-      .buttonStyle(.plain)
+      .padding(.horizontal, 16)
+      .padding(.vertical, 14)
+      .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+      .contentShape(Rectangle())
     }
-    .padding(.horizontal, 12)
-    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+    .buttonStyle(.plain)
+    .accessibilityLabel("\(account.displayIcon) \(account.name)")
+    .accessibilityValue(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
     .accessibilityActions {
       if !account.closed {
         Button(model.isAccountFavourite(account.id) ? "Remove from Favourites" : "Add to Favourites") {

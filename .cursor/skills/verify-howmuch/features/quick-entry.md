@@ -42,3 +42,4 @@ Preconditions:
 - Retries of a failed submit reuse one `client_id`. A successful save mints a new one. Double-clicking Save after success starts a blank form, not a duplicate of the last id.
 - Date follows the machine's local calendar, not UTC. Use the `Today` shortcut rather than inventing a date.
 - Transfer and split paths are separate sub-features; this recipe is the spend path only. Do not mark those verified by completing a simple spend.
+- This is the web `/add` form. It does not prove iOS Add Transaction, compose intake, or Shortcuts. Those are the `ios-*` recipes.

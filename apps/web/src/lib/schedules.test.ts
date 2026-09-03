@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ScheduledTransaction } from "../api/types";
-import { activeSchedulesForAccount, scheduledAmount, scheduleRecurrence, transferScheduleLabel } from "./schedules";
+import { activeSchedulesForAccount, activeSchedulesForScope, scheduledAmount, scheduleRecurrence, transferScheduleLabel } from "./schedules";
 
 describe("account register schedules", () => {
   test("keeps only active schedules for the selected account and sorts by next date", () => {
@@ -12,6 +12,11 @@ describe("account register schedules", () => {
     ];
 
     expect(activeSchedulesForAccount(schedules, "checking").map((schedule) => schedule.id)).toEqual(["sooner", "later"]);
+    expect(activeSchedulesForScope(schedules, new Set(["checking", "savings"])).map((schedule) => schedule.id)).toEqual([
+      "other",
+      "sooner",
+      "later",
+    ]);
   });
 
   test("uses the exact split total when the parent amount is absent", () => {

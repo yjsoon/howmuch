@@ -42,3 +42,4 @@ Preconditions:
 - scrypt is slow. Wait for All Accounts, not a fixed 200ms sleep.
 - Opening any app route without a session still renders the setup/sign-in form. That is not a routing bug.
 - Do not POST `/api/auth/setup` from `control-howmuch http` and call the feature verified.
+- iOS Connection cannot create the owner. Finish this recipe on `{web_url}` before any `ios-*` recipe.
