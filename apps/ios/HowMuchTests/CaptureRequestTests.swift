@@ -135,4 +135,22 @@ final class CaptureRouterTests: XCTestCase {
     XCTAssertNil(router.pending)
     XCTAssertNil(router.presented)
   }
+
+  func testSignedOutDropsEvenWhileABlockingSheetIsUp() {
+    let router = CaptureRouter.shared
+    router.beginBlockingSheet()
+    router.enqueue(CaptureRequest(kind: .blank, connectionFingerprint: "plan-a"))
+    router.consume(isAuthenticated: false, currentFingerprint: "plan-a")
+    XCTAssertNil(router.pending)
+    XCTAssertNil(router.presented)
+  }
+
+  func testFingerprintMismatchDropsEvenWhileABlockingSheetIsUp() {
+    let router = CaptureRouter.shared
+    router.beginBlockingSheet()
+    router.enqueue(CaptureRequest(kind: .blank, connectionFingerprint: "plan-a"))
+    router.consume(isAuthenticated: true, currentFingerprint: "plan-b")
+    XCTAssertNil(router.pending)
+    XCTAssertNil(router.presented)
+  }
 }

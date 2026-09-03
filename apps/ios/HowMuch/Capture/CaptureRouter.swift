@@ -25,21 +25,22 @@ final class CaptureRouter {
   }
 
   func consume(isAuthenticated: Bool, currentFingerprint: String) {
-    guard blockingSheetCount == 0 else {
-      return
-    }
     guard let request = pending else {
       return
     }
-    pending = nil
     switch CaptureAdmission.decide(
       request,
       isAuthenticated: isAuthenticated,
       currentFingerprint: currentFingerprint
     ) {
     case .drop, .inbox:
+      pending = nil
       return
     case .present(let admitted):
+      guard blockingSheetCount == 0 else {
+        return
+      }
+      pending = nil
       presented = admitted
     }
   }
