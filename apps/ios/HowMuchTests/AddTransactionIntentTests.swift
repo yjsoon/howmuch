@@ -136,6 +136,38 @@ final class AddTransactionIntentTests: XCTestCase {
     XCTAssertNil(draft.categoryID)
   }
 
+  func testEntityQueriesKeepPickedIDsWhenCatalogIsUnread() {
+    let account = AccountEntityQuery.resolved(["acct-everyday"], catalog: nil)
+    XCTAssertEqual(account.map(\.id), ["acct-everyday"])
+
+    let payee = PayeeEntityQuery.resolved(["payee-fairprice"], catalog: nil)
+    XCTAssertEqual(payee.map(\.id), ["payee-fairprice"])
+    XCTAssertEqual(payee.first?.isNew, false)
+
+    let created = PayeeEntityQuery.resolved(
+      [PayeeEntityQuery.newPayeeID(for: "Shortcut Coffee Verify")],
+      catalog: nil
+    )
+    XCTAssertEqual(created.first?.isNew, true)
+    XCTAssertEqual(created.first?.name, "Shortcut Coffee Verify")
+
+    let category = CategoryEntityQuery.resolved(["cat-dining"], catalog: nil)
+    XCTAssertEqual(category.map(\.id), ["cat-dining"])
+  }
+
+  func testEntityQueriesPreferCatalogNamesAndKeepUnknownIDs() {
+    let account = AccountEntityQuery.resolved(["acct-everyday", "acct-gone"], catalog: Self.catalog)
+    XCTAssertEqual(account.map(\.id), ["acct-everyday", "acct-gone"])
+    XCTAssertEqual(account.first?.name, "Everyday Account")
+
+    let payee = PayeeEntityQuery.resolved(["payee-transfer"], catalog: Self.catalog)
+    XCTAssertEqual(payee.first?.transferAccountId, "acct-travel")
+
+    let category = CategoryEntityQuery.resolved(["cat-dining"], catalog: Self.catalog)
+    XCTAssertEqual(category.first?.name, "Dining Out")
+    XCTAssertEqual(category.first?.groupName, "Everyday")
+  }
+
   func testNewPayeeRoundTripLeavesNameOnly() async throws {
     let id = PayeeEntityQuery.newPayeeID(for: "Shortcut Coffee Verify")
     XCTAssertEqual(PayeeEntityQuery.newPayeeName(from: id), "Shortcut Coffee Verify")

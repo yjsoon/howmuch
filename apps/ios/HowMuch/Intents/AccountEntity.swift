@@ -17,9 +17,22 @@ struct AccountEntity: AppEntity {
 
 struct AccountEntityQuery: EntityQuery {
   func entities(for identifiers: [AccountEntity.ID]) async throws -> [AccountEntity] {
-    let accounts = IntentCatalogStore.shared.loadActive()?.openAccounts ?? []
-    return identifiers.compactMap { id in
-      accounts.first { $0.id == id }.map { AccountEntity(id: $0.id, name: $0.name) }
+    Self.resolved(identifiers, catalog: IntentCatalogStore.shared.loadActive())
+  }
+
+  /// App Intents drops a parameter when this returns fewer entities than
+  /// identifiers. The intent daemon may resolve IDs without Application
+  /// Support, so a missing catalog must still keep the pick.
+  static func resolved(
+    _ identifiers: [AccountEntity.ID],
+    catalog: IntentCatalogSnapshot?
+  ) -> [AccountEntity] {
+    let accounts = catalog?.openAccounts ?? []
+    return identifiers.map { id in
+      if let live = accounts.first(where: { $0.id == id }) {
+        return AccountEntity(id: live.id, name: live.name)
+      }
+      return AccountEntity(id: id, name: id)
     }
   }
 

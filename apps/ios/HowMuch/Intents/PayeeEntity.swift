@@ -25,15 +25,29 @@ struct PayeeEntity: AppEntity {
 
 struct PayeeEntityQuery: EntityStringQuery {
   func entities(for identifiers: [PayeeEntity.ID]) async throws -> [PayeeEntity] {
-    identifiers.compactMap { id in
-      if let name = PayeeEntityQuery.newPayeeName(from: id) {
+    Self.resolved(identifiers, catalog: IntentCatalogStore.shared.loadActive())
+  }
+
+  /// Same rule as accounts: never drop an identifier, or Shortcuts will
+  /// hand `perform()` a nil payee even after the user picked one.
+  static func resolved(
+    _ identifiers: [PayeeEntity.ID],
+    catalog: IntentCatalogSnapshot?
+  ) -> [PayeeEntity] {
+    let payees = catalog?.pickerPayees ?? []
+    return identifiers.map { id in
+      if let name = newPayeeName(from: id) {
         return PayeeEntity(id: id, name: name, transferAccountId: nil, isNew: true)
       }
-      return (IntentCatalogStore.shared.loadActive()?.pickerPayees ?? [])
-        .first { $0.id == id }
-        .map {
-          PayeeEntity(id: $0.id, name: $0.name, transferAccountId: $0.transferAccountId, isNew: false)
-        }
+      if let live = payees.first(where: { $0.id == id }) {
+        return PayeeEntity(
+          id: live.id,
+          name: live.name,
+          transferAccountId: live.transferAccountId,
+          isNew: false
+        )
+      }
+      return PayeeEntity(id: id, name: id, transferAccountId: nil, isNew: false)
     }
   }
 
