@@ -14,6 +14,7 @@ import type {
   PlanSettings,
   QuickEntryInput,
   ReconciliationMismatchDetail,
+  RewardsReport,
   ScheduledTransaction,
   ScheduledTransactionInput,
   ScheduledOccurrenceResult,
@@ -125,6 +126,7 @@ export interface ReportQuery {
   account_ids?: string;
   category_ids?: string;
   interval?: string;
+  group?: string;
 }
 
 export interface AuthUser {
@@ -314,6 +316,8 @@ export const api = {
     request<NetWorthReport>(`/api/reports/net-worth${query({ ...params })}`),
   ageOfMoney: (params: ReportQuery) =>
     request<AgeOfMoneyReport>(`/api/reports/age-of-money${query({ ...params })}`),
+  rewards: (params: ReportQuery) =>
+    request<RewardsReport>(`/api/reports/rewards${query({ ...params })}`),
   quickEntry: (input: QuickEntryInput) =>
     request<{ transaction: Transaction }>("/api/mobile/quick-entry", {
       method: "POST",

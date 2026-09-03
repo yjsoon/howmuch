@@ -55,4 +55,5 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Settings](./settings.md) covers the footer Settings hub and that API tokens and Rewards import are not top-level nav.
 - [API tokens](./api-tokens.md) covers minting a personal token and revoking it.
 - [Rewards import](./rewards-tracker-import.md) covers uploading a Rewards Tracker settings export and replaying it without duplicates.
+- [Rewards](./rewards.md) covers the Reflect dashboard: Travel Card tiles, All-range spend, flags, and grouping.
 - [Organise accounts](./organise-accounts.md) covers favourites, a custom group, and the sidebar after close.

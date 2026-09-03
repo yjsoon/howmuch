@@ -20,6 +20,7 @@ const REPORTS = [
   { to: "/income", label: "Income v Spending" },
   { to: "/net-worth", label: "Net Worth" },
   { to: "/age-of-money", label: "Age of Money" },
+  { to: "/rewards", label: "Rewards" },
 ];
 
 export function Shell() {

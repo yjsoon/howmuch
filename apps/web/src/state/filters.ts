@@ -12,6 +12,7 @@ export interface Filters {
   accountIds: string[];
   categoryIds: string[];
   interval: Interval;
+  groupBy: "flag" | "payee" | "category" | "memo";
 }
 
 export interface FilterOptions {
@@ -51,6 +52,7 @@ export function filtersFromSearch(
     accountIds,
     categoryIds: parseList(params.get("categories")),
     interval: interval && INTERVALS.includes(interval) ? interval : "month",
+    groupBy: parseGroupBy(params.get("group")),
   };
 }
 
@@ -74,6 +76,9 @@ export function applyFilterPatch(previous: URLSearchParams, patch: Partial<Filte
   }
   if (patch.interval) {
     writeParam(next, "interval", patch.interval);
+  }
+  if ("groupBy" in patch && patch.groupBy) {
+    writeParam(next, "group", patch.groupBy === "flag" ? undefined : patch.groupBy);
   }
   return next;
 }
@@ -120,6 +125,7 @@ export function useFilters(options?: FilterOptions): {
       account_ids: filters.accountIds.join(",") || undefined,
       category_ids: filters.categoryIds.join(",") || undefined,
       interval: filters.interval,
+      group: filters.groupBy === "flag" ? undefined : filters.groupBy,
     }),
     [filters, planId],
   );
@@ -133,6 +139,11 @@ function writeParam(params: URLSearchParams, key: string, value: string | undefi
   } else {
     params.delete(key);
   }
+}
+
+function parseGroupBy(value: string | null): Filters["groupBy"] {
+  if (value === "payee" || value === "category" || value === "memo" || value === "flag") return value;
+  return "flag";
 }
 
 /** Builds a /transactions link that carries the current range plus a category drill-down. */

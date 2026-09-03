@@ -2,11 +2,11 @@
 
 ## Purpose
 
-A quiet, dense ledger and Reflect dashboard for a single self-hosted user. It is a working tool, not a marketing page: four Reflect reports, the register, scheduled transactions, API tokens, and mobile quick entry make up the product.
+A quiet, dense ledger and Reflect dashboard for a single self-hosted user. It is a working tool, not a marketing page: five Reflect reports, the register, scheduled transactions, API tokens, and mobile quick entry make up the product.
 
 ## Non-Goals
 
-- No YNAB write-back or credit-card-specific handling. Month-assignment and target overlays stay on the API for iOS. The web app does not edit them.
+- No YNAB write-back. Month-assignment and target overlays stay on the API for iOS. The web app does not edit them. Rewards uses imported card rules against the HowMuch ledger.
 - No onboarding, marketing, or empty-state theatre.
 - No multi-user auth UI (version one is a single bearer token).
 
@@ -32,7 +32,7 @@ The aesthetic is a broadsheet ledger: ink on paper, hairline rules, controlled d
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │ HOWMUCH        Scheduled · Spending · Income · Net Worth      │
-│                Age of Money · All Accounts [+ Add]            │
+│                Age of Money · Rewards · All Accounts [+ Add]     │
 │                footer: Settings · Sign out                    │
 ├──────────────────────────────────────────────────────────────┤
 │ Filter rail: date-range presets (1m/3m/12m/YTD/All/custom),   │
@@ -57,6 +57,7 @@ The aesthetic is a broadsheet ledger: ink on paper, hairline rules, controlled d
 | `/income` | Income vs Spending: paired columns per period, table with income / spending / net / cumulative net |
 | `/net-worth` | Net Worth: stepped area chart, per-account balance table per period, account filter |
 | `/age-of-money` | Age of Money: line of weighted age in days per period, unmatched-spending diagnostics |
+| `/rewards` | Rewards: per-card tiles from imported Rewards Tracker cards, ledger spend, flags, and payee/category/memo grouping |
 | `/transactions` | Dense register with the same filter rail, payee/memo search, drill-down target for every report |
 | `/add` | Mobile quick entry: thumb-reach form (amount keypad-first, account, payee, optional category/memo), posts to `/api/mobile/quick-entry` with a client-generated `client_id` for idempotency |
 
@@ -67,6 +68,7 @@ One `Filters` object serialised to the query string and shared by all report rou
 - `from`, `to` (ISO dates; presets compute them client-side)
 - `account_ids`, `category_ids` (comma-separated, matching the API)
 - `interval` (`day | week | month | year`) where the report supports it
+- `group` (`flag | payee | category | memo`) on Rewards only; default `flag`
 
 Navigating between tabs preserves the query string, so a date range chosen on Spending carries to Net Worth. Drill-down from a report row links to `/transactions` with the relevant `category_ids`/date range applied.
 
@@ -76,7 +78,7 @@ The API returns YNAB-style `{ data: ... }` envelopes; amounts are integer milliu
 
 Endpoints consumed:
 
-- `GET /api/reports/spending-breakdown | income-vs-spending | net-worth | age-of-money`
+- `GET /api/reports/spending-breakdown | income-vs-spending | net-worth | age-of-money | rewards`
 - `GET /v1/plans/{id}/accounts`, `/categories`, `/payees`, `/settings` (filter options and formatting)
 - `GET /v1/plans/{id}/transactions` (+ scoped variants) for the register
 - `POST /api/mobile/quick-entry` for quick entry
@@ -99,7 +101,7 @@ apps/web/
     state/filters.ts    # URL ↔ Filters codec, hook
     components/         # FilterRail, SegmentedControl, MultiSelect,
                         # DataTable, charts/ (ShareBars, Columns, Area, Line)
-    pages/              # Spending, Income, NetWorth, AgeOfMoney,
+    pages/              # Spending, Income, NetWorth, AgeOfMoney, Rewards,
                         # Transactions, QuickEntry, Scheduled, ApiTokens
 ```
 

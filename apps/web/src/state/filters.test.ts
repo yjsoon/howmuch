@@ -39,4 +39,16 @@ describe("filtersFromSearch", () => {
     expect(filters.accountIds).toEqual(["remembered"]);
     expect(filters.interval).toBe("week");
   });
+
+  test("reads group from the URL and defaults to flag", () => {
+    expect(filtersFromSearch(new URLSearchParams("group=payee"), { defaultRange: () => ({}) }).groupBy).toBe("payee");
+    expect(filtersFromSearch(new URLSearchParams(), { defaultRange: () => ({}) }).groupBy).toBe("flag");
+  });
+});
+
+describe("applyFilterPatch group", () => {
+  test("drops the default flag grouping from the URL", () => {
+    const next = applyFilterPatch(new URLSearchParams("group=payee"), { groupBy: "flag" });
+    expect(next.get("group")).toBeNull();
+  });
 });

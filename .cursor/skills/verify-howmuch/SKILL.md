@@ -5,13 +5,13 @@ description: Drive the HowMuch web ledger in a real browser against an isolated 
 
 # Verify HowMuch
 
-HowMuch's primary surface is the React web app (`apps/web`). A user signs in, reads four Reflect reports, searches the register, posts a quick entry, manages schedules and API tokens, and organises sidebar accounts. There is no monthly Plan edit. This skill drives that path in a browser against a disposable local API.
+HowMuch's primary surface is the React web app (`apps/web`). A user signs in, reads five Reflect reports, searches the register, posts a quick entry, manages schedules and API tokens, and organises sidebar accounts. There is no monthly Plan edit. This skill drives that path in a browser against a disposable local API.
 
 Secondary surfaces, not covered here:
 
 - iOS (`apps/ios`) — Xcode / simulator only
 - Hosted Worker + D1 — production/preview. Do not point verification at `howmuch.soon.sg` or run Wrangler deploys for this skill.
-- YNAB Rewards Tracker (`yjsoon/ynab-rewards-tracker`) — not in this repo. HowMuch absorbs a settings export at **Rewards import** (`/import/rewards`); there is no live rewards dashboard or YNAB OAuth to drive.
+- YNAB Rewards Tracker (`yjsoon/ynab-rewards-tracker`) — not in this repo. HowMuch imports a settings export at **Rewards import** (`/import/rewards`) and shows the live dashboard at **Rewards** (`/rewards`) against the HowMuch ledger. There is no YNAB OAuth to drive.
 
 There is no Playwright/Cypress harness. Drive the UI with Cursor browser / computer-use against the URL `control-howmuch state` prints. Use `control-howmuch http` as a second, read-only view of stored data.
 
@@ -88,7 +88,7 @@ Stable handles:
 | Auth fields | labels `Username`, `Password`, `Setup token` |
 | Auth submit | `Create account` / `Sign in` |
 | Primary nav | `nav` named `Primary navigation` |
-| Nav links | `Scheduled`, Reflect reports (`Spending breakdown`, `Income v Spending`, `Net Worth`, `Age of Money`), `All Accounts`, `Organise accounts` |
+| Nav links | `Scheduled`, Reflect reports (`Spending breakdown`, `Income v Spending`, `Net Worth`, `Age of Money`, `Rewards`), `All Accounts`, `Organise accounts` |
 | Settings | sidebar footer link `Settings` (drawer bottom on viewport ≤720px). Hub lists `API tokens` and `Rewards import` |
 | Quick entry | sidebar `+ Add transaction` or route `/add` |
 | Register compose | account register toolbar `+ Add transaction` |

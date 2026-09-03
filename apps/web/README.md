@@ -23,7 +23,7 @@ Typechecks then emits a static bundle to `dist/`.
 ## Routes
 
 - `/` and unknown paths redirect to All Accounts (`/transactions?range=all&accounts=all`)
-- `/spending`, `/income`, `/net-worth`, `/age-of-money` — the four Reflect reports
+- `/spending`, `/income`, `/net-worth`, `/age-of-money`, `/rewards` — Reflect reports
 - `/transactions` — register with search and drill-down from reports
 - `/scheduled` — recurring transactions
 - `/settings` — Settings hub (API tokens, Rewards import)
