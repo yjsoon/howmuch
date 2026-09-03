@@ -766,7 +766,10 @@ export function TransactionsPage() {
     }
   }, [rowEdit, scopedRows]);
 
-  const eligibleIds = useMemo(() => eligibleApprovalIds(rows, approvalSession), [approvalSession, rows]);
+  const eligibleIds = useMemo(
+    () => eligibleApprovalIds(matchedRows, approvalSession),
+    [approvalSession, matchedRows],
+  );
   const selectionRows = useMemo(() => eligibleIds.map((id) => ({ id })), [eligibleIds]);
   const dispatchSelection = (intent: RegisterSelectionIntent) => {
     setSelection((current) => reduceSelection(current, selectionRows, intent, listKey));
@@ -782,7 +785,7 @@ export function TransactionsPage() {
   );
 
   const approveMany = async (transactionIds: readonly string[]) => {
-    const plan = planApproval(transactionIds, rows, approvalSessionRef.current);
+    const plan = planApproval(transactionIds, matchedRows, approvalSessionRef.current);
     if (mutationLockRef.current || !plan) return;
     const plannedIds = plan.flat();
     const started = beginApproval(approvalSessionRef.current, plannedIds);
@@ -1286,7 +1289,24 @@ export function TransactionsPage() {
                           key={txn.id}
                           row={{ kind: "posted", transaction: txn }}
                           surface={rowSurface}
-                          leading={null}
+                          leading={!txn.approved && !txn.deleted ? (
+                            <input
+                              type="checkbox"
+                              checked={selectedApprovalIdSet.has(txn.id)}
+                              onClick={(event) => {
+                                const index = eligibleIds.indexOf(txn.id);
+                                if (index >= 0) {
+                                  dispatchSelection({
+                                    kind: event.shiftKey ? "extend" : "toggle",
+                                    index,
+                                  });
+                                }
+                              }}
+                              onChange={() => {}}
+                              disabled={mutationBusy}
+                              aria-label={`Select ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
+                            />
+                          ) : null}
                           account={txn.account_name}
                           actions={(
                             <>
