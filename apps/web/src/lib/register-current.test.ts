@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { asOfTodayBalance, isUpcomingRegisterDate, partitionRegisterDates } from "./register-current";
+import {
+  asOfTodayBalance,
+  dateInRegisterWindow,
+  isUpcomingRegisterDate,
+  partitionRegisterDates,
+  registerFetchUntilDate,
+} from "./register-current";
 
 const TODAY = "2026-09-01";
 
@@ -8,6 +14,31 @@ describe("isUpcomingRegisterDate", () => {
     expect(isUpcomingRegisterDate("2026-09-08", TODAY)).toBe(true);
     expect(isUpcomingRegisterDate("2026-09-01", TODAY)).toBe(false);
     expect(isUpcomingRegisterDate("2026-08-29", TODAY)).toBe(false);
+  });
+});
+
+describe("registerFetchUntilDate", () => {
+  test("drops until_date when the window ends today or later, so posted futures load", () => {
+    expect(registerFetchUntilDate("2026-09-01", TODAY)).toBeUndefined();
+    expect(registerFetchUntilDate("2026-09-30", TODAY)).toBeUndefined();
+    expect(registerFetchUntilDate(undefined, TODAY)).toBeUndefined();
+  });
+
+  test("keeps until_date for a past window", () => {
+    expect(registerFetchUntilDate("2026-08-31", TODAY)).toBe("2026-08-31");
+  });
+});
+
+describe("dateInRegisterWindow", () => {
+  test("includes posted futures when the window ends today", () => {
+    expect(dateInRegisterWindow("2026-09-08", "2026-07-01", "2026-09-01", TODAY)).toBe(true);
+    expect(dateInRegisterWindow("2026-08-29", "2026-07-01", "2026-09-01", TODAY)).toBe(true);
+    expect(dateInRegisterWindow("2026-06-01", "2026-07-01", "2026-09-01", TODAY)).toBe(false);
+  });
+
+  test("excludes posted futures from a past month window", () => {
+    expect(dateInRegisterWindow("2026-09-08", "2026-08-01", "2026-08-31", TODAY)).toBe(false);
+    expect(dateInRegisterWindow("2026-08-15", "2026-08-01", "2026-08-31", TODAY)).toBe(true);
   });
 });
 
