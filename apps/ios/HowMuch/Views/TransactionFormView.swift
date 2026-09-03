@@ -101,15 +101,26 @@ struct AmountKeypadEngine: Equatable {
 /// one, otherwise the last-used account.
 struct AddTransactionSheet: View {
   @Environment(AppModel.self) private var model
+  let request: CaptureRequest
 
   var body: some View {
-    TransactionFormView(draft: seededDraft, isEditing: false)
+    TransactionFormView(draft: initialDraft, isEditing: false)
   }
 
-  private var seededDraft: TransactionDraft {
-    var draft = TransactionDraft()
-    draft.seedIfNeeded(accounts: model.openAccounts, preferredAccountID: model.preferredCaptureAccountID)
-    return draft
+  private var initialDraft: TransactionDraft {
+    switch request.kind {
+    case .blank, .inbox:
+      var draft = TransactionDraft()
+      if case .blank = request.kind {
+        draft.seedIfNeeded(
+          accounts: model.openAccounts,
+          preferredAccountID: model.preferredCaptureAccountID
+        )
+      }
+      return draft
+    case .draft(let draft):
+      return draft
+    }
   }
 }
 

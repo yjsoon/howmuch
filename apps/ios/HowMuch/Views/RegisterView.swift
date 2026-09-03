@@ -24,7 +24,6 @@ struct RegisterView: View {
   @State private var uncategorisedOnly = false
   @State private var unapprovedOnly = false
   @State private var editingTransaction: Transaction?
-  @State private var duplicatingDraft: DuplicateDraft?
   @State private var isShowingReconciliation = false
   @State private var editingIdentity: Account?
   @State private var membershipsAccount: Account?
@@ -35,11 +34,6 @@ struct RegisterView: View {
   @State private var pendingRowAction: PendingRow?
   @SceneStorage("howmuch.register.scheduledExpanded") private var expandedScheduleAccountIDs = ""
   @State private var editingSchedule: ScheduledTransaction?
-
-  private struct DuplicateDraft: Identifiable {
-    let id = UUID()
-    let draft: TransactionDraft
-  }
 
   private struct RegisterDateSection: Identifiable {
     let date: String
@@ -110,21 +104,23 @@ struct RegisterView: View {
     }
     .sheet(isPresented: $isShowingReconciliation) {
       AccountReconciliationSheet(preferredAccountID: scope.accountID)
+        .blocksCapturePresentation()
     }
     .sheet(item: $editingIdentity) { account in
       AccountIdentityEditorSheet(account: account)
+        .blocksCapturePresentation()
     }
     .sheet(item: $membershipsAccount) { account in
       AccountMembershipSheet(accountID: account.id)
+        .blocksCapturePresentation()
     }
     .sheet(item: $editingTransaction) { transaction in
       TransactionEditorSheet(transaction: transaction)
-    }
-    .sheet(item: $duplicatingDraft) { duplicate in
-      TransactionFormView(draft: duplicate.draft, isEditing: false)
+        .blocksCapturePresentation()
     }
     .sheet(item: $editingSchedule) { schedule in
       ScheduledTransactionEditorView(schedule: schedule)
+        .blocksCapturePresentation()
     }
     .alert("Couldn’t approve transaction", isPresented: Binding(
       get: { approvalError != nil },
@@ -483,7 +479,12 @@ struct RegisterView: View {
         Label("Edit", systemImage: "pencil")
       }
       Button {
-        duplicatingDraft = DuplicateDraft(draft: TransactionDraft(duplicating: transaction))
+        model.presentCapture(
+          CaptureRequest(
+            kind: .draft(TransactionDraft(duplicating: transaction)),
+            connectionFingerprint: model.settings.connectionFingerprint
+          )
+        )
       } label: {
         Label("Duplicate for Today", systemImage: "plus.square.on.square")
       }

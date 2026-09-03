@@ -102,31 +102,34 @@ struct AccountsView: View {
       await model.refreshAccountUsageLast30Days()
     }
     .sheet(item: $presentedSheet) { sheet in
-      switch sheet {
-      case .newGroup(let prefilledAccountID):
-        NewCustomAccountGroupSheet(prefilledAccountID: prefilledAccountID)
-      case .manageGroups:
-        ManageAccountGroupsSheet()
-      case .favourites:
-        ChooseFavouritesSheet()
-      case .memberships(let accountID):
-        AccountMembershipSheet(accountID: accountID)
-      case .editGroup(let group):
-        NavigationStack {
-          CustomAccountGroupEditor(group: group)
-            .toolbar {
-              ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { presentedSheet = nil }
+      Group {
+        switch sheet {
+        case .newGroup(let prefilledAccountID):
+          NewCustomAccountGroupSheet(prefilledAccountID: prefilledAccountID)
+        case .manageGroups:
+          ManageAccountGroupsSheet()
+        case .favourites:
+          ChooseFavouritesSheet()
+        case .memberships(let accountID):
+          AccountMembershipSheet(accountID: accountID)
+        case .editGroup(let group):
+          NavigationStack {
+            CustomAccountGroupEditor(group: group)
+              .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                  Button("Cancel") { presentedSheet = nil }
+                }
               }
-            }
+          }
+        case .reorder(let group):
+          AccountGroupReorderSheet(group: group)
+        case .icon(let account):
+          AccountIdentityEditorSheet(account: account)
+        case .newAccount:
+          NewAccountSheet()
         }
-      case .reorder(let group):
-        AccountGroupReorderSheet(group: group)
-      case .icon(let account):
-        AccountIdentityEditorSheet(account: account)
-      case .newAccount:
-        NewAccountSheet()
       }
+      .blocksCapturePresentation()
     }
     .binaryConfirm(
       "Delete \(groupPendingDeletion?.name ?? "this group")?",
