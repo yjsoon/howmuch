@@ -1,5 +1,129 @@
 import Foundation
 
+/// YNAB account types the create-account write accepts. Cash / Credit / Tracking
+/// on Accounts are derived from these, not from a parallel string set.
+enum AccountKind: String, CaseIterable, Identifiable, Hashable {
+  case checking
+  case savings
+  case cash
+  case creditCard
+  case lineOfCredit
+  case mortgage
+  case autoLoan
+  case studentLoan
+  case medicalDebt
+  case otherLoan
+  case otherAsset
+  case otherLiability
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .checking: "Checking"
+    case .savings: "Savings"
+    case .cash: "Cash"
+    case .creditCard: "Credit Card"
+    case .lineOfCredit: "Line of Credit"
+    case .mortgage: "Mortgage"
+    case .autoLoan: "Auto Loan"
+    case .studentLoan: "Student Loan"
+    case .medicalDebt: "Medical Debt"
+    case .otherLoan: "Other Loan"
+    case .otherAsset: "Other Asset"
+    case .otherLiability: "Other Liability"
+    }
+  }
+
+  enum Group: String, CaseIterable, Identifiable {
+    case budget
+    case tracking
+
+    var id: String { rawValue }
+
+    var title: String {
+      switch self {
+      case .budget: "Budget"
+      case .tracking: "Tracking"
+      }
+    }
+
+    var footer: String {
+      switch self {
+      case .budget: "Cash, savings, and cards on the plan."
+      case .tracking: "Loans and assets that sit off the plan."
+      }
+    }
+  }
+
+  var placeholderName: String {
+    switch self {
+    case .checking: "Everyday Account"
+    case .savings: "Rainy Day Saver"
+    case .cash: "Wallet"
+    case .creditCard: "Travel Card"
+    case .lineOfCredit: "Overdraft"
+    case .mortgage: "Home Loan"
+    case .autoLoan: "Car Loan"
+    case .studentLoan: "Student Loan"
+    case .medicalDebt: "Medical"
+    case .otherLoan: "Loan"
+    case .otherAsset: "Investment"
+    case .otherLiability: "Liability"
+    }
+  }
+
+  var defaultIcon: AccountIcon {
+    AccountIcon.default(for: rawValue)
+  }
+
+  var group: Group {
+    switch self {
+    case .checking, .savings, .cash, .creditCard, .lineOfCredit:
+      .budget
+    case .mortgage, .autoLoan, .studentLoan, .medicalDebt, .otherLoan, .otherAsset, .otherLiability:
+      .tracking
+    }
+  }
+
+  var onBudget: Bool {
+    group == .budget
+  }
+
+  var storesLiability: Bool {
+    switch self {
+    case .creditCard, .lineOfCredit, .mortgage, .autoLoan, .studentLoan, .medicalDebt, .otherLoan, .otherLiability:
+      true
+    case .checking, .savings, .cash, .otherAsset:
+      false
+    }
+  }
+
+  var isCash: Bool {
+    switch self {
+    case .checking, .savings, .cash: true
+    default: false
+    }
+  }
+
+  var isCredit: Bool {
+    switch self {
+    case .creditCard, .lineOfCredit: true
+    default: false
+    }
+  }
+
+  /// Cards and loans store what you owe as a negative balance. The sheet asks
+  /// for the amount owed; this turns that entry into the POST `balance`.
+  func openingBalanceMilliunits(fromEntered entered: Int) -> Int {
+    storesLiability ? -abs(entered) : entered
+  }
+
+  static func kinds(in group: Group) -> [AccountKind] {
+    allCases.filter { $0.group == group }
+  }
+}
+
 /// Built-in account sections. Favourites is a user collection.
 /// Cash, Credit, Tracking, and Closed are a type index.
 enum AccountSystemGroup: String, CaseIterable, Identifiable {
@@ -21,8 +145,13 @@ enum AccountSystemGroup: String, CaseIterable, Identifiable {
     }
   }
 
-  static let cashTypes: Set<String> = ["checking", "savings", "cash"]
-  static let creditTypes: Set<String> = ["creditCard", "lineOfCredit"]
+  static var cashTypes: Set<String> {
+    Set(AccountKind.allCases.filter(\.isCash).map(\.rawValue))
+  }
+
+  static var creditTypes: Set<String> {
+    Set(AccountKind.allCases.filter(\.isCredit).map(\.rawValue))
+  }
 
   func contains(_ account: Account, favouriteIDs: Set<String>) -> Bool {
     switch self {

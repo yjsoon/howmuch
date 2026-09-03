@@ -1433,6 +1433,50 @@ describe("account icons", () => {
   });
 });
 
+describe("account creation", () => {
+  test("records a card opening balance as a liability and provisions a transfer payee", async () => {
+    const card = await createAccountViaApi({
+      name: "UOB Lady's Card",
+      type: "creditCard",
+      balance: -250000,
+      icon: "💳",
+      on_budget: true,
+    });
+    expect(card).toMatchObject({
+      name: "UOB Lady's Card",
+      type: "creditCard",
+      balance: -250000,
+      icon: "💳",
+      on_budget: true,
+    });
+    expect(card.transfer_payee_id).toBeTruthy();
+
+    const payees = await (await request("/v1/plans/plan-test/payees")).json();
+    const transfer = payees.data.payees.find((payee: any) => payee.id === card.transfer_payee_id);
+    expect(transfer).toMatchObject({
+      name: "Transfer : UOB Lady's Card",
+      transfer_account_id: card.id,
+    });
+  });
+
+  test("places a tracking mortgage off-budget", async () => {
+    const mortgage = await createAccountViaApi({
+      name: "Home Loan",
+      type: "mortgage",
+      balance: -380000000,
+      icon: "🏠",
+      on_budget: false,
+    });
+    expect(mortgage).toMatchObject({
+      name: "Home Loan",
+      type: "mortgage",
+      balance: -380000000,
+      icon: "🏠",
+      on_budget: false,
+    });
+  });
+});
+
 describe("transfers and splits", () => {
   test("provisions transfer payees and creates both sides of a transfer", async () => {
     const checking = await createAccountViaApi({ name: "Checking", type: "checking" });
