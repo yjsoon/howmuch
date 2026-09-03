@@ -117,14 +117,17 @@ struct WrappingHStack: Layout {
 struct FilterChip: View {
   let label: String
   var isActive = false
+  var showsChevron = true
 
   var body: some View {
     HStack(spacing: 5) {
       Text(label)
         .font(.footnote.weight(.medium))
-      Image(systemName: "chevron.down")
-        .font(.caption.weight(.semibold))
-        .accessibilityHidden(true)
+      if showsChevron {
+        Image(systemName: "chevron.down")
+          .font(.caption.weight(.semibold))
+          .accessibilityHidden(true)
+      }
     }
     .foregroundStyle(isActive ? Theme.card : Theme.accent)
     .padding(.horizontal, 12)
