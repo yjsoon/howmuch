@@ -450,12 +450,11 @@ struct TransactionFormView: View {
     if row.parsedAccount {
       if row.draft.accountID.isEmpty {
         draft.accountID = ""
-        showAccountPrompt = true
       } else {
         draft.accountID = row.draft.accountID
-        showAccountPrompt = false
       }
     }
+    showAccountPrompt = !row.accountCandidates.isEmpty
     withAnimation(.snappy) {
       isKeypadVisible = draft.amountMagnitudeMilli == 0
     }
@@ -611,14 +610,7 @@ struct TransactionFormView: View {
           // elsewhere; the server rejects the self-transfer anyway.
           disabledAccountIDs: Set(draft.subtransactions.compactMap(\.transferAccountID))
         ) { account in
-          draft.accountID = account.id
-          accountCandidates = []
-          if draft.transferAccountID == account.id {
-            // A transfer cannot target its own account; drop the payee.
-            draft.transferAccountID = nil
-            draft.payeeID = nil
-            draft.payeeName = ""
-          }
+          assignPickedAccount(account.id)
         }
       } label: {
         DisclosureValueRow(
@@ -634,9 +626,7 @@ struct TransactionFormView: View {
           prompt: "Which account?",
           candidates: accountCandidates
         ) { candidate in
-          draft.accountID = candidate.id
-          accountCandidates = []
-          showAccountPrompt = false
+          assignPickedAccount(candidate.id)
         }
       }
       CardDivider()
@@ -660,6 +650,12 @@ struct TransactionFormView: View {
   /// disappears rather than inviting a value the API would discard.
   private var hidesCategory: Bool {
     draft.isTransfer && model.accountsBothOnBudget(draft.accountID, draft.transferAccountID)
+  }
+
+  private func assignPickedAccount(_ accountID: String) {
+    SlipAccountPick.apply(accountID, to: &draft)
+    accountCandidates = []
+    showAccountPrompt = false
   }
 
   private func ambiguousRail(

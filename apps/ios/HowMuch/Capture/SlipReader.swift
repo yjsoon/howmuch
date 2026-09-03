@@ -28,6 +28,17 @@ struct SlipCandidate: Equatable, Identifiable, Sendable {
   let name: String
 }
 
+enum SlipAccountPick {
+  static func apply(_ accountID: String, to draft: inout TransactionDraft) {
+    draft.accountID = accountID
+    if draft.transferAccountID == accountID {
+      draft.transferAccountID = nil
+      draft.payeeID = nil
+      draft.payeeName = ""
+    }
+  }
+}
+
 struct SlipMappedDraft: Equatable, Sendable {
   var draft: TransactionDraft
   var parsedAmount: Bool

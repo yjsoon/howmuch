@@ -71,6 +71,55 @@ final class SlipReaderMappingTests: XCTestCase {
     XCTAssertTrue(mapped[0].accountCandidates.isEmpty)
   }
 
+  func testAmbiguousAccountKeepsTransferPayee() {
+    let mapped = SlipReaderMapping.map(
+      [.init(amount: "5", payee: "Transfer : Travel Account", account: "Account")],
+      accounts: [
+        Self.account("acct-everyday", "Everyday Account"),
+        Self.account("acct-travel", "Travel Account"),
+      ],
+      categoryGroups: [Self.everydayGroup],
+      payees: [
+        Payee(
+          id: "payee-travel",
+          name: "Transfer : Travel Account",
+          transferAccountId: "acct-travel",
+          deleted: false
+        ),
+      ],
+      calendar: Self.calendar,
+      now: Self.now
+    )
+    XCTAssertEqual(mapped.count, 1)
+    XCTAssertEqual(mapped[0].draft.accountID, "")
+    XCTAssertEqual(mapped[0].accountCandidates.map(\.id), ["acct-everyday", "acct-travel"])
+    XCTAssertEqual(mapped[0].draft.transferAccountID, "acct-travel")
+    XCTAssertEqual(mapped[0].draft.payeeID, "payee-travel")
+  }
+
+  func testPickingTransferDestinationAccountDropsSelfTransfer() {
+    var draft = TransactionDraft()
+    draft.transferAccountID = "acct-travel"
+    draft.payeeID = "payee-travel"
+    draft.payeeName = "Transfer : Travel Account"
+    SlipAccountPick.apply("acct-travel", to: &draft)
+    XCTAssertEqual(draft.accountID, "acct-travel")
+    XCTAssertNil(draft.transferAccountID)
+    XCTAssertNil(draft.payeeID)
+    XCTAssertEqual(draft.payeeName, "")
+  }
+
+  func testPickingOtherAccountKeepsTransfer() {
+    var draft = TransactionDraft()
+    draft.transferAccountID = "acct-travel"
+    draft.payeeID = "payee-travel"
+    draft.payeeName = "Transfer : Travel Account"
+    SlipAccountPick.apply("acct-everyday", to: &draft)
+    XCTAssertEqual(draft.accountID, "acct-everyday")
+    XCTAssertEqual(draft.transferAccountID, "acct-travel")
+    XCTAssertEqual(draft.payeeID, "payee-travel")
+  }
+
   func testTwoSpendsReturnTwoDrafts() {
     let mapped = SlipReaderMapping.map(
       [
