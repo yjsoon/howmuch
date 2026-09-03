@@ -80,7 +80,7 @@ struct IntakeReviewListView: View {
       }
       .sheet(item: $editingItem) { item in
         TransactionFormView(
-          draft: item.draft,
+          draft: IntakeReviewPreparation.draft(item, addToAccountID: addToAccountID),
           isEditing: false,
           allowsDeletion: false,
           isReviewing: true,
@@ -107,7 +107,9 @@ struct IntakeReviewListView: View {
   }
 
   private var canAdd: Bool {
-    !includedItems.isEmpty && includedItems.allSatisfy { prepared($0).canSave }
+    !includedItems.isEmpty && includedItems.allSatisfy {
+      IntakeReviewPreparation.draft($0, addToAccountID: addToAccountID).canSave
+    }
   }
 
   private var sourceStrip: some View {
@@ -209,11 +211,22 @@ struct IntakeReviewListView: View {
     .ynabCard()
   }
 
+  private var addButtonTitle: String {
+    let count = includedItems.count
+    let drafts = includedItems.map {
+      IntakeReviewPreparation.draft($0, addToAccountID: addToAccountID)
+    }
+    if IntakeReviewPreparation.namesSharedAccount(in: drafts) {
+      return "Add \(count) to \(addAccountName)"
+    }
+    return count == 1 ? "Add 1 transaction" : "Add \(count) transactions"
+  }
+
   private var addButton: some View {
     Button(action: addIncluded) {
       HStack(spacing: 8) {
         Image(systemName: "checkmark.circle.fill")
-        Text("Add \(includedItems.count) to \(addAccountName)")
+        Text(addButtonTitle)
           .fontWeight(.semibold)
       }
       .padding(.horizontal, 8)
@@ -240,16 +253,10 @@ struct IntakeReviewListView: View {
     editingItem = nil
   }
 
-  private func prepared(_ item: IntakeReviewItem) -> TransactionDraft {
-    var draft = item.draft
-    if draft.accountID.isEmpty {
-      draft.accountID = addToAccountID
-    }
-    return draft
-  }
-
   private func addIncluded() {
-    let drafts = includedItems.map(prepared)
+    let drafts = includedItems.map {
+      IntakeReviewPreparation.draft($0, addToAccountID: addToAccountID)
+    }
     guard drafts.allSatisfy(\.canSave) else {
       return
     }
@@ -293,6 +300,20 @@ struct IntakeReviewListView: View {
       return "Transfer"
     }
     return model.categoryName(forID: draft.categoryID) ?? "Uncategorised"
+  }
+}
+
+enum IntakeReviewPreparation {
+  static func draft(_ item: IntakeReviewItem, addToAccountID: String) -> TransactionDraft {
+    var draft = item.draft
+    if draft.accountID.isEmpty {
+      draft.accountID = addToAccountID
+    }
+    return draft
+  }
+
+  static func namesSharedAccount(in drafts: [TransactionDraft]) -> Bool {
+    Set(drafts.map(\.accountID).filter { !$0.isEmpty }).count <= 1
   }
 }
 
