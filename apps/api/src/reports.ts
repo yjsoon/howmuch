@@ -1,4 +1,7 @@
 import type { Database } from "bun:sqlite";
+import { buildRewardsReport } from "./rewards/build";
+import { parseAppSettings, parseCreditCards, parseRewardGroupBy } from "./rewards/parse";
+import { mapRewardTransactionRow } from "./rewards/rows";
 import type { ReportFilters } from "./types";
 
 type Row = Record<string, any>;
@@ -211,6 +214,68 @@ export class ReportService {
         unmatched_spending: bucket.unmatched,
       })),
     };
+  }
+
+  rewards(planId: string, filters: ReportFilters = {}) {
+    const snapshot = this.db
+      .query("SELECT payload_json FROM rewards_tracker_snapshots WHERE plan_id = ?")
+      .get(planId) as { payload_json: string } | null;
+    const cardRows = this.db
+      .query("SELECT payload_json FROM rewards_tracker_cards WHERE plan_id = ? AND deleted = 0 ORDER BY name, id")
+      .all(planId) as Array<{ payload_json: string }>;
+    const parsedSnapshot = snapshot ? JSON.parse(String(snapshot.payload_json)) as { settings?: unknown } : null;
+    const cards = parseCreditCards(cardRows.map((row) => JSON.parse(String(row.payload_json))));
+    const accountIds = cards.map((card) => card.ynabAccountId);
+    const clauses = ["t.plan_id = ?", "t.deleted = 0"];
+    const params: any[] = [planId];
+    if (filters.from) {
+      clauses.push("t.date >= ?");
+      params.push(filters.from);
+    }
+    if (filters.to) {
+      clauses.push("t.date <= ?");
+      params.push(filters.to);
+    }
+    const selectedAccounts = filters.accountIds?.length ? filters.accountIds : accountIds;
+    if (selectedAccounts.length) {
+      clauses.push(`t.account_id IN (${selectedAccounts.map(() => "?").join(", ")})`);
+      params.push(...selectedAccounts);
+    } else {
+      clauses.push("1 = 0");
+    }
+    const rows = this.db
+      .query(
+        `SELECT t.id, t.date, t.amount_milli, t.account_id, a.name AS account_name,
+           t.flag_color, t.flag_name, t.memo, t.transfer_account_id,
+           COALESCE(p.name, t.payee_name_snapshot) AS payee_name,
+           COALESCE(c.name, t.category_name_snapshot) AS category_name
+         FROM transactions t
+         JOIN accounts a ON a.id = t.account_id
+         LEFT JOIN payees p ON p.id = t.payee_id
+         LEFT JOIN categories c ON c.id = t.category_id
+         WHERE ${clauses.join(" AND ")}
+         ORDER BY t.date, t.id`,
+      )
+      .all(...params) as Array<Record<string, any>>;
+    const accountNames = Object.fromEntries(rows.map((row) => [String(row.account_id), String(row.account_name)]));
+    for (const card of cards) {
+      if (!accountNames[card.ynabAccountId]) {
+        const account = this.db
+          .query("SELECT name FROM accounts WHERE plan_id = ? AND id = ?")
+          .get(planId, card.ynabAccountId) as { name: string } | null;
+        if (account) accountNames[card.ynabAccountId] = account.name;
+      }
+    }
+    return buildRewardsReport({
+      cards,
+      accountNames,
+      transactions: rows.map(mapRewardTransactionRow),
+      settings: parseAppSettings(parsedSnapshot?.settings),
+      from: filters.from ?? null,
+      to: filters.to ?? null,
+      groupBy: parseRewardGroupBy(filters.groupBy),
+      accountIds: filters.accountIds ?? [],
+    });
   }
 
   private lineFilters(planId: string, filters: ReportFilters, includeTransfers = false): { where: string; params: any[] } {

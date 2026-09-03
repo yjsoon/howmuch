@@ -2022,6 +2022,20 @@ describe("native reports and imports", () => {
     expect(register.data.transactions).toEqual([
       expect.objectContaining({ id: "txn-rewards-1", payee_name: "Candlenut", flag_color: "orange", amount: -2500000 }),
     ]);
+
+    const rewards = await (await request("/api/reports/rewards?plan_id=plan-test&from=2026-05-01&to=2026-05-31&group=payee")).json();
+    expect(rewards.data.cards).toEqual([
+      expect.objectContaining({
+        account_id: "acct-rewards",
+        calculation: expect.objectContaining({
+          total_spend: 2500,
+          reward_type: "cashback",
+        }),
+      }),
+    ]);
+    expect(rewards.data.groups).toEqual([
+      expect.objectContaining({ label: "Candlenut", spend: 2500 }),
+    ]);
   });
 
   test("updates account opening balances on reseed", async () => {

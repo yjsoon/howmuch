@@ -146,6 +146,8 @@
       "payee_name": "Grab",
       "category_id": "cat-transport",
       "memo": "Airport run",
+      "flag_color": "red",
+      "flag_name": "Dining",
       "approved": true
     },
     {
@@ -206,6 +208,8 @@
       "payee_name": "Scoot",
       "category_id": "cat-holiday",
       "memo": "Taipei flights",
+      "flag_color": "red",
+      "flag_name": "Dining",
       "approved": true
     },
     {
@@ -236,6 +240,8 @@
       "payee_name": "MUJI",
       "category_id": "cat-shopping",
       "memo": "Home bits",
+      "flag_color": "blue",
+      "flag_name": "Online",
       "approved": true
     },
     {
@@ -256,6 +262,8 @@
       "payee_name": "Candlenut",
       "category_id": "cat-dining",
       "memo": "Birthday supper",
+      "flag_color": "red",
+      "flag_name": "Dining",
       "approved": true
     },
     {

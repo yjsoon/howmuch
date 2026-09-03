@@ -14,7 +14,7 @@
       "billingCycle": { "type": "calendar" },
       "featured": true,
       "earningRate": 1.2,
-      "minimumSpend": 500,
+      "minimumSpend": 200,
       "subcategoriesEnabled": true,
       "subcategories": [
         {
