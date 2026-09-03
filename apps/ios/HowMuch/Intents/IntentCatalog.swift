@@ -121,6 +121,29 @@ final class IntentCatalogStore: @unchecked Sendable {
     return loadLocked(fingerprint: fingerprint)
   }
 
+  func loadActive() -> IntentCatalogSnapshot? {
+    lock.lock()
+    defer { lock.unlock() }
+    guard
+      let files = try? FileManager.default.contentsOfDirectory(
+        at: directory,
+        includingPropertiesForKeys: [.contentModificationDateKey],
+        options: [.skipsHiddenFiles]
+      )
+    else {
+      return nil
+    }
+    let newest = files.filter { $0.pathExtension == "json" }.max { left, right in
+      let leftDate = (try? left.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+      let rightDate = (try? right.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+      return leftDate < rightDate
+    }
+    guard let newest, let data = try? Data(contentsOf: newest) else {
+      return nil
+    }
+    return try? decoder.decode(IntentCatalogSnapshot.self, from: data)
+  }
+
   func wipe(fingerprint: String) {
     lock.lock()
     defer { lock.unlock() }

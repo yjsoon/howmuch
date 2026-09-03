@@ -45,6 +45,22 @@ enum MoneyCodec {
     return total.partialValue
   }
 
+  static func milliunits(from value: Decimal) -> Int? {
+    let magnitude = value < 0 ? -value : value
+    var scaled = magnitude * 1000
+    var integerPart = Decimal()
+    NSDecimalRound(&integerPart, &scaled, 0, .down)
+    guard integerPart == scaled else {
+      return nil
+    }
+    let number = NSDecimalNumber(decimal: integerPart)
+    let milli = number.intValue
+    guard NSDecimalNumber(value: milli) == number else {
+      return nil
+    }
+    return milli
+  }
+
   static func displayString(for milliunits: Int, currencyFormat: CurrencyFormat?) -> String {
     let formatter = formatter(for: currencyFormat)
     let decimalValue = Decimal(milliunits) / 1000
