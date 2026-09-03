@@ -451,6 +451,10 @@ Transaction response fields:
 
 `GET /api/reports/age-of-money`
 
+`GET /api/reports/rewards`
+
+Rewards reads imported Rewards Tracker cards and the HowMuch ledger. It does not call YNAB. Spend and reward figures are currency units, not milliunits.
+
 Common filters:
 
 - `from`
@@ -470,6 +474,8 @@ Extra filters:
 
 - `include_closed_accounts` on Net Worth
 - `top_payees_limit` on Spending Breakdown
+- `group` on Rewards (`flag`, `payee`, `category`, `memo`)
+
 ### Mobile Quick Entry
 
 `POST /api/mobile/quick-entry`

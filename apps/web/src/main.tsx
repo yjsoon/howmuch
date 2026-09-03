@@ -20,6 +20,7 @@ const IncomePage = lazy(() => import("./pages/Income").then((module) => ({ defau
 const NetWorthPage = lazy(() => import("./pages/NetWorth").then((module) => ({ default: module.NetWorthPage })));
 const QuickEntryPage = lazy(() => import("./pages/QuickEntry").then((module) => ({ default: module.QuickEntryPage })));
 const RewardsImportPage = lazy(() => import("./pages/RewardsImport").then((module) => ({ default: module.RewardsImportPage })));
+const RewardsPage = lazy(() => import("./pages/Rewards").then((module) => ({ default: module.RewardsPage })));
 const ScheduledTransactionsPage = lazy(() => import("./pages/ScheduledTransactions").then((module) => ({ default: module.ScheduledTransactionsPage })));
 const SettingsPage = lazy(() => import("./pages/Settings").then((module) => ({ default: module.SettingsPage })));
 const SpendingPage = lazy(() => import("./pages/Spending").then((module) => ({ default: module.SpendingPage })));
@@ -44,6 +45,7 @@ const router = createBrowserRouter([
       { path: "/income", element: <IncomePage /> },
       { path: "/net-worth", element: <NetWorthPage /> },
       { path: "/age-of-money", element: <AgeOfMoneyPage /> },
+      { path: "/rewards", element: <RewardsPage /> },
       { path: "/transactions", element: <TransactionsPage /> },
       { path: "*", element: <Navigate to={home} replace /> },
     ],

@@ -18,11 +18,12 @@ interface Props {
   /** Intervals this report supports; omit to hide the segmented control. */
   intervals?: Interval[];
   showCategories?: boolean;
+  groups?: Array<"flag" | "payee" | "category" | "memo">;
   /** Shows a quiet progress stripe along the rail while a report refetches. */
   busy?: boolean;
 }
 
-export function FilterRail({ filters, setFilters, intervals, showCategories = true, busy = false }: Props) {
+export function FilterRail({ filters, setFilters, intervals, showCategories = true, groups, busy = false }: Props) {
   const { accounts, categoryGroups } = usePlan();
   const activePreset = matchPreset(filters.from, filters.to);
   const month = calendarMonthOf(filters.from, filters.to);
@@ -61,7 +62,8 @@ export function FilterRail({ filters, setFilters, intervals, showCategories = tr
       filters.to ||
       filters.accountIds.length ||
       (showCategories && filters.categoryIds.length) ||
-      (selectedInterval && selectedInterval !== "month"),
+      (selectedInterval && selectedInterval !== "month") ||
+      (groups && filters.groupBy !== "flag"),
   );
 
   const summary = [
@@ -75,6 +77,7 @@ export function FilterRail({ filters, setFilters, intervals, showCategories = tr
         : "All categories"
       : null,
     selectedInterval ? `${selectedInterval} intervals` : null,
+    groups ? `By ${filters.groupBy}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -180,6 +183,24 @@ export function FilterRail({ filters, setFilters, intervals, showCategories = tr
             </div>
           </div>
         )}
+
+        {groups && (
+          <div className="filter-cluster">
+            <span className="rail-label">Group</span>
+            <div className="segmented" role="group" aria-label="Group rewards">
+              {groups.map((group) => (
+                <button
+                  key={group}
+                  type="button"
+                  className={group === filters.groupBy ? "segment segment-active" : "segment"}
+                  onClick={() => setFilters({ groupBy: group })}
+                >
+                  {group[0].toUpperCase() + group.slice(1)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="filter-summary">
@@ -196,6 +217,7 @@ export function FilterRail({ filters, setFilters, intervals, showCategories = tr
                   accountIds: [],
                   categoryIds: [],
                   interval: intervals?.includes("month") ? "month" : (intervals?.[0] ?? "month"),
+                  groupBy: "flag",
                 })
               }
             >

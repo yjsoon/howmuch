@@ -8,6 +8,7 @@ import { decimalToMilliunits } from "./money";
 import { importCsvRows } from "./importers/csv";
 import { importRewardsTrackerExport } from "./importers/rewards-tracker";
 import { importYnabFromApi } from "./importers/ynab";
+import { parseRewardGroupBy } from "./rewards/parse";
 import type { LedgerStore, ReportStore } from "./storage";
 import { SQLiteAuthStore, type AuthStore, type AuthUser } from "./auth-store";
 import {
@@ -585,6 +586,9 @@ async function handleNative(
     if (segments[2] === "age-of-money") {
       return json({ data: await reports.ageOfMoney(planId, filters) });
     }
+    if (segments[2] === "rewards") {
+      return json({ data: await reports.rewards(planId, filters) });
+    }
   }
 
   if (segments[1] === "mobile" && segments[2] === "quick-entry" && method === "POST") {
@@ -733,6 +737,7 @@ function reportFilters(url: URL) {
     includeClosedAccounts: url.searchParams.get("include_closed_accounts") === "true",
     interval: (url.searchParams.get("interval") as any) ?? "month",
     topPayeesLimit: parseNumber(url.searchParams.get("top_payees_limit")),
+    groupBy: parseRewardGroupBy(url.searchParams.get("group")),
   };
 }
 

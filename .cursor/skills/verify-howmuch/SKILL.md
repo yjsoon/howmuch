@@ -7,14 +7,14 @@ description: Drive HowMuch in a real browser (web ledger) and, for capture/intak
 
 HowMuch has two user surfaces in this repo. Drive the one the change actually touched. Both talk to the same disposable local API from `control-howmuch launch`. Never point either at `howmuch.soon.sg`.
 
-**Web** (`apps/web`) is the React ledger: first-owner setup, four Reflect reports, register, `/add` quick entry, schedules, tokens, sidebar accounts. There is no monthly Plan edit on the web.
+**Web** (`apps/web`) is the React ledger: first-owner setup, five Reflect reports (including Rewards), register, `/add` quick entry, schedules, tokens, sidebar accounts. There is no monthly Plan edit on the web.
 
 **iOS** (`apps/ios`) is the SwiftUI companion: Accounts / Plan / Reflect, the **Add Transaction** capture sheet, Duplicate for Today, and (when built) typed intake, the `N > 1` review list, Shortcuts App Intents, share, and the screenshot offer. Specs: `docs/frontend/intake-ui.md`, `docs/frontend/app-intents.md`. Issues: [#87](https://github.com/yjsoon/howmuch/issues/87), [#96](https://github.com/yjsoon/howmuch/issues/96) and their children.
 
 Not covered here:
 
 - Hosted Worker + D1. Do not run Wrangler deploys for this skill.
-- YNAB Rewards Tracker (`yjsoon/ynab-rewards-tracker`) — not in this repo. HowMuch absorbs a settings export at **Rewards import** (`/import/rewards`); there is no live rewards dashboard or YNAB OAuth to drive.
+- YNAB Rewards Tracker (`yjsoon/ynab-rewards-tracker`) — not in this repo. HowMuch imports a settings export at **Rewards import** (`/import/rewards`) and shows the live dashboard at **Rewards** (`/rewards`) against the HowMuch ledger. There is no YNAB OAuth to drive.
 - The clickable HTML prototype (`docs/frontend/intake-ui.html`). That is a layout draft. It is not the app. Never treat a prototype screenshot as proof that iOS meets a recipe.
 
 There is no Playwright/Cypress harness. Drive web with Cursor browser / computer-use against the URL `control-howmuch state` prints. Drive iOS with computer-use against the Simulator. Use `control-howmuch http` as a second, read-only view of stored data.
@@ -137,7 +137,7 @@ Stable web handles:
 | Auth fields | labels `Username`, `Password`, `Setup token` |
 | Auth submit | `Create account` / `Sign in` |
 | Primary nav | `nav` named `Primary navigation` |
-| Nav links | `Scheduled`, Reflect reports (`Spending breakdown`, `Income v Spending`, `Net Worth`, `Age of Money`), `All Accounts`, `Organise accounts` |
+| Nav links | `Scheduled`, Reflect reports (`Spending breakdown`, `Income v Spending`, `Net Worth`, `Age of Money`, `Rewards`), `All Accounts`, `Organise accounts` |
 | Settings | sidebar footer link `Settings` (drawer bottom on viewport ≤720px). Hub lists `API tokens` and `Rewards import` |
 | Quick entry | sidebar `+ Add transaction` or route `/add` |
 | Register compose | account register toolbar `+ Add transaction` |

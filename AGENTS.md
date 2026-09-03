@@ -16,6 +16,15 @@ When this session is on a Mac with Xcode, and the user wants HowMuch on a physic
 
 Do **not** run it on Linux, a cloud VM without Xcode, or a Mac missing the checks below. GitHub Actions Speedflight is only if the user asks.
 
+### Pull first
+
+Every time the user asks for a build, `git fetch origin` and archive from up-to-date remote code **before** `scripts/speedflight.sh`. A "new build" means what is on the remote now, not a stale local feature branch.
+
+- If they named a branch, check it out and `git pull origin <branch>`.
+- Otherwise check out `main` and `git pull origin main`.
+- If you are already on a feature branch they did not name, do not archive it while it is behind `origin/main`. Merge or rebase onto `origin/main` (or switch to `main`) first.
+- Then do the rest of preflight. The script still requires a clean tree with `HEAD` pushed.
+
 ### Preflight (do this before the script)
 
 Confirm, without printing secrets:

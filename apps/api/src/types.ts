@@ -206,4 +206,5 @@ export type ReportFilters = {
   includeClosedAccounts?: boolean;
   interval?: "day" | "week" | "month" | "year";
   topPayeesLimit?: number;
+  groupBy?: "flag" | "payee" | "category" | "memo";
 };

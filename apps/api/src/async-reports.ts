@@ -1,4 +1,7 @@
 import type { AsyncSqlDatabase } from "./async-sql";
+import { buildRewardsReport } from "./rewards/build";
+import { parseAppSettings, parseCreditCards, parseRewardGroupBy } from "./rewards/parse";
+import { mapRewardTransactionRow } from "./rewards/rows";
 import type { ReportFilters } from "./types";
 
 type Row = Record<string, any>;
@@ -195,6 +198,59 @@ export class AsyncReportService {
         unmatched_spending: bucket.unmatched,
       })),
     };
+  }
+
+  async rewards(planId: string, filters: ReportFilters = {}) {
+    const snapshot = await this.db.get<{ payload_json: string }>(
+      "SELECT payload_json FROM rewards_tracker_snapshots WHERE plan_id = $1",
+      [planId],
+    );
+    const cardRows = await this.db.all<{ payload_json: string }>(
+      "SELECT payload_json FROM rewards_tracker_cards WHERE plan_id = $1 AND deleted = 0 ORDER BY name, id",
+      [planId],
+    );
+    const parsedSnapshot = snapshot ? JSON.parse(String(snapshot.payload_json)) as { settings?: unknown } : null;
+    const cards = parseCreditCards(cardRows.map((row) => JSON.parse(String(row.payload_json))));
+    const accountIds = cards.map((card) => card.ynabAccountId);
+    const params: any[] = [];
+    const clauses = [`t.plan_id = ${bind(params, planId)}`, "t.deleted = 0"];
+    if (filters.from) clauses.push(`t.date >= ${bind(params, filters.from)}`);
+    if (filters.to) clauses.push(`t.date <= ${bind(params, filters.to)}`);
+    const selectedAccounts = filters.accountIds?.length ? filters.accountIds : accountIds;
+    if (selectedAccounts.length) appendInFilter(clauses, params, "t.account_id", selectedAccounts);
+    else clauses.push("1 = 0");
+    const rows = await this.db.all<Record<string, any>>(
+      `SELECT t.id, t.date, t.amount_milli, t.account_id, a.name AS account_name,
+         t.flag_color, t.flag_name, t.memo, t.transfer_account_id,
+         COALESCE(p.name, t.payee_name_snapshot) AS payee_name,
+         COALESCE(c.name, t.category_name_snapshot) AS category_name
+       FROM transactions t
+       JOIN accounts a ON a.id = t.account_id
+       LEFT JOIN payees p ON p.id = t.payee_id
+       LEFT JOIN categories c ON c.id = t.category_id
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY t.date, t.id`,
+      params,
+    );
+    const accountNames = Object.fromEntries(rows.map((row) => [String(row.account_id), String(row.account_name)]));
+    for (const card of cards) {
+      if (accountNames[card.ynabAccountId]) continue;
+      const account = await this.db.get<{ name: string }>(
+        "SELECT name FROM accounts WHERE plan_id = $1 AND id = $2",
+        [planId, card.ynabAccountId],
+      );
+      if (account) accountNames[card.ynabAccountId] = account.name;
+    }
+    return buildRewardsReport({
+      cards,
+      accountNames,
+      transactions: rows.map(mapRewardTransactionRow),
+      settings: parseAppSettings(parsedSnapshot?.settings),
+      from: filters.from ?? null,
+      to: filters.to ?? null,
+      groupBy: parseRewardGroupBy(filters.groupBy),
+      accountIds: filters.accountIds ?? [],
+    });
   }
 
   private lineFilters(planId: string, filters: ReportFilters, includeTransfers = false) {

@@ -286,6 +286,65 @@ export interface AgeOfMoneyReport {
   }>;
 }
 
+export interface RewardsReport {
+  from: string | null;
+  to: string | null;
+  group_by: "flag" | "payee" | "category" | "memo";
+  miles_valuation: number;
+  totals: {
+    spend: number;
+    reward_dollars: number;
+    cashback: number;
+    miles: number;
+  };
+  cards: Array<{
+    card: {
+      id: string;
+      name: string;
+      issuer: string;
+      type: "cashback" | "miles";
+      ynabAccountId: string;
+      featured: boolean;
+    };
+    account_id: string;
+    account_name: string;
+    calculation: {
+      period: string;
+      total_spend: number;
+      counted_spend: number;
+      eligible_spend: number;
+      reward_earned: number;
+      reward_earned_dollars: number;
+      reward_type: "cashback" | "miles";
+      minimum_spend: number | null;
+      minimum_spend_met: boolean;
+      minimum_spend_progress: number | null;
+      maximum_spend: number | null;
+      maximum_spend_exceeded: boolean;
+      maximum_spend_progress: number | null;
+      flags: Array<{
+        subcategoryId: string;
+        name: string;
+        flagColor: string;
+        totalSpend: number;
+        eligibleSpend: number;
+        rewardEarned: number;
+        rewardEarnedDollars?: number;
+        rewardRate?: number;
+      }>;
+    };
+  }>;
+  groups: Array<{
+    key: string;
+    label: string;
+    flag_color: string | null;
+    spend: number;
+    reward: number;
+    reward_dollars: number;
+    transaction_count: number;
+  }>;
+}
+
 export interface QuickEntrySplitLine {
   amount: string;
   category_id: string | null;

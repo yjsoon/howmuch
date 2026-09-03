@@ -188,6 +188,8 @@ cmd_doctor() {
   db_path="$(read_state db_path)"
   api_port="$(read_state api_port)"
   web_port="$(read_state web_port)"
+  dir="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$dir")"
+  db_path="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$db_path")"
 
   if [[ "$session" == "howmuch-dev" ]]; then
     echo "fail session is the shared howmuch-dev session" >&2
