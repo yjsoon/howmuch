@@ -1821,6 +1821,32 @@ enum OutboxStore {
   }
 }
 
+enum OutboxBatch {
+  static func appending(
+    _ drafts: [TransactionDraft],
+    onto existing: [PendingTransaction],
+    fingerprint: String,
+    isCurrentConnection: (String) -> Bool
+  ) -> [PendingTransaction] {
+    var next = existing
+    for draft in drafts {
+      let request = draft.writeRequest(includeCleared: draft.shouldWriteCleared)
+      let importID = request.importID
+      let alreadyQueued = next.contains { pending in
+        pending.request.importID == importID
+          && importID != nil
+          && isCurrentConnection(pending.connectionFingerprint)
+      }
+      if !alreadyQueued {
+        next.append(
+          PendingTransaction(request: request, connectionFingerprint: fingerprint)
+        )
+      }
+    }
+    return next
+  }
+}
+
 struct SaveMessage: Equatable, Identifiable {
   enum Kind: Equatable {
     case success
