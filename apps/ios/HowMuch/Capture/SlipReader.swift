@@ -361,7 +361,6 @@ struct ExtractedSlips {
 
 @Generable
 struct ExtractedSlip {
-  var id: GenerationID
   @Guide(description: "Amount as a decimal string like 5.00, no currency symbol")
   var amount: String
   @Guide(description: "Merchant or payee name if mentioned, otherwise empty")
