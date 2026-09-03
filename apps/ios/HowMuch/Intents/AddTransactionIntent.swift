@@ -27,7 +27,7 @@ struct AddTransactionIntent: AppIntent {
   var date: Date?
 
   @Parameter(title: "Flag")
-  var flag: FlagColour?
+  var flag: IntentFlag?
 
   @Parameter(title: "Memo")
   var memo: String?
@@ -53,7 +53,7 @@ struct AddTransactionIntent: AppIntent {
         },
         categoryID: category?.id,
         date: date,
-        flag: flag,
+        flag: flag?.flagColour,
         memo: memo,
         cleared: cleared,
         catalog: catalog
@@ -79,12 +79,20 @@ extension EntryDirection: AppEnum {
   }
 }
 
-extension FlagColour: AppEnum {
+enum IntentFlag: String, AppEnum, CaseIterable {
+  case none
+  case red
+  case orange
+  case yellow
+  case green
+  case blue
+  case purple
+
   static var typeDisplayRepresentation: TypeDisplayRepresentation {
     TypeDisplayRepresentation(name: "Flag")
   }
 
-  static var caseDisplayRepresentations: [FlagColour: DisplayRepresentation] {
+  static var caseDisplayRepresentations: [IntentFlag: DisplayRepresentation] {
     [
       .none: "None",
       .red: "Red",
@@ -94,6 +102,25 @@ extension FlagColour: AppEnum {
       .blue: "Blue",
       .purple: "Purple",
     ]
+  }
+
+  var flagColour: FlagColour {
+    switch self {
+    case .none:
+      return .none
+    case .red:
+      return .red
+    case .orange:
+      return .orange
+    case .yellow:
+      return .yellow
+    case .green:
+      return .green
+    case .blue:
+      return .blue
+    case .purple:
+      return .purple
+    }
   }
 }
 

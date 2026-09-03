@@ -117,6 +117,13 @@ final class AddTransactionIntentTests: XCTestCase {
     XCTAssertEqual(draft.payeeName, "Shortcut Coffee Verify")
   }
 
+  func testIntentFlagNoneUsesNonEmptyRawValue() {
+    XCTAssertEqual(IntentFlag.none.rawValue, "none")
+    XCTAssertFalse(IntentFlag.none.rawValue.isEmpty)
+    XCTAssertEqual(IntentFlag.none.flagColour, .none)
+    XCTAssertEqual(IntentFlag.red.flagColour, .red)
+  }
+
   func testBareRequestIsBlankKind() throws {
     let request = try AddTransactionIntentBuilder.request(
       amount: nil,
