@@ -39,7 +39,9 @@ struct PayeeEntityQuery: EntityStringQuery {
       if let name = newPayeeName(from: id) {
         return PayeeEntity(id: id, name: name, transferAccountId: nil, isNew: true)
       }
-      if let live = payees.first(where: { $0.id == id }) {
+      if let live = payees.first(where: {
+        $0.id == id || $0.name.caseInsensitiveCompare(id) == .orderedSame
+      }) {
         return PayeeEntity(
           id: live.id,
           name: live.name,

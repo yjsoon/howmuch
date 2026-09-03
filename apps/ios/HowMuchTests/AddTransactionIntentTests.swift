@@ -160,12 +160,33 @@ final class AddTransactionIntentTests: XCTestCase {
     XCTAssertEqual(account.map(\.id), ["acct-everyday", "acct-gone"])
     XCTAssertEqual(account.first?.name, "Everyday Account")
 
+    let byName = AccountEntityQuery.resolved(["Everyday Account"], catalog: Self.catalog)
+    XCTAssertEqual(byName.first?.id, "acct-everyday")
+
     let payee = PayeeEntityQuery.resolved(["payee-transfer"], catalog: Self.catalog)
     XCTAssertEqual(payee.first?.transferAccountId, "acct-travel")
 
-    let category = CategoryEntityQuery.resolved(["cat-dining"], catalog: Self.catalog)
+    let category = CategoryEntityQuery.resolved(["Dining Out"], catalog: Self.catalog)
+    XCTAssertEqual(category.first?.id, "cat-dining")
     XCTAssertEqual(category.first?.name, "Dining Out")
     XCTAssertEqual(category.first?.groupName, "Everyday")
+  }
+
+  func testBuilderResolvesAccountAndCategoryDisplayNames() throws {
+    let draft = try AddTransactionIntentBuilder.draft(
+      amount: Decimal(3500) / 1000,
+      direction: .outflow,
+      accountID: "Everyday Account",
+      payee: nil,
+      categoryID: "Dining Out",
+      date: nil,
+      flag: nil,
+      memo: nil,
+      cleared: nil,
+      catalog: Self.catalog
+    )
+    XCTAssertEqual(draft.accountID, "acct-everyday")
+    XCTAssertEqual(draft.categoryID, "cat-dining")
   }
 
   func testNewPayeeRoundTripLeavesNameOnly() async throws {

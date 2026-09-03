@@ -35,6 +35,19 @@ struct AddTransactionIntent: AppIntent {
   @Parameter(title: "Cleared")
   var cleared: Bool?
 
+  static var parameterSummary: some ParameterSummary {
+    Summary("Add \(\.$amount)") {
+      \.$direction
+      \.$account
+      \.$payee
+      \.$category
+      \.$date
+      \.$flag
+      \.$memo
+      \.$cleared
+    }
+  }
+
   private static func decimal(from amount: Double?) -> Decimal? {
     guard let amount else {
       return nil
@@ -207,8 +220,8 @@ enum AddTransactionIntentBuilder {
       }
       draft.amountMagnitudeMilli = milli
     }
-    if let accountID, Self.accepts(accountID, in: catalog?.openAccounts.map(\.id), catalog: catalog) {
-      draft.accountID = accountID
+    if let accountID, let resolved = Self.resolveAccount(accountID, catalog: catalog) {
+      draft.accountID = resolved
     }
     if let date {
       draft.date = date
@@ -222,20 +235,34 @@ enum AddTransactionIntentBuilder {
     applyPayee(payee, to: &draft, catalog: catalog)
     if draft.transferAccountID == nil,
        let categoryID,
-       Self.accepts(categoryID, in: catalog?.pickerCategories.map(\.id), catalog: catalog) {
-      draft.categoryID = categoryID
+       let resolved = Self.resolveCategory(categoryID, catalog: catalog) {
+      draft.categoryID = resolved
     }
     return draft
   }
 
-  /// Stale IDs drop only when a catalog is present. A missing catalog (cold
-  /// Shortcuts launch before the snapshot is readable) must not wipe fields
-  /// the user already picked — amount would land and account would not.
-  private static func accepts(_ id: String, in knownIDs: [String]?, catalog: IntentCatalogSnapshot?) -> Bool {
-    guard catalog != nil else {
-      return true
+  /// Stale IDs drop only when a catalog is present. A missing catalog must
+  /// keep the pick. Shortcuts may also hand a display name instead of an id.
+  private static func resolveAccount(_ raw: String, catalog: IntentCatalogSnapshot?) -> String? {
+    guard let catalog else {
+      return raw
     }
-    return knownIDs?.contains(id) == true
+    let accounts = catalog.openAccounts
+    if accounts.contains(where: { $0.id == raw }) {
+      return raw
+    }
+    return accounts.first { $0.name.caseInsensitiveCompare(raw) == .orderedSame }?.id
+  }
+
+  private static func resolveCategory(_ raw: String, catalog: IntentCatalogSnapshot?) -> String? {
+    guard let catalog else {
+      return raw
+    }
+    let categories = catalog.pickerCategories
+    if categories.contains(where: { $0.id == raw }) {
+      return raw
+    }
+    return categories.first { $0.name.caseInsensitiveCompare(raw) == .orderedSame }?.id
   }
 
   private static func applyPayee(
@@ -252,7 +279,11 @@ enum AddTransactionIntentBuilder {
       draft.payeeID = nil
       return
     }
-    guard let live = catalog?.pickerPayees.first(where: { $0.id == payee.id }) else {
+    guard let live = catalog?.pickerPayees.first(where: {
+      $0.id == payee.id
+        || $0.name.caseInsensitiveCompare(payee.name) == .orderedSame
+        || $0.name.caseInsensitiveCompare(payee.id) == .orderedSame
+    }) else {
       guard catalog == nil else {
         return
       }
