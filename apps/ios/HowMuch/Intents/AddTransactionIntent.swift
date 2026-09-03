@@ -9,7 +9,7 @@ struct AddTransactionIntent: AppIntent {
   static let supportedModes: IntentModes = .foreground(.immediate)
 
   @Parameter(title: "Amount")
-  var amount: Decimal?
+  var amount: Double?
 
   @Parameter(title: "Direction")
   var direction: EntryDirection?
@@ -35,12 +35,19 @@ struct AddTransactionIntent: AppIntent {
   @Parameter(title: "Cleared")
   var cleared: Bool?
 
+  private static func decimal(from amount: Double?) -> Decimal? {
+    guard let amount else {
+      return nil
+    }
+    return Decimal(string: String(amount), locale: Locale(identifier: "en_US_POSIX")) ?? Decimal(amount)
+  }
+
   @MainActor
   func perform() async throws -> some IntentResult {
     let catalog = IntentCatalogStore.shared.loadActive()
     do {
       let request = try AddTransactionIntentBuilder.request(
-        amount: amount,
+        amount: Self.decimal(from: amount),
         direction: direction,
         accountID: account?.id,
         payee: payee.map {
