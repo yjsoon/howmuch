@@ -13,6 +13,12 @@ struct CategoryEntity: AppEntity {
   @Property(title: "Group")
   var groupName: String
 
+  init(id: String, name: String, groupName: String) {
+    self.id = id
+    self.name = name
+    self.groupName = groupName
+  }
+
   var displayRepresentation: DisplayRepresentation {
     DisplayRepresentation(
       title: LocalizedStringResource(stringLiteral: name),

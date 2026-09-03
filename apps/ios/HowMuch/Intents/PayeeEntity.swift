@@ -11,6 +11,11 @@ struct PayeeEntity: AppEntity {
   @Property(title: "Name")
   var name: String
 
+  init(id: String, name: String) {
+    self.id = id
+    self.name = name
+  }
+
   var isNew: Bool {
     PayeeEntityQuery.newPayeeName(from: id) != nil
   }

@@ -136,6 +136,18 @@ final class AddTransactionIntentTests: XCTestCase {
     XCTAssertNil(draft.categoryID)
   }
 
+  func testEntityInitsTakeStringNames() {
+    let account = AccountEntity(id: "acct-everyday", name: "Everyday Account")
+    XCTAssertEqual(account.name, "Everyday Account")
+
+    let payee = PayeeEntity(id: PayeeEntityQuery.newPayeeID(for: "Coffee"), name: "Coffee")
+    XCTAssertEqual(payee.name, "Coffee")
+    XCTAssertEqual(payee.isNew, true)
+
+    let category = CategoryEntity(id: "cat-dining", name: "Dining Out", groupName: "Everyday")
+    XCTAssertEqual(category.groupName, "Everyday")
+  }
+
   func testEntityQueriesKeepPickedIDsWhenCatalogIsUnread() {
     let account = AccountEntityQuery.resolved(["acct-everyday"], catalog: nil)
     XCTAssertEqual(account.map(\.id), ["acct-everyday"])

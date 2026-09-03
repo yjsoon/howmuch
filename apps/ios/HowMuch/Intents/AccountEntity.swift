@@ -11,6 +11,11 @@ struct AccountEntity: AppEntity {
   @Property(title: "Name")
   var name: String
 
+  init(id: String, name: String) {
+    self.id = id
+    self.name = name
+  }
+
   var displayRepresentation: DisplayRepresentation {
     DisplayRepresentation(title: LocalizedStringResource(stringLiteral: name))
   }
