@@ -24,6 +24,11 @@ describe("iOS add account", () => {
     expect(sheet).toContain('.navigationTitle("New Account")');
     expect(sheet).toContain("model.createAccount(");
     expect(sheet).toContain("Amount owed");
+    expect(sheet).toContain("Enter what you currently owe.");
+    expect(sheet).toContain("Listed as");
+    expect(sheet).toContain(".listStyle(.insetGrouped)");
+    expect(sheet).toContain("scrollDismissesKeyboard(.interactively)");
+    expect(accounts).toContain("No Accounts");
     expect(client).toContain('path: "/v1/plans/\\(planID)/accounts"');
     expect(client).toContain('method: "POST"');
     expect(model).toContain("kind.openingBalanceMilliunits(fromEntered: enteredBalance)");

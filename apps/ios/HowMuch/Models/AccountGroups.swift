@@ -35,9 +35,11 @@ enum AccountKind: String, CaseIterable, Identifiable, Hashable {
     }
   }
 
-  enum Group: String, CaseIterable {
+  enum Group: String, CaseIterable, Identifiable {
     case budget
     case tracking
+
+    var id: String { rawValue }
 
     var title: String {
       switch self {
@@ -45,6 +47,34 @@ enum AccountKind: String, CaseIterable, Identifiable, Hashable {
       case .tracking: "Tracking"
       }
     }
+
+    var footer: String {
+      switch self {
+      case .budget: "Cash, savings, and cards on the plan."
+      case .tracking: "Loans and assets that sit off the plan."
+      }
+    }
+  }
+
+  var placeholderName: String {
+    switch self {
+    case .checking: "Everyday Account"
+    case .savings: "Rainy Day Saver"
+    case .cash: "Wallet"
+    case .creditCard: "Travel Card"
+    case .lineOfCredit: "Overdraft"
+    case .mortgage: "Home Loan"
+    case .autoLoan: "Car Loan"
+    case .studentLoan: "Student Loan"
+    case .medicalDebt: "Medical"
+    case .otherLoan: "Loan"
+    case .otherAsset: "Investment"
+    case .otherLiability: "Liability"
+    }
+  }
+
+  var defaultIcon: AccountIcon {
+    AccountIcon.default(for: rawValue)
   }
 
   var group: Group {

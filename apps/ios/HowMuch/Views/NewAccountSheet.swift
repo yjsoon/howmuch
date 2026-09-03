@@ -12,7 +12,12 @@ struct NewAccountSheet: View {
   @State private var isPickingIcon = false
   @State private var error: String?
   @State private var isSaving = false
-  @FocusState private var isNameFocused: Bool
+  @FocusState private var focusedField: Field?
+
+  private enum Field: Hashable {
+    case name
+    case balance
+  }
 
   var body: some View {
     NavigationStack {
@@ -31,6 +36,7 @@ struct NewAccountSheet: View {
         .padding(16)
       }
       .background(Theme.canvas)
+      .scrollDismissesKeyboard(.interactively)
       .navigationTitle("New Account")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -61,11 +67,17 @@ struct NewAccountSheet: View {
             .accessibilityLabel("Save")
           }
         }
+        ToolbarItemGroup(placement: .keyboard) {
+          Spacer()
+          Button("Done") {
+            focusedField = nil
+          }
+        }
       }
       .interactiveDismissDisabled(isSaving)
       .task {
         await Task.yield()
-        isNameFocused = true
+        focusedField = .name
       }
     }
   }
@@ -93,9 +105,11 @@ struct NewAccountSheet: View {
   }
 
   private var nameField: some View {
-    TextField("Everyday Account", text: $name)
+    TextField(kind.placeholderName, text: $name)
       .textInputAutocapitalization(.words)
-      .focused($isNameFocused)
+      .focused($focusedField, equals: .name)
+      .submitLabel(.next)
+      .onSubmit { focusedField = .balance }
       .disabled(isSaving)
   }
 
@@ -107,6 +121,9 @@ struct NewAccountSheet: View {
         Text("Type")
           .foregroundStyle(Theme.textPrimary)
         Spacer()
+        Text(kind.defaultIcon.rawValue)
+          .font(.title3)
+          .accessibilityHidden(true)
         Text(kind.title)
           .foregroundStyle(.secondary)
         Image(systemName: "chevron.right")
@@ -123,9 +140,10 @@ struct NewAccountSheet: View {
     .ynabCard()
     .accessibilityLabel("Type")
     .accessibilityValue(kind.title)
+    .accessibilityHint("Opens the account type list")
     .onChange(of: kind) { _, next in
       if !iconIsCustom {
-        icon = AccountIcon.default(for: next.rawValue)
+        icon = next.defaultIcon
       }
     }
   }
@@ -148,9 +166,15 @@ struct NewAccountSheet: View {
           }
         }
       }
-      Text(balanceHint)
-        .font(.footnote)
-        .foregroundStyle(enteredBalance == nil ? Theme.outflow : Color.secondary)
+      if let listedBalancePreview {
+        Text(listedBalancePreview.text)
+          .font(.footnote)
+          .foregroundStyle(listedBalancePreview.colour)
+      } else {
+        Text(balanceHint)
+          .font(.footnote)
+          .foregroundStyle(enteredBalance == nil ? Theme.outflow : Color.secondary)
+      }
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 13)
@@ -160,12 +184,14 @@ struct NewAccountSheet: View {
   private var balanceField: some View {
     TextField("0.00", text: $balanceText)
       .keyboardType(kind.storesLiability ? .decimalPad : .numbersAndPunctuation)
+      .focused($focusedField, equals: .balance)
       .disabled(isSaving)
       .accessibilityLabel(balanceLabel)
   }
 
   private var iconCard: some View {
     Button {
+      focusedField = nil
       isPickingIcon = true
     } label: {
       HStack {
@@ -224,13 +250,29 @@ struct NewAccountSheet: View {
       return "Enter an amount with no more than three decimal places."
     }
     if kind.storesLiability {
-      return "Stored as a negative balance, like a credit card statement."
+      return "Enter what you currently owe."
     }
-    return "Use a minus sign if this account is already overdrawn."
+    return "Today’s balance. Use a minus if you’re overdrawn."
+  }
+
+  private var listedBalancePreview: (text: String, colour: Color)? {
+    guard let entered = enteredBalance else {
+      return nil
+    }
+    let listed = kind.openingBalanceMilliunits(fromEntered: entered)
+    guard listed != 0 else {
+      return nil
+    }
+    let amount = MoneyCodec.signedDisplayString(for: listed, currencyFormat: model.currencyFormat)
+    if kind.storesLiability {
+      return ("Listed as \(amount) on Accounts.", Theme.amountColour(listed))
+    }
+    return nil
   }
 
   private func save() async {
     guard let enteredBalance, canSave else { return }
+    focusedField = nil
     isSaving = true
     error = nil
     do {
@@ -254,14 +296,18 @@ private struct AccountKindPicker: View {
 
   var body: some View {
     List {
-      ForEach(AccountKind.Group.allCases, id: \.self) { group in
-        Section(group.title) {
+      ForEach(AccountKind.Group.allCases) { group in
+        Section {
           ForEach(AccountKind.kinds(in: group)) { kind in
             Button {
               selection = kind
               dismiss()
             } label: {
-              HStack {
+              HStack(spacing: 12) {
+                Text(kind.defaultIcon.rawValue)
+                  .font(.title3)
+                  .frame(width: 32)
+                  .accessibilityHidden(true)
                 Text(kind.title)
                   .foregroundStyle(Theme.textPrimary)
                 Spacer()
@@ -272,11 +318,19 @@ private struct AccountKindPicker: View {
                 }
               }
             }
+            .accessibilityLabel(kind.title)
             .accessibilityAddTraits(selection == kind ? [.isSelected] : [])
           }
+        } header: {
+          Text(group.title)
+        } footer: {
+          Text(group.footer)
         }
       }
     }
+    .listStyle(.insetGrouped)
+    .scrollContentBackground(.hidden)
+    .background(Theme.canvas)
     .navigationTitle("Account Type")
     .navigationBarTitleDisplayMode(.inline)
   }

@@ -18,34 +18,31 @@ struct AccountsView: View {
           PhasePlaceholder(phase: model.referencePhase) {
             await model.refreshReferenceData()
           }
+        } else if model.accounts.isEmpty {
+          ContentUnavailableView {
+            Label("No Accounts", systemImage: "building.columns")
+          } description: {
+            Text("Add a bank account or card to start recording transactions.")
+          } actions: {
+            Button("New Account") {
+              presentedSheet = .newAccount
+            }
+            .buttonStyle(.borderedProminent)
+          }
+          .frame(maxWidth: .infinity)
+          .padding(.top, 48)
         } else {
           ledgerShortcuts
-
-          if model.accounts.isEmpty {
-            ContentUnavailableView {
-              Label("No Accounts", systemImage: "building.columns")
-            } description: {
-              Text("Add a bank account or card to start recording transactions.")
-            } actions: {
-              Button("New Account") {
-                presentedSheet = .newAccount
-              }
-              .buttonStyle(.borderedProminent)
+          if !collectionGroups.isEmpty {
+            accountListBandLabel("Your groups")
+            ForEach(collectionGroups) { group in
+              accountGroupSection(group)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.top, 24)
-          } else {
-            if !collectionGroups.isEmpty {
-              accountListBandLabel("Your groups")
-              ForEach(collectionGroups) { group in
-                accountGroupSection(group)
-              }
-            }
-            if !indexGroups.isEmpty {
-              accountListBandLabel("By type")
-              ForEach(indexGroups) { group in
-                accountGroupSection(group)
-              }
+          }
+          if !indexGroups.isEmpty {
+            accountListBandLabel("By type")
+            ForEach(indexGroups) { group in
+              accountGroupSection(group)
             }
           }
         }

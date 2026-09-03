@@ -23,8 +23,8 @@ Preconditions:
 - Everyday Account, Rainy Day Saver, and Travel Card are still listed unless driving `ios-add-account-empty`.
 - Use name `Verify Card` so the row is unique.
 
-- **Open.** On `Accounts`, choose `New Account`. Sheet title `New Account`. Leading `Cancel`. Fields `Name`, `Type` (`Checking`), `Current balance`, `Icon`.
-- **Card.** Name `Verify Card`. Type `Credit Card` (under `Budget`). Type row then reads `Credit Card`. Balance label becomes `Amount owed`. Enter `12.50`. Leave the default card icon.
+- **Open.** On `Accounts`, choose `New Account`. Sheet title `New Account`. Leading `Cancel`. Fields `Name`, `Type` (`Checking` with the bank emoji), `Current balance`, `Icon`.
+- **Card.** Name `Verify Card`. Type `Credit Card` (under `Budget`; footer mentions cards on the plan). Type row then reads `Credit Card`. Balance label becomes `Amount owed`. Enter `12.50`. Footnote `Listed as` a negative `12.50`. Leave the default card icon.
 - **Save.** Trailing `Save` is enabled. Choose `Save`. Toast `Added Verify Card`. Sheet dismisses. Accounts lists `Verify Card` under `Credit` with a negative `12.50`.
 - **HTTP match.** `control-howmuch http GET /v1/plans/local-plan/accounts` includes `name` `Verify Card`, `type` `creditCard`, `balance` `-12500`, `on_budget` true. `control-howmuch http GET /v1/plans/local-plan/payees` includes `Transfer : Verify Card` with that account id.
 - **Capture destination.** Tab `Transaction`. Payee list includes `Transfer : Verify Card`. Cancel without saving.
@@ -33,6 +33,7 @@ Preconditions:
 ## Gotchas
 
 - Organise accounts still only manages groups. Creating a card or bank account is the Accounts plus, not New Group.
-- Amount owed for cards and loans is typed positive; the server stores a negative balance.
+- Amount owed for cards and loans is typed positive; Accounts lists it negative. The sheet shows `Listed as` once the amount is non-zero.
 - Checking, Savings, Cash, and Other Asset keep the entered current balance, including a minus for overdraft.
+- An empty ledger hides All Transactions / Scheduled and shows **No Accounts** with **New Account**.
 - iOS Simulator is required. Do not treat web as a substitute; web has no create-account sheet.
