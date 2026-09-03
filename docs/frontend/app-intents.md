@@ -157,3 +157,7 @@ New files (when built): `Intents/AddTransactionIntent.swift`, entities + queries
 - [ ] Stale or missing entity IDs leave the field empty.
 - [ ] Signed out: app opens to connection; no crash; no other plan’s catalog.
 - [ ] Duplicate, +, and Quick Action still work after the shared door lands.
+
+## Verification
+
+When this is in the app, drive `.cursor/skills/verify-howmuch` recipe `ios-app-intents` (and `ios-capture` for the shared door). Nothing may hit the outbox until Save.

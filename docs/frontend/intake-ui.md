@@ -174,3 +174,7 @@ Tab +, Quick Action, Duplicate, compose, share, and App Intents must not each ow
 6. Share extension (no extra confirmation chrome).
 7. Repair line (typed).
 8. Later: screenshot offer.
+
+## Verification
+
+When this UI is in the app, drive it with `.cursor/skills/verify-howmuch` recipes `ios-connection`, `ios-capture`, `ios-intake-compose`, `ios-intake-review-list`. Skip a recipe if the handle is not on the sheet. The HTML file is not proof.
