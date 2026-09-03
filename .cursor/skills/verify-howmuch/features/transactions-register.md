@@ -1,6 +1,6 @@
 # Transactions register
 
-The register is a dense list of ledger rows with the same filter rail as reports, plus payee/memo search. All Accounts and each sidebar account are separate entry points.
+The register is a dense list of ledger rows with the same filter rail as reports, plus payee/memo search. All Accounts and each sidebar account are separate entry points. Posted future-dated rows and recurrences sit behind a closed **Scheduled** disclosure; the table itself is today and backwards.
 
 ## Sub-features
 
@@ -9,6 +9,7 @@ The register is a dense list of ledger rows with the same filter rail as reports
 - `register-default-empty` is empty on the default trailing-two-month window when today is 2026-08.
 - `register-search` filters loaded rows by payee, memo, category, or account (FairPrice Finest).
 - `register-balances` shows cleared / uncleared / working figures in the header.
+- `register-scheduled` shows a closed **Scheduled** disclosure on All Accounts and on an account register when recurrences or posted futures exist.
 
 ## How to get to it (user POV)
 

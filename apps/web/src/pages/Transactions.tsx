@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState, Fragment, type ReactNode } from "react";
 import { NavLink, useSearchParams } from "react-router-dom";
 import { ApiError, api, BulkApprovalError, useApi } from "../api/client";
 import type {
@@ -35,7 +35,6 @@ import {
 import {
   closedCompose,
   composePayload,
-  dateInFilterRange,
   reduceCompose,
   type RegisterComposeState,
 } from "../lib/register-compose";
@@ -49,6 +48,7 @@ import {
   type RegisterRowEditAction,
   type RegisterRowEditSession,
 } from "../lib/register-row-edit";
+import { dateInRegisterWindow, isUpcomingRegisterDate, registerFetchUntilDate } from "../lib/register-current";
 import { fillRegisterHorizon } from "../lib/register-horizon";
 import { applyClearedOverlays, applyRegisterPatches, deletedIdsForRemoval, reconcileClearedOverlays, retainInFlightPatches, unlinkSplitMirrorParent } from "../lib/register-rows";
 import {
@@ -58,7 +58,7 @@ import {
   selectedIds,
   type RegisterSelectionIntent,
 } from "../lib/register-selection";
-import { activeSchedulesForAccount, scheduledAmount, scheduleRecurrence, transferScheduleLabel } from "../lib/schedules";
+import { activeSchedulesForScope, scheduledAmount, scheduleRecurrence, transferScheduleLabel } from "../lib/schedules";
 import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
 
@@ -125,9 +125,11 @@ export function TransactionsPage() {
   });
   const [refreshGeneration, setRefreshGeneration] = useState(0);
   const requestVersionRef = useRef(0);
+  const today = todayIso();
+  const fetchUntilDate = registerFetchUntilDate(filters.to, today);
   const pageQuery = useMemo(
-    () => ({ since_date: filters.from, until_date: filters.to, limit: 100 }),
-    [filters.from, filters.to],
+    () => ({ since_date: filters.from, until_date: fetchUntilDate, limit: 100 }),
+    [fetchUntilDate, filters.from],
   );
   const [page, setPage] = useState({
     transactions: [] as Transaction[],
@@ -169,12 +171,8 @@ export function TransactionsPage() {
     setCompose(closedCompose());
   }, [composeScope]);
   const schedules = useApi<ScheduledTransaction[]>(
-    selectedAccountId ? `${planId}:account-schedules:${selectedAccountId}` : `${planId}:account-schedules-idle`,
-    () => selectedAccountId ? api.scheduledTransactions(planId) : Promise.resolve([]),
-  );
-  const accountSchedules = useMemo(
-    () => selectedAccountId ? activeSchedulesForAccount(schedules.data ?? [], selectedAccountId) : [],
-    [schedules.data, selectedAccountId],
+    `${planId}:scheduled-transactions`,
+    () => api.scheduledTransactions(planId),
   );
   const approvalQueue = useApi(
     JSON.stringify({ planId, selectedAccountId, from: filters.from, to: filters.to, refreshGeneration, approvalQueue: true }),
@@ -185,7 +183,7 @@ export function TransactionsPage() {
         let offset = 0;
         let changed = false;
         for (;;) {
-          const query = { since_date: filters.from, until_date: filters.to, type: "unapproved" as const, limit: 250, offset };
+          const query = { since_date: filters.from, until_date: fetchUntilDate, type: "unapproved" as const, limit: 250, offset };
           const result = selectedAccountId
             ? await api.accountTransactions(planId, selectedAccountId, query)
             : await api.transactions(planId, query);
@@ -467,7 +465,7 @@ export function TransactionsPage() {
       setReconciliationPreviewGeneration((generation) => generation + 1);
       const savedName = (updated.payee_name ?? session.draft.payeeName).trim() || "Entry";
       setMutationSuccess(
-        dateInFilterRange(updated.date, filters.from, filters.to)
+        dateInRegisterWindow(updated.date, filters.from, filters.to, today)
           ? `${savedName} saved.`
           : `${savedName} saved. It is outside this date range.`,
       );
@@ -506,7 +504,7 @@ export function TransactionsPage() {
         if (!current.loaded || current.transactions.some((row) => row.id === transaction.id)) {
           return current;
         }
-        if (!registerAccountIds.has(transaction.account_id) || !dateInFilterRange(transaction.date, filters.from, filters.to)) {
+        if (!registerAccountIds.has(transaction.account_id) || !dateInRegisterWindow(transaction.date, filters.from, filters.to, today)) {
           return current;
         }
         return { ...current, transactions: [transaction, ...current.transactions] };
@@ -514,7 +512,7 @@ export function TransactionsPage() {
       setReconciliationPreviewGeneration((generation) => generation + 1);
       const savedName = transaction.payee_name ?? "Entry";
       setMutationSuccess(
-        dateInFilterRange(transaction.date, filters.from, filters.to)
+        dateInRegisterWindow(transaction.date, filters.from, filters.to, today)
           ? `${savedName} saved.`
           : `${savedName} saved. It is outside this date range.`,
       );
@@ -667,8 +665,8 @@ export function TransactionsPage() {
       (unapprovedOnly ? patchedQueue : patchedPage)
         .filter((txn) => !txn.deleted)
         .filter((txn) => registerAccountIds.has(txn.account_id))
-        .filter((txn) => unapprovedOnly || dateInFilterRange(txn.date, filters.from, filters.to)),
-    [filters.from, filters.to, patchedPage, patchedQueue, registerAccountIds, unapprovedOnly],
+        .filter((txn) => unapprovedOnly || dateInRegisterWindow(txn.date, filters.from, filters.to, today)),
+    [filters.from, filters.to, patchedPage, patchedQueue, registerAccountIds, today, unapprovedOnly],
   );
 
   const uncategorisedCount = useMemo(() => inScope.filter(hasUncategorisedLine).length, [inScope]);
@@ -703,7 +701,7 @@ export function TransactionsPage() {
   }, [categoryIds, filters.categoryIds.length, flow, inScope, unapprovedOnly, wantsUncategorised]);
 
   const editingRowId = rowEdit.status === "idle" ? null : rowId(rowEdit.row);
-  const rows = useMemo(() => {
+  const matchedRows = useMemo(() => {
     const needle = deferredSearch.trim().toLowerCase();
     return scopedRows.filter((txn) => {
       if (editingRowId && txn.id === editingRowId) {
@@ -724,6 +722,42 @@ export function TransactionsPage() {
       );
     });
   }, [deferredSearch, editingRowId, scopedRows]);
+  const rows = useMemo(
+    () => matchedRows.filter((txn) => !isUpcomingRegisterDate(txn.date, today)),
+    [matchedRows, today],
+  );
+  const postedFutureRows = useMemo(
+    () => matchedRows.filter((txn) => isUpcomingRegisterDate(txn.date, today)),
+    [matchedRows, today],
+  );
+  const visibleSchedules = useMemo(() => {
+    if (unapprovedOnly) {
+      return [];
+    }
+    const needle = deferredSearch.trim().toLowerCase();
+    return activeSchedulesForScope(schedules.data ?? [], registerAccountIds).filter((schedule) => {
+      if (filters.categoryIds.length) {
+        const matchesCategory =
+          (schedule.category_id !== null && categoryIds.has(schedule.category_id))
+          || schedule.subtransactions?.some((line) => line.category_id !== null && categoryIds.has(line.category_id));
+        const uncategorised = !schedule.category_id && !schedule.transfer_account_id
+          && !(schedule.subtransactions?.some((line) => line.category_id || line.transfer_account_id));
+        if (!matchesCategory && !(wantsUncategorised && uncategorised)) {
+          return false;
+        }
+      }
+      if (!needle) {
+        return true;
+      }
+      const accountName = accounts.find((account) => account.id === schedule.account_id)?.name;
+      const payeeName = schedule.payee_name ?? (schedule.payee_id ? payees.data?.find((payee) => payee.id === schedule.payee_id)?.name : undefined);
+      const categoryName = schedule.category_name;
+      const haystack = [schedule.memo, accountName, payeeName, categoryName, ...(schedule.subtransactions ?? []).flatMap((line) => [line.memo, line.payee_name, line.category_name])];
+      return haystack.some((value) => value?.toLowerCase().includes(needle));
+    });
+  }, [accounts, categoryIds, deferredSearch, filters.categoryIds.length, payees.data, registerAccountIds, schedules.data, unapprovedOnly, wantsUncategorised]);
+  const scheduledDisclosureCount = postedFutureRows.length + visibleSchedules.length;
+  const showScheduledDisclosure = scheduledDisclosureCount > 0 || Boolean(schedules.error);
 
   useEffect(() => {
     const present = new Set(scopedRows.map((txn) => txn.id));
@@ -1189,7 +1223,7 @@ export function TransactionsPage() {
               {rows.length} transactions · {formatMoney(totals.inflow)} in · {formatMoney(totals.outflow)} out · {formatMoney(totals.net, { sign: true })} net
             </span>
           </div>
-          {rows.length > 0 || selectedAccountId || compose.status === "open" ? (
+          {rows.length > 0 || showScheduledDisclosure || compose.status === "open" ? (
             <div className="table-wrap table-wrap-wide">
               <table className="ledger-table register-table">
                 <thead>
@@ -1237,15 +1271,71 @@ export function TransactionsPage() {
                       onSave={(keepOpen) => void saveCompose(keepOpen)}
                     />
                   )}
-                  {selectedAccountId && (
-                    <AccountScheduledRows
-                      key={selectedAccountId}
-                      schedules={accountSchedules}
+                  {showScheduledDisclosure && (
+                    <RegisterScheduledDisclosure
+                      key={selectedAccountId ?? "all"}
+                      schedules={visibleSchedules}
+                      posted={postedFutureRows}
                       loading={schedules.loading}
                       error={schedules.error}
                       accounts={accounts}
                       categoryGroups={categoryGroups}
                       payees={payees.data ?? []}
+                      renderPosted={(txn) => [
+                        <RegisterEditableRow
+                          key={txn.id}
+                          row={{ kind: "posted", transaction: txn }}
+                          surface={rowSurface}
+                          leading={null}
+                          account={txn.account_name}
+                          actions={(
+                            <>
+                              {!txn.approved && (
+                                <button
+                                  type="button"
+                                  className="register-row-action register-row-action-approve"
+                                  onClick={() => void approveMany([txn.id])}
+                                  disabled={writeLocked || approvalSession.pending.has(txn.id)}
+                                  aria-label={`Approve ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
+                                >
+                                  {approvalSession.pending.has(txn.id) ? "Approving…" : "Approve"}
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="register-row-action register-row-action-danger"
+                                onClick={() => {
+                                  setPendingDeletion(txn);
+                                  setMutationError(null);
+                                }}
+                                disabled={writeLocked || mutatingId === txn.id}
+                                aria-label={`${txn.approved ? "Delete" : "Reject"} ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
+                              >
+                                {txn.approved ? "Delete" : "Reject"}
+                              </button>
+                            </>
+                          )}
+                          status={(
+                            <ClearedStatus
+                              transaction={txn}
+                              busy={writeLocked || mutatingId === txn.id}
+                              onToggle={() => void toggleCleared(txn)}
+                            />
+                          )}
+                          payeeExtra={<FlagTag colour={txn.flag_color} name={txn.flag_name} />}
+                        />,
+                        ...(txn.subtransactions ?? []).map((sub) => (
+                          <RegisterEditableRow
+                            key={sub.id}
+                            row={{ kind: "split-line", parent: txn, lineId: sub.id }}
+                            surface={rowSurface}
+                            leading={null}
+                            account={null}
+                            actions={null}
+                            status={null}
+                          />
+                        )),
+                      ]}
                     />
                   )}
                   {rows.flatMap((txn) => [
@@ -1322,7 +1412,7 @@ export function TransactionsPage() {
                   ])}
                 </tbody>
               </table>
-              {rows.length === 0 && !page.filling && compose.status !== "open" && (
+              {rows.length === 0 && !page.filling && compose.status !== "open" && !showScheduledDisclosure && (
                 <div className="register-empty-state">
                   <p className="status-title">{emptyMessage}</p>
                   <p className="status-detail">Try widening the date range, clearing filters, or shortening the search term.</p>
@@ -1348,30 +1438,102 @@ export function TransactionsPage() {
   );
 }
 
-function AccountScheduledRows({
+function RegisterScheduledDisclosure({
   schedules,
+  posted,
   loading,
   error,
   accounts,
   categoryGroups,
   payees,
+  renderPosted,
 }: {
   schedules: ScheduledTransaction[];
+  posted: Transaction[];
   loading: boolean;
   error: string | null;
   accounts: Account[];
   categoryGroups: CategoryGroup[];
   payees: Payee[];
+  renderPosted: (transaction: Transaction) => ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
   const accountNames = new Map(accounts.map((account) => [account.id, account.name]));
   const categoryNames = new Map(categoryGroups.flatMap((group) => group.categories ?? []).map((category) => [category.id, category.name]));
   const payeeNames = new Map(payees.map((payee) => [payee.id, payee.name]));
-  const summary = loading && schedules.length === 0
-    ? "Loading…"
-    : error
-      ? "Unavailable"
-      : `${schedules.length} upcoming`;
+  const count = posted.length + schedules.length;
+  const summary = error && count === 0
+    ? "Unavailable"
+    : String(count);
+
+  const scheduleRows = (schedule: ScheduledTransaction) => {
+    const amount = scheduledAmount(schedule);
+    const transfer = schedule.transfer_account_id ? transferScheduleLabel(schedule.transfer_account_id, accountNames) : null;
+    const payee = schedule.payee_name
+      ?? (schedule.payee_id ? payeeNames.get(schedule.payee_id) : null)
+      ?? transfer
+      ?? "No payee";
+    const category = schedule.subtransactions?.length
+      ? `Split · ${schedule.subtransactions.length} lines`
+      : transfer ?? schedule.category_name ?? (schedule.category_id ? categoryNames.get(schedule.category_id) : null) ?? "Uncategorised";
+    const accountName = accountNames.get(schedule.account_id) ?? "Account";
+    return [
+      <tr key={schedule.id} className="register-scheduled-row">
+        <td />
+        <td className="nowrap">{schedule.date_next ? formatDate(schedule.date_next) : "No next date"}</td>
+        <td>{accountName}</td>
+        <td>{payee}</td>
+        <td className="muted">Scheduled · {scheduleRecurrence(schedule.frequency)} · {category}</td>
+        <td className="muted memo-cell" title={schedule.memo ?? ""}>{schedule.memo ?? "-"}</td>
+        <td className="num amount-negative">{amount < 0 ? formatAmount(amount) : ""}</td>
+        <td className="num amount-positive">{amount > 0 ? formatAmount(amount) : ""}</td>
+        <td className="register-actions"><NavLink className="register-row-action" to="/scheduled">Manage</NavLink></td>
+        <td />
+      </tr>,
+      ...(schedule.subtransactions ?? []).map((line) => {
+        const lineTransfer = line.transfer_account_id ? transferScheduleLabel(line.transfer_account_id, accountNames) : null;
+        return <tr key={line.id} className="split-line-row register-scheduled-split-row">
+          <td />
+          <td />
+          <td />
+          <td className="muted split-line-cell">↳ {line.payee_name ?? (line.payee_id ? payeeNames.get(line.payee_id) : null) ?? lineTransfer ?? "-"}</td>
+          <td className="muted">{lineTransfer ?? line.category_name ?? (line.category_id ? categoryNames.get(line.category_id) : null) ?? "Uncategorised"}</td>
+          <td className="muted memo-cell" title={line.memo ?? ""}>{line.memo ?? "-"}</td>
+          <td className="num amount-negative">{line.amount < 0 ? formatAmount(line.amount) : ""}</td>
+          <td className="num amount-positive">{line.amount > 0 ? formatAmount(line.amount) : ""}</td>
+          <td />
+          <td />
+        </tr>;
+      }),
+    ];
+  };
+
+  const expandedRows = [
+    ...posted.map((transaction) => ({
+      date: transaction.date,
+      kind: 0 as const,
+      id: transaction.id,
+      node: renderPosted(transaction),
+    })),
+    ...schedules.map((schedule) => ({
+      date: schedule.date_next ?? schedule.date_first ?? "9999-12-31",
+      kind: 1 as const,
+      id: schedule.id,
+      node: scheduleRows(schedule),
+    })),
+  ].sort((left, right) => right.date.localeCompare(left.date) || left.kind - right.kind || left.id.localeCompare(right.id));
+
+  if (error && count === 0) {
+    return (
+      <tr className="register-scheduled-message">
+        <td colSpan={10}>
+          <span role="alert">Could not load scheduled transactions: {error}</span>
+          {" · "}
+          <NavLink to="/scheduled">Manage schedules</NavLink>
+        </td>
+      </tr>
+    );
+  }
 
   return (
     <>
@@ -1386,61 +1548,18 @@ function AccountScheduledRows({
             <svg className="register-scheduled-icon" viewBox="0 0 20 20" aria-hidden="true">
               <path d="M4 6.5h12M6.5 3.5v4M13.5 3.5v4M4 5h12v12H4z" />
             </svg>
-            <span>Scheduled transactions</span>
+            <span>Scheduled</span>
             <span className="register-scheduled-count">{summary}</span>
             <span className="register-scheduled-chevron" aria-hidden="true">›</span>
           </button>
         </td>
       </tr>
-      {expanded && loading && schedules.length === 0 && (
+      {expanded && loading && count === 0 && (
         <tr className="register-scheduled-message"><td colSpan={10}><span role="status">Loading scheduled transactions…</span></td></tr>
       )}
-      {expanded && error && (
-        <tr className="register-scheduled-message"><td colSpan={10}><span role="alert">Could not load scheduled transactions: {error}</span> · <NavLink to="/scheduled">Manage schedules</NavLink></td></tr>
-      )}
-      {expanded && !error && !loading && schedules.length === 0 && (
-        <tr className="register-scheduled-message"><td colSpan={10}>No active schedules for this account. <NavLink to="/scheduled">Manage schedules</NavLink></td></tr>
-      )}
-      {expanded && schedules.flatMap((schedule) => {
-        const amount = scheduledAmount(schedule);
-        const transfer = schedule.transfer_account_id ? transferScheduleLabel(schedule.transfer_account_id, accountNames) : null;
-        const payee = schedule.payee_name
-          ?? (schedule.payee_id ? payeeNames.get(schedule.payee_id) : null)
-          ?? transfer
-          ?? "No payee";
-        const category = schedule.subtransactions?.length
-          ? `Split · ${schedule.subtransactions.length} lines`
-          : transfer ?? schedule.category_name ?? (schedule.category_id ? categoryNames.get(schedule.category_id) : null) ?? "Uncategorised";
-        return [
-          <tr key={schedule.id} className="register-scheduled-row">
-            <td />
-            <td className="nowrap">{schedule.date_next ? formatDate(schedule.date_next) : "No next date"}</td>
-            <td className="muted">Scheduled · {scheduleRecurrence(schedule.frequency)}</td>
-            <td>{payee}</td>
-            <td className="muted">{category}</td>
-            <td className="muted memo-cell" title={schedule.memo ?? ""}>{schedule.memo ?? "-"}</td>
-            <td className="num amount-negative">{amount < 0 ? formatAmount(amount) : ""}</td>
-            <td className="num amount-positive">{amount > 0 ? formatAmount(amount) : ""}</td>
-            <td className="register-actions"><NavLink className="register-row-action" to="/scheduled">Manage</NavLink></td>
-            <td />
-          </tr>,
-          ...(schedule.subtransactions ?? []).map((line) => {
-            const lineTransfer = line.transfer_account_id ? transferScheduleLabel(line.transfer_account_id, accountNames) : null;
-            return <tr key={line.id} className="split-line-row register-scheduled-split-row">
-              <td />
-              <td />
-              <td />
-              <td className="muted split-line-cell">↳ {line.payee_name ?? (line.payee_id ? payeeNames.get(line.payee_id) : null) ?? lineTransfer ?? "-"}</td>
-              <td className="muted">{lineTransfer ?? line.category_name ?? (line.category_id ? categoryNames.get(line.category_id) : null) ?? "Uncategorised"}</td>
-              <td className="muted memo-cell" title={line.memo ?? ""}>{line.memo ?? "-"}</td>
-              <td className="num amount-negative">{line.amount < 0 ? formatAmount(line.amount) : ""}</td>
-              <td className="num amount-positive">{line.amount > 0 ? formatAmount(line.amount) : ""}</td>
-              <td />
-              <td />
-            </tr>;
-          }),
-        ];
-      })}
+      {expanded && expandedRows.map((entry) => (
+        <Fragment key={`${entry.kind}-${entry.id}`}>{entry.node}</Fragment>
+      ))}
     </>
   );
 }

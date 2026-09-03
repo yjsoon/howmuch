@@ -4,8 +4,15 @@ export function activeSchedulesForAccount(
   schedules: ScheduledTransaction[],
   accountId: string,
 ): ScheduledTransaction[] {
+  return activeSchedulesForScope(schedules, new Set([accountId]));
+}
+
+export function activeSchedulesForScope(
+  schedules: ScheduledTransaction[],
+  accountIds: ReadonlySet<string>,
+): ScheduledTransaction[] {
   return schedules
-    .filter((schedule) => !schedule.deleted && schedule.account_id === accountId)
+    .filter((schedule) => !schedule.deleted && typeof schedule.account_id === "string" && accountIds.has(schedule.account_id))
     .sort((left, right) =>
       String(left.date_next ?? left.date_first ?? "9999-12-31")
         .localeCompare(String(right.date_next ?? right.date_first ?? "9999-12-31"))
