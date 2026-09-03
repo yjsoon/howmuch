@@ -40,6 +40,54 @@ final class AddTransactionIntentTests: XCTestCase {
     XCTAssertEqual(draft.signedMilliunits, -3_500)
   }
 
+  func testNilCatalogStillAppliesPickedIDs() throws {
+    let draft = try AddTransactionIntentBuilder.draft(
+      amount: Decimal(3500) / 1000,
+      direction: .outflow,
+      accountID: "acct-everyday",
+      payee: AddTransactionIntentBuilder.PayeeInput(
+        id: "new:Shortcut Coffee Verify",
+        name: "Shortcut Coffee Verify",
+        transferAccountId: nil,
+        isNew: true
+      ),
+      categoryID: "cat-dining",
+      date: nil,
+      flag: nil,
+      memo: nil,
+      cleared: nil,
+      catalog: nil
+    )
+    XCTAssertEqual(draft.accountID, "acct-everyday")
+    XCTAssertEqual(draft.payeeName, "Shortcut Coffee Verify")
+    XCTAssertNil(draft.payeeID)
+    XCTAssertEqual(draft.categoryID, "cat-dining")
+    XCTAssertEqual(draft.amountMagnitudeMilli, 3_500)
+  }
+
+  func testNilCatalogKeepsMatchedPayeeIDs() throws {
+    let draft = try AddTransactionIntentBuilder.draft(
+      amount: Decimal(3500) / 1000,
+      direction: .outflow,
+      accountID: "acct-everyday",
+      payee: AddTransactionIntentBuilder.PayeeInput(
+        id: "payee-fairprice",
+        name: "FairPrice Finest",
+        transferAccountId: nil,
+        isNew: false
+      ),
+      categoryID: "cat-dining",
+      date: nil,
+      flag: nil,
+      memo: nil,
+      cleared: nil,
+      catalog: nil
+    )
+    XCTAssertEqual(draft.payeeID, "payee-fairprice")
+    XCTAssertEqual(draft.payeeName, "FairPrice Finest")
+    XCTAssertEqual(draft.accountID, "acct-everyday")
+  }
+
   func testStaleIDsAreDropped() throws {
     let draft = try AddTransactionIntentBuilder.draft(
       amount: Decimal(3500) / 1000,

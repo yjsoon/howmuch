@@ -207,7 +207,7 @@ enum AddTransactionIntentBuilder {
       }
       draft.amountMagnitudeMilli = milli
     }
-    if let accountID, catalog?.openAccounts.contains(where: { $0.id == accountID }) == true {
+    if let accountID, Self.accepts(accountID, in: catalog?.openAccounts.map(\.id), catalog: catalog) {
       draft.accountID = accountID
     }
     if let date {
@@ -222,10 +222,20 @@ enum AddTransactionIntentBuilder {
     applyPayee(payee, to: &draft, catalog: catalog)
     if draft.transferAccountID == nil,
        let categoryID,
-       catalog?.pickerCategories.contains(where: { $0.id == categoryID }) == true {
+       Self.accepts(categoryID, in: catalog?.pickerCategories.map(\.id), catalog: catalog) {
       draft.categoryID = categoryID
     }
     return draft
+  }
+
+  /// Stale IDs drop only when a catalog is present. A missing catalog (cold
+  /// Shortcuts launch before the snapshot is readable) must not wipe fields
+  /// the user already picked — amount would land and account would not.
+  private static func accepts(_ id: String, in knownIDs: [String]?, catalog: IntentCatalogSnapshot?) -> Bool {
+    guard catalog != nil else {
+      return true
+    }
+    return knownIDs?.contains(id) == true
   }
 
   private static func applyPayee(
@@ -243,6 +253,17 @@ enum AddTransactionIntentBuilder {
       return
     }
     guard let live = catalog?.pickerPayees.first(where: { $0.id == payee.id }) else {
+      guard catalog == nil else {
+        return
+      }
+      draft.payeeID = payee.id
+      draft.payeeName = payee.name
+      draft.transferAccountID = payee.transferAccountId
+      if payee.transferAccountId == draft.accountID {
+        draft.transferAccountID = nil
+        draft.payeeID = nil
+        draft.payeeName = ""
+      }
       return
     }
     draft.payeeID = live.id

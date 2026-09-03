@@ -122,6 +122,7 @@ final class IntentCatalogStore: @unchecked Sendable {
   }
 
   func loadActive() -> IntentCatalogSnapshot? {
+    waitForPendingWrites()
     lock.lock()
     defer { lock.unlock() }
     guard
