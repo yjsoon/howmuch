@@ -8,10 +8,11 @@ struct AccountEntity: AppEntity {
   static var defaultQuery = AccountEntityQuery()
 
   var id: String
+  @Property(title: "Name")
   var name: String
 
   var displayRepresentation: DisplayRepresentation {
-    DisplayRepresentation(title: "\(name)")
+    DisplayRepresentation(title: LocalizedStringResource(stringLiteral: name))
   }
 }
 

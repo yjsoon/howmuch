@@ -164,7 +164,9 @@ final class AddTransactionIntentTests: XCTestCase {
     XCTAssertEqual(byName.first?.id, "acct-everyday")
 
     let payee = PayeeEntityQuery.resolved(["payee-transfer"], catalog: Self.catalog)
-    XCTAssertEqual(payee.first?.transferAccountId, "acct-travel")
+    XCTAssertEqual(payee.first?.id, "payee-transfer")
+    XCTAssertEqual(payee.first?.name, "Travel Card")
+    XCTAssertEqual(payee.first?.isNew, false)
 
     let category = CategoryEntityQuery.resolved(["Dining Out"], catalog: Self.catalog)
     XCTAssertEqual(category.first?.id, "cat-dining")

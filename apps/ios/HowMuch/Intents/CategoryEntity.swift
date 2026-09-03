@@ -8,11 +8,16 @@ struct CategoryEntity: AppEntity {
   static var defaultQuery = CategoryEntityQuery()
 
   var id: String
+  @Property(title: "Name")
   var name: String
+  @Property(title: "Group")
   var groupName: String
 
   var displayRepresentation: DisplayRepresentation {
-    DisplayRepresentation(title: "\(name)", subtitle: "\(groupName)")
+    DisplayRepresentation(
+      title: LocalizedStringResource(stringLiteral: name),
+      subtitle: LocalizedStringResource(stringLiteral: groupName)
+    )
   }
 }
 

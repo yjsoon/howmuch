@@ -87,16 +87,12 @@ struct AddTransactionIntent: AppIntent {
 }
 
 extension EntryDirection: AppEnum {
-  static var typeDisplayRepresentation: TypeDisplayRepresentation {
-    TypeDisplayRepresentation(name: "Direction")
-  }
+  static let typeDisplayRepresentation: TypeDisplayRepresentation = "Direction"
 
-  static var caseDisplayRepresentations: [EntryDirection: DisplayRepresentation] {
-    [
-      .outflow: "Outflow",
-      .inflow: "Inflow",
-    ]
-  }
+  static let caseDisplayRepresentations: [EntryDirection: DisplayRepresentation] = [
+    .outflow: "Outflow",
+    .inflow: "Inflow",
+  ]
 }
 
 enum IntentFlag: String, AppEnum, CaseIterable {
@@ -108,21 +104,17 @@ enum IntentFlag: String, AppEnum, CaseIterable {
   case blue
   case purple
 
-  static var typeDisplayRepresentation: TypeDisplayRepresentation {
-    TypeDisplayRepresentation(name: "Flag")
-  }
+  static let typeDisplayRepresentation: TypeDisplayRepresentation = "Flag"
 
-  static var caseDisplayRepresentations: [IntentFlag: DisplayRepresentation] {
-    [
-      .none: "None",
-      .red: "Red",
-      .orange: "Orange",
-      .yellow: "Yellow",
-      .green: "Green",
-      .blue: "Blue",
-      .purple: "Purple",
-    ]
-  }
+  static let caseDisplayRepresentations: [IntentFlag: DisplayRepresentation] = [
+    .none: "None",
+    .red: "Red",
+    .orange: "Orange",
+    .yellow: "Yellow",
+    .green: "Green",
+    .blue: "Blue",
+    .purple: "Purple",
+  ]
 
   var flagColour: FlagColour {
     switch self {

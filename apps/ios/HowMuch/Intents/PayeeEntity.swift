@@ -8,18 +8,28 @@ struct PayeeEntity: AppEntity {
   static var defaultQuery = PayeeEntityQuery()
 
   var id: String
+  @Property(title: "Name")
   var name: String
-  var transferAccountId: String?
-  var isNew: Bool
+
+  var isNew: Bool {
+    PayeeEntityQuery.newPayeeName(from: id) != nil
+  }
+
+  var transferAccountId: String? {
+    IntentCatalogStore.shared.loadActive()?.pickerPayees.first { $0.id == id }?.transferAccountId
+  }
 
   var displayRepresentation: DisplayRepresentation {
     if isNew {
-      return DisplayRepresentation(title: "Create “\(name)”")
+      return DisplayRepresentation(title: LocalizedStringResource(stringLiteral: "Create “\(name)”"))
     }
     if transferAccountId != nil {
-      return DisplayRepresentation(title: "\(name)", subtitle: "Transfer")
+      return DisplayRepresentation(
+        title: LocalizedStringResource(stringLiteral: name),
+        subtitle: "Transfer"
+      )
     }
-    return DisplayRepresentation(title: "\(name)")
+    return DisplayRepresentation(title: LocalizedStringResource(stringLiteral: name))
   }
 }
 
@@ -28,8 +38,8 @@ struct PayeeEntityQuery: EntityStringQuery {
     Self.resolved(identifiers, catalog: IntentCatalogStore.shared.loadActive())
   }
 
-  /// Same rule as accounts: never drop an identifier, or Shortcuts will
-  /// hand `perform()` a nil payee even after the user picked one.
+  /// App Intents drops a parameter when this returns fewer entities than
+  /// identifiers. Match id or display name, and never drop a pick.
   static func resolved(
     _ identifiers: [PayeeEntity.ID],
     catalog: IntentCatalogSnapshot?
@@ -37,19 +47,14 @@ struct PayeeEntityQuery: EntityStringQuery {
     let payees = catalog?.pickerPayees ?? []
     return identifiers.map { id in
       if let name = newPayeeName(from: id) {
-        return PayeeEntity(id: id, name: name, transferAccountId: nil, isNew: true)
+        return PayeeEntity(id: id, name: name)
       }
       if let live = payees.first(where: {
         $0.id == id || $0.name.caseInsensitiveCompare(id) == .orderedSame
       }) {
-        return PayeeEntity(
-          id: live.id,
-          name: live.name,
-          transferAccountId: live.transferAccountId,
-          isNew: false
-        )
+        return PayeeEntity(id: live.id, name: live.name)
       }
-      return PayeeEntity(id: id, name: id, transferAccountId: nil, isNew: false)
+      return PayeeEntity(id: id, name: id)
     }
   }
 
@@ -61,11 +66,11 @@ struct PayeeEntityQuery: EntityStringQuery {
     let payees = IntentCatalogStore.shared.loadActive()?.pickerPayees ?? []
     var matches = payees
       .filter { $0.name.localizedStandardContains(trimmed) }
-      .map { PayeeEntity(id: $0.id, name: $0.name, transferAccountId: $0.transferAccountId, isNew: false) }
+      .map { PayeeEntity(id: $0.id, name: $0.name) }
     let hasExact = payees.contains { $0.name.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }
     if !hasExact {
       matches.append(
-        PayeeEntity(id: PayeeEntityQuery.newPayeeID(for: trimmed), name: trimmed, transferAccountId: nil, isNew: true)
+        PayeeEntity(id: PayeeEntityQuery.newPayeeID(for: trimmed), name: trimmed)
       )
     }
     return matches
@@ -73,7 +78,7 @@ struct PayeeEntityQuery: EntityStringQuery {
 
   func suggestedEntities() async throws -> [PayeeEntity] {
     (IntentCatalogStore.shared.loadActive()?.pickerPayees ?? []).map {
-      PayeeEntity(id: $0.id, name: $0.name, transferAccountId: $0.transferAccountId, isNew: false)
+      PayeeEntity(id: $0.id, name: $0.name)
     }
   }
 
