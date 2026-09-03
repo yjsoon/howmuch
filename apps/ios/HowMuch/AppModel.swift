@@ -237,6 +237,33 @@ final class AppModel {
     saveViewPrefs()
   }
 
+  func createAccount(
+    name: String,
+    kind: AccountKind,
+    enteredBalance: Int,
+    icon: AccountIcon?
+  ) async throws -> Account {
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty {
+      throw APIClientError.validation("Name cannot be empty")
+    }
+    let created = try await apiClient.createAccount(
+      planID: settings.planID,
+      name: trimmed,
+      type: kind.rawValue,
+      balance: kind.openingBalanceMilliunits(fromEntered: enteredBalance),
+      icon: icon?.rawValue,
+      onBudget: kind.onBudget
+    )
+    if !accounts.contains(where: { $0.id == created.id }) {
+      accounts.append(created)
+      rebuildLookups()
+    }
+    await refreshLedgerAndInvalidatePlan()
+    showSaveMessage("Added \(created.name)")
+    return created
+  }
+
   func setAccountIdentity(name: String?, icon: AccountIcon?, for accountID: String) async throws {
     let parsedName = name?.trimmingCharacters(in: .whitespacesAndNewlines)
     if let parsedName, parsedName.isEmpty {

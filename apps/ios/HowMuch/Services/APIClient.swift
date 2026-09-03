@@ -121,6 +121,28 @@ struct APIClient {
     return response.data.account
   }
 
+  func createAccount(
+    planID: String,
+    name: String,
+    type: String,
+    balance: Int,
+    icon: String?,
+    onBudget: Bool
+  ) async throws -> Account {
+    let response: APIEnvelope<AccountPayload> = try await request(
+      path: "/v1/plans/\(planID)/accounts",
+      method: "POST",
+      body: AccountCreateRequest(
+        name: name,
+        type: type,
+        balance: balance,
+        icon: icon,
+        onBudget: onBudget
+      )
+    )
+    return response.data.account
+  }
+
   func fetchAccountPreferences(planID: String) async throws -> SyncedAccountPreferences? {
     do {
       let response: APIEnvelope<AccountPreferencesPayload> = try await request(

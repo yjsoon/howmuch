@@ -101,6 +101,7 @@ Check the running app, not the spec, before driving a planned recipe. If the han
 | Recipe | Drive when |
 | --- | --- |
 | [iOS connection](features/ios-connection.md) | Connection sheet exists (always) |
+| [iOS add account](features/ios-add-account.md) | Accounts trailing plus **New Account** exists |
 | [iOS capture](features/ios-capture.md) | Add Transaction sheet exists (always). After #98, Duplicate / + / Quick Action share one door |
 | [iOS intake compose](features/ios-intake-compose.md) | A compose `TextField` sits above the amount header on Add Transaction (#99 / #102) |
 | [iOS intake review list](features/ios-intake-review-list.md) | Two spends in one typed sentence open **{N} Transactions** (#103) |
@@ -151,6 +152,7 @@ Stable iOS handles:
 | Thing | Handle |
 | --- | --- |
 | Tabs | `Accounts`, `Plan`, `Reflect`, search-role `Transaction` |
+| New account | Accounts trailing `New Account` (plus). Sheet title `New Account` |
 | Connection | `Connection settings` (ellipsis). Sheet title `Connection` |
 | Server field | placeholder `http://192.168.1.10:8787` under header `Server` |
 | Access | `Username`, `Password`, button `Sign in` / `Sign in again` |

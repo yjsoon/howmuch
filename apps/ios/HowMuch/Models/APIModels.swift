@@ -868,6 +868,35 @@ struct AccountIconWriteRequest: Encodable {
   }
 }
 
+struct AccountCreateRequest: Encodable {
+  let account: Body
+
+  init(name: String, type: String, balance: Int, icon: String?, onBudget: Bool) {
+    account = Body(name: name, type: type, balance: balance, icon: icon, onBudget: onBudget)
+  }
+
+  struct Body: Encodable {
+    let name: String
+    let type: String
+    let balance: Int
+    let icon: String?
+    let onBudget: Bool
+
+    enum CodingKeys: String, CodingKey {
+      case name, type, balance, icon, onBudget
+    }
+
+    func encode(to encoder: Encoder) throws {
+      var container = encoder.container(keyedBy: CodingKeys.self)
+      try container.encode(name, forKey: .name)
+      try container.encode(type, forKey: .type)
+      try container.encode(balance, forKey: .balance)
+      try container.encodeIfPresent(icon, forKey: .icon)
+      try container.encode(onBudget, forKey: .onBudget)
+    }
+  }
+}
+
 struct CategoriesPayload: Decodable {
   let categoryGroups: [CategoryGroup]
 }

@@ -21,16 +21,31 @@ struct AccountsView: View {
         } else {
           ledgerShortcuts
 
-          if !collectionGroups.isEmpty {
-            accountListBandLabel("Your groups")
-            ForEach(collectionGroups) { group in
-              accountGroupSection(group)
+          if model.accounts.isEmpty {
+            ContentUnavailableView {
+              Label("No Accounts", systemImage: "building.columns")
+            } description: {
+              Text("Add a bank account or card to start recording transactions.")
+            } actions: {
+              Button("New Account") {
+                presentedSheet = .newAccount
+              }
+              .buttonStyle(.borderedProminent)
             }
-          }
-          if !indexGroups.isEmpty {
-            accountListBandLabel("By type")
-            ForEach(indexGroups) { group in
-              accountGroupSection(group)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 24)
+          } else {
+            if !collectionGroups.isEmpty {
+              accountListBandLabel("Your groups")
+              ForEach(collectionGroups) { group in
+                accountGroupSection(group)
+              }
+            }
+            if !indexGroups.isEmpty {
+              accountListBandLabel("By type")
+              ForEach(indexGroups) { group in
+                accountGroupSection(group)
+              }
             }
           }
         }
@@ -65,7 +80,13 @@ struct AccountsView: View {
         }
         .accessibilityLabel("Organise accounts")
       }
-      ToolbarItem(placement: .topBarTrailing) {
+      ToolbarItemGroup(placement: .topBarTrailing) {
+        Button {
+          presentedSheet = .newAccount
+        } label: {
+          Label("New Account", systemImage: "plus")
+        }
+        .tint(Theme.accent)
         Button {
           model.isShowingSettings = true
         } label: {
@@ -106,6 +127,8 @@ struct AccountsView: View {
         AccountGroupReorderSheet(group: group)
       case .icon(let account):
         AccountIdentityEditorSheet(account: account)
+      case .newAccount:
+        NewAccountSheet()
       }
     }
     .binaryConfirm(
@@ -588,6 +611,7 @@ private enum AccountsSheet: Identifiable {
   case editGroup(CustomAccountGroup)
   case reorder(AccountGroupManagementItem)
   case icon(Account)
+  case newAccount
 
   var id: String {
     switch self {
@@ -598,6 +622,7 @@ private enum AccountsSheet: Identifiable {
     case .editGroup(let group): "edit-\(group.id)"
     case .reorder(let group): "reorder-\(group.id)"
     case .icon(let account): "icon-\(account.id)"
+    case .newAccount: "new-account"
     }
   }
 }
