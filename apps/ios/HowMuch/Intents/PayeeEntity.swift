@@ -38,6 +38,12 @@ struct PayeeEntity: AppEntity {
   }
 }
 
+struct PayeeNameOptions: DynamicOptionsProvider {
+  func results() async throws -> [String] {
+    (IntentCatalogStore.shared.loadActive()?.pickerPayees ?? []).map(\.name)
+  }
+}
+
 struct PayeeEntityQuery: EntityStringQuery {
   func entities(for identifiers: [PayeeEntity.ID]) async throws -> [PayeeEntity] {
     Self.resolved(identifiers, catalog: IntentCatalogStore.shared.loadActive())

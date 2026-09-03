@@ -11,23 +11,23 @@ struct AddTransactionIntent: AppIntent {
   @Parameter(title: "Amount")
   var amount: Double?
 
-  @Parameter(title: "Direction")
-  var direction: EntryDirection?
+  @Parameter(title: "Direction", optionsProvider: DirectionNameOptions())
+  var direction: String?
 
-  @Parameter(title: "Account")
-  var account: AccountEntity?
+  @Parameter(title: "Account", optionsProvider: AccountNameOptions())
+  var account: String?
 
-  @Parameter(title: "Payee")
-  var payee: PayeeEntity?
+  @Parameter(title: "Payee", optionsProvider: PayeeNameOptions())
+  var payee: String?
 
-  @Parameter(title: "Category")
-  var category: CategoryEntity?
+  @Parameter(title: "Category", optionsProvider: CategoryNameOptions())
+  var category: String?
 
   @Parameter(title: "Date", kind: .date)
   var date: Date?
 
-  @Parameter(title: "Flag")
-  var flag: IntentFlag?
+  @Parameter(title: "Flag", optionsProvider: FlagNameOptions())
+  var flag: String?
 
   @Parameter(title: "Memo")
   var memo: String?
@@ -61,19 +61,12 @@ struct AddTransactionIntent: AppIntent {
     do {
       let request = try AddTransactionIntentBuilder.request(
         amount: Self.decimal(from: amount),
-        direction: direction,
-        accountID: account?.id,
-        payee: payee.map {
-          AddTransactionIntentBuilder.PayeeInput(
-            id: $0.id,
-            name: $0.name,
-            transferAccountId: $0.transferAccountId,
-            isNew: $0.isNew
-          )
-        },
-        categoryID: category?.id,
+        direction: AddTransactionIntentBuilder.entryDirection(from: direction),
+        accountID: account,
+        payee: AddTransactionIntentBuilder.payeeInput(from: payee, catalog: catalog),
+        categoryID: category,
         date: date,
-        flag: flag?.flagColour,
+        flag: AddTransactionIntentBuilder.flagColour(from: flag),
         memo: memo,
         cleared: cleared,
         catalog: catalog
@@ -86,16 +79,19 @@ struct AddTransactionIntent: AppIntent {
   }
 }
 
-extension EntryDirection: AppEnum {
-  static let typeDisplayRepresentation: TypeDisplayRepresentation = "Direction"
-
-  static let caseDisplayRepresentations: [EntryDirection: DisplayRepresentation] = [
-    .outflow: "Outflow",
-    .inflow: "Inflow",
-  ]
+struct DirectionNameOptions: DynamicOptionsProvider {
+  func results() async throws -> [String] {
+    ["Outflow", "Inflow"]
+  }
 }
 
-enum IntentFlag: String, AppEnum, CaseIterable {
+struct FlagNameOptions: DynamicOptionsProvider {
+  func results() async throws -> [String] {
+    IntentFlag.allCases.map(\.title)
+  }
+}
+
+enum IntentFlag: String, CaseIterable {
   case none
   case red
   case orange
@@ -104,17 +100,24 @@ enum IntentFlag: String, AppEnum, CaseIterable {
   case blue
   case purple
 
-  static let typeDisplayRepresentation: TypeDisplayRepresentation = "Flag"
-
-  static let caseDisplayRepresentations: [IntentFlag: DisplayRepresentation] = [
-    .none: "None",
-    .red: "Red",
-    .orange: "Orange",
-    .yellow: "Yellow",
-    .green: "Green",
-    .blue: "Blue",
-    .purple: "Purple",
-  ]
+  var title: String {
+    switch self {
+    case .none:
+      return "None"
+    case .red:
+      return "Red"
+    case .orange:
+      return "Orange"
+    case .yellow:
+      return "Yellow"
+    case .green:
+      return "Green"
+    case .blue:
+      return "Blue"
+    case .purple:
+      return "Purple"
+    }
+  }
 
   var flagColour: FlagColour {
     switch self {
@@ -146,6 +149,65 @@ enum AddTransactionIntentBuilder {
     var name: String
     var transferAccountId: String?
     var isNew: Bool
+  }
+
+  static func entryDirection(from raw: String?) -> EntryDirection? {
+    guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+      return nil
+    }
+    if trimmed.localizedCaseInsensitiveContains("inflow") {
+      return .inflow
+    }
+    if trimmed.localizedCaseInsensitiveContains("outflow") {
+      return .outflow
+    }
+    return nil
+  }
+
+  static func flagColour(from raw: String?) -> FlagColour? {
+    guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+      return nil
+    }
+    return IntentFlag.allCases.first(where: {
+      $0.rawValue.caseInsensitiveCompare(trimmed) == .orderedSame
+        || $0.title.caseInsensitiveCompare(trimmed) == .orderedSame
+    })?.flagColour
+  }
+
+  static func payeeInput(from raw: String?, catalog: IntentCatalogSnapshot?) -> PayeeInput? {
+    guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+      return nil
+    }
+    if let name = PayeeEntityQuery.newPayeeName(from: trimmed) {
+      return PayeeInput(id: trimmed, name: name, transferAccountId: nil, isNew: true)
+    }
+    let name = unwrapCreatedPayeeName(trimmed)
+    if let live = catalog?.pickerPayees.first(where: {
+      $0.id == name || $0.name.caseInsensitiveCompare(name) == .orderedSame
+    }) {
+      return PayeeInput(
+        id: live.id,
+        name: live.name,
+        transferAccountId: live.transferAccountId,
+        isNew: false
+      )
+    }
+    return PayeeInput(
+      id: PayeeEntityQuery.newPayeeID(for: name),
+      name: name,
+      transferAccountId: nil,
+      isNew: true
+    )
+  }
+
+  static func unwrapCreatedPayeeName(_ raw: String) -> String {
+    if raw.hasPrefix("Create “"), raw.hasSuffix("”") {
+      return String(raw.dropFirst(8).dropLast(1))
+    }
+    if raw.hasPrefix("Create \""), raw.hasSuffix("\"") {
+      return String(raw.dropFirst(8).dropLast(1))
+    }
+    return raw
   }
 
   static func request(

@@ -21,6 +21,12 @@ struct AccountEntity: AppEntity {
   }
 }
 
+struct AccountNameOptions: DynamicOptionsProvider {
+  func results() async throws -> [String] {
+    (IntentCatalogStore.shared.loadActive()?.openAccounts ?? []).map(\.name)
+  }
+}
+
 struct AccountEntityQuery: EntityStringQuery {
   func entities(for identifiers: [AccountEntity.ID]) async throws -> [AccountEntity] {
     Self.resolved(identifiers, catalog: IntentCatalogStore.shared.loadActive())

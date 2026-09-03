@@ -27,6 +27,12 @@ struct CategoryEntity: AppEntity {
   }
 }
 
+struct CategoryNameOptions: DynamicOptionsProvider {
+  func results() async throws -> [String] {
+    (IntentCatalogStore.shared.loadActive()?.pickerCategories ?? []).map(\.name)
+  }
+}
+
 struct CategoryEntityQuery: EntityStringQuery {
   func entities(for identifiers: [CategoryEntity.ID]) async throws -> [CategoryEntity] {
     Self.resolved(identifiers, catalog: IntentCatalogStore.shared.loadActive())

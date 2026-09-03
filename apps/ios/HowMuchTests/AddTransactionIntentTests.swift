@@ -239,6 +239,44 @@ final class AddTransactionIntentTests: XCTestCase {
     XCTAssertEqual(IntentFlag.red.flagColour, .red)
   }
 
+  func testStringParametersMapToDraftFields() throws {
+    XCTAssertEqual(AddTransactionIntentBuilder.entryDirection(from: "Outflow"), .outflow)
+    XCTAssertEqual(AddTransactionIntentBuilder.entryDirection(from: "Inflow"), .inflow)
+    XCTAssertEqual(AddTransactionIntentBuilder.flagColour(from: "Red"), .red)
+
+    let created = AddTransactionIntentBuilder.payeeInput(
+      from: "Create “Shortcut Coffee Verify”",
+      catalog: Self.catalog
+    )
+    XCTAssertEqual(created?.isNew, true)
+    XCTAssertEqual(created?.name, "Shortcut Coffee Verify")
+
+    let typed = AddTransactionIntentBuilder.payeeInput(
+      from: "Shortcut Coffee Verify",
+      catalog: Self.catalog
+    )
+    XCTAssertEqual(typed?.isNew, true)
+    XCTAssertEqual(typed?.name, "Shortcut Coffee Verify")
+
+    let draft = try AddTransactionIntentBuilder.draft(
+      amount: Decimal(3500) / 1000,
+      direction: AddTransactionIntentBuilder.entryDirection(from: "Outflow"),
+      accountID: "Everyday Account",
+      payee: typed,
+      categoryID: "Dining Out",
+      date: nil,
+      flag: AddTransactionIntentBuilder.flagColour(from: "None"),
+      memo: nil,
+      cleared: false,
+      catalog: Self.catalog
+    )
+    XCTAssertEqual(draft.accountID, "acct-everyday")
+    XCTAssertEqual(draft.categoryID, "cat-dining")
+    XCTAssertEqual(draft.payeeName, "Shortcut Coffee Verify")
+    XCTAssertNil(draft.payeeID)
+    XCTAssertEqual(draft.amountMagnitudeMilli, 3_500)
+  }
+
   func testBareRequestIsBlankKind() throws {
     let request = try AddTransactionIntentBuilder.request(
       amount: nil,
