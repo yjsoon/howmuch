@@ -31,6 +31,7 @@ import {
   type EffectiveScheduledTransaction,
 } from "./scheduled-transactions";
 import { parseAccountIcon, resolveAccountPresentation } from "./account-icon";
+import { applyAccountUpdate, type AccountUpdatePatch } from "./account-kind";
 
 type Row = Record<string, any>;
 
@@ -349,36 +350,42 @@ export class LedgerRepository {
     await this.ensureTransferPayee(planId, account.id);
   }
 
-  async updateAccountIcon(planId: string, accountId: string, icon: string): Promise<any> {
-    return this.updateAccount(planId, accountId, { icon });
-  }
-
-  async updateAccount(planId: string, accountId: string, patch: { icon?: string; name?: string }): Promise<any> {
+  async updateAccount(planId: string, accountId: string, patch: AccountUpdatePatch): Promise<any> {
     const nextIcon = patch.icon === undefined ? undefined : parseAccountIcon(patch.icon);
     if (patch.icon !== undefined && !nextIcon) throw new ValidationError("icon must be a single emoji");
     const nextName = patch.name === undefined ? undefined : String(patch.name).trim();
     if (patch.name !== undefined && !nextName) throw new ValidationError("account.name is required");
-    if (nextIcon === undefined && nextName === undefined) {
-      throw new ValidationError("account.icon or account.name is required");
+    if (nextIcon === undefined && nextName === undefined && patch.kind === undefined) {
+      throw new ValidationError("account.icon, account.name, or account.type is required");
     }
     const row = await this.db
-      .query("SELECT id FROM accounts WHERE id = ? AND plan_id = ? AND deleted = 0")
+      .query("SELECT name, icon, type FROM accounts WHERE id = ? AND plan_id = ? AND deleted = 0")
       .get(accountId, planId) as Row | null;
     if (!row) throw new NotFoundError("Account not found");
-    if (nextIcon !== undefined && nextName !== undefined) {
-      await this.db
-        .query("UPDATE accounts SET icon = ?, name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
-        .run(nextIcon, nextName, accountId, planId);
-    } else if (nextIcon !== undefined) {
-      await this.db
-        .query("UPDATE accounts SET icon = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
-        .run(nextIcon, accountId, planId);
-    } else {
-      await this.db
-        .query("UPDATE accounts SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?")
-        .run(nextName, accountId, planId);
+    const fields = applyAccountUpdate(
+      { name: String(row.name ?? ""), icon: row.icon, type: row.type },
+      { ...(nextIcon !== undefined ? { icon: nextIcon } : {}), ...(nextName !== undefined ? { name: nextName } : {}), ...(patch.kind ? { kind: patch.kind } : {}) },
+    );
+    const assignments: string[] = [];
+    const values: unknown[] = [];
+    if (fields.name !== undefined) {
+      assignments.push("name = ?");
+      values.push(fields.name);
     }
-    if (nextName !== undefined) {
+    if (fields.icon !== undefined) {
+      assignments.push("icon = ?");
+      values.push(fields.icon);
+    }
+    if (fields.type !== undefined) {
+      assignments.push("type = ?");
+      values.push(fields.type);
+      assignments.push("on_budget = ?");
+      values.push(bool(fields.on_budget));
+    }
+    await this.db
+      .query(`UPDATE accounts SET ${assignments.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND plan_id = ?`)
+      .run(...values, accountId, planId);
+    if (fields.name !== undefined) {
       await this.ensureTransferPayee(planId, accountId);
     }
     await this.touchPlan(planId);

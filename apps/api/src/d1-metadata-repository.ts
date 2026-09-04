@@ -5,6 +5,7 @@ import type { D1WriteContext } from "./d1-transaction-repository";
 import { D1GuardedCommandExecutor, statement } from "./d1-guarded-command";
 import type { EffectiveScheduledTransaction } from "./scheduled-transactions";
 import { resolveAccountPresentation } from "./account-icon";
+import { onBudgetForKind, type AccountUpdatePatch } from "./account-kind";
 
 /** Exact effective-source snapshot required to merge a scheduled mutation. */
 export type ScheduledMutationSnapshot = Readonly<{
@@ -104,11 +105,7 @@ export class D1MetadataRepository {
     ]);
   }
 
-  async updateAccountIcon(planId: string, accountId: string, icon: string, context?: D1WriteContext): Promise<void> {
-    return this.updateAccount(planId, accountId, { icon }, context);
-  }
-
-  async updateAccount(planId: string, accountId: string, patch: { icon?: string; name?: string }, context?: D1WriteContext): Promise<void> {
+  async updateAccount(planId: string, accountId: string, patch: AccountUpdatePatch, context?: D1WriteContext): Promise<void> {
     const commandId = this.id(context);
     const assignments: string[] = [];
     const values: unknown[] = [];
@@ -120,7 +117,13 @@ export class D1MetadataRepository {
       assignments.push("name=?");
       values.push(patch.name);
     }
-    if (assignments.length === 0) throw new Error("account.icon or account.name is required");
+    if (patch.kind !== undefined) {
+      assignments.push("type=?");
+      values.push(patch.kind);
+      assignments.push("on_budget=?");
+      values.push(onBudgetForKind(patch.kind) ? 1 : 0);
+    }
+    if (assignments.length === 0) throw new Error("account.icon, account.name, or account.type is required");
     await this.run("metadata.account.update", planId, accountId, patch, context, [
       assertion(commandId, "metadata_plan_exists", planId, planId),
       assertion(commandId, "metadata_account", accountId, planId),

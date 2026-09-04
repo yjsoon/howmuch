@@ -23,6 +23,7 @@ import {
 } from "./password-auth";
 import { randomBytes } from "node:crypto";
 import { ScheduledTransactionValidationError } from "./scheduled-transactions";
+import { ACCOUNT_KINDS, parseAccountKind, type AccountUpdatePatch } from "./account-kind";
 
 type HandlerOptions = {
   db?: Database;
@@ -72,7 +73,7 @@ export function createHandler(options: HandlerOptions): (request: Request) => Pr
       }
 
       if (segments[0] === "v1") {
-        return await handleV1(request, url, segments, repo, principal, config.defaultPlanId);
+        return await handleV1(request, url, segments, repo, principal, config.defaultPlanId, config.transitionReadOnly);
       }
 
       if (segments[0] === "api") {
@@ -136,6 +137,7 @@ async function handleV1(
   repo: LedgerStore,
   principal: Principal,
   defaultPlanId: string,
+  transitionReadOnly: boolean,
 ): Promise<Response> {
   const method = request.method.toUpperCase();
 
@@ -230,12 +232,30 @@ async function handleV1(
       const body = await readJson(request);
       const payload = body.account ?? body;
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-        throw new ValidationError("account.icon or account.name is required");
+        throw new ValidationError("account.icon, account.name, or account.type is required");
       }
-      const patch = {
+      if (Object.prototype.hasOwnProperty.call(payload, "on_budget")) {
+        throw new ValidationError("account.on_budget is derived from account.type and cannot be set");
+      }
+      const kind = payload.type === undefined ? undefined : parseAccountKind(payload.type);
+      if (payload.type !== undefined && kind === null) {
+        throw new ValidationError(`account.type must be one of ${Object.keys(ACCOUNT_KINDS).join(", ")}`);
+      }
+      const patch: AccountUpdatePatch = {
         ...(typeof payload.icon === "string" ? { icon: payload.icon } : {}),
         ...(typeof payload.name === "string" ? { name: payload.name } : {}),
+        ...(kind ? { kind } : {}),
       };
+      if (patch.icon === undefined && patch.name === undefined && patch.kind === undefined) {
+        throw new ValidationError("account.icon, account.name, or account.type is required");
+      }
+      if (transitionReadOnly && patch.kind !== undefined) {
+        return apiError(
+          423,
+          "transition_read_only",
+          "Financial changes are temporarily locked while YNAB is the source of truth",
+        );
+      }
       const account = await repo.updateAccount(planId, accountId, patch);
       return json({ data: { account, server_knowledge: await repo.getServerKnowledge(planId) } });
     }
