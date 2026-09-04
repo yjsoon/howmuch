@@ -67,20 +67,20 @@ struct InboxReadingView: View {
       onResolved([])
       return
     }
-    var drafts: [TransactionDraft] = []
+    var mapped: [TransactionDraft] = []
     for item in items {
-      drafts.append(contentsOf: await drafts(from: item))
+      mapped.append(contentsOf: await readDrafts(from: item))
     }
-    if drafts.count == 1 {
-      drafts[0].seedIfNeeded(
+    if mapped.count == 1 {
+      mapped[0].seedIfNeeded(
         accounts: model.openAccounts,
         preferredAccountID: model.preferredCaptureAccountID
       )
     }
-    onResolved(drafts)
+    onResolved(mapped)
   }
 
-  private func drafts(from item: InboxItem) async -> [TransactionDraft] {
+  private func readDrafts(from item: InboxItem) async -> [TransactionDraft] {
     let text: String
     switch item.kind {
     case .text:
