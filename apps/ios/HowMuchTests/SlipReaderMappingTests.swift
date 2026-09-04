@@ -179,6 +179,7 @@ final class SlipReaderMappingTests: XCTestCase {
     XCTAssertFalse(prefix.contains("Closed Card"))
     XCTAssertTrue(prefix.contains("Categories: Groceries, Dining Out"))
     XCTAssertTrue(prefix.hasSuffix("Sentence:\n"))
+    XCTAssertTrue((prefix + "I spent 5").contains("Sentence:\nI spent 5"))
   }
 
   func testReadDoesNotCallCommit() async {

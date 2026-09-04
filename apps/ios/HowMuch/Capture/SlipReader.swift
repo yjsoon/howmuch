@@ -243,7 +243,7 @@ enum SlipReaderMapping {
 
 enum SlipReaderPrompt {
   static let instructions = """
-  Extract every distinct spend from the sentence. Amounts are decimal strings such as 5 or 5.00, never milliunits and never IDs. Copy account, category, and payee names from the provided lists when they match. Leave a field empty when it was not mentioned. Split two spends in one sentence into two items.
+  Extract every distinct spend from the sentence. Amounts are decimal strings such as 5 or 5.00, never milliunits and never IDs. Copy account, category, and payee names from the provided lists when they match. Leave a field empty when it was not mentioned. Leave date empty unless the sentence names a day. Split two spends in one sentence into two items. Return spends. Each spend has amount, payee, category, account, date, and isInflow (true only when money is received).
   """
 
   static func prefix(
@@ -262,6 +262,7 @@ enum SlipReaderPrompt {
     Payees: \(payeeNames.joined(separator: ", "))
 
     Sentence:
+
     """
   }
 }
@@ -392,7 +393,12 @@ actor SlipReader {
     }
     let prompt = prefix + text
     do {
-      let response = try await session.respond(to: prompt, generating: ExtractedSlips.self)
+      let response = try await session.respond(
+        to: prompt,
+        generating: ExtractedSlips.self,
+        includeSchemaInPrompt: false,
+        options: GenerationOptions(samplingMode: .greedy)
+      )
       return response.content.spends.map { slip in
         SlipReaderMapping.Extraction(
           amount: slip.amount,
