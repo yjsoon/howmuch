@@ -397,7 +397,7 @@ actor SlipReader {
         to: prompt,
         generating: ExtractedSlips.self,
         includeSchemaInPrompt: false,
-        options: GenerationOptions(samplingMode: .greedy)
+        options: GenerationOptions(sampling: .greedy)
       )
       return response.content.spends.map { slip in
         SlipReaderMapping.Extraction(
