@@ -303,7 +303,8 @@ actor SlipReader {
       categoryGroups: categoryGroups,
       payees: payees
     )
-    guard primedPrefix != prefix || primedSession == nil else {
+    if primedPrefix == prefix, let session = primedSession {
+      session.prewarm(promptPrefix: Prompt(prefix))
       return
     }
     startPrime(prefix)

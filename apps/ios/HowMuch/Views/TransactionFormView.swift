@@ -407,6 +407,18 @@ struct TransactionFormView: View {
           payees: model.payees
         )
       }
+      .onChange(of: composeText) { old, new in
+        guard old.isEmpty, !new.isEmpty else {
+          return
+        }
+        Task {
+          await SlipReader.shared.prewarm(
+            accounts: model.openAccounts,
+            categoryGroups: model.categoryGroups,
+            payees: model.payees
+          )
+        }
+      }
   }
 
   private func parseCompose() {
