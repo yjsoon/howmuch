@@ -44,8 +44,61 @@ struct SlipMappedDraft: Equatable, Sendable {
   var parsedAmount: Bool
   var parsedDate: Bool
   var parsedAccount: Bool
+  var parsedInflow: Bool
   var accountCandidates: [SlipCandidate]
   var categoryCandidates: [SlipCandidate]
+}
+
+enum ComposeParseApply {
+  struct Outcome: Equatable {
+    var draft: TransactionDraft
+    var accountCandidates: [SlipCandidate]
+    var categoryCandidates: [SlipCandidate]
+    var showAccountPrompt: Bool
+    var showCategoryPrompt: Bool
+  }
+
+  static func applying(_ row: SlipMappedDraft, to draft: TransactionDraft) -> Outcome {
+    var next = draft
+    if row.parsedAmount {
+      next.amountMagnitudeMilli = row.draft.amountMagnitudeMilli
+    }
+    if row.parsedInflow {
+      next.direction = .inflow
+    }
+    if row.parsedDate {
+      next.date = row.draft.date
+    }
+    if !row.draft.payeeName.isEmpty || row.draft.payeeID != nil {
+      next.payeeID = row.draft.payeeID
+      next.payeeName = row.draft.payeeName
+      next.transferAccountID = row.draft.transferAccountID
+    }
+
+    var showCategoryPrompt = false
+    if let categoryID = row.draft.categoryID {
+      next.categoryID = categoryID
+    } else if !row.categoryCandidates.isEmpty {
+      showCategoryPrompt = true
+      next.categoryID = nil
+    }
+
+    var showAccountPrompt = false
+    if !row.draft.accountID.isEmpty {
+      next.accountID = row.draft.accountID
+    } else if !row.accountCandidates.isEmpty {
+      showAccountPrompt = true
+      next.accountID = ""
+    }
+
+    return Outcome(
+      draft: next,
+      accountCandidates: row.accountCandidates,
+      categoryCandidates: row.categoryCandidates,
+      showAccountPrompt: showAccountPrompt,
+      showCategoryPrompt: showCategoryPrompt
+    )
+  }
 }
 
 enum SlipReaderMapping {
@@ -166,6 +219,7 @@ enum SlipReaderMapping {
       parsedAmount: parsedAmount,
       parsedDate: parsedDate,
       parsedAccount: parsedAccount,
+      parsedInflow: extraction.isInflow,
       accountCandidates: accountCandidates,
       categoryCandidates: categoryCandidates
     )
@@ -243,23 +297,20 @@ enum SlipReaderMapping {
 
 enum SlipReaderPrompt {
   static let instructions = """
-  Extract every distinct spend from the sentence. Amounts are decimal strings such as 5 or 5.00, never milliunits and never IDs. Copy account, category, and payee names from the provided lists when they match. Leave a field empty when it was not mentioned. Leave date empty unless the sentence names a day. Split two spends in one sentence into two items. Return spends. Each spend has amount, payee, category, account, date, and isInflow (true only when money is received).
+  Extract every distinct spend from the sentence. Amounts are decimal strings such as 5 or 5.00, never milliunits and never IDs. Copy account and category names from the provided lists when they match. Payee is a name from the sentence. Leave a field empty when it was not mentioned. Leave date empty unless the sentence names a day. Split two spends in one sentence into two items. Return spends. Each spend has amount, payee, category, account, date, and isInflow (true only when money is received).
   """
 
   static func prefix(
     accounts: [Account],
-    categoryGroups: [CategoryGroup],
-    payees: [Payee]
+    categoryGroups: [CategoryGroup]
   ) -> String {
     let accountNames = accounts.filter { !$0.closed && !$0.deleted }.map(\.name)
     let categoryNames = categoryGroups.filter { !$0.deleted }.flatMap { group in
       group.categories.filter { !$0.deleted }.map(\.name)
     }
-    let payeeNames = payees.filter { $0.deleted != true }.map(\.name)
     return """
     Accounts: \(accountNames.joined(separator: ", "))
     Categories: \(categoryNames.joined(separator: ", "))
-    Payees: \(payeeNames.joined(separator: ", "))
 
     Sentence:
 
@@ -300,8 +351,7 @@ actor SlipReader {
     }
     let prefix = SlipReaderPrompt.prefix(
       accounts: accounts,
-      categoryGroups: categoryGroups,
-      payees: payees
+      categoryGroups: categoryGroups
     )
     if primedPrefix == prefix, let session = primedSession {
       session.prewarm(promptPrefix: Prompt(prefix))
@@ -376,8 +426,7 @@ actor SlipReader {
 
     let prefix = SlipReaderPrompt.prefix(
       accounts: accounts,
-      categoryGroups: categoryGroups,
-      payees: payees
+      categoryGroups: categoryGroups
     )
     let session: LanguageModelSession
     if primedPrefix == prefix, let primedSession {
