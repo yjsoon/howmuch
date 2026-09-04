@@ -268,36 +268,42 @@ final class AppModel {
     return created
   }
 
-  func setAccountIdentity(name: String?, icon: AccountIcon?, for accountID: String) async throws {
-    let parsedName = name?.trimmingCharacters(in: .whitespacesAndNewlines)
-    if let parsedName, parsedName.isEmpty {
+  func updateAccount(_ identity: AccountIdentity, for accountID: String) async throws {
+    let trimmed = identity.name.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty {
       throw APIClientError.validation("Name cannot be empty")
-    }
-    guard parsedName != nil || icon != nil else {
-      throw APIClientError.validation("Name or icon is required")
     }
     guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {
       throw APIClientError.validation("Account not found")
     }
     let previous = accounts[index]
     let previousPayees = payees
-    let nextName = parsedName ?? previous.name
-    let nextIcon = icon?.rawValue ?? previous.icon ?? previous.displayIcon
-    accounts[index] = previous.withIdentity(name: nextName, icon: nextIcon)
-    renameTransferPayee(forAccountID: accountID, to: nextName)
+    let next = AccountIdentity(name: trimmed, classification: identity.classification, icon: identity.icon)
+    accounts[index] = previous.with(next)
+    renameTransferPayee(forAccountID: accountID, to: trimmed)
     rebuildLookups()
     do {
+      let typeToSend: String?
+      if case .kind(let kind) = identity.classification, kind.rawValue != previous.type {
+        typeToSend = kind.rawValue
+      } else {
+        typeToSend = nil
+      }
+      let currentIcon = previous.icon ?? previous.displayIcon
+      let iconToSend = identity.icon.rawValue == currentIcon ? nil : identity.icon.rawValue
       let updated = try await apiClient.updateAccount(
         planID: settings.planID,
         accountID: accountID,
-        icon: icon?.rawValue,
-        name: parsedName
+        name: trimmed,
+        icon: iconToSend,
+        type: typeToSend
       )
       if let current = accounts.firstIndex(where: { $0.id == accountID }) {
         accounts[current] = updated
         renameTransferPayee(forAccountID: accountID, to: updated.name)
         rebuildLookups()
       }
+      publishIntentCatalog()
     } catch {
       if let current = accounts.firstIndex(where: { $0.id == accountID }) {
         accounts[current] = previous

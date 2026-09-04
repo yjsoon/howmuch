@@ -1,19 +1,6 @@
-export const FALLBACK_ACCOUNT_ICON = "🏦";
+import { defaultIconForKind } from "./account-kind";
 
-export const DEFAULT_ICON_BY_ACCOUNT_TYPE: Record<string, string> = {
-  checking: "🏦",
-  savings: "💰",
-  cash: "💵",
-  creditCard: "💳",
-  lineOfCredit: "💳",
-  otherAsset: "📈",
-  otherLiability: "📉",
-  mortgage: "🏠",
-  autoLoan: "🚗",
-  studentLoan: "🎓",
-  medicalDebt: "🏥",
-  otherLoan: "📄",
-};
+export const FALLBACK_ACCOUNT_ICON = "🏦";
 
 export type AccountPresentation = {
   icon: string;
@@ -40,7 +27,7 @@ export function parseAccountIcon(value: unknown): string | null {
 }
 
 export function defaultIconForAccountType(type?: string | null): string {
-  return (type && DEFAULT_ICON_BY_ACCOUNT_TYPE[type]) || FALLBACK_ACCOUNT_ICON;
+  return defaultIconForKind(type);
 }
 
 export function splitLegacyAccountName(name: string): { icon: string | null; name: string } {

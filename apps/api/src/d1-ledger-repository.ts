@@ -1,6 +1,7 @@
 import { createId } from "./ids";
 import { createHash } from "node:crypto";
 import { parseAccountIcon } from "./account-icon";
+import { applyAccountUpdate, type AccountUpdatePatch } from "./account-kind";
 import { LedgerRepository, NotFoundError, ReconciliationMismatchError, TransactionStateConflictError, ValidationError, type TransactionWriteOptions } from "./repository";
 import type { LedgerStore } from "./storage";
 import type { AccountReconciliationOptions, AccountReconciliationPreview, AccountReconciliationResult, MonthCategoryTargetInput, ScheduledTransactionInput, ScheduledWriteOptions, TransactionBatchResult, TransactionBatchUpdate, TransactionInput } from "./types";
@@ -37,18 +38,23 @@ export class D1LedgerRepository extends LedgerRepository {
   override async upsertPlan(planId:string,plan:any,settings?:any):Promise<void>{await this.metadata.upsertPlan(planId,plan,settings,this.context("plan.upsert",planId,planId));}
   override async ensureAccount(planId:string,accountId:string,name?:string):Promise<void>{await this.metadata.ensureAccount(planId,accountId,name,this.context("account.ensure",planId,accountId));}
   override async upsertAccount(planId:string,account:any):Promise<void>{await this.metadata.upsertAccount(planId,account,this.context("account.upsert",planId,account.id));}
-  override async updateAccountIcon(planId:string,accountId:string,icon:string):Promise<any>{
-    return this.updateAccount(planId, accountId, { icon });
-  }
-  override async updateAccount(planId:string,accountId:string,patch:{icon?:string;name?:string}):Promise<any>{
+  override async updateAccount(planId:string,accountId:string,patch:AccountUpdatePatch):Promise<any>{
     const parsedIcon = patch.icon === undefined ? undefined : parseAccountIcon(patch.icon);
     if (patch.icon !== undefined && !parsedIcon) throw new ValidationError("icon must be a single emoji");
     const parsedName = patch.name === undefined ? undefined : String(patch.name).trim();
     if (patch.name !== undefined && !parsedName) throw new ValidationError("account.name is required");
-    if (parsedIcon === undefined && parsedName === undefined) throw new ValidationError("account.icon or account.name is required");
-    const existing = await this.d1.get("SELECT id FROM accounts WHERE id=? AND plan_id=? AND deleted=0", [accountId, planId]);
+    if (parsedIcon === undefined && parsedName === undefined && patch.kind === undefined) throw new ValidationError("account.icon, account.name, or account.type is required");
+    const existing = await this.d1.get("SELECT name, icon, type FROM accounts WHERE id=? AND plan_id=? AND deleted=0", [accountId, planId]);
     if (!existing) throw new NotFoundError("Account not found");
-    await this.metadata.updateAccount(planId, accountId, { ...(parsedIcon !== undefined ? { icon: parsedIcon } : {}), ...(parsedName !== undefined ? { name: parsedName } : {}) }, this.context("account.update", planId, accountId));
+    const fields = applyAccountUpdate(
+      { name: String(existing.name ?? ""), icon: existing.icon, type: existing.type },
+      { ...(parsedIcon !== undefined ? { icon: parsedIcon } : {}), ...(parsedName !== undefined ? { name: parsedName } : {}), ...(patch.kind ? { kind: patch.kind } : {}) },
+    );
+    await this.metadata.updateAccount(planId, accountId, {
+      ...(fields.name !== undefined ? { name: fields.name } : {}),
+      ...(fields.icon !== undefined ? { icon: fields.icon } : {}),
+      ...(fields.type !== undefined ? { kind: fields.type } : {}),
+    }, this.context("account.update", planId, accountId));
     return this.getAccount(planId, accountId);
   }
   override async createAccount(planId:string,account:any):Promise<any>{

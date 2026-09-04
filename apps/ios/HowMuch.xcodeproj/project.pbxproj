@@ -20,6 +20,8 @@
 		A1000000000000000000006A /* Confirm.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000007A /* Confirm.swift */; };
 		A1000000000000000000006B /* AccountIconPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000007B /* AccountIconPicker.swift */; };
 		A1000000000000000000006C /* NewAccountSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000007C /* NewAccountSheet.swift */; };
+		A1000000000000000000006D /* AccountIdentityFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000007D /* AccountIdentityFields.swift */; };
+		A1000000000000000000006E /* EditAccountSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000007E /* EditAccountSheet.swift */; };
 		A10000000000000000000061 /* AccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000071 /* AccountsView.swift */; };
 		A10000000000000000000062 /* RegisterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000072 /* RegisterView.swift */; };
 		A10000000000000000000063 /* TransactionFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000073 /* TransactionFormView.swift */; };
@@ -81,6 +83,8 @@
 		A1000000000000000000007A /* Confirm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Confirm.swift; sourceTree = "<group>"; };
 		A1000000000000000000007B /* AccountIconPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountIconPicker.swift; sourceTree = "<group>"; };
 		A1000000000000000000007C /* NewAccountSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewAccountSheet.swift; sourceTree = "<group>"; };
+		A1000000000000000000007D /* AccountIdentityFields.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountIdentityFields.swift; sourceTree = "<group>"; };
+		A1000000000000000000007E /* EditAccountSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditAccountSheet.swift; sourceTree = "<group>"; };
 		A10000000000000000000071 /* AccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountsView.swift; sourceTree = "<group>"; };
 		A10000000000000000000072 /* RegisterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterView.swift; sourceTree = "<group>"; };
 		A10000000000000000000073 /* TransactionFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionFormView.swift; sourceTree = "<group>"; };
@@ -196,6 +200,8 @@
 				A1000000000000000000007A /* Confirm.swift */,
 				A1000000000000000000007B /* AccountIconPicker.swift */,
 				A1000000000000000000007C /* NewAccountSheet.swift */,
+				A1000000000000000000007D /* AccountIdentityFields.swift */,
+				A1000000000000000000007E /* EditAccountSheet.swift */,
 				A10000000000000000000071 /* AccountsView.swift */,
 				A10000000000000000000072 /* RegisterView.swift */,
 				A10000000000000000000077 /* CategoriesView.swift */,
@@ -356,6 +362,8 @@
 				A1000000000000000000006A /* Confirm.swift in Sources */,
 				A1000000000000000000006B /* AccountIconPicker.swift in Sources */,
 				A1000000000000000000006C /* NewAccountSheet.swift in Sources */,
+				A1000000000000000000006D /* AccountIdentityFields.swift in Sources */,
+				A1000000000000000000006E /* EditAccountSheet.swift in Sources */,
 				A10000000000000000000061 /* AccountsView.swift in Sources */,
 				A10000000000000000000062 /* RegisterView.swift in Sources */,
 				A10000000000000000000063 /* TransactionFormView.swift in Sources */,

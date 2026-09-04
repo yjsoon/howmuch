@@ -25,7 +25,7 @@ struct RegisterView: View {
   @State private var unapprovedOnly = false
   @State private var editingTransaction: Transaction?
   @State private var isShowingReconciliation = false
-  @State private var editingIdentity: Account?
+  @State private var editingAccount: Account?
   @State private var membershipsAccount: Account?
   @State private var approvalError: String?
   @State private var statusError: String?
@@ -76,7 +76,7 @@ struct RegisterView: View {
       if let account = scopedAccount {
         ToolbarItem(placement: .principal) {
           Button {
-            editingIdentity = account
+            editingAccount = account
           } label: {
             HStack(spacing: 6) {
               Text(account.displayIcon)
@@ -91,7 +91,7 @@ struct RegisterView: View {
             .foregroundStyle(Theme.textPrimary)
           }
           .accessibilityLabel("\(account.displayIcon) \(account.name)")
-          .accessibilityHint("Opens the name and icon editor")
+          .accessibilityHint("Opens the account editor")
         }
       }
       ToolbarItemGroup(placement: .topBarTrailing) {
@@ -106,8 +106,8 @@ struct RegisterView: View {
       AccountReconciliationSheet(preferredAccountID: scope.accountID)
         .blocksCapturePresentation()
     }
-    .sheet(item: $editingIdentity) { account in
-      AccountIdentityEditorSheet(account: account)
+    .sheet(item: $editingAccount) { account in
+      EditAccountSheet(account: account)
         .blocksCapturePresentation()
     }
     .sheet(item: $membershipsAccount) { account in
@@ -201,9 +201,9 @@ struct RegisterView: View {
     if let account = scopedAccount {
       Menu {
         Button {
-          editingIdentity = account
+          editingAccount = account
         } label: {
-          Label("Edit name and icon", systemImage: "pencil")
+          Label("Edit Account", systemImage: "pencil")
         }
         if !account.closed {
           Button {
@@ -282,7 +282,7 @@ struct RegisterView: View {
   }
 
   private func accountOverflowHint(_ account: Account) -> String {
-    var parts = ["Edit name and icon"]
+    var parts = ["Edit Account"]
     if !account.closed {
       parts.append("favourites")
     }

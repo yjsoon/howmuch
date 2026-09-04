@@ -1492,6 +1492,27 @@ describe("D1 foundation", () => {
     expect(deleted.deleted).toBe(true);
   });
 
+  test("D1 account type updates derive on_budget and follow the default icon", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    const followed = await repo.updateAccount("p", "a", { kind: "savings" });
+    expect(followed).toMatchObject({ type: "savings", on_budget: true, icon: "💰", balance: 0 });
+    expect(db.query("SELECT type, on_budget, icon, balance_milli FROM accounts WHERE id='a'").get()).toEqual({
+      type: "savings",
+      on_budget: 1,
+      icon: "💰",
+      balance_milli: 0,
+    });
+
+    await repo.upsertAccount("p", { id: "b", name: "Piggy", type: "checking", icon: "🐷", on_budget: true });
+    await repo.updateAccount("p", "b", { kind: "mortgage" });
+    expect(db.query("SELECT type, on_budget, icon FROM accounts WHERE id='b'").get()).toEqual({
+      type: "mortgage",
+      on_budget: 0,
+      icon: "🐷",
+    });
+  });
+
   test("D1 split IDs cannot be stolen by another parent in the same plan", async () => {
     const db=await ledgerSqlite(); const writer=new D1TransactionRepository(new D1Database(fakeD1(db)));
     await writer.create("p",{id:"first",account_id:"a",date:"2026-01-01",amount:2,subtransactions:[{id:"shared",amount:1},{id:"first-other",amount:1}]},{operationId:"first"});

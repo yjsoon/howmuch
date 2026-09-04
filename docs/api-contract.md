@@ -89,11 +89,16 @@ stripped from the stored name. A trailing emoji stays on the name. Accounts
 without a leading emoji receive a type default such as 🏦 for checking or 💳
 for credit cards.
 
-Update body: `{ "account": { "icon": "🐷", "name": "Everyday" } }`. Supply `icon`,
-`name`, or both. `icon` must be a single emoji; `name` is stored as typed and
+Update body: `{ "account": { "icon": "🐷", "name": "Everyday", "type": "savings" } }`.
+Supply `icon`, `name`, `type`, or any combination. `type` is optional and must
+be one of the HowMuch account kinds. `on_budget` is derived from `type` and is
+rejected if sent. `icon` must be a single emoji; `name` is stored as typed and
 does not lift a leading emoji. A name change also renames the matching
-`Transfer : …` payee. This write is presentation-only and is not locked by
-transition read-only mode.
+`Transfer : …` payee. A type change that omits `icon` follows the new type
+default when the stored icon is missing or still the old type default. Name
+and icon writes stay presentation-only and are not locked by transition
+read-only mode. A write that includes `type` is locked in transition
+read-only mode.
 
 The server generates an id when none is supplied and treats `balance` as the opening
 balance. Every account also owns a `Transfer : <name>` payee (created on demand

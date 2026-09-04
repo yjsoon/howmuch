@@ -1420,6 +1420,19 @@ describe("account icons", () => {
     expect(transfer.name).toBe("Transfer : Daily Spend");
   });
 
+  test("stores a renamed name as typed and does not lift a leading emoji", async () => {
+    const account = await createAccountViaApi({ name: "Everyday", type: "checking" });
+    const renamed = await request(`/v1/plans/plan-test/accounts/${account.id}`, {
+      method: "PATCH",
+      body: { account: { name: "💳 Daily" } },
+    });
+    expect(renamed.status).toBe(200);
+    expect(db.query("SELECT name, icon FROM accounts WHERE id = ?").get(account.id)).toEqual({
+      name: "💳 Daily",
+      icon: "🏦",
+    });
+  });
+
   test("keeps a custom icon when a later upsert still carries an emoji on the name", async () => {
     const repo = new LedgerRepository(db, "plan-test");
     const account = await createAccountViaApi({ name: "💳 OCBC", type: "creditCard" });
@@ -1430,6 +1443,147 @@ describe("account icons", () => {
     await repo.upsertAccount("plan-test", { id: account.id, name: "💳 OCBC", type: "creditCard" });
     const listed = await (await request(`/v1/plans/plan-test/accounts/${account.id}`)).json();
     expect(listed.data.account).toMatchObject({ name: "OCBC", icon: "🐷" });
+  });
+});
+
+describe("account type updates", () => {
+  test("patches checking to savings and keeps on_budget and balances", async () => {
+    const account = await createAccountViaApi({
+      name: "Everyday",
+      type: "checking",
+      balance: 12500,
+    });
+    const updated = await request(`/v1/plans/plan-test/accounts/${account.id}`, {
+      method: "PATCH",
+      body: { account: { type: "savings" } },
+    });
+    expect(updated.status).toBe(200);
+    expect((await updated.json()).data.account).toMatchObject({
+      name: "Everyday",
+      type: "savings",
+      on_budget: true,
+      balance: 12500,
+      cleared_balance: 12500,
+      uncleared_balance: 0,
+    });
+  });
+
+  test("patches checking to mortgage and derives on_budget false without touching balances", async () => {
+    const account = await createAccountViaApi({
+      name: "Everyday",
+      type: "checking",
+      balance: 12500,
+    });
+    const updated = await request(`/v1/plans/plan-test/accounts/${account.id}`, {
+      method: "PATCH",
+      body: { account: { type: "mortgage" } },
+    });
+    expect(updated.status).toBe(200);
+    expect((await updated.json()).data.account).toMatchObject({
+      type: "mortgage",
+      on_budget: false,
+      balance: 12500,
+      cleared_balance: 12500,
+      uncleared_balance: 0,
+    });
+  });
+
+  test("rejects an unknown type with the accepted kinds", async () => {
+    const account = await createAccountViaApi({ name: "Everyday", type: "checking" });
+    const rejected = await request(`/v1/plans/plan-test/accounts/${account.id}`, {
+      method: "PATCH",
+      body: { account: { type: "payPal" } },
+    });
+    expect(rejected.status).toBe(400);
+    expect((await rejected.json()).error.detail).toBe(
+      "account.type must be one of checking, savings, cash, creditCard, lineOfCredit, mortgage, autoLoan, studentLoan, medicalDebt, otherLoan, otherAsset, otherLiability",
+    );
+  });
+
+  test("rejects a type patch that also sends on_budget", async () => {
+    const account = await createAccountViaApi({ name: "Everyday", type: "checking" });
+    const rejected = await request(`/v1/plans/plan-test/accounts/${account.id}`, {
+      method: "PATCH",
+      body: { account: { type: "savings", on_budget: true } },
+    });
+    expect(rejected.status).toBe(400);
+    expect((await rejected.json()).error.detail).toBe(
+      "account.on_budget is derived from account.type and cannot be set",
+    );
+  });
+
+  test("rejects on_budget alone", async () => {
+    const account = await createAccountViaApi({ name: "Everyday", type: "checking" });
+    const rejected = await request(`/v1/plans/plan-test/accounts/${account.id}`, {
+      method: "PATCH",
+      body: { account: { on_budget: false } },
+    });
+    expect(rejected.status).toBe(400);
+    expect((await rejected.json()).error.detail).toBe(
+      "account.on_budget is derived from account.type and cannot be set",
+    );
+  });
+
+  test("follows the type default icon and keeps a custom icon", async () => {
+    const following = await createAccountViaApi({ name: "Everyday", type: "checking" });
+    expect(following.icon).toBe("🏦");
+    const followed = await request(`/v1/plans/plan-test/accounts/${following.id}`, {
+      method: "PATCH",
+      body: { account: { type: "savings" } },
+    });
+    expect(followed.status).toBe(200);
+    expect((await followed.json()).data.account).toMatchObject({ type: "savings", icon: "💰" });
+
+    const custom = await createAccountViaApi({ name: "Piggy", type: "checking", icon: "🐷" });
+    const kept = await request(`/v1/plans/plan-test/accounts/${custom.id}`, {
+      method: "PATCH",
+      body: { account: { type: "savings" } },
+    });
+    expect(kept.status).toBe(200);
+    expect((await kept.json()).data.account).toMatchObject({ type: "savings", icon: "🐷" });
+  });
+
+  test("keeps a client icon sent with a type change", async () => {
+    const account = await createAccountViaApi({ name: "Everyday", type: "checking" });
+    const updated = await request(`/v1/plans/plan-test/accounts/${account.id}`, {
+      method: "PATCH",
+      body: { account: { type: "savings", icon: "🐷" } },
+    });
+    expect(updated.status).toBe(200);
+    expect((await updated.json()).data.account).toMatchObject({ type: "savings", icon: "🐷" });
+  });
+
+  test("name and icon stay writable in transition while type is locked", async () => {
+    const account = await createAccountViaApi({ name: "Everyday", type: "checking" });
+    const transitionHandler = createHandler({
+      db,
+      config: {
+        dbPath: ":memory:",
+        port: 0,
+        apiToken: "test-token",
+        defaultPlanId: "plan-test",
+        transitionReadOnly: true,
+      },
+    });
+    const transitionRequest = (body: unknown) => transitionHandler(
+      new Request(`http://howmuch.test/v1/plans/plan-test/accounts/${account.id}`, {
+        method: "PATCH",
+        headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    );
+
+    const iconOnly = await transitionRequest({ account: { icon: "🐷" } });
+    expect(iconOnly.status).toBe(200);
+    const nameOnly = await transitionRequest({ account: { name: "Daily" } });
+    expect(nameOnly.status).toBe(200);
+    const typeChange = await transitionRequest({ account: { type: "savings" } });
+    expect(typeChange.status).toBe(423);
+    expect((await typeChange.json()).error).toEqual({
+      id: "423",
+      name: "transition_read_only",
+      detail: "Financial changes are temporarily locked while YNAB is the source of truth",
+    });
   });
 });
 

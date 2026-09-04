@@ -69,3 +69,24 @@ struct AccountIcon: RawRepresentable, Equatable, Hashable, Sendable {
     return trimmed.isEmpty ? `default`(for: accountType).rawValue : trimmed
   }
 }
+
+enum AccountIconChoice: Hashable {
+  case followsType
+  case custom(AccountIcon)
+
+  init(stored: String?, type: String) {
+    let typeDefault = AccountIcon.default(for: type)
+    guard let stored, let parsed = AccountIcon(rawValue: stored), parsed != typeDefault else {
+      self = .followsType
+      return
+    }
+    self = .custom(parsed)
+  }
+
+  func resolved(default typeDefault: AccountIcon) -> AccountIcon {
+    switch self {
+    case .followsType: typeDefault
+    case .custom(let icon): icon
+    }
+  }
+}
