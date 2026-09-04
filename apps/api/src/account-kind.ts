@@ -1,4 +1,3 @@
-/** The account types HowMuch classifies. Single source for on_budget and the default icon. */
 export const ACCOUNT_KINDS = {
   checking: { onBudget: true, defaultIcon: "🏦" },
   savings: { onBudget: true, defaultIcon: "💰" },
@@ -28,7 +27,6 @@ export type AccountUpdateExisting = {
   type?: string | null;
 };
 
-/** Boundary parse. Imported strings outside the table are not writable. */
 export function parseAccountKind(value: unknown): AccountKind | null {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(ACCOUNT_KINDS, value)
     ? value as AccountKind
@@ -39,7 +37,11 @@ export function onBudgetForKind(kind: AccountKind): boolean {
   return ACCOUNT_KINDS[kind].onBudget;
 }
 
-/** Identity merge for PATCH. Balances are never in the result. */
+export function defaultIconForKind(type?: string | null): string {
+  const kind = parseAccountKind(type);
+  return kind ? ACCOUNT_KINDS[kind].defaultIcon : ACCOUNT_KINDS.checking.defaultIcon;
+}
+
 export function applyAccountUpdate(
   existing: AccountUpdateExisting,
   patch: AccountUpdatePatch,
@@ -53,10 +55,7 @@ export function applyAccountUpdate(
     next.on_budget = onBudgetForKind(patch.kind);
     if (patch.icon === undefined) {
       const stored = existing.icon == null || existing.icon === "" ? null : existing.icon;
-      const previousDefault = existing.type && Object.prototype.hasOwnProperty.call(ACCOUNT_KINDS, existing.type)
-        ? ACCOUNT_KINDS[existing.type as AccountKind].defaultIcon
-        : "🏦";
-      if (stored == null || stored === previousDefault) {
+      if (stored == null || stored === defaultIconForKind(existing.type)) {
         next.icon = ACCOUNT_KINDS[patch.kind].defaultIcon;
       }
     }

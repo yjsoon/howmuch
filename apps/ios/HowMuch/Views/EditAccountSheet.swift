@@ -95,19 +95,23 @@ struct EditAccountSheet: View {
   }
 
   private var typeNotes: [String] {
-    guard case .kind(let kind) = classification else {
-      return []
+    switch classification {
+    case .imported:
+      return [
+        "Imported as \(classification.title). Choose a type to classify it. Balances do not change.",
+      ]
+    case .kind(let kind):
+      var notes: [String] = []
+      if AccountKind(rawValue: account.type) == nil {
+        notes.append("Replaces the imported type “\(account.type)”. Balances do not change.")
+      }
+      if kind.onBudget != account.onBudget {
+        let origin = account.onBudget ? "Budget" : "Tracking"
+        let destination = kind.onBudget ? "Budget" : "Tracking"
+        notes.append("Moves the account from \(origin) to \(destination). Balances do not change.")
+      }
+      return notes
     }
-    var notes: [String] = []
-    if AccountKind(rawValue: account.type) == nil {
-      notes.append("Replaces the imported type “\(account.type)”. Balances do not change.")
-    }
-    if kind.onBudget != account.onBudget {
-      let origin = account.onBudget ? "Budget" : "Tracking"
-      let destination = kind.onBudget ? "Budget" : "Tracking"
-      notes.append("Moves the account from \(origin) to \(destination). Balances do not change.")
-    }
-    return notes
   }
 
   private func save() async {

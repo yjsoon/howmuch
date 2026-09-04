@@ -23,6 +23,7 @@ describe("iOS edit account", () => {
     expect(edit).toContain("AccountIdentityFields(");
     expect(edit).toContain("model.updateAccount(");
     expect(edit).toContain("Replaces the imported type");
+    expect(edit).toContain("Choose a type to classify it");
     expect(edit).toContain("Balances do not change.");
     expect(fields).toContain("struct AccountIdentityFields");
     expect(fields).toContain("Text(\"Type\")");

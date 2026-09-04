@@ -33,6 +33,6 @@ Preconditions:
 ## Gotchas
 
 - Name and icon still save during transition read-only. A type change is locked and shows the sheet error.
-- Imported YNAB types such as `personalLoan` stay as their humanised label until a kind is picked. Picking one shows `Replaces the imported type “…”`.
+- Imported YNAB types such as `personalLoan` stay as their humanised label until a kind is picked. The sheet notes `Imported as … Choose a type to classify it.` Picking one shows `Replaces the imported type “…”`.
 - Changing type does not recategorise existing transfers.
 - iOS Simulator is required. Web has no type editor.

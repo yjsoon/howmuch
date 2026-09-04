@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   ACCOUNT_KINDS,
   applyAccountUpdate,
+  defaultIconForKind,
   onBudgetForKind,
   parseAccountKind,
 } from "./account-kind";
@@ -58,6 +59,14 @@ describe("onBudgetForKind", () => {
   });
 });
 
+describe("defaultIconForKind", () => {
+  test("uses the table default and the checking icon for unknown types", () => {
+    expect(defaultIconForKind("savings")).toBe("💰");
+    expect(defaultIconForKind("payPal")).toBe(ACCOUNT_KINDS.checking.defaultIcon);
+    expect(defaultIconForKind(null)).toBe(ACCOUNT_KINDS.checking.defaultIcon);
+  });
+});
+
 describe("applyAccountUpdate", () => {
   const checking = { name: "Everyday", icon: "🏦", type: "checking" };
 
@@ -101,6 +110,14 @@ describe("applyAccountUpdate", () => {
       type: "mortgage",
       on_budget: false,
       icon: "🏠",
+    });
+  });
+
+  test("follows the new type default when the previous type is imported", () => {
+    expect(applyAccountUpdate({ name: "PayPal", icon: "🏦", type: "payPal" }, { kind: "otherAsset" })).toEqual({
+      type: "otherAsset",
+      on_budget: false,
+      icon: "📈",
     });
   });
 });

@@ -1,4 +1,4 @@
-import { ACCOUNT_KINDS } from "./account-kind";
+import { defaultIconForKind } from "./account-kind";
 
 export const FALLBACK_ACCOUNT_ICON = "🏦";
 
@@ -27,9 +27,7 @@ export function parseAccountIcon(value: unknown): string | null {
 }
 
 export function defaultIconForAccountType(type?: string | null): string {
-  return (type && Object.prototype.hasOwnProperty.call(ACCOUNT_KINDS, type)
-    ? ACCOUNT_KINDS[type as keyof typeof ACCOUNT_KINDS].defaultIcon
-    : undefined) || FALLBACK_ACCOUNT_ICON;
+  return defaultIconForKind(type);
 }
 
 export function splitLegacyAccountName(name: string): { icon: string | null; name: string } {
