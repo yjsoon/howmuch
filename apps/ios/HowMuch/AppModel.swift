@@ -171,6 +171,7 @@ final class AppModel {
     reportsPhase = .idle
     ledgerPageGeneration += 1
     isShowingSettings = true
+    wipeIntentCatalog()
   }
 
   var lastUsedAccountID: String? {
@@ -1055,6 +1056,7 @@ final class AppModel {
       }
       pruneViewPrefs(using: reference.accounts)
       referencePhase = .loaded
+      publishIntentCatalog()
     } catch {
       guard generation == referenceGeneration, planID == settings.planID, scope == activeViewPrefsScope else {
         return
@@ -1178,6 +1180,21 @@ final class AppModel {
     reportsGeneration &+= 1
     planRefreshGeneration &+= 1
     invalidateAccountUsage()
+    wipeIntentCatalog()
+  }
+
+  func publishIntentCatalog(using store: IntentCatalogStore = .shared) {
+    let snapshot = IntentCatalogSnapshot.project(
+      fingerprint: settings.connectionFingerprint,
+      accounts: accounts,
+      categoryGroups: categoryGroups,
+      payees: payees
+    )
+    store.scheduleWrite(snapshot)
+  }
+
+  func wipeIntentCatalog(using store: IntentCatalogStore = .shared) {
+    store.wipeAll()
   }
 
   func refreshScheduledTransactions(quiet: Bool = false) async {
