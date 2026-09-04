@@ -76,6 +76,7 @@ struct CategoriesView: View {
           budgeted: budgeted
         )
       }
+      .blocksCapturePresentation()
     }
     .sheet(item: $editingTarget) { category in
       PlanTargetSheet(category: category, currencyFormat: model.currencyFormat) { target in
@@ -92,6 +93,7 @@ struct CategoriesView: View {
           categoryID: category.id
         )
       }
+      .blocksCapturePresentation()
     }
   }
 

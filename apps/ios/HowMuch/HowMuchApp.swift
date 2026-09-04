@@ -18,8 +18,6 @@ struct HowMuchApp: App {
 @MainActor
 enum QuickAction {
   static let addExpenseType = "sg.soon.howmuch.add-expense"
-  static let notification = Notification.Name("HowMuch.QuickAction.addExpense")
-  static var pendingCapture = false
 
   static func register() {
     UIApplication.shared.shortcutItems = [
@@ -31,6 +29,12 @@ enum QuickAction {
         userInfo: nil
       )
     ]
+  }
+
+  static func enqueueBlankCapture() {
+    CaptureRouter.shared.enqueue(
+      CaptureRequest(kind: .blank, connectionFingerprint: nil)
+    )
   }
 }
 
@@ -56,10 +60,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
 final class QuickActionSceneDelegate: NSObject, UIWindowSceneDelegate {
   func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
-    // Cold launch from the shortcut: RootView does not exist yet, so leave a
-    // flag for it rather than posting into the void.
     if connectionOptions.shortcutItem?.type == QuickAction.addExpenseType {
-      QuickAction.pendingCapture = true
+      QuickAction.enqueueBlankCapture()
     }
   }
 
@@ -72,7 +74,7 @@ final class QuickActionSceneDelegate: NSObject, UIWindowSceneDelegate {
       completionHandler(false)
       return
     }
-    NotificationCenter.default.post(name: QuickAction.notification, object: nil)
+    QuickAction.enqueueBlankCapture()
     completionHandler(true)
   }
 }
@@ -86,17 +88,24 @@ enum AppTab: Hashable {
 
 private struct RootView: View {
   @Environment(AppModel.self) private var model
+  @Environment(\.scenePhase) private var scenePhase
   @State private var tab: AppTab = .accounts
   @State private var appliedReportsGeneration = 0
 
   var body: some View {
     @Bindable var model = model
+    @Bindable var capture = CaptureRouter.shared
 
     let selection = Binding(
       get: { tab },
       set: { (next: AppTab) in
         if next == .transaction {
-          model.isShowingCapture = true
+          model.presentCapture(
+            CaptureRequest(
+              kind: .blank,
+              connectionFingerprint: model.settings.connectionFingerprint
+            )
+          )
         } else {
           tab = next
         }
@@ -172,34 +181,37 @@ private struct RootView: View {
         await model.applySettings(nextSettings)
       }
       .interactiveDismissDisabled(!model.settings.isAuthenticated)
-      .onDisappear {
-        consumePendingCapture()
-      }
+      .blocksCapturePresentation()
     }
-    .sheet(isPresented: $model.isShowingCapture) {
-      AddTransactionSheet()
+    .sheet(item: $capture.presented) { request in
+      AddTransactionSheet(request: request)
     }
     .onAppear {
       consumePendingCapture()
     }
-    .onReceive(NotificationCenter.default.publisher(for: QuickAction.notification)) { _ in
-      guard !model.isShowingCapture else {
-        return
+    .onChange(of: capture.pending?.id) { _, _ in
+      consumePendingCapture()
+    }
+    .onChange(of: capture.blockingSheetCount) { _, _ in
+      consumePendingCapture()
+    }
+    .onChange(of: scenePhase) { _, phase in
+      if phase == .active {
+        consumePendingCapture()
       }
-      if model.isShowingSettings {
-        QuickAction.pendingCapture = true
-        model.isShowingSettings = false
-      } else {
-        model.isShowingCapture = true
+    }
+    .onChange(of: model.settings.isAuthenticated) { _, isAuthenticated in
+      if !isAuthenticated {
+        capture.dropForSignOut()
       }
     }
   }
 
   private func consumePendingCapture() {
-    if QuickAction.pendingCapture {
-      QuickAction.pendingCapture = false
-      model.isShowingCapture = true
-    }
+    CaptureRouter.shared.consume(
+      isAuthenticated: model.settings.isAuthenticated,
+      currentFingerprint: model.settings.connectionFingerprint
+    )
   }
 }
 

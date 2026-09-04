@@ -83,9 +83,11 @@ struct ScheduledTransactionsView: View {
     }
     .sheet(isPresented: $isCreatingSchedule) {
       ScheduledTransactionEditorView()
+        .blocksCapturePresentation()
     }
     .sheet(item: $editingSchedule) { schedule in
       ScheduledTransactionEditorView(schedule: schedule)
+        .blocksCapturePresentation()
     }
   }
 

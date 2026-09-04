@@ -73,7 +73,6 @@ final class AppModel {
   var isSubmitting = false
   var lastSaveMessage: SaveMessage?
   var isShowingSettings = false
-  var isShowingCapture = false
   /// Account registers currently on a navigation stack, deepest last.
   /// Capture prefers the visible register over the last account a save used.
   private(set) var focusedRegisterAccountIDs: [String] = []
@@ -189,6 +188,10 @@ final class AppModel {
       return lastUsed
     }
     return nil
+  }
+
+  func presentCapture(_ request: CaptureRequest) {
+    CaptureRouter.shared.enqueue(request)
   }
 
   func beginFocusedRegisterAccount(_ accountID: String) {

@@ -140,9 +140,11 @@ struct ReportFilterBar: View {
     }
     .sheet(isPresented: $isPickingAccounts) {
       AccountScopePicker(selection: $scope.accountIDs)
+        .blocksCapturePresentation()
     }
     .sheet(isPresented: $isPickingCategories) {
       CategoryScopePicker(selection: $scope.categoryIDs)
+        .blocksCapturePresentation()
     }
   }
 
