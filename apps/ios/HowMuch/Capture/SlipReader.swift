@@ -241,6 +241,31 @@ enum SlipReaderMapping {
   }
 }
 
+enum SlipReaderPrompt {
+  static let instructions = """
+  Extract every distinct spend from the sentence. Amounts are decimal strings such as 5 or 5.00, never milliunits and never IDs. Copy account, category, and payee names from the provided lists when they match. Leave a field empty when it was not mentioned. Split two spends in one sentence into two items.
+  """
+
+  static func prefix(
+    accounts: [Account],
+    categoryGroups: [CategoryGroup],
+    payees: [Payee]
+  ) -> String {
+    let accountNames = accounts.filter { !$0.closed && !$0.deleted }.map(\.name)
+    let categoryNames = categoryGroups.filter { !$0.deleted }.flatMap { group in
+      group.categories.filter { !$0.deleted }.map(\.name)
+    }
+    let payeeNames = payees.filter { $0.deleted != true }.map(\.name)
+    return """
+    Accounts: \(accountNames.joined(separator: ", "))
+    Categories: \(categoryNames.joined(separator: ", "))
+    Payees: \(payeeNames.joined(separator: ", "))
+
+    Sentence:
+    """
+  }
+}
+
 actor SlipReader {
   enum Extractor: Sendable {
     case foundationModels
@@ -250,9 +275,38 @@ actor SlipReader {
   static let shared = SlipReader()
 
   private let extractor: Extractor
+  #if canImport(FoundationModels)
+  private var primedPrefix: String?
+  private var primedSession: LanguageModelSession?
+  private var isExtracting = false
+  #endif
 
   init(extractor: Extractor = .foundationModels) {
     self.extractor = extractor
+  }
+
+  func prewarm(
+    accounts: [Account],
+    categoryGroups: [CategoryGroup],
+    payees: [Payee]
+  ) {
+    guard case .foundationModels = extractor else {
+      return
+    }
+    #if canImport(FoundationModels)
+    guard !isExtracting, Self.modelAllowsExtract else {
+      return
+    }
+    let prefix = SlipReaderPrompt.prefix(
+      accounts: accounts,
+      categoryGroups: categoryGroups,
+      payees: payees
+    )
+    guard primedPrefix != prefix || primedSession == nil else {
+      return
+    }
+    startPrime(prefix)
+    #endif
   }
 
   func read(
@@ -288,7 +342,7 @@ actor SlipReader {
     let extractions: [SlipReaderMapping.Extraction]
     switch extractor {
     case .foundationModels:
-      extractions = await Self.extractWithModel(
+      extractions = await extractWithModel(
         text: trimmed,
         accounts: accounts,
         categoryGroups: categoryGroups,
@@ -307,41 +361,36 @@ actor SlipReader {
     )
   }
 
-  private static func extractWithModel(
+  private func extractWithModel(
     text: String,
     accounts: [Account],
     categoryGroups: [CategoryGroup],
     payees: [Payee]
   ) async -> [SlipReaderMapping.Extraction] {
     #if canImport(FoundationModels)
-    switch SystemLanguageModel.default.availability {
-    case .unavailable(let reason):
-      if case .modelNotReady = reason {
-        break
-      }
+    guard Self.modelAllowsExtract else {
       return []
-    case .available:
-      break
-    @unknown default:
-      break
     }
 
-    let accountNames = accounts.filter { !$0.closed && !$0.deleted }.map(\.name)
-    let categoryNames = categoryGroups.filter { !$0.deleted }.flatMap { group in
-      group.categories.filter { !$0.deleted }.map(\.name)
+    let prefix = SlipReaderPrompt.prefix(
+      accounts: accounts,
+      categoryGroups: categoryGroups,
+      payees: payees
+    )
+    let session: LanguageModelSession
+    if primedPrefix == prefix, let primedSession {
+      session = primedSession
+      self.primedSession = nil
+      primedPrefix = nil
+    } else {
+      session = LanguageModelSession(instructions: SlipReaderPrompt.instructions)
     }
-    let payeeNames = payees.filter { $0.deleted != true }.map(\.name)
-    let session = LanguageModelSession(instructions: """
-    Extract every distinct spend from the sentence. Amounts are decimal strings such as 5 or 5.00, never milliunits and never IDs. Copy account, category, and payee names from the provided lists when they match. Leave a field empty when it was not mentioned. Split two spends in one sentence into two items.
-    """)
-    let prompt = """
-    Accounts: \(accountNames.joined(separator: ", "))
-    Categories: \(categoryNames.joined(separator: ", "))
-    Payees: \(payeeNames.joined(separator: ", "))
-
-    Sentence:
-    \(text)
-    """
+    isExtracting = true
+    defer {
+      isExtracting = false
+      startPrime(prefix)
+    }
+    let prompt = prefix + text
     do {
       let response = try await session.respond(to: prompt, generating: ExtractedSlips.self)
       return response.content.spends.map { slip in
@@ -361,6 +410,29 @@ actor SlipReader {
     return []
     #endif
   }
+
+  #if canImport(FoundationModels)
+  private static var modelAllowsExtract: Bool {
+    switch SystemLanguageModel.default.availability {
+    case .unavailable(let reason):
+      if case .modelNotReady = reason {
+        return true
+      }
+      return false
+    case .available:
+      return true
+    @unknown default:
+      return true
+    }
+  }
+
+  private func startPrime(_ prefix: String) {
+    let session = LanguageModelSession(instructions: SlipReaderPrompt.instructions)
+    session.prewarm(promptPrefix: Prompt(prefix))
+    primedPrefix = prefix
+    primedSession = session
+  }
+  #endif
 }
 
 #if canImport(FoundationModels)

@@ -166,6 +166,21 @@ final class SlipReaderMappingTests: XCTestCase {
     XCTAssertEqual(mapped[0].draft.date, start)
   }
 
+  func testPromptPrefixPutsCatalogsBeforeTheSentence() {
+    let prefix = SlipReaderPrompt.prefix(
+      accounts: [
+        Self.account("acct-everyday", "Everyday Account"),
+        Self.account("acct-closed", "Closed Card", closed: true),
+      ],
+      categoryGroups: [Self.everydayGroup],
+      payees: []
+    )
+    XCTAssertTrue(prefix.contains("Accounts: Everyday Account"))
+    XCTAssertFalse(prefix.contains("Closed Card"))
+    XCTAssertTrue(prefix.contains("Categories: Groceries, Dining Out"))
+    XCTAssertTrue(prefix.hasSuffix("Sentence:\n"))
+  }
+
   func testReadDoesNotCallCommit() async {
     let before = OutboxStore.load()
     let reader = SlipReader(extractor: .fixed { _ in
@@ -203,14 +218,14 @@ final class SlipReaderMappingTests: XCTestCase {
     ]
   )
 
-  private static func account(_ id: String, _ name: String) -> Account {
+  private static func account(_ id: String, _ name: String, closed: Bool = false) -> Account {
     Account(
       id: id,
       name: name,
       icon: nil,
       type: "checking",
       onBudget: true,
-      closed: false,
+      closed: closed,
       balance: 0,
       clearedBalance: 0,
       unclearedBalance: 0,

@@ -384,6 +384,13 @@ struct TransactionFormView: View {
     return live.first?.name ?? "Groceries"
   }
 
+  private var composeWarmID: String {
+    let accounts = model.openAccounts.map(\.id).joined(separator: ",")
+    let categories = model.categoryGroups.flatMap(\.categories).map(\.id).joined(separator: ",")
+    let payees = model.payees.map(\.id).joined(separator: ",")
+    return "\(accounts)|\(categories)|\(payees)"
+  }
+
   private var composeField: some View {
     TextField(composePlaceholder, text: $composeText)
       .textFieldStyle(.plain)
@@ -393,6 +400,13 @@ struct TransactionFormView: View {
       .padding(.horizontal, 16)
       .frame(height: 48)
       .ynabCard()
+      .task(id: composeWarmID) {
+        await SlipReader.shared.prewarm(
+          accounts: model.openAccounts,
+          categoryGroups: model.categoryGroups,
+          payees: model.payees
+        )
+      }
   }
 
   private func parseCompose() {
