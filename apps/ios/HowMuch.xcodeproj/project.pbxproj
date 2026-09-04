@@ -46,6 +46,8 @@
 		A20000000000000000000057 /* AddTransactionIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000056 /* AddTransactionIntent.swift */; };
 		A20000000000000000000059 /* AppShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000058 /* AppShortcuts.swift */; };
 		A2000000000000000000005B /* AddTransactionIntentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005A /* AddTransactionIntentTests.swift */; };
+		A20000000000000000000081 /* IntakeReviewListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000080 /* IntakeReviewListView.swift */; };
+		A20000000000000000000083 /* CommitManyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000082 /* CommitManyTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -64,6 +66,8 @@
 		A20000000000000000000056 /* AddTransactionIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddTransactionIntent.swift; sourceTree = "<group>"; };
 		A20000000000000000000058 /* AppShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcuts.swift; sourceTree = "<group>"; };
 		A2000000000000000000005A /* AddTransactionIntentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddTransactionIntentTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000080 /* IntakeReviewListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeReviewListView.swift; sourceTree = "<group>"; };
+		A20000000000000000000082 /* CommitManyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitManyTests.swift; sourceTree = "<group>"; };
 		A10000000000000000000010 /* HowMuchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HowMuchApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000011 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		A10000000000000000000012 /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
@@ -198,6 +202,7 @@
 				A10000000000000000000078 /* ScheduledTransactionsView.swift */,
 				A10000000000000000000079 /* ScheduledTransactionEditorView.swift */,
 				A10000000000000000000073 /* TransactionFormView.swift */,
+				A20000000000000000000080 /* IntakeReviewListView.swift */,
 				A10000000000000000000074 /* Pickers.swift */,
 				A10000000000000000000075 /* ReflectView.swift */,
 				A10000000000000000000076 /* ReflectDetails.swift */,
@@ -236,6 +241,7 @@
 				A20000000000000000000033 /* IntentCatalogTests.swift */,
 				A20000000000000000000042 /* SlipReaderMappingTests.swift */,
 				A2000000000000000000005A /* AddTransactionIntentTests.swift */,
+				A20000000000000000000082 /* CommitManyTests.swift */,
 			);
 			path = HowMuchTests;
 			sourceTree = "<group>";
@@ -370,6 +376,7 @@
 				A20000000000000000000055 /* CategoryEntity.swift in Sources */,
 				A20000000000000000000057 /* AddTransactionIntent.swift in Sources */,
 				A20000000000000000000059 /* AppShortcuts.swift in Sources */,
+				A20000000000000000000081 /* IntakeReviewListView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -381,6 +388,7 @@
 				A20000000000000000000034 /* IntentCatalogTests.swift in Sources */,
 				A20000000000000000000043 /* SlipReaderMappingTests.swift in Sources */,
 				A2000000000000000000005B /* AddTransactionIntentTests.swift in Sources */,
+				A20000000000000000000083 /* CommitManyTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -102,9 +102,14 @@ struct AmountKeypadEngine: Equatable {
 struct AddTransactionSheet: View {
   @Environment(AppModel.self) private var model
   let request: CaptureRequest
+  var onMultipleDrafts: ([TransactionDraft]) -> Void = { _ in }
 
   var body: some View {
-    TransactionFormView(draft: initialDraft, isEditing: false)
+    TransactionFormView(
+      draft: initialDraft,
+      isEditing: false,
+      onMultipleDrafts: onMultipleDrafts
+    )
   }
 
   private var initialDraft: TransactionDraft {
@@ -178,12 +183,25 @@ struct TransactionFormView: View {
   @FocusState private var isComposeFocused: Bool
   private let isEditing: Bool
   private let allowsDeletion: Bool
+  private let isReviewing: Bool
+  private let onMultipleDrafts: ([TransactionDraft]) -> Void
+  private let onPersist: ((TransactionDraft) -> Void)?
 
   // Plain stored properties before @State, assigned as wrapped values: the
   // shape the SDK 27 @State macro migration expects.
-  init(draft: TransactionDraft, isEditing: Bool, allowsDeletion: Bool = true) {
+  init(
+    draft: TransactionDraft,
+    isEditing: Bool,
+    allowsDeletion: Bool = true,
+    isReviewing: Bool = false,
+    onMultipleDrafts: @escaping ([TransactionDraft]) -> Void = { _ in },
+    onPersist: ((TransactionDraft) -> Void)? = nil
+  ) {
     self.isEditing = isEditing
     self.allowsDeletion = allowsDeletion
+    self.isReviewing = isReviewing
+    self.onMultipleDrafts = onMultipleDrafts
+    self.onPersist = onPersist
     var engine = AmountKeypadEngine()
     engine.setValue(draft.amountMagnitudeMilli)
     self.draft = draft
@@ -363,7 +381,7 @@ struct TransactionFormView: View {
   }
 
   private var showsCompose: Bool {
-    !isEditing && ComposeIntelligence.showsField
+    !isEditing && !isReviewing && ComposeIntelligence.showsField
   }
 
   private var composePlaceholder: String {
@@ -443,6 +461,10 @@ struct TransactionFormView: View {
 
   private func applyMapped(_ mapped: [SlipMappedDraft]) {
     isComposeFocused = false
+    if mapped.count > 1 {
+      onMultipleDrafts(mapped.map(\.draft))
+      return
+    }
     guard mapped.count == 1, let row = mapped.first else {
       withAnimation(.snappy) {
         isKeypadVisible = draft.amountMagnitudeMilli == 0
@@ -965,6 +987,12 @@ struct TransactionFormView: View {
     }
     errorMessage = nil
     do {
+      if let onPersist {
+        onPersist(draft)
+        hasCommitted = true
+        dismiss()
+        return
+      }
       try model.commit(draft)
       hasCommitted = true
       dismiss()

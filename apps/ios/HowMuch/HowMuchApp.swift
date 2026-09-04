@@ -184,7 +184,7 @@ private struct RootView: View {
       .blocksCapturePresentation()
     }
     .sheet(item: $capture.presented) { request in
-      AddTransactionSheet(request: request)
+      CaptureIntakeHost(request: request)
     }
     .onAppear {
       consumePendingCapture()
@@ -212,6 +212,25 @@ private struct RootView: View {
       isAuthenticated: model.settings.isAuthenticated,
       currentFingerprint: model.settings.connectionFingerprint
     )
+  }
+}
+
+private struct CaptureIntakeHost: View {
+  @Environment(AppModel.self) private var model
+  let request: CaptureRequest
+  @State private var reviewDrafts: [TransactionDraft]?
+
+  var body: some View {
+    if let reviewDrafts {
+      IntakeReviewListView(
+        drafts: reviewDrafts,
+        preferredAccountID: model.preferredCaptureAccountID
+      )
+    } else {
+      AddTransactionSheet(request: request) { drafts in
+        reviewDrafts = drafts
+      }
+    }
   }
 }
 

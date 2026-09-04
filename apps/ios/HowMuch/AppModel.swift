@@ -1515,20 +1515,43 @@ final class AppModel {
   }
 
   func commit(_ draft: TransactionDraft) throws {
-    try CommitRejection.check(draft)
-    viewPrefs.lastUsedAccountID = draft.accountID
-    saveViewPrefs()
-    if let transactionID = draft.id {
+    try commit([draft])
+  }
+
+  func commit(_ drafts: [TransactionDraft]) throws {
+    guard !drafts.isEmpty else {
+      return
+    }
+    for draft in drafts {
+      try CommitRejection.check(draft)
+    }
+    if let last = drafts.last {
+      viewPrefs.lastUsedAccountID = last.accountID
+      saveViewPrefs()
+    }
+    if drafts.count == 1, let draft = drafts.first, let transactionID = draft.id {
       applyPendingEdit(draft, transactionID: transactionID)
       return
     }
-    try enqueueCreate(draft)
-    showSaveMessage(savedMessage(for: draft))
+    let creates = drafts.filter { $0.id == nil }
+    for draft in drafts {
+      if let transactionID = draft.id {
+        applyPendingEdit(draft, transactionID: transactionID)
+      }
+    }
+    guard !creates.isEmpty else {
+      return
+    }
+    try enqueueCreates(creates)
+    showSaveMessage(savedMessage(for: creates))
   }
 
-  private func savedMessage(for draft: TransactionDraft) -> String {
-    let payee = draft.payeeName.trimmingCharacters(in: .whitespacesAndNewlines)
-    return "Saved \(MoneyCodec.displayString(for: draft.signedMilliunits, currencyFormat: currencyFormat)) — \(payee.isEmpty ? "transaction" : payee)"
+  private func savedMessage(for drafts: [TransactionDraft]) -> String {
+    if drafts.count == 1, let draft = drafts.first {
+      let payee = draft.payeeName.trimmingCharacters(in: .whitespacesAndNewlines)
+      return "Saved \(MoneyCodec.displayString(for: draft.signedMilliunits, currencyFormat: currencyFormat)) — \(payee.isEmpty ? "transaction" : payee)"
+    }
+    return "Saved \(drafts.count) transactions"
   }
 
   func retryPending(_ id: PendingRow.ID) {
@@ -1552,24 +1575,18 @@ final class AppModel {
     }
   }
 
-  private func enqueueCreate(_ draft: TransactionDraft) throws {
-    let request = draft.writeRequest(includeCleared: draft.shouldWriteCleared)
-    let importID = request.importID
-    let alreadyQueued = pendingTransactions.contains { pending in
-      pending.request.importID == importID
-        && importID != nil
-        && settings.matchesCurrentOrLegacyOutboxStamp(pending.connectionFingerprint)
-    }
-    if !alreadyQueued {
-      let next = pendingTransactions + [
-        PendingTransaction(request: request, connectionFingerprint: settings.connectionFingerprint)
-      ]
-      do {
-        try OutboxStore.save(next)
-        pendingTransactions = next
-      } catch {
-        throw CommitRejection.persistFailed
-      }
+  private func enqueueCreates(_ drafts: [TransactionDraft]) throws {
+    let next = OutboxBatch.appending(
+      drafts,
+      onto: pendingTransactions,
+      fingerprint: settings.connectionFingerprint,
+      isCurrentConnection: { settings.matchesCurrentOrLegacyOutboxStamp($0) }
+    )
+    do {
+      try OutboxStore.save(next)
+      pendingTransactions = next
+    } catch {
+      throw CommitRejection.persistFailed
     }
     Task { await drainOutbox(trigger: .commit) }
   }
@@ -1621,7 +1638,7 @@ final class AppModel {
       }
       pendingEdits[transactionID] = nil
       editTasks[transactionID] = nil
-      showSaveMessage(savedMessage(for: draft))
+      showSaveMessage(savedMessage(for: [draft]))
       Task { await refreshLedgerAndInvalidatePlan() }
     } catch {
       guard isCurrentEdit(transactionID, generation: generation, destination: destination) else {
