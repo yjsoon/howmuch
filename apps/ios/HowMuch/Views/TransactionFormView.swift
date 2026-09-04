@@ -170,10 +170,11 @@ struct TransactionFormView: View {
   @State private var isAutoAdvancingToPayee = false
   @State private var hasCommitted = false
   @State private var composeText = ""
-  @State private var accountCandidates: [StubSlipReader.Candidate] = []
-  @State private var categoryCandidates: [StubSlipReader.Candidate] = []
+  @State private var accountCandidates: [SlipCandidate] = []
+  @State private var categoryCandidates: [SlipCandidate] = []
   @State private var showAccountPrompt = false
   @State private var showCategoryPrompt = false
+  @State private var parseTask: Task<Void, Never>?
   @FocusState private var isComposeFocused: Bool
   private let isEditing: Bool
   private let allowsDeletion: Bool
@@ -315,6 +316,9 @@ struct TransactionFormView: View {
           draft.disableSplit()
         }
       }
+      .onDisappear {
+        parseTask?.cancel()
+      }
       .onChange(of: keypad) {
         draft.amountMagnitudeMilli = keypad.display
       }
@@ -380,6 +384,13 @@ struct TransactionFormView: View {
     return live.first?.name ?? "Groceries"
   }
 
+  private var composeWarmID: String {
+    let accounts = model.openAccounts.map(\.id).joined(separator: ",")
+    let categories = model.categoryGroups.flatMap(\.categories).map(\.id).joined(separator: ",")
+    let payees = model.payees.map(\.id).joined(separator: ",")
+    return "\(accounts)|\(categories)|\(payees)"
+  }
+
   private var composeField: some View {
     TextField(composePlaceholder, text: $composeText)
       .textFieldStyle(.plain)
@@ -389,50 +400,87 @@ struct TransactionFormView: View {
       .padding(.horizontal, 16)
       .frame(height: 48)
       .ynabCard()
+      .task(id: composeWarmID) {
+        await SlipReader.shared.prewarm(
+          accounts: model.openAccounts,
+          categoryGroups: model.categoryGroups,
+          payees: model.payees
+        )
+      }
+      .onChange(of: composeText) { old, new in
+        guard old.isEmpty, !new.isEmpty else {
+          return
+        }
+        Task {
+          await SlipReader.shared.prewarm(
+            accounts: model.openAccounts,
+            categoryGroups: model.categoryGroups,
+            payees: model.payees
+          )
+        }
+      }
   }
 
   private func parseCompose() {
-    let outcome = StubSlipReader.read(
-      text: composeText,
-      placeholder: composePlaceholder,
-      accounts: model.openAccounts,
-      categoryGroups: model.categoryGroups
-    )
-    let parsed = outcome.amountMilli != nil
-      || outcome.categoryID != nil
-      || outcome.accountID != nil
-      || !outcome.accountCandidates.isEmpty
-      || !outcome.categoryCandidates.isEmpty
-    guard parsed else {
-      isComposeFocused = false
+    parseTask?.cancel()
+    let text = composeText
+    let accounts = model.openAccounts
+    let categoryGroups = model.categoryGroups
+    let payees = model.payees
+    parseTask = Task { @MainActor in
+      let mapped = await SlipReader.shared.interpret(
+        text: text,
+        accounts: accounts,
+        categoryGroups: categoryGroups,
+        payees: payees
+      )
+      guard !Task.isCancelled else {
+        return
+      }
+      applyMapped(mapped)
+    }
+  }
+
+  private func applyMapped(_ mapped: [SlipMappedDraft]) {
+    isComposeFocused = false
+    guard mapped.count == 1, let row = mapped.first else {
       withAnimation(.snappy) {
         isKeypadVisible = draft.amountMagnitudeMilli == 0
       }
       return
     }
-    if let amountMilli = outcome.amountMilli {
-      draft.amountMagnitudeMilli = amountMilli
-      keypad.setValue(amountMilli)
+    if row.parsedAmount {
+      draft.amountMagnitudeMilli = row.draft.amountMagnitudeMilli
+      keypad.setValue(row.draft.amountMagnitudeMilli)
     }
-    categoryCandidates = outcome.categoryCandidates
-    if let categoryID = outcome.categoryID {
+    draft.direction = row.draft.direction
+    if row.parsedDate {
+      draft.date = row.draft.date
+    }
+    if !row.draft.payeeName.isEmpty || row.draft.payeeID != nil {
+      draft.payeeID = row.draft.payeeID
+      draft.payeeName = row.draft.payeeName
+      draft.transferAccountID = row.draft.transferAccountID
+    }
+    categoryCandidates = row.categoryCandidates
+    if let categoryID = row.draft.categoryID {
       draft.categoryID = categoryID
       showCategoryPrompt = false
     } else {
-      showCategoryPrompt = !outcome.categoryCandidates.isEmpty
+      showCategoryPrompt = !row.categoryCandidates.isEmpty
       if showCategoryPrompt {
         draft.categoryID = nil
       }
     }
-    accountCandidates = outcome.accountCandidates
-    if let accountID = outcome.accountID {
-      draft.accountID = accountID
-      showAccountPrompt = false
-    } else {
-      draft.accountID = ""
-      showAccountPrompt = true
+    accountCandidates = row.accountCandidates
+    if row.parsedAccount {
+      if row.draft.accountID.isEmpty {
+        draft.accountID = ""
+      } else {
+        draft.accountID = row.draft.accountID
+      }
     }
-    isComposeFocused = false
+    showAccountPrompt = !row.accountCandidates.isEmpty
     withAnimation(.snappy) {
       isKeypadVisible = draft.amountMagnitudeMilli == 0
     }
@@ -588,14 +636,7 @@ struct TransactionFormView: View {
           // elsewhere; the server rejects the self-transfer anyway.
           disabledAccountIDs: Set(draft.subtransactions.compactMap(\.transferAccountID))
         ) { account in
-          draft.accountID = account.id
-          accountCandidates = []
-          if draft.transferAccountID == account.id {
-            // A transfer cannot target its own account; drop the payee.
-            draft.transferAccountID = nil
-            draft.payeeID = nil
-            draft.payeeName = ""
-          }
+          assignPickedAccount(account.id)
         }
       } label: {
         DisclosureValueRow(
@@ -611,9 +652,7 @@ struct TransactionFormView: View {
           prompt: "Which account?",
           candidates: accountCandidates
         ) { candidate in
-          draft.accountID = candidate.id
-          accountCandidates = []
-          showAccountPrompt = false
+          assignPickedAccount(candidate.id)
         }
       }
       CardDivider()
@@ -639,10 +678,16 @@ struct TransactionFormView: View {
     draft.isTransfer && model.accountsBothOnBudget(draft.accountID, draft.transferAccountID)
   }
 
+  private func assignPickedAccount(_ accountID: String) {
+    SlipAccountPick.apply(accountID, to: &draft)
+    accountCandidates = []
+    showAccountPrompt = false
+  }
+
   private func ambiguousRail(
     prompt: String,
-    candidates: [StubSlipReader.Candidate],
-    onPick: @escaping (StubSlipReader.Candidate) -> Void
+    candidates: [SlipCandidate],
+    onPick: @escaping (SlipCandidate) -> Void
   ) -> some View {
     VStack(alignment: .leading, spacing: 8) {
       Text(prompt)
