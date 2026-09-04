@@ -166,18 +166,126 @@ final class SlipReaderMappingTests: XCTestCase {
     XCTAssertEqual(mapped[0].draft.date, start)
   }
 
-  func testPromptPrefixPutsCatalogsBeforeTheSentence() {
+  func testUnmatchedAccountNameLeavesIDEmptyWithoutChips() {
+    let mapped = SlipReaderMapping.map(
+      [.init(amount: "5", account: "No Such Bank")],
+      accounts: [Self.account("acct-everyday", "Everyday Account")],
+      categoryGroups: [Self.everydayGroup],
+      payees: [],
+      calendar: Self.calendar,
+      now: Self.now
+    )
+    XCTAssertEqual(mapped.count, 1)
+    XCTAssertTrue(mapped[0].parsedAccount)
+    XCTAssertEqual(mapped[0].draft.accountID, "")
+    XCTAssertTrue(mapped[0].accountCandidates.isEmpty)
+  }
+
+  func testApplyKeepsSeededAccountWhenNameDoesNotMatch() {
+    var draft = TransactionDraft()
+    draft.accountID = "acct-everyday"
+    draft.direction = .inflow
+    let row = SlipReaderMapping.map(
+      [.init(amount: "5", account: "No Such Bank")],
+      accounts: [Self.account("acct-everyday", "Everyday Account")],
+      categoryGroups: [Self.everydayGroup],
+      payees: [],
+      calendar: Self.calendar,
+      now: Self.now
+    )[0]
+    let applied = ComposeParseApply.applying(row, to: draft)
+    XCTAssertEqual(applied.draft.accountID, "acct-everyday")
+    XCTAssertFalse(applied.showAccountPrompt)
+    XCTAssertTrue(applied.accountCandidates.isEmpty)
+    XCTAssertEqual(applied.draft.amountMagnitudeMilli, 5_000)
+    XCTAssertEqual(applied.draft.direction, .inflow)
+  }
+
+  func testApplyDoesNotForceOutflowWhenInflowWasToggled() {
+    var draft = TransactionDraft()
+    draft.direction = .inflow
+    draft.accountID = "acct-everyday"
+    let row = SlipReaderMapping.map(
+      [.init(amount: "5", category: "Groceries")],
+      accounts: [Self.account("acct-everyday", "Everyday Account")],
+      categoryGroups: [Self.everydayGroup],
+      payees: [],
+      calendar: Self.calendar,
+      now: Self.now
+    )[0]
+    XCTAssertFalse(row.parsedInflow)
+    let applied = ComposeParseApply.applying(row, to: draft)
+    XCTAssertEqual(applied.draft.direction, .inflow)
+  }
+
+  func testApplySetsInflowWhenTheSentenceReceivedMoney() {
+    var draft = TransactionDraft()
+    draft.direction = .outflow
+    let row = SlipReaderMapping.map(
+      [.init(amount: "5", isInflow: true)],
+      accounts: [],
+      categoryGroups: [],
+      payees: [],
+      calendar: Self.calendar,
+      now: Self.now
+    )[0]
+    XCTAssertTrue(row.parsedInflow)
+    let applied = ComposeParseApply.applying(row, to: draft)
+    XCTAssertEqual(applied.draft.direction, .inflow)
+  }
+
+  func testApplyShowsChipsAndClearsAccountWhenAmbiguous() {
+    var draft = TransactionDraft()
+    draft.accountID = "acct-everyday"
+    let row = SlipReaderMapping.map(
+      [.init(amount: "5", account: "Account")],
+      accounts: [
+        Self.account("acct-everyday", "Everyday Account"),
+        Self.account("acct-travel", "Travel Account"),
+      ],
+      categoryGroups: [Self.everydayGroup],
+      payees: [],
+      calendar: Self.calendar,
+      now: Self.now
+    )[0]
+    let applied = ComposeParseApply.applying(row, to: draft)
+    XCTAssertEqual(applied.draft.accountID, "")
+    XCTAssertTrue(applied.showAccountPrompt)
+    XCTAssertEqual(applied.accountCandidates.map(\.id), ["acct-everyday", "acct-travel"])
+  }
+
+  func testApplyUniqueAccountOverwritesASeededPick() {
+    var draft = TransactionDraft()
+    draft.accountID = "acct-travel"
+    let row = SlipReaderMapping.map(
+      [.init(amount: "5", account: "Everyday Account")],
+      accounts: [
+        Self.account("acct-everyday", "Everyday Account"),
+        Self.account("acct-travel", "Travel Card"),
+      ],
+      categoryGroups: [Self.everydayGroup],
+      payees: [],
+      calendar: Self.calendar,
+      now: Self.now
+    )[0]
+    let applied = ComposeParseApply.applying(row, to: draft)
+    XCTAssertEqual(applied.draft.accountID, "acct-everyday")
+    XCTAssertFalse(applied.showAccountPrompt)
+  }
+
+  func testPromptPrefixPutsCatalogsBeforeTheSentenceAndOmitsPayees() {
     let prefix = SlipReaderPrompt.prefix(
       accounts: [
         Self.account("acct-everyday", "Everyday Account"),
         Self.account("acct-closed", "Closed Card", closed: true),
       ],
-      categoryGroups: [Self.everydayGroup],
-      payees: []
+      categoryGroups: [Self.everydayGroup]
     )
     XCTAssertTrue(prefix.contains("Accounts: Everyday Account"))
     XCTAssertFalse(prefix.contains("Closed Card"))
     XCTAssertTrue(prefix.contains("Categories: Groceries, Dining Out"))
+    XCTAssertFalse(prefix.contains("Payees:"))
+    XCTAssertFalse(prefix.contains("FairPrice"))
     XCTAssertTrue(prefix.hasSuffix("Sentence:\n"))
     XCTAssertTrue((prefix + "I spent 5").contains("Sentence:\nI spent 5"))
   }

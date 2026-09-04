@@ -295,11 +295,11 @@ enum AddTransactionIntentBuilder {
     return draft
   }
 
-  /// Stale IDs drop only when a catalog is present. A missing catalog must
-  /// keep the pick. Shortcuts may also hand a display name instead of an id.
+  /// Shortcuts hands display names. Without a catalog those names are not
+  /// ledger IDs — leaving them on the draft would enable Save on Choose Account.
   private static func resolveAccount(_ raw: String, catalog: IntentCatalogSnapshot?) -> String? {
     guard let catalog else {
-      return raw
+      return nil
     }
     let accounts = catalog.openAccounts
     if accounts.contains(where: { $0.id == raw }) {
@@ -310,7 +310,7 @@ enum AddTransactionIntentBuilder {
 
   private static func resolveCategory(_ raw: String, catalog: IntentCatalogSnapshot?) -> String? {
     guard let catalog else {
-      return raw
+      return nil
     }
     let categories = catalog.pickerCategories
     if categories.contains(where: { $0.id == raw }) {

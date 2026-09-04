@@ -471,38 +471,15 @@ struct TransactionFormView: View {
       }
       return
     }
+    let applied = ComposeParseApply.applying(row, to: draft)
+    draft = applied.draft
+    accountCandidates = applied.accountCandidates
+    categoryCandidates = applied.categoryCandidates
+    showAccountPrompt = applied.showAccountPrompt
+    showCategoryPrompt = applied.showCategoryPrompt
     if row.parsedAmount {
-      draft.amountMagnitudeMilli = row.draft.amountMagnitudeMilli
       keypad.setValue(row.draft.amountMagnitudeMilli)
     }
-    draft.direction = row.draft.direction
-    if row.parsedDate {
-      draft.date = row.draft.date
-    }
-    if !row.draft.payeeName.isEmpty || row.draft.payeeID != nil {
-      draft.payeeID = row.draft.payeeID
-      draft.payeeName = row.draft.payeeName
-      draft.transferAccountID = row.draft.transferAccountID
-    }
-    categoryCandidates = row.categoryCandidates
-    if let categoryID = row.draft.categoryID {
-      draft.categoryID = categoryID
-      showCategoryPrompt = false
-    } else {
-      showCategoryPrompt = !row.categoryCandidates.isEmpty
-      if showCategoryPrompt {
-        draft.categoryID = nil
-      }
-    }
-    accountCandidates = row.accountCandidates
-    if row.parsedAccount {
-      if row.draft.accountID.isEmpty {
-        draft.accountID = ""
-      } else {
-        draft.accountID = row.draft.accountID
-      }
-    }
-    showAccountPrompt = !row.accountCandidates.isEmpty
     withAnimation(.snappy) {
       isKeypadVisible = draft.amountMagnitudeMilli == 0
     }

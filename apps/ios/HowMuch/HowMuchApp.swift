@@ -185,6 +185,7 @@ private struct RootView: View {
     }
     .sheet(item: $capture.presented) { request in
       CaptureIntakeHost(request: request)
+        .id(request.id)
     }
     .onAppear {
       consumePendingCapture()
@@ -221,15 +222,20 @@ private struct CaptureIntakeHost: View {
   @State private var reviewDrafts: [TransactionDraft]?
 
   var body: some View {
-    if let reviewDrafts {
-      IntakeReviewListView(
-        drafts: reviewDrafts,
-        preferredAccountID: model.preferredCaptureAccountID
-      )
-    } else {
-      AddTransactionSheet(request: request) { drafts in
-        reviewDrafts = drafts
+    Group {
+      if let reviewDrafts {
+        IntakeReviewListView(
+          drafts: reviewDrafts,
+          preferredAccountID: model.preferredCaptureAccountID
+        )
+      } else {
+        AddTransactionSheet(request: request) { drafts in
+          reviewDrafts = drafts
+        }
       }
+    }
+    .onChange(of: request.id) { _, _ in
+      reviewDrafts = nil
     }
   }
 }
