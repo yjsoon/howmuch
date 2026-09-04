@@ -53,6 +53,7 @@
 		A20000000000000000000091 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
 		A20000000000000000000093 /* InboxStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000092 /* InboxStoreTests.swift */; };
 		A20000000000000000000095 /* InboxReadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000094 /* InboxReadingView.swift */; };
+		A20000000000000000000097 /* IntelligenceAura.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000096 /* IntelligenceAura.swift */; };
 		A30000000000000000000003 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000002 /* ShareViewController.swift */; };
 		A30000000000000000000006 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
 		A3000000000000000000000B /* HowMuchShare.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* HowMuchShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -79,6 +80,7 @@
 		A20000000000000000000090 /* InboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxStore.swift; sourceTree = "<group>"; };
 		A20000000000000000000092 /* InboxStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxStoreTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000094 /* InboxReadingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxReadingView.swift; sourceTree = "<group>"; };
+		A20000000000000000000096 /* IntelligenceAura.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelligenceAura.swift; sourceTree = "<group>"; };
 		A30000000000000000000001 /* HowMuchShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HowMuchShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A30000000000000000000002 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		A30000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -267,6 +269,7 @@
 				A20000000000000000000012 /* CaptureRouter.swift */,
 				A20000000000000000000090 /* InboxStore.swift */,
 				A20000000000000000000094 /* InboxReadingView.swift */,
+				A20000000000000000000096 /* IntelligenceAura.swift */,
 				A20000000000000000000040 /* SlipReader.swift */,
 			);
 			path = Capture;
@@ -473,6 +476,7 @@
 				A20000000000000000000081 /* IntakeReviewListView.swift in Sources */,
 				A20000000000000000000091 /* InboxStore.swift in Sources */,
 				A20000000000000000000095 /* InboxReadingView.swift in Sources */,
+				A20000000000000000000097 /* IntelligenceAura.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

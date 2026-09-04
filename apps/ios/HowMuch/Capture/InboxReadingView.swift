@@ -16,28 +16,23 @@ struct InboxReadingView: View {
 
   var body: some View {
     NavigationStack {
-      VStack(spacing: 16) {
-        if let thumbnail {
-          Image(uiImage: thumbnail)
-            .resizable()
-            .scaledToFit()
-            .frame(maxHeight: 180)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        } else {
-          Image(systemName: "doc.text")
-            .font(.largeTitle)
-            .foregroundStyle(.secondary)
+      ZStack {
+        Theme.canvas
+        IntelligenceAura()
+        VStack(spacing: 18) {
+          Spacer()
+          sourcePreview
+          Text("Stays on this device")
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(Theme.textPrimary.opacity(0.72))
+          Spacer()
         }
-        Text("Stays on this device")
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-        Spacer()
+        .padding(28)
       }
-      .padding(16)
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-      .background(Theme.canvas)
+      .ignoresSafeArea()
       .navigationTitle("Reading…")
       .navigationBarTitleDisplayMode(.inline)
+      .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Cancel") {
@@ -50,6 +45,44 @@ struct InboxReadingView: View {
         await readInbox()
       }
     }
+  }
+
+  @ViewBuilder
+  private var sourcePreview: some View {
+    let shape = RoundedRectangle(cornerRadius: 28, style: .continuous)
+    ZStack {
+      IntelligenceHalo()
+        .blur(radius: 18)
+        .frame(width: 240, height: 240)
+        .scaleEffect(1.15)
+      if let thumbnail {
+        Image(uiImage: thumbnail)
+          .resizable()
+          .scaledToFill()
+          .frame(width: 168, height: 168)
+          .clipShape(shape)
+          .overlay {
+            IntelligenceHalo()
+              .mask(shape.stroke(lineWidth: 3))
+          }
+          .shadow(color: Color(red: 0.45, green: 0.38, blue: 0.95).opacity(0.35), radius: 24)
+      } else {
+        Circle()
+          .fill(.ultraThinMaterial)
+          .frame(width: 148, height: 148)
+          .overlay {
+            IntelligenceHalo()
+              .mask(Circle().stroke(lineWidth: 4))
+          }
+          .overlay {
+            Image(systemName: "doc.text")
+              .font(.system(size: 36, weight: .medium))
+              .foregroundStyle(Theme.textPrimary.opacity(0.78))
+          }
+          .shadow(color: Color(red: 0.45, green: 0.38, blue: 0.95).opacity(0.4), radius: 28)
+      }
+    }
+    .accessibilityHidden(true)
   }
 
   @MainActor

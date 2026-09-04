@@ -180,6 +180,7 @@ struct TransactionFormView: View {
   @State private var showAccountPrompt = false
   @State private var showCategoryPrompt = false
   @State private var parseTask: Task<Void, Never>?
+  @State private var isParsing = false
   @FocusState private var isComposeFocused: Bool
   private let isEditing: Bool
   private let allowsDeletion: Bool
@@ -280,7 +281,14 @@ struct TransactionFormView: View {
           .transition(.move(edge: .bottom))
         }
       }
-      .background(Theme.canvas)
+      .background {
+        ZStack {
+          Theme.canvas
+          if isParsing {
+            IntelligenceAura(intensity: 0.62)
+          }
+        }
+      }
       .navigationDestination(isPresented: $isAutoAdvancingToPayee) {
         PayeePickerView(draft: $draft)
       }
@@ -446,6 +454,8 @@ struct TransactionFormView: View {
     let categoryGroups = model.categoryGroups
     let payees = model.payees
     parseTask = Task { @MainActor in
+      isParsing = true
+      defer { isParsing = false }
       let mapped = await SlipReader.shared.interpret(
         text: text,
         accounts: accounts,
