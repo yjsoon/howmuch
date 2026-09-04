@@ -20,7 +20,7 @@ struct AddFromImageIntent: AppIntent {
     let write: InboxWrite
     do {
       write = try InboxIntentHandoff.imageWrite(image.data, filename: Self.filename(for: image))
-    } catch {
+    } catch InboxIntentHandoff.Error.empty {
       throw $image.needsValueError()
     }
     try InboxIntentHandoff.enqueue(write)
@@ -42,7 +42,6 @@ struct AddFromImageIntent: AppIntent {
         return "payload.webp"
       }
     }
-    let name = file.filename
-    return name.isEmpty ? "payload.img" : name
+    return "payload.img"
   }
 }

@@ -72,6 +72,50 @@ final class AddFromInboxIntentTests: XCTestCase {
     XCTAssertNil(intent.account)
     XCTAssertNil(intent.memo)
   }
+
+  func testUnknownImageTypeIgnoresHostileFilename() {
+    let file = IntentFile(
+      data: Data("webp-not".utf8),
+      filename: "../manifest.json",
+      type: .data
+    )
+    XCTAssertEqual(AddFromImageIntent.filename(for: file), "payload.img")
+  }
+
+  func testPngUsesPayloadPngEvenWhenFilenameIsHostile() {
+    let file = IntentFile(
+      data: Data([0x89, 0x50, 0x4E, 0x47]),
+      filename: "manifest.json",
+      type: .png
+    )
+    XCTAssertEqual(AddFromImageIntent.filename(for: file), "payload.png")
+  }
+
+  func testOversizedImagePerformThrowsPayloadTooLargeNotNeedsValue() async {
+    var intent = AddFromImageIntent()
+    intent.image = IntentFile(
+      data: Data(repeating: 0x01, count: InboxStore.maxPayloadBytes + 1),
+      filename: "huge.png",
+      type: .png
+    )
+    do {
+      _ = try await intent.perform()
+      XCTFail("expected payloadTooLarge")
+    } catch let error as InboxIntentHandoff.Error {
+      XCTAssertEqual(error, .payloadTooLarge)
+    } catch {
+      XCTFail("wrong error \(error)")
+    }
+    XCTAssertTrue(store.claimInboxThrowsNothing())
+    XCTAssertNil(CaptureRouter.shared.pending)
+  }
+
+  func testOversizedTextWriteThrowsPayloadTooLarge() {
+    let text = String(repeating: "a", count: InboxStore.maxPayloadBytes + 1)
+    XCTAssertThrowsError(try InboxIntentHandoff.textWrite(text)) { error in
+      XCTAssertEqual(error as? InboxIntentHandoff.Error, .payloadTooLarge)
+    }
+  }
 }
 
 private extension InboxStore {

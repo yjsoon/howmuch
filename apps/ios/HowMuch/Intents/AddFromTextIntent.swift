@@ -2,9 +2,18 @@ import AppIntents
 import Foundation
 
 enum InboxIntentHandoff {
-  enum Error: Swift.Error, Equatable {
+  enum Error: Swift.Error, Equatable, CustomLocalizedStringResourceConvertible {
     case empty
     case payloadTooLarge
+
+    var localizedStringResource: LocalizedStringResource {
+      switch self {
+      case .empty:
+        return "Choose a value."
+      case .payloadTooLarge:
+        return "That file is too large for HowMuch. Use a smaller image or a shorter sentence."
+      }
+    }
   }
 
   static var store: InboxStore = .shared
@@ -70,7 +79,7 @@ struct AddFromTextIntent: AppIntent {
     let write: InboxWrite
     do {
       write = try InboxIntentHandoff.textWrite(text)
-    } catch {
+    } catch InboxIntentHandoff.Error.empty {
       throw $text.needsValueError()
     }
     try InboxIntentHandoff.enqueue(write)
