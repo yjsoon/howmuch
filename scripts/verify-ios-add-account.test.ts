@@ -13,6 +13,7 @@ describe("iOS add account", () => {
   test("Accounts exposes New Account and posts through the existing create route", () => {
     const accounts = read("apps/ios/HowMuch/Views/AccountsView.swift");
     const sheet = read("apps/ios/HowMuch/Views/NewAccountSheet.swift");
+    const fields = read("apps/ios/HowMuch/Views/AccountIdentityFields.swift");
     const client = read("apps/ios/HowMuch/Services/APIClient.swift");
     const model = read("apps/ios/HowMuch/AppModel.swift");
     const kinds = read("apps/ios/HowMuch/Models/AccountGroups.swift");
@@ -23,11 +24,15 @@ describe("iOS add account", () => {
     expect(accounts).toContain("NewAccountSheet()");
     expect(sheet).toContain('.navigationTitle("New Account")');
     expect(sheet).toContain("model.createAccount(");
+    expect(sheet).toContain("AccountIdentityFields(");
     expect(sheet).toContain("Amount owed");
     expect(sheet).toContain("Enter what you currently owe.");
     expect(sheet).toContain("Listed as");
-    expect(sheet).toContain(".listStyle(.insetGrouped)");
     expect(sheet).toContain("scrollDismissesKeyboard(.interactively)");
+    expect(fields).toContain("Text(\"Type\")");
+    expect(fields).toContain("Text(\"Icon\")");
+    expect(fields).toContain(".listStyle(.insetGrouped)");
+    expect(sheet.indexOf("AccountIdentityFields(")).toBeLessThan(sheet.indexOf("balanceCard"));
     expect(accounts).toContain("No Accounts");
     expect(client).toContain('path: "/v1/plans/\\(planID)/accounts"');
     expect(client).toContain('method: "POST"');

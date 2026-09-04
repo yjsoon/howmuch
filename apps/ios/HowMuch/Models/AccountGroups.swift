@@ -124,6 +124,49 @@ enum AccountKind: String, CaseIterable, Identifiable, Hashable {
   }
 }
 
+/// Create only produces `.kind`. Imported YNAB types without an `AccountKind`
+/// (`personalLoan`, `otherDebt`, `payPal`) stay `.imported` until a kind is picked.
+enum AccountClassification: Hashable {
+  case kind(AccountKind)
+  case imported(type: String)
+
+  init(type: String) {
+    self = AccountKind(rawValue: type).map(Self.kind) ?? .imported(type: type)
+  }
+
+  var type: String {
+    switch self {
+    case .kind(let kind): kind.rawValue
+    case .imported(let type): type
+    }
+  }
+
+  var kind: AccountKind? {
+    if case .kind(let kind) = self { return kind }
+    return nil
+  }
+
+  var title: String {
+    switch self {
+    case .kind(let kind):
+      kind.title
+    case .imported(let type):
+      Self.humanized(type)
+    }
+  }
+
+  var defaultIcon: AccountIcon {
+    AccountIcon.default(for: type)
+  }
+
+  private static func humanized(_ type: String) -> String {
+    type.replacingOccurrences(of: "([a-z0-9])([A-Z])", with: "$1 $2", options: .regularExpression)
+      .split(separator: " ")
+      .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+      .joined(separator: " ")
+  }
+}
+
 /// Built-in account sections. Favourites is a user collection.
 /// Cash, Credit, Tracking, and Closed are a type index.
 enum AccountSystemGroup: String, CaseIterable, Identifiable {

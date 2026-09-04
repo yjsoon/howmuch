@@ -845,25 +845,33 @@ struct AccountPayload: Decodable {
   let account: Account
 }
 
-struct AccountIconWriteRequest: Encodable {
+struct AccountIdentity: Hashable {
+  var name: String
+  var classification: AccountClassification
+  var icon: AccountIcon
+}
+
+struct AccountUpdateRequest: Encodable {
   let account: AccountWriteBody
 
-  init(icon: String? = nil, name: String? = nil) {
-    account = AccountWriteBody(icon: icon, name: name)
+  init(name: String?, icon: String?, type: String?) {
+    account = AccountWriteBody(name: name, icon: icon, type: type)
   }
 
   struct AccountWriteBody: Encodable {
-    let icon: String?
     let name: String?
+    let icon: String?
+    let type: String?
 
     enum CodingKeys: String, CodingKey {
-      case icon, name
+      case name, icon, type
     }
 
     func encode(to encoder: Encoder) throws {
       var container = encoder.container(keyedBy: CodingKeys.self)
-      try container.encodeIfPresent(icon, forKey: .icon)
       try container.encodeIfPresent(name, forKey: .name)
+      try container.encodeIfPresent(icon, forKey: .icon)
+      try container.encodeIfPresent(type, forKey: .type)
     }
   }
 }
@@ -1157,17 +1165,22 @@ struct Account: Decodable, Identifiable, Hashable {
     AccountIcon.displayGlyph(stored: icon, accountType: type)
   }
 
-  func withIcon(_ icon: String) -> Account {
-    withIdentity(name: name, icon: icon)
-  }
-
-  func withIdentity(name: String, icon: String) -> Account {
-    Account(
+  func with(_ identity: AccountIdentity) -> Account {
+    let nextType: String
+    let nextOnBudget: Bool
+    if case .kind(let kind) = identity.classification {
+      nextType = kind.rawValue
+      nextOnBudget = kind.onBudget
+    } else {
+      nextType = type
+      nextOnBudget = onBudget
+    }
+    return Account(
       id: id,
-      name: name,
-      icon: icon,
-      type: type,
-      onBudget: onBudget,
+      name: identity.name,
+      icon: identity.icon.rawValue,
+      type: nextType,
+      onBudget: nextOnBudget,
       closed: closed,
       balance: balance,
       clearedBalance: clearedBalance,

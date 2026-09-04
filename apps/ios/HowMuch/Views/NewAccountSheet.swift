@@ -7,26 +7,25 @@ struct NewAccountSheet: View {
   @State private var name = ""
   @State private var kind = AccountKind.checking
   @State private var balanceText = ""
-  @State private var icon = AccountIcon.default(for: AccountKind.checking.rawValue)
-  @State private var iconIsCustom = false
-  @State private var isPickingIcon = false
+  @State private var icon = AccountIconChoice.followsType
   @State private var error: String?
   @State private var isSaving = false
-  @FocusState private var focusedField: Field?
-
-  private enum Field: Hashable {
-    case name
-    case balance
-  }
+  @FocusState private var nameFocused: Bool
+  @FocusState private var balanceFocused: Bool
 
   var body: some View {
     NavigationStack {
       ScrollView {
         VStack(alignment: .leading, spacing: 16) {
-          nameCard
-          typeCard
+          AccountIdentityFields(
+            name: $name,
+            kind: $kind,
+            icon: $icon,
+            nameFocus: $nameFocused,
+            onSubmitName: { balanceFocused = true }
+          )
+          .disabled(isSaving)
           balanceCard
-          iconCard
           if let error {
             Text(error)
               .font(.footnote)
@@ -70,80 +69,15 @@ struct NewAccountSheet: View {
         ToolbarItemGroup(placement: .keyboard) {
           Spacer()
           Button("Done") {
-            focusedField = nil
+            nameFocused = false
+            balanceFocused = false
           }
         }
       }
       .interactiveDismissDisabled(isSaving)
       .task {
         await Task.yield()
-        focusedField = .name
-      }
-    }
-  }
-
-  private var nameCard: some View {
-    Group {
-      if dynamicTypeSize.isAccessibilitySize {
-        VStack(alignment: .leading, spacing: 6) {
-          Text("Name")
-            .foregroundStyle(Theme.textPrimary)
-          nameField
-        }
-      } else {
-        HStack {
-          Text("Name")
-            .foregroundStyle(Theme.textPrimary)
-          nameField
-            .multilineTextAlignment(.trailing)
-        }
-      }
-    }
-    .padding(.horizontal, 16)
-    .padding(.vertical, 13)
-    .ynabCard()
-  }
-
-  private var nameField: some View {
-    TextField(kind.placeholderName, text: $name)
-      .textInputAutocapitalization(.words)
-      .focused($focusedField, equals: .name)
-      .submitLabel(.next)
-      .onSubmit { focusedField = .balance }
-      .disabled(isSaving)
-  }
-
-  private var typeCard: some View {
-    NavigationLink {
-      AccountKindPicker(selection: $kind)
-    } label: {
-      HStack {
-        Text("Type")
-          .foregroundStyle(Theme.textPrimary)
-        Spacer()
-        Text(kind.defaultIcon.rawValue)
-          .font(.title3)
-          .accessibilityHidden(true)
-        Text(kind.title)
-          .foregroundStyle(.secondary)
-        Image(systemName: "chevron.right")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.secondary)
-          .accessibilityHidden(true)
-      }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 13)
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .disabled(isSaving)
-    .ynabCard()
-    .accessibilityLabel("Type")
-    .accessibilityValue(kind.title)
-    .accessibilityHint("Opens the account type list")
-    .onChange(of: kind) { _, next in
-      if !iconIsCustom {
-        icon = next.defaultIcon
+        nameFocused = true
       }
     }
   }
@@ -184,45 +118,9 @@ struct NewAccountSheet: View {
   private var balanceField: some View {
     TextField("0.00", text: $balanceText)
       .keyboardType(kind.storesLiability ? .decimalPad : .numbersAndPunctuation)
-      .focused($focusedField, equals: .balance)
+      .focused($balanceFocused)
       .disabled(isSaving)
       .accessibilityLabel(balanceLabel)
-  }
-
-  private var iconCard: some View {
-    Button {
-      focusedField = nil
-      isPickingIcon = true
-    } label: {
-      HStack {
-        Text("Icon")
-          .foregroundStyle(Theme.textPrimary)
-        Spacer()
-        Text(icon.rawValue)
-          .font(.title3)
-          .accessibilityHidden(true)
-        Image(systemName: "chevron.right")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.secondary)
-          .accessibilityHidden(true)
-      }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 13)
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .disabled(isSaving)
-    .ynabCard()
-    .accessibilityLabel("Icon")
-    .accessibilityValue(icon.rawValue)
-    .accessibilityHint("Opens the icon picker")
-    .sheet(isPresented: $isPickingIcon) {
-      AccountIconPicker(selected: icon) { picked in
-        icon = picked
-        iconIsCustom = true
-        isPickingIcon = false
-      }
-    }
   }
 
   private var trimmedName: String {
@@ -272,7 +170,8 @@ struct NewAccountSheet: View {
 
   private func save() async {
     guard let enteredBalance, canSave else { return }
-    focusedField = nil
+    nameFocused = false
+    balanceFocused = false
     isSaving = true
     error = nil
     do {
@@ -280,58 +179,12 @@ struct NewAccountSheet: View {
         name: trimmedName,
         kind: kind,
         enteredBalance: enteredBalance,
-        icon: icon
+        icon: icon.resolved(default: kind.defaultIcon)
       )
       dismiss()
     } catch {
       self.error = error.localizedDescription
       isSaving = false
     }
-  }
-}
-
-private struct AccountKindPicker: View {
-  @Environment(\.dismiss) private var dismiss
-  @Binding var selection: AccountKind
-
-  var body: some View {
-    List {
-      ForEach(AccountKind.Group.allCases) { group in
-        Section {
-          ForEach(AccountKind.kinds(in: group)) { kind in
-            Button {
-              selection = kind
-              dismiss()
-            } label: {
-              HStack(spacing: 12) {
-                Text(kind.defaultIcon.rawValue)
-                  .font(.title3)
-                  .frame(width: 32)
-                  .accessibilityHidden(true)
-                Text(kind.title)
-                  .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                if selection == kind {
-                  Image(systemName: "checkmark")
-                    .foregroundStyle(Theme.accent)
-                    .accessibilityHidden(true)
-                }
-              }
-            }
-            .accessibilityLabel(kind.title)
-            .accessibilityAddTraits(selection == kind ? [.isSelected] : [])
-          }
-        } header: {
-          Text(group.title)
-        } footer: {
-          Text(group.footer)
-        }
-      }
-    }
-    .listStyle(.insetGrouped)
-    .scrollContentBackground(.hidden)
-    .background(Theme.canvas)
-    .navigationTitle("Account Type")
-    .navigationBarTitleDisplayMode(.inline)
   }
 }

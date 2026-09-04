@@ -123,8 +123,8 @@ struct AccountsView: View {
           }
         case .reorder(let group):
           AccountGroupReorderSheet(group: group)
-        case .icon(let account):
-          AccountIdentityEditorSheet(account: account)
+        case .edit(let account):
+          EditAccountSheet(account: account)
         case .newAccount:
           NewAccountSheet()
         }
@@ -361,8 +361,21 @@ struct AccountsView: View {
       Button("Groups") {
         presentedSheet = .memberships(account.id)
       }
-      Button("Change icon") {
-        presentedSheet = .icon(account)
+      Button("Edit Account") {
+        presentedSheet = .edit(account)
+      }
+    }
+    .contextMenu {
+      if !account.closed {
+        Button(model.isAccountFavourite(account.id) ? "Remove from Favourites" : "Add to Favourites") {
+          model.toggleAccountFavourite(account.id)
+        }
+      }
+      Button("Groups") {
+        presentedSheet = .memberships(account.id)
+      }
+      Button("Edit Account") {
+        presentedSheet = .edit(account)
       }
     }
   }
@@ -610,7 +623,7 @@ private enum AccountsSheet: Identifiable {
   case memberships(String)
   case editGroup(CustomAccountGroup)
   case reorder(AccountGroupManagementItem)
-  case icon(Account)
+  case edit(Account)
   case newAccount
 
   var id: String {
@@ -621,7 +634,7 @@ private enum AccountsSheet: Identifiable {
     case .memberships(let accountID): "memberships-\(accountID)"
     case .editGroup(let group): "edit-\(group.id)"
     case .reorder(let group): "reorder-\(group.id)"
-    case .icon(let account): "icon-\(account.id)"
+    case .edit(let account): "edit-account-\(account.id)"
     case .newAccount: "new-account"
     }
   }
@@ -1011,172 +1024,5 @@ private struct CustomAccountGroupEditor: View {
 
   private var nameError: String? {
     model.customAccountGroupNameError(name, excluding: group.id)
-  }
-}
-
-struct AccountIdentityEditorSheet: View {
-  @Environment(AppModel.self) private var model
-  @Environment(\.dismiss) private var dismiss
-  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-  let account: Account
-  @State private var name: String
-  @State private var icon: AccountIcon
-  @State private var writesIcon: Bool
-  @State private var error: String?
-  @State private var isSaving = false
-  @State private var isPickingIcon = false
-
-  init(account: Account) {
-    self.account = account
-    _name = State(initialValue: account.name)
-    if let parsed = AccountIcon(rawValue: account.displayIcon) {
-      _icon = State(initialValue: parsed)
-      _writesIcon = State(initialValue: true)
-    } else {
-      _icon = State(initialValue: .default(for: account.type))
-      _writesIcon = State(initialValue: false)
-    }
-  }
-
-  var body: some View {
-    NavigationStack {
-      ScrollView {
-        VStack(alignment: .leading, spacing: 16) {
-          nameCard
-          iconCard
-          if let error {
-            Text(error)
-              .font(.footnote)
-              .foregroundStyle(Theme.outflow)
-          }
-        }
-        .padding(16)
-      }
-      .background(Theme.canvas)
-      .navigationTitle("Edit name and icon")
-      .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button {
-            dismiss()
-          } label: {
-            Image(systemName: "xmark")
-              .font(.body.weight(.semibold))
-              .foregroundStyle(Theme.textPrimary)
-          }
-          .disabled(isSaving)
-          .accessibilityLabel("Cancel")
-        }
-        ToolbarItem(placement: .confirmationAction) {
-          if isSaving {
-            ProgressView()
-              .accessibilityLabel("Saving")
-          } else {
-            Button {
-              Task { await save() }
-            } label: {
-              Image(systemName: "checkmark")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(canSave ? Theme.accent : Color.secondary)
-            }
-            .disabled(!canSave)
-            .accessibilityLabel("Save")
-          }
-        }
-      }
-      .interactiveDismissDisabled(isSaving)
-    }
-  }
-
-  private var nameCard: some View {
-    Group {
-      if dynamicTypeSize.isAccessibilitySize {
-        VStack(alignment: .leading, spacing: 6) {
-          Text("Name")
-            .foregroundStyle(Theme.textPrimary)
-          nameField
-        }
-      } else {
-        HStack {
-          Text("Name")
-            .foregroundStyle(Theme.textPrimary)
-          nameField
-            .multilineTextAlignment(.trailing)
-        }
-      }
-    }
-    .padding(.horizontal, 16)
-    .padding(.vertical, 13)
-    .ynabCard()
-  }
-
-  private var nameField: some View {
-    TextField("Account name", text: $name)
-      .textInputAutocapitalization(.words)
-      .disabled(isSaving)
-  }
-
-  private var iconCard: some View {
-    Button {
-      isPickingIcon = true
-    } label: {
-      HStack {
-        Text("Icon")
-          .foregroundStyle(Theme.textPrimary)
-        Spacer()
-        Text(shownIcon)
-          .font(.title3)
-          .accessibilityHidden(true)
-        Image(systemName: "chevron.right")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.secondary)
-          .accessibilityHidden(true)
-      }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 13)
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .disabled(isSaving)
-    .ynabCard()
-    .accessibilityLabel("Icon")
-    .accessibilityValue(shownIcon)
-    .accessibilityHint("Opens the icon picker")
-    .sheet(isPresented: $isPickingIcon) {
-      AccountIconPicker(selected: writesIcon ? icon : nil) { picked in
-        icon = picked
-        writesIcon = true
-        isPickingIcon = false
-      }
-    }
-  }
-
-  private var shownIcon: String {
-    writesIcon ? icon.rawValue : account.displayIcon
-  }
-
-  private var trimmedName: String {
-    name.trimmingCharacters(in: .whitespacesAndNewlines)
-  }
-
-  private var canSave: Bool {
-    !trimmedName.isEmpty
-  }
-
-  private func save() async {
-    guard canSave else { return }
-    isSaving = true
-    error = nil
-    do {
-      try await model.setAccountIdentity(
-        name: trimmedName,
-        icon: writesIcon ? icon : nil,
-        for: account.id
-      )
-      dismiss()
-    } catch {
-      self.error = error.localizedDescription
-      isSaving = false
-    }
   }
 }
