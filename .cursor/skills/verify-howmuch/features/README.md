@@ -67,6 +67,7 @@ iOS (Simulator + same API). Specs in `docs/frontend/intake-ui.md` and `docs/fron
 
 - [iOS connection](./ios-connection.md) covers pointing Simulator at the verify API, signing in as `verifier`, and refusing production.
 - [iOS add account](./ios-add-account.md) covers creating a bank account or card from the Accounts plus.
+- [iOS edit account](./ios-edit-account.md) covers changing an account’s name, type, and icon from Accounts or the register.
 - [iOS capture](./ios-capture.md) covers the existing Add Transaction sheet, keypad Save, Duplicate for Today, and the Add Expense Quick Action. After #98 those doors share one sheet.
 - [iOS intake compose](./ios-intake-compose.md) covers the typed/pasted compose field, `N == 1` prefill, ambiguous ochre chips, and Apple Intelligence off (#99 / #102). Skip until the field exists.
 - [iOS intake review list](./ios-intake-review-list.md) covers two spends in one sentence opening **{N} Transactions** (#103). Skip until that sheet exists.

@@ -102,6 +102,7 @@ Check the running app, not the spec, before driving a planned recipe. If the han
 | --- | --- |
 | [iOS connection](features/ios-connection.md) | Connection sheet exists (always) |
 | [iOS add account](features/ios-add-account.md) | Accounts trailing plus **New Account** exists |
+| [iOS edit account](features/ios-edit-account.md) | Accounts row **Edit Account** and register title editor exist |
 | [iOS capture](features/ios-capture.md) | Add Transaction sheet exists (always). After #98, Duplicate / + / Quick Action share one door |
 | [iOS intake compose](features/ios-intake-compose.md) | A compose `TextField` sits above the amount header on Add Transaction (#99 / #102) |
 | [iOS intake review list](features/ios-intake-review-list.md) | Two spends in one typed sentence open **{N} Transactions** (#103) |
