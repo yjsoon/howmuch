@@ -169,6 +169,12 @@ struct TransactionFormView: View {
   @State private var isConfirmingSplitRemoval = false
   @State private var isAutoAdvancingToPayee = false
   @State private var hasCommitted = false
+  @State private var composeText = ""
+  @State private var accountCandidates: [StubSlipReader.Candidate] = []
+  @State private var categoryCandidates: [StubSlipReader.Candidate] = []
+  @State private var showAccountPrompt = false
+  @State private var showCategoryPrompt = false
+  @FocusState private var isComposeFocused: Bool
   private let isEditing: Bool
   private let allowsDeletion: Bool
 
@@ -191,6 +197,9 @@ struct TransactionFormView: View {
       VStack(spacing: 0) {
         ScrollView {
           VStack(spacing: 14) {
+            if showsCompose {
+              composeField
+            }
             amountHeader
             detailCard
             splitCard
@@ -267,7 +276,7 @@ struct TransactionFormView: View {
         }
       }
       .overlay(alignment: .bottomTrailing) {
-        if !isKeypadVisible {
+        if !isKeypadVisible && !isComposeFocused {
           saveButton
             .padding(20)
         }
@@ -309,6 +318,25 @@ struct TransactionFormView: View {
       .onChange(of: keypad) {
         draft.amountMagnitudeMilli = keypad.display
       }
+      .onChange(of: isComposeFocused) { _, focused in
+        if focused {
+          withAnimation(.snappy) {
+            isKeypadVisible = false
+          }
+        }
+      }
+      .onChange(of: draft.accountID) { _, _ in
+        if !draft.accountID.isEmpty {
+          accountCandidates = []
+          showAccountPrompt = false
+        }
+      }
+      .onChange(of: draft.categoryID) { _, _ in
+        if draft.categoryID != nil {
+          categoryCandidates = []
+          showCategoryPrompt = false
+        }
+      }
     }
   }
 
@@ -330,6 +358,86 @@ struct TransactionFormView: View {
     draft.payeeID != nil || !draft.payeeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
+  private var showsCompose: Bool {
+    !isEditing && ComposeIntelligence.showsField
+  }
+
+  private var composePlaceholder: String {
+    let category = placeholderCategoryName
+    let account = model.account(withID: draft.accountID)?.name
+      ?? model.openAccounts.first?.name
+      ?? "Account"
+    return "5 of \(category) on \(account)"
+  }
+
+  private var placeholderCategoryName: String {
+    let live = model.categoryGroups
+      .filter { !$0.deleted && !$0.isQuiet }
+      .flatMap { $0.categories.filter { !$0.deleted } }
+    if let groceries = live.first(where: { $0.name.localizedCaseInsensitiveCompare("Groceries") == .orderedSame }) {
+      return groceries.name
+    }
+    return live.first?.name ?? "Groceries"
+  }
+
+  private var composeField: some View {
+    TextField(composePlaceholder, text: $composeText)
+      .textFieldStyle(.plain)
+      .submitLabel(.go)
+      .focused($isComposeFocused)
+      .onSubmit(parseCompose)
+      .padding(.horizontal, 16)
+      .frame(height: 48)
+      .ynabCard()
+  }
+
+  private func parseCompose() {
+    let outcome = StubSlipReader.read(
+      text: composeText,
+      placeholder: composePlaceholder,
+      accounts: model.openAccounts,
+      categoryGroups: model.categoryGroups
+    )
+    let parsed = outcome.amountMilli != nil
+      || outcome.categoryID != nil
+      || outcome.accountID != nil
+      || !outcome.accountCandidates.isEmpty
+      || !outcome.categoryCandidates.isEmpty
+    guard parsed else {
+      isComposeFocused = false
+      withAnimation(.snappy) {
+        isKeypadVisible = draft.amountMagnitudeMilli == 0
+      }
+      return
+    }
+    if let amountMilli = outcome.amountMilli {
+      draft.amountMagnitudeMilli = amountMilli
+      keypad.setValue(amountMilli)
+    }
+    categoryCandidates = outcome.categoryCandidates
+    if let categoryID = outcome.categoryID {
+      draft.categoryID = categoryID
+      showCategoryPrompt = false
+    } else {
+      showCategoryPrompt = !outcome.categoryCandidates.isEmpty
+      if showCategoryPrompt {
+        draft.categoryID = nil
+      }
+    }
+    accountCandidates = outcome.accountCandidates
+    if let accountID = outcome.accountID {
+      draft.accountID = accountID
+      showAccountPrompt = false
+    } else {
+      draft.accountID = ""
+      showAccountPrompt = true
+    }
+    isComposeFocused = false
+    withAnimation(.snappy) {
+      isKeypadVisible = draft.amountMagnitudeMilli == 0
+    }
+  }
+
   private var amountHeader: some View {
     VStack(spacing: 14) {
       if !draft.isSplit {
@@ -338,10 +446,9 @@ struct TransactionFormView: View {
 
       Button {
         guard !draft.isSplit else {
-          // Split totals are the sum of their lines; the amount stays put so
-          // the API's split invariant holds.
           return
         }
+        isComposeFocused = false
         withAnimation(.snappy) {
           isKeypadVisible = true
         }
@@ -461,6 +568,16 @@ struct TransactionFormView: View {
           )
         }
         .buttonStyle(.plain)
+        if showCategoryPrompt {
+          ambiguousRail(
+            prompt: "Which category?",
+            candidates: categoryCandidates
+          ) { candidate in
+            draft.categoryID = candidate.id
+            categoryCandidates = []
+            showCategoryPrompt = false
+          }
+        }
         CardDivider()
       }
 
@@ -472,6 +589,7 @@ struct TransactionFormView: View {
           disabledAccountIDs: Set(draft.subtransactions.compactMap(\.transferAccountID))
         ) { account in
           draft.accountID = account.id
+          accountCandidates = []
           if draft.transferAccountID == account.id {
             // A transfer cannot target its own account; drop the payee.
             draft.transferAccountID = nil
@@ -488,6 +606,16 @@ struct TransactionFormView: View {
         )
       }
       .buttonStyle(.plain)
+      if showAccountPrompt {
+        ambiguousRail(
+          prompt: "Which account?",
+          candidates: accountCandidates
+        ) { candidate in
+          draft.accountID = candidate.id
+          accountCandidates = []
+          showAccountPrompt = false
+        }
+      }
       CardDivider()
 
       NavigationLink {
@@ -509,6 +637,33 @@ struct TransactionFormView: View {
   /// disappears rather than inviting a value the API would discard.
   private var hidesCategory: Bool {
     draft.isTransfer && model.accountsBothOnBudget(draft.accountID, draft.transferAccountID)
+  }
+
+  private func ambiguousRail(
+    prompt: String,
+    candidates: [StubSlipReader.Candidate],
+    onPick: @escaping (StubSlipReader.Candidate) -> Void
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(prompt)
+        .font(.footnote)
+        .foregroundStyle(Theme.uncategorised)
+      if !candidates.isEmpty {
+        WrappingHStack(spacing: 8) {
+          ForEach(candidates) { candidate in
+            Button {
+              onPick(candidate)
+            } label: {
+              FilterChip(label: candidate.name, showsChevron: false)
+            }
+            .buttonStyle(.plain)
+          }
+        }
+      }
+    }
+    .padding(.leading, 56)
+    .padding(.trailing, 16)
+    .padding(.vertical, 8)
   }
 
   private var splitCard: some View {

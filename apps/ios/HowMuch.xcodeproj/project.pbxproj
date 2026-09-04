@@ -35,9 +35,11 @@
 		A10000000000000000000092 /* EmojiKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000091 /* EmojiKit */; };
 		A20000000000000000000011 /* CaptureRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* CaptureRequest.swift */; };
 		A20000000000000000000013 /* CaptureRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* CaptureRouter.swift */; };
+		A20000000000000000000041 /* StubSlipReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000040 /* StubSlipReader.swift */; };
 		A20000000000000000000021 /* CaptureRequestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000020 /* CaptureRequestTests.swift */; };
 		A20000000000000000000031 /* IntentCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000030 /* IntentCatalog.swift */; };
 		A20000000000000000000034 /* IntentCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000033 /* IntentCatalogTests.swift */; };
+		A20000000000000000000043 /* StubSlipReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000042 /* StubSlipReaderTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -45,6 +47,8 @@
 		A20000000000000000000022 /* HowMuchTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HowMuchTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000010 /* CaptureRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureRequest.swift; sourceTree = "<group>"; };
 		A20000000000000000000012 /* CaptureRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureRouter.swift; sourceTree = "<group>"; };
+		A20000000000000000000040 /* StubSlipReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StubSlipReader.swift; sourceTree = "<group>"; };
+		A20000000000000000000042 /* StubSlipReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StubSlipReaderTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000020 /* CaptureRequestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureRequestTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000030 /* IntentCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentCatalog.swift; sourceTree = "<group>"; };
 		A20000000000000000000033 /* IntentCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentCatalogTests.swift; sourceTree = "<group>"; };
@@ -195,6 +199,7 @@
 			children = (
 				A20000000000000000000010 /* CaptureRequest.swift */,
 				A20000000000000000000012 /* CaptureRouter.swift */,
+				A20000000000000000000040 /* StubSlipReader.swift */,
 			);
 			path = Capture;
 			sourceTree = "<group>";
@@ -212,6 +217,7 @@
 			children = (
 				A20000000000000000000020 /* CaptureRequestTests.swift */,
 				A20000000000000000000033 /* IntentCatalogTests.swift */,
+				A20000000000000000000042 /* StubSlipReaderTests.swift */,
 			);
 			path = HowMuchTests;
 			sourceTree = "<group>";
@@ -340,6 +346,7 @@
 				A20000000000000000000011 /* CaptureRequest.swift in Sources */,
 				A20000000000000000000013 /* CaptureRouter.swift in Sources */,
 				A20000000000000000000031 /* IntentCatalog.swift in Sources */,
+				A20000000000000000000041 /* StubSlipReader.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -349,6 +356,7 @@
 			files = (
 				A20000000000000000000021 /* CaptureRequestTests.swift in Sources */,
 				A20000000000000000000034 /* IntentCatalogTests.swift in Sources */,
+				A20000000000000000000043 /* StubSlipReaderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
