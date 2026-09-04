@@ -1,4 +1,5 @@
 import XCTest
+import AppIntents
 import UniformTypeIdentifiers
 @testable import HowMuch
 
