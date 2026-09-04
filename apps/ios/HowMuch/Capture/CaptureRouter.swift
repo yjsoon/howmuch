@@ -33,9 +33,15 @@ final class CaptureRouter {
       isAuthenticated: isAuthenticated,
       currentFingerprint: currentFingerprint
     ) {
-    case .drop, .inbox:
+    case .drop:
       pending = nil
       return
+    case .inbox:
+      guard blockingSheetCount == 0 else {
+        return
+      }
+      pending = nil
+      presented = request
     case .present(let admitted):
       guard blockingSheetCount == 0 else {
         return

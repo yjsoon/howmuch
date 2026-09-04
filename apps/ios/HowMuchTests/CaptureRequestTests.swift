@@ -91,12 +91,26 @@ final class CaptureRouterTests: XCTestCase {
     XCTAssertEqual(router.presented?.kind, .blank)
   }
 
-  func testInboxConsumeDoesNotPresentAForm() {
+  func testInboxConsumePresentsReadingRequest() {
     let router = CaptureRouter.shared
     router.enqueue(CaptureRequest(kind: .inbox, connectionFingerprint: "plan-a"))
     router.consume(isAuthenticated: true, currentFingerprint: "plan-a")
     XCTAssertNil(router.pending)
+    XCTAssertEqual(router.presented?.kind, .inbox)
+  }
+
+  func testInboxConsumeWaitsWhileABlockingSheetIsUp() {
+    let router = CaptureRouter.shared
+    router.beginBlockingSheet()
+    router.enqueue(CaptureRequest(kind: .inbox, connectionFingerprint: "plan-a"))
+    router.consume(isAuthenticated: true, currentFingerprint: "plan-a")
+    XCTAssertNotNil(router.pending)
     XCTAssertNil(router.presented)
+
+    router.endBlockingSheet()
+    router.consume(isAuthenticated: true, currentFingerprint: "plan-a")
+    XCTAssertNil(router.pending)
+    XCTAssertEqual(router.presented?.kind, .inbox)
   }
 
   func testSecondEnqueueReplacesThePresentedRequest() {
