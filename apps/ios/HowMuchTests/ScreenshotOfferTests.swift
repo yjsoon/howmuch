@@ -186,10 +186,11 @@ final class ScreenshotOfferTests: XCTestCase {
 
     gate.setDelayNext(true)
     let delayed = Task { await controller.consider(shot) }
-    XCTAssertEqual(gate.started.wait(timeout: .now() + 2), .success)
+    let started = await gate.waitUntilStarted()
+    XCTAssertTrue(started, "consider never entered lineCounter")
     controller.dismiss()
     XCTAssertNil(controller.offer)
-    gate.proceed.signal()
+    gate.allowProceed()
     await delayed.value
     XCTAssertNil(controller.offer)
     XCTAssertTrue(store.claimInboxThrowsNothing())
@@ -205,9 +206,10 @@ final class ScreenshotOfferTests: XCTestCase {
     await controller.setEnabled(true)
     gate.setDelayNext(true)
     let delayed = Task { await controller.consider(candidate(createdAt: Date.distantFuture)) }
-    XCTAssertEqual(gate.started.wait(timeout: .now() + 2), .success)
+    let started = await gate.waitUntilStarted()
+    XCTAssertTrue(started, "consider never entered lineCounter")
     await controller.setEnabled(false)
-    gate.proceed.signal()
+    gate.allowProceed()
     await delayed.value
     XCTAssertFalse(controller.isEnabled)
     XCTAssertNil(controller.offer)
@@ -246,13 +248,31 @@ final class FakeScreenshotLibrary: ScreenshotLibrary {
 final class LineCountGate: @unchecked Sendable {
   private let lock = NSLock()
   private var delayNext = false
-  let started = DispatchSemaphore(value: 0)
-  let proceed = DispatchSemaphore(value: 0)
+  private var didStart = false
+  private let proceed = DispatchSemaphore(value: 0)
 
   func setDelayNext(_ value: Bool) {
     lock.lock()
     delayNext = value
+    if value {
+      didStart = false
+    }
     lock.unlock()
+  }
+
+  func waitUntilStarted(timeout: TimeInterval = 2) async -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while !hasStarted {
+      if Date() > deadline {
+        return false
+      }
+      try? await Task.sleep(for: .milliseconds(10))
+    }
+    return true
+  }
+
+  func allowProceed() {
+    proceed.signal()
   }
 
   func count(_ data: Data) -> Int {
@@ -260,10 +280,18 @@ final class LineCountGate: @unchecked Sendable {
     let delay = delayNext
     lock.unlock()
     if delay {
-      started.signal()
+      lock.lock()
+      didStart = true
+      lock.unlock()
       proceed.wait()
     }
     return 3
+  }
+
+  private var hasStarted: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return didStart
   }
 }
 
