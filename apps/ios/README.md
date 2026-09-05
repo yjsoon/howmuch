@@ -43,7 +43,12 @@ State lives in one observable `AppModel` with independent load phases per surfac
 
 ## Validation
 
-Use the [iOS validation contract](AGENTS.md) from the repo root: select one available iOS 26+ simulator, reuse its UDID for build-for-testing and test-without-building, and retain phase logs in the project-local cache layout. Rebuild after source changes and do not run tests from a failed build. Choose tests and representative UI states relevant to the change.
+Use `scripts/ios-xcodebuild.sh` from the repo root. It implements the [iOS validation contract](AGENTS.md): one owner per checkout, a pinned iOS 26+ simulator UDID, `build/xcode/DerivedData-simulator`, `-jobs 2 COMPILER_INDEX_STORE_ENABLE=NO`, and timestamped logs under `build/xcode/logs`. Rebuild after source changes and do not run tests from a failed build. Choose tests and representative UI states relevant to the change.
+
+```sh
+scripts/ios-xcodebuild.sh doctor
+scripts/ios-xcodebuild.sh test
+```
 
 Local unsigned builds/tests use the intended worktree; they do not require signing secrets, committed/pushed code, or updating to `main`. Simulator installation/launch is local validation, not physical-device distribution.
 

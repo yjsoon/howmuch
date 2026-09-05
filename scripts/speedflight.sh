@@ -39,7 +39,11 @@ BASE="${SPEEDFLIGHT_BASE:-https://speedflight.dev}"
 # page link stays on the custom domain.
 FALLBACK_BASE="https://speedflight.jake-7c3.workers.dev"
 OUT="build/share"
-DERIVED_DATA="build/xcode/DerivedData-archive"
+# Separate from simulator/device iteration caches. Do not wipe this as a first response.
+DERIVED_DATA="${HOWMUCH_ARCHIVE_DERIVED:-$PWD/build/xcode/DerivedData-archive}"
+XCODE_JOBS="${HOWMUCH_XCODE_JOBS:-2}"
+XCODE_LOG_DIR="${HOWMUCH_XCODE_LOG_DIR:-$PWD/build/xcode/logs}"
+LOCK_DIR="${HOWMUCH_XCODE_LOCK_DIR:-$PWD/build/xcode/ios-xcodebuild.lock}"
 
 # Publication requires a clean, remote-backed revision, including in CI.
 # A detached exact revision needs an explicit containing origin branch or tag.
@@ -77,18 +81,29 @@ BRANCH="${SOURCE_REF#refs/*/}"
 # xcodegen generate --quiet
 
 rm -rf "$OUT"
-mkdir -p "$OUT"
+mkdir -p "$OUT" "$DERIVED_DATA" "$XCODE_LOG_DIR"
+if mkdir "$LOCK_DIR" 2>/dev/null; then
+  printf '%s\n' "$$" >"$LOCK_DIR/pid"
+  trap 'rm -rf "$LOCK_DIR"' EXIT
+else
+  other="$(cat "$LOCK_DIR/pid" 2>/dev/null || echo unknown)"
+  echo "error: another HowMuch xcodebuild owns this checkout (pid $other)" >&2
+  exit 75
+fi
 
 # Archive signed, not with CODE_SIGNING_ALLOWED=NO: an unsigned archive
 # carries no entitlements and the export re-sign does not add them back.
 # Cloud signing with the ASC key makes a development certificate for the
-# archive and the ad hoc one for the export.
+# archive and the ad hoc one for the export. Keep full logs: -quiet hid
+# actool/swift progress that still ran under memory pressure.
+ARCHIVE_LOG="$XCODE_LOG_DIR/speedflight-archive-$(date '+%Y%m%d-%H%M%S').log"
+echo "archiving with derivedData=$DERIVED_DATA jobs=$XCODE_JOBS log=$ARCHIVE_LOG"
 xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
   -configuration Release \
   -destination "generic/platform=iOS" \
   -derivedDataPath "$DERIVED_DATA" \
   -archivePath "$OUT/App.xcarchive" \
-  -jobs 2 \
+  -jobs "$XCODE_JOBS" \
   -allowProvisioningUpdates \
   -authenticationKeyID "$ASC_KEY_ID" \
   -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
@@ -96,7 +111,7 @@ xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
   DEVELOPMENT_TEAM="$TEAM_ID" \
   CODE_SIGN_STYLE=Automatic \
   COMPILER_INDEX_STORE_ENABLE=NO \
-  -quiet archive
+  archive 2>&1 | tee "$ARCHIVE_LOG" "$OUT/archive.log"
 
 cat > "$OUT/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -112,6 +127,7 @@ cat > "$OUT/ExportOptions.plist" <<PLIST
 </plist>
 PLIST
 
+EXPORT_LOG="$XCODE_LOG_DIR/speedflight-export-$(date '+%Y%m%d-%H%M%S').log"
 xcodebuild -exportArchive \
   -archivePath "$OUT/App.xcarchive" \
   -exportOptionsPlist "$OUT/ExportOptions.plist" \
@@ -120,7 +136,7 @@ xcodebuild -exportArchive \
   -authenticationKeyID "$ASC_KEY_ID" \
   -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
   -authenticationKeyPath "$ASC_PRIVATE_KEY_PATH" \
-  -quiet
+  2>&1 | tee "$EXPORT_LOG" "$OUT/export.log"
 mv "$OUT"/export/*.ipa "$OUT/signed.ipa"
 
 # 1. Register the build with its metadata. The server answers with the ids.

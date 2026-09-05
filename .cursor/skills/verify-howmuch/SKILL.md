@@ -76,9 +76,17 @@ It must report:
 Required for each selected `ios-*` recipe, not every recipe for every change. Skip those recipes (do not mark them verified via web `/add`) when Xcode / Simulator is missing. Continue safe local fixes and reruns within the task; validation does not authorize signing, publication, commits, pushes, or installing external skills.
 
 1. `control-howmuch launch` and `doctor` pass. Complete first-owner setup on `{web_url}` if `setup_required` is still true.
-2. Follow [apps/ios/AGENTS.md](../../../apps/ios/AGENTS.md) for canonical **HowMuch** simulator validation from the repo root. Reuse its selected iOS 26+ `SIMULATOR_UDID`, cache, and successful products across build-for-testing and test-without-building; rebuild after source changes. No signing credentials or clean/pushed HEAD are needed.
+2. Follow [apps/ios/AGENTS.md](../../../apps/ios/AGENTS.md) for canonical **HowMuch** simulator validation from the repo root. `scripts/ios-xcodebuild.sh test` reuses the selected iOS 26+ UDID, `build/xcode/DerivedData-simulator`, and successful products across build-for-testing and test-without-building; rebuild after source changes. No signing credentials or clean/pushed HEAD are needed.
 
-Then install and launch the built app on that same simulator: `xcrun simctl install "$SIMULATOR_UDID" build/xcode/DerivedData-simulator/Build/Products/Debug-iphonesimulator/HowMuch.app`, then `xcrun simctl launch "$SIMULATOR_UDID" sg.soon.howmuch`. Computer-use drives the Simulator window, not `{web_url}`. This local installation does not prove or authorize physical-device distribution.
+Then install and launch the built app on that same simulator:
+
+```sh
+UDID="$(scripts/ios-xcodebuild.sh destination)"
+xcrun simctl install "$UDID" "$(scripts/ios-xcodebuild.sh app-path)"
+xcrun simctl launch "$UDID" sg.soon.howmuch
+```
+
+Computer-use drives the Simulator window, not `{web_url}`. This local installation does not prove or authorize physical-device distribution.
 
 3. Connection (ellipsis **Connection settings** on Accounts, Plan, or Reflect):
    - **Server** = `{api_url}` from `control-howmuch state` (Simulator: `http://127.0.0.1:{api_port}`). New installs default to `https://howmuch.soon.sg` — change it. HTTP is allowed only for this device or this LAN.
