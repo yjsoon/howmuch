@@ -8,8 +8,20 @@ struct AccountsView: View {
   @State private var groupPendingDeletion: CustomAccountGroup?
 
   var body: some View {
+    @Bindable var screenshots = ScreenshotOfferController.shared
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
+        if let offer = screenshots.offer, screenshots.isEnabled {
+          ScreenshotOfferCard(
+            offer: offer,
+            onReview: {
+              try? screenshots.review()
+            },
+            onDismiss: {
+              screenshots.dismiss()
+            }
+          )
+        }
         if !model.pendingRows.isEmpty {
           OutboxCard()
         }

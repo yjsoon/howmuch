@@ -57,6 +57,8 @@
 		A20000000000000000000093 /* InboxStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000092 /* InboxStoreTests.swift */; };
 		A20000000000000000000095 /* InboxReadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000094 /* InboxReadingView.swift */; };
 		A20000000000000000000097 /* IntelligenceAura.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000096 /* IntelligenceAura.swift */; };
+		A200000000000000000000A1 /* ScreenshotOffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000A0 /* ScreenshotOffer.swift */; };
+		A200000000000000000000A3 /* ScreenshotOfferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000A2 /* ScreenshotOfferTests.swift */; };
 		A30000000000000000000003 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000002 /* ShareViewController.swift */; };
 		A30000000000000000000006 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
 		A3000000000000000000000B /* HowMuchShare.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* HowMuchShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -87,6 +89,8 @@
 		A20000000000000000000092 /* InboxStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxStoreTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000094 /* InboxReadingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxReadingView.swift; sourceTree = "<group>"; };
 		A20000000000000000000096 /* IntelligenceAura.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelligenceAura.swift; sourceTree = "<group>"; };
+		A200000000000000000000A0 /* ScreenshotOffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotOffer.swift; sourceTree = "<group>"; };
+		A200000000000000000000A2 /* ScreenshotOfferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotOfferTests.swift; sourceTree = "<group>"; };
 		A30000000000000000000001 /* HowMuchShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HowMuchShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A30000000000000000000002 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		A30000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -276,6 +280,7 @@
 				A20000000000000000000090 /* InboxStore.swift */,
 				A20000000000000000000094 /* InboxReadingView.swift */,
 				A20000000000000000000096 /* IntelligenceAura.swift */,
+				A200000000000000000000A0 /* ScreenshotOffer.swift */,
 				A20000000000000000000040 /* SlipReader.swift */,
 			);
 			path = Capture;
@@ -306,6 +311,7 @@
 				A20000000000000000000082 /* CommitManyTests.swift */,
 				A20000000000000000000092 /* InboxStoreTests.swift */,
 				A2000000000000000000009C /* AddFromInboxIntentTests.swift */,
+				A200000000000000000000A2 /* ScreenshotOfferTests.swift */,
 			);
 			path = HowMuchTests;
 			sourceTree = "<group>";
@@ -488,6 +494,7 @@
 				A20000000000000000000091 /* InboxStore.swift in Sources */,
 				A20000000000000000000095 /* InboxReadingView.swift in Sources */,
 				A20000000000000000000097 /* IntelligenceAura.swift in Sources */,
+				A200000000000000000000A1 /* ScreenshotOffer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -502,6 +509,7 @@
 				A20000000000000000000083 /* CommitManyTests.swift in Sources */,
 				A20000000000000000000093 /* InboxStoreTests.swift in Sources */,
 				A2000000000000000000009D /* AddFromInboxIntentTests.swift in Sources */,
+				A200000000000000000000A3 /* ScreenshotOfferTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -591,6 +599,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HowMuch/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = HowMuch;
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "HowMuch looks at new screenshots so it can offer to add them. Photos stay on this device.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -622,6 +631,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HowMuch/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = HowMuch;
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "HowMuch looks at new screenshots so it can offer to add them. Photos stay on this device.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

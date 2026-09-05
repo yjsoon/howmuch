@@ -59,6 +59,7 @@ struct SettingsView: View {
   }
 
   var body: some View {
+    @Bindable var screenshots = ScreenshotOfferController.shared
     NavigationStack {
       Form {
         Section {
@@ -161,12 +162,34 @@ struct SettingsView: View {
             }
             .disabled(isSaving || isTesting)
           }
+
+          Button {
+            let next = !screenshots.isEnabled
+            screenshots.applyEnabledPreference(next)
+            Task { await screenshots.setEnabled(next) }
+          } label: {
+            HStack {
+              Text("Offer new screenshots")
+                .foregroundStyle(Theme.textPrimary)
+              Spacer()
+              Text(screenshots.isEnabled ? "On" : "Off")
+                .foregroundStyle(screenshots.isEnabled ? Theme.accent : .secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+          }
+          .accessibilityIdentifier("offer-new-screenshots")
+          .accessibilityLabel("Offer new screenshots")
+          .accessibilityValue(screenshots.isEnabled ? "On" : "Off")
         } footer: {
-          if case .failure(let message) = testResult {
-            Text(message)
-              .foregroundStyle(Theme.outflow)
-          } else if testResult == .success {
-            Text("Signed in successfully.")
+          VStack(alignment: .leading, spacing: 8) {
+            if case .failure(let message) = testResult {
+              Text(message)
+                .foregroundStyle(Theme.outflow)
+            } else if testResult == .success {
+              Text("Signed in successfully.")
+            }
+            Text("When Offer new screenshots is on, HowMuch can notice a new screenshot and offer to add it. Photos stay on this device. Off by default.")
           }
         }
       }
