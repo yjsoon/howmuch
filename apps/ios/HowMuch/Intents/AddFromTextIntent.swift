@@ -35,7 +35,11 @@ enum InboxIntentHandoff {
     )
   }
 
-  static func imageWrite(_ data: Data, filename: String) throws -> InboxWrite {
+  static func imageWrite(
+    _ data: Data,
+    filename: String,
+    source: InboxSource = .appIntent
+  ) throws -> InboxWrite {
     guard !data.isEmpty else {
       throw Error.empty
     }
@@ -43,7 +47,7 @@ enum InboxIntentHandoff {
       throw Error.payloadTooLarge
     }
     return InboxWrite(
-      source: .appIntent,
+      source: source,
       kind: .image,
       filename: filename,
       data: data

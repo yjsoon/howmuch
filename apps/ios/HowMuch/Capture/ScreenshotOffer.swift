@@ -1,0 +1,395 @@
+import Observation
+import Photos
+import SwiftUI
+import UIKit
+#if canImport(Vision)
+import Vision
+#endif
+
+struct ScreenshotCandidate: Equatable, Sendable {
+  var id: String
+  var data: Data
+  var filename: String
+  var createdAt: Date
+}
+
+struct ScreenshotOffer: Equatable, Identifiable, Sendable {
+  var id: String
+  var lineCount: Int
+  var imageData: Data
+  var filename: String
+
+  var caption: String {
+    let noun = lineCount == 1 ? "line" : "lines"
+    return "Looks like a screenshot · \(lineCount) \(noun)"
+  }
+}
+
+protocol ScreenshotLibrary: AnyObject {
+  var authorizationStatus: PHAuthorizationStatus { get }
+  var observesPhotoLibrary: Bool { get }
+  func requestAccess() async -> PHAuthorizationStatus
+  func latestScreenshot(createdAfter: Date, excluding: Set<String>) async -> ScreenshotCandidate?
+}
+
+@MainActor
+@Observable
+final class ScreenshotOfferController {
+  static let shared = ScreenshotOfferController()
+
+  static let enabledKey = "HowMuch.screenshotOffer.enabled"
+  static let enabledAtKey = "HowMuch.screenshotOffer.enabledAt"
+  static let dismissedKey = "HowMuch.screenshotOffer.dismissedIDs"
+
+  private(set) var isEnabled: Bool
+  private(set) var offer: ScreenshotOffer?
+
+  private var enabledAt: Date?
+  private var dismissedIDs: Set<String>
+  private let defaults: UserDefaults
+  private let library: ScreenshotLibrary
+  private let lineCounter: @Sendable (Data) -> Int
+  private var photoProbe: PhotoLibraryChangeProbe?
+  private var screenshotObserver: NSObjectProtocol?
+
+  init(
+    defaults: UserDefaults = .standard,
+    library: ScreenshotLibrary = PhotosScreenshotLibrary(),
+    lineCounter: @escaping @Sendable (Data) -> Int = ScreenshotOfferController.countLines
+  ) {
+    self.defaults = defaults
+    self.library = library
+    self.lineCounter = lineCounter
+    isEnabled = defaults.bool(forKey: Self.enabledKey)
+    if defaults.object(forKey: Self.enabledAtKey) != nil {
+      enabledAt = Date(timeIntervalSince1970: defaults.double(forKey: Self.enabledAtKey))
+    }
+    dismissedIDs = Set(defaults.stringArray(forKey: Self.dismissedKey) ?? [])
+  }
+
+  func setEnabled(_ enabled: Bool) async {
+    if !enabled {
+      persistEnabled(false, at: nil)
+      offer = nil
+      stopObserving()
+      return
+    }
+    let status = await library.requestAccess()
+    guard status.isScreenshotReadable else {
+      persistEnabled(false, at: nil)
+      offer = nil
+      stopObserving()
+      return
+    }
+    persistEnabled(true, at: Date())
+    startObserving()
+    await refresh()
+  }
+
+  func startIfNeeded() {
+    guard isEnabled, library.authorizationStatus.isScreenshotReadable else {
+      return
+    }
+    startObserving()
+    Task { await refresh() }
+  }
+
+  func refresh() async {
+    guard isEnabled, let enabledAt else {
+      offer = nil
+      return
+    }
+    guard library.authorizationStatus.isScreenshotReadable else {
+      offer = nil
+      return
+    }
+    guard let candidate = await library.latestScreenshot(
+      createdAfter: enabledAt,
+      excluding: dismissedIDs
+    ) else {
+      return
+    }
+    await consider(candidate)
+  }
+
+  func consider(_ candidate: ScreenshotCandidate) async {
+    guard isEnabled else {
+      return
+    }
+    guard !dismissedIDs.contains(candidate.id) else {
+      return
+    }
+    if let enabledAt, candidate.createdAt < enabledAt {
+      return
+    }
+    guard !candidate.data.isEmpty, candidate.data.count <= InboxStore.maxPayloadBytes else {
+      return
+    }
+    let lines = await Task.detached(priority: .utility) { [lineCounter] in
+      max(1, lineCounter(candidate.data))
+    }.value
+    offer = ScreenshotOffer(
+      id: candidate.id,
+      lineCount: lines,
+      imageData: candidate.data,
+      filename: candidate.filename
+    )
+  }
+
+  func dismiss() {
+    guard let offer else {
+      return
+    }
+    rememberDismissed(offer.id)
+  }
+
+  func review() throws {
+    guard isEnabled, let offer else {
+      return
+    }
+    let write = try InboxIntentHandoff.imageWrite(
+      offer.imageData,
+      filename: offer.filename,
+      source: .detectedScreenshot
+    )
+    try InboxIntentHandoff.enqueue(write)
+    rememberDismissed(offer.id)
+  }
+
+  static func countLines(in data: Data) -> Int {
+    #if canImport(Vision)
+    guard let image = UIImage(data: data), let cgImage = image.cgImage else {
+      return 1
+    }
+    let request = VNRecognizeTextRequest()
+    request.recognitionLevel = .fast
+    let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+    do {
+      try handler.perform([request])
+    } catch {
+      return 1
+    }
+    let count = request.results?.count ?? 0
+    return max(1, count)
+    #else
+    return 1
+    #endif
+  }
+
+  private func rememberDismissed(_ id: String) {
+    dismissedIDs.insert(id)
+    defaults.set(Array(dismissedIDs), forKey: Self.dismissedKey)
+    if offer?.id == id {
+      offer = nil
+    }
+  }
+
+  private func persistEnabled(_ enabled: Bool, at date: Date?) {
+    isEnabled = enabled
+    enabledAt = date
+    defaults.set(enabled, forKey: Self.enabledKey)
+    if let date {
+      defaults.set(date.timeIntervalSince1970, forKey: Self.enabledAtKey)
+    } else {
+      defaults.removeObject(forKey: Self.enabledAtKey)
+    }
+  }
+
+  private func startObserving() {
+    guard library.observesPhotoLibrary else {
+      return
+    }
+    if photoProbe == nil {
+      let probe = PhotoLibraryChangeProbe { [weak self] in
+        Task { @MainActor in
+          await self?.refresh()
+        }
+      }
+      photoProbe = probe
+      PHPhotoLibrary.shared().register(probe)
+    }
+    if screenshotObserver == nil {
+      screenshotObserver = NotificationCenter.default.addObserver(
+        forName: UIApplication.userDidTakeScreenshotNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        Task { @MainActor in
+          try? await Task.sleep(for: .milliseconds(800))
+          await self?.refresh()
+        }
+      }
+    }
+  }
+
+  private func stopObserving() {
+    if let photoProbe {
+      PHPhotoLibrary.shared().unregisterChangeObserver(photoProbe)
+    }
+    photoProbe = nil
+    if let screenshotObserver {
+      NotificationCenter.default.removeObserver(screenshotObserver)
+      self.screenshotObserver = nil
+    }
+  }
+}
+
+extension PHAuthorizationStatus {
+  var isScreenshotReadable: Bool {
+    self == .authorized || self == .limited
+  }
+}
+
+final class PhotosScreenshotLibrary: ScreenshotLibrary {
+  var authorizationStatus: PHAuthorizationStatus {
+    PHPhotoLibrary.authorizationStatus(for: .readWrite)
+  }
+
+  var observesPhotoLibrary: Bool { true }
+
+  func requestAccess() async -> PHAuthorizationStatus {
+    await withCheckedContinuation { continuation in
+      PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
+        continuation.resume(returning: status)
+      }
+    }
+  }
+
+  func latestScreenshot(createdAfter: Date, excluding: Set<String>) async -> ScreenshotCandidate? {
+    let albums = PHAssetCollection.fetchAssetCollections(
+      with: .smartAlbum,
+      subtype: .smartAlbumScreenshots,
+      options: nil
+    )
+    guard let album = albums.firstObject else {
+      return nil
+    }
+    let options = PHFetchOptions()
+    options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+    options.fetchLimit = 12
+    let assets = PHAsset.fetchAssets(in: album, options: options)
+    var match: PHAsset?
+    assets.enumerateObjects { asset, _, stop in
+      guard let created = asset.creationDate, created >= createdAfter else {
+        return
+      }
+      guard !excluding.contains(asset.localIdentifier) else {
+        return
+      }
+      match = asset
+      stop.pointee = true
+    }
+    guard let asset = match else {
+      return nil
+    }
+    return await load(asset)
+  }
+
+  private func load(_ asset: PHAsset) async -> ScreenshotCandidate? {
+    await withCheckedContinuation { continuation in
+      let options = PHImageRequestOptions()
+      options.version = .current
+      options.isNetworkAccessAllowed = false
+      options.isSynchronous = false
+      options.deliveryMode = .highQualityFormat
+      PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, uti, _, _ in
+        guard let data, !data.isEmpty, data.count <= InboxStore.maxPayloadBytes else {
+          continuation.resume(returning: nil)
+          return
+        }
+        continuation.resume(
+          returning: ScreenshotCandidate(
+            id: asset.localIdentifier,
+            data: data,
+            filename: Self.filename(forUTI: uti),
+            createdAt: asset.creationDate ?? Date()
+          )
+        )
+      }
+    }
+  }
+
+  static func filename(forUTI uti: String?) -> String {
+    switch uti {
+    case "public.jpeg", "public.jpg":
+      return "payload.jpg"
+    case "public.png":
+      return "payload.png"
+    case "public.heic", "public.heif":
+      return "payload.heic"
+    default:
+      return "payload.img"
+    }
+  }
+}
+
+private final class PhotoLibraryChangeProbe: NSObject, PHPhotoLibraryChangeObserver {
+  private let onChange: () -> Void
+
+  init(onChange: @escaping () -> Void) {
+    self.onChange = onChange
+  }
+
+  func photoLibraryDidChange(_ changeInstance: PHChange) {
+    onChange()
+  }
+}
+
+struct ScreenshotOfferCard: View {
+  let offer: ScreenshotOffer
+  var onReview: () -> Void
+  var onDismiss: () -> Void
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 12) {
+      thumbnail
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Add these transactions?")
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(Theme.textPrimary)
+        Text(offer.caption)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Button("Review", action: onReview)
+          .font(.subheadline.weight(.semibold))
+          .tint(Theme.accent)
+          .padding(.top, 4)
+      }
+      Spacer(minLength: 8)
+      Button(action: onDismiss) {
+        Image(systemName: "xmark")
+          .font(.footnote.weight(.semibold))
+          .foregroundStyle(Theme.accent)
+          .frame(width: 44, height: 44)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Dismiss")
+    }
+    .padding(.leading, 16)
+    .padding(.vertical, 12)
+    .padding(.trailing, 4)
+    .ynabCard()
+    .accessibilityElement(children: .contain)
+  }
+
+  @ViewBuilder
+  private var thumbnail: some View {
+    let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+    Group {
+      if let image = UIImage(data: offer.imageData) {
+        Image(uiImage: image)
+          .resizable()
+          .scaledToFill()
+      } else {
+        Image(systemName: "photo")
+          .font(.title3)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .frame(width: 56, height: 56)
+    .background(Theme.canvas)
+    .clipShape(shape)
+    .accessibilityHidden(true)
+  }
+}

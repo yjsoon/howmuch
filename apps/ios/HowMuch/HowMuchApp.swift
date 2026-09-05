@@ -205,6 +205,7 @@ private struct RootView: View {
     .onAppear {
       consumePendingCapture()
       enqueueInboxIfNeeded(force: false)
+      ScreenshotOfferController.shared.startIfNeeded()
     }
     .onChange(of: capture.pending?.id) { _, _ in
       consumePendingCapture()
@@ -216,6 +217,7 @@ private struct RootView: View {
       if phase == .active {
         enqueueInboxIfNeeded(force: false)
         consumePendingCapture()
+        ScreenshotOfferController.shared.startIfNeeded()
       }
     }
     .onChange(of: model.settings.isAuthenticated) { _, isAuthenticated in

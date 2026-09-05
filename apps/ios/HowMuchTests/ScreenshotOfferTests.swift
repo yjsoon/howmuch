@@ -1,0 +1,184 @@
+import XCTest
+import Photos
+@testable import HowMuch
+
+@MainActor
+final class ScreenshotOfferTests: XCTestCase {
+  private var directory: URL!
+  private var store: InboxStore!
+  private var defaults: UserDefaults!
+  private var suiteName: String!
+  private var library: FakeScreenshotLibrary!
+  private var controller: ScreenshotOfferController!
+
+  override func setUp() async throws {
+    directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    store = InboxStore(container: directory)
+    InboxIntentHandoff.store = store
+    suiteName = "HowMuch.screenshotOffer.\(UUID().uuidString)"
+    defaults = UserDefaults(suiteName: suiteName)
+    defaults.removePersistentDomain(forName: suiteName)
+    library = FakeScreenshotLibrary()
+    controller = ScreenshotOfferController(
+      defaults: defaults,
+      library: library,
+      lineCounter: { _ in 3 }
+    )
+    CaptureRouter.shared.dropForSignOut()
+    while CaptureRouter.shared.blockingSheetCount > 0 {
+      CaptureRouter.shared.endBlockingSheet()
+    }
+  }
+
+  override func tearDown() async throws {
+    InboxIntentHandoff.store = .shared
+    CaptureRouter.shared.dropForSignOut()
+    while CaptureRouter.shared.blockingSheetCount > 0 {
+      CaptureRouter.shared.endBlockingSheet()
+    }
+    defaults.removePersistentDomain(forName: suiteName)
+    try? FileManager.default.removeItem(at: directory)
+  }
+
+  func testDefaultOffShowsNoOffer() async {
+    XCTAssertFalse(controller.isEnabled)
+    library.next = candidate(createdAt: Date.distantFuture)
+    await controller.refresh()
+    XCTAssertNil(controller.offer)
+  }
+
+  func testDeniedAccessLeavesDetectionOff() async {
+    library.authorizationStatus = .denied
+    await controller.setEnabled(true)
+    XCTAssertFalse(controller.isEnabled)
+    XCTAssertEqual(library.requestCount, 1)
+    XCTAssertNil(controller.offer)
+  }
+
+  func testCaptionUsesLineCount() {
+    XCTAssertEqual(
+      ScreenshotOffer(id: "a", lineCount: 1, imageData: Data(), filename: "payload.png").caption,
+      "Looks like a screenshot · 1 line"
+    )
+    XCTAssertEqual(
+      ScreenshotOffer(id: "a", lineCount: 3, imageData: Data(), filename: "payload.png").caption,
+      "Looks like a screenshot · 3 lines"
+    )
+  }
+
+  func testConsiderShowsOfferAfterEnable() async {
+    await controller.setEnabled(true)
+    XCTAssertTrue(controller.isEnabled)
+    library.next = candidate(createdAt: Date.distantFuture)
+    await controller.refresh()
+    XCTAssertEqual(controller.offer?.id, "shot-1")
+    XCTAssertEqual(controller.offer?.lineCount, 3)
+    XCTAssertEqual(controller.offer?.caption, "Looks like a screenshot · 3 lines")
+    XCTAssertTrue(store.claimInboxThrowsNothing())
+    XCTAssertNil(CaptureRouter.shared.pending)
+  }
+
+  func testOldScreenshotsAreNotOffered() async {
+    await controller.setEnabled(true)
+    library.next = candidate(createdAt: Date.distantPast)
+    await controller.refresh()
+    XCTAssertNil(controller.offer)
+  }
+
+  func testDismissHidesCardAndDoesNotWriteInbox() async throws {
+    await controller.setEnabled(true)
+    library.next = candidate(createdAt: Date.distantFuture)
+    await controller.refresh()
+    XCTAssertEqual(controller.offer?.id, "shot-1")
+
+    controller.dismiss()
+    XCTAssertNil(controller.offer)
+    XCTAssertTrue(store.claimInboxThrowsNothing())
+    XCTAssertNil(CaptureRouter.shared.pending)
+
+    await controller.refresh()
+    XCTAssertNil(controller.offer)
+  }
+
+  func testReviewEnqueuesDetectedScreenshotAndHidesCard() async throws {
+    await controller.setEnabled(true)
+    library.next = candidate(createdAt: Date.distantFuture)
+    await controller.refresh()
+
+    try controller.review()
+
+    XCTAssertNil(controller.offer)
+    XCTAssertEqual(CaptureRouter.shared.pending?.kind, .inbox)
+    let claimed = try store.claimInbox()
+    XCTAssertEqual(claimed.count, 1)
+    XCTAssertEqual(claimed.first?.source, .detectedScreenshot)
+    XCTAssertEqual(claimed.first?.kind, .image)
+    XCTAssertEqual(claimed.first?.filename, "payload.png")
+    XCTAssertEqual(try claimed.first?.payloadData(), candidate().data)
+  }
+
+  func testTurningOffHidesOfferAndIgnoresNewShots() async {
+    await controller.setEnabled(true)
+    library.next = candidate(createdAt: Date.distantFuture)
+    await controller.refresh()
+    XCTAssertNotNil(controller.offer)
+
+    await controller.setEnabled(false)
+    XCTAssertFalse(controller.isEnabled)
+    XCTAssertNil(controller.offer)
+
+    await controller.refresh()
+    XCTAssertNil(controller.offer)
+  }
+
+  func testDismissedScreenshotStaysGoneAfterReload() async {
+    await controller.setEnabled(true)
+    library.next = candidate(createdAt: Date.distantFuture)
+    await controller.refresh()
+    controller.dismiss()
+
+    let reloaded = ScreenshotOfferController(
+      defaults: defaults,
+      library: library,
+      lineCounter: { _ in 3 }
+    )
+    XCTAssertTrue(reloaded.isEnabled)
+    await reloaded.refresh()
+    XCTAssertNil(reloaded.offer)
+  }
+
+  private func candidate(createdAt: Date = Date.distantFuture) -> ScreenshotCandidate {
+    ScreenshotCandidate(
+      id: "shot-1",
+      data: Data([0x89, 0x50, 0x4E, 0x47]),
+      filename: "payload.png",
+      createdAt: createdAt
+    )
+  }
+}
+
+@MainActor
+final class FakeScreenshotLibrary: ScreenshotLibrary {
+  var authorizationStatus: PHAuthorizationStatus = .authorized
+  var observesPhotoLibrary = false
+  var next: ScreenshotCandidate?
+  var requestCount = 0
+
+  func requestAccess() async -> PHAuthorizationStatus {
+    requestCount += 1
+    return authorizationStatus
+  }
+
+  func latestScreenshot(createdAfter: Date, excluding: Set<String>) async -> ScreenshotCandidate? {
+    guard let next, next.createdAt >= createdAfter, !excluding.contains(next.id) else {
+      return nil
+    }
+    return next
+  }
+}
+
+private extension InboxStore {
+  func claimInboxThrowsNothing() -> Bool {
+    (try? claimInbox())?.isEmpty ?? true
+  }
+}

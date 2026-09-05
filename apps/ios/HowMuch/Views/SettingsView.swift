@@ -59,6 +59,7 @@ struct SettingsView: View {
   }
 
   var body: some View {
+    @Bindable var screenshots = ScreenshotOfferController.shared
     NavigationStack {
       Form {
         Section {
@@ -168,6 +169,24 @@ struct SettingsView: View {
           } else if testResult == .success {
             Text("Signed in successfully.")
           }
+        }
+
+        Section {
+          Toggle(
+            "Offer new screenshots",
+            isOn: Binding(
+              get: { screenshots.isEnabled },
+              set: { enabled in
+                Task {
+                  await screenshots.setEnabled(enabled)
+                }
+              }
+            )
+          )
+        } header: {
+          Text("Screenshots")
+        } footer: {
+          Text("When this is on, HowMuch can notice a new screenshot and offer to add it. Photos stay on this device. Off by default.")
         }
       }
       .navigationTitle("Connection")
