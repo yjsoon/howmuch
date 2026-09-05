@@ -41,24 +41,37 @@ FALLBACK_BASE="https://speedflight.jake-7c3.workers.dev"
 OUT="build/share"
 DERIVED_DATA="build/xcode/DerivedData-archive"
 
-# The page shows a branch and commit, so those must be real: everything
-# committed, and the commit on the remote. Under CI the checkout is the
-# pushed commit by definition, and a detached HEAD has no upstream to test.
-BRANCH="${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}"
+# Publication requires a clean, remote-backed revision, including in CI.
+# A detached exact revision needs an explicit containing origin branch or tag.
+BRANCH="$(git symbolic-ref --quiet --short HEAD || true)"
 COMMIT="$(git rev-parse HEAD)"
 # https form of origin, so the page can link the branch and commit.
 REPO_URL="$(git remote get-url origin 2>/dev/null | sed -E 's#^git@([^:]+):#https://\1/#; s#\.git$##')"
 case "$REPO_URL" in https://*) ;; *) REPO_URL="" ;; esac
-if [[ -z "${CI:-}" ]]; then
-  if [[ -n "$(git status --porcelain)" ]]; then
-    echo "working tree is dirty: commit before sharing a build" >&2
-    exit 1
-  fi
-  if ! git merge-base --is-ancestor "$COMMIT" "@{u}" 2>/dev/null; then
-    echo "HEAD is not pushed: git push -u origin $BRANCH" >&2
-    exit 1
-  fi
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "publication prerequisite unmet: working tree must be clean; no commit or push is authorized by this check" >&2
+  exit 1
 fi
+SOURCE_REF="${SPEEDFLIGHT_SOURCE_REF:-${BRANCH:+refs/heads/$BRANCH}}"
+case "$SOURCE_REF" in
+  refs/heads/*|refs/tags/*) ;;
+  *) echo "publication prerequisite unmet: SPEEDFLIGHT_SOURCE_REF must name a full origin branch or tag (refs/heads/... or refs/tags/...)" >&2; exit 1 ;;
+esac
+if ! git check-ref-format "$SOURCE_REF"; then
+  echo "publication prerequisite unmet: invalid origin branch or tag" >&2
+  exit 1
+fi
+# Fetch exactly the selected ref; cached tracking refs are not publication proof.
+# This does not check out, merge, rebase, commit, or push anything.
+if ! git fetch --no-tags origin "$SOURCE_REF"; then
+  echo "publication prerequisite unmet: could not fetch the selected origin branch or tag" >&2
+  exit 1
+fi
+if ! git merge-base --is-ancestor "$COMMIT" 'FETCH_HEAD^{commit}'; then
+  echo "publication prerequisite unmet: HEAD is not contained in the selected origin branch or tag; revision changes and pushes need authorization" >&2
+  exit 1
+fi
+BRANCH="${SOURCE_REF#refs/*/}"
 
 # Uncomment for XcodeGen projects: the project file is generated and gitignored.
 # xcodegen generate --quiet

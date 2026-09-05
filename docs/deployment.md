@@ -1,9 +1,15 @@
 # Deployment
 
-Production and preview use separate fresh D1 databases in APAC:
+## Authority and local validation
 
-- `howmuch-production`: `57dc5569-d639-44c1-bb9d-6214f43a43b8`
-- `howmuch-preview`: `7ca818bd-7f04-4b9b-8a84-8c8f84a6a272`
+Remote migrations and deployments require explicit authorization for the selected environment. Use only Wrangler profile `yj`, account **YJ `810a0c404daff0737f4a2a97a7aab092`**, never the Tinkertanker Cloudflare account. The owner's `yjsoon@gmail.com` shorthand and displayed member `cloudflare@yjsoon.com` refer to the same intended account; account/resource IDs, not the email label, are authoritative.
+
+Verify the selected account and that the configured resources exist there before any remote mutation. Do not create replacements or change bindings to work around a wrong account. Production and preview use separate D1 databases in APAC:
+
+| Environment | Worker | D1 database | D1 ID |
+|---|---|---|---|
+| Production | `howmuch` | `howmuch-production` | `57dc5569-d639-44c1-bb9d-6214f43a43b8` |
+| Preview | `howmuch-preview` | `howmuch-preview` | `7ca818bd-7f04-4b9b-8a84-8c8f84a6a272` |
 
 Environment bindings are repeated because Wrangler does not inherit them. Local work may apply the canonical migration with:
 
@@ -13,30 +19,44 @@ wrangler d1 migrations apply DB --local
 bun run build
 ```
 
+The worker `build` script builds web assets and runs `wrangler deploy --dry-run`; it does not upload or authorize a deployment. Local tests/fixes/reruns may continue within the task without production credentials or publication permission.
+
 The preview environment explicitly enables both its `workers.dev` route and
 Preview URLs. This produces a reachable `howmuch-preview.<account>.workers.dev`
 endpoint for end-to-end checks while leaving production on
 `https://howmuch.soon.sg`.
 
-For a first remote deployment, migrate before deploying:
+## Authorized remote deployment
+
+After verifying identity/resources, migrate before deploying **only the authorized environment**. Commands below run from `apps/worker`; a preview request does not authorize production.
+
+Preview:
 
 ```sh
-cd apps/worker
-wrangler d1 migrations apply DB --remote --env preview
+wrangler d1 migrations apply DB --remote --profile yj --env preview
 bun run deploy:preview
-wrangler d1 migrations apply DB --remote
+```
+
+Production:
+
+```sh
+wrangler d1 migrations apply DB --remote --profile yj
 bun run deploy
 ```
 
-The deployment scripts build the web app immediately before Wrangler uploads
+Both deployment scripts select profile `yj` explicitly. Profile selection is not a substitute for account/resource verification. They build the web app immediately before Wrangler uploads
 its assets. Use them rather than invoking `wrangler deploy` directly so `/docs`
 and the rest of the SPA cannot be missing or stale.
 
 Keep `HOWMUCH_API_TOKEN` as an encrypted secret. Use the local, validated import, parity, and D1-bootstrap tools in `docs/ynab-migration.md` for any YNAB work. They copy the verified ledger, provenance, and raw mirror into an otherwise clean target. Do not use an unverified SQLite file or ad-hoc table copy.
 
-## Temporary YNAB transition mode
+## Current YNAB transition status
 
 Production has finished the YNAB-primary transition. `HOWMUCH_TRANSITION_READ_ONLY=false`, there is no `HOWMUCH_YNAB_PLAN_ID`, and the only cron is HowMuch scheduled materialisation at `5 16 * * *` (`00:05 Asia/Singapore`). Do not add `HOWMUCH_YNAB_PLAN_ID` or the `10 16 * * *` YNAB delta cron again unless a new transition is explicitly authorised. `HOWMUCH_YNAB_TOKEN` must not exist as a Worker secret. Preview stays writable with no YNAB plan, token, or cron. Local configuration is writable unless the variable is the literal string `true`.
+
+### Historical procedure — only for an explicitly authorized new transition
+
+The following transition/recovery/cutover steps are not part of routine deployment. Re-evaluate them against current source and an approved conflict policy before any reactivation; this document does not authorize restoring the former transition.
 
 Before enabling the production secret or deploying a transition configuration, verify Wrangler profile `yj` is using account `YJ` (`810a0c404daff0737f4a2a97a7aab092`) and D1 database `howmuch-production` (`57dc5569-d639-44c1-bb9d-6214f43a43b8`). A current D1 Time Travel bookmark is a required recovery gate. From `apps/worker`, record the private bookmark returned by:
 
@@ -62,6 +82,8 @@ Final cutover back to HowMuch must happen in this order:
 6. Restore only the HowMuch scheduled-materialisation cron `5 16 * * *` (`00:05 Asia/Singapore`) and verify one count-only run. It enters at most 25 fair, re-evaluated occurrences, skips closed accounts, isolates bad schedules, and uses deterministic receipts for retry safety.
 
 After cutover, do not run a YNAB re-import over a ledger with HowMuch-local writes such as account reconciliations unless a new transition and conflict policy has been explicitly authorised; it could replace normalised YNAB-derived transaction state.
+
+## First-owner setup
 
 After the password-auth migration and Worker are deployed, open the app on its HTTPS custom domain. When no user exists, the setup form requests:
 

@@ -43,10 +43,8 @@ State lives in one observable `AppModel` with independent load phases per surfac
 
 ## Validation
 
-Build from the repo root:
+Use the [iOS validation contract](AGENTS.md) from the repo root: select one available iOS 26+ simulator, reuse its UDID for build-for-testing and test-without-building, and retain phase logs in the project-local cache layout. Rebuild after source changes and do not run tests from a failed build. Choose tests and representative UI states relevant to the change.
 
-```sh
-xcodebuild -project apps/ios/HowMuch.xcodeproj -scheme HowMuch -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/howmuch-derived CODE_SIGNING_ALLOWED=NO CLANG_MODULE_CACHE_PATH=/tmp/howmuch-module-cache SWIFT_MODULECACHE_PATH=/tmp/howmuch-module-cache build
-```
+Local unsigned builds/tests use the intended worktree; they do not require signing secrets, committed/pushed code, or updating to `main`. Simulator installation/launch is local validation, not physical-device distribution.
 
-To put a signed build on a registered iPhone that is not plugged into this Mac, use Speedflight (`scripts/speedflight.sh`). Standing checks and “Mac is not set up” guidance live in the iOS Speedflight section of `AGENTS.md`.
+For explicitly authorized signed publication to a registered iPhone, follow the [Speedflight runbook](../../docs/speedflight.md). `scripts/speedflight.sh` signs, exports, and uploads in one invocation; do not use it as a local build check.

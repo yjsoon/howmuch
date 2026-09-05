@@ -73,16 +73,12 @@ It must report:
 
 ## iOS Simulator
 
-Required for every `ios-*` recipe. Skip those recipes (do not mark them verified via web `/add`) when Xcode / Simulator is missing.
+Required for each selected `ios-*` recipe, not every recipe for every change. Skip those recipes (do not mark them verified via web `/add`) when Xcode / Simulator is missing. Continue safe local fixes and reruns within the task; validation does not authorize signing, publication, commits, pushes, or installing external skills.
 
 1. `control-howmuch launch` and `doctor` pass. Complete first-owner setup on `{web_url}` if `setup_required` is still true.
-2. Build and run scheme **HowMuch** from `apps/ios/HowMuch.xcodeproj` on **iOS Simulator** (iOS 26+). From the repo root:
+2. Follow [apps/ios/AGENTS.md](../../../apps/ios/AGENTS.md) for canonical **HowMuch** simulator validation from the repo root. Reuse its selected iOS 26+ `SIMULATOR_UDID`, cache, and successful products across build-for-testing and test-without-building; rebuild after source changes. No signing credentials or clean/pushed HEAD are needed.
 
-```sh
-xcodebuild -project apps/ios/HowMuch.xcodeproj -scheme HowMuch -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/howmuch-derived CODE_SIGNING_ALLOWED=NO CLANG_MODULE_CACHE_PATH=/tmp/howmuch-module-cache SWIFT_MODULECACHE_PATH=/tmp/howmuch-module-cache build
-```
-
-Then install and launch in Simulator (Xcode Run, or `simctl install` + `simctl launch sg.soon.howmuch`). Computer-use drives the Simulator window, not `{web_url}`.
+Then install and launch the built app on that same simulator: `xcrun simctl install "$SIMULATOR_UDID" build/xcode/DerivedData-simulator/Build/Products/Debug-iphonesimulator/HowMuch.app`, then `xcrun simctl launch "$SIMULATOR_UDID" sg.soon.howmuch`. Computer-use drives the Simulator window, not `{web_url}`. This local installation does not prove or authorize physical-device distribution.
 
 3. Connection (ellipsis **Connection settings** on Accounts, Plan, or Reflect):
    - **Server** = `{api_url}` from `control-howmuch state` (Simulator: `http://127.0.0.1:{api_port}`). New installs default to `https://howmuch.soon.sg` — change it. HTTP is allowed only for this device or this LAN.

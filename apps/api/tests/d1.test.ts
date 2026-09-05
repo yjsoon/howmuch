@@ -212,8 +212,9 @@ describe("D1 foundation", () => {
     expect(rootPackage.dependencies).toBeUndefined();
     const workerPackage = await Bun.file(new URL("../../worker/package.json", import.meta.url)).json();
     expect(workerPackage.scripts["build:web"]).toBe("bun run --cwd ../web build");
-    expect(workerPackage.scripts.deploy).toBe("bun run build:web && wrangler deploy");
-    expect(workerPackage.scripts["deploy:preview"]).toBe("bun run build:web && wrangler deploy --env preview");
+    expect(workerPackage.scripts.build).toBe("bun run build:web && wrangler deploy --dry-run --outdir dist");
+    expect(workerPackage.scripts.deploy).toBe("bun run build:web && wrangler deploy --profile yj");
+    expect(workerPackage.scripts["deploy:preview"]).toBe("bun run build:web && wrangler deploy --profile yj --env preview");
     const wranglerConfig = JSON.parse((await Bun.file(new URL("../../worker/wrangler.jsonc", import.meta.url)).text()).replace(/^\s*\/\/.*$/gm, ""));
     expect(wranglerConfig.d1_databases[0]).toMatchObject({ database_name: "howmuch-production", database_id: "57dc5569-d639-44c1-bb9d-6214f43a43b8" });
     expect(wranglerConfig.env.preview.d1_databases[0]).toMatchObject({ database_name: "howmuch-preview", database_id: "7ca818bd-7f04-4b9b-8a84-8c8f84a6a272" });
