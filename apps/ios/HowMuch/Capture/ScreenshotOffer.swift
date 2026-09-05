@@ -257,11 +257,11 @@ final class PhotosScreenshotLibrary: ScreenshotLibrary {
   var observesPhotoLibrary: Bool { true }
 
   func requestAccess() async -> PHAuthorizationStatus {
-    await withCheckedContinuation { continuation in
-      PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
-        continuation.resume(returning: status)
-      }
+    let current = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+    if current != .notDetermined {
+      return current
     }
+    return await PHPhotoLibrary.requestAuthorization(for: .readWrite)
   }
 
   func latestScreenshot(createdAfter: Date, excluding: Set<String>) async -> ScreenshotCandidate? {

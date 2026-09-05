@@ -13,6 +13,7 @@ struct SettingsView: View {
   @State private var setupState: SetupState = .idle
   @State private var planState: PlanState = .idle
   @State private var planRequestID = UUID()
+  @State private var offerScreenshots = ScreenshotOfferController.shared.isEnabled
   private let wasInitiallyAuthenticated: Bool
 
   let onSave: @MainActor (APISettings) async -> Void
@@ -172,17 +173,15 @@ struct SettingsView: View {
         }
 
         Section {
-          Toggle(
-            "Offer new screenshots",
-            isOn: Binding(
-              get: { screenshots.isEnabled },
-              set: { enabled in
-                Task {
-                  await screenshots.setEnabled(enabled)
+          Toggle("Offer new screenshots", isOn: $offerScreenshots)
+            .onChange(of: offerScreenshots) { _, enabled in
+              Task {
+                await screenshots.setEnabled(enabled)
+                if offerScreenshots != screenshots.isEnabled {
+                  offerScreenshots = screenshots.isEnabled
                 }
               }
-            )
-          )
+            }
         } header: {
           Text("Screenshots")
         } footer: {
@@ -192,6 +191,7 @@ struct SettingsView: View {
       .navigationTitle("Connection")
       .navigationBarTitleDisplayMode(.inline)
       .task {
+        offerScreenshots = screenshots.isEnabled
         checkSetupStatus()
         if sessionMatchesDraft {
           loadPlans()
