@@ -91,8 +91,44 @@ final class IntentCatalogStore: @unchecked Sendable {
   }
 
   static func defaultDirectory() -> URL {
-    let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-    return root.appendingPathComponent("HowMuch/IntentCatalog", isDirectory: true)
+    if let container = HowMuchAppGroup.containerURL() {
+      let directory = Self.directory(in: container)
+      migrateLegacyApplicationSupportIfNeeded(to: directory)
+      return directory
+    }
+    return legacyApplicationSupportDirectory()
+  }
+
+  static func directory(in container: URL) -> URL {
+    container.appendingPathComponent("IntentCatalog", isDirectory: true)
+  }
+
+  static func legacyApplicationSupportDirectory() -> URL {
+    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent("HowMuch/IntentCatalog", isDirectory: true)
+  }
+
+  static func migrateLegacyApplicationSupportIfNeeded(to directory: URL) {
+    migrate(from: legacyApplicationSupportDirectory(), to: directory)
+  }
+
+  static func migrate(from legacy: URL, to directory: URL) {
+    let fileManager = FileManager.default
+    guard fileManager.fileExists(atPath: legacy.path) else {
+      return
+    }
+    try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+    let existing = Set(
+      ((try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? [])
+        .map(\.lastPathComponent)
+    )
+    let legacyFiles = (try? fileManager.contentsOfDirectory(at: legacy, includingPropertiesForKeys: nil)) ?? []
+    for file in legacyFiles where file.pathExtension == "json" {
+      guard !existing.contains(file.lastPathComponent) else {
+        continue
+      }
+      try? fileManager.copyItem(at: file, to: directory.appendingPathComponent(file.lastPathComponent))
+    }
   }
 
   func scheduleWrite(_ snapshot: IntentCatalogSnapshot) {

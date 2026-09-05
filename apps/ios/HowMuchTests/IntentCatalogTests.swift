@@ -121,6 +121,41 @@ final class IntentCatalogTests: XCTestCase {
     XCTAssertNil(store.load(fingerprint: model.settings.connectionFingerprint))
   }
 
+  func testMigrateCopiesLegacyJSONWithoutClobbering() throws {
+    let legacy = directory.appendingPathComponent("legacy", isDirectory: true)
+    let destination = directory.appendingPathComponent("app-group", isDirectory: true)
+    try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+    let snapshot = IntentCatalogSnapshot.project(
+      fingerprint: "plan-a",
+      accounts: [Self.account(id: "acct-everyday", name: "Everyday Account", closed: false)],
+      categoryGroups: [],
+      payees: []
+    )
+    let store = IntentCatalogStore(directory: legacy)
+    store.write(snapshot)
+    IntentCatalogStore.migrate(from: legacy, to: destination)
+    let migrated = IntentCatalogStore(directory: destination)
+    XCTAssertEqual(migrated.load(fingerprint: "plan-a")?.openAccounts.map(\.id), ["acct-everyday"])
+
+    let newer = IntentCatalogSnapshot.project(
+      fingerprint: "plan-a",
+      accounts: [Self.account(id: "acct-travel", name: "Travel Card", closed: false)],
+      categoryGroups: [],
+      payees: []
+    )
+    migrated.write(newer)
+    IntentCatalogStore.migrate(from: legacy, to: destination)
+    XCTAssertEqual(migrated.load(fingerprint: "plan-a")?.openAccounts.map(\.id), ["acct-travel"])
+  }
+
+  func testDirectoryInAppGroupContainerKeepsIntentCatalogFolder() {
+    let container = URL(fileURLWithPath: "/tmp/howmuch-app-group")
+    XCTAssertEqual(
+      IntentCatalogStore.directory(in: container).lastPathComponent,
+      "IntentCatalog"
+    )
+  }
+
   func testScheduledWriteDoesNotLandAfterWipe() {
     let snapshot = IntentCatalogSnapshot.project(
       fingerprint: "plan-a",

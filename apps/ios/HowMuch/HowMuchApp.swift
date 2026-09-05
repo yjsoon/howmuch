@@ -36,6 +36,12 @@ enum QuickAction {
       CaptureRequest(kind: .blank, connectionFingerprint: nil)
     )
   }
+
+  static func enqueueInboxCapture() {
+    CaptureRouter.shared.enqueue(
+      CaptureRequest(kind: .inbox, connectionFingerprint: nil)
+    )
+  }
 }
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
@@ -62,6 +68,15 @@ final class QuickActionSceneDelegate: NSObject, UIWindowSceneDelegate {
   func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
     if connectionOptions.shortcutItem?.type == QuickAction.addExpenseType {
       QuickAction.enqueueBlankCapture()
+    }
+    if connectionOptions.urlContexts.contains(where: { $0.url.scheme == "howmuch" }) {
+      QuickAction.enqueueInboxCapture()
+    }
+  }
+
+  func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+    if URLContexts.contains(where: { $0.url.scheme == "howmuch" }) {
+      QuickAction.enqueueInboxCapture()
     }
   }
 
@@ -189,6 +204,7 @@ private struct RootView: View {
     }
     .onAppear {
       consumePendingCapture()
+      enqueueInboxIfNeeded(force: false)
     }
     .onChange(of: capture.pending?.id) { _, _ in
       consumePendingCapture()
@@ -198,13 +214,23 @@ private struct RootView: View {
     }
     .onChange(of: scenePhase) { _, phase in
       if phase == .active {
+        enqueueInboxIfNeeded(force: false)
         consumePendingCapture()
       }
     }
     .onChange(of: model.settings.isAuthenticated) { _, isAuthenticated in
       if !isAuthenticated {
         capture.dropForSignOut()
+      } else {
+        enqueueInboxIfNeeded(force: false)
+        consumePendingCapture()
       }
+    }
+    .onOpenURL { url in
+      guard url.scheme == "howmuch" else {
+        return
+      }
+      enqueueInboxIfNeeded(force: true)
     }
   }
 
@@ -214,12 +240,47 @@ private struct RootView: View {
       currentFingerprint: model.settings.connectionFingerprint
     )
   }
+
+  private func enqueueInboxIfNeeded(force: Bool) {
+    guard model.settings.isAuthenticated else {
+      return
+    }
+    let store = InboxStore.shared
+    if force {
+      model.presentCapture(
+        CaptureRequest(
+          kind: .inbox,
+          connectionFingerprint: model.settings.connectionFingerprint
+        )
+      )
+      return
+    }
+    if store.hasReadyInboxItems() {
+      model.presentCapture(
+        CaptureRequest(
+          kind: .inbox,
+          connectionFingerprint: model.settings.connectionFingerprint
+        )
+      )
+      return
+    }
+    if CaptureRouter.shared.presented == nil, store.hasReadingItems() {
+      model.presentCapture(
+        CaptureRequest(
+          kind: .inbox,
+          connectionFingerprint: model.settings.connectionFingerprint
+        )
+      )
+    }
+  }
 }
 
 private struct CaptureIntakeHost: View {
   @Environment(AppModel.self) private var model
   let request: CaptureRequest
   @State private var reviewDrafts: [TransactionDraft]?
+  @State private var inboxDraft: TransactionDraft?
+  @State private var claimedInboxIDs: [UUID] = []
 
   var body: some View {
     Group {
@@ -228,14 +289,48 @@ private struct CaptureIntakeHost: View {
           drafts: reviewDrafts,
           preferredAccountID: model.preferredCaptureAccountID
         )
+      } else if case .inbox = request.kind, inboxDraft == nil {
+        InboxReadingView(
+          onResolved: applyInboxDrafts,
+          onClaimed: { claimedInboxIDs = $0 }
+        )
       } else {
-        AddTransactionSheet(request: request) { drafts in
+        AddTransactionSheet(request: formRequest) { drafts in
           reviewDrafts = drafts
         }
       }
     }
     .onChange(of: request.id) { _, _ in
       reviewDrafts = nil
+      inboxDraft = nil
+      claimedInboxIDs = []
+    }
+    .onDisappear {
+      if CaptureRouter.shared.presented == nil {
+        InboxStore.shared.discardReading(ids: claimedInboxIDs)
+        claimedInboxIDs = []
+      }
+    }
+  }
+
+  private var formRequest: CaptureRequest {
+    if let inboxDraft {
+      return CaptureRequest(
+        id: request.id,
+        kind: .draft(inboxDraft),
+        connectionFingerprint: request.connectionFingerprint
+      )
+    }
+    return request
+  }
+
+  private func applyInboxDrafts(_ drafts: [TransactionDraft]) {
+    if drafts.count > 1 {
+      reviewDrafts = drafts
+    } else if let only = drafts.first {
+      inboxDraft = only
+    } else {
+      CaptureRouter.shared.presented = nil
     }
   }
 }

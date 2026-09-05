@@ -50,6 +50,13 @@
 		A2000000000000000000005B /* AddTransactionIntentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005A /* AddTransactionIntentTests.swift */; };
 		A20000000000000000000081 /* IntakeReviewListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000080 /* IntakeReviewListView.swift */; };
 		A20000000000000000000083 /* CommitManyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000082 /* CommitManyTests.swift */; };
+		A20000000000000000000091 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
+		A20000000000000000000093 /* InboxStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000092 /* InboxStoreTests.swift */; };
+		A20000000000000000000095 /* InboxReadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000094 /* InboxReadingView.swift */; };
+		A20000000000000000000097 /* IntelligenceAura.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000096 /* IntelligenceAura.swift */; };
+		A30000000000000000000003 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000002 /* ShareViewController.swift */; };
+		A30000000000000000000006 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
+		A3000000000000000000000B /* HowMuchShare.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* HowMuchShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -70,6 +77,14 @@
 		A2000000000000000000005A /* AddTransactionIntentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddTransactionIntentTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000080 /* IntakeReviewListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeReviewListView.swift; sourceTree = "<group>"; };
 		A20000000000000000000082 /* CommitManyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitManyTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000090 /* InboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxStore.swift; sourceTree = "<group>"; };
+		A20000000000000000000092 /* InboxStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxStoreTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000094 /* InboxReadingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxReadingView.swift; sourceTree = "<group>"; };
+		A20000000000000000000096 /* IntelligenceAura.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelligenceAura.swift; sourceTree = "<group>"; };
+		A30000000000000000000001 /* HowMuchShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HowMuchShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A30000000000000000000002 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		A30000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A30000000000000000000005 /* HowMuchShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HowMuchShare.entitlements; sourceTree = "<group>"; };
 		A10000000000000000000010 /* HowMuchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HowMuchApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000011 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		A10000000000000000000012 /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
@@ -108,7 +123,28 @@
 			remoteGlobalIDString = A10000000000000000000009;
 			remoteInfo = HowMuch;
 		};
+		A30000000000000000000008 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A1000000000000000000000A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A30000000000000000000007;
+			remoteInfo = HowMuchShare;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A3000000000000000000000A /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A3000000000000000000000B /* HowMuchShare.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		A10000000000000000000030 /* Frameworks */ = {
@@ -126,6 +162,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A3000000000000000000000D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -133,6 +176,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000003 /* HowMuch */,
+				A30000000000000000000013 /* HowMuchShare */,
 				A2000000000000000000002B /* HowMuchTests */,
 				A10000000000000000000004 /* Products */,
 			);
@@ -159,6 +203,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000001 /* HowMuch.app */,
+				A30000000000000000000001 /* HowMuchShare.appex */,
 				A20000000000000000000022 /* HowMuchTests.xctest */,
 			);
 			name = Products;
@@ -222,6 +267,9 @@
 			children = (
 				A20000000000000000000010 /* CaptureRequest.swift */,
 				A20000000000000000000012 /* CaptureRouter.swift */,
+				A20000000000000000000090 /* InboxStore.swift */,
+				A20000000000000000000094 /* InboxReadingView.swift */,
+				A20000000000000000000096 /* IntelligenceAura.swift */,
 				A20000000000000000000040 /* SlipReader.swift */,
 			);
 			path = Capture;
@@ -248,8 +296,19 @@
 				A20000000000000000000042 /* SlipReaderMappingTests.swift */,
 				A2000000000000000000005A /* AddTransactionIntentTests.swift */,
 				A20000000000000000000082 /* CommitManyTests.swift */,
+				A20000000000000000000092 /* InboxStoreTests.swift */,
 			);
 			path = HowMuchTests;
+			sourceTree = "<group>";
+		};
+		A30000000000000000000013 /* HowMuchShare */ = {
+			isa = PBXGroup;
+			children = (
+				A30000000000000000000002 /* ShareViewController.swift */,
+				A30000000000000000000004 /* Info.plist */,
+				A30000000000000000000005 /* HowMuchShare.entitlements */,
+			);
+			path = HowMuchShare;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -262,10 +321,12 @@
 				A10000000000000000000031 /* Sources */,
 				A10000000000000000000030 /* Frameworks */,
 				A10000000000000000000032 /* Resources */,
+				A3000000000000000000000A /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A30000000000000000000009 /* PBXTargetDependency */,
 			);
 			name = HowMuch;
 			packageProductDependencies = (
@@ -292,6 +353,23 @@
 			productReference = A20000000000000000000022 /* HowMuchTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		A30000000000000000000007 /* HowMuchShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A30000000000000000000012 /* Build configuration list for PBXNativeTarget "HowMuchShare" */;
+			buildPhases = (
+				A3000000000000000000000C /* Sources */,
+				A3000000000000000000000D /* Frameworks */,
+				A3000000000000000000000E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = HowMuchShare;
+			productName = HowMuchShare;
+			productReference = A30000000000000000000001 /* HowMuchShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -308,6 +386,9 @@
 					A20000000000000000000025 = {
 						CreatedOnToolsVersion = 16.0;
 						TestTargetID = A10000000000000000000009;
+					};
+					A30000000000000000000007 = {
+						CreatedOnToolsVersion = 16.0;
 					};
 				};
 			};
@@ -328,6 +409,7 @@
 			projectRoot = "";
 			targets = (
 				A10000000000000000000009 /* HowMuch */,
+				A30000000000000000000007 /* HowMuchShare */,
 				A20000000000000000000025 /* HowMuchTests */,
 			);
 		};
@@ -339,6 +421,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1000000000000000000002A /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A3000000000000000000000E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -385,6 +474,9 @@
 				A20000000000000000000057 /* AddTransactionIntent.swift in Sources */,
 				A20000000000000000000059 /* AppShortcuts.swift in Sources */,
 				A20000000000000000000081 /* IntakeReviewListView.swift in Sources */,
+				A20000000000000000000091 /* InboxStore.swift in Sources */,
+				A20000000000000000000095 /* InboxReadingView.swift in Sources */,
+				A20000000000000000000097 /* IntelligenceAura.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -397,6 +489,16 @@
 				A20000000000000000000043 /* SlipReaderMappingTests.swift in Sources */,
 				A2000000000000000000005B /* AddTransactionIntentTests.swift in Sources */,
 				A20000000000000000000083 /* CommitManyTests.swift in Sources */,
+				A20000000000000000000093 /* InboxStoreTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A3000000000000000000000C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A30000000000000000000003 /* ShareViewController.swift in Sources */,
+				A30000000000000000000006 /* InboxStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -407,6 +509,11 @@
 			isa = PBXTargetDependency;
 			target = A10000000000000000000009 /* HowMuch */;
 			targetProxy = A20000000000000000000029 /* PBXContainerItemProxy */;
+		};
+		A30000000000000000000009 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A30000000000000000000007 /* HowMuchShare */;
+			targetProxy = A30000000000000000000008 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -572,6 +679,61 @@
 			};
 			name = Release;
 		};
+		A30000000000000000000010 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = HowMuchShare/HowMuchShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = PQ6U5ESLN2;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = HowMuchShare/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = HowMuch;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = sg.soon.howmuch.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A30000000000000000000011 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = HowMuchShare/HowMuchShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = PQ6U5ESLN2;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = HowMuchShare/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = HowMuch;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = sg.soon.howmuch.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -598,6 +760,15 @@
 			buildConfigurations = (
 				A20000000000000000000027 /* Debug */,
 				A20000000000000000000028 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A30000000000000000000012 /* Build configuration list for PBXNativeTarget "HowMuchShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A30000000000000000000010 /* Debug */,
+				A30000000000000000000011 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
