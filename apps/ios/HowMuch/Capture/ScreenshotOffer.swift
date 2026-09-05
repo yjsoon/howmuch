@@ -51,6 +51,7 @@ final class ScreenshotOfferController {
   private let lineCounter: @Sendable (Data) -> Int
   private var photoProbe: PhotoLibraryChangeProbe?
   private var screenshotObserver: NSObjectProtocol?
+  private var considerGeneration = 0
 
   init(
     defaults: UserDefaults = .standard,
@@ -68,16 +69,16 @@ final class ScreenshotOfferController {
   }
 
   func setEnabled(_ enabled: Bool) async {
+    considerGeneration += 1
+    offer = nil
     if !enabled {
       persistEnabled(false, at: nil)
-      offer = nil
       stopObserving()
       return
     }
     let status = await library.requestAccess()
     guard status.isScreenshotReadable else {
       persistEnabled(false, at: nil)
-      offer = nil
       stopObserving()
       return
     }
@@ -107,33 +108,40 @@ final class ScreenshotOfferController {
       createdAfter: enabledAt,
       excluding: dismissedIDs
     ) else {
+      offer = nil
       return
     }
     await consider(candidate)
   }
 
   func consider(_ candidate: ScreenshotCandidate) async {
-    guard isEnabled else {
+    guard shouldOffer(candidate) else {
       return
     }
-    guard !dismissedIDs.contains(candidate.id) else {
-      return
-    }
-    if let enabledAt, candidate.createdAt < enabledAt {
-      return
-    }
-    guard !candidate.data.isEmpty, candidate.data.count <= InboxStore.maxPayloadBytes else {
-      return
-    }
+    considerGeneration += 1
+    let generation = considerGeneration
     let lines = await Task.detached(priority: .utility) { [lineCounter] in
       max(1, lineCounter(candidate.data))
     }.value
+    guard generation == considerGeneration, shouldOffer(candidate) else {
+      return
+    }
     offer = ScreenshotOffer(
       id: candidate.id,
       lineCount: lines,
       imageData: candidate.data,
       filename: candidate.filename
     )
+  }
+
+  private func shouldOffer(_ candidate: ScreenshotCandidate) -> Bool {
+    guard isEnabled, !dismissedIDs.contains(candidate.id) else {
+      return false
+    }
+    if let enabledAt, candidate.createdAt < enabledAt {
+      return false
+    }
+    return !candidate.data.isEmpty && candidate.data.count <= InboxStore.maxPayloadBytes
   }
 
   func dismiss() {
@@ -177,6 +185,7 @@ final class ScreenshotOfferController {
   }
 
   private func rememberDismissed(_ id: String) {
+    considerGeneration += 1
     dismissedIDs.insert(id)
     defaults.set(Array(dismissedIDs), forKey: Self.dismissedKey)
     if offer?.id == id {

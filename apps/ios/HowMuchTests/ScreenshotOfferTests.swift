@@ -147,6 +147,72 @@ final class ScreenshotOfferTests: XCTestCase {
     XCTAssertNil(reloaded.offer)
   }
 
+  func testRefreshClearsOfferWhenScreenshotIsGone() async {
+    await controller.setEnabled(true)
+    library.next = candidate(createdAt: Date.distantFuture)
+    await controller.refresh()
+    XCTAssertEqual(controller.offer?.id, "shot-1")
+
+    library.next = nil
+    await controller.refresh()
+    XCTAssertNil(controller.offer)
+  }
+
+  func testReEnableDoesNotRestoreAScreenshotFromBeforeTheNewWindow() async {
+    await controller.setEnabled(true)
+    library.next = candidate(createdAt: Date.distantFuture)
+    await controller.refresh()
+    XCTAssertNotNil(controller.offer)
+
+    await controller.setEnabled(false)
+    XCTAssertNil(controller.offer)
+
+    library.next = candidate(createdAt: Date.distantPast)
+    await controller.setEnabled(true)
+    XCTAssertNil(controller.offer)
+  }
+
+  func testInFlightConsiderDoesNotResurrectAfterDismiss() async {
+    let gate = LineCountGate()
+    controller = ScreenshotOfferController(
+      defaults: defaults,
+      library: library,
+      lineCounter: { gate.count($0) }
+    )
+    await controller.setEnabled(true)
+    let shot = candidate(createdAt: Date.distantFuture)
+    await controller.consider(shot)
+    XCTAssertEqual(controller.offer?.id, "shot-1")
+
+    gate.setDelayNext(true)
+    let delayed = Task { await controller.consider(shot) }
+    XCTAssertEqual(gate.started.wait(timeout: .now() + 2), .success)
+    controller.dismiss()
+    XCTAssertNil(controller.offer)
+    gate.proceed.signal()
+    await delayed.value
+    XCTAssertNil(controller.offer)
+    XCTAssertTrue(store.claimInboxThrowsNothing())
+  }
+
+  func testInFlightConsiderDoesNotPublishAfterDisable() async {
+    let gate = LineCountGate()
+    controller = ScreenshotOfferController(
+      defaults: defaults,
+      library: library,
+      lineCounter: { gate.count($0) }
+    )
+    await controller.setEnabled(true)
+    gate.setDelayNext(true)
+    let delayed = Task { await controller.consider(candidate(createdAt: Date.distantFuture)) }
+    XCTAssertEqual(gate.started.wait(timeout: .now() + 2), .success)
+    await controller.setEnabled(false)
+    gate.proceed.signal()
+    await delayed.value
+    XCTAssertFalse(controller.isEnabled)
+    XCTAssertNil(controller.offer)
+  }
+
   private func candidate(createdAt: Date = Date.distantFuture) -> ScreenshotCandidate {
     ScreenshotCandidate(
       id: "shot-1",
@@ -174,6 +240,30 @@ final class FakeScreenshotLibrary: ScreenshotLibrary {
       return nil
     }
     return next
+  }
+}
+
+final class LineCountGate: @unchecked Sendable {
+  private let lock = NSLock()
+  private var delayNext = false
+  let started = DispatchSemaphore(value: 0)
+  let proceed = DispatchSemaphore(value: 0)
+
+  func setDelayNext(_ value: Bool) {
+    lock.lock()
+    delayNext = value
+    lock.unlock()
+  }
+
+  func count(_ data: Data) -> Int {
+    lock.lock()
+    let delay = delayNext
+    lock.unlock()
+    if delay {
+      started.signal()
+      proceed.wait()
+    }
+    return 3
   }
 }
 
