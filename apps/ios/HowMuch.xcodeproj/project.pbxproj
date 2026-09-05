@@ -47,6 +47,9 @@
 		A20000000000000000000055 /* CategoryEntity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000054 /* CategoryEntity.swift */; };
 		A20000000000000000000057 /* AddTransactionIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000056 /* AddTransactionIntent.swift */; };
 		A20000000000000000000059 /* AppShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000058 /* AppShortcuts.swift */; };
+		A20000000000000000000099 /* AddFromTextIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000098 /* AddFromTextIntent.swift */; };
+		A2000000000000000000009B /* AddFromImageIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000009A /* AddFromImageIntent.swift */; };
+		A2000000000000000000009D /* AddFromInboxIntentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000009C /* AddFromInboxIntentTests.swift */; };
 		A2000000000000000000005B /* AddTransactionIntentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005A /* AddTransactionIntentTests.swift */; };
 		A20000000000000000000081 /* IntakeReviewListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000080 /* IntakeReviewListView.swift */; };
 		A20000000000000000000083 /* CommitManyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000082 /* CommitManyTests.swift */; };
@@ -74,6 +77,9 @@
 		A20000000000000000000054 /* CategoryEntity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryEntity.swift; sourceTree = "<group>"; };
 		A20000000000000000000056 /* AddTransactionIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddTransactionIntent.swift; sourceTree = "<group>"; };
 		A20000000000000000000058 /* AppShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcuts.swift; sourceTree = "<group>"; };
+		A20000000000000000000098 /* AddFromTextIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddFromTextIntent.swift; sourceTree = "<group>"; };
+		A2000000000000000000009A /* AddFromImageIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddFromImageIntent.swift; sourceTree = "<group>"; };
+		A2000000000000000000009C /* AddFromInboxIntentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddFromInboxIntentTests.swift; sourceTree = "<group>"; };
 		A2000000000000000000005A /* AddTransactionIntentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddTransactionIntentTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000080 /* IntakeReviewListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeReviewListView.swift; sourceTree = "<group>"; };
 		A20000000000000000000082 /* CommitManyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitManyTests.swift; sourceTree = "<group>"; };
@@ -283,6 +289,8 @@
 				A20000000000000000000052 /* PayeeEntity.swift */,
 				A20000000000000000000054 /* CategoryEntity.swift */,
 				A20000000000000000000056 /* AddTransactionIntent.swift */,
+				A20000000000000000000098 /* AddFromTextIntent.swift */,
+				A2000000000000000000009A /* AddFromImageIntent.swift */,
 				A20000000000000000000058 /* AppShortcuts.swift */,
 			);
 			path = Intents;
@@ -297,6 +305,7 @@
 				A2000000000000000000005A /* AddTransactionIntentTests.swift */,
 				A20000000000000000000082 /* CommitManyTests.swift */,
 				A20000000000000000000092 /* InboxStoreTests.swift */,
+				A2000000000000000000009C /* AddFromInboxIntentTests.swift */,
 			);
 			path = HowMuchTests;
 			sourceTree = "<group>";
@@ -472,6 +481,8 @@
 				A20000000000000000000053 /* PayeeEntity.swift in Sources */,
 				A20000000000000000000055 /* CategoryEntity.swift in Sources */,
 				A20000000000000000000057 /* AddTransactionIntent.swift in Sources */,
+				A20000000000000000000099 /* AddFromTextIntent.swift in Sources */,
+				A2000000000000000000009B /* AddFromImageIntent.swift in Sources */,
 				A20000000000000000000059 /* AppShortcuts.swift in Sources */,
 				A20000000000000000000081 /* IntakeReviewListView.swift in Sources */,
 				A20000000000000000000091 /* InboxStore.swift in Sources */,
@@ -490,6 +501,7 @@
 				A2000000000000000000005B /* AddTransactionIntentTests.swift in Sources */,
 				A20000000000000000000083 /* CommitManyTests.swift in Sources */,
 				A20000000000000000000093 /* InboxStoreTests.swift in Sources */,
+				A2000000000000000000009D /* AddFromInboxIntentTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

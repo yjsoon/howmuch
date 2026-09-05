@@ -137,4 +137,65 @@ final class InboxStoreTests: XCTestCase {
     let claimed = try store.claimInbox()
     XCTAssertEqual(Set(claimed.map(\.source)), [.appIntent, .detectedScreenshot])
   }
+
+  func testSanitizedFilenameRejectsManifestCollisionAndEmpty() {
+    XCTAssertEqual(InboxStore.sanitizedFilename("payload.png"), "payload.png")
+    XCTAssertEqual(InboxStore.sanitizedFilename("manifest.json"), "payload.bin")
+    XCTAssertEqual(InboxStore.sanitizedFilename("../manifest.json"), "payload.bin")
+    XCTAssertEqual(InboxStore.sanitizedFilename(".."), "payload.bin")
+    XCTAssertEqual(InboxStore.sanitizedFilename(".hidden"), "payload.bin")
+    XCTAssertEqual(InboxStore.sanitizedFilename(""), "payload.bin")
+    XCTAssertEqual(InboxStore.sanitizedFilename("a/b/c.txt"), "c.txt")
+    XCTAssertEqual(InboxStore.sanitizedFilename("../evil.png"), "evil.png")
+  }
+
+  func testWriteDoesNotLetPayloadFilenameClobberManifest() throws {
+    let id = UUID()
+    try store.write(
+      InboxWrite(
+        id: id,
+        source: .appIntent,
+        kind: .image,
+        filename: "manifest.json",
+        data: Data("photo".utf8)
+      )
+    )
+    let claimed = try store.claimInbox()
+    XCTAssertEqual(claimed.first?.filename, "payload.bin")
+    XCTAssertEqual(try claimed.first?.payloadData(), Data("photo".utf8))
+    XCTAssertEqual(claimed.first?.source, .appIntent)
+    XCTAssertTrue(
+      FileManager.default.fileExists(
+        atPath: store.readingDirectory
+          .appendingPathComponent(id.uuidString)
+          .appendingPathComponent("manifest.json").path
+      )
+    )
+  }
+
+  func testWriteKeepsTraversalInsideTheItemDirectory() throws {
+    let id = UUID()
+    try store.write(
+      InboxWrite(
+        id: id,
+        source: .appIntent,
+        kind: .image,
+        filename: "../evil.png",
+        data: Data("photo".utf8)
+      )
+    )
+    let claimed = try XCTUnwrap(try store.claim(id))
+    XCTAssertEqual(claimed.filename, "evil.png")
+    XCTAssertEqual(try claimed.payloadData(), Data("photo".utf8))
+    XCTAssertFalse(
+      FileManager.default.fileExists(
+        atPath: store.inboxDirectory.appendingPathComponent("evil.png").path
+      )
+    )
+    XCTAssertFalse(
+      FileManager.default.fileExists(
+        atPath: store.readingDirectory.appendingPathComponent("evil.png").path
+      )
+    )
+  }
 }

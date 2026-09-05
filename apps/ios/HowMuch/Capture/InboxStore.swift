@@ -115,6 +115,20 @@ final class InboxStore: @unchecked Sendable {
       .appendingPathComponent("HowMuch", isDirectory: true)
   }
 
+  static func sanitizedFilename(_ raw: String) -> String {
+    let name = URL(fileURLWithPath: raw).lastPathComponent
+    let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
+    guard !name.isEmpty,
+          name != "manifest.json",
+          name != ".",
+          name != "..",
+          !name.hasPrefix("."),
+          name.unicodeScalars.allSatisfy({ allowed.contains($0) }) else {
+      return "payload.bin"
+    }
+    return name
+  }
+
   func hasReadyInboxItems() -> Bool {
     lock.lock()
     defer { lock.unlock() }
@@ -146,12 +160,13 @@ final class InboxStore: @unchecked Sendable {
     }
     try fileManager.createDirectory(at: partial, withIntermediateDirectories: true)
     do {
-      try write.data.write(to: partial.appendingPathComponent(write.filename), options: .atomic)
+      let filename = Self.sanitizedFilename(write.filename)
+      try write.data.write(to: partial.appendingPathComponent(filename), options: .atomic)
       let manifest = InboxManifest(
         id: write.id,
         source: write.source,
         kind: write.kind,
-        filename: write.filename,
+        filename: filename,
         createdAt: write.createdAt
       )
       let manifestData = try encoder.encode(manifest)
