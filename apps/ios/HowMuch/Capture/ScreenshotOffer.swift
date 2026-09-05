@@ -68,7 +68,7 @@ final class ScreenshotOfferController {
     dismissedIDs = Set(defaults.stringArray(forKey: Self.dismissedKey) ?? [])
   }
 
-  func setEnabled(_ enabled: Bool) async {
+  func applyEnabledPreference(_ enabled: Bool) {
     considerGeneration += 1
     if !enabled {
       persistEnabled(false, at: nil)
@@ -78,6 +78,13 @@ final class ScreenshotOfferController {
     }
     persistEnabled(true, at: Date())
     startObserving()
+  }
+
+  func setEnabled(_ enabled: Bool) async {
+    applyEnabledPreference(enabled)
+    guard enabled else {
+      return
+    }
     await authorizeAndRefresh()
   }
 
@@ -94,13 +101,8 @@ final class ScreenshotOfferController {
     guard isEnabled else {
       return
     }
-    if status == .denied || status == .restricted {
-      persistEnabled(false, at: nil)
-      offer = nil
-      stopObserving()
-      return
-    }
     guard status.isScreenshotReadable else {
+      offer = nil
       return
     }
     await refresh()

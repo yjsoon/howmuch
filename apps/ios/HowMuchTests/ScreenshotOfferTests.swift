@@ -47,11 +47,21 @@ final class ScreenshotOfferTests: XCTestCase {
     XCTAssertNil(controller.offer)
   }
 
-  func testDeniedAccessLeavesDetectionOff() async {
+  func testDeniedAccessKeepsPreferenceOnWithoutAnOffer() async {
     library.authorizationStatus = .denied
     await controller.setEnabled(true)
-    XCTAssertFalse(controller.isEnabled)
+    XCTAssertTrue(controller.isEnabled)
+    XCTAssertTrue(defaults.bool(forKey: ScreenshotOfferController.enabledKey))
     XCTAssertEqual(library.requestCount, 1)
+    XCTAssertNil(controller.offer)
+  }
+
+  func testApplyEnabledPreferenceWritesDefaultsBeforePhotosReturns() {
+    library.authorizationStatus = .denied
+    controller.applyEnabledPreference(true)
+    XCTAssertTrue(controller.isEnabled)
+    XCTAssertTrue(defaults.bool(forKey: ScreenshotOfferController.enabledKey))
+    XCTAssertEqual(library.requestCount, 0)
     XCTAssertNil(controller.offer)
   }
 
