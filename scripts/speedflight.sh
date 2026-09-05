@@ -39,6 +39,7 @@ BASE="${SPEEDFLIGHT_BASE:-https://speedflight.dev}"
 # page link stays on the custom domain.
 FALLBACK_BASE="https://speedflight.jake-7c3.workers.dev"
 OUT="build/share"
+DERIVED_DATA="build/xcode/DerivedData-archive"
 
 # The page shows a branch and commit, so those must be real: everything
 # committed, and the commit on the remote. Under CI the checkout is the
@@ -72,13 +73,16 @@ mkdir -p "$OUT"
 xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
   -configuration Release \
   -destination "generic/platform=iOS" \
+  -derivedDataPath "$DERIVED_DATA" \
   -archivePath "$OUT/App.xcarchive" \
+  -jobs 2 \
   -allowProvisioningUpdates \
   -authenticationKeyID "$ASC_KEY_ID" \
   -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
   -authenticationKeyPath "$ASC_PRIVATE_KEY_PATH" \
   DEVELOPMENT_TEAM="$TEAM_ID" \
   CODE_SIGN_STYLE=Automatic \
+  COMPILER_INDEX_STORE_ENABLE=NO \
   -quiet archive
 
 cat > "$OUT/ExportOptions.plist" <<PLIST
