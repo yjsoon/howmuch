@@ -1,4 +1,6 @@
 import XCTest
+import UIKit
+import ImageIO
 @testable import HowMuch
 
 final class InboxStoreTests: XCTestCase {
@@ -12,6 +14,110 @@ final class InboxStoreTests: XCTestCase {
 
   override func tearDown() async throws {
     try? FileManager.default.removeItem(at: directory)
+  }
+
+  func testPreviewDownsamplesToDisplayPixelBoundAndPreservesOriginal() async throws {
+    let data = try previewJPEG(width: 1200, height: 600)
+    let item = try previewItem(data: data)
+    for scale in [CGFloat(1), CGFloat(2), CGFloat(3)] {
+      let result = try await InboxPreview.firstThumbnail(in: [item], displayScale: scale)
+      let image = try XCTUnwrap(result)
+      let bitmap = try XCTUnwrap(image.cgImage)
+      XCTAssertEqual(bitmap.width, Int(168 * scale))
+      XCTAssertEqual(bitmap.height, Int(84 * scale))
+      XCTAssertEqual(image.scale, scale)
+      XCTAssertEqual(image.imageOrientation, .up)
+    }
+    XCTAssertEqual(try item.payloadData(), data, "Preview must not replace the OCR payload")
+    XCTAssertEqual(store.loadReading().map(\.id), [item.id])
+  }
+
+  func testPreviewAppliesEXIFRotationToBitmap() async throws {
+    let item = try previewItem(data: previewJPEG(width: 1200, height: 600, orientation: 6))
+    let result = try await InboxPreview.firstThumbnail(in: [item], displayScale: 2)
+    let image = try XCTUnwrap(result)
+    let bitmap = try XCTUnwrap(image.cgImage)
+    XCTAssertEqual(bitmap.width, 168)
+    XCTAssertEqual(bitmap.height, 336)
+    XCTAssertEqual(image.imageOrientation, .up, "EXIF rotation must be baked into the thumbnail")
+  }
+
+  func testPreviewAppliesEXIFMirroringToPixels() async throws {
+    let item = try previewItem(data: previewJPEG(width: 1200, height: 600, orientation: 2))
+    let result = try await InboxPreview.firstThumbnail(in: [item], displayScale: 1)
+    let bitmap = try XCTUnwrap(result?.cgImage)
+    let context = try bitmapContext(width: bitmap.width, height: bitmap.height)
+    context.draw(bitmap, in: CGRect(x: 0, y: 0, width: bitmap.width, height: bitmap.height))
+    let pixels = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
+    let left = (bitmap.height / 2 * bitmap.width + bitmap.width / 4) * 4
+    let right = (bitmap.height / 2 * bitmap.width + bitmap.width * 3 / 4) * 4
+    XCTAssertGreaterThan(pixels[left + 2], pixels[left], "Mirrored left half should be blue")
+    XCTAssertGreaterThan(pixels[right], pixels[right + 2], "Mirrored right half should be red")
+  }
+
+  func testPreviewSkipsTextAndCorruptImagesAndReturnsFirstUsableImageWithoutUpscaling() async throws {
+    let text = try previewItem(data: previewJPEG(width: 80, height: 40), kind: .text)
+    let corrupt = try previewItem(data: Data("not an image".utf8))
+    let first = try previewItem(data: previewJPEG(width: 48, height: 24))
+    let later = try previewItem(data: previewJPEG(width: 100, height: 200))
+    let result = try await InboxPreview.firstThumbnail(
+      in: [text, corrupt, first, later], displayScale: 3
+    )
+    let bitmap = try XCTUnwrap(result?.cgImage)
+    XCTAssertEqual(bitmap.width, 48)
+    XCTAssertEqual(bitmap.height, 24)
+    let missing = try await InboxPreview.firstThumbnail(in: [text, corrupt], displayScale: 3)
+    XCTAssertNil(missing)
+  }
+
+  func testCancelledPreviewThrowsAndKeepsReadingPayloadRecoverable() async throws {
+    let data = try previewJPEG(width: 1200, height: 600)
+    let item = try previewItem(data: data)
+    let task = Task {
+      // Cancel before entry deterministically, without timing sleeps or a production test hook.
+      withUnsafeCurrentTask { $0?.cancel() }
+      return try await InboxPreview.firstThumbnail(in: [item], displayScale: 3)
+    }
+    do {
+      _ = try await task.value
+      XCTFail("A cancelled preview must not deliver an image")
+    } catch is CancellationError {
+      // Expected.
+    }
+    XCTAssertEqual(store.loadReading().map(\.id), [item.id])
+    XCTAssertEqual(try item.payloadData(), data)
+    let recovered = try await InboxPreview.firstThumbnail(in: store.loadReading(), displayScale: 3)
+    XCTAssertNotNil(recovered)
+  }
+
+  private func previewItem(data: Data, kind: InboxPayloadKind = .image) throws -> InboxItem {
+    let id = UUID()
+    try store.write(InboxWrite(
+      id: id, source: .shareSheet, kind: kind, filename: "payload.jpg", data: data
+    ))
+    return try XCTUnwrap(try store.claim(id))
+  }
+
+  private func bitmapContext(width: Int, height: Int) throws -> CGContext {
+    try XCTUnwrap(CGContext(
+      data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+      space: CGColorSpaceCreateDeviceRGB(),
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+    ))
+  }
+
+  private func previewJPEG(width: Int, height: Int, orientation: Int = 1) throws -> Data {
+    let context = try bitmapContext(width: width, height: height)
+    context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+    context.fill(CGRect(x: 0, y: 0, width: width / 2, height: height))
+    context.setFillColor(CGColor(red: 0, green: 0, blue: 1, alpha: 1))
+    context.fill(CGRect(x: width / 2, y: 0, width: width / 2, height: height))
+    let image = try XCTUnwrap(context.makeImage())
+    let data = NSMutableData()
+    let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil))
+    CGImageDestinationAddImage(destination, image, [kCGImagePropertyOrientation: orientation] as CFDictionary)
+    XCTAssertTrue(CGImageDestinationFinalize(destination))
+    return data as Data
   }
 
   func testWriteUsesPartialThenRename() throws {

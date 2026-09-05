@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 #if canImport(Vision)
 import Vision
 #endif
@@ -7,12 +8,14 @@ import Vision
 struct InboxReadingView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.displayScale) private var displayScale
 
   var store: InboxStore = .shared
   var onResolved: ([TransactionDraft]) -> Void
   var onClaimed: ([UUID]) -> Void = { _ in }
 
   @State private var thumbnail: UIImage?
+  @State private var readingTask: Task<Void, Never>?
 
   var body: some View {
     NavigationStack {
@@ -36,13 +39,23 @@ struct InboxReadingView: View {
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Cancel") {
+            readingTask?.cancel()
             dismiss()
           }
           .tint(Theme.accent)
         }
       }
       .task {
-        await readInbox()
+        let task = Task { await readInbox() }
+        readingTask = task
+        await withTaskCancellationHandler {
+          await task.value
+        } onCancel: {
+          task.cancel()
+        }
+      }
+      .onDisappear {
+        readingTask?.cancel()
       }
     }
   }
@@ -88,76 +101,126 @@ struct InboxReadingView: View {
   @MainActor
   private func readInbox() async {
     do {
-      try store.claimInbox()
+      let store = store
+      let items = try await inboxBackgroundWork {
+        try store.claimInbox()
+        try Task.checkCancellation()
+        return store.loadReading()
+      }
+      try Task.checkCancellation()
+      onClaimed(items.map(\.id))
+      thumbnail = try await InboxPreview.firstThumbnail(in: items, displayScale: displayScale)
+      try Task.checkCancellation()
+      var mapped: [TransactionDraft] = []
+      for item in items {
+        try Task.checkCancellation()
+        mapped.append(contentsOf: try await readDrafts(from: item))
+      }
+      try Task.checkCancellation()
+      if mapped.count == 1 {
+        mapped[0].seedIfNeeded(
+          accounts: model.openAccounts,
+          preferredAccountID: model.preferredCaptureAccountID
+        )
+      }
+      onResolved(mapped)
+    } catch is CancellationError {
+      // The capture host owns item cleanup. Never deliver a result after dismissal.
     } catch {
+      guard !Task.isCancelled else { return }
       onResolved([])
-      return
     }
-    let items = store.loadReading()
-    onClaimed(items.map(\.id))
-    thumbnail = items.compactMap(Self.thumbnail(for:)).first
-    guard !items.isEmpty else {
-      onResolved([])
-      return
-    }
-    var mapped: [TransactionDraft] = []
-    for item in items {
-      mapped.append(contentsOf: await readDrafts(from: item))
-    }
-    if mapped.count == 1 {
-      mapped[0].seedIfNeeded(
-        accounts: model.openAccounts,
-        preferredAccountID: model.preferredCaptureAccountID
-      )
-    }
-    onResolved(mapped)
   }
 
-  private func readDrafts(from item: InboxItem) async -> [TransactionDraft] {
+  @MainActor
+  private func readDrafts(from item: InboxItem) async throws -> [TransactionDraft] {
+    try Task.checkCancellation()
     let text: String
     switch item.kind {
     case .text:
-      text = item.payloadText()
+      text = try await inboxBackgroundWork { item.payloadText() }
     case .image:
-      guard let data = try? item.payloadData() else {
+      guard let data = try await inboxBackgroundWork({ try? item.payloadData() }) else {
         return []
       }
+      try Task.checkCancellation()
       text = await SlipImageText.recognize(data)
     }
-    return await SlipReader.shared.read(
+    try Task.checkCancellation()
+    let drafts = await SlipReader.shared.read(
       text: text,
       accounts: model.openAccounts,
       categoryGroups: model.categoryGroups,
       payees: model.payees
     )
+    try Task.checkCancellation()
+    return drafts
   }
+}
 
-  private static func thumbnail(for item: InboxItem) -> UIImage? {
-    guard item.kind == .image, let data = try? item.payloadData() else {
+/// File-backed, orientation-correct previews; OCR continues to use the original payload.
+enum InboxPreview {
+  static func firstThumbnail(in items: [InboxItem], displayScale: CGFloat) async throws -> UIImage? {
+    try await inboxBackgroundWork {
+      let scale = displayScale.isFinite ? max(1, displayScale) : 1
+      let maximumPixelSize = ceil(168 * scale)
+      for item in items {
+        try Task.checkCancellation()
+        guard item.kind == .image else { continue }
+        let image: UIImage? = autoreleasepool {
+          guard let source = CGImageSourceCreateWithURL(
+            item.payloadURL as CFURL,
+            [kCGImageSourceShouldCache: false] as CFDictionary
+          ), let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize,
+            kCGImageSourceShouldCacheImmediately: true
+          ] as CFDictionary) else { return nil }
+          return UIImage(cgImage: thumbnail, scale: scale, orientation: .up)
+        }
+        try Task.checkCancellation()
+        if let image { return image }
+      }
       return nil
     }
-    return UIImage(data: data)
+  }
+}
+
+/// Detached synchronous work must inherit cancellation explicitly, including cancellation
+/// while an uninterruptible file read/decoder is running. Never deliver that stale result.
+private func inboxBackgroundWork<Value: Sendable>(
+  _ operation: @escaping @Sendable () throws -> Value
+) async throws -> Value {
+  try Task.checkCancellation()
+  let task = Task.detached(priority: .userInitiated) {
+    try Task.checkCancellation()
+    let value = try operation()
+    try Task.checkCancellation()
+    return value
+  }
+  return try await withTaskCancellationHandler {
+    let value = try await task.value
+    try Task.checkCancellation()
+    return value
+  } onCancel: {
+    task.cancel()
   }
 }
 
 enum SlipImageText {
   static func recognize(_ data: Data) async -> String {
     #if canImport(Vision)
-    await Task.detached(priority: .userInitiated) {
-      guard let image = UIImage(data: data), let cgImage = image.cgImage else {
-        return ""
-      }
+    return (try? await inboxBackgroundWork {
       let request = VNRecognizeTextRequest()
       request.recognitionLevel = .accurate
-      let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-      do {
-        try handler.perform([request])
-      } catch {
-        return ""
-      }
+      let handler = VNImageRequestHandler(data: data, options: [:])
+      try Task.checkCancellation()
+      try handler.perform([request])
+      try Task.checkCancellation()
       let observations = request.results ?? []
       return observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
-    }.value
+    }) ?? ""
     #else
     return ""
     #endif

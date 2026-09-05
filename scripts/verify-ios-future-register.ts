@@ -75,8 +75,10 @@ if (
 
 if (
   register.includes("let hideFuturePosted = scope.accountID != nil")
-  || !/transactions: visibleTransactions\.filter \{ \$0\.date <= today \}/.test(register)
-  || !/private var currentDateSections: \[RegisterDateSection\] \{[\s\S]*?schedules: \[\]/.test(register)
+  || !/if row\.date > today \{\s*upcoming\[row\.date,[\s\S]*?\} else \{\s*current\[row\.date,/.test(register)
+  || !/for row in schedules \{\s*upcoming\[row\.dateNext,[^\n]*\.schedules\.append\(row\)/.test(register)
+  || /current\[[^\n]*\.schedules\.append/.test(register)
+  || !register.includes("ForEach(snapshot.currentDateSections)")
 ) {
   failures.push("Register still leaves future-dated rows or recurrences in the main timeline.");
 }

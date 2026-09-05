@@ -59,6 +59,7 @@
 		A20000000000000000000097 /* IntelligenceAura.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000096 /* IntelligenceAura.swift */; };
 		A200000000000000000000A1 /* ScreenshotOffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000A0 /* ScreenshotOffer.swift */; };
 		A200000000000000000000A3 /* ScreenshotOfferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000A2 /* ScreenshotOfferTests.swift */; };
+		A200000000000000000000B1 /* RegisterSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000B0 /* RegisterSnapshotTests.swift */; };
 		A30000000000000000000003 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000002 /* ShareViewController.swift */; };
 		A30000000000000000000006 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
 		A3000000000000000000000B /* HowMuchShare.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* HowMuchShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -91,6 +92,7 @@
 		A20000000000000000000096 /* IntelligenceAura.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelligenceAura.swift; sourceTree = "<group>"; };
 		A200000000000000000000A0 /* ScreenshotOffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotOffer.swift; sourceTree = "<group>"; };
 		A200000000000000000000A2 /* ScreenshotOfferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotOfferTests.swift; sourceTree = "<group>"; };
+		A200000000000000000000B0 /* RegisterSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterSnapshotTests.swift; sourceTree = "<group>"; };
 		A30000000000000000000001 /* HowMuchShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HowMuchShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A30000000000000000000002 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		A30000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -312,6 +314,7 @@
 				A20000000000000000000092 /* InboxStoreTests.swift */,
 				A2000000000000000000009C /* AddFromInboxIntentTests.swift */,
 				A200000000000000000000A2 /* ScreenshotOfferTests.swift */,
+				A200000000000000000000B0 /* RegisterSnapshotTests.swift */,
 			);
 			path = HowMuchTests;
 			sourceTree = "<group>";
@@ -510,6 +513,7 @@
 				A20000000000000000000093 /* InboxStoreTests.swift in Sources */,
 				A2000000000000000000009D /* AddFromInboxIntentTests.swift in Sources */,
 				A200000000000000000000A3 /* ScreenshotOfferTests.swift in Sources */,
+				A200000000000000000000B1 /* RegisterSnapshotTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

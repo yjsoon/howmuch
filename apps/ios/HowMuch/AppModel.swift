@@ -847,6 +847,7 @@ final class AppModel {
   }
 
   var pendingRows: [PendingRow] {
+    guard !pendingTransactions.isEmpty else { return [] }
     let serverImportIDs = Set(serverTransactions.compactMap(\.importID))
     return pendingTransactions.compactMap { pending in
       guard settings.matchesCurrentOrLegacyOutboxStamp(pending.connectionFingerprint) else {

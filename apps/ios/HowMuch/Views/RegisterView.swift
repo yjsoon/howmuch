@@ -12,6 +12,65 @@ enum RegisterScope: Hashable {
   }
 }
 
+/// One value per render: section headers, counts, totals and empty states all use
+/// the same filtered rows instead of re-running the ledger search for each one.
+struct RegisterSnapshot {
+  struct DateSection: Identifiable {
+    let date: String
+    var pending: [PendingRow] = []
+    var transactions: [Transaction] = []
+    var schedules: [ScheduledTransaction] = []
+    var id: String { date }
+  }
+
+  let transactionCount: Int
+  let scheduleCount: Int
+  let isEmpty: Bool
+  let inflow: Int
+  let outflow: Int
+  let currentDateSections: [DateSection]
+  let disclosureDateSections: [DateSection]
+  let scheduledDisclosureCount: Int
+
+  init(transactions: [Transaction], pending: [PendingRow], schedules: [ScheduledTransaction], today: String) {
+    transactionCount = transactions.count
+    scheduleCount = schedules.count
+    isEmpty = transactions.isEmpty && pending.isEmpty && schedules.isEmpty
+    var current: [String: DateSection] = [:]
+    var upcoming: [String: DateSection] = [:]
+    var inflow = 0
+    var outflow = 0
+    var upcomingCount = schedules.count
+    for row in transactions {
+      if row.amount > 0 { inflow += row.amount }
+      if row.amount < 0 { outflow -= row.amount }
+      if row.date > today {
+        upcoming[row.date, default: DateSection(date: row.date)].transactions.append(row)
+        upcomingCount += 1
+      } else {
+        current[row.date, default: DateSection(date: row.date)].transactions.append(row)
+      }
+    }
+    for row in pending {
+      if row.isoDate > today {
+        upcoming[row.isoDate, default: DateSection(date: row.isoDate)].pending.append(row)
+        upcomingCount += 1
+      } else {
+        current[row.isoDate, default: DateSection(date: row.isoDate)].pending.append(row)
+      }
+    }
+    // Recurrences belong in Scheduled even when their next date is overdue.
+    for row in schedules {
+      upcoming[row.dateNext, default: DateSection(date: row.dateNext)].schedules.append(row)
+    }
+    self.inflow = inflow
+    self.outflow = outflow
+    currentDateSections = current.values.sorted { $0.date > $1.date }
+    disclosureDateSections = upcoming.values.sorted { $0.date > $1.date }
+    scheduledDisclosureCount = upcomingCount
+  }
+}
+
 struct RegisterView: View {
   @Environment(AppModel.self) private var model
   let scope: RegisterScope
@@ -35,14 +94,6 @@ struct RegisterView: View {
   @SceneStorage("howmuch.register.scheduledExpanded") private var expandedScheduleAccountIDs = ""
   @State private var editingSchedule: ScheduledTransaction?
 
-  private struct RegisterDateSection: Identifiable {
-    let date: String
-    let pending: [PendingRow]
-    let transactions: [Transaction]
-    let schedules: [ScheduledTransaction]
-    var id: String { date }
-  }
-
   init(
     scope: RegisterScope,
     categoryID: String? = nil,
@@ -56,13 +107,21 @@ struct RegisterView: View {
   }
 
   var body: some View {
+    let snapshot = RegisterSnapshot(
+      transactions: visibleTransactions,
+      pending: visiblePendingRows,
+      schedules: visibleSchedules,
+      today: Date.now.isoDateString
+    )
     List {
       workingBalanceSection
-      loadingOrFilterSections
-      scheduledDisclosureSection
-      transactionDateSections
-      searchCoverageSection
-      emptyRegisterSection
+      loadingOrFilterSections(snapshot)
+      scheduledDisclosureSection(snapshot)
+      ForEach(snapshot.currentDateSections) { section in
+        dateSection(section)
+      }
+      searchCoverageSection(snapshot)
+      emptyRegisterSection(snapshot)
       olderTransactionsErrorSection
       loadOlderTransactionsSection
     }
@@ -338,7 +397,7 @@ struct RegisterView: View {
   }
 
   @ViewBuilder
-  private var loadingOrFilterSections: some View {
+  private func loadingOrFilterSections(_ snapshot: RegisterSnapshot) -> some View {
     if model.transactions.isEmpty, model.ledgerPhase != .loaded {
       Section {
         PhasePlaceholder(phase: model.ledgerPhase) {
@@ -372,9 +431,9 @@ struct RegisterView: View {
           .listRowSeparator(.hidden)
         }
       }
-      if isNarrowed, !visibleTransactions.isEmpty {
+      if isNarrowed, snapshot.transactionCount > 0 {
         Section {
-          totalsSummary
+          totalsSummary(snapshot)
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
@@ -384,14 +443,7 @@ struct RegisterView: View {
   }
 
   @ViewBuilder
-  private var transactionDateSections: some View {
-    ForEach(currentDateSections) { section in
-      dateSection(section)
-    }
-  }
-
-  @ViewBuilder
-  private func dateSection(_ section: RegisterDateSection) -> some View {
+  private func dateSection(_ section: RegisterSnapshot.DateSection) -> some View {
     Section {
       ForEach(section.pending) { row in
         PendingTransactionRow(
@@ -498,10 +550,10 @@ struct RegisterView: View {
   }
 
   @ViewBuilder
-  private var searchCoverageSection: some View {
+  private func searchCoverageSection(_ snapshot: RegisterSnapshot) -> some View {
     if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       Section {
-        Text(searchCoverageCopy)
+        Text(searchCoverageCopy(snapshot))
           .font(.footnote)
           .foregroundStyle(.secondary)
           .frame(maxWidth: .infinity, alignment: .leading)
@@ -511,19 +563,19 @@ struct RegisterView: View {
     }
   }
 
-  private var searchCoverageCopy: String {
+  private func searchCoverageCopy(_ snapshot: RegisterSnapshot) -> String {
     let loaded = model.transactions.count
     let transactionWord = loaded == 1 ? "transaction" : "transactions"
-    if visibleSchedules.isEmpty {
+    if snapshot.scheduleCount == 0 {
       return "Search covers \(loaded) loaded \(transactionWord). Scroll to load older ones."
     }
-    let scheduledWord = visibleSchedules.count == 1 ? "scheduled transaction" : "scheduled transactions"
-    return "Search covers \(loaded) loaded \(transactionWord) and \(visibleSchedules.count) \(scheduledWord). Scroll to load older ones."
+    let scheduledWord = snapshot.scheduleCount == 1 ? "scheduled transaction" : "scheduled transactions"
+    return "Search covers \(loaded) loaded \(transactionWord) and \(snapshot.scheduleCount) \(scheduledWord). Scroll to load older ones."
   }
 
   @ViewBuilder
-  private var emptyRegisterSection: some View {
-    if visibleTransactions.isEmpty, visiblePendingRows.isEmpty, visibleSchedules.isEmpty, model.ledgerPhase == .loaded, !model.isFillingHorizon {
+  private func emptyRegisterSection(_ snapshot: RegisterSnapshot) -> some View {
+    if snapshot.isEmpty, model.ledgerPhase == .loaded, !model.isFillingHorizon {
       Section {
         Group {
           if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -713,8 +765,8 @@ struct RegisterView: View {
   }
 
   @ViewBuilder
-  private var scheduledDisclosureSection: some View {
-    if showsScheduledFailure, disclosureDateSections.isEmpty {
+  private func scheduledDisclosureSection(_ snapshot: RegisterSnapshot) -> some View {
+    if showsScheduledFailure, snapshot.disclosureDateSections.isEmpty {
       Section {
         Button {
           Task { await model.refreshScheduledTransactions() }
@@ -751,7 +803,7 @@ struct RegisterView: View {
         .accessibilityLabel("Couldn’t load scheduled transactions")
         .accessibilityHint("Double tap to try again.")
       }
-    } else if shouldShowScheduled {
+    } else if snapshot.scheduledDisclosureCount > 0 {
       Section {
         Button {
           withAnimation(.snappy) {
@@ -767,7 +819,7 @@ struct RegisterView: View {
               .font(.subheadline.weight(.semibold))
               .foregroundStyle(Theme.textPrimary)
             Spacer()
-            Text("\(scheduledDisclosureCount)")
+            Text("\(snapshot.scheduledDisclosureCount)")
               .font(.subheadline)
               .foregroundStyle(.secondary)
           }
@@ -780,11 +832,11 @@ struct RegisterView: View {
         .listRowSeparator(.hidden)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel("Scheduled")
-        .accessibilityValue(scheduledAccessibilityValue)
+        .accessibilityValue("\(isScheduledExpanded ? "Expanded" : "Collapsed"), \(snapshot.scheduledDisclosureCount)")
         .accessibilityHint(isScheduledExpanded ? "Collapses scheduled transactions." : "Expands scheduled transactions.")
       }
       if isScheduledExpanded {
-        ForEach(disclosureDateSections) { section in
+        ForEach(snapshot.disclosureDateSections) { section in
           dateSection(section)
         }
       }
@@ -793,14 +845,6 @@ struct RegisterView: View {
 
   private var showsScheduledFailure: Bool {
     model.scheduledTransactionsPhase.errorMessage != nil
-  }
-
-  private var shouldShowScheduled: Bool {
-    scheduledDisclosureCount > 0
-  }
-
-  private var scheduledDisclosureCount: Int {
-    disclosureDateSections.reduce(0) { $0 + $1.pending.count + $1.transactions.count + $1.schedules.count }
   }
 
   private var scheduledExpansionKey: String {
@@ -823,13 +867,6 @@ struct RegisterView: View {
       ids.insert(scheduledExpansionKey)
     }
     expandedScheduleAccountIDs = ids.sorted().joined(separator: ",")
-  }
-
-  private var scheduledAccessibilityValue: String {
-    if isScheduledExpanded {
-      return "Expanded, \(scheduledDisclosureCount)"
-    }
-    return "Collapsed, \(scheduledDisclosureCount)"
   }
 
   private var accountSchedules: [ScheduledTransaction] {
@@ -928,14 +965,13 @@ struct RegisterView: View {
       || accountIDs?.isEmpty == false
   }
 
-  private var totalsSummary: some View {
-    let rows = visibleTransactions
-    let inflow = rows.filter { $0.amount > 0 }.reduce(0) { $0 + $1.amount }
-    let outflow = rows.filter { $0.amount < 0 }.reduce(0) { $0 + abs($1.amount) }
+  private func totalsSummary(_ snapshot: RegisterSnapshot) -> some View {
+    let inflow = snapshot.inflow
+    let outflow = snapshot.outflow
     let net = inflow - outflow
 
     return VStack(spacing: 8) {
-      Text("\(rows.count) transaction\(rows.count == 1 ? "" : "s")")
+      Text("\(snapshot.transactionCount) transaction\(snapshot.transactionCount == 1 ? "" : "s")")
         .font(.caption)
         .foregroundStyle(.secondary)
       HStack {
@@ -1085,43 +1121,6 @@ struct RegisterView: View {
       }
       let haystack = [row.payeeName, row.categoryName, row.memo, row.accountName]
       return haystack.contains { $0?.localizedStandardContains(query) == true }
-    }
-  }
-
-  private var disclosureDateSections: [RegisterDateSection] {
-    let today = Date.now.isoDateString
-    return dateSections(
-      pending: visiblePendingRows.filter { $0.isoDate > today },
-      transactions: visibleTransactions.filter { $0.date > today },
-      schedules: visibleSchedules
-    )
-  }
-
-  private var currentDateSections: [RegisterDateSection] {
-    let today = Date.now.isoDateString
-    return dateSections(
-      pending: visiblePendingRows.filter { $0.isoDate <= today },
-      transactions: visibleTransactions.filter { $0.date <= today },
-      schedules: []
-    )
-  }
-
-  private func dateSections(
-    pending: [PendingRow],
-    transactions: [Transaction],
-    schedules: [ScheduledTransaction]
-  ) -> [RegisterDateSection] {
-    let pendingByDate = Dictionary(grouping: pending, by: \.isoDate)
-    let postedByDate = Dictionary(grouping: transactions, by: \.date)
-    let schedulesByDate = Dictionary(grouping: schedules, by: \.dateNext)
-    let dates = Set(pendingByDate.keys).union(postedByDate.keys).union(schedulesByDate.keys)
-    return dates.sorted(by: >).map { date in
-      RegisterDateSection(
-        date: date,
-        pending: pendingByDate[date] ?? [],
-        transactions: postedByDate[date] ?? [],
-        schedules: schedulesByDate[date] ?? []
-      )
     }
   }
 }

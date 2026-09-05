@@ -74,7 +74,7 @@ struct IntakeReviewListView: View {
           .tint(Theme.accent)
         }
       }
-      .overlay(alignment: .bottomTrailing) {
+      .safeAreaInset(edge: .bottom, alignment: .trailing) {
         addButton
           .padding(20)
       }
@@ -127,12 +127,14 @@ struct IntakeReviewListView: View {
   }
 
   private var rowsCard: some View {
-    VStack(spacing: 0) {
-      ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-        if index > 0 {
-          CardDivider()
+    LazyVStack(spacing: 0) {
+      ForEach(items) { item in
+        VStack(spacing: 0) {
+          if item.id != items.first?.id {
+            CardDivider()
+          }
+          row(item)
         }
-        row(item)
       }
     }
     .ynabCard()
