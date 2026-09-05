@@ -64,6 +64,23 @@ struct SettingsView: View {
     NavigationStack {
       Form {
         Section {
+          Toggle("Offer new screenshots", isOn: $offerScreenshots)
+            .accessibilityIdentifier("offer-new-screenshots")
+            .onChange(of: offerScreenshots) { _, enabled in
+              Task {
+                await screenshots.setEnabled(enabled)
+                if offerScreenshots != screenshots.isEnabled {
+                  offerScreenshots = screenshots.isEnabled
+                }
+              }
+            }
+        } header: {
+          Text("Screenshots")
+        } footer: {
+          Text("When this is on, HowMuch can notice a new screenshot and offer to add it. Photos stay on this device. Off by default.")
+        }
+
+        Section {
           TextField("http://192.168.1.10:8787", text: $draft.baseURLString)
             .keyboardType(.URL)
             .textInputAutocapitalization(.never)
@@ -171,27 +188,10 @@ struct SettingsView: View {
             Text("Signed in successfully.")
           }
         }
-
-        Section {
-          Toggle("Offer new screenshots", isOn: $offerScreenshots)
-            .onChange(of: offerScreenshots) { _, enabled in
-              Task {
-                await screenshots.setEnabled(enabled)
-                if offerScreenshots != screenshots.isEnabled {
-                  offerScreenshots = screenshots.isEnabled
-                }
-              }
-            }
-        } header: {
-          Text("Screenshots")
-        } footer: {
-          Text("When this is on, HowMuch can notice a new screenshot and offer to add it. Photos stay on this device. Off by default.")
-        }
       }
       .navigationTitle("Connection")
       .navigationBarTitleDisplayMode(.inline)
       .task {
-        offerScreenshots = screenshots.isEnabled
         checkSetupStatus()
         if sessionMatchesDraft {
           loadPlans()

@@ -70,29 +70,40 @@ final class ScreenshotOfferController {
 
   func setEnabled(_ enabled: Bool) async {
     considerGeneration += 1
-    offer = nil
     if !enabled {
       persistEnabled(false, at: nil)
-      stopObserving()
-      return
-    }
-    let status = await library.requestAccess()
-    guard status.isScreenshotReadable else {
-      persistEnabled(false, at: nil)
+      offer = nil
       stopObserving()
       return
     }
     persistEnabled(true, at: Date())
     startObserving()
-    await refresh()
+    await authorizeAndRefresh()
   }
 
   func startIfNeeded() {
-    guard isEnabled, library.authorizationStatus.isScreenshotReadable else {
+    guard isEnabled else {
       return
     }
     startObserving()
-    Task { await refresh() }
+    Task { await authorizeAndRefresh() }
+  }
+
+  private func authorizeAndRefresh() async {
+    let status = await library.requestAccess()
+    guard isEnabled else {
+      return
+    }
+    if status == .denied || status == .restricted {
+      persistEnabled(false, at: nil)
+      offer = nil
+      stopObserving()
+      return
+    }
+    guard status.isScreenshotReadable else {
+      return
+    }
+    await refresh()
   }
 
   func refresh() async {
@@ -261,7 +272,18 @@ final class PhotosScreenshotLibrary: ScreenshotLibrary {
     if current != .notDetermined {
       return current
     }
-    return await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+    return await withTaskGroup(of: PHAuthorizationStatus.self) { group in
+      group.addTask {
+        await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+      }
+      group.addTask {
+        try? await Task.sleep(for: .seconds(2))
+        return PHPhotoLibrary.authorizationStatus(for: .readWrite)
+      }
+      let first = await group.next() ?? .notDetermined
+      group.cancelAll()
+      return first
+    }
   }
 
   func latestScreenshot(createdAfter: Date, excluding: Set<String>) async -> ScreenshotCandidate? {

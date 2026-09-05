@@ -55,6 +55,13 @@ final class ScreenshotOfferTests: XCTestCase {
     XCTAssertNil(controller.offer)
   }
 
+  func testNotDeterminedAccessKeepsTheToggleOn() async {
+    library.authorizationStatus = .notDetermined
+    await controller.setEnabled(true)
+    XCTAssertTrue(controller.isEnabled)
+    XCTAssertEqual(library.requestCount, 1)
+  }
+
   func testCaptionUsesLineCount() {
     XCTAssertEqual(
       ScreenshotOffer(id: "a", lineCount: 1, imageData: Data(), filename: "payload.png").caption,
