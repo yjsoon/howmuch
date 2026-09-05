@@ -64,16 +64,27 @@ struct SettingsView: View {
     NavigationStack {
       Form {
         Section {
-          Toggle("Offer new screenshots", isOn: $offerScreenshots)
-            .accessibilityIdentifier("offer-new-screenshots")
-            .onChange(of: offerScreenshots) { _, enabled in
-              Task {
-                await screenshots.setEnabled(enabled)
-                if offerScreenshots != screenshots.isEnabled {
-                  offerScreenshots = screenshots.isEnabled
-                }
+          Button {
+            let next = !offerScreenshots
+            offerScreenshots = next
+            Task {
+              await screenshots.setEnabled(next)
+              if offerScreenshots != screenshots.isEnabled {
+                offerScreenshots = screenshots.isEnabled
               }
             }
+          } label: {
+            HStack {
+              Text("Offer new screenshots")
+                .foregroundStyle(Theme.textPrimary)
+              Spacer()
+              Text(offerScreenshots ? "On" : "Off")
+                .foregroundStyle(offerScreenshots ? Theme.accent : .secondary)
+            }
+          }
+          .accessibilityIdentifier("offer-new-screenshots")
+          .accessibilityLabel("Offer new screenshots")
+          .accessibilityValue(offerScreenshots ? "On" : "Off")
         } header: {
           Text("Screenshots")
         } footer: {
