@@ -334,10 +334,11 @@ app_path() {
 }
 
 test_product_exists() {
-  local app xctest
+  local app xctest_root xctest_plugin
   app="$(app_path)"
-  xctest="$SIM_DERIVED/Build/Products/Debug-iphonesimulator/HowMuchTests.xctest"
-  [[ -d "$app" && -d "$xctest" ]]
+  xctest_root="$SIM_DERIVED/Build/Products/Debug-iphonesimulator/HowMuchTests.xctest"
+  xctest_plugin="$app/PlugIns/HowMuchTests.xctest"
+  [[ -d "$app" && ( -d "$xctest_root" || -d "$xctest_plugin" ) ]]
 }
 
 cmd_doctor() {
@@ -352,7 +353,7 @@ cmd_doctor() {
   echo "jobs: $JOBS (COMPILER_INDEX_STORE_ENABLE=NO)"
   echo "lock: $([[ -d "$LOCK_DIR" ]] && echo held by "$(cat "$LOCK_DIR/pid" 2>/dev/null || echo unknown)" || echo free)"
   echo "app: $(app_path) $([[ -d "$(app_path)" ]] && echo present || echo missing)"
-  echo "tests: $([[ -d "$SIM_DERIVED/Build/Products/Debug-iphonesimulator/HowMuchTests.xctest" ]] && echo present || echo missing)"
+  echo "tests: $(test_product_exists && echo present || echo missing)"
   echo "$(pressure_line)"
   echo "booted simulators:"
   local booted
@@ -430,7 +431,7 @@ cmd_build_for_testing() {
 cmd_test_without_building() {
   prepare_build 0
   if ! test_product_exists; then
-    echo "error: no test products in $SIM_DERIVED; run build-for-testing first" >&2
+    echo "error: no HowMuchTests.xctest in $SIM_DERIVED (a plain build can remove it); run build-for-testing or test" >&2
     exit 1
   fi
   xcode_invocation test-without-building test-without-building "$@"
