@@ -359,7 +359,7 @@ struct RegisterView: View {
   private var registerFilterMenuItems: some View {
     if scope != .unapproved, (unapprovedCount > 0 || unapprovedOnly) {
       Toggle(isOn: $unapprovedOnly) {
-        Label(reviewNewMenuTitle, systemImage: "sparkles")
+        Label(reviewNewMenuTitle, systemImage: "tray")
       }
       .menuActionDismissBehavior(.disabled)
     }
@@ -643,7 +643,7 @@ struct RegisterView: View {
               )
             )
           } else if scope == .unapproved {
-            ContentUnavailableView("No new transactions", systemImage: "sparkles")
+            ContentUnavailableView("No new transactions", systemImage: "tray")
           } else if model.hasMoreTransactions {
             ContentUnavailableView(
               "No recent transactions",
