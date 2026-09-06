@@ -43,7 +43,7 @@ OUT="build/share"
 DERIVED_DATA="${HOWMUCH_ARCHIVE_DERIVED:-$PWD/build/xcode/DerivedData-archive}"
 XCODE_JOBS="${HOWMUCH_XCODE_JOBS:-2}"
 XCODE_LOG_DIR="${HOWMUCH_XCODE_LOG_DIR:-$PWD/build/xcode/logs}"
-LOCK_DIR="${HOWMUCH_XCODE_LOCK_DIR:-$PWD/build/xcode/ios-xcodebuild.lock}"
+LOCK_DIR="${HOWMUCH_XCODE_LOCK_DIR:-$PWD/build/xcode/ios-runner.lock}"
 
 # Publication requires a clean, remote-backed revision, including in CI.
 # A detached exact revision needs an explicit containing origin branch or tag.
