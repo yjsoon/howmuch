@@ -1385,6 +1385,34 @@ extension Transaction {
     )
   }
 
+  func withApproved(_ approved: Bool) -> Transaction {
+    Transaction(
+      id: id,
+      date: date,
+      amount: amount,
+      memo: memo,
+      cleared: cleared,
+      approved: approved,
+      flagColor: flagColor,
+      flagName: flagName,
+      accountID: accountID,
+      accountName: accountName,
+      payeeID: payeeID,
+      payeeName: payeeName,
+      categoryID: categoryID,
+      categoryName: categoryName,
+      transferAccountID: transferAccountID,
+      transferTransactionID: transferTransactionID,
+      parentTransactionID: parentTransactionID,
+      matchedTransactionID: matchedTransactionID,
+      importID: importID,
+      importPayeeName: importPayeeName,
+      importPayeeNameOriginal: importPayeeNameOriginal,
+      deleted: deleted,
+      subtransactions: subtransactions
+    )
+  }
+
   /// Single-transaction writes can omit `parentTransactionID`. Keep the list value.
   func preservingParent(from existing: Transaction) -> Transaction {
     guard parentTransactionID == nil, let parentTransactionID = existing.parentTransactionID else {
@@ -1678,6 +1706,20 @@ struct TransactionApprovalEnvelope: Encodable {
 
 struct TransactionApprovalRequest: Encodable {
   let approved: Bool
+}
+
+struct TransactionCollectionApprovalEnvelope: Encodable {
+  let transactions: [Item]
+
+  struct Item: Encodable {
+    let id: String
+    let approved: Bool
+  }
+}
+
+struct TransactionCollectionPayload: Decodable {
+  let transactionIds: [String]?
+  let serverKnowledge: Int?
 }
 
 struct TransactionSubtransactionWriteRequest: Codable, Equatable {

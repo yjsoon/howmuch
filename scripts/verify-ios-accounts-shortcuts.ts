@@ -43,8 +43,14 @@ if (!source.includes("RegisterView(scope: .all)")) {
 if (!source.includes("ScheduledTransactionsView()")) {
   failures.push("Scheduled destination ScheduledTransactionsView() is missing.");
 }
+if (!source.includes("RegisterView(scope: .unapproved)")) {
+  failures.push("New destination RegisterView(scope: .unapproved) is missing.");
+}
 if (!shortcuts.includes('title: "Scheduled"')) {
   failures.push('Scheduled shortcut title must be the one-line label "Scheduled".');
+}
+if (!shortcuts.includes('title: "New"')) {
+  failures.push('New shortcut title must be the one-line label "New".');
 }
 if (shortcuts.includes('title: "Scheduled Transactions"')) {
   failures.push("Scheduled shortcut title must not use Scheduled Transactions; that wraps on a half-width tile.");
@@ -67,6 +73,9 @@ if (!source.includes('"list.bullet.rectangle"')) {
 if (!source.includes('"calendar.badge.clock"')) {
   failures.push("Scheduled icon calendar.badge.clock is missing.");
 }
+if (!source.includes('"sparkles"')) {
+  failures.push("New icon sparkles is missing.");
+}
 if (shortcuts.includes("chevron.right")) {
   failures.push("Shortcut tiles must not include chevron.right.");
 }
@@ -86,4 +95,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log("iOS accounts shortcuts: Grid pair, one-line Scheduled title, no subtitle, restack before xxLarge, no chevron, scheduled copy in LedgerShortcutStatus.");
+console.log("iOS accounts shortcuts: Grid pair plus New, one-line Scheduled/New titles, no subtitle, restack before xxLarge, no chevron, scheduled copy in LedgerShortcutStatus.");

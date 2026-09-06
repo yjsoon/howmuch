@@ -33,6 +33,24 @@ final class RegisterSnapshotTests: XCTestCase {
     XCTAssertFalse(snapshot.isEmpty)
   }
 
+  func testInboxModeKeepsFutureUnapprovedDatesInCurrentSections() throws {
+    let future = try transaction("future-new", date: "2026-09-06", amount: -4_000)
+    let today = try transaction("today-new", date: "2026-09-05", amount: -2_000)
+    let snapshot = RegisterSnapshot(
+      transactions: [future, today],
+      pending: [],
+      schedules: [],
+      today: "2026-09-05",
+      mode: .inbox
+    )
+    XCTAssertEqual(snapshot.currentDateSections.map(\.id), ["2026-09-06", "2026-09-05"])
+    XCTAssertEqual(snapshot.currentDateSections[0].transactions.map(\.id), ["future-new"])
+    XCTAssertTrue(snapshot.disclosureDateSections.isEmpty)
+    XCTAssertEqual(snapshot.scheduledDisclosureCount, 0)
+    XCTAssertEqual(snapshot.transactionCount, 2)
+    XCTAssertEqual(snapshot.outflow, 6_000)
+  }
+
   func testEmptyAndPendingOnlyStates() {
     let empty = RegisterSnapshot(transactions: [], pending: [], schedules: [], today: "2026-09-05")
     XCTAssertTrue(empty.isEmpty)
