@@ -37,6 +37,7 @@ final class AppModel {
   var payees: [Payee] = []
   private var serverTransactions: [Transaction] = []
   private var serverUnapprovedTransactions: [Transaction] = []
+  private var approvalSession = RegisterApproval.Session.empty
   /// Imported YNAB schedules remain an immutable source mirror; local edits
   /// and entered occurrences are reflected through HowMuch overlays.
   var scheduledTransactions: [ScheduledTransaction] = []
@@ -155,6 +156,7 @@ final class AppModel {
     payees = []
     serverTransactions = []
     serverUnapprovedTransactions = []
+    approvalSession = .empty
     clearedToggleOverlays.removeAll()
     clearedTogglesInFlight.removeAll()
     scheduledTransactions = []
@@ -853,7 +855,18 @@ final class AppModel {
   }
 
   var unapprovedTransactions: [Transaction] {
-    overlaying(serverUnapprovedTransactions)
+    overlaying(serverUnapprovedTransactions).filter { row in
+      !row.deleted && !row.approved && !approvalSession.confirmed.contains(row.id)
+    }
+  }
+
+  var isApprovalInFlight: Bool {
+    !approvalSession.pending.isEmpty
+  }
+
+  func approveAllTitle(for rows: [Transaction]) -> String? {
+    let count = eligibleApprovalCount(in: rows)
+    return count == 0 ? nil : RegisterApproval.approveAllLabel(count)
   }
 
   var pendingRows: [PendingRow] {
@@ -1108,7 +1121,7 @@ final class AppModel {
       serverTransactions = sortedUniqueTransactions(
         quiet ? page.transactions + serverTransactions : page.transactions
       )
-      serverUnapprovedTransactions = sortedUniqueTransactions(unapproved)
+      replaceUnapprovedQueue(with: unapproved)
       reconcileClearedToggleOverlays()
       applyTransactionPageCursor(page)
       ledgerPhase = .loaded
@@ -1172,6 +1185,7 @@ final class AppModel {
     payees = []
     serverTransactions = []
     serverUnapprovedTransactions = []
+    approvalSession = .empty
     clearedToggleOverlays.removeAll()
     clearedTogglesInFlight.removeAll()
     scheduledTransactions = []
@@ -1744,8 +1758,95 @@ final class AppModel {
     if let index = serverTransactions.firstIndex(where: { $0.id == existing.id }) {
       serverTransactions[index] = next
     }
-    if let index = serverUnapprovedTransactions.firstIndex(where: { $0.id == existing.id }) {
+    if next.approved {
+      serverUnapprovedTransactions.removeAll { $0.id == existing.id }
+    } else if let index = serverUnapprovedTransactions.firstIndex(where: { $0.id == existing.id }) {
       serverUnapprovedTransactions[index] = next
+    }
+  }
+
+  private func replaceUnapprovedQueue(with fetched: [Transaction]) {
+    let live = fetched.filter { !$0.approved && !$0.deleted }
+    let stillUnapproved = Set(live.map(\.id))
+    var session = approvalSession
+    session.confirmed.formIntersection(stillUnapproved)
+    approvalSession = session
+    serverUnapprovedTransactions = sortedUniqueTransactions(
+      live.filter { !approvalSession.confirmed.contains($0.id) }
+    )
+  }
+
+  private func applyApprovedIDs(_ ids: Set<String>) {
+    guard !ids.isEmpty else {
+      return
+    }
+    serverUnapprovedTransactions.removeAll { ids.contains($0.id) }
+    serverTransactions = serverTransactions.map { ids.contains($0.id) ? $0.withApproved(true) : $0 }
+  }
+
+  private func eligibleApprovalCount(in rows: [Transaction]) -> Int {
+    RegisterApproval.eligibleIDs(
+      in: rows.filter { pendingEdits[$0.id] == nil }.map(\.approvalRow),
+      session: approvalSession
+    ).count
+  }
+
+  private enum ApprovalSuccessCopy {
+    case bulk
+    case single(Transaction)
+  }
+
+  private func runApproval(from rows: [Transaction], success: ApprovalSuccessCopy) async throws {
+    let candidates = rows.filter { pendingEdits[$0.id] == nil && editTasks[$0.id] == nil }
+    guard let plan = RegisterApproval.plan(
+      submitted: candidates.map(\.approvalRow),
+      session: approvalSession
+    ) else {
+      return
+    }
+    guard let started = RegisterApproval.begin(approvalSession, ids: plan.ids) else {
+      return
+    }
+    approvalSession = started
+    var approvedCount = 0
+    do {
+      for chunk in plan.chunks {
+        do {
+          try await apiClient.approveTransactionBatch(
+            planID: settings.planID,
+            transactionIDs: chunk.ids
+          )
+          approvedCount += chunk.count
+          applyApprovedIDs(Set(chunk.ids))
+        } catch {
+          throw BulkApprovalError(approvedCount: approvedCount, underlying: error)
+        }
+      }
+      approvalSession = RegisterApproval.finish(approvalSession, ids: plan.ids)
+      switch success {
+      case .bulk:
+        showSaveMessage(RegisterApproval.approvedToast(approvedCount))
+      case .single(let row):
+        showSaveMessage("Approved \(row.payeeName ?? "transaction")")
+      }
+      await refreshLedger(quiet: true)
+    } catch let error as BulkApprovalError {
+      approvalSession = RegisterApproval.fail(
+        approvalSession,
+        ids: plan.ids,
+        approvedCount: error.approvedCount
+      )
+      if error.approvedCount > 0 {
+        showSaveMessage(
+          RegisterApproval.interruptedToast(
+            approvedCount: error.approvedCount,
+            uncertainCount: max(0, plan.ids.count - error.approvedCount)
+          ),
+          kind: .failure
+        )
+      }
+      await refreshLedger(quiet: true)
+      throw error
     }
   }
 
@@ -1896,18 +1997,24 @@ final class AppModel {
     Task { await refreshLedgerAndInvalidatePlan() }
   }
 
+  func approveEligible(from rows: [Transaction]) async {
+    do {
+      try await runApproval(from: rows, success: .bulk)
+    } catch let error as BulkApprovalError {
+      if error.approvedCount == 0 {
+        showSaveMessage(error.localizedDescription, kind: .failure)
+      }
+    } catch {
+      showSaveMessage(error.localizedDescription, kind: .failure)
+    }
+  }
+
   func approveTransaction(_ transaction: Transaction) async throws {
     try ensureNoPendingEdit(on: transaction)
     guard !transaction.approved else {
       return
     }
-    let approved = try await apiClient.approveTransaction(
-      planID: settings.planID,
-      transactionID: transaction.id
-    )
-    applySavedTransaction(approved, replacing: transaction)
-    showSaveMessage("Approved \(approved.payeeName ?? "transaction")")
-    await refreshLedger(quiet: true)
+    try await runApproval(from: [transaction], success: .single(transaction))
   }
 
   private func showSaveMessage(_ text: String, kind: SaveMessage.Kind = .success) {

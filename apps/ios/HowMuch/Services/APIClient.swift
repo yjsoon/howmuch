@@ -7,6 +7,20 @@ extension Notification.Name {
   static let howMuchAuthenticationExpired = Notification.Name("HowMuch.AuthenticationExpired")
 }
 
+struct BulkApprovalError: LocalizedError {
+  let approvedCount: Int
+  let underlying: Error?
+
+  init(approvedCount: Int, underlying: Error? = nil) {
+    self.approvedCount = approvedCount
+    self.underlying = underlying
+  }
+
+  var errorDescription: String? {
+    underlying?.localizedDescription ?? "Couldn’t approve transactions."
+  }
+}
+
 enum APIClientError: LocalizedError {
   case invalidBaseURL
   case invalidResponse
@@ -454,6 +468,24 @@ struct APIClient {
       body: TransactionApprovalEnvelope(transaction: TransactionApprovalRequest(approved: true))
     )
     return response.data.transaction
+  }
+
+  func approveTransactionBatch(planID: String, transactionIDs: [String]) async throws {
+    guard !transactionIDs.isEmpty else {
+      throw APIClientError.validation("Transaction approval batch must not be empty.")
+    }
+    guard transactionIDs.count <= RegisterApproval.batchLimit else {
+      throw APIClientError.validation(
+        "Transaction approval batch cannot exceed \(RegisterApproval.batchLimit) items."
+      )
+    }
+    let _: APIEnvelope<TransactionCollectionPayload> = try await request(
+      path: "/v1/plans/\(planID)/transactions",
+      method: "PATCH",
+      body: TransactionCollectionApprovalEnvelope(
+        transactions: transactionIDs.map { .init(id: $0, approved: true) }
+      )
+    )
   }
 
   func updateTransactionCleared(

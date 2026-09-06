@@ -156,12 +156,12 @@ struct AccountsView: View {
   }
 
   private var ledgerShortcuts: some View {
-    let allTransactions = LedgerShortcutTile(
-      icon: "list.bullet.rectangle",
-      title: "All Transactions",
-      status: .quiet
+    let newTransactions = LedgerShortcutTile(
+      icon: "sparkles",
+      title: "New",
+      status: LedgerShortcutStatus.newQueue(count: model.unapprovedTransactions.count)
     ) {
-      RegisterView(scope: .all)
+      RegisterView(scope: .unapproved)
     }
 
     let scheduled = LedgerShortcutTile(
@@ -175,18 +175,30 @@ struct AccountsView: View {
       ScheduledTransactionsView()
     }
 
+    let allTransactions = LedgerShortcutTile(
+      icon: "list.bullet.rectangle",
+      title: "All",
+      status: .quiet
+    ) {
+      RegisterView(scope: .all)
+    }
+
     return Grid(alignment: .topLeading, horizontalSpacing: 12, verticalSpacing: 12) {
       if usesColumnShortcuts {
         GridRow {
-          allTransactions
+          newTransactions
           scheduled
+          allTransactions
         }
       } else {
         GridRow {
-          allTransactions
+          newTransactions
         }
         GridRow {
           scheduled
+        }
+        GridRow {
+          allTransactions
         }
       }
     }
@@ -419,6 +431,17 @@ struct AccountsView: View {
         .busy("Loading upcoming transactions")
       case .idle, .failed:
         .quiet
+      }
+    }
+
+    static func newQueue(count: Int) -> LedgerShortcutStatus {
+      switch count {
+      case 0:
+        .quiet
+      case 1:
+        .detail("1 new transaction")
+      default:
+        .detail("\(count) new transactions")
       }
     }
 
