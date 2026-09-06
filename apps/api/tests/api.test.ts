@@ -638,6 +638,66 @@ describe("YNAB-compatible API", () => {
     expect(invalid.status).toBe(400);
   });
 
+  test("filters transaction lists by q across text fields and typed amounts", async () => {
+    await createAccount("acct-search", { name: "Everyday" });
+    await createTransaction({
+      account_id: "acct-search",
+      date: "2024-01-15",
+      amount: -142300,
+      payee_name: "FairPrice Finest",
+      memo: "weekly shop",
+    });
+    await createTransaction({
+      account_id: "acct-search",
+      date: "2026-08-01",
+      amount: -12000,
+      payee_name: "Scoot",
+    });
+    await createTransaction({
+      account_id: "acct-search",
+      date: "2026-08-02",
+      amount: -120000,
+      payee_name: "Big Shop",
+    });
+
+    const byPayee = await (await request("/v1/plans/plan-test/transactions?q=FairPrice")).json();
+    expect(byPayee.data.transactions.map((transaction: { payee_name: string }) => transaction.payee_name)).toEqual([
+      "FairPrice Finest",
+    ]);
+
+    for (const q of ["142.30", "142", "$142.30"]) {
+      const found = await (await request(`/v1/plans/plan-test/transactions?q=${encodeURIComponent(q)}`)).json();
+      expect(found.data.transactions.map((transaction: { payee_name: string }) => transaction.payee_name)).toEqual([
+        "FairPrice Finest",
+      ]);
+    }
+
+    const twelve = await (await request("/v1/plans/plan-test/transactions?q=12")).json();
+    expect(twelve.data.transactions.map((transaction: { payee_name: string }) => transaction.payee_name)).toEqual([
+      "Scoot",
+    ]);
+
+    const horizon = await (await request("/v1/plans/plan-test/transactions?since_date=2026-01-01")).json();
+    expect(horizon.data.transactions.map((transaction: { payee_name: string }) => transaction.payee_name)).toEqual([
+      "Big Shop",
+      "Scoot",
+    ]);
+
+    const olderMatch = await (await request("/v1/plans/plan-test/transactions?q=142.30")).json();
+    expect(olderMatch.data.transactions).toHaveLength(1);
+    expect(olderMatch.data.transactions[0].date).toBe("2024-01-15");
+    expect(olderMatch.data.has_more).toBeFalse();
+    expect(olderMatch.data.next_offset).toBeNull();
+
+    const unfiltered = await (await request("/v1/plans/plan-test/transactions?limit=2")).json();
+    expect(unfiltered.data.transactions).toHaveLength(2);
+    expect(unfiltered.data.has_more).toBeTrue();
+    expect(unfiltered.data.next_offset).toBe(2);
+
+    const tooLong = await request(`/v1/plans/plan-test/transactions?q=${"f".repeat(201)}`);
+    expect(tooLong.status).toBe(400);
+  });
+
   test("treats repeated single-transaction import ids as idempotent", async () => {
     const body = {
       transaction: {
