@@ -35,5 +35,5 @@ Preconditions:
 - Organise accounts still only manages groups. Creating a card or bank account is the Accounts plus, not New Group.
 - Amount owed for cards and loans is typed positive; Accounts lists it negative. The sheet shows `Listed as` once the amount is non-zero.
 - Checking, Savings, Cash, and Other Asset keep the entered current balance, including a minus for overdraft.
-- An empty ledger hides All Transactions / Scheduled and shows **No Accounts** with **New Account**.
+- An empty ledger hides New / Scheduled / All and shows **No Accounts** with **New Account**.
 - iOS Simulator is required. Do not treat web as a substitute; web has no create-account sheet.

@@ -46,14 +46,17 @@ if (!source.includes("ScheduledTransactionsView()")) {
 if (!source.includes("RegisterView(scope: .unapproved)")) {
   failures.push("New destination RegisterView(scope: .unapproved) is missing.");
 }
-if (!shortcuts.includes('title: "Scheduled"')) {
-  failures.push('Scheduled shortcut title must be the one-line label "Scheduled".');
+const shortcutTitles = [...memberSpan("private var ledgerShortcuts").matchAll(/title: "([^"]+)"/g)].map(
+  (match) => match[1],
+);
+if (JSON.stringify(shortcutTitles) !== JSON.stringify(["New", "Scheduled", "All"])) {
+  failures.push(`Shortcut titles must be New, Scheduled, All in that order (got ${shortcutTitles.join(", ")}).`);
 }
-if (!shortcuts.includes('title: "New"')) {
-  failures.push('New shortcut title must be the one-line label "New".');
+if (shortcuts.includes('title: "All Transactions"')) {
+  failures.push('All shortcut title must be the one-line label "All".');
 }
 if (shortcuts.includes('title: "Scheduled Transactions"')) {
-  failures.push("Scheduled shortcut title must not use Scheduled Transactions; that wraps on a half-width tile.");
+  failures.push("Scheduled shortcut title must not use Scheduled Transactions; that wraps on a third-width tile.");
 }
 if (!source.includes('"1 upcoming transaction"')) {
   failures.push("Singular upcoming copy is missing.");
@@ -95,4 +98,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log("iOS accounts shortcuts: Grid pair plus New, one-line Scheduled/New titles, no subtitle, restack before xxLarge, no chevron, scheduled copy in LedgerShortcutStatus.");
+console.log("iOS accounts shortcuts: Grid New, Scheduled, All, one-line titles, no subtitle, restack before xxLarge, no chevron, scheduled copy in LedgerShortcutStatus.");
