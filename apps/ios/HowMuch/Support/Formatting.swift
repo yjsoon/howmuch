@@ -45,7 +45,7 @@ enum MoneyCodec {
     return total.partialValue
   }
 
-  /// Model extractions may include `$`, `S$`, currency codes, or trailing words.
+  /// Model extractions may include `$`, `S$`, grouping commas, currency codes, or trailing words.
   /// Typed fields still go through `milliunits(from:)` and reject that junk.
   static func milliunits(fromExtraction input: String) -> Int? {
     var raw = input.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -57,6 +57,7 @@ enum MoneyCodec {
       with: "",
       options: .regularExpression
     )
+    raw = raw.replacingOccurrences(of: ",", with: "")
     guard let match = raw.range(of: #"-?\d+(?:\.\d+)?"#, options: .regularExpression) else {
       return nil
     }

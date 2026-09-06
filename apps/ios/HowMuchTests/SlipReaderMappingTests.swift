@@ -28,6 +28,8 @@ final class SlipReaderMappingTests: XCTestCase {
         .init(amount: "$50 for coffee"),
         .init(amount: "50 dollars"),
         .init(amount: "$5"),
+        .init(amount: "$1,234.56"),
+        .init(amount: "S$1,234"),
       ],
       accounts: [],
       categoryGroups: [],
@@ -37,10 +39,12 @@ final class SlipReaderMappingTests: XCTestCase {
     )
     XCTAssertEqual(
       mapped.map(\.draft.amountMagnitudeMilli),
-      [50_000, 50_000, 12_500, 50_000, 50_000, 5_000]
+      [50_000, 50_000, 12_500, 50_000, 50_000, 5_000, 1_234_560, 1_234_000]
     )
-    XCTAssertEqual(mapped.map(\.parsedAmount), [true, true, true, true, true, true])
+    XCTAssertEqual(mapped.map(\.parsedAmount), Array(repeating: true, count: 8))
     XCTAssertEqual(MoneyCodec.milliunits(fromExtraction: "S$50"), 50_000)
+    XCTAssertEqual(MoneyCodec.milliunits(fromExtraction: "$1,234.56"), 1_234_560)
+    XCTAssertEqual(MoneyCodec.milliunits(fromExtraction: "S$1,234"), 1_234_000)
     XCTAssertNil(MoneyCodec.milliunits(from: "S$50"))
   }
 
