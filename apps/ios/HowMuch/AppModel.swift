@@ -290,7 +290,10 @@ final class AppModel {
         typeToSend = nil
       }
       let currentIcon = previous.icon ?? previous.displayIcon
-      let iconToSend = identity.icon.rawValue == currentIcon ? nil : identity.icon.rawValue
+      let followsNewType = typeToSend.map { identity.icon == AccountIcon.default(for: $0) } ?? false
+      let iconToSend = followsNewType || identity.icon.rawValue == currentIcon
+        ? nil
+        : identity.icon.rawValue
       let updated = try await apiClient.updateAccount(
         planID: settings.planID,
         accountID: accountID,
@@ -298,6 +301,9 @@ final class AppModel {
         icon: iconToSend,
         type: typeToSend
       )
+      if let typeToSend, updated.type != typeToSend {
+        throw APIClientError.validation("The server did not save the account type.")
+      }
       if let current = accounts.firstIndex(where: { $0.id == accountID }) {
         accounts[current] = updated
         renameTransferPayee(forAccountID: accountID, to: updated.name)
