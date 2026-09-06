@@ -304,7 +304,7 @@ enum SlipReaderMapping {
 
   private static func stripDateLeadIn(_ raw: String) -> String {
     raw.replacingOccurrences(
-      of: #"^(?i)(?:scheduled|on|for|due)(?:\s+the)?\s+"#,
+      of: #"^(?i)(?:(?:scheduled|on|for|due)(?:\s+the)?\s+)+"#,
       with: "",
       options: .regularExpression
     ).trimmingCharacters(in: .whitespacesAndNewlines)

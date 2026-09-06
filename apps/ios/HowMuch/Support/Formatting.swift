@@ -58,7 +58,7 @@ enum MoneyCodec {
       options: .regularExpression
     )
     raw = raw.replacingOccurrences(of: ",", with: "")
-    guard let match = raw.range(of: #"-?\d+(?:\.\d+)?"#, options: .regularExpression) else {
+    guard let match = raw.range(of: #"-?(?:\d+(?:\.\d+)?|\.\d+)"#, options: .regularExpression) else {
       return nil
     }
     return milliunits(from: String(raw[match]))
