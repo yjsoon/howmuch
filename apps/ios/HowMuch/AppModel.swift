@@ -1797,12 +1797,9 @@ final class AppModel {
   }
 
   private func runApproval(from rows: [Transaction], success: ApprovalSuccessCopy) async throws {
-    let requested = rows
-      .filter { pendingEdits[$0.id] == nil && editTasks[$0.id] == nil }
-      .map(\.id)
+    let candidates = rows.filter { pendingEdits[$0.id] == nil && editTasks[$0.id] == nil }
     guard let plan = RegisterApproval.plan(
-      ids: requested,
-      rows: unapprovedTransactions.map(\.approvalRow),
+      submitted: candidates.map(\.approvalRow),
       session: approvalSession
     ) else {
       return

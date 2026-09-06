@@ -14,6 +14,12 @@ final class RegisterApprovalTests: XCTestCase {
     )
   }
 
+  func testSubmittedPlanApprovesALedgerRowThatIsNotInTheInbox() {
+    XCTAssertEqual(RegisterApproval.plan(submitted: [row("ledger-only")])?.ids, ["ledger-only"])
+    XCTAssertNil(RegisterApproval.plan(ids: ["ledger-only"], rows: [row("inbox")]))
+    XCTAssertNil(RegisterApproval.plan(submitted: [row("already", approved: true)]))
+  }
+
   func testDropsMissingApprovedDeletedAndDuplicateIDs() {
     let plan = RegisterApproval.plan(
       ids: ["d", "a", "d", "missing", "b", "c"],

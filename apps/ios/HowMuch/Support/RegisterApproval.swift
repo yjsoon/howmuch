@@ -49,6 +49,10 @@ enum RegisterApproval {
     }
   }
 
+  static func plan(submitted rows: [Row], session: Session = .empty) -> Plan? {
+    plan(ids: rows.map(\.id), rows: rows, session: session)
+  }
+
   static func plan(ids: [String], rows: [Row], session: Session = .empty) -> Plan? {
     let eligible = Set(eligibleIDs(in: rows, session: session))
     var planned: [String] = []
