@@ -76,8 +76,11 @@ if (!source.includes('"list.bullet.rectangle"')) {
 if (!source.includes('"calendar.badge.clock"')) {
   failures.push("Scheduled icon calendar.badge.clock is missing.");
 }
-if (!source.includes('"sparkles"')) {
-  failures.push("New icon sparkles is missing.");
+if (!source.includes('"tray"')) {
+  failures.push("New icon tray is missing.");
+}
+if (shortcuts.includes('"sparkles"')) {
+  failures.push("New shortcut must not use sparkles; that is reserved for AI features.");
 }
 if (shortcuts.includes("chevron.right")) {
   failures.push("Shortcut tiles must not include chevron.right.");

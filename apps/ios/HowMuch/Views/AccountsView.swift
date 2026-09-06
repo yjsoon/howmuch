@@ -157,7 +157,7 @@ struct AccountsView: View {
 
   private var ledgerShortcuts: some View {
     let newTransactions = LedgerShortcutTile(
-      icon: "sparkles",
+      icon: "tray",
       title: "New",
       status: LedgerShortcutStatus.newQueue(count: model.unapprovedTransactions.count)
     ) {
