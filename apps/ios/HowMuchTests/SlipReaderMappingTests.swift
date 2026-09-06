@@ -19,6 +19,38 @@ final class SlipReaderMappingTests: XCTestCase {
     XCTAssertEqual(MoneyCodec.milliunits(from: "5.00").map(abs), mapped[0].draft.amountMagnitudeMilli)
   }
 
+  func testExtractionAmountsAcceptCurrencyPrefixesAndJunk() {
+    let mapped = SlipReaderMapping.map(
+      [
+        .init(amount: "S$50"),
+        .init(amount: "SGD 50"),
+        .init(amount: "USD 12.5"),
+        .init(amount: "$50 for coffee"),
+        .init(amount: "50 dollars"),
+        .init(amount: "$5"),
+        .init(amount: "$1,234.56"),
+        .init(amount: "S$1,234"),
+        .init(amount: "$.50"),
+      ],
+      accounts: [],
+      categoryGroups: [],
+      payees: [],
+      calendar: Self.calendar,
+      now: Self.now
+    )
+    XCTAssertEqual(
+      mapped.map(\.draft.amountMagnitudeMilli),
+      [50_000, 50_000, 12_500, 50_000, 50_000, 5_000, 1_234_560, 1_234_000, 500]
+    )
+    XCTAssertEqual(mapped.map(\.parsedAmount), Array(repeating: true, count: 9))
+    XCTAssertEqual(MoneyCodec.milliunits(fromExtraction: "S$50"), 50_000)
+    XCTAssertEqual(MoneyCodec.milliunits(fromExtraction: "$1,234.56"), 1_234_560)
+    XCTAssertEqual(MoneyCodec.milliunits(fromExtraction: "S$1,234"), 1_234_000)
+    XCTAssertEqual(MoneyCodec.milliunits(fromExtraction: "$.50"), 500)
+    XCTAssertEqual(MoneyCodec.milliunits(from: "$.50"), 500)
+    XCTAssertNil(MoneyCodec.milliunits(from: "S$50"))
+  }
+
   func testUnambiguousNameMapsToID() {
     let mapped = SlipReaderMapping.map(
       [.init(amount: "5", category: "Groceries", account: "Everyday Account")],
@@ -166,6 +198,59 @@ final class SlipReaderMappingTests: XCTestCase {
     XCTAssertEqual(mapped[0].draft.date, start)
   }
 
+  func testNaturalAndScheduledDatesParse() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let now = Date(timeIntervalSince1970: 1_788_652_800)
+    let cases: [(String, Int, Int, Int)] = [
+      ("today", 2026, 9, 6),
+      ("yesterday", 2026, 9, 5),
+      ("8 Sep", 2026, 9, 8),
+      ("Sep 8", 2026, 9, 8),
+      ("8 September", 2026, 9, 8),
+      ("8/9", 2026, 9, 8),
+      ("scheduled 15 September", 2026, 9, 15),
+      ("scheduled for 15 September", 2026, 9, 15),
+      ("due on 15 September", 2026, 9, 15),
+      ("next Friday", 2026, 9, 11),
+      ("2026-09-20", 2026, 9, 20),
+    ]
+    for (raw, year, month, day) in cases {
+      let parsed = SlipReaderMapping.date(from: raw, calendar: calendar, now: now)
+      XCTAssertNotNil(parsed, raw)
+      guard let parsed else {
+        continue
+      }
+      let parts = calendar.dateComponents([.year, .month, .day], from: parsed)
+      XCTAssertEqual(parts.year, year, raw)
+      XCTAssertEqual(parts.month, month, raw)
+      XCTAssertEqual(parts.day, day, raw)
+      XCTAssertEqual(parsed, calendar.startOfDay(for: parsed), raw)
+    }
+  }
+
+  func testApplySetsScheduledNaturalDate() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let now = Date(timeIntervalSince1970: 1_788_652_800)
+    var draft = TransactionDraft()
+    draft.date = calendar.startOfDay(for: now)
+    let row = SlipReaderMapping.map(
+      [.init(amount: "5", date: "scheduled 15 September")],
+      accounts: [],
+      categoryGroups: [],
+      payees: [],
+      calendar: calendar,
+      now: now
+    )[0]
+    XCTAssertTrue(row.parsedDate)
+    let applied = ComposeParseApply.applying(row, to: draft)
+    let parts = calendar.dateComponents([.year, .month, .day], from: applied.draft.date)
+    XCTAssertEqual(parts.year, 2026)
+    XCTAssertEqual(parts.month, 9)
+    XCTAssertEqual(parts.day, 15)
+  }
+
   func testUnmatchedAccountNameLeavesIDEmptyWithoutChips() {
     let mapped = SlipReaderMapping.map(
       [.init(amount: "5", account: "No Such Bank")],
@@ -234,11 +319,33 @@ final class SlipReaderMappingTests: XCTestCase {
     XCTAssertEqual(applied.draft.direction, .inflow)
   }
 
+  func testApplyKeepsSeededAccountWhenExtractionOmitsAccount() {
+    var draft = TransactionDraft()
+    draft.accountID = "acct-travel"
+    let row = SlipReaderMapping.map(
+      [.init(amount: "5")],
+      sentence: "$5 coffee",
+      accounts: [
+        Self.account("acct-everyday", "Everyday Account"),
+        Self.account("acct-travel", "Travel Card"),
+      ],
+      categoryGroups: [Self.everydayGroup],
+      payees: [],
+      calendar: Self.calendar,
+      now: Self.now
+    )[0]
+    XCTAssertFalse(row.parsedAccount)
+    let applied = ComposeParseApply.applying(row, to: draft)
+    XCTAssertEqual(applied.draft.accountID, "acct-travel")
+    XCTAssertFalse(applied.showAccountPrompt)
+  }
+
   func testApplyShowsChipsAndClearsAccountWhenAmbiguous() {
     var draft = TransactionDraft()
     draft.accountID = "acct-everyday"
     let row = SlipReaderMapping.map(
       [.init(amount: "5", account: "Account")],
+      sentence: "5 on Account",
       accounts: [
         Self.account("acct-everyday", "Everyday Account"),
         Self.account("acct-travel", "Travel Account"),
@@ -259,6 +366,7 @@ final class SlipReaderMappingTests: XCTestCase {
     draft.accountID = "acct-travel"
     let row = SlipReaderMapping.map(
       [.init(amount: "5", account: "Everyday Account")],
+      sentence: "5 on Everyday Account",
       accounts: [
         Self.account("acct-everyday", "Everyday Account"),
         Self.account("acct-travel", "Travel Card"),
@@ -271,6 +379,71 @@ final class SlipReaderMappingTests: XCTestCase {
     let applied = ComposeParseApply.applying(row, to: draft)
     XCTAssertEqual(applied.draft.accountID, "acct-everyday")
     XCTAssertFalse(applied.showAccountPrompt)
+  }
+
+  func testApplyExplicitTravelCardInSentenceOverwritesADifferentSeed() {
+    var draft = TransactionDraft()
+    draft.accountID = "acct-everyday"
+    let row = SlipReaderMapping.map(
+      [.init(amount: "5", account: "Travel Card")],
+      sentence: "5 on Travel Card",
+      accounts: [
+        Self.account("acct-everyday", "Everyday Account"),
+        Self.account("acct-travel", "Travel Card"),
+      ],
+      categoryGroups: [Self.everydayGroup],
+      payees: [],
+      calendar: Self.calendar,
+      now: Self.now
+    )[0]
+    let applied = ComposeParseApply.applying(row, to: draft)
+    XCTAssertEqual(applied.draft.accountID, "acct-travel")
+    XCTAssertFalse(applied.showAccountPrompt)
+  }
+
+  func testApplyKeepsSeededAccountWhenSentenceDoesNotNameOne() {
+    var draft = TransactionDraft()
+    draft.accountID = "acct-travel"
+    let row = SlipReaderMapping.map(
+      [.init(amount: "5", account: "Everyday Account")],
+      sentence: "$5 coffee",
+      accounts: [
+        Self.account("acct-everyday", "Everyday Account"),
+        Self.account("acct-travel", "Travel Card"),
+      ],
+      categoryGroups: [Self.everydayGroup],
+      payees: [],
+      calendar: Self.calendar,
+      now: Self.now
+    )[0]
+    XCTAssertFalse(row.parsedAccount)
+    XCTAssertEqual(row.draft.accountID, "")
+    let applied = ComposeParseApply.applying(row, to: draft)
+    XCTAssertEqual(applied.draft.accountID, "acct-travel")
+    XCTAssertFalse(applied.showAccountPrompt)
+    XCTAssertTrue(applied.accountCandidates.isEmpty)
+  }
+
+  func testApplyKeepsSeededAccountWhenHallucinatedAmbiguousNameIsAbsentFromSentence() {
+    var draft = TransactionDraft()
+    draft.accountID = "acct-everyday"
+    let row = SlipReaderMapping.map(
+      [.init(amount: "5", account: "Account")],
+      sentence: "$5 coffee",
+      accounts: [
+        Self.account("acct-everyday", "Everyday Account"),
+        Self.account("acct-travel", "Travel Account"),
+      ],
+      categoryGroups: [Self.everydayGroup],
+      payees: [],
+      calendar: Self.calendar,
+      now: Self.now
+    )[0]
+    XCTAssertFalse(row.parsedAccount)
+    let applied = ComposeParseApply.applying(row, to: draft)
+    XCTAssertEqual(applied.draft.accountID, "acct-everyday")
+    XCTAssertFalse(applied.showAccountPrompt)
+    XCTAssertTrue(applied.accountCandidates.isEmpty)
   }
 
   func testPromptPrefixPutsCatalogsBeforeTheSentenceAndOmitsPayees() {
@@ -288,6 +461,14 @@ final class SlipReaderMappingTests: XCTestCase {
     XCTAssertFalse(prefix.contains("FairPrice"))
     XCTAssertTrue(prefix.hasSuffix("Sentence:\n"))
     XCTAssertTrue((prefix + "I spent 5").contains("Sentence:\nI spent 5"))
+  }
+
+  func testPromptLeavesAccountEmptyUnlessNamedAndParsesCurrencyAndDates() {
+    let text = SlipReaderPrompt.instructions
+    XCTAssertFalse(text.contains("when they match"))
+    XCTAssertTrue(text.localizedCaseInsensitiveContains("leave account empty unless"))
+    XCTAssertTrue(text.contains("S$"))
+    XCTAssertTrue(text.localizedCaseInsensitiveContains("schedule"))
   }
 
   func testReadDoesNotCallCommit() async {

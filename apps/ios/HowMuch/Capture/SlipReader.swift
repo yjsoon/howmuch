@@ -84,9 +84,9 @@ enum ComposeParseApply {
     }
 
     var showAccountPrompt = false
-    if !row.draft.accountID.isEmpty {
+    if row.parsedAccount, !row.draft.accountID.isEmpty {
       next.accountID = row.draft.accountID
-    } else if !row.accountCandidates.isEmpty {
+    } else if row.parsedAccount, !row.accountCandidates.isEmpty {
       showAccountPrompt = true
       next.accountID = ""
     }
@@ -117,6 +117,7 @@ enum SlipReaderMapping {
 
   static func map(
     _ extractions: [Extraction],
+    sentence: String = "",
     accounts: [Account],
     categoryGroups: [CategoryGroup],
     payees: [Payee],
@@ -129,6 +130,7 @@ enum SlipReaderMapping {
       }
       return mapOne(
         extraction,
+        sentence: sentence,
         accounts: accounts,
         categoryGroups: categoryGroups,
         payees: payees,
@@ -144,25 +146,19 @@ enum SlipReaderMapping {
       return nil
     }
     let today = calendar.startOfDay(for: now)
-    if trimmed.caseInsensitiveCompare("today") == .orderedSame {
-      return today
+    let normalized = stripDateLeadIn(trimmed)
+    if let named = namedDay(normalized, calendar: calendar, today: today) {
+      return named
     }
-    if trimmed.caseInsensitiveCompare("yesterday") == .orderedSame {
-      return calendar.date(byAdding: .day, value: -1, to: today) ?? today
+    if let relative = relativeWeekday(normalized, calendar: calendar, today: today) {
+      return relative
     }
-    let formatter = DateFormatter()
-    formatter.calendar = calendar
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = calendar.timeZone
-    formatter.dateFormat = "yyyy-MM-dd"
-    guard let parsed = formatter.date(from: trimmed) else {
-      return nil
-    }
-    return calendar.startOfDay(for: parsed)
+    return formattedDay(normalized, calendar: calendar, now: today)
   }
 
   private static func mapOne(
     _ extraction: Extraction,
+    sentence: String,
     accounts: [Account],
     categoryGroups: [CategoryGroup],
     payees: [Payee],
@@ -173,7 +169,7 @@ enum SlipReaderMapping {
     draft.direction = extraction.isInflow ? .inflow : .outflow
 
     var parsedAmount = false
-    if !extraction.amount.isEmpty, let milli = MoneyCodec.milliunits(from: extraction.amount) {
+    if !extraction.amount.isEmpty, let milli = MoneyCodec.milliunits(fromExtraction: extraction.amount) {
       draft.amountMagnitudeMilli = abs(milli)
       parsedAmount = true
     }
@@ -185,9 +181,10 @@ enum SlipReaderMapping {
     }
 
     var accountCandidates: [SlipCandidate] = []
-    let parsedAccount = !extraction.account.isEmpty
+    let accountQuery = extraction.account.trimmingCharacters(in: .whitespacesAndNewlines)
+    let parsedAccount = !accountQuery.isEmpty && mentions(accountQuery, in: sentence)
     if parsedAccount {
-      let matches = matchAccounts(extraction.account, in: accounts)
+      let matches = matchAccounts(accountQuery, in: accounts)
       if matches.count == 1 {
         draft.accountID = matches[0].id
       } else if (2...3).contains(matches.count) {
@@ -293,11 +290,100 @@ enum SlipReaderMapping {
     }
     return from.onBudget && to.onBudget
   }
+
+  private static func mentions(_ needle: String, in sentence: String) -> Bool {
+    let query = needle.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !query.isEmpty else {
+      return false
+    }
+    if sentence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      return true
+    }
+    return sentence.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+  }
+
+  private static func stripDateLeadIn(_ raw: String) -> String {
+    raw.replacingOccurrences(
+      of: #"^(?i)(?:(?:scheduled|on|for|due)(?:\s+the)?\s+)+"#,
+      with: "",
+      options: .regularExpression
+    ).trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private static func namedDay(_ raw: String, calendar: Calendar, today: Date) -> Date? {
+    if raw.caseInsensitiveCompare("today") == .orderedSame {
+      return today
+    }
+    if raw.caseInsensitiveCompare("yesterday") == .orderedSame {
+      return calendar.date(byAdding: .day, value: -1, to: today) ?? today
+    }
+    return nil
+  }
+
+  private static func relativeWeekday(_ raw: String, calendar: Calendar, today: Date) -> Date? {
+    let lower = raw.lowercased()
+    guard lower.hasPrefix("next ") else {
+      return nil
+    }
+    let name = lower.dropFirst(5).trimmingCharacters(in: .whitespacesAndNewlines)
+    let weekdays = [
+      "sunday": 1,
+      "monday": 2,
+      "tuesday": 3,
+      "wednesday": 4,
+      "thursday": 5,
+      "friday": 6,
+      "saturday": 7,
+    ]
+    guard let weekday = weekdays[name] else {
+      return nil
+    }
+    var cursor = today
+    for _ in 1...7 {
+      guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else {
+        return nil
+      }
+      cursor = calendar.startOfDay(for: next)
+      if calendar.component(.weekday, from: cursor) == weekday {
+        return cursor
+      }
+    }
+    return nil
+  }
+
+  private static func formattedDay(_ raw: String, calendar: Calendar, now: Date) -> Date? {
+    let formatter = DateFormatter()
+    formatter.calendar = calendar
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = calendar.timeZone
+    formatter.isLenient = false
+    formatter.defaultDate = now
+    let formats = [
+      "yyyy-MM-dd",
+      "d MMMM yyyy",
+      "d MMM yyyy",
+      "MMMM d yyyy",
+      "MMM d yyyy",
+      "d MMMM",
+      "d MMM",
+      "MMMM d",
+      "MMM d",
+      "d/M/yyyy",
+      "d/M",
+    ]
+    for format in formats {
+      formatter.dateFormat = format
+      if let parsed = formatter.date(from: raw) {
+        return calendar.startOfDay(for: parsed)
+      }
+    }
+    return nil
+  }
 }
 
 enum SlipReaderPrompt {
   static let instructions = """
-  Extract every distinct spend from the sentence. Amounts are decimal strings such as 5 or 5.00, never milliunits and never IDs. Copy account and category names from the provided lists when they match. Payee is a name from the sentence. Leave a field empty when it was not mentioned. Leave date empty unless the sentence names a day. Split two spends in one sentence into two items. Return spends. Each spend has amount, payee, category, account, date, and isInflow (true only when money is received).
+  Extract every distinct spend from the sentence. Amount is the numeric figure even when the sentence uses $, S$, SGD, USD, or the word dollars. Write it as a decimal string such as 5 or 5.00, never milliunits and never IDs. Payee is a name from the sentence. Copy a category name from the provided list only when the sentence names that category. Leave account empty unless the sentence explicitly names an account. Do not pick an account from the list just because it is there. Leave a field empty when it was not mentioned. Fill date when the sentence names a day to post or schedule, including today, yesterday, 8 Sep, 15 September, 8/9, next Friday, or yyyy-MM-dd. Split two spends in one sentence into two items. Return spends. Each spend has amount, payee, category, account, date, and isInflow (true only when money is received).
   """
 
   static func prefix(
@@ -405,6 +491,7 @@ actor SlipReader {
     }
     return SlipReaderMapping.map(
       extractions,
+      sentence: trimmed,
       accounts: accounts,
       categoryGroups: categoryGroups,
       payees: payees,
@@ -500,15 +587,15 @@ struct ExtractedSlips {
 
 @Generable
 struct ExtractedSlip {
-  @Guide(description: "Amount as a decimal string like 5.00, no currency symbol")
+  @Guide(description: "Numeric amount such as 5.00 even if the sentence had $, S$, SGD, USD, or dollars")
   var amount: String
   @Guide(description: "Merchant or payee name if mentioned, otherwise empty")
   var payee: String
-  @Guide(description: "Category name copied from the category list if mentioned, otherwise empty")
+  @Guide(description: "Category name copied from the category list only if the sentence names it, otherwise empty")
   var category: String
-  @Guide(description: "Account name copied from the account list if mentioned, otherwise empty")
+  @Guide(description: "Account name only if the sentence explicitly names one, otherwise empty")
   var account: String
-  @Guide(description: "Calendar date as yyyy-MM-dd, today, or yesterday if mentioned, otherwise empty")
+  @Guide(description: "Day to post or schedule as yyyy-MM-dd, today, yesterday, 8 Sep, 8/9, next Friday, or empty")
   var date: String
   @Guide(description: "True only when the sentence is money received")
   var isInflow: Bool
