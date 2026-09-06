@@ -126,7 +126,9 @@ struct RegisterView: View {
       loadOlderTransactionsSection
     }
     .listStyle(.plain)
-    .listSectionSpacing(.compact)
+    .listSectionSpacing(0)
+    .listSectionMargins(.vertical, 0)
+    .environment(\.defaultMinListHeaderHeight, 0)
     .scrollContentBackground(.hidden)
     .background(Theme.canvas)
     .navigationTitle(title)
@@ -471,6 +473,7 @@ struct RegisterView: View {
         .background(Theme.surfaceMuted)
         .listRowInsets(EdgeInsets())
     }
+    .listSectionMargins(.vertical, 0)
   }
 
   private func scheduleRow(_ schedule: ScheduledTransaction, showsNextDate: Bool) -> some View {
