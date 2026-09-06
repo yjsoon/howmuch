@@ -50,6 +50,14 @@ import {
 } from "../lib/register-row-edit";
 import { dateInRegisterWindow, isUpcomingRegisterDate, registerFetchUntilDate } from "../lib/register-current";
 import { fillRegisterHorizon } from "../lib/register-horizon";
+import {
+  fieldsFromSchedule,
+  matchesRegisterQuery,
+  mergeSearchRows,
+  parseRegisterQuery,
+  searchStatusCopy,
+  transactionMatchesQuery,
+} from "../lib/register-search";
 import { applyClearedOverlays, applyRegisterPatches, deletedIdsForRemoval, reconcileClearedOverlays, retainInFlightPatches, unlinkSplitMirrorParent } from "../lib/register-rows";
 import {
   emptySelection,
@@ -141,6 +149,17 @@ export function TransactionsPage() {
     loaded: false,
     error: null as string | null,
   });
+  const [searchPage, setSearchPage] = useState({
+    query: "",
+    transactions: [] as Transaction[],
+    hasMore: false,
+    nextOffset: null as number | null,
+    loading: false,
+    loadingMore: false,
+    error: null as string | null,
+  });
+  const registerQuery = useMemo(() => parseRegisterQuery(deferredSearch), [deferredSearch]);
+  const searchVersionRef = useRef(0);
   const [pendingDeletion, setPendingDeletion] = useState<Transaction | null>(null);
   const [reconcileDraft, setReconcileDraft] = useState<ReconcileDraft | null>(null);
   const [reconciliationPreviewGeneration, setReconciliationPreviewGeneration] = useState(0);
@@ -299,9 +318,113 @@ export function TransactionsPage() {
       }
       return next;
     });
-  }, [approvalQueue.data, page.transactions]);
+  }, [approvalQueue.data, page.transactions, searchPage.transactions]);
+
+  const searchQueryParams = (offset: number) => ({
+    q: registerQuery?.raw,
+    since_date: filters.from,
+    until_date: fetchUntilDate,
+    limit: 100,
+    offset,
+  });
+
+  useEffect(() => {
+    const q = registerQuery?.raw;
+    if (!q || unapprovedOnly) {
+      searchVersionRef.current += 1;
+      setSearchPage({
+        query: "",
+        transactions: [],
+        hasMore: false,
+        nextOffset: null,
+        loading: false,
+        loadingMore: false,
+        error: null,
+      });
+      return;
+    }
+    let cancelled = false;
+    const version = ++searchVersionRef.current;
+    setSearchPage({
+      query: q,
+      transactions: [],
+      hasMore: false,
+      nextOffset: null,
+      loading: true,
+      loadingMore: false,
+      error: null,
+    });
+    const params = searchQueryParams(0);
+    const request = selectedAccountId
+      ? api.accountTransactions(planId, selectedAccountId, params)
+      : api.transactions(planId, params);
+    request
+      .then((result) => {
+        if (cancelled || version !== searchVersionRef.current) {
+          return;
+        }
+        setSearchPage({
+          query: q,
+          transactions: result.transactions,
+          hasMore: result.has_more,
+          nextOffset: result.next_offset,
+          loading: false,
+          loadingMore: false,
+          error: null,
+        });
+      })
+      .catch((error: Error) => {
+        if (cancelled || version !== searchVersionRef.current) {
+          return;
+        }
+        setSearchPage({
+          query: q,
+          transactions: [],
+          hasMore: false,
+          nextOffset: null,
+          loading: false,
+          loadingMore: false,
+          error: error.message,
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchUntilDate, filters.from, planId, registerQuery?.raw, selectedAccountId, unapprovedOnly, refreshGeneration]);
 
   const loadOlder = async () => {
+    if (registerQuery && !unapprovedOnly) {
+      if (searchPage.loadingMore || !searchPage.hasMore || searchPage.nextOffset === null) {
+        return;
+      }
+      const requestedOffset = searchPage.nextOffset;
+      const version = searchVersionRef.current;
+      setSearchPage((current) => ({ ...current, loadingMore: true, error: null }));
+      try {
+        const params = searchQueryParams(requestedOffset);
+        const older = selectedAccountId
+          ? await api.accountTransactions(planId, selectedAccountId, params)
+          : await api.transactions(planId, params);
+        setSearchPage((current) => version !== searchVersionRef.current || current.nextOffset !== requestedOffset
+          ? current
+          : {
+            ...current,
+            transactions: [
+              ...current.transactions,
+              ...older.transactions.filter((transaction) => !current.transactions.some((loaded) => loaded.id === transaction.id)),
+            ],
+            hasMore: older.has_more,
+            nextOffset: older.next_offset,
+            loadingMore: false,
+            error: null,
+          });
+      } catch (error) {
+        setSearchPage((current) => version !== searchVersionRef.current || current.nextOffset !== requestedOffset
+          ? current
+          : { ...current, loadingMore: false, error: (error as Error).message });
+      }
+      return;
+    }
     if (page.loadingMore || !page.hasMore || page.nextOffset === null) return;
     const requestedOffset = page.nextOffset;
     const requestVersion = requestVersionRef.current;
@@ -660,6 +783,16 @@ export function TransactionsPage() {
       ),
     [approvalSession, clearedOverlays, deletedIds, page.transactions, replacements],
   );
+  const patchedSearch = useMemo(
+    () =>
+      applyClearedOverlays(
+        applyRegisterPatches(searchPage.transactions, replacements, deletedIds).map((txn) =>
+          !txn.approved && rowLooksApproved(txn, approvalSession) ? { ...txn, approved: true } : txn,
+        ),
+        clearedOverlays,
+      ),
+    [approvalSession, clearedOverlays, deletedIds, replacements, searchPage.transactions],
+  );
   const inScope = useMemo(
     () =>
       (unapprovedOnly ? patchedQueue : patchedPage)
@@ -701,27 +834,56 @@ export function TransactionsPage() {
   }, [categoryIds, filters.categoryIds.length, flow, inScope, unapprovedOnly, wantsUncategorised]);
 
   const editingRowId = rowEdit.status === "idle" ? null : rowId(rowEdit.row);
+  const applyRowFilters = (rows: Transaction[]) => {
+    const outflowOnly = flow === "outflow" || wantsUncategorised;
+    return rows
+      .filter((txn) => !txn.deleted)
+      .filter((txn) => registerAccountIds.has(txn.account_id))
+      .filter((txn) => unapprovedOnly || dateInRegisterWindow(txn.date, filters.from, filters.to, today))
+      .filter((txn) => !unapprovedOnly || !txn.approved)
+      .filter((txn) => !outflowOnly || (txn.amount < 0 && !txn.transfer_account_id))
+      .filter((txn) => {
+        if (!filters.categoryIds.length) {
+          return true;
+        }
+        const matchesCategory =
+          (txn.category_id !== null && categoryIds.has(txn.category_id)) ||
+          txn.subtransactions?.some((sub) => sub.category_id !== null && categoryIds.has(sub.category_id));
+        if (matchesCategory) {
+          return true;
+        }
+        return wantsUncategorised && hasUncategorisedLine(txn);
+      });
+  };
   const matchedRows = useMemo(() => {
-    const needle = deferredSearch.trim().toLowerCase();
-    return scopedRows.filter((txn) => {
+    const localMatches = scopedRows.filter((txn) => {
       if (editingRowId && txn.id === editingRowId) {
         return true;
       }
-      return (
-        !needle ||
-        txn.payee_name?.toLowerCase().includes(needle) ||
-        txn.memo?.toLowerCase().includes(needle) ||
-        txn.category_name?.toLowerCase().includes(needle) ||
-        txn.account_name?.toLowerCase().includes(needle) ||
-        txn.subtransactions?.some(
-          (sub) =>
-            sub.payee_name?.toLowerCase().includes(needle) ||
-            sub.memo?.toLowerCase().includes(needle) ||
-            sub.category_name?.toLowerCase().includes(needle),
-        )
-      );
+      return transactionMatchesQuery(registerQuery, txn);
     });
-  }, [deferredSearch, editingRowId, scopedRows]);
+    if (!registerQuery) {
+      return scopedRows;
+    }
+    if (unapprovedOnly) {
+      return localMatches;
+    }
+    return mergeSearchRows(localMatches, applyRowFilters(patchedSearch));
+  }, [
+    categoryIds,
+    editingRowId,
+    filters.categoryIds.length,
+    filters.from,
+    filters.to,
+    flow,
+    patchedSearch,
+    registerAccountIds,
+    registerQuery,
+    scopedRows,
+    today,
+    unapprovedOnly,
+    wantsUncategorised,
+  ]);
   const rows = useMemo(
     () => matchedRows.filter((txn) => !isUpcomingRegisterDate(txn.date, today)),
     [matchedRows, today],
@@ -734,7 +896,7 @@ export function TransactionsPage() {
     if (unapprovedOnly) {
       return [];
     }
-    const needle = deferredSearch.trim().toLowerCase();
+    const query = registerQuery;
     return activeSchedulesForScope(schedules.data ?? [], registerAccountIds).filter((schedule) => {
       if (filters.categoryIds.length) {
         const matchesCategory =
@@ -746,16 +908,14 @@ export function TransactionsPage() {
           return false;
         }
       }
-      if (!needle) {
+      if (!query) {
         return true;
       }
       const accountName = accounts.find((account) => account.id === schedule.account_id)?.name;
       const payeeName = schedule.payee_name ?? (schedule.payee_id ? payees.data?.find((payee) => payee.id === schedule.payee_id)?.name : undefined);
-      const categoryName = schedule.category_name;
-      const haystack = [schedule.memo, accountName, payeeName, categoryName, ...(schedule.subtransactions ?? []).flatMap((line) => [line.memo, line.payee_name, line.category_name])];
-      return haystack.some((value) => value?.toLowerCase().includes(needle));
+      return matchesRegisterQuery(query, fieldsFromSchedule(schedule, { accountName, payeeName }));
     });
-  }, [accounts, categoryIds, deferredSearch, filters.categoryIds.length, payees.data, registerAccountIds, schedules.data, unapprovedOnly, wantsUncategorised]);
+  }, [accounts, categoryIds, filters.categoryIds.length, payees.data, registerAccountIds, registerQuery, schedules.data, unapprovedOnly, wantsUncategorised]);
   const scheduledDisclosureCount = postedFutureRows.length + visibleSchedules.length;
   const showScheduledDisclosure = scheduledDisclosureCount > 0 || Boolean(schedules.error);
 
@@ -978,15 +1138,23 @@ export function TransactionsPage() {
               type="search"
               name="search"
               className="search-input"
-              placeholder="Search payee, memo, category or account..."
+              placeholder="Search payee, memo, category, account, or amount…"
               value={search}
               onChange={(event) => startTransition(() => setSearch(event.target.value))}
               aria-label="Search transactions"
             />
             <span className="search-meta">
-              Showing {rows.length} of {scopedRows.length} loaded filtered entries
+              {registerQuery
+                ? searchStatusCopy({
+                    shown: rows.length,
+                    scheduled: visibleSchedules.length,
+                    hasMore: searchPage.hasMore,
+                    loading: searchPage.loading,
+                    error: searchPage.error,
+                  })
+                : `Showing ${rows.length} of ${scopedRows.length} loaded filtered entries`}
             </span>
-            {filters.accountIds.length > 1 && page.hasMore && (
+            {filters.accountIds.length > 1 && (registerQuery ? searchPage.hasMore : page.hasMore) && (
               <span className="search-meta">Load older entries to extend this multi-account result.</span>
             )}
           </div>
@@ -1445,10 +1613,17 @@ export function TransactionsPage() {
               <p className="status-detail">Try widening the date range, clearing filters, or shortening the search term.</p>
             </div>
           )}
-          {page.hasMore && !page.filling && !unapprovedOnly && (
+          {((registerQuery && !unapprovedOnly) ? searchPage.hasMore : page.hasMore) && !page.filling && !unapprovedOnly && (
             <div className="register-load-more">
-              <button type="button" className="register-load-more-button" onClick={loadOlder} disabled={page.loadingMore}>
-                {page.loadingMore ? "Loading older transactions…" : "Load older transactions"}
+              <button
+                type="button"
+                className="register-load-more-button"
+                onClick={loadOlder}
+                disabled={registerQuery ? searchPage.loadingMore : page.loadingMore}
+              >
+                {registerQuery
+                  ? (searchPage.loadingMore ? "Loading older matches…" : "Load older matches")
+                  : (page.loadingMore ? "Loading older transactions…" : "Load older transactions")}
               </button>
             </div>
           )}

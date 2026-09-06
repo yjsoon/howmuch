@@ -236,7 +236,8 @@ struct APIClient {
     offset: Int = 0,
     sinceDate: String? = nil,
     untilDate: String? = nil,
-    type: String? = nil
+    type: String? = nil,
+    q: String? = nil
   ) async throws -> TransactionPage {
     var queryItems = [
       URLQueryItem(name: "limit", value: String(Self.transactionPageSize)),
@@ -250,6 +251,9 @@ struct APIClient {
     }
     if let type {
       queryItems.append(URLQueryItem(name: "type", value: type))
+    }
+    if let q, !q.isEmpty {
+      queryItems.append(URLQueryItem(name: "q", value: q))
     }
     let path = accountID.map { "/v1/plans/\(planID)/accounts/\($0)/transactions" }
       ?? "/v1/plans/\(planID)/transactions"

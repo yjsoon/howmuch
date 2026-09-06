@@ -63,6 +63,7 @@ export type TransactionFilters = {
   includeDeleted?: boolean;
   limit?: number | null;
   offset?: number | null;
+  q?: string | null;
 };
 
 export const DEFAULT_TRANSACTION_PAGE_SIZE = 100;

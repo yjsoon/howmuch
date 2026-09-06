@@ -838,12 +838,16 @@ final class AppModel {
     payeesByID[id]
   }
 
+  func overlaying(_ rows: [Transaction]) -> [Transaction] {
+    overlayingClearedToggles(on: overlayingPendingEdits(on: rows))
+  }
+
   var transactions: [Transaction] {
-    overlayingClearedToggles(on: overlayingPendingEdits(on: serverTransactions))
+    overlaying(serverTransactions)
   }
 
   var unapprovedTransactions: [Transaction] {
-    overlayingClearedToggles(on: overlayingPendingEdits(on: serverUnapprovedTransactions))
+    overlaying(serverUnapprovedTransactions)
   }
 
   var pendingRows: [PendingRow] {

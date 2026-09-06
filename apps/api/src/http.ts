@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { ApiConfig } from "./config";
 import { AccountPreferencesConflictError, LedgerRepository, NotFoundError, ReconciliationMismatchError, TransactionStateConflictError, ValidationError } from "./repository";
+import { MAX_REGISTER_QUERY_LENGTH } from "@howmuch/register-query";
 import { DEFAULT_TRANSACTION_PAGE_SIZE, MAX_TRANSACTION_PAGE_SIZE, type AccountPreferences, type TransactionFilters } from "./types";
 import { collectionPostIntent, parseTransactionCreates, parseTransactionUpdates } from "./transaction-batch";
 import { ReportService } from "./reports";
@@ -704,6 +705,7 @@ function queryFilters(url: URL, overrides: Record<string, string | null> = {}): 
     lastKnowledgeOfServer: parseNumber(url.searchParams.get("last_knowledge_of_server")) ?? null,
     limit: parseTransactionPageNumber(url.searchParams.get("limit"), "limit", DEFAULT_TRANSACTION_PAGE_SIZE, 1, MAX_TRANSACTION_PAGE_SIZE),
     offset: parseTransactionPageNumber(url.searchParams.get("offset"), "offset", 0, 0),
+    q: parseRegisterQueryParam(url.searchParams.get("q")),
   };
 }
 
@@ -727,6 +729,20 @@ async function transactionListResponse(repo: LedgerStore, planId: string, filter
     }
   }
   return apiError(409, "ledger_changed", "Transactions changed while this page was loading. Try again.");
+}
+
+function parseRegisterQueryParam(value: string | null): string | null {
+  if (value == null) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.length > MAX_REGISTER_QUERY_LENGTH) {
+    throw new ValidationError(`q must be at most ${MAX_REGISTER_QUERY_LENGTH} characters`);
+  }
+  return trimmed;
 }
 
 function parseTransactionPageNumber(

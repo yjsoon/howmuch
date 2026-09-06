@@ -260,6 +260,14 @@ Supported query parameters:
 - `last_knowledge_of_server`
 - `limit` — whole number from 1 to 250; defaults to 100
 - `offset` — zero-based whole-number offset; defaults to 0
+- `q` — optional free-text needle, 1–200 characters after trimming. A row
+  matches when `q` is a case-insensitive substring of its payee, memo,
+  category or account name, or of any split line’s payee, memo or category;
+  or when `q` parses as a money amount at the typed precision. `142` matches
+  142.00–142.99; `142.30` and `$142.30` match 142.30. A leading `-` restricts
+  to outflows, `+` to inflows. `q` composes with every other filter by AND.
+  Page size, ordering, `has_more` and `next_offset` are unchanged. Omit `q`
+  for the unfiltered register page.
 
 Transaction lists are always bounded, including the account, payee, category,
 and month-scoped variants. Results are ordered newest first by date, creation

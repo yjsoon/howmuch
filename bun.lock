@@ -13,6 +13,9 @@
     },
     "apps/api": {
       "name": "@howmuch/api",
+      "dependencies": {
+        "@howmuch/register-query": "workspace:*",
+      },
     },
     "apps/web": {
       "name": "@howmuch/web",
@@ -20,6 +23,7 @@
         "@fontsource/ibm-plex-mono": "^5.2.5",
         "@fontsource/ibm-plex-sans": "^5.2.5",
         "@fontsource/newsreader": "^5.2.5",
+        "@howmuch/register-query": "workspace:*",
         "react": "^19.1.0",
         "react-dom": "^19.1.0",
         "react-markdown": "^10.1.0",
@@ -35,6 +39,9 @@
     },
     "apps/worker": {
       "name": "@howmuch/worker",
+    },
+    "packages/register-query": {
+      "name": "@howmuch/register-query",
     },
   },
   "packages": {
@@ -155,6 +162,8 @@
     "@fontsource/newsreader": ["@fontsource/newsreader@5.2.10", "", {}, "sha512-TFaYzoFhDqarUyV2yYjgZZEwT4bpaj6sGBnXSnFknQ/QB8/9LzfY6IO9+inHOX4zzPp87Z7/KuG1OI5gr91Q3A=="],
 
     "@howmuch/api": ["@howmuch/api@workspace:apps/api"],
+
+    "@howmuch/register-query": ["@howmuch/register-query@workspace:packages/register-query"],
 
     "@howmuch/web": ["@howmuch/web@workspace:apps/web"],
 
