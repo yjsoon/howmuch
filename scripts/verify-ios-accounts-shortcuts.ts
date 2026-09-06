@@ -88,6 +88,9 @@ if (shortcuts.includes("chevron.right")) {
 if (tile.includes("lineLimit")) {
   failures.push("LedgerShortcutTile must not use lineLimit.");
 }
+if (!tile.includes("iconSlot") || !tile.includes("frame(height: iconSlot)")) {
+  failures.push("Shortcut titles must share a baseline; pin the icon row to iconSlot.");
+}
 if (!source.includes("usesColumnShortcuts") && !source.includes("dynamicTypeSize < .xxLarge")) {
   failures.push("Column restack must use usesColumnShortcuts or dynamicTypeSize < .xxLarge.");
 }

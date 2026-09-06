@@ -462,24 +462,26 @@ struct AccountsView: View {
     let title: String
     let status: LedgerShortcutStatus
     @ViewBuilder let destination: () -> Destination
+    @ScaledMetric(relativeTo: .title2) private var iconSlot = 32.0
 
     var body: some View {
       NavigationLink {
         destination()
       } label: {
         VStack(alignment: .leading, spacing: 10) {
-          HStack(alignment: .top, spacing: 8) {
+          HStack(alignment: .center, spacing: 8) {
             Image(systemName: icon)
               .font(.title2)
               .foregroundStyle(Theme.accent)
+              .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
               .accessibilityHidden(true)
-            Spacer(minLength: 0)
             if status.isBusy {
               ProgressView()
                 .controlSize(.small)
                 .accessibilityHidden(true)
             }
           }
+          .frame(height: iconSlot)
 
           Text(title)
             .font(.subheadline.weight(.semibold))
