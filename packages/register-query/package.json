@@ -1,0 +1,8 @@
+{
+  "name": "@howmuch/register-query",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

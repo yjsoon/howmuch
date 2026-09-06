@@ -32,6 +32,7 @@ import {
 } from "./scheduled-transactions";
 import { parseAccountIcon, resolveAccountPresentation } from "./account-icon";
 import { applyAccountUpdate, type AccountUpdatePatch } from "./account-kind";
+import { parseRegisterQuery, transactionSearchSql } from "@howmuch/register-query";
 
 type Row = Record<string, any>;
 
@@ -1422,6 +1423,15 @@ export class LedgerRepository {
     if (filters.lastKnowledgeOfServer != null) {
       clauses.push("t.server_knowledge > ?");
       params.push(filters.lastKnowledgeOfServer);
+    }
+    if (filters.q) {
+      const plan = await this.getPlan(planId);
+      const query = parseRegisterQuery(filters.q, plan.currency_format);
+      if (query) {
+        const search = transactionSearchSql(query);
+        clauses.push(search.sql);
+        params.push(...search.params);
+      }
     }
 
     const pagination = limit == null ? "" : "\n         LIMIT ? OFFSET ?";

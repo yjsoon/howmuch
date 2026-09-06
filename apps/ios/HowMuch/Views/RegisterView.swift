@@ -71,6 +71,16 @@ struct RegisterSnapshot {
   }
 }
 
+private struct RegisterSearchPage {
+  var query = ""
+  var transactions: [Transaction] = []
+  var hasMore = false
+  var nextOffset: Int?
+  var loading = false
+  var loadingMore = false
+  var error: String?
+}
+
 struct RegisterView: View {
   @Environment(AppModel.self) private var model
   let scope: RegisterScope
@@ -79,6 +89,7 @@ struct RegisterView: View {
   var accountIDs: Set<String>?
 
   @State private var searchText = ""
+  @State private var searchPage = RegisterSearchPage()
   @State private var unclearedOnly = false
   @State private var uncategorisedOnly = false
   @State private var unapprovedOnly = false
@@ -159,7 +170,10 @@ struct RegisterView: View {
         registerOverflowMenu
       }
     }
-    .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search Transactions")
+    .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search transactions or amounts")
+    .task(id: searchFetchKey) {
+      await runRegisterSearch()
+    }
     .refreshable {
       await model.refreshAll()
     }
@@ -552,11 +566,35 @@ struct RegisterView: View {
     .registerRowChrome()
   }
 
+  private var searchQuery: RegisterQuery? {
+    RegisterQuery.parse(searchText, currencyFormat: model.currencyFormat)
+  }
+
+  private var searchFetchKey: String {
+    [
+      searchQuery?.raw ?? "",
+      scope.accountID ?? "all",
+      categoryID ?? "",
+      dateRange?.lowerBound ?? "",
+      dateRange?.upperBound ?? "",
+      unapprovedOnly ? "unapproved" : "",
+      model.settings.planID,
+    ].joined(separator: "|")
+  }
+
   @ViewBuilder
   private func searchCoverageSection(_ snapshot: RegisterSnapshot) -> some View {
-    if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+    if searchQuery != nil {
       Section {
-        Text(searchCoverageCopy(snapshot))
+        Text(
+          registerSearchStatusCopy(
+            shown: snapshot.transactionCount,
+            scheduled: snapshot.scheduleCount,
+            hasMore: searchPage.hasMore,
+            loading: searchPage.loading,
+            error: searchPage.error
+          )
+        )
           .font(.footnote)
           .foregroundStyle(.secondary)
           .frame(maxWidth: .infinity, alignment: .leading)
@@ -564,16 +602,6 @@ struct RegisterView: View {
           .listRowSeparator(.hidden)
       }
     }
-  }
-
-  private func searchCoverageCopy(_ snapshot: RegisterSnapshot) -> String {
-    let loaded = model.transactions.count
-    let transactionWord = loaded == 1 ? "transaction" : "transactions"
-    if snapshot.scheduleCount == 0 {
-      return "Search covers \(loaded) loaded \(transactionWord). Scroll to load older ones."
-    }
-    let scheduledWord = snapshot.scheduleCount == 1 ? "scheduled transaction" : "scheduled transactions"
-    return "Search covers \(loaded) loaded \(transactionWord) and \(snapshot.scheduleCount) \(scheduledWord). Scroll to load older ones."
   }
 
   @ViewBuilder
@@ -641,7 +669,37 @@ struct RegisterView: View {
 
   @ViewBuilder
   private var loadOlderTransactionsSection: some View {
-    if model.hasMoreTransactions, !model.isFillingHorizon, model.ledgerPhase == .loaded {
+    if let query = searchQuery, !unapprovedOnly {
+      if searchPage.hasMore || searchPage.error != nil {
+        Section {
+          VStack(alignment: .leading, spacing: 8) {
+            if let error = searchPage.error {
+              Text("Couldn’t search older transactions")
+                .font(.subheadline.weight(.semibold))
+              Text(error)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+            Button {
+              Task { await loadOlderSearchMatches(query) }
+            } label: {
+              HStack(spacing: 8) {
+                if searchPage.loadingMore {
+                  ProgressView()
+                }
+                Text(searchPage.loadingMore ? "Loading older matches…" : "Load older matches")
+              }
+              .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(searchPage.loadingMore)
+            .accessibilityHint("Loads the next page of older matching transactions.")
+          }
+          .listRowBackground(Color.clear)
+          .listRowSeparator(.hidden)
+        }
+      }
+    } else if model.hasMoreTransactions, !model.isFillingHorizon, model.ledgerPhase == .loaded {
       Section {
         Button {
           Task { await model.loadOlderTransactions() }
@@ -898,7 +956,6 @@ struct RegisterView: View {
     if unapprovedOnly || unclearedOnly || uncategorisedOnly {
       return []
     }
-    let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     return accountSchedules.filter { schedule in
       if let categoryID,
          schedule.categoryID != categoryID,
@@ -908,26 +965,36 @@ struct RegisterView: View {
       if let dateRange, !dateRange.contains(schedule.dateNext) {
         return false
       }
-      return scheduleMatchesSearch(schedule, query: query)
+      return scheduleMatchesSearch(schedule, query: searchQuery)
     }
   }
 
-  private func scheduleMatchesSearch(_ schedule: ScheduledTransaction, query: String) -> Bool {
-    guard !query.isEmpty else {
+  private func scheduleMatchesSearch(_ schedule: ScheduledTransaction, query: RegisterQuery?) -> Bool {
+    guard let query else {
       return true
     }
-    var haystack: [String?] = [schedule.memo]
-    if let payeeID = schedule.payeeID {
-      haystack.append(model.payee(withID: payeeID)?.name)
-    }
-    haystack.append(model.categoryName(forID: schedule.categoryID))
-    haystack.append(contentsOf: schedule.activeSubtransactions.map { model.categoryName(forID: $0.categoryID) })
-    haystack.append(model.account(withID: schedule.accountID)?.name)
+    var fields = RegisterSearchFields(
+      payeeName: schedule.payeeID.flatMap { model.payee(withID: $0)?.name },
+      memo: schedule.memo,
+      categoryName: model.categoryName(forID: schedule.categoryID),
+      accountName: model.account(withID: schedule.accountID)?.name,
+      amountMilli: schedule.amount,
+      lines: schedule.activeSubtransactions.map {
+        RegisterSearchLine(
+          payeeName: nil,
+          memo: $0.memo,
+          categoryName: model.categoryName(forID: $0.categoryID),
+          amountMilli: $0.amount
+        )
+      }
+    )
     if let transferAccountID = schedule.transferAccountID {
-      haystack.append(model.account(withID: transferAccountID)?.name)
-      haystack.append("Transfer")
+      fields.accountName = fields.accountName ?? model.account(withID: transferAccountID)?.name
+      if "Transfer".localizedStandardContains(query.text) {
+        return true
+      }
     }
-    return haystack.contains { $0?.localizedStandardContains(query) == true }
+    return query.matches(fields)
   }
 
   private var scopedTransactions: [Transaction] {
@@ -1064,9 +1131,8 @@ struct RegisterView: View {
   }
 
   private var visibleTransactions: [Transaction] {
-    let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     let source = unapprovedOnly ? approvalScopedTransactions : scopedTransactions
-    return source.filter { transaction in
+    let local = source.filter { transaction in
       if unclearedOnly, transaction.cleared != .uncleared {
         return false
       }
@@ -1076,17 +1142,31 @@ struct RegisterView: View {
       if unapprovedOnly, transaction.approved {
         return false
       }
-      guard !query.isEmpty else {
+      guard let query = searchQuery else {
         return true
       }
-      let haystack = [
-        transaction.payeeName,
-        transaction.categoryName,
-        transaction.memo,
-        transaction.accountName,
-      ]
-      return haystack.contains { $0?.localizedStandardContains(query) == true }
+      return query.matches(transaction.registerSearchFields)
     }
+    guard let query = searchQuery, !unapprovedOnly else {
+      return local
+    }
+    var merged: [String: Transaction] = Dictionary(uniqueKeysWithValues: local.map { ($0.id, $0) })
+    for hit in model.overlaying(searchPage.transactions) {
+      if merged[hit.id] != nil { continue }
+      if unclearedOnly, hit.cleared != .uncleared { continue }
+      if uncategorisedOnly, !hit.isUncategorised { continue }
+      if let accountID = scope.accountID, hit.accountID != accountID { continue }
+      if let accountIDs, !accountIDs.isEmpty, !accountIDs.contains(hit.accountID) { continue }
+      if let categoryID, hit.categoryID != categoryID,
+         !hit.subtransactions.contains(where: { $0.categoryID == categoryID }) {
+        continue
+      }
+      if let dateRange, !dateRange.contains(hit.date) { continue }
+      if query.matches(hit.registerSearchFields) {
+        merged[hit.id] = hit
+      }
+    }
+    return merged.values.sorted { ($0.date, $0.id) > ($1.date, $1.id) }
   }
 
   private var scopedPendingRows: [PendingRow] {
@@ -1108,7 +1188,6 @@ struct RegisterView: View {
   }
 
   private var visiblePendingRows: [PendingRow] {
-    let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     return scopedPendingRows.filter { row in
       if unapprovedOnly {
         return false
@@ -1119,11 +1198,74 @@ struct RegisterView: View {
       if uncategorisedOnly, row.categoryID != nil || row.splitLineCount > 0 {
         return false
       }
-      guard !query.isEmpty else {
+      guard let query = searchQuery else {
         return true
       }
-      let haystack = [row.payeeName, row.categoryName, row.memo, row.accountName]
-      return haystack.contains { $0?.localizedStandardContains(query) == true }
+      return query.matches(row.registerSearchFields)
+    }
+  }
+
+  private func runRegisterSearch() async {
+    guard let query = searchQuery, !unapprovedOnly else {
+      searchPage = RegisterSearchPage()
+      return
+    }
+    try? await Task.sleep(nanoseconds: 300_000_000)
+    guard !Task.isCancelled else {
+      return
+    }
+    await fetchSearchPage(query: query, offset: 0, replacing: true)
+  }
+
+  private func loadOlderSearchMatches(_ query: RegisterQuery) async {
+    guard let offset = searchPage.nextOffset, searchPage.hasMore else {
+      return
+    }
+    await fetchSearchPage(query: query, offset: offset, replacing: false)
+  }
+
+  private func fetchSearchPage(query: RegisterQuery, offset: Int, replacing: Bool) async {
+    if replacing {
+      searchPage.loading = true
+      searchPage.error = nil
+    } else {
+      searchPage.loadingMore = true
+      searchPage.error = nil
+    }
+    do {
+      let page = try await model.apiClient.fetchTransactions(
+        planID: model.settings.planID,
+        accountID: scope.accountID,
+        offset: offset,
+        sinceDate: dateRange?.lowerBound,
+        untilDate: dateRange?.upperBound,
+        q: query.raw
+      )
+      guard !Task.isCancelled else {
+        return
+      }
+      if replacing {
+        searchPage.transactions = page.transactions
+      } else {
+        let existing = Set(searchPage.transactions.map(\.id))
+        searchPage.transactions.append(contentsOf: page.transactions.filter { !existing.contains($0.id) })
+      }
+      searchPage.query = query.raw
+      searchPage.hasMore = page.hasMore
+      searchPage.nextOffset = page.nextOffset
+      searchPage.loading = false
+      searchPage.loadingMore = false
+      searchPage.error = nil
+    } catch {
+      guard !Task.isCancelled else {
+        return
+      }
+      searchPage.loading = false
+      searchPage.loadingMore = false
+      searchPage.error = error.localizedDescription
+      if replacing {
+        searchPage.hasMore = true
+      }
     }
   }
 }
