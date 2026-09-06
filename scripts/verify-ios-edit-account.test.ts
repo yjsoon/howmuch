@@ -41,6 +41,8 @@ describe("iOS edit account", () => {
     expect(client).toContain("type: type");
     expect(model).toContain("func updateAccount(_ identity: AccountIdentity");
     expect(model).toContain("publishIntentCatalog()");
+    expect(model).toContain("The server did not save the account type.");
+    expect(model).toContain("followsNewType");
     expect(pbxproj).toContain("AccountIdentityFields.swift in Sources");
     expect(pbxproj).toContain("EditAccountSheet.swift in Sources");
     expect(pbxproj).toContain("A1000000000000000000007D");
