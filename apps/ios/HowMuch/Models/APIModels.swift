@@ -2023,7 +2023,7 @@ enum OutboxDrainTrigger: Equatable {
   case manual
 }
 
-enum EntryDirection: String, CaseIterable, Identifiable {
+enum EntryDirection: String, Codable, CaseIterable, Identifiable {
   case outflow
   case inflow
 
@@ -2040,7 +2040,7 @@ enum EntryDirection: String, CaseIterable, Identifiable {
 }
 
 /// Editable state behind both the Add Transaction sheet and the edit form.
-struct TransactionSubtransactionDraft: Equatable {
+struct TransactionSubtransactionDraft: Equatable, Codable {
   /// Existing IDs are preserved on edit. Fresh and duplicated lines omit IDs
   /// so the server creates a distinct graph rather than mutating the source.
   var id: String?
@@ -2108,7 +2108,7 @@ struct TransactionSubtransactionDraft: Equatable {
   }
 }
 
-struct TransactionDraft: Equatable {
+struct TransactionDraft: Equatable, Codable {
   var id: String?
   var importID: String?
   var direction: EntryDirection = .outflow

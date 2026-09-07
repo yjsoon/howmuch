@@ -73,55 +73,6 @@ final class CommitManyTests: XCTestCase {
     XCTAssertEqual(request, draft.writeRequest(includeCleared: draft.shouldWriteCleared))
   }
 
-  func testEmptyAccountRowEditUsesAddToAccount() {
-    var groceries = Self.draft(importID: "imp-no-acct", amount: 5_000)
-    groceries.accountID = ""
-    let item = IntakeReviewItem(draft: groceries)
-    let prepared = IntakeReviewPreparation.draft(item, addToAccountID: "acct-everyday")
-    XCTAssertEqual(prepared.accountID, "acct-everyday")
-    XCTAssertTrue(prepared.canSave)
-    XCTAssertFalse(item.draft.canSave)
-  }
-
-  func testAddButtonNamesAccountOnlyWhenShared() {
-    var everyday = Self.draft(importID: "imp-one", amount: 5_000)
-    everyday.accountID = "acct-everyday"
-    var travel = Self.draft(importID: "imp-two", amount: 3_200)
-    travel.accountID = "acct-travel"
-    XCTAssertFalse(
-      IntakeReviewPreparation.namesSharedAccount(in: [everyday, travel])
-    )
-    XCTAssertTrue(
-      IntakeReviewPreparation.namesSharedAccount(in: [everyday, everyday])
-    )
-    var missing = Self.draft(importID: "imp-three", amount: 1_000)
-    missing.accountID = ""
-    let backfilled = IntakeReviewPreparation.draft(
-      IntakeReviewItem(draft: missing),
-      addToAccountID: "acct-everyday"
-    )
-    XCTAssertTrue(
-      IntakeReviewPreparation.namesSharedAccount(in: [everyday, backfilled])
-    )
-  }
-
-  func testRepairAssignsCategoryByPayee() {
-    var groceries = Self.draft(importID: "imp-cold", amount: 4_000)
-    groceries.payeeName = "Cold Storage"
-    groceries.categoryID = nil
-    var other = Self.draft(importID: "imp-other", amount: 1_000)
-    other.payeeName = "FairPrice Finest"
-    other.categoryID = nil
-    let items = [IntakeReviewItem(draft: groceries), IntakeReviewItem(draft: other)]
-    let next = IntakeRepair.apply(
-      "everything from Cold Storage is groceries",
-      to: items,
-      categoryGroups: [Self.everydayGroup]
-    )
-    XCTAssertEqual(next?[0].draft.categoryID, "cat-groceries")
-    XCTAssertNil(next?[1].draft.categoryID)
-  }
-
   private static func draft(importID: String, amount: Int) -> TransactionDraft {
     var draft = TransactionDraft()
     draft.importID = importID
@@ -130,14 +81,4 @@ final class CommitManyTests: XCTestCase {
     draft.direction = .outflow
     return draft
   }
-
-  private static let everydayGroup = CategoryGroup(
-    id: "grp-spend",
-    name: "Everyday",
-    hidden: false,
-    deleted: false,
-    categories: [
-      Category(id: "cat-groceries", categoryGroupID: "grp-spend", name: "Groceries", deleted: false),
-    ]
-  )
 }

@@ -233,7 +233,7 @@ enum AddTransactionIntentBuilder {
       && (direction == nil || direction == .outflow)
     let fingerprint = catalog?.connectionFingerprint
     if isBare {
-      return CaptureRequest(kind: .blank, connectionFingerprint: fingerprint)
+      return CaptureRequest(kind: .blank, connectionFingerprint: fingerprint, origin: .lastUsedOpen)
     }
     return CaptureRequest(
       kind: .draft(
@@ -250,7 +250,8 @@ enum AddTransactionIntentBuilder {
           catalog: catalog
         )
       ),
-      connectionFingerprint: fingerprint
+      connectionFingerprint: fingerprint,
+      origin: .presetDraft
     )
   }
 

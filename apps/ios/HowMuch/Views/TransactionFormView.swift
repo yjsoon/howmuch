@@ -78,6 +78,10 @@ struct AmountKeypadEngine: Equatable {
     return copy.commitValue()
   }
 
+  var hasPendingArithmetic: Bool {
+    pendingOp != nil
+  }
+
   private mutating func evaluate() {
     guard let acc = accumulator, let op = pendingOp else {
       return
@@ -97,35 +101,14 @@ struct AmountKeypadEngine: Equatable {
   }
 }
 
-/// "Add Transaction" sheet, seeded from the visible register when there is
-/// one, otherwise the last-used account.
-struct AddTransactionSheet: View {
-  @Environment(AppModel.self) private var model
-  let request: CaptureRequest
-  var onMultipleDrafts: ([TransactionDraft]) -> Void = { _ in }
+@MainActor
+final class CaptureFormCommitHook {
+  var keypad = AmountKeypadEngine()
+  var hasPendingArithmetic: Bool { keypad.hasPendingArithmetic }
 
-  var body: some View {
-    TransactionFormView(
-      draft: initialDraft,
-      isEditing: false,
-      onMultipleDrafts: onMultipleDrafts
-    )
-  }
-
-  private var initialDraft: TransactionDraft {
-    switch request.kind {
-    case .blank, .inbox:
-      var draft = TransactionDraft()
-      if case .blank = request.kind {
-        draft.seedIfNeeded(
-          accounts: model.openAccounts,
-          preferredAccountID: model.preferredCaptureAccountID
-        )
-      }
-      return draft
-    case .draft(let draft):
-      return draft
-    }
+  @discardableResult
+  func commit() -> Int {
+    keypad.commitValue()
   }
 }
 
@@ -164,7 +147,6 @@ enum KeypadPrimaryAction {
 struct TransactionFormView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
-
   @State private var draft: TransactionDraft
   @State private var keypad: AmountKeypadEngine
   @State private var isKeypadVisible: Bool
@@ -174,19 +156,16 @@ struct TransactionFormView: View {
   @State private var isConfirmingSplitRemoval = false
   @State private var isAutoAdvancingToPayee = false
   @State private var hasCommitted = false
-  @State private var composeText = ""
   @State private var accountCandidates: [SlipCandidate] = []
   @State private var categoryCandidates: [SlipCandidate] = []
   @State private var showAccountPrompt = false
   @State private var showCategoryPrompt = false
-  @State private var parseTask: Task<Void, Never>?
-  @State private var isParsing = false
-  @FocusState private var isComposeFocused: Bool
   private let isEditing: Bool
   private let allowsDeletion: Bool
-  private let isReviewing: Bool
-  private let onMultipleDrafts: ([TransactionDraft]) -> Void
+  private let chrome: TransactionFormChrome
   private let onPersist: ((TransactionDraft) -> Void)?
+  private let onDraftChange: ((TransactionDraft) -> Void)?
+  private let commitHook: CaptureFormCommitHook?
 
   // Plain stored properties before @State, assigned as wrapped values: the
   // shape the SDK 27 @State macro migration expects.
@@ -194,15 +173,17 @@ struct TransactionFormView: View {
     draft: TransactionDraft,
     isEditing: Bool,
     allowsDeletion: Bool = true,
-    isReviewing: Bool = false,
-    onMultipleDrafts: @escaping ([TransactionDraft]) -> Void = { _ in },
-    onPersist: ((TransactionDraft) -> Void)? = nil
+    chrome: TransactionFormChrome = .standalone,
+    onPersist: ((TransactionDraft) -> Void)? = nil,
+    onDraftChange: ((TransactionDraft) -> Void)? = nil,
+    commitHook: CaptureFormCommitHook? = nil
   ) {
     self.isEditing = isEditing
     self.allowsDeletion = allowsDeletion
-    self.isReviewing = isReviewing
-    self.onMultipleDrafts = onMultipleDrafts
+    self.chrome = chrome
     self.onPersist = onPersist
+    self.onDraftChange = onDraftChange
+    self.commitHook = commitHook
     var engine = AmountKeypadEngine()
     engine.setValue(draft.amountMagnitudeMilli)
     self.draft = draft
@@ -213,13 +194,10 @@ struct TransactionFormView: View {
   }
 
   var body: some View {
-    NavigationStack {
+    wrappedForm {
       VStack(spacing: 0) {
         ScrollView {
           VStack(spacing: 14) {
-            if showsCompose {
-              composeField
-            }
             amountHeader
             detailCard
             splitCard
@@ -281,29 +259,39 @@ struct TransactionFormView: View {
           .transition(.move(edge: .bottom))
         }
       }
-      .background {
-        ZStack {
-          Theme.canvas
-          if isParsing {
-            IntelligenceAura(intensity: 0.62)
-          }
-        }
-      }
+      .background(Theme.canvas)
       .navigationDestination(isPresented: $isAutoAdvancingToPayee) {
         PayeePickerView(draft: $draft)
       }
-      .navigationTitle(isEditing ? "Transaction" : "Add Transaction")
+      .navigationTitle(formTitle)
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button("Cancel") {
-            dismiss()
+        if showsStandaloneChrome {
+          ToolbarItem(placement: .cancellationAction) {
+            Button("Cancel") {
+              dismiss()
+            }
+            .tint(Theme.accent)
           }
-          .tint(Theme.accent)
+        } else if chrome == .sessionEditor || chrome == .sessionManual {
+          ToolbarItem(placement: .cancellationAction) {
+            Button("Cancel") {
+              dismiss()
+            }
+            .tint(Theme.accent)
+          }
+          ToolbarItem(placement: .confirmationAction) {
+            Button("Done") {
+              draft.amountMagnitudeMilli = keypad.commitValue()
+              onPersist?(draft)
+              dismiss()
+            }
+            .tint(Theme.accent)
+          }
         }
       }
       .overlay(alignment: .bottomTrailing) {
-        if !isKeypadVisible && !isComposeFocused {
+        if showsStandaloneChrome, !isKeypadVisible {
           saveButton
             .padding(20)
         }
@@ -342,18 +330,15 @@ struct TransactionFormView: View {
           draft.disableSplit()
         }
       }
-      .onDisappear {
-        parseTask?.cancel()
-      }
       .onChange(of: keypad) {
+        commitHook?.keypad = keypad
+        if keypad.hasPendingArithmetic {
+          return
+        }
         draft.amountMagnitudeMilli = keypad.display
       }
-      .onChange(of: isComposeFocused) { _, focused in
-        if focused {
-          withAnimation(.snappy) {
-            isKeypadVisible = false
-          }
-        }
+      .onAppear {
+        commitHook?.keypad = keypad
       }
       .onChange(of: draft.accountID) { _, _ in
         if !draft.accountID.isEmpty {
@@ -370,6 +355,32 @@ struct TransactionFormView: View {
     }
   }
 
+  @ViewBuilder
+  private func wrappedForm(@ViewBuilder content: () -> some View) -> some View {
+    if chrome == .standalone {
+      NavigationStack {
+        content()
+      }
+    } else {
+      content()
+    }
+  }
+
+  private var showsStandaloneChrome: Bool {
+    chrome == .standalone
+  }
+
+  private var formTitle: String {
+    switch chrome {
+    case .sessionEditor:
+      return "Edit draft"
+    case .sessionManual:
+      return isEditing ? "Edit draft" : "New transaction"
+    case .standalone:
+      return isEditing ? "Transaction" : "Add Transaction"
+    }
+  }
+
   /// A fresh capture without a payee flows straight to the payee picker; a
   /// draft that is ready to go saves outright; otherwise just collapse.
   /// Judged on the committed value, so the label always matches what the tap
@@ -378,121 +389,20 @@ struct TransactionFormView: View {
     guard !draft.accountID.isEmpty, keypad.committedValue > 0 else {
       return .done
     }
+    if chrome == .sessionEditor {
+      return .done
+    }
     if !isEditing, !draft.isSplit, !hasPayee {
       return .next
+    }
+    if chrome == .sessionManual {
+      return .done
     }
     return .save
   }
 
   private var hasPayee: Bool {
     draft.payeeID != nil || !draft.payeeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-  }
-
-  private var showsCompose: Bool {
-    !isEditing && !isReviewing && ComposeIntelligence.showsField
-  }
-
-  private var composePlaceholder: String {
-    let category = placeholderCategoryName
-    let account = model.account(withID: draft.accountID)?.name
-      ?? model.openAccounts.first?.name
-      ?? "Account"
-    return "5 of \(category) on \(account)"
-  }
-
-  private var placeholderCategoryName: String {
-    let live = model.categoryGroups
-      .filter { !$0.deleted && !$0.isQuiet }
-      .flatMap { $0.categories.filter { !$0.deleted } }
-    if let groceries = live.first(where: { $0.name.localizedCaseInsensitiveCompare("Groceries") == .orderedSame }) {
-      return groceries.name
-    }
-    return live.first?.name ?? "Groceries"
-  }
-
-  private var composeWarmID: String {
-    let accounts = model.openAccounts.map(\.id).joined(separator: ",")
-    let categories = model.categoryGroups.flatMap(\.categories).map(\.id).joined(separator: ",")
-    let payees = model.payees.map(\.id).joined(separator: ",")
-    return "\(accounts)|\(categories)|\(payees)"
-  }
-
-  private var composeField: some View {
-    TextField(composePlaceholder, text: $composeText)
-      .textFieldStyle(.plain)
-      .submitLabel(.go)
-      .focused($isComposeFocused)
-      .onSubmit(parseCompose)
-      .padding(.horizontal, 16)
-      .frame(height: 48)
-      .ynabCard()
-      .task(id: composeWarmID) {
-        await SlipReader.shared.prewarm(
-          accounts: model.openAccounts,
-          categoryGroups: model.categoryGroups,
-          payees: model.payees
-        )
-      }
-      .onChange(of: composeText) { old, new in
-        guard old.isEmpty, !new.isEmpty else {
-          return
-        }
-        Task {
-          await SlipReader.shared.prewarm(
-            accounts: model.openAccounts,
-            categoryGroups: model.categoryGroups,
-            payees: model.payees
-          )
-        }
-      }
-  }
-
-  private func parseCompose() {
-    parseTask?.cancel()
-    let text = composeText
-    let accounts = model.openAccounts
-    let categoryGroups = model.categoryGroups
-    let payees = model.payees
-    parseTask = Task { @MainActor in
-      isParsing = true
-      defer { isParsing = false }
-      let mapped = await SlipReader.shared.interpret(
-        text: text,
-        accounts: accounts,
-        categoryGroups: categoryGroups,
-        payees: payees
-      )
-      guard !Task.isCancelled else {
-        return
-      }
-      applyMapped(mapped)
-    }
-  }
-
-  private func applyMapped(_ mapped: [SlipMappedDraft]) {
-    isComposeFocused = false
-    if mapped.count > 1 {
-      onMultipleDrafts(mapped.map(\.draft))
-      return
-    }
-    guard mapped.count == 1, let row = mapped.first else {
-      withAnimation(.snappy) {
-        isKeypadVisible = draft.amountMagnitudeMilli == 0
-      }
-      return
-    }
-    let applied = ComposeParseApply.applying(row, to: draft)
-    draft = applied.draft
-    accountCandidates = applied.accountCandidates
-    categoryCandidates = applied.categoryCandidates
-    showAccountPrompt = applied.showAccountPrompt
-    showCategoryPrompt = applied.showCategoryPrompt
-    if row.parsedAmount {
-      keypad.setValue(row.draft.amountMagnitudeMilli)
-    }
-    withAnimation(.snappy) {
-      isKeypadVisible = draft.amountMagnitudeMilli == 0
-    }
   }
 
   private var amountHeader: some View {
@@ -505,7 +415,6 @@ struct TransactionFormView: View {
         guard !draft.isSplit else {
           return
         }
-        isComposeFocused = false
         withAnimation(.snappy) {
           isKeypadVisible = true
         }

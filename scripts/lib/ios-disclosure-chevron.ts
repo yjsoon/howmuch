@@ -26,7 +26,7 @@ export function findFormDisclosureChevronFaults(files: readonly SwiftSource[]): 
         (candidate) => candidate.start > view.start && candidate.start < view.start + view.body.length,
       );
       const body = ownViewBody(view, nested);
-      if (!body.includes("Form {") || !body.includes("DisclosureValueRow(")) {
+      if (!containsSwiftUIForm(body) || !body.includes("DisclosureValueRow(")) {
         continue;
       }
       for (const call of calleeCalls(view.body, "DisclosureValueRow")) {
@@ -67,6 +67,11 @@ function componentFaults(file: SwiftSource): DisclosureChevronFault[] {
     });
   }
   return faults;
+}
+
+/** True only for a SwiftUI `Form` token, not identifiers that merely end in Form. */
+function containsSwiftUIForm(body: string): boolean {
+  return /\bForm\s*\{/.test(body);
 }
 
 function ownViewBody(

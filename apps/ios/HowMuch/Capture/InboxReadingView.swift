@@ -11,7 +11,9 @@ struct InboxReadingView: View {
   @Environment(\.displayScale) private var displayScale
 
   var store: InboxStore = .shared
-  var onResolved: ([TransactionDraft]) -> Void
+  var preferredAccountID: String?
+  var onResolved: ([SlipMappedDraft]) -> Void
+  var onAttachments: ([CaptureAttachment]) -> Void = { _ in }
   var onClaimed: ([UUID]) -> Void = { _ in }
 
   @State private var thumbnail: UIImage?
@@ -111,16 +113,39 @@ struct InboxReadingView: View {
       onClaimed(items.map(\.id))
       thumbnail = try await InboxPreview.firstThumbnail(in: items, displayScale: displayScale)
       try Task.checkCancellation()
-      var mapped: [TransactionDraft] = []
+      var mapped: [SlipMappedDraft] = []
       for item in items {
         try Task.checkCancellation()
-        mapped.append(contentsOf: try await readDrafts(from: item))
+        switch item.kind {
+        case .image:
+          guard let data = try await inboxBackgroundWork({ try? item.payloadData() }) else {
+            continue
+          }
+          let attachmentID = UUID()
+          onAttachments([
+            CaptureAttachment(id: attachmentID, filename: item.filename, data: data, isReading: true)
+          ])
+          let text = await SlipImageText.recognize(data)
+          onAttachments([
+            CaptureAttachment(
+              id: attachmentID,
+              filename: item.filename,
+              data: data,
+              recognizedText: text,
+              isReading: false,
+              errorMessage: text.isEmpty ? "I could not read text from that image. It is still attached." : nil
+            )
+          ])
+          mapped.append(contentsOf: await interpretDrafts(from: text))
+        case .text:
+          mapped.append(contentsOf: await interpretDrafts(from: item.payloadText()))
+        }
       }
       try Task.checkCancellation()
-      if mapped.count == 1 {
-        mapped[0].seedIfNeeded(
+      if mapped.count == 1, !mapped[0].parsedAccount {
+        mapped[0].draft.seedIfNeeded(
           accounts: model.openAccounts,
-          preferredAccountID: model.preferredCaptureAccountID
+          preferredAccountID: preferredAccountID
         )
       }
       onResolved(mapped)
@@ -133,28 +158,13 @@ struct InboxReadingView: View {
   }
 
   @MainActor
-  private func readDrafts(from item: InboxItem) async throws -> [TransactionDraft] {
-    try Task.checkCancellation()
-    let text: String
-    switch item.kind {
-    case .text:
-      text = try await inboxBackgroundWork { item.payloadText() }
-    case .image:
-      guard let data = try await inboxBackgroundWork({ try? item.payloadData() }) else {
-        return []
-      }
-      try Task.checkCancellation()
-      text = await SlipImageText.recognize(data)
-    }
-    try Task.checkCancellation()
-    let drafts = await SlipReader.shared.read(
+  private func interpretDrafts(from text: String) async -> [SlipMappedDraft] {
+    await SlipReader.shared.interpret(
       text: text,
       accounts: model.openAccounts,
       categoryGroups: model.categoryGroups,
       payees: model.payees
     )
-    try Task.checkCancellation()
-    return drafts
   }
 }
 

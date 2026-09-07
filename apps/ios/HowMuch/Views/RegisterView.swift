@@ -534,7 +534,8 @@ struct RegisterView: View {
         model.presentCapture(
           CaptureRequest(
             kind: .draft(TransactionDraft(duplicating: transaction)),
-            connectionFingerprint: model.settings.connectionFingerprint
+            connectionFingerprint: model.settings.connectionFingerprint,
+            origin: .presetDraft
           )
         )
       } label: {

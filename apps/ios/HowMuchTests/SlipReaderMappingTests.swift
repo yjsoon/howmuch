@@ -181,7 +181,7 @@ final class SlipReaderMappingTests: XCTestCase {
     XCTAssertTrue(mapped[0].accountCandidates.isEmpty)
   }
 
-  func testApplyKeepsSeededAccountWhenNameDoesNotMatch() {
+  func testApplyLeavesAccountUnresolvedWhenNameIsExplicitlyUnrecognized() {
     var draft = TransactionDraft()
     draft.accountID = "acct-everyday"
     draft.direction = .inflow
@@ -194,11 +194,11 @@ final class SlipReaderMappingTests: XCTestCase {
       now: Self.now
     )[0]
     let applied = ComposeParseApply.applying(row, to: draft)
-    XCTAssertEqual(applied.draft.accountID, "acct-everyday")
-    XCTAssertFalse(applied.showAccountPrompt)
+    XCTAssertEqual(applied.draft.accountID, "")
     XCTAssertTrue(applied.accountCandidates.isEmpty)
     XCTAssertEqual(applied.draft.amountMagnitudeMilli, 5_000)
     XCTAssertEqual(applied.draft.direction, .inflow)
+    XCTAssertFalse(applied.draft.canSave)
   }
 
   func testApplyDoesNotForceOutflowWhenInflowWasToggled() {
@@ -250,7 +250,6 @@ final class SlipReaderMappingTests: XCTestCase {
     )[0]
     let applied = ComposeParseApply.applying(row, to: draft)
     XCTAssertEqual(applied.draft.accountID, "")
-    XCTAssertTrue(applied.showAccountPrompt)
     XCTAssertEqual(applied.accountCandidates.map(\.id), ["acct-everyday", "acct-travel"])
   }
 
@@ -270,7 +269,6 @@ final class SlipReaderMappingTests: XCTestCase {
     )[0]
     let applied = ComposeParseApply.applying(row, to: draft)
     XCTAssertEqual(applied.draft.accountID, "acct-everyday")
-    XCTAssertFalse(applied.showAccountPrompt)
   }
 
   func testPromptPrefixPutsCatalogsBeforeTheSentenceAndOmitsPayees() {

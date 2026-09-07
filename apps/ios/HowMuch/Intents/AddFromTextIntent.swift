@@ -59,7 +59,7 @@ enum InboxIntentHandoff {
     try store.write(write)
     let fingerprint = IntentCatalogStore.shared.loadActive()?.connectionFingerprint
     CaptureRouter.shared.enqueue(
-      CaptureRequest(kind: .inbox, connectionFingerprint: fingerprint)
+      CaptureRequest(kind: .inbox, connectionFingerprint: fingerprint, origin: .inbox)
     )
   }
 }
