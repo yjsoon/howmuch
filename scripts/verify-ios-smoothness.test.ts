@@ -9,7 +9,11 @@ test("register consumers share one filtered snapshot per render", () => {
     // One declaration and one snapshot input, not another search per consumer.
     expect(register.match(new RegExp(`\\b${property}\\b`, "g"))?.length).toBe(2);
   }
+  expect(register).toContain("let transactions = visibleTransactions");
   expect(register).toContain("let snapshot = RegisterSnapshot(");
+  expect(register).toContain("transactions: transactions,");
+  expect(register).toContain("approveAllTitle(for: transactions)");
+  expect(register).toContain("approveEligible(from: transactions)");
   expect(register).toContain("ForEach(snapshot.currentDateSections)");
   expect(register).toContain("ForEach(snapshot.disclosureDateSections)");
 });

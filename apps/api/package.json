@@ -6,6 +6,9 @@
     "dev": "bun --hot src/server.ts",
     "migrate": "bun src/migrate.ts",
     "test": "bun test"
+  },
+  "dependencies": {
+    "@howmuch/register-query": "workspace:*"
   }
 }
 

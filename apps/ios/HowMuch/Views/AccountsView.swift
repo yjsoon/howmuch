@@ -156,12 +156,12 @@ struct AccountsView: View {
   }
 
   private var ledgerShortcuts: some View {
-    let allTransactions = LedgerShortcutTile(
-      icon: "list.bullet.rectangle",
-      title: "All Transactions",
-      status: .quiet
+    let newTransactions = LedgerShortcutTile(
+      icon: "tray",
+      title: "New",
+      status: LedgerShortcutStatus.newQueue(count: model.unapprovedTransactions.count)
     ) {
-      RegisterView(scope: .all)
+      RegisterView(scope: .unapproved)
     }
 
     let scheduled = LedgerShortcutTile(
@@ -175,18 +175,30 @@ struct AccountsView: View {
       ScheduledTransactionsView()
     }
 
+    let allTransactions = LedgerShortcutTile(
+      icon: "list.bullet.rectangle",
+      title: "All",
+      status: .quiet
+    ) {
+      RegisterView(scope: .all)
+    }
+
     return Grid(alignment: .topLeading, horizontalSpacing: 12, verticalSpacing: 12) {
       if usesColumnShortcuts {
         GridRow {
-          allTransactions
+          newTransactions
           scheduled
+          allTransactions
         }
       } else {
         GridRow {
-          allTransactions
+          newTransactions
         }
         GridRow {
           scheduled
+        }
+        GridRow {
+          allTransactions
         }
       }
     }
@@ -422,6 +434,17 @@ struct AccountsView: View {
       }
     }
 
+    static func newQueue(count: Int) -> LedgerShortcutStatus {
+      switch count {
+      case 0:
+        .quiet
+      case 1:
+        .detail("1 new transaction")
+      default:
+        .detail("\(count) new transactions")
+      }
+    }
+
     var detail: String? {
       switch self {
       case .quiet: nil
@@ -439,24 +462,26 @@ struct AccountsView: View {
     let title: String
     let status: LedgerShortcutStatus
     @ViewBuilder let destination: () -> Destination
+    @ScaledMetric(relativeTo: .title2) private var iconSlot = 32.0
 
     var body: some View {
       NavigationLink {
         destination()
       } label: {
         VStack(alignment: .leading, spacing: 10) {
-          HStack(alignment: .top, spacing: 8) {
+          HStack(alignment: .center, spacing: 8) {
             Image(systemName: icon)
               .font(.title2)
               .foregroundStyle(Theme.accent)
+              .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
               .accessibilityHidden(true)
-            Spacer(minLength: 0)
             if status.isBusy {
               ProgressView()
                 .controlSize(.small)
                 .accessibilityHidden(true)
             }
           }
+          .frame(height: iconSlot)
 
           Text(title)
             .font(.subheadline.weight(.semibold))

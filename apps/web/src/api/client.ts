@@ -263,11 +263,11 @@ export const api = {
         body: JSON.stringify({ statement_date: statementDate, statement_balance: statementBalance }),
       },
     ),
-  transactions: (planId: string, params: { since_date?: string; until_date?: string; type?: "unapproved"; limit?: number; offset?: number }) =>
+  transactions: (planId: string, params: { since_date?: string; until_date?: string; type?: "unapproved"; limit?: number; offset?: number; q?: string }) =>
     request<TransactionPage>(
       `${planUrl(planId, "transactions")}${query(params)}`,
     ),
-  accountTransactions: (planId: string, accountId: string, params: { since_date?: string; until_date?: string; type?: "unapproved"; limit?: number; offset?: number }) =>
+  accountTransactions: (planId: string, accountId: string, params: { since_date?: string; until_date?: string; type?: "unapproved"; limit?: number; offset?: number; q?: string }) =>
     request<TransactionPage>(
       `${planUrl(planId, "accounts", accountId, "transactions")}${query(params)}`,
     ),

@@ -43,11 +43,20 @@ if (!source.includes("RegisterView(scope: .all)")) {
 if (!source.includes("ScheduledTransactionsView()")) {
   failures.push("Scheduled destination ScheduledTransactionsView() is missing.");
 }
-if (!shortcuts.includes('title: "Scheduled"')) {
-  failures.push('Scheduled shortcut title must be the one-line label "Scheduled".');
+if (!source.includes("RegisterView(scope: .unapproved)")) {
+  failures.push("New destination RegisterView(scope: .unapproved) is missing.");
+}
+const shortcutTitles = [...memberSpan("private var ledgerShortcuts").matchAll(/title: "([^"]+)"/g)].map(
+  (match) => match[1],
+);
+if (JSON.stringify(shortcutTitles) !== JSON.stringify(["New", "Scheduled", "All"])) {
+  failures.push(`Shortcut titles must be New, Scheduled, All in that order (got ${shortcutTitles.join(", ")}).`);
+}
+if (shortcuts.includes('title: "All Transactions"')) {
+  failures.push('All shortcut title must be the one-line label "All".');
 }
 if (shortcuts.includes('title: "Scheduled Transactions"')) {
-  failures.push("Scheduled shortcut title must not use Scheduled Transactions; that wraps on a half-width tile.");
+  failures.push("Scheduled shortcut title must not use Scheduled Transactions; that wraps on a third-width tile.");
 }
 if (!source.includes('"1 upcoming transaction"')) {
   failures.push("Singular upcoming copy is missing.");
@@ -67,11 +76,20 @@ if (!source.includes('"list.bullet.rectangle"')) {
 if (!source.includes('"calendar.badge.clock"')) {
   failures.push("Scheduled icon calendar.badge.clock is missing.");
 }
+if (!source.includes('"tray"')) {
+  failures.push("New icon tray is missing.");
+}
+if (shortcuts.includes('"sparkles"')) {
+  failures.push("New shortcut must not use sparkles; that is reserved for AI features.");
+}
 if (shortcuts.includes("chevron.right")) {
   failures.push("Shortcut tiles must not include chevron.right.");
 }
 if (tile.includes("lineLimit")) {
   failures.push("LedgerShortcutTile must not use lineLimit.");
+}
+if (!tile.includes("iconSlot") || !tile.includes("frame(height: iconSlot)")) {
+  failures.push("Shortcut titles must share a baseline; pin the icon row to iconSlot.");
 }
 if (!source.includes("usesColumnShortcuts") && !source.includes("dynamicTypeSize < .xxLarge")) {
   failures.push("Column restack must use usesColumnShortcuts or dynamicTypeSize < .xxLarge.");
@@ -86,4 +104,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log("iOS accounts shortcuts: Grid pair, one-line Scheduled title, no subtitle, restack before xxLarge, no chevron, scheduled copy in LedgerShortcutStatus.");
+console.log("iOS accounts shortcuts: Grid New, Scheduled, All, one-line titles, no subtitle, restack before xxLarge, no chevron, scheduled copy in LedgerShortcutStatus.");

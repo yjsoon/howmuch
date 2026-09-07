@@ -75,12 +75,16 @@ if (
 
 if (
   register.includes("let hideFuturePosted = scope.accountID != nil")
-  || !/if row\.date > today \{\s*upcoming\[row\.date,[\s\S]*?\} else \{\s*current\[row\.date,/.test(register)
+  || !/if mode == \.ledger, row\.date > today \{\s*upcoming\[row\.date,[\s\S]*?\} else \{\s*current\[row\.date,/.test(register)
   || !/for row in schedules \{\s*upcoming\[row\.dateNext,[^\n]*\.schedules\.append\(row\)/.test(register)
   || /current\[[^\n]*\.schedules\.append/.test(register)
   || !register.includes("ForEach(snapshot.currentDateSections)")
 ) {
   failures.push("Register still leaves future-dated rows or recurrences in the main timeline.");
+}
+
+if (!register.includes("case inbox") || !register.includes("mode == .ledger")) {
+  failures.push("Unapproved inbox lost the snapshot mode that keeps future new rows in the main list.");
 }
 
 if (!register.includes('scope.accountID ?? "all"')) {

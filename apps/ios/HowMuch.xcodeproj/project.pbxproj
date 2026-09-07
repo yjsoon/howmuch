@@ -16,6 +16,7 @@
 		A10000000000000000000024 /* Formatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* Formatting.swift */; };
 		A10000000000000000000027 /* RegisterHorizon.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* RegisterHorizon.swift */; };
 		A1000000000000000000002C /* RegisterCurrent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001C /* RegisterCurrent.swift */; };
+		A1000000000000000000002D /* RegisterQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001D /* RegisterQuery.swift */; };
 		A10000000000000000000060 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000070 /* Components.swift */; };
 		A1000000000000000000006A /* Confirm.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000007A /* Confirm.swift */; };
 		A1000000000000000000006B /* AccountIconPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000007B /* AccountIconPicker.swift */; };
@@ -74,6 +75,9 @@
 		A40000000000000000000037 /* LedgerQueryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000036 /* LedgerQueryTests.swift */; };
 		A40000000000000000000039 /* CaptureWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000038 /* CaptureWorkspaceTests.swift */; };
 		A4000000000000000000003B /* CaptureSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000003A /* CaptureSnapshotTests.swift */; };
+		A200000000000000000000B3 /* RegisterQueryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000B2 /* RegisterQueryTests.swift */; };
+		A200000000000000000000C1 /* RegisterApproval.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000C0 /* RegisterApproval.swift */; };
+		A200000000000000000000C3 /* RegisterApprovalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000C2 /* RegisterApprovalTests.swift */; };
 		A30000000000000000000003 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000002 /* ShareViewController.swift */; };
 		A30000000000000000000006 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
 		A3000000000000000000000B /* HowMuchShare.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* HowMuchShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -121,6 +125,9 @@
 		A40000000000000000000036 /* LedgerQueryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerQueryTests.swift; sourceTree = "<group>"; };
 		A40000000000000000000038 /* CaptureWorkspaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureWorkspaceTests.swift; sourceTree = "<group>"; };
 		A4000000000000000000003A /* CaptureSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureSnapshotTests.swift; sourceTree = "<group>"; };
+		A200000000000000000000B2 /* RegisterQueryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterQueryTests.swift; sourceTree = "<group>"; };
+		A200000000000000000000C0 /* RegisterApproval.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterApproval.swift; sourceTree = "<group>"; };
+		A200000000000000000000C2 /* RegisterApprovalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterApprovalTests.swift; sourceTree = "<group>"; };
 		A30000000000000000000001 /* HowMuchShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HowMuchShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A30000000000000000000002 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		A30000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -134,6 +141,7 @@
 		A10000000000000000000014 /* Formatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Formatting.swift; sourceTree = "<group>"; };
 		A10000000000000000000017 /* RegisterHorizon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterHorizon.swift; sourceTree = "<group>"; };
 		A1000000000000000000001C /* RegisterCurrent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterCurrent.swift; sourceTree = "<group>"; };
+		A1000000000000000000001D /* RegisterQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterQuery.swift; sourceTree = "<group>"; };
 		A10000000000000000000070 /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		A1000000000000000000007A /* Confirm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Confirm.swift; sourceTree = "<group>"; };
 		A1000000000000000000007B /* AccountIconPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountIconPicker.swift; sourceTree = "<group>"; };
@@ -273,6 +281,8 @@
 				A10000000000000000000014 /* Formatting.swift */,
 				A10000000000000000000017 /* RegisterHorizon.swift */,
 				A1000000000000000000001C /* RegisterCurrent.swift */,
+				A1000000000000000000001D /* RegisterQuery.swift */,
+				A200000000000000000000C0 /* RegisterApproval.swift */,
 				A10000000000000000000019 /* Theme.swift */,
 			);
 			path = Support;
@@ -357,6 +367,8 @@
 				A2000000000000000000009C /* AddFromInboxIntentTests.swift */,
 				A200000000000000000000A2 /* ScreenshotOfferTests.swift */,
 				A200000000000000000000B0 /* RegisterSnapshotTests.swift */,
+				A200000000000000000000B2 /* RegisterQueryTests.swift */,
+				A200000000000000000000C2 /* RegisterApprovalTests.swift */,
 			);
 			path = HowMuchTests;
 			sourceTree = "<group>";
@@ -506,6 +518,8 @@
 				A10000000000000000000024 /* Formatting.swift in Sources */,
 				A10000000000000000000027 /* RegisterHorizon.swift in Sources */,
 				A1000000000000000000002C /* RegisterCurrent.swift in Sources */,
+				A1000000000000000000002D /* RegisterQuery.swift in Sources */,
+				A200000000000000000000C1 /* RegisterApproval.swift in Sources */,
 				A10000000000000000000029 /* Theme.swift in Sources */,
 				A10000000000000000000060 /* Components.swift in Sources */,
 				A1000000000000000000006A /* Confirm.swift in Sources */,
@@ -570,6 +584,8 @@
 				A2000000000000000000009D /* AddFromInboxIntentTests.swift in Sources */,
 				A200000000000000000000A3 /* ScreenshotOfferTests.swift in Sources */,
 				A200000000000000000000B1 /* RegisterSnapshotTests.swift in Sources */,
+				A200000000000000000000B3 /* RegisterQueryTests.swift in Sources */,
+				A200000000000000000000C3 /* RegisterApprovalTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

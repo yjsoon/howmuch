@@ -45,6 +45,25 @@ enum MoneyCodec {
     return total.partialValue
   }
 
+  /// Model extractions may include `$`, `S$`, grouping commas, currency codes, or trailing words.
+  /// Typed fields still go through `milliunits(from:)` and reject that junk.
+  static func milliunits(fromExtraction input: String) -> Int? {
+    var raw = input.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !raw.isEmpty else {
+      return nil
+    }
+    raw = raw.replacingOccurrences(
+      of: #"(?i)(?:\b(?:s|us|a|nz|hk)\$)|\b(?:sgd|usd)\b|\b(?:dollars?)\b|\$"#,
+      with: "",
+      options: .regularExpression
+    )
+    raw = raw.replacingOccurrences(of: ",", with: "")
+    guard let match = raw.range(of: #"-?(?:\d+(?:\.\d+)?|\.\d+)"#, options: .regularExpression) else {
+      return nil
+    }
+    return milliunits(from: String(raw[match]))
+  }
+
   static func milliunits(from value: Decimal) -> Int? {
     let magnitude = value < 0 ? -value : value
     var scaled = magnitude * 1000
