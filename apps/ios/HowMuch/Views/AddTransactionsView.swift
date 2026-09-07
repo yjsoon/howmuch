@@ -5,7 +5,6 @@ import UniformTypeIdentifiers
 
 enum TransactionFormChrome: Equatable {
   case standalone
-  case sessionManual
   case sessionEditor
 }
 
@@ -25,7 +24,6 @@ struct AddTransactionsView: View {
   @State private var isComposerFocused = false
   @State private var claimComposerFocus = false
   @State private var didConsumeEntryFocus = false
-  @State private var cancelledNewManual = false
   @State private var isShowingPlus = false
   @State private var creatingManual = false
   @State private var isConfirmingDiscard = false
@@ -103,12 +101,7 @@ struct AddTransactionsView: View {
             onImages: { beginIngest(images: $0, filenamePrefix: "paste") },
             onRemove: { session.removeAttachment($0) },
             onRetry: { retryReadingImage($0) },
-            onOpenInAssistant: embeddedInAssistant
-              ? nil
-              : {
-                workspace.continueInAssistant()
-                dismiss()
-              }
+            onAddManually: beginManualEntry
           )
         }
       .navigationDestination(isPresented: Binding(
@@ -127,19 +120,14 @@ struct AddTransactionsView: View {
           )
         }
       }
-      .navigationDestination(isPresented: $creatingManual) {
+      .sheet(isPresented: $creatingManual) {
         TransactionFormView(
           draft: seededManualDraft(),
           isEditing: false,
-          allowsDeletion: false,
-          chrome: .sessionManual,
-          onPersist: { updated in
-            session.appendManualDraft(updated)
-            if !embeddedInAssistant {
-              workspace.rememberEntryMode(.manual)
-            }
-          }
+          allowsDeletion: false
         )
+        .presentationDetents([.large])
+        .blocksCapturePresentation()
       }
       .navigationDestination(isPresented: Binding(
         get: { inspectQueryCard != nil },
@@ -227,26 +215,7 @@ struct AddTransactionsView: View {
       let blankChat = session.messages.isEmpty && session.drafts.isEmpty && session.sentAttachments.isEmpty
       let imageEntry = !session.attachments.isEmpty && session.composerText.isEmpty
       if blankChat, !imageEntry {
-        if embeddedInAssistant {
-          claimComposerFocus = true
-        } else if session.entryMode == .describe {
-          claimComposerFocus = true
-        } else if session.entryMode == .manual, !cancelledNewManual {
-          creatingManual = true
-        }
-      }
-    }
-    .onChange(of: session.entryMode) { _, mode in
-      if mode == .manual {
-        isComposerFocused = false
-        claimComposerFocus = false
-        if session.isBusy {
-          workspace.cancelOwnedConversationWork()
-          session.stopActiveReply()
-        }
-      }
-      if !embeddedInAssistant {
-        workspace.rememberEntryMode(mode)
+        claimComposerFocus = true
       }
     }
     .onChange(of: isComposerFocused) { _, focused in
@@ -259,11 +228,6 @@ struct AddTransactionsView: View {
     }
     .onChange(of: session.revision) { _, _ in
       workspace.requestPersistCurrent()
-    }
-    .onChange(of: creatingManual) { _, presented in
-      if !presented {
-        cancelledNewManual = true
-      }
     }
     .onChange(of: highlightDraftID) { _, id in
       guard let id else {
@@ -427,15 +391,7 @@ struct AddTransactionsView: View {
           }
         },
         retry: { retryReply(message.id) },
-        enterManually: {
-          isComposerFocused = false
-          claimComposerFocus = false
-          if session.isBusy {
-            workspace.cancelOwnedConversationWork()
-            session.stopActiveReply()
-          }
-          creatingManual = true
-        },
+        enterManually: beginManualEntry,
         undo: session.canUndo(ownedIDs: message.ownedDraftIDs) ? { session.undo() } : nil,
         pendingQuery: message.id == session.pendingQueryReplyID ? session.pendingQuery : nil,
         pendingTargetDrafts: message.id == session.pendingUpdateReplyID ? session.pendingTargetDrafts() : [],
@@ -509,17 +465,6 @@ struct AddTransactionsView: View {
         }
         .disabled(session.isBusy || session.isIngesting)
         .accessibilityHint("Pastes text or images from the clipboard. Content is only read after you tap Paste.")
-        Button("Enter manually") {
-          isShowingPlus = false
-          isComposerFocused = false
-          claimComposerFocus = false
-          if session.isBusy {
-            workspace.cancelOwnedConversationWork()
-            session.stopActiveReply()
-          }
-          creatingManual = true
-        }
-        .disabled(session.isSaving)
       }
       .navigationTitle("Add")
       .navigationBarTitleDisplayMode(.inline)
@@ -595,6 +540,20 @@ struct AddTransactionsView: View {
     return draft
   }
 
+  private func beginManualEntry() {
+    guard !session.isSaving, isCurrent(capturedTurnScope()) else {
+      return
+    }
+    isComposerFocused = false
+    claimComposerFocus = false
+    if session.isBusy {
+      workspace.cancelOwnedConversationWork()
+      session.stopActiveReply()
+    }
+    workspace.persistCurrentIfNeeded()
+    creatingManual = true
+  }
+
   private func capturedTurnScope(generation: Int? = nil) -> CaptureTurnScope {
     var scope = CaptureTurnScope.capture(
       session: session,
@@ -622,9 +581,6 @@ struct AddTransactionsView: View {
       return
     }
     errorMessage = nil
-    if !embeddedInAssistant {
-      workspace.rememberEntryMode(.describe)
-    }
     let frozen = session.freezeComposerTurn(accountName: currentAccountName, localDate: frozenLocalDate)
     jumpToMessage = frozen.userMessageID
     runFrozenTurn(frozen)

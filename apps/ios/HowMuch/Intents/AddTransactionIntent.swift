@@ -222,21 +222,8 @@ enum AddTransactionIntentBuilder {
     cleared: Bool?,
     catalog: IntentCatalogSnapshot?
   ) throws -> CaptureRequest {
-    let isBare = amount == nil
-      && accountID == nil
-      && payee == nil
-      && categoryID == nil
-      && date == nil
-      && (flag == nil || flag == .none)
-      && (memo == nil || memo?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true)
-      && (cleared == nil || cleared == false)
-      && (direction == nil || direction == .outflow)
-    let fingerprint = catalog?.connectionFingerprint
-    if isBare {
-      return CaptureRequest(kind: .blank, connectionFingerprint: fingerprint, origin: .lastUsedOpen)
-    }
     return CaptureRequest(
-      kind: .draft(
+      kind: .manual(
         try draft(
           amount: amount,
           direction: direction,
@@ -250,8 +237,8 @@ enum AddTransactionIntentBuilder {
           catalog: catalog
         )
       ),
-      connectionFingerprint: fingerprint,
-      origin: .presetDraft
+      connectionFingerprint: catalog?.connectionFingerprint,
+      origin: accountID == nil ? .lastUsedOpen : .presetDraft
     )
   }
 

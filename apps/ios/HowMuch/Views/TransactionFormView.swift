@@ -273,7 +273,7 @@ struct TransactionFormView: View {
             }
             .tint(Theme.accent)
           }
-        } else if chrome == .sessionEditor || chrome == .sessionManual {
+        } else if chrome == .sessionEditor {
           ToolbarItem(placement: .cancellationAction) {
             Button("Cancel") {
               dismiss()
@@ -374,8 +374,6 @@ struct TransactionFormView: View {
     switch chrome {
     case .sessionEditor:
       return "Edit draft"
-    case .sessionManual:
-      return isEditing ? "Edit draft" : "New transaction"
     case .standalone:
       return isEditing ? "Transaction" : "Add Transaction"
     }
@@ -394,9 +392,6 @@ struct TransactionFormView: View {
     }
     if !isEditing, !draft.isSplit, !hasPayee {
       return .next
-    }
-    if chrome == .sessionManual {
-      return .done
     }
     return .save
   }

@@ -6,9 +6,11 @@ Most use is adding transactions. Occasional use is read-only questions about rec
 
 ## Destinations
 
-Keep **Accounts**, **Rewards**, and **Assistant**. **Add Transactions** is a search-role tab (plus icon) that opens capture and does not stay selected. **Plan** and **Reflect** open from trailing **More**. Accessibility label for capture: **Add Transactions**. A visible account-scoped register supplies that account; a hidden retained Accounts stack does not leak. Home Screen Add Expense uses last-used open.
+Keep **Accounts**, **Rewards**, and **Assistant**. **Add Transactions** is a search-role tab with a **balloon +** (`plus.bubble`) icon: tapping opens conversational Quick Add without changing the selected tab. There is no second, full-width Add accessory. **Plan** and **Reflect** open from trailing **More**. Holding Add opens **Add manually**, also available as a VoiceOver action. SwiftUI supplies the sidebar menu; a scoped UIKit context-menu interaction supplies the iPhone tab-bar menu without changing its layout or selection delegate. The conversation dock also exposes **Add manually**. Accessibility label for capture: **Add Transactions**. A visible account-scoped register supplies that account for either path; a hidden retained Accounts stack does not leak. Home Screen Add Expense uses last-used open.
 
 Pushed Assistant conversations hide the tab bar. Native Back (AX or a real tap on the system control) pops to Assistant home, restores the tab bar and the search-role Add tab, keeps the conversation session, and does not write the ledger. Hosted snapshot tests prove that same `navigationDestination` binding with `UINavigationController.popViewController(animated: false)`, not a synthesized Back tap. Quick Add’s modal covers them.
+
+The **Add Transaction** App Intent always opens the normal form, blank or prefilled from its structured parameters. **Add from Text** and **Add from Image** continue into conversational capture. No shortcut saves automatically, and remembered entry mode never changes these destinations.
 
 ## Account origin
 
@@ -30,9 +32,9 @@ At Send, freeze the selected account and local date into that user turn. A froze
 
 User bubbles sit on the right. Assistant prose sits in a shaded incoming bubble on the left. Previews, query results, and clarifications belong to the owning reply. Drafts remain the financial source of truth; each mutable draft has one live preview. Later additions are new groups. Corrections keep the original preview and add a later “View updated draft” link.
 
-Quick Add toolbar: **Close | Add Transactions**. An understated **Open in Assistant** text link sits on the composer account row and opens this same session in Assistant. It is not a toolbar expand icon and not a second bottom Continue CTA. No auto-dismiss after Save. No segmented Describe/Manual control, global Save, bottom Continue, or clipped transcript.
+Quick Add toolbar: **Close | Add Transactions**. An understated **Add manually** text action sits on the composer account row and opens the normal transaction form without replacing the conversation. There is no Open in Assistant handoff; saved local conversation history remains accessible from Assistant. No auto-dismiss after a conversation group's Save. No segmented Describe/Manual control, global Save, bottom Continue, or clipped transcript.
 
-One keyboard-safe dock: compact account line (with Open in Assistant on Quick Add) plus a single white plus/text/send (or Stop) shell. Input grows about 1–5 lines and caps near 120pt. Plus stays reachable during an in-flight model turn so Enter manually can stop that owned work. Photo Library, Camera, and `PasteButton` stay blocked while a turn is busy or an image is ingesting. Native edit-menu paste remains. Pending images live in the shell; sent images live in the user bubble. Blank Quick Add and Assistant **New conversation** focus the field; resume and image entry do not.
+One keyboard-safe dock: compact account line with **Add manually**, plus a single white plus/text/send (or Stop) shell. Input grows about 1–5 lines and caps near 120pt. Add manually stays reachable during an in-flight model turn and stops that owned work. The inner plus opens attachment/paste choices; Photo Library, Camera, and `PasteButton` stay blocked while a turn is busy or an image is ingesting. Native edit-menu paste remains. Pending images live in the shell; sent images live in the user bubble. Blank Quick Add and Assistant **New conversation** focus the field; resume and image entry do not.
 
 ## Save
 
@@ -40,14 +42,16 @@ Group-local Save commits only that reply’s included, unsaved draft IDs through
 
 ## Manual
 
-Plus → Enter manually opens the existing calculator editor. **Done** resolves arithmetic and applies the local draft preview only. **Cancel** leaves the original values. A new manual draft is created on Done, not before. Done never commits. Quick Add remembers last-used Manual vs chat; Assistant New conversation always opens chat. Stop and Enter manually cancel the owned conversation task as well as late application. Open in Assistant does not. Opening Manual does not cancel in-flight image ingestion.
+**Add manually** opens the existing standalone **Add Transaction** sheet with calculator, fields, **Save**, and **Cancel**. Save commits directly once through the normal local outbox path and dismisses the form; there is no extra chat preview requiring another Save. Cancel discards only the form's edits. When opened from a conversation, it inherits the selected account and preserves that conversation's messages, drafts, pending text, and attachments. It does not create or replace a conversation session. Stop and Add manually cancel the owned conversation task as well as late application. Opening Manual does not cancel in-flight image ingestion.
+
+Editing an existing conversation draft remains different: **Done** resolves arithmetic and updates that local draft only; **Cancel** preserves its original values. The owning conversation group still requires explicit Save. New conversational entry always opens chat, regardless of any legacy remembered Manual preference.
 
 ## Assistant
 
-Home stays at the root: **Today**, **New conversation**, recents. Opening a conversation or Open in Assistant from Quick Add pushes the shared surface. Recents use a short user-derived title, or **Message draft** when only pending text/images exist. History is scoped to endpoint, user, and plan. Discard is a confirmed local action and does not delete saved payments.
+Home stays at the root: **Today**, **New conversation**, recents. Opening a recent or new conversation pushes the shared surface. Recents use a short user-derived title, or **Message draft** when only pending text/images exist. History is scoped to endpoint, user, and plan. Discard is a confirmed local action and does not delete saved payments.
 
 Today is the local calendar day, using recorded-spending reports and excluding uncategorised on-budget transfer legs. Loading, unavailable, and zero are distinct. Query answers render once in the owning reply; scope and source sit beneath and do not repeat the detail. Legacy snapshots without `queryID` hydrate each unmatched card onto a matching assistant detail or a system result event so Inspect remains reachable. Source lists use existing matching-payment navigation. Questions cannot mutate saved transactions. No push notifications.
 
 ## Apple Intelligence
 
-Show unavailable, downloading, and error states explicitly. Stop and Retry reuse the same frozen turn and reply slot. Later typed text is not swallowed. True unavailable status offers Enter manually, not a fake fallback. There is no cloud or regex fallback. Simulator model unavailability is a validation limit. Tests may inject deterministic doubles.
+Show unavailable, downloading, and error states explicitly. Stop and Retry reuse the same frozen turn and reply slot. Later typed text is not swallowed. True unavailable status offers Add manually, not a fake fallback. There is no cloud or regex fallback. Simulator model unavailability is a validation limit. Tests may inject deterministic doubles.

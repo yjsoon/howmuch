@@ -8,6 +8,296 @@ import Vision
 
 @MainActor
 final class CaptureSnapshotTests: XCTestCase {
+  func testAddManuallySavesOnceAndCancelPreservesConversation() async {
+    // Reuse the immediate offline transport so Save exercises the real outbox
+    // without an unpredictable socket timeout or any real ledger request.
+    XCTAssertTrue(URLProtocol.registerClass(SnapshotHomeBriefFailureProtocol.self))
+    defer { URLProtocol.unregisterClass(SnapshotHomeBriefFailureProtocol.self) }
+    for size in [DynamicTypeSize.large, .accessibility3] {
+      SnapshotHomeBriefFailureProtocol.reset()
+      let harness = SnapshotHarness.make(baseURLString: SnapshotHomeBriefFailureProtocol.fixtureBaseURL)
+      harness.model.settings.authenticatedUserID = "manual-fixture-\(UUID().uuidString)"
+      let session = harness.admitParsed()
+      session.selectedAccountID = "acct-travel"
+      session.composerText = "Keep this unsent message"
+      let attachment = CaptureAttachment(filename: "pending.jpg", data: Data([1, 2, 3]), isReading: true)
+      session.addAttachment(attachment)
+      let draftIDs = session.drafts.map(\.id)
+      let messageIDs = session.messages.map(\.id)
+      guard let surface = SnapshotSurface(
+        root: AddTransactionsView(session: session, workspace: harness.workspace)
+          .environment(harness.model)
+          .environment(\.dynamicTypeSize, size),
+        size: CGSize(width: 390, height: 844)
+      ) else {
+        XCTFail("manual entry requires a connected UIWindowScene")
+        continue
+      }
+      defer {
+        surface.detach()
+        for row in harness.model.pendingRows { harness.model.discardPending(row.id) }
+      }
+      _ = await surface.captureUntilOCR(contains: ["Lunch"])
+      attachImage(surface.captureVisible(), name: "manual-entry-conversation-\(size)")
+      guard let manual = surface.firstControl(label: "Add manually") else {
+        XCTFail("Quick Add must expose Add manually in its dock: \(surface.accessibilityLabels())")
+        continue
+      }
+      surface.assertMinimumHitTarget(manual)
+      XCTAssertTrue(surface.windowBounds.contains(manual.frame))
+      XCTAssertNil(surface.firstControl(label: "Open in Assistant"))
+      XCTAssertTrue(surface.activate(manual))
+      let opened = await surface.waitUntil { surface.firstControl(label: "Cancel") != nil }
+      XCTAssertTrue(opened)
+      _ = await surface.captureUntilOCR(contains: ["Add Transaction", "Travel"])
+      attachImage(surface.captureVisible(), name: "manual-entry-form-\(size)")
+      guard let cancel = surface.firstControl(label: "Cancel"),
+            let digit = surface.firstControl(label: "1") else {
+        XCTFail("normal manual form must expose Cancel and its calculator")
+        continue
+      }
+      XCTAssertTrue(surface.activate(digit))
+      XCTAssertTrue(surface.activate(cancel))
+      let closed = await surface.waitUntil { surface.firstControl(label: "Cancel") == nil }
+      XCTAssertTrue(closed)
+      await surface.settleNavigation()
+      XCTAssertTrue(harness.model.pendingRows.isEmpty, "Cancel must not enqueue a transaction")
+      XCTAssertEqual(harness.workspace.current?.id, session.id)
+      XCTAssertEqual(session.composerText, "Keep this unsent message")
+      XCTAssertEqual(session.drafts.map(\.id), draftIDs)
+      XCTAssertEqual(session.messages.map(\.id), messageIDs)
+      XCTAssertEqual(session.attachments.map(\.id), [attachment.id])
+      XCTAssertTrue(session.attachments[0].isReading)
+
+      guard let reopen = surface.firstControl(label: "Add manually") else {
+        XCTFail("manual action must remain available after Cancel")
+        continue
+      }
+      XCTAssertTrue(surface.activate(reopen))
+      let reopened = await surface.waitUntil { surface.firstControl(label: "1") != nil }
+      XCTAssertTrue(reopened)
+      await surface.settleNavigation()
+      for label in ["1", "2", "0", "0", "next"] {
+        guard let control = surface.firstControl(label: label) else {
+          XCTFail("manual calculator missing \(label): \(surface.accessibilityLabels())")
+          break
+        }
+        XCTAssertTrue(surface.activate(control))
+        await surface.settleVisible()
+      }
+      let choosingPayee = await surface.waitUntil { surface.firstControl(label: "Lunch Shop") != nil }
+      XCTAssertTrue(choosingPayee)
+      await surface.settleNavigation()
+      guard let payee = surface.firstControl(label: "Lunch Shop") else { continue }
+      XCTAssertTrue(surface.activate(payee))
+      let ready = await surface.waitUntil { surface.firstControl(label: "Save") != nil }
+      XCTAssertTrue(ready, "\(size) Save missing after payee selection: \(surface.accessibilityLabels())")
+      await surface.settleNavigation()
+      let rendered = await surface.captureUntilOCR(contains: ["Add Transaction", "Lunch Shop", "Save"])
+      XCTAssertTrue(rendered.text.contains(Self.normalizedOCR("Add Transaction")), "manual form title missing in OCR [\(rendered.text)]")
+      XCTAssertTrue(rendered.text.contains(Self.normalizedOCR("Save")), "manual Save missing in OCR [\(rendered.text)]")
+      attachImage(rendered.image, name: "manual-entry-ready-\(size)")
+      guard let save = surface.firstControl(label: "Save") else { continue }
+      XCTAssertTrue(surface.isControlEnabled(save))
+      XCTAssertTrue(surface.activate(save))
+      _ = surface.activate(save) // A rapid second activation must not enqueue twice.
+      let saved = await surface.waitUntil {
+        harness.model.pendingRows.count == 1 && surface.firstControl(label: "Cancel") == nil
+      }
+      XCTAssertTrue(saved, "Save must enqueue directly and dismiss the manual sheet")
+      XCTAssertEqual(harness.model.pendingRows.count, 1)
+      XCTAssertEqual(harness.model.pendingRows.first?.signedAmount, -12_000)
+      XCTAssertEqual(harness.model.pendingRows.first?.accountID, "acct-travel")
+      XCTAssertEqual(harness.model.pendingRows.first?.payeeName, "Lunch Shop")
+      XCTAssertTrue(harness.model.transactions.isEmpty, "local Save does not claim server success")
+      XCTAssertEqual(harness.workspace.current?.id, session.id)
+      XCTAssertEqual(session.composerText, "Keep this unsent message")
+      XCTAssertEqual(session.drafts.map(\.id), draftIDs, "manual Save must not create a second saveable chat card")
+      XCTAssertEqual(session.messages.map(\.id), messageIDs)
+      XCTAssertEqual(session.attachments.map(\.id), [attachment.id])
+      let drained = await surface.waitUntil {
+        !SnapshotHomeBriefFailureProtocol.recorded.isEmpty && !harness.model.isSyncingOutbox
+      }
+      XCTAssertTrue(drained, "the fixture's offline request must finish before outbox cleanup")
+      for row in harness.model.pendingRows { harness.model.discardPending(row.id) }
+      XCTAssertTrue(harness.model.pendingRows.isEmpty)
+      XCTAssertFalse(
+        OutboxStore.load().contains { $0.connectionFingerprint == harness.model.settings.connectionFingerprint },
+        "manual Save fixture must leave no persisted outbox residue"
+      )
+    }
+  }
+
+  func testBlankConversationIgnoresRememberedManualEntry() async {
+    let suite = "howmuch.tests.manual-preference.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
+    defer {
+      defaults.removePersistentDomain(forName: suite)
+      try? FileManager.default.removeItem(at: directory)
+    }
+    let harness = SnapshotHarness.make(store: CaptureWorkspaceStore(defaults: defaults, rootURL: directory))
+    let scope = harness.model.settings.viewPrefsScopeKey!
+    defaults.set("manual", forKey: "HowMuch.CaptureEntryMode.\(scope)")
+    harness.workspace.dropForScopeChange()
+    let session = harness.admitEmpty()
+    guard let surface = SnapshotSurface(
+      root: AddTransactionsView(session: session, workspace: harness.workspace).environment(harness.model),
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("conversation entry requires a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+    let rendered = await surface.captureUntilOCR(contains: ["Add an expense"])
+    XCTAssertTrue(rendered.text.contains(Self.normalizedOCR("Add an expense")))
+    XCTAssertNil(surface.firstControl(label: "Cancel"), "a remembered mode must not route a conversation request to the form")
+    XCTAssertEqual(session.entryMode, .describe)
+    XCTAssertNotNil(surface.firstControl(label: "Send"))
+  }
+
+  func testBalloonTabTapAndAccessibilityActionUseDistinctRoutes() async {
+    let router = CaptureRouter.shared
+    let previous = router.pending
+    defer { router.pending = previous }
+    for size in [DynamicTypeSize.large, .accessibility3] {
+      let harness = SnapshotHarness.make()
+      let origin = CaptureOrigin.visibleRegister(accountID: "acct-travel")
+      var selectedTab = AppTab.accounts
+      guard let surface = SnapshotSurface(
+        root: TabView(selection: Binding(
+          get: { selectedTab },
+          set: { next in
+            if next == .add {
+              harness.model.presentAddTransactions(origin: origin)
+            } else {
+              selectedTab = next
+            }
+          }
+        )) {
+          Tab("Accounts", systemImage: "building.columns", value: AppTab.accounts) { Text("Entry fixture") }
+          Tab("Rewards", systemImage: "creditcard", value: AppTab.rewards) { Text("Rewards fixture") }
+          Tab("Assistant", systemImage: "bubble.left.and.bubble.right", value: AppTab.assistant) { Text("Assistant fixture") }
+          RootCaptureTab(addManually: { harness.model.presentManualTransaction(origin: origin) })
+        }
+        .background {
+          RootCaptureTabActions(addManually: { harness.model.presentManualTransaction(origin: origin) })
+            .frame(width: 0, height: 0)
+        }
+        .environment(\.dynamicTypeSize, size),
+        size: CGSize(width: 390, height: 844)
+      ) else {
+        XCTFail("root Add tab needs a connected UIWindowScene")
+        continue
+      }
+      defer { surface.detach() }
+      let appeared = await surface.waitUntil { surface.firstControl(label: "Add Transactions") != nil }
+      XCTAssertTrue(appeared)
+      guard let button = surface.firstControl(label: "Add Transactions") else { continue }
+      surface.assertMinimumHitTarget(button)
+      XCTAssertTrue(surface.windowBounds.contains(button.frame))
+      for label in ["Accounts", "Rewards", "Assistant"] {
+        guard let destination = surface.firstControl(label: label) else {
+          XCTFail("root tab missing \(label)")
+          continue
+        }
+        XCTAssertEqual(button.frame.midY, destination.frame.midY, accuracy: 12, "Add must share the tab row, not a separate accessory")
+        XCTAssertFalse(destination.object.accessibilityCustomActions?.contains { $0.name == "Add manually" } == true)
+      }
+      attachImage(surface.captureVisible(), name: "manual-entry-balloon-\(size)")
+      XCTAssertTrue(surface.activate(button))
+      XCTAssertEqual(router.pending?.kind, .blank, "ordinary tap must remain conversational")
+      XCTAssertEqual(router.pending?.origin, origin)
+      XCTAssertEqual(selectedTab, .accounts, "Add must not replace the selected destination")
+      _ = await surface.waitUntil {
+        surface.firstControl(label: "Add Transactions")?.object.accessibilityCustomActions?.contains { $0.name == "Add manually" } == true
+      }
+      guard let manual = surface.firstControl(label: "Add Transactions")?.object.accessibilityCustomActions?.first(where: { $0.name == "Add manually" }),
+            let handler = manual.actionHandler else {
+        XCTFail("the balloon must expose an actionable Add manually VoiceOver action")
+        continue
+      }
+      XCTAssertTrue(handler(manual))
+      guard let request = router.pending, case .manual(let draft) = request.kind else {
+        XCTFail("manual accessibility action must enqueue the form, not conversation")
+        continue
+      }
+      XCTAssertTrue(draft.accountID.isEmpty, "resolve the frozen origin only after references load")
+      XCTAssertEqual(router.pending?.origin, origin)
+      XCTAssertTrue(harness.model.pendingRows.isEmpty)
+    }
+  }
+
+  func testManualIntakeHostPreservesConversationAndAccountIntent() async {
+    let router = CaptureRouter.shared
+    let previous = router.presented
+    defer { router.presented = previous }
+    var preset = TransactionDraft()
+    preset.accountID = "acct-everyday"
+    preset.amountMagnitudeMilli = 5_700
+    preset.payeeName = "Shortcut coffee"
+    preset.memo = "Shortcut fixture"
+    var stale = preset
+    stale.accountID = "missing-account"
+    let cases: [(String, TransactionDraft, CaptureOrigin, String)] = [
+      ("blank", TransactionDraft(), .visibleRegister(accountID: "acct-travel"), "Travel"),
+      ("prefilled", preset, .presetDraft, "Everyday"),
+      ("stale-account", stale, .presetDraft, "Choose Account"),
+    ]
+    for (name, draft, origin, account) in cases {
+      let harness = SnapshotHarness.make()
+      let session = harness.admitParsed()
+      session.composerText = "Keep the conversation"
+      let generation = session.generation
+      let request = CaptureRequest(kind: .manual(draft), connectionFingerprint: harness.model.settings.connectionFingerprint, origin: origin)
+      router.presented = request
+      guard let surface = SnapshotSurface(
+        root: Text("Entry fixture")
+          .sheet(item: Binding(get: { router.presented }, set: { router.presented = $0 })) { request in
+            CaptureIntakeHost(request: request, workspace: harness.workspace)
+              .environment(harness.model)
+          },
+        size: CGSize(width: 390, height: 844)
+      ) else {
+        XCTFail("manual intake needs a connected UIWindowScene")
+        continue
+      }
+      defer { surface.detach() }
+      let admitted = await surface.waitUntil {
+        surface.firstControl(label: "Cancel") != nil
+          && surface.firstControl(labelContains: account) != nil
+      }
+      XCTAssertTrue(admitted, "\(name) manual intake must finish admission: \(surface.accessibilityLabels())")
+      let rendered = await surface.captureUntilOCR(
+        contains: ["Add Transaction", account],
+        timeoutNanoseconds: 2_000_000_000
+      )
+      XCTAssertTrue(rendered.text.contains(Self.normalizedOCR("Add Transaction")), "\(name) title missing in OCR [\(rendered.text)]")
+      XCTAssertTrue(rendered.text.contains(Self.normalizedOCR(account)), "\(name) account missing in OCR [\(rendered.text)]")
+      attachImage(rendered.image, name: "manual-entry-intake-\(name)")
+      XCTAssertEqual(harness.workspace.current?.id, session.id)
+      XCTAssertEqual(session.composerText, "Keep the conversation")
+      XCTAssertEqual(session.generation, generation, "manual intake must not cancel or replace a separate conversation")
+      XCTAssertEqual(session.drafts.count, 1)
+      XCTAssertFalse(session.drafts[0].committed)
+      XCTAssertNil(surface.firstControl(label: "Send"))
+      if name != "blank" {
+        guard let save = surface.firstControl(label: "Save") else {
+          XCTFail("prefilled normal form must expose Save")
+          continue
+        }
+        XCTAssertEqual(surface.isControlEnabled(save), name == "prefilled", "unresolved explicit account must block Save")
+        XCTAssertNotNil(surface.firstControl(labelContains: "Shortcut coffee"))
+      }
+      guard let cancel = surface.firstControl(label: "Cancel") else { continue }
+      XCTAssertTrue(surface.activate(cancel))
+      let closed = await surface.waitUntil { router.presented == nil }
+      XCTAssertTrue(closed)
+      XCTAssertTrue(harness.model.pendingRows.isEmpty)
+      XCTAssertEqual(harness.workspace.current?.id, session.id)
+    }
+  }
+
   func testDescribeManualAndImageStatesRenderIsolatedContent() async {
     let cases: [(String, [String], (SnapshotHarness) -> AnyView)] = [
       ("empty", ["Add an expense", "Everyday"], { harness in
@@ -43,7 +333,7 @@ final class CaptureSnapshotTests: XCTestCase {
       ("query", ["Recorded spending", "Inspect"], { harness in
         AnyView(AddTransactionsView(session: harness.admitQuery(), workspace: harness.workspace))
       }),
-      ("error", ["Couldn't finish", "Enter manually"], { harness in
+      ("error", ["Couldn't finish", "Add manually"], { harness in
         AnyView(AddTransactionsView(session: harness.admitFailedReply(), workspace: harness.workspace))
       }),
       ("generating", ["Let me take a look"], { harness in
@@ -55,7 +345,7 @@ final class CaptureSnapshotTests: XCTestCase {
             .environment(\.colorScheme, .dark)
         )
       }),
-      ("long-account", ["Everyday Joint Household Spending", "Open in Assistant"], { harness in
+      ("long-account", ["Everyday Joint Household Spending", "Add manually"], { harness in
         harness.model.accounts[0] = SnapshotHarness.account(
           "acct-everyday",
           "Everyday Joint Household Spending"
@@ -212,7 +502,7 @@ final class CaptureSnapshotTests: XCTestCase {
       missingActions.isEmpty,
       "accessibility3 actions missing complete \(missingActions) in \(actionsLines.map { Self.normalizedOCR($0) }) seen \(seenActions) \(actionDiag)"
     )
-    for label in ["Save transaction", "Edit", "Send", "Open in Assistant"] {
+    for label in ["Save transaction", "Edit", "Send", "Add manually"] {
       guard let control = surface.firstControl(label: label) else {
         XCTFail("accessibility3 \(label) AX missing in \(surface.accessibilityLabels())")
         continue
@@ -235,7 +525,7 @@ final class CaptureSnapshotTests: XCTestCase {
       }
       defer { surface.detach() }
       _ = await surface.captureUntilOCR(contains: ["Lunch", "Save transaction"])
-      for label in ["Edit", "Save transaction", "Open in Assistant"] {
+      for label in ["Edit", "Save transaction", "Add manually"] {
         guard let control = surface.firstControl(label: label) else {
           XCTFail("\(size) missing \(label) in \(surface.accessibilityLabels())")
           continue
@@ -333,13 +623,16 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertEqual(session.composerText, sentence)
     XCTAssertTrue(field.isFirstResponder)
 
-    session.entryMode = .manual
-    await Task.yield()
-    try? await Task.sleep(nanoseconds: 20_000_000)
-    surface.layoutNow()
+    guard await openManualForm(on: surface) else { return }
     XCTAssertFalse(field.isFirstResponder, "Manual should resign the describe composer")
     XCTAssertNotNil(surface.firstDescendant(PasteAwareTextView.self), "the conversation dock stays mounted")
 
+    guard let cancel = surface.firstControl(label: "Cancel") else {
+      return XCTFail("manual form must expose Cancel")
+    }
+    XCTAssertTrue(surface.activate(cancel))
+    let closed = await surface.waitUntil { surface.firstControl(label: "Cancel") == nil }
+    XCTAssertTrue(closed)
     XCTAssertTrue(field.becomeFirstResponder())
     field.insertText("!")
     try? await Task.sleep(nanoseconds: 20_000_000)
@@ -399,31 +692,31 @@ final class CaptureSnapshotTests: XCTestCase {
       return
     }
     let send = surface.firstControl(label: "Send")
-    let plus = surface.firstControl(label: "Add a photo, paste, or enter manually")
+    let plus = surface.firstControl(label: "Add a photo or paste")
     let account = surface.firstControl(labelContains: "Account for next message")
-    let open = surface.firstControl(label: "Open in Assistant")
+    let manual = surface.firstControl(label: "Add manually")
     XCTAssertNotNil(send, "dock Send AX missing in \(surface.accessibilityLabels())")
     XCTAssertNotNil(plus, "plus AX missing in \(surface.accessibilityLabels())")
     XCTAssertNotNil(account, "account AX missing in \(surface.accessibilityLabels())")
-    XCTAssertNotNil(open, "Open in Assistant AX missing in \(surface.accessibilityLabels())")
-    for control in [send, plus, account, open].compactMap({ $0 }) {
+    XCTAssertNotNil(manual, "Add manually AX missing in \(surface.accessibilityLabels())")
+    for control in [send, plus, account, manual].compactMap({ $0 }) {
       XCTAssertGreaterThanOrEqual(control.frame.width, 44, "\(control.label) width \(control.frame)")
       XCTAssertGreaterThanOrEqual(control.frame.height, 44, "\(control.label) height \(control.frame)")
     }
-    if let account, let open {
-      XCTAssertFalse(account.frame.intersects(open.frame), "account and Open in Assistant must not overlap: \(account.frame) \(open.frame)")
+    if let account, let manual {
+      XCTAssertFalse(account.frame.intersects(manual.frame), "account and Add manually must not overlap: \(account.frame) \(manual.frame)")
       XCTAssertEqual(
         account.frame.midY,
-        open.frame.midY,
+        manual.frame.midY,
         accuracy: 12,
-        "account and Open in Assistant must share the context row: \(account.frame) \(open.frame)"
+        "account and Add manually must share the context row: \(account.frame) \(manual.frame)"
       )
     }
-    if let send, let open {
+    if let send, let manual {
       XCTAssertLessThanOrEqual(
-        open.frame.maxY,
+        manual.frame.maxY,
         send.frame.minY + 1,
-        "Open in Assistant must sit above Send: link \(open.frame) send \(send.frame)"
+        "Add manually must sit above Send: link \(manual.frame) send \(send.frame)"
       )
     }
     XCTAssertGreaterThanOrEqual(field.bounds.height, 44, "empty composer field must keep the 44pt row: \(field.bounds)")
@@ -431,7 +724,7 @@ final class CaptureSnapshotTests: XCTestCase {
     field.insertText("Lunch $12")
     try? await Task.sleep(nanoseconds: 50_000_000)
     surface.layoutNow()
-    let plusAfter = surface.firstControl(label: "Add a photo, paste, or enter manually") ?? plus
+    let plusAfter = surface.firstControl(label: "Add a photo or paste") ?? plus
     let sendAfter = surface.firstControl(label: "Send") ?? send
     let typedFieldFrame = surface.windowFrame(of: field)
     let caret = field.caretRect(for: field.endOfDocument)
@@ -472,17 +765,12 @@ final class CaptureSnapshotTests: XCTestCase {
     )
     XCTAssertEqual(field.contentInset.top, 0, accuracy: 0.5, "multiline must drop centering contentInset: \(field.contentInset)")
     XCTAssertEqual(session.composerText, field.text)
-    guard let handoff = surface.firstControl(label: "Open in Assistant") else {
-      XCTFail("Open in Assistant missing after multiline input in \(surface.accessibilityLabels())")
-      return
-    }
-    XCTAssertTrue(surface.activate(handoff), "Open in Assistant must hand off via the dock link")
-    let opened = await surface.waitUntil {
-      harness.workspace.shouldOpenAssistant && harness.workspace.pendingAssistantSessionID == session.id
-    }
-    XCTAssertTrue(opened, "dock link must set shouldOpenAssistant and pending session without calling workspace directly")
-    XCTAssertEqual(session.composerText, field.text, "handoff must keep unsent composer text")
-    XCTAssertTrue(harness.model.transactions.isEmpty, "Open in Assistant must not write the ledger")
+    guard await openManualForm(on: surface) else { return }
+    XCTAssertEqual(harness.workspace.current?.id, session.id)
+    XCTAssertNil(harness.workspace.pendingAssistantSessionID, "manual entry must not navigate to Assistant")
+    XCTAssertEqual(session.composerText, field.text, "manual entry must keep unsent composer text")
+    XCTAssertTrue(harness.model.transactions.isEmpty, "opening the form must not write the ledger")
+    XCTAssertTrue(harness.model.pendingRows.isEmpty, "opening the form must not enqueue a save")
   }
 
   func testAssistantNavigationPopRestoresHome() async {
@@ -533,77 +821,58 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertTrue(harness.model.transactions.isEmpty, "navigation pop must not write the ledger")
   }
 
-  func testManualEditorDoneAppliesAndCancelLeavesOriginal() async {
+  func testConversationDraftEditorDoneAndCancelRemainDraftOnly() async {
     let harness = SnapshotHarness.make()
-    let session = harness.admitEmpty()
+    let session = harness.admitParsed()
+    let id = session.drafts[0].id
     guard let surface = SnapshotSurface(
       root: AddTransactionsView(session: session, workspace: harness.workspace)
         .environment(harness.model),
       size: CGSize(width: 390, height: 844)
     ) else {
-      XCTFail("manual editor needs a connected UIWindowScene")
+      XCTFail("draft editor needs a connected UIWindowScene")
       return
     }
     defer { surface.detach() }
 
-    _ = await surface.captureUntilOCR(contains: ["Add an expense"])
-    XCTAssertTrue(session.drafts.isEmpty, "new Manual must not create a draft before Done")
-    guard await openManualEditor(on: surface) else {
-      return
+    for finish in ["Cancel", "Done"] {
+      _ = await surface.captureUntilOCR(contains: ["Lunch"])
+      guard let edit = await revealControl(on: surface, label: "Edit") else {
+        return XCTFail("conversation must retain its draft Edit action")
+      }
+      XCTAssertTrue(surface.activate(edit))
+      _ = await surface.captureUntilOCR(contains: ["Edit draft"])
+      guard let amount = surface.firstControl(labelContains: "12.00") else {
+        return XCTFail("draft editor must expose its amount")
+      }
+      XCTAssertTrue(surface.activate(amount))
+      let keypad = await surface.waitUntil { surface.firstControl(label: "1") != nil }
+      XCTAssertTrue(keypad)
+      guard let digit = surface.firstControl(label: "1") else { return }
+      XCTAssertTrue(surface.activate(digit))
+      await surface.settleVisible()
+      XCTAssertEqual(session.drafts[0].draft.amountMagnitudeMilli, 12_000, "editing must stay local until Done")
+      guard let action = surface.controls(labelContains: finish)
+        .filter({ $0.label == finish }).min(by: { $0.frame.minY < $1.frame.minY }) else {
+        return XCTFail("draft editor must retain toolbar \(finish)")
+      }
+      XCTAssertTrue(surface.activate(action))
+      let closed = await surface.waitUntil { surface.firstControl(label: "Cancel") == nil }
+      XCTAssertTrue(closed)
+      XCTAssertEqual(session.drafts.map(\.id), [id])
+      XCTAssertEqual(session.drafts[0].draft.amountMagnitudeMilli, finish == "Cancel" ? 12_000 : 120_010)
+      XCTAssertFalse(session.drafts[0].committed)
+      XCTAssertTrue(harness.model.pendingRows.isEmpty, "draft Done must not save to the ledger")
+      XCTAssertTrue(harness.model.transactions.isEmpty)
     }
-    _ = await surface.captureUntilOCR(contains: ["New transaction"])
-    XCTAssertTrue(session.drafts.isEmpty, "opening Manual must not create a draft")
-    guard let cancel = surface.firstControl(label: "Cancel") else {
-      XCTFail("manual editor missing Cancel in \(surface.accessibilityLabels())")
-      return
-    }
-    XCTAssertTrue(surface.activate(cancel), "Cancel must dismiss the manual editor")
-    let cancelledEditor = await surface.waitUntil {
-      session.drafts.isEmpty && surface.firstControl(label: "Cancel") == nil
-    }
-    XCTAssertTrue(
-      cancelledEditor,
-      "Cancel must leave no new draft and dismiss the editor"
-    )
-    XCTAssertTrue(session.drafts.isEmpty, "Cancel must leave no new draft")
-
-    guard await openManualEditor(on: surface) else {
-      return
-    }
-    _ = await surface.captureUntilOCR(contains: ["New transaction"])
-    XCTAssertTrue(session.drafts.isEmpty)
-    guard let done = surface.firstControl(label: "Done") else {
-      XCTFail("manual editor missing Done in \(surface.accessibilityLabels())")
-      return
-    }
-    XCTAssertTrue(surface.activate(done), "Done must apply the manual editor")
-    let appliedManual = await surface.waitUntil { session.drafts.count == 1 }
-    XCTAssertTrue(
-      appliedManual,
-      "Done must create the manual draft through the editor"
-    )
-    XCTAssertEqual(session.drafts.count, 1)
-    XCTAssertEqual(session.messages.filter { $0.text == "Entered manually" }.count, 1)
-    XCTAssertTrue(harness.model.transactions.isEmpty, "Manual Done must not save to the ledger")
   }
 
-  private func openManualEditor(on surface: SnapshotSurface) async -> Bool {
-    guard let plus = surface.firstControl(label: "Add a photo, paste, or enter manually") else {
-      XCTFail("plus control missing in \(surface.accessibilityLabels())")
+  private func openManualForm(on surface: SnapshotSurface) async -> Bool {
+    guard let enter = surface.firstControl(label: "Add manually") else {
+      XCTFail("dock missing Add manually in \(surface.accessibilityLabels())")
       return false
     }
-    XCTAssertTrue(surface.activate(plus), "plus must open the add sheet")
-    guard await surface.waitUntil(timeoutNanoseconds: 1_500_000_000, {
-      surface.firstControl(label: "Enter manually") != nil
-    }) else {
-      XCTFail("plus menu missing Enter manually in \(surface.accessibilityLabels())")
-      return false
-    }
-    guard let enter = surface.firstControl(label: "Enter manually") else {
-      XCTFail("plus menu missing Enter manually in \(surface.accessibilityLabels())")
-      return false
-    }
-    XCTAssertTrue(surface.activate(enter), "Enter manually must present the editor")
+    XCTAssertTrue(surface.activate(enter), "Add manually must present the form")
     return await surface.waitUntil(timeoutNanoseconds: 1_500_000_000, {
       surface.firstControl(label: "Cancel") != nil
     })
@@ -635,13 +904,7 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertFalse(session.canSaveIncluded)
     XCTAssertEqual(token.generation, session.generation)
 
-    session.entryMode = .manual
-    try? await Task.sleep(nanoseconds: 20_000_000)
-    surface.layoutNow()
-    try? await Task.sleep(nanoseconds: 20_000_000)
-    surface.layoutNow()
-
-    XCTAssertEqual(session.entryMode, .manual)
+    guard await openManualForm(on: surface) else { return }
     XCTAssertNotEqual(session.generation, token.generation)
     XCTAssertFalse(session.isBusy)
     XCTAssertFalse(session.matchesTurn(generation: token.generation))
@@ -718,13 +981,7 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertTrue(session.isIngesting)
     XCTAssertTrue(session.isTransferringImages)
 
-    session.entryMode = .manual
-    try? await Task.sleep(nanoseconds: 20_000_000)
-    surface.layoutNow()
-    try? await Task.sleep(nanoseconds: 20_000_000)
-    surface.layoutNow()
-
-    XCTAssertEqual(session.entryMode, .manual)
+    guard await openManualForm(on: surface) else { return }
     XCTAssertEqual(session.generation, generation)
     XCTAssertFalse(session.isBusy)
     XCTAssertTrue(session.isTransferringImages)
@@ -1022,7 +1279,7 @@ final class CaptureSnapshotTests: XCTestCase {
       "three-error AX3 must keep composer Send visible \(crowdedSurface.accessibilityLabels())"
     )
     XCTAssertNotNil(
-      crowdedSurface.firstControl(label: "Add a photo, paste, or enter manually"),
+      crowdedSurface.firstControl(label: "Add a photo or paste"),
       "three-error AX3 must keep composer plus visible \(crowdedSurface.accessibilityLabels())"
     )
   }
@@ -1092,11 +1349,11 @@ final class CaptureSnapshotTests: XCTestCase {
     defer { URLProtocol.unregisterClass(SnapshotQueryDelayProtocol.self) }
     let cancels: [(String, (SnapshotHarness, SnapshotSurface, CaptureSession) async -> Void)] = [
       ("manual", { _, surface, _ in
-        guard let enter = await self.revealControl(on: surface, label: "Enter manually") else {
-          XCTFail("Enter manually missing after query start in \(surface.accessibilityLabels())")
+        guard let enter = await self.revealControl(on: surface, label: "Add manually") else {
+          XCTFail("Add manually missing after query start in \(surface.accessibilityLabels())")
           return
         }
-        XCTAssertTrue(surface.activate(enter), "Enter manually must be the production control")
+        XCTAssertTrue(surface.activate(enter), "Add manually must be the production control")
       }),
       ("scope", { harness, _, _ in
         harness.workspace.dropForScopeChange()
@@ -1400,7 +1657,7 @@ final class CaptureSnapshotTests: XCTestCase {
   }
 
   fileprivate static func hasVisibleAction(_ lines: [String], _ name: String) -> Bool {
-    if name == "Open in Assistant" || name == "Save transaction" {
+    if name == "Add manually" || name == "Save transaction" {
       return hasCompleteVisibleLine(lines, name) || hasAdjacentPhrase(lines, name)
     }
     return hasCompleteVisibleLine(lines, name)
@@ -2132,6 +2389,20 @@ private final class SnapshotSurface {
       }
     }
     return predicate()
+  }
+
+  func settleNavigation(file: StaticString = #filePath, line: UInt = #line) async {
+    // AX nodes can exist while UIKit is still presenting/pushing their screen.
+    // Synthetic activation must wait until a real user could interact with it.
+    func isTransitioning(_ controller: UIViewController) -> Bool {
+      controller.transitionCoordinator != nil
+        || controller.isBeingPresented
+        || controller.isBeingDismissed
+        || controller.children.contains(where: isTransitioning)
+        || controller.presentedViewController.map(isTransitioning) == true
+    }
+    let settled = await waitUntil { !isTransitioning(host) }
+    XCTAssertTrue(settled, "UIKit navigation must settle before activation", file: file, line: line)
   }
 
   func keyboardFrameInWindow() -> CGRect? {

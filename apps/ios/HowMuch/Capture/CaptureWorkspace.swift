@@ -14,13 +14,11 @@ final class CaptureWorkspace {
   var recents: [CaptureSessionSnapshot] = []
   private(set) var activeScopeKey: String?
   var pendingAssistantSessionID: UUID?
-  var shouldOpenAssistant = false
 
   private let store: CaptureWorkspaceStore
   private let persistDelay: Duration
   private var persistTask: Task<Void, Never>?
   private var conversationTask: Task<Void, Never>?
-  private var lastUsedEntryMode: CaptureEntryMode = .describe
 
   init(store: CaptureWorkspaceStore = .shared, persistDelay: Duration = .milliseconds(250)) {
     self.store = store
@@ -41,10 +39,8 @@ final class CaptureWorkspace {
     persistCurrentIfNeeded()
     current = nil
     pendingAssistantSessionID = nil
-    shouldOpenAssistant = false
     activeScopeKey = scopeKey
     recents = store.load(scope: scopeKey)
-    lastUsedEntryMode = store.lastEntryMode(scope: scopeKey)
   }
 
   func dropForScopeChange() {
@@ -55,12 +51,7 @@ final class CaptureWorkspace {
     current = nil
     recents = []
     pendingAssistantSessionID = nil
-    shouldOpenAssistant = false
     activeScopeKey = nil
-  }
-
-  func rememberedEntryMode() -> CaptureEntryMode {
-    lastUsedEntryMode
   }
 
   func runConversationTurn(_ work: @escaping @MainActor () async -> Void) {
@@ -71,14 +62,6 @@ final class CaptureWorkspace {
       }
       await work()
     }
-  }
-
-  func rememberEntryMode(_ mode: CaptureEntryMode) {
-    lastUsedEntryMode = mode
-    if let current {
-      current.entryMode = mode
-    }
-    store.saveLastEntryMode(mode, scope: activeScopeKey)
   }
 
   @discardableResult
@@ -113,8 +96,7 @@ final class CaptureWorkspace {
       id: request.id,
       scopeKey: scopeKey ?? "",
       origin: request.origin,
-      selectedAccountID: context.selectedAccountID,
-      entryMode: lastUsedEntryMode
+      selectedAccountID: context.selectedAccountID
     )
     if case .draft(let draft) = request.kind {
       session.replaceDrafts([CaptureDraftItem(draft: draft)])
@@ -143,12 +125,6 @@ final class CaptureWorkspace {
     return session
   }
 
-  func continueInAssistant() {
-    persistCurrentIfNeeded()
-    pendingAssistantSessionID = current?.id
-    shouldOpenAssistant = true
-  }
-
   func discardCurrent() {
     cancelDeferredPersist()
     cancelOwnedConversationWork()
@@ -159,7 +135,6 @@ final class CaptureWorkspace {
     }
     current = nil
     pendingAssistantSessionID = nil
-    shouldOpenAssistant = false
   }
 
   func discard(id: UUID) {
@@ -186,7 +161,6 @@ final class CaptureWorkspace {
     recents = []
     current = nil
     pendingAssistantSessionID = nil
-    shouldOpenAssistant = false
   }
 
   @discardableResult
@@ -339,23 +313,6 @@ struct CaptureWorkspaceStore {
     }
     try? fileManager.removeItem(at: scopeDirectory(scope: scope))
     defaults.removeObject(forKey: entryModeKey(scope: scope))
-  }
-
-  func lastEntryMode(scope: String?) -> CaptureEntryMode {
-    guard let scope, Self.isPersistableScope(scope),
-          let raw = defaults.string(forKey: entryModeKey(scope: scope)),
-          let mode = CaptureEntryMode(rawValue: raw)
-    else {
-      return .describe
-    }
-    return mode
-  }
-
-  func saveLastEntryMode(_ mode: CaptureEntryMode, scope: String?) {
-    guard let scope, Self.isPersistableScope(scope) else {
-      return
-    }
-    defaults.set(mode.rawValue, forKey: entryModeKey(scope: scope))
   }
 
   private func write(_ items: [CaptureSessionSnapshot], scope: String) {

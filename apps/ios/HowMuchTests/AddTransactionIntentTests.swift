@@ -277,7 +277,7 @@ final class AddTransactionIntentTests: XCTestCase {
     XCTAssertEqual(draft.amountMagnitudeMilli, 3_500)
   }
 
-  func testBareRequestIsBlankKind() throws {
+  func testBareRequestOpensManualForm() throws {
     let request = try AddTransactionIntentBuilder.request(
       amount: nil,
       direction: nil,
@@ -290,7 +290,42 @@ final class AddTransactionIntentTests: XCTestCase {
       cleared: nil,
       catalog: Self.catalog
     )
-    XCTAssertEqual(request.kind, .blank)
+    guard case .manual(let draft) = request.kind else {
+      return XCTFail("Add Transaction must open the form, not a conversation")
+    }
+    XCTAssertEqual(draft.amountMagnitudeMilli, 0)
+    XCTAssertTrue(draft.accountID.isEmpty)
+    XCTAssertEqual(request.origin, .lastUsedOpen)
+    XCTAssertEqual(request.connectionFingerprint, "plan-a")
+  }
+
+  func testStructuredRequestOpensManualFormWithoutDroppingFields() throws {
+    let date = Date(timeIntervalSince1970: 1_788_800_000)
+    let request = try AddTransactionIntentBuilder.request(
+      amount: Decimal(1234) / 100,
+      direction: .inflow,
+      accountID: "acct-travel",
+      payee: .init(id: "payee-fairprice", name: "FairPrice Finest", transferAccountId: nil, isNew: false),
+      categoryID: "cat-dining",
+      date: date,
+      flag: .blue,
+      memo: "Shortcut fixture",
+      cleared: true,
+      catalog: Self.catalog
+    )
+    guard case .manual(let draft) = request.kind else {
+      return XCTFail("structured fields must go directly to the normal form")
+    }
+    XCTAssertEqual(draft.amountMagnitudeMilli, 12_340)
+    XCTAssertEqual(draft.direction, .inflow)
+    XCTAssertEqual(draft.accountID, "acct-travel")
+    XCTAssertEqual(draft.payeeID, "payee-fairprice")
+    XCTAssertEqual(draft.categoryID, "cat-dining")
+    XCTAssertEqual(draft.date, date)
+    XCTAssertEqual(draft.flag, .blue)
+    XCTAssertEqual(draft.memo, "Shortcut fixture")
+    XCTAssertTrue(draft.isCleared)
+    XCTAssertEqual(request.origin, .presetDraft)
   }
 
   private static let catalog = IntentCatalogSnapshot(

@@ -361,10 +361,10 @@ final class CaptureConversationTests: XCTestCase {
     XCTAssertEqual(session.selectedAccountID, "acct-travel")
   }
 
-  func testContinueInAssistantKeepsTheSameSessionID() {
+  func testPersistedQuickAddRemainsAvailableInAssistantRecents() {
     let workspace = CaptureWorkspace(
       store: CaptureWorkspaceStore(
-        defaults: UserDefaults(suiteName: "howmuch.tests.expand.\(UUID().uuidString)")!,
+        defaults: UserDefaults(suiteName: "howmuch.tests.recents.\(UUID().uuidString)")!,
         rootURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
       )
     )
@@ -377,9 +377,11 @@ final class CaptureConversationTests: XCTestCase {
     )
     session.composerText = "Keep this"
     let id = session.id
-    workspace.continueInAssistant()
+    workspace.persistCurrentIfNeeded()
+    XCTAssertEqual(workspace.recents.first?.id, id)
+    XCTAssertEqual(workspace.recents.first?.composerText, "Keep this")
+    _ = workspace.resume(id)
     XCTAssertEqual(workspace.pendingAssistantSessionID, id)
-    XCTAssertTrue(workspace.shouldOpenAssistant)
     XCTAssertEqual(workspace.current?.id, id)
     XCTAssertEqual(workspace.current?.composerText, "Keep this")
   }
@@ -693,7 +695,7 @@ final class CaptureConversationTests: XCTestCase {
     XCTAssertEqual(restored.messages.filter { $0.queryID == orphan.id }.count, 1)
   }
 
-  func testStopCancelsOwnedConversationTaskAndExpandDoesNot() async {
+  func testStopCancelsOwnedConversationTaskAndPersistenceDoesNot() async {
     let workspace = CaptureWorkspace(
       store: CaptureWorkspaceStore(
         defaults: UserDefaults(suiteName: "howmuch.tests.cancel.\(UUID().uuidString)")!,
@@ -719,17 +721,17 @@ final class CaptureConversationTests: XCTestCase {
     try? await Task.sleep(for: .milliseconds(350))
     XCTAssertFalse(finishedAfterStop)
 
-    var finishedAfterExpand = false
+    var finishedAfterPersist = false
     workspace.runConversationTurn {
       try? await Task.sleep(for: .milliseconds(80))
       guard !Task.isCancelled else {
         return
       }
-      finishedAfterExpand = true
+      finishedAfterPersist = true
     }
-    workspace.continueInAssistant()
+    workspace.persistCurrentIfNeeded()
     try? await Task.sleep(for: .milliseconds(200))
-    XCTAssertTrue(finishedAfterExpand)
+    XCTAssertTrue(finishedAfterPersist)
   }
 
   private static func session() -> CaptureSession {

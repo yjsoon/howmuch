@@ -173,7 +173,7 @@ struct CaptureAssistantReply: View {
         Button("Retry", action: retry)
           .frame(minHeight: 44)
       }
-      Button("Enter manually", action: enterManually)
+      Button("Add manually", action: enterManually)
         .frame(minHeight: 44)
     }
     .font(.subheadline.weight(.semibold))
@@ -545,7 +545,7 @@ struct CaptureComposerDock: View {
   var onImages: ([UIImage]) -> Void
   var onRemove: (UUID) -> Void
   var onRetry: (UUID) -> Void
-  var onOpenInAssistant: (() -> Void)? = nil
+  var onAddManually: () -> Void
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
   var body: some View {
@@ -567,19 +567,18 @@ struct CaptureComposerDock: View {
         .buttonStyle(.plain)
         .disabled(!canChangeAccount)
         .accessibilityLabel("Account for next message, \(accountLabel), change account")
-        if let onOpenInAssistant {
-          Button(action: onOpenInAssistant) {
-            Text("Open in Assistant")
-              .font(.footnote)
-              .foregroundStyle(Theme.accent)
-              .multilineTextAlignment(.trailing)
-              .fixedSize(horizontal: false, vertical: true)
-              .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
-              .contentShape(Rectangle())
-          }
-          .buttonStyle(.plain)
-          .accessibilityLabel("Open in Assistant")
+        Button(action: onAddManually) {
+          Text("Add manually")
+            .font(.footnote)
+            .foregroundStyle(Theme.accent)
+            .multilineTextAlignment(.trailing)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .disabled(!canOpenPlus)
+        .accessibilityLabel("Add manually")
       }
       VStack(alignment: .leading, spacing: 8) {
         let recovery = pending.filter { $0.errorMessage != nil }
@@ -622,7 +621,7 @@ struct CaptureComposerDock: View {
           }
           .tint(Theme.accent)
           .disabled(!canOpenPlus)
-          .accessibilityLabel("Add a photo, paste, or enter manually")
+          .accessibilityLabel("Add a photo or paste")
           CaptureComposerField(text: $text, isComposerFocused: $isFocused, claimFocus: claimFocus, onImages: onImages)
             .accessibilityLabel("Transaction description")
             .accessibilityHint("Describe a spend or ask a recorded-spending question. System dictation works here.")

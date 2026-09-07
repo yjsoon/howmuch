@@ -2,6 +2,19 @@ import XCTest
 @testable import HowMuch
 
 final class CaptureRequestTests: XCTestCase {
+  func testManualRequestPreservesDraftAndUsesNormalAdmissionGuards() {
+    var draft = TransactionDraft()
+    draft.accountID = "acct-travel"
+    draft.payeeName = "Shortcut lunch"
+    draft.amountMagnitudeMilli = 12_000
+    let request = CaptureRequest(kind: .manual(draft), connectionFingerprint: "plan-a")
+    XCTAssertEqual(request.origin, .presetDraft)
+    XCTAssertEqual(request.kind, .manual(draft))
+    XCTAssertEqual(CaptureAdmission.decide(request, isAuthenticated: true, currentFingerprint: "plan-a"), .present(request))
+    XCTAssertEqual(CaptureAdmission.decide(request, isAuthenticated: false, currentFingerprint: "plan-a"), .drop)
+    XCTAssertEqual(CaptureAdmission.decide(request, isAuthenticated: true, currentFingerprint: "plan-b"), .drop)
+  }
+
   func testInboxKindIsRepresentable() {
     let request = CaptureRequest(kind: .inbox, connectionFingerprint: "plan-a")
     XCTAssertEqual(request.kind, .inbox)

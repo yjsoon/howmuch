@@ -200,7 +200,6 @@ struct AssistantView: View {
       lastUsedAccountID: model.lastUsedOpenAccountID,
       focusedRegisterAccountID: nil
     )
-    session.entryMode = .describe
     workspace.pendingAssistantSessionID = session.id
   }
 

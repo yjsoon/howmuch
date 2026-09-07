@@ -214,6 +214,16 @@ final class AppModel {
     )
   }
 
+  func presentManualTransaction(origin: CaptureOrigin) {
+    presentCapture(
+      CaptureRequest(
+        kind: .manual(TransactionDraft()),
+        connectionFingerprint: settings.connectionFingerprint,
+        origin: origin
+      )
+    )
+  }
+
   func beginFocusedRegisterAccount(_ accountID: String) {
     focusedRegisterAccountIDs.append(accountID)
     focusedRegisters.append((activeCaptureSurface, accountID))

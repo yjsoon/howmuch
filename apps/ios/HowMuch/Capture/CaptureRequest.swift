@@ -9,6 +9,7 @@ struct CaptureRequest: Identifiable, Equatable {
   enum Kind: Equatable {
     case blank
     case draft(TransactionDraft)
+    case manual(TransactionDraft)
     case inbox
   }
 
@@ -27,7 +28,7 @@ struct CaptureRequest: Identifiable, Equatable {
       switch kind {
       case .blank:
         self.origin = .lastUsedOpen
-      case .draft:
+      case .draft, .manual:
         self.origin = .presetDraft
       case .inbox:
         self.origin = .inbox

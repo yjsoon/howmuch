@@ -154,11 +154,13 @@ private struct RootView: View {
         }
       }
 
-      Tab("Add Transactions", systemImage: "plus", value: AppTab.add, role: .search) {
-        Color.clear
-      }
+      RootCaptureTab(addManually: { model.presentManualTransaction(origin: model.addTransactionsOrigin()) })
     }
     .tabBarMinimizeBehavior(.onScrollDown)
+    .background {
+      RootCaptureTabActions(addManually: { model.presentManualTransaction(origin: model.addTransactionsOrigin()) })
+        .frame(width: 0, height: 0)
+    }
     .onChange(of: tab, initial: true) { _, next in
       if let surface = next.captureSurface {
         model.activeCaptureSurface = surface
@@ -232,12 +234,6 @@ private struct RootView: View {
         consumePendingCapture()
       }
     }
-    .onChange(of: workspace.shouldOpenAssistant) { _, shouldOpen in
-      if shouldOpen {
-        tab = .assistant
-        workspace.shouldOpenAssistant = false
-      }
-    }
     .onOpenURL { url in
       guard url.scheme == "howmuch" else {
         return
@@ -290,19 +286,29 @@ private struct RootView: View {
   }
 }
 
-private struct CaptureIntakeHost: View {
+struct CaptureIntakeHost: View {
   @Environment(AppModel.self) private var model
   let request: CaptureRequest
+  private let workspace: CaptureWorkspace
   @State private var session: CaptureSession?
+  @State private var manualDraft: TransactionDraft?
   @State private var claimedInboxIDs: [UUID] = []
   @State private var isReadingInbox = false
   @State private var admissionError: String?
   @State private var didAdmit = false
 
+  init(request: CaptureRequest, workspace: CaptureWorkspace = .shared) {
+    self.request = request
+    self.workspace = workspace
+  }
+
   var body: some View {
     Group {
       if !didAdmit {
         admissionPlaceholder
+      } else if let manualDraft {
+        TransactionFormView(draft: manualDraft, isEditing: false, allowsDeletion: false)
+          .presentationDetents([.large])
       } else if isReadingInbox {
         InboxReadingView(
           preferredAccountID: session?.selectedAccountID,
@@ -319,7 +325,7 @@ private struct CaptureIntakeHost: View {
           onClaimed: { claimedInboxIDs = $0 }
         )
       } else if let session {
-        AddTransactionsView(session: session)
+        AddTransactionsView(session: session, workspace: workspace)
           .presentationDetents([.large])
       } else {
         Theme.canvas
@@ -331,7 +337,7 @@ private struct CaptureIntakeHost: View {
       await admitWhenReady()
     }
     .onDisappear {
-      CaptureWorkspace.shared.persistCurrentIfNeeded()
+      workspace.persistCurrentIfNeeded()
       if CaptureRouter.shared.presented == nil {
         InboxStore.shared.discardReading(ids: claimedInboxIDs)
         claimedInboxIDs = []
@@ -390,13 +396,13 @@ private struct CaptureIntakeHost: View {
       return
     }
     let scopeKey = model.settings.viewPrefsScopeKey
-    CaptureWorkspace.shared.activate(scopeKey: scopeKey)
+    workspace.activate(scopeKey: scopeKey)
     guard CaptureAdmissionGate.shouldAdmitAfterRefresh(
       request: request,
       presented: CaptureRouter.shared.presented,
       isCancelled: Task.isCancelled,
       settingsScopeKey: scopeKey,
-      workspaceScopeKey: CaptureWorkspace.shared.activeScopeKey
+      workspaceScopeKey: workspace.activeScopeKey
     ) else {
       return
     }
@@ -404,7 +410,26 @@ private struct CaptureIntakeHost: View {
   }
 
   private func admitSession() {
-    let admitted = CaptureWorkspace.shared.admit(
+    if case .manual(var draft) = request.kind {
+      // A manual form never admits/replaces a conversation session. Preserve
+      // explicit shortcut accounts; unresolved or closed picks need a choice.
+      if !draft.accountID.isEmpty || request.origin == .presetDraft {
+        if !model.openAccounts.contains(where: { $0.id == draft.accountID }) {
+          draft.accountID = ""
+        }
+      } else {
+        draft.accountID = CaptureAccountContext.resolve(
+          origin: request.origin,
+          openAccounts: model.openAccounts,
+          lastUsedAccountID: model.lastUsedOpenAccountID
+        ).selectedAccountID ?? ""
+      }
+      manualDraft = draft
+      didAdmit = true
+      admissionError = nil
+      return
+    }
+    let admitted = workspace.admit(
       request: request,
       scopeKey: model.settings.viewPrefsScopeKey,
       openAccounts: model.openAccounts,
@@ -437,6 +462,116 @@ private struct CaptureIntakeHost: View {
     }
     session.replaceDrafts(drafts.map { CaptureDraftItem(mapped: $0) })
     session.ownUnownedDrafts(as: "Added from a share")
-    CaptureWorkspace.shared.persistCurrentIfNeeded()
+    workspace.persistCurrentIfNeeded()
+  }
+}
+
+struct RootCaptureTab: TabContent {
+  let addManually: () -> Void
+
+  var body: some TabContent<AppTab> {
+    Tab("Add Transactions", systemImage: "plus.bubble", value: AppTab.add, role: .search) {
+      Color.clear
+    }
+    .contextMenu {
+      Button(action: addManually) {
+        Label("Add manually", systemImage: "square.and.pencil")
+      }
+    }
+  }
+}
+
+/// SwiftUI's TabContent menu serves the sidebar, not the iPhone tab bar.
+/// Attach standard UIKit interactions to the semantically identified Add control.
+struct RootCaptureTabActions: UIViewControllerRepresentable {
+  let addManually: () -> Void
+
+  func makeUIViewController(context: Context) -> Controller {
+    let controller = Controller()
+    controller.addManually = addManually
+    return controller
+  }
+
+  func updateUIViewController(_ controller: Controller, context: Context) {
+    controller.addManually = addManually
+    controller.install()
+  }
+
+  static func dismantleUIViewController(_ controller: Controller, coordinator: ()) {
+    controller.uninstall()
+  }
+
+  final class Controller: UIViewController, UIContextMenuInteractionDelegate {
+    var addManually: () -> Void = {}
+    private weak var target: UIControl?
+    private var menuInteraction: UIContextMenuInteraction?
+    private var manualAction: UIAccessibilityCustomAction?
+
+    override func loadView() {
+      view = UIView()
+      view.isUserInteractionEnabled = false
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+      super.viewDidAppear(animated)
+      install()
+    }
+
+    override func viewDidLayoutSubviews() {
+      super.viewDidLayoutSubviews()
+      install()
+    }
+
+    func install() {
+      func tabController(in controller: UIViewController) -> UITabBarController? {
+        if let tab = controller as? UITabBarController { return tab }
+        return controller.children.lazy.compactMap { tabController(in: $0) }.first
+      }
+      func addControl(in view: UIView) -> UIControl? {
+        if let control = view as? UIControl, control.accessibilityLabel == "Add Transactions" {
+          return control
+        }
+        return view.subviews.lazy.compactMap { addControl(in: $0) }.first
+      }
+      guard let root = view.window?.rootViewController,
+            let tab = tabController(in: root),
+            let control = addControl(in: tab.tabBar),
+            control !== target else { return }
+      uninstall()
+      target = control
+      let interaction = UIContextMenuInteraction(delegate: self)
+      menuInteraction = interaction
+      control.addInteraction(interaction)
+      let action = UIAccessibilityCustomAction(name: "Add manually") { [weak self] _ in
+        guard let self else { return false }
+        self.addManually()
+        return true
+      }
+      manualAction = action
+      control.accessibilityCustomActions = (control.accessibilityCustomActions ?? []) + [action]
+    }
+
+    func uninstall() {
+      if let menuInteraction { target?.removeInteraction(menuInteraction) }
+      if let manualAction {
+        target?.accessibilityCustomActions = target?.accessibilityCustomActions?.filter { $0 !== manualAction }
+      }
+      target = nil
+      menuInteraction = nil
+      manualAction = nil
+    }
+
+    func contextMenuInteraction(
+      _ interaction: UIContextMenuInteraction,
+      configurationForMenuAtLocation location: CGPoint
+    ) -> UIContextMenuConfiguration? {
+      UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+        UIMenu(children: [
+          UIAction(title: "Add manually", image: UIImage(systemName: "square.and.pencil")) { [weak self] _ in
+            self?.addManually()
+          },
+        ])
+      }
+    }
   }
 }
