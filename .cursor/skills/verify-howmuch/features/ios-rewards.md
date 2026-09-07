@@ -1,6 +1,6 @@
 # iOS Rewards
 
-Rewards is a tab. It shows imported Rewards Tracker cards against the HowMuch ledger. Envelope planning is the Accounts **Plan** shortcut, not this tab. There is no live YNAB connection.
+Rewards is a tab. It shows imported Rewards Tracker cards against the HowMuch ledger. Envelope planning is **More → Plan**, not this tab. There is no live YNAB connection.
 
 ## Sub-features
 
