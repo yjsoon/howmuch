@@ -424,6 +424,10 @@ struct CaptureIntakeHost: View {
           lastUsedAccountID: model.lastUsedOpenAccountID
         ).selectedAccountID ?? ""
       }
+      // Preserve an explicit transfer destination instead of inheriting it as the source.
+      if draft.accountID == draft.transferAccountID {
+        draft.accountID = ""
+      }
       manualDraft = draft
       didAdmit = true
       admissionError = nil

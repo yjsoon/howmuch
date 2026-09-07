@@ -298,6 +298,86 @@ final class CaptureSnapshotTests: XCTestCase {
     }
   }
 
+  func testManualShortcutTransferRequiresDistinctInheritedSource() async throws {
+    let router = CaptureRouter.shared
+    let previous = router.presented
+    let preferencesKey = ScopedViewPrefsStore.userDefaultsKey
+    let previousPreferences = UserDefaults.standard.object(forKey: preferencesKey)
+    defer {
+      router.presented = previous
+      UserDefaults.standard.set(previousPreferences, forKey: preferencesKey)
+    }
+    let cases: [(String, String?)] = [("last-used", "acct-travel"), ("fallback", nil)]
+    for (name, lastUsedAccountID) in cases {
+      let harness = SnapshotHarness.make(
+        baseURLString: "https://manual-transfer-\(UUID().uuidString.lowercased()).invalid",
+        lastUsedAccountID: lastUsedAccountID
+      )
+      if lastUsedAccountID == nil { harness.model.accounts.reverse() }
+      harness.model.payees.append(
+        Payee(id: "payee-transfer", name: "Transfer to Travel", transferAccountId: "acct-travel", deleted: false)
+      )
+      harness.model.rebuildLookups()
+      XCTAssertEqual(harness.model.lastUsedOpenAccountID, lastUsedAccountID)
+      if lastUsedAccountID == nil { XCTAssertEqual(harness.model.openAccounts.first?.id, "acct-travel") }
+      let request = try AddTransactionIntentBuilder.request(
+        amount: Decimal(12), direction: .outflow, accountID: nil,
+        payee: .init(id: "payee-transfer", name: "Transfer to Travel", transferAccountId: "acct-travel", isNew: false),
+        categoryID: nil, date: nil, flag: nil, memo: nil, cleared: nil,
+        catalog: IntentCatalogSnapshot.project(
+          fingerprint: harness.model.settings.connectionFingerprint,
+          accounts: harness.model.accounts, categoryGroups: harness.model.categoryGroups, payees: harness.model.payees
+        )
+      )
+      guard case .manual(let draft) = request.kind else {
+        return XCTFail("structured transfer shortcut must open the manual form")
+      }
+      XCTAssertEqual(request.origin, .lastUsedOpen)
+      XCTAssertTrue(draft.accountID.isEmpty)
+      XCTAssertEqual(draft.transferAccountID, "acct-travel")
+      router.presented = request
+      guard let surface = SnapshotSurface(
+        root: Text("Entry fixture")
+          .sheet(item: Binding(get: { router.presented }, set: { router.presented = $0 })) { request in
+            CaptureIntakeHost(request: request, workspace: harness.workspace).environment(harness.model)
+          },
+        size: CGSize(width: 390, height: 844)
+      ) else {
+        return XCTFail("manual transfer intake needs a connected UIWindowScene")
+      }
+      defer { surface.detach() }
+      let admitted = await surface.waitUntil { surface.firstControl(label: "Save") != nil }
+      XCTAssertTrue(admitted)
+      await surface.settleNavigation()
+      let save = try XCTUnwrap(surface.firstControl(label: "Save"))
+      XCTAssertFalse(surface.isControlEnabled(save), "\(name) must not make an inherited self-transfer saveable")
+      XCTAssertNotNil(surface.firstControl(labelContains: "Transfer to Travel"), "keep the explicit transfer destination")
+      attachImage(surface.captureVisible(), name: "manual-transfer-blocked-\(name)")
+      guard let account = surface.firstControl(labelContains: "Choose Account") else {
+        XCTFail("\(name) must require a source distinct from the transfer destination: \(surface.accessibilityLabels())")
+        continue
+      }
+      XCTAssertTrue(surface.activate(account))
+      let choosing = await surface.waitUntil { surface.firstControl(label: "Everyday") != nil }
+      XCTAssertTrue(choosing)
+      await surface.settleNavigation()
+      let everyday = try XCTUnwrap(surface.firstControl(label: "Everyday"))
+      XCTAssertTrue(surface.activate(everyday))
+      await surface.settleNavigation()
+      let rendered = await surface.captureUntilOCR(contains: ["Add Transaction", "Transfer to Travel", "Everyday", "Save"])
+      XCTAssertTrue(rendered.text.contains(Self.normalizedOCR("Transfer to Travel")))
+      XCTAssertTrue(rendered.text.contains(Self.normalizedOCR("Everyday")))
+      attachImage(rendered.image, name: "manual-transfer-ready-\(name)")
+      let readySave = try XCTUnwrap(surface.firstControl(label: "Save"))
+      XCTAssertTrue(surface.isControlEnabled(readySave), "a distinct source must allow the preserved transfer")
+      let cancel = try XCTUnwrap(surface.firstControl(label: "Cancel"))
+      XCTAssertTrue(surface.activate(cancel))
+      let closed = await surface.waitUntil { router.presented == nil }
+      XCTAssertTrue(closed)
+      XCTAssertTrue(harness.model.pendingRows.isEmpty, "checking transfer readiness must not save anything")
+    }
+  }
+
   func testDescribeManualAndImageStatesRenderIsolatedContent() async {
     let cases: [(String, [String], (SnapshotHarness) -> AnyView)] = [
       ("empty", ["Add an expense", "Everyday"], { harness in
@@ -1711,7 +1791,8 @@ private final class SnapshotHarness {
 
   static func make(
     baseURLString: String = "http://127.0.0.1:1",
-    store: CaptureWorkspaceStore? = nil
+    store: CaptureWorkspaceStore? = nil,
+    lastUsedAccountID: String? = nil
   ) -> SnapshotHarness {
     var settings = APISettings()
     settings.baseURLString = baseURLString
@@ -1720,6 +1801,10 @@ private final class SnapshotHarness {
     settings.authenticatedUserID = "fixture-user"
     settings.planID = "fixture-plan"
 
+    if let lastUsedAccountID, let scope = settings.viewPrefsScopeKey {
+      var preferences = ScopedViewPrefsStore.load()
+      preferences.set(ViewPrefs(lastUsedAccountID: lastUsedAccountID), for: scope)
+    }
     let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
     model.accounts = [
       account("acct-everyday", "Everyday"),
