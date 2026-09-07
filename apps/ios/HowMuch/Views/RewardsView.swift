@@ -43,14 +43,10 @@ struct RewardsView: View {
     .navigationBarTitleDisplayMode(.large)
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
-        Button {
-          model.isShowingSettings = true
-        } label: {
-          Label("Connection settings", systemImage: "ellipsis.circle")
-        }
-        .tint(Theme.accent)
+        DestinationsMenu()
       }
     }
+    .moreDestinations()
     .sheet(isPresented: $showingImport) {
       NavigationStack {
         RewardsImportView()

@@ -79,7 +79,7 @@ final class AppModel {
   /// Horizon fill uses this stack. Capture origin uses `visibleRegisterAccountID`.
   private(set) var focusedRegisterAccountIDs: [String] = []
   /// Which destination currently owns the visible chrome. A retained Accounts
-  /// register must not leak into Rewards/Reflect/Assistant or Home Screen.
+  /// register must not leak into Rewards/Assistant or Home Screen.
   var activeCaptureSurface: CaptureSurface = .accounts
   private var focusedRegisters: [(surface: CaptureSurface, accountID: String)] = []
   private var pendingTransactions: [PendingTransaction] = OutboxStore.load()

@@ -5,7 +5,7 @@ import Foundation
 enum CaptureOrigin: Equatable, Codable, Sendable {
   /// + from a specific account register.
   case visibleRegister(accountID: String)
-  /// + from overview, Rewards, Reflect, or Assistant.
+  /// + from overview, Rewards, Assistant, or a pushed Plan or Reflect screen.
   case lastUsedOpen
   /// Home Screen Add Expense quick action. Ignores a leftover visible register.
   case homeScreenShortcut
@@ -79,7 +79,6 @@ struct CaptureAccountContext: Equatable, Codable, Sendable {
 enum CaptureSurface: Hashable, Sendable {
   case accounts
   case rewards
-  case reflect
   case assistant
 }
 

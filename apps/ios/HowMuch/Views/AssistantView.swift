@@ -20,14 +20,10 @@ struct AssistantView: View {
     .navigationBarTitleDisplayMode(.large)
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
-        Button {
-          model.isShowingSettings = true
-        } label: {
-          Label("Connection settings", systemImage: "ellipsis.circle")
-        }
-        .tint(Theme.accent)
+        DestinationsMenu()
       }
     }
+    .moreDestinations()
     .navigationDestination(isPresented: Binding(
       get: { workspace.pendingAssistantSessionID != nil },
       set: { presented in

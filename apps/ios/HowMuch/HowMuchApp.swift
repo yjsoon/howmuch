@@ -97,19 +97,19 @@ final class QuickActionSceneDelegate: NSObject, UIWindowSceneDelegate {
 enum AppTab: Hashable {
   case accounts
   case rewards
-  case reflect
   case assistant
+  case add
 
-  var captureSurface: CaptureSurface {
+  var captureSurface: CaptureSurface? {
     switch self {
     case .accounts:
       return .accounts
     case .rewards:
       return .rewards
-    case .reflect:
-      return .reflect
     case .assistant:
       return .assistant
+    case .add:
+      return nil
     }
   }
 }
@@ -118,14 +118,24 @@ private struct RootView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.scenePhase) private var scenePhase
   @State private var tab: AppTab = .accounts
-  @State private var appliedReportsGeneration = 0
 
   var body: some View {
     @Bindable var model = model
     @Bindable var capture = CaptureRouter.shared
     @Bindable var workspace = CaptureWorkspace.shared
 
-    TabView(selection: $tab) {
+    let selection = Binding(
+      get: { tab },
+      set: { (next: AppTab) in
+        if next == .add {
+          model.presentAddTransactions(origin: model.addTransactionsOrigin())
+        } else {
+          tab = next
+        }
+      }
+    )
+
+    TabView(selection: selection) {
       Tab("Accounts", systemImage: "building.columns", value: AppTab.accounts) {
         NavigationStack {
           AccountsView()
@@ -138,25 +148,21 @@ private struct RootView: View {
         }
       }
 
-      Tab("Reflect", systemImage: "chart.bar.fill", value: AppTab.reflect) {
-        NavigationStack {
-          ReflectView()
-        }
-      }
-
       Tab("Assistant", systemImage: "bubble.left.and.bubble.right", value: AppTab.assistant) {
         NavigationStack {
           AssistantView(workspace: workspace)
         }
       }
+
+      Tab("Add Transactions", systemImage: "plus", value: AppTab.add, role: .search) {
+        Color.clear
+      }
     }
     .tabBarMinimizeBehavior(.onScrollDown)
-    .modifier(RootCaptureAccessoryModifier(
-      isEnabled: !workspace.hidesRootCaptureChrome,
-      add: { model.presentAddTransactions(origin: model.addTransactionsOrigin()) }
-    ))
     .onChange(of: tab, initial: true) { _, next in
-      model.activeCaptureSurface = next.captureSurface
+      if let surface = next.captureSurface {
+        model.activeCaptureSurface = surface
+      }
     }
     .overlay(alignment: .bottom) {
       Group {
@@ -185,18 +191,6 @@ private struct RootView: View {
     }
     .task(id: model.settings.connectionFingerprint) {
       await model.refreshAll()
-    }
-    .task(id: ReflectVisitKey(tab: tab, generation: model.reportsRefreshGeneration)) {
-      guard tab == .reflect else {
-        return
-      }
-      let generation = model.reportsRefreshGeneration
-      guard generation > appliedReportsGeneration else {
-        return
-      }
-      if await model.refreshReflectOverview(quiet: true) {
-        appliedReportsGeneration = generation
-      }
     }
     .sheet(isPresented: $model.isShowingSettings) {
       SettingsView(settings: model.settings) { nextSettings in
@@ -444,37 +438,5 @@ private struct CaptureIntakeHost: View {
     session.replaceDrafts(drafts.map { CaptureDraftItem(mapped: $0) })
     session.ownUnownedDrafts(as: "Added from a share")
     CaptureWorkspace.shared.persistCurrentIfNeeded()
-  }
-}
-
-private struct ReflectVisitKey: Hashable {
-  let tab: AppTab
-  let generation: Int
-}
-
-private struct RootCaptureAccessoryModifier: ViewModifier {
-  var isEnabled: Bool
-  let add: () -> Void
-
-  func body(content: Content) -> some View {
-    if #available(iOS 26.1, *) {
-      content.tabViewBottomAccessory(isEnabled: isEnabled) {
-        accessory
-      }
-    } else if isEnabled {
-      content.tabViewBottomAccessory {
-        accessory
-      }
-    } else {
-      content
-    }
-  }
-
-  private var accessory: some View {
-    Button(action: add) {
-      Label("Add Transactions", systemImage: "plus")
-    }
-    .accessibilityLabel("Add Transactions")
-    .accessibilityHint("Adds transactions using the visible account register when one is showing, otherwise the last-used open account.")
   }
 }

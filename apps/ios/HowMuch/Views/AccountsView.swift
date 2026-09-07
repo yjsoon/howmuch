@@ -96,14 +96,10 @@ struct AccountsView: View {
           Label("New Account", systemImage: "plus")
         }
         .tint(Theme.accent)
-        Button {
-          model.isShowingSettings = true
-        } label: {
-          Label("Connection settings", systemImage: "ellipsis.circle")
-        }
-        .tint(Theme.accent)
+        DestinationsMenu()
       }
     }
+    .moreDestinations()
     .refreshable {
       await model.refreshAll()
     }
@@ -175,14 +171,6 @@ struct AccountsView: View {
       ScheduledTransactionsView()
     }
 
-    let plan = LedgerShortcutTile(
-      icon: "square.grid.2x2",
-      title: "Plan",
-      status: .quiet
-    ) {
-      CategoriesView()
-    }
-
     let allTransactions = LedgerShortcutTile(
       icon: "list.bullet.rectangle",
       title: "All",
@@ -196,9 +184,6 @@ struct AccountsView: View {
         GridRow {
           newTransactions
           scheduled
-        }
-        GridRow {
-          plan
           allTransactions
         }
       } else {
@@ -207,9 +192,6 @@ struct AccountsView: View {
         }
         GridRow {
           scheduled
-        }
-        GridRow {
-          plan
         }
         GridRow {
           allTransactions

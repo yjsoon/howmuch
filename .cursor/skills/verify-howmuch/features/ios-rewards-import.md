@@ -13,7 +13,7 @@ Rewards import takes a Rewards Tracker for YNAB settings export and stores that 
 
 ## How to get to it (user POV)
 
-- On Accounts, Rewards, or Reflect, choose **Connection settings** (ellipsis). When signed in, choose **Rewards import** under Tools.
+- On Accounts, Rewards, or Assistant, choose **More** (ellipsis), then **Connection settings**. When signed in, choose **Rewards import** under Tools.
 - On an empty Rewards tab, choose **Rewards import**.
 
 ## Driving it with control-howmuch
@@ -25,7 +25,7 @@ Preconditions:
 - Use the repo file `fixtures/rewards-tracker-export.json`. Do not invent a different export.
 - Xcode Simulator is running HowMuch (`sg.soon.howmuch`). If Simulator is missing, skip this whole file.
 
-- **Open page.** Connection settings → `Rewards import`. Navigation title is `Rewards import`. Empty copy is `No Rewards Tracker cards stored yet.` The tab bar has no `Rewards import` item.
+- **Open page.** More → `Connection settings` → `Rewards import`. Navigation title is `Rewards import`. Empty copy is `No Rewards Tracker cards stored yet.` The tab bar has no `Rewards import` item.
 - **Choose file.** Choose `Choose export`. Pick `fixtures/rewards-tracker-export.json`. Status is `Selected rewards-tracker-export.json`. `Import export` is enabled.
 - **Import.** Choose `Import export`. The button reads `Importing…`, then `Imported this session` shows Cards `1`, Tag mappings `2`, Accounts upserted `1`, Transactions imported `0`. Stored cards lists `Travel Card` with `DBS · miles`.
 - **Replay.** Choose the same file again. Choose `Import export`. Cards stays `1`. Stored cards still has one `Travel Card` row.
