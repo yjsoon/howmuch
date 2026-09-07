@@ -1,0 +1,127 @@
+{
+  "data": {
+    "from": null,
+    "to": null,
+    "group_by": "flag",
+    "miles_valuation": 0.015,
+    "totals": {
+      "spend": 830.8,
+      "reward_dollars": 46.4145,
+      "cashback": 0,
+      "miles": 3094.3
+    },
+    "cards": [
+      {
+        "card": {
+          "id": "card-travel",
+          "name": "Travel Card",
+          "issuer": "DBS",
+          "type": "miles",
+          "ynabAccountId": "acct-credit",
+          "billingCycle": {
+            "type": "calendar"
+          },
+          "featured": true,
+          "earningRate": 1.2,
+          "minimumSpend": 200,
+          "subcategoriesEnabled": true,
+          "subcategories": [
+            {
+              "id": "subcat-dining",
+              "name": "Dining",
+              "flagColor": "red",
+              "rewardValue": 4,
+              "priority": 1,
+              "active": true,
+              "createdAt": "2026-01-15T00:00:00.000Z",
+              "updatedAt": "2026-01-15T00:00:00.000Z"
+            },
+            {
+              "id": "subcat-online",
+              "name": "Online",
+              "flagColor": "blue",
+              "rewardValue": 3,
+              "priority": 2,
+              "active": true,
+              "createdAt": "2026-01-15T00:00:00.000Z",
+              "updatedAt": "2026-01-15T00:00:00.000Z"
+            }
+          ]
+        },
+        "account_id": "acct-credit",
+        "account_name": "Travel Card",
+        "calculation": {
+          "period": "all",
+          "total_spend": 830.8,
+          "counted_spend": 830.8,
+          "eligible_spend": 830.8,
+          "reward_earned": 3094.3,
+          "reward_earned_dollars": 46.4145,
+          "reward_type": "miles",
+          "minimum_spend": 200,
+          "minimum_spend_met": true,
+          "minimum_spend_progress": 100,
+          "maximum_spend": null,
+          "maximum_spend_exceeded": false,
+          "maximum_spend_progress": null,
+          "flags": [
+            {
+              "subcategoryId": "subcat-dining",
+              "name": "Dining",
+              "flagColor": "red",
+              "totalSpend": 601.9,
+              "countedSpend": 601.9,
+              "eligibleSpend": 601.9,
+              "eligibleSpendBeforeBlocks": 601.9,
+              "rewardEarned": 2407.6,
+              "rewardEarnedDollars": 36.114,
+              "rewardRate": 4,
+              "minimumSpend": null,
+              "minimumSpendMet": true,
+              "maximumSpend": null,
+              "maximumSpendExceeded": false,
+              "blockSize": null
+            },
+            {
+              "subcategoryId": "subcat-online",
+              "name": "Online",
+              "flagColor": "blue",
+              "totalSpend": 228.9,
+              "countedSpend": 228.9,
+              "eligibleSpend": 228.9,
+              "eligibleSpendBeforeBlocks": 228.9,
+              "rewardEarned": 686.7,
+              "rewardEarnedDollars": 10.3005,
+              "rewardRate": 3,
+              "minimumSpend": null,
+              "minimumSpendMet": true,
+              "maximumSpend": null,
+              "maximumSpendExceeded": false,
+              "blockSize": null
+            }
+          ]
+        }
+      }
+    ],
+    "groups": [
+      {
+        "key": "flag:red",
+        "label": "Dining",
+        "flag_color": "red",
+        "spend": 601.9,
+        "reward": 2407.6,
+        "reward_dollars": 36.114,
+        "transaction_count": 3
+      },
+      {
+        "key": "flag:blue",
+        "label": "Online",
+        "flag_color": "blue",
+        "spend": 228.9,
+        "reward": 686.7,
+        "reward_dollars": 10.3005,
+        "transaction_count": 1
+      }
+    ]
+  }
+}

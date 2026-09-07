@@ -443,6 +443,41 @@ struct APIClient {
     )
   }
 
+  func fetchRewards(
+    planID: String,
+    from: String?,
+    to: String?,
+    accountIDs: [String] = [],
+    group: RewardGroupBy
+  ) async throws -> RewardsReport {
+    try await report(
+      path: "/api/reports/rewards", planID: planID, from: from, to: to,
+      interval: nil, accountIDs: accountIDs, group: group.rawValue
+    )
+  }
+
+  func fetchRewardsTrackerSnapshot(planID: String) async throws -> RewardsTrackerSnapshot {
+    let response: APIEnvelope<RewardsTrackerSnapshot> = try await request(
+      path: "/api/import/rewards-tracker",
+      queryItems: [URLQueryItem(name: "plan_id", value: planID)]
+    )
+    return response.data
+  }
+
+  func importRewardsTracker(planID: String, payloadJSON: Data) async throws -> RewardsTrackerImportResult {
+    let payload = try JSONSerialization.jsonObject(with: payloadJSON)
+    let body = try JSONSerialization.data(withJSONObject: [
+      "plan_id": planID,
+      "payload": payload,
+    ])
+    let response: APIEnvelope<RewardsTrackerImportResult> = try await executeRequest(
+      path: "/api/import/rewards-tracker",
+      method: "POST",
+      bodyData: body
+    )
+    return response.data
+  }
+
   func createTransaction(planID: String, request body: TransactionWriteRequest) async throws -> Transaction {
     let response: APIEnvelope<TransactionPayload> = try await request(
       path: "/v1/plans/\(planID)/transactions",
@@ -522,7 +557,8 @@ struct APIClient {
     to: String?,
     interval: String?,
     accountIDs: [String] = [],
-    categoryIDs: [String] = []
+    categoryIDs: [String] = [],
+    group: String? = nil
   ) async throws -> Payload {
     // plan_id is mandatory on every report call: without it the API silently
     // answers for its configured default plan.
@@ -541,6 +577,9 @@ struct APIClient {
     }
     if !categoryIDs.isEmpty {
       queryItems.append(URLQueryItem(name: "category_ids", value: categoryIDs.sorted().joined(separator: ",")))
+    }
+    if let group {
+      queryItems.append(URLQueryItem(name: "group", value: group))
     }
 
     let response: APIEnvelope<Payload> = try await request(path: path, queryItems: queryItems)

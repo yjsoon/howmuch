@@ -175,6 +175,54 @@ struct MonthStepper: View {
   }
 }
 
+enum MoreDestination: Hashable {
+  case plan
+  case reflect
+}
+
+struct DestinationsMenu: View {
+  var omitting: MoreDestination?
+  @Environment(AppModel.self) private var model
+
+  var body: some View {
+    Menu {
+      if omitting != .plan {
+        NavigationLink(value: MoreDestination.plan) {
+          Label("Plan", systemImage: "square.grid.2x2")
+        }
+      }
+      if omitting != .reflect {
+        NavigationLink(value: MoreDestination.reflect) {
+          Label("Reflect", systemImage: "chart.bar.fill")
+        }
+      }
+      Divider()
+      Button {
+        model.isShowingSettings = true
+      } label: {
+        Label("Connection settings", systemImage: "gearshape")
+      }
+    } label: {
+      Label("More", systemImage: "ellipsis.circle")
+    }
+    .tint(Theme.accent)
+    .accessibilityLabel("More")
+  }
+}
+
+extension View {
+  func moreDestinations() -> some View {
+    navigationDestination(for: MoreDestination.self) { destination in
+      switch destination {
+      case .plan:
+        CategoriesView()
+      case .reflect:
+        ReflectView()
+      }
+    }
+  }
+}
+
 /// Loading / error placeholder for a surface driven by a `LoadPhase`.
 struct PhasePlaceholder: View {
   let phase: LoadPhase

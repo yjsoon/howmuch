@@ -66,10 +66,11 @@ final class AppModel {
   var referencePhase: LoadPhase = .idle
   var ledgerPhase: LoadPhase = .idle
   var scheduledTransactionsPhase: LoadPhase = .idle
-  /// Increments after mutations that affect a plan month, so the Plan tab
-  /// reloads its locally held monthly snapshot when it becomes visible.
+  /// Increments after mutations that affect a plan month, so the Plan
+  /// destination reloads its locally held monthly snapshot when it becomes visible.
   private(set) var planRefreshGeneration = 0
   private(set) var reportsRefreshGeneration = 0
+  private(set) var rewardsRefreshGeneration = 0
   var reportsPhase: LoadPhase = .idle
   var isSubmitting = false
   var lastSaveMessage: SaveMessage?
@@ -78,7 +79,7 @@ final class AppModel {
   /// Horizon fill uses this stack. Capture origin uses `visibleRegisterAccountID`.
   private(set) var focusedRegisterAccountIDs: [String] = []
   /// Which destination currently owns the visible chrome. A retained Accounts
-  /// register must not leak into Plan/Reflect/Assistant or Home Screen.
+  /// register must not leak into Rewards/Assistant or Home Screen.
   var activeCaptureSurface: CaptureSurface = .accounts
   private var focusedRegisters: [(surface: CaptureSurface, accountID: String)] = []
   private var pendingTransactions: [PendingTransaction] = OutboxStore.load()
@@ -1259,8 +1260,14 @@ final class AppModel {
     scheduledTransactionsGeneration &+= 1
     reportsGeneration &+= 1
     planRefreshGeneration &+= 1
+    rewardsRefreshGeneration &+= 1
     invalidateAccountUsage()
     wipeIntentCatalog()
+  }
+
+  func noteRewardsImport() async {
+    rewardsRefreshGeneration &+= 1
+    await refreshAll(quiet: true)
   }
 
   func publishIntentCatalog(using store: IntentCatalogStore = .shared) {

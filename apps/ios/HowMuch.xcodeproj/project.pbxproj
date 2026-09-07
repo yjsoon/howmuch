@@ -30,6 +30,9 @@
 		A10000000000000000000065 /* ReflectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000075 /* ReflectView.swift */; };
 		A10000000000000000000066 /* ReflectDetails.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000076 /* ReflectDetails.swift */; };
 		A10000000000000000000067 /* CategoriesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000077 /* CategoriesView.swift */; };
+		A50000000000000000000011 /* RewardsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000010 /* RewardsView.swift */; };
+		A50000000000000000000013 /* RewardsImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000012 /* RewardsImportView.swift */; };
+		A50000000000000000000021 /* RewardsReportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000020 /* RewardsReportTests.swift */; };
 		A10000000000000000000068 /* ScheduledTransactionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000078 /* ScheduledTransactionsView.swift */; };
 		A10000000000000000000069 /* ScheduledTransactionEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000079 /* ScheduledTransactionEditorView.swift */; };
 		A10000000000000000000028 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* SettingsView.swift */; };
@@ -128,6 +131,7 @@
 		A200000000000000000000B2 /* RegisterQueryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterQueryTests.swift; sourceTree = "<group>"; };
 		A200000000000000000000C0 /* RegisterApproval.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterApproval.swift; sourceTree = "<group>"; };
 		A200000000000000000000C2 /* RegisterApprovalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterApprovalTests.swift; sourceTree = "<group>"; };
+		A50000000000000000000020 /* RewardsReportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardsReportTests.swift; sourceTree = "<group>"; };
 		A30000000000000000000001 /* HowMuchShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HowMuchShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A30000000000000000000002 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		A30000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -155,6 +159,8 @@
 		A10000000000000000000075 /* ReflectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReflectView.swift; sourceTree = "<group>"; };
 		A10000000000000000000076 /* ReflectDetails.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReflectDetails.swift; sourceTree = "<group>"; };
 		A10000000000000000000077 /* CategoriesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoriesView.swift; sourceTree = "<group>"; };
+		A50000000000000000000010 /* RewardsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardsView.swift; sourceTree = "<group>"; };
+		A50000000000000000000012 /* RewardsImportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardsImportView.swift; sourceTree = "<group>"; };
 		A10000000000000000000078 /* ScheduledTransactionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduledTransactionsView.swift; sourceTree = "<group>"; };
 		A10000000000000000000079 /* ScheduledTransactionEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduledTransactionEditorView.swift; sourceTree = "<group>"; };
 		A10000000000000000000018 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -300,6 +306,8 @@
 				A10000000000000000000071 /* AccountsView.swift */,
 				A10000000000000000000072 /* RegisterView.swift */,
 				A10000000000000000000077 /* CategoriesView.swift */,
+				A50000000000000000000010 /* RewardsView.swift */,
+				A50000000000000000000012 /* RewardsImportView.swift */,
 				A10000000000000000000078 /* ScheduledTransactionsView.swift */,
 				A10000000000000000000079 /* ScheduledTransactionEditorView.swift */,
 				A10000000000000000000073 /* TransactionFormView.swift */,
@@ -369,6 +377,7 @@
 				A200000000000000000000B0 /* RegisterSnapshotTests.swift */,
 				A200000000000000000000B2 /* RegisterQueryTests.swift */,
 				A200000000000000000000C2 /* RegisterApprovalTests.swift */,
+				A50000000000000000000020 /* RewardsReportTests.swift */,
 			);
 			path = HowMuchTests;
 			sourceTree = "<group>";
@@ -534,6 +543,8 @@
 				A10000000000000000000065 /* ReflectView.swift in Sources */,
 				A10000000000000000000066 /* ReflectDetails.swift in Sources */,
 				A10000000000000000000067 /* CategoriesView.swift in Sources */,
+				A50000000000000000000011 /* RewardsView.swift in Sources */,
+				A50000000000000000000013 /* RewardsImportView.swift in Sources */,
 				A10000000000000000000068 /* ScheduledTransactionsView.swift in Sources */,
 				A10000000000000000000069 /* ScheduledTransactionEditorView.swift in Sources */,
 				A10000000000000000000028 /* SettingsView.swift in Sources */,
@@ -586,6 +597,7 @@
 				A200000000000000000000B1 /* RegisterSnapshotTests.swift in Sources */,
 				A200000000000000000000B3 /* RegisterQueryTests.swift in Sources */,
 				A200000000000000000000C3 /* RegisterApprovalTests.swift in Sources */,
+				A50000000000000000000021 /* RewardsReportTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

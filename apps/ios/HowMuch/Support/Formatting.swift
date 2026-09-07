@@ -87,6 +87,10 @@ enum MoneyCodec {
       ?? decimalValue.formatted(.number.precision(.fractionLength(2)))
   }
 
+  static func displayString(forCurrencyUnits units: Double, currencyFormat: CurrencyFormat?) -> String {
+    displayString(for: Int((units * 1000).rounded()), currencyFormat: currencyFormat)
+  }
+
   private static let formatterLock = NSLock()
   private static var formatters: [String: NumberFormatter] = [:]
 

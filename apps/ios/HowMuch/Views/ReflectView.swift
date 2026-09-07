@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ReflectView: View {
   @Environment(AppModel.self) private var model
+  @State private var appliedReportsGeneration = 0
 
   var body: some View {
     ScrollView {
@@ -44,12 +45,16 @@ struct ReflectView: View {
     .navigationBarTitleDisplayMode(.large)
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
-        Button {
-          model.isShowingSettings = true
-        } label: {
-          Label("Connection settings", systemImage: "ellipsis.circle")
-        }
-        .tint(Theme.accent)
+        DestinationsMenu(omitting: .reflect)
+      }
+    }
+    .task(id: model.reportsRefreshGeneration) {
+      let generation = model.reportsRefreshGeneration
+      guard generation > appliedReportsGeneration else {
+        return
+      }
+      if await model.refreshReflectOverview(quiet: true) {
+        appliedReportsGeneration = generation
       }
     }
     .refreshable {

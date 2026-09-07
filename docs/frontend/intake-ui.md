@@ -6,9 +6,9 @@ Most use is adding transactions. Occasional use is read-only questions about rec
 
 ## Destinations
 
-Keep **Accounts**, **Plan**, **Reflect**, and **Assistant**. **+** is the native iOS 26 **Add Transactions** tab-view accessory on root destinations only, not a fifth tab. Accessibility label: **Add Transactions**. A visible account-scoped register supplies that account; a hidden retained Accounts stack does not leak. Home Screen Add Expense uses last-used open.
+Keep **Accounts**, **Rewards**, and **Assistant**. **Add Transactions** is a search-role tab (plus icon) that opens capture and does not stay selected. **Plan** and **Reflect** open from trailing **More**. Accessibility label for capture: **Add Transactions**. A visible account-scoped register supplies that account; a hidden retained Accounts stack does not leak. Home Screen Add Expense uses last-used open.
 
-Pushed Assistant conversations hide the tab bar and accessory. Native Back (AX or a real tap on the system control) pops to Assistant home, restores the tab bar and Add accessory, keeps the conversation session, and does not write the ledger. Hosted snapshot tests prove that same `navigationDestination` binding with `UINavigationController.popViewController(animated: false)`, not a synthesized Back tap. Quick Add’s modal covers them.
+Pushed Assistant conversations hide the tab bar. Native Back (AX or a real tap on the system control) pops to Assistant home, restores the tab bar and the search-role Add tab, keeps the conversation session, and does not write the ledger. Hosted snapshot tests prove that same `navigationDestination` binding with `UINavigationController.popViewController(animated: false)`, not a synthesized Back tap. Quick Add’s modal covers them.
 
 ## Account origin
 
@@ -17,7 +17,7 @@ Resolve account context at session admission. Composer **Account** is the next m
 | Entry | Account |
 | --- | --- |
 | + from a specific account register | that open account |
-| + from overview, Plan, Reflect, or Assistant | last-used **open** account |
+| + from overview, Rewards, Assistant, or pushed Plan / Reflect | last-used **open** account |
 | Home Screen **Add Expense** | last-used **open** account, even if a register was left open |
 | Duplicate / structured App Intent | the draft’s explicit account |
 | Share / inbox | last-used open account |

@@ -96,14 +96,10 @@ struct AccountsView: View {
           Label("New Account", systemImage: "plus")
         }
         .tint(Theme.accent)
-        Button {
-          model.isShowingSettings = true
-        } label: {
-          Label("Connection settings", systemImage: "ellipsis.circle")
-        }
-        .tint(Theme.accent)
+        DestinationsMenu()
       }
     }
+    .moreDestinations()
     .refreshable {
       await model.refreshAll()
     }

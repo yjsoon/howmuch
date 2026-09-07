@@ -52,12 +52,7 @@ struct CategoriesView: View {
     .navigationBarTitleDisplayMode(.large)
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
-        Button {
-          model.isShowingSettings = true
-        } label: {
-          Label("Connection settings", systemImage: "ellipsis.circle")
-        }
-        .tint(Theme.accent)
+        DestinationsMenu(omitting: .plan)
       }
     }
     .task(id: PlanRefreshKey(month: monthAnchor, generation: model.planRefreshGeneration)) {

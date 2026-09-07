@@ -15,9 +15,6 @@ final class CaptureWorkspace {
   private(set) var activeScopeKey: String?
   var pendingAssistantSessionID: UUID?
   var shouldOpenAssistant = false
-  var hidesRootCaptureChrome: Bool {
-    pendingAssistantSessionID != nil
-  }
 
   private let store: CaptureWorkspaceStore
   private let persistDelay: Duration
