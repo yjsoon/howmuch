@@ -1078,6 +1078,98 @@ final class CaptureSnapshotTests: XCTestCase {
     }
   }
 
+  func testRestoredPendingMerchantReportClarificationDoesNotFetchAfterAccountChoice() async {
+    SnapshotQueryDelayProtocol.reset()
+    XCTAssertTrue(
+      URLProtocol.registerClass(SnapshotQueryDelayProtocol.self),
+      "query delay stub must register on URLSession.shared"
+    )
+    defer { URLProtocol.unregisterClass(SnapshotQueryDelayProtocol.self) }
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("howmuch-capture-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = CaptureWorkspaceStore(
+      defaults: UserDefaults(suiteName: "howmuch.tests.capture.\(UUID().uuidString)")!,
+      rootURL: directory
+    )
+    let original = SnapshotHarness.make(
+      baseURLString: SnapshotQueryDelayProtocol.fixtureBaseURL,
+      store: store
+    )
+    let scope = original.model.settings.viewPrefsScopeKey
+    XCTAssertEqual(original.model.settings.baseURL?.host, SnapshotQueryDelayProtocol.fixtureHost)
+    let session = original.admitPendingQueryClarification(
+      includeCategory: false,
+      account: "Card",
+      merchant: "Starbucks"
+    )
+    XCTAssertEqual(session.pendingQuery?.spec.kind, .spending)
+    XCTAssertEqual(session.pendingQuery?.spec.merchant, "Starbucks")
+    XCTAssertEqual(session.pendingQuery?.spec.account, "Card")
+    XCTAssertEqual(session.pendingQuery?.from, "2026-09-01")
+    XCTAssertEqual(session.pendingQuery?.to, "2026-09-06")
+    XCTAssertTrue(session.pendingQuery?.accountIDs.isEmpty == true)
+    XCTAssertTrue(session.pendingQuery?.unresolvedCategory.isEmpty == true)
+    original.workspace.persistCurrentIfNeeded()
+    let persisted = store.load(scope: scope)
+    XCTAssertEqual(persisted.count, 1, "legacy-valid pending query must persist through CaptureWorkspaceStore")
+    XCTAssertEqual(persisted.first?.id, session.id)
+    XCTAssertEqual(persisted.first?.pendingQuery?.spec.merchant, "Starbucks")
+    XCTAssertEqual(persisted.first?.pendingQuery?.spec.kind, .spending)
+    XCTAssertEqual(persisted.first?.pendingQuery?.from, "2026-09-01")
+    XCTAssertEqual(persisted.first?.pendingQuery?.to, "2026-09-06")
+    XCTAssertEqual(persisted.first?.pendingQuery?.unresolvedAccount.map(\.id), ["acct-everyday", "acct-travel"])
+
+    let restoredHarness = SnapshotHarness.make(
+      baseURLString: SnapshotQueryDelayProtocol.fixtureBaseURL,
+      store: store
+    )
+    XCTAssertEqual(restoredHarness.model.settings.viewPrefsScopeKey, scope)
+    XCTAssertEqual(restoredHarness.workspace.recents.map(\.id), [session.id])
+    guard let restored = restoredHarness.workspace.resume(session.id) else {
+      XCTFail("fresh workspace must resume the persisted pending query")
+      return
+    }
+    XCTAssertEqual(restored.pendingQuery?.spec.merchant, "Starbucks")
+    XCTAssertEqual(restored.pendingQuery?.from, "2026-09-01")
+    XCTAssertEqual(restored.pendingQuery?.to, "2026-09-06")
+    XCTAssertTrue(restored.queryCards.isEmpty)
+    guard let surface = SnapshotSurface(
+      root: AddTransactionsView(session: restored, workspace: restoredHarness.workspace)
+        .environment(restoredHarness.model),
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("restored merchant pending query needs a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+    _ = await surface.captureUntilOCR(contains: ["Which account"])
+    attachImage(surface.captureVisible(), name: "capture-restored-merchant-pending-query")
+    guard let candidate = await revealControl(on: surface, label: "Everyday") else {
+      XCTFail("stored account candidate missing after resume in \(surface.accessibilityLabels())")
+      return
+    }
+    SnapshotQueryDelayProtocol.reset()
+    XCTAssertTrue(surface.activate(candidate), "tapping Everyday must continue the restored pending query")
+    let honest = await surface.waitUntil(timeoutNanoseconds: 1_500_000_000, {
+      restored.lastFeedback?.localizedCaseInsensitiveContains("merchant") == true
+    })
+    XCTAssertTrue(
+      honest,
+      "restored spending+merchant clarification must be rejected honestly without a report; feedback \(restored.lastFeedback ?? "") cards \(restored.queryCards.count) started \(SnapshotQueryDelayProtocol.started)"
+    )
+    XCTAssertTrue(
+      SnapshotQueryDelayProtocol.started.isEmpty,
+      "restored merchant-qualified spending must not fetch report or sources; started \(SnapshotQueryDelayProtocol.started)"
+    )
+    try? await Task.sleep(nanoseconds: 1_000_000_000)
+    XCTAssertTrue(
+      SnapshotQueryDelayProtocol.started.isEmpty,
+      "late restored merchant-qualified spending must still not fetch; started \(SnapshotQueryDelayProtocol.started)"
+    )
+    XCTAssertTrue(restored.queryCards.isEmpty)
+  }
+
   private func revealControl(on surface: SnapshotSurface, label: String) async -> SnapshotAXNode? {
     func usable(_ node: SnapshotAXNode) -> Bool {
       guard node.frame.width > 0, node.frame.height > 0 else {
@@ -1283,7 +1375,10 @@ private final class SnapshotHarness {
   let model: AppModel
   let workspace: CaptureWorkspace
 
-  static func make(baseURLString: String = "http://127.0.0.1:1") -> SnapshotHarness {
+  static func make(
+    baseURLString: String = "http://127.0.0.1:1",
+    store: CaptureWorkspaceStore? = nil
+  ) -> SnapshotHarness {
     var settings = APISettings()
     settings.baseURLString = baseURLString
     settings.username = "fixture-owner"
@@ -1328,7 +1423,7 @@ private final class SnapshotHarness {
     model.rebuildLookups()
 
     let workspace = CaptureWorkspace(
-      store: CaptureWorkspaceStore(
+      store: store ?? CaptureWorkspaceStore(
         defaults: UserDefaults(suiteName: "howmuch.tests.snap.\(UUID().uuidString)")!,
         rootURL: FileManager.default.temporaryDirectory.appendingPathComponent("howmuch-snap-\(UUID().uuidString)")
       )
@@ -1596,12 +1691,16 @@ private final class SnapshotHarness {
     return session
   }
 
-  func admitPendingQueryClarification(includeCategory: Bool = true) -> CaptureSession {
+  func admitPendingQueryClarification(
+    includeCategory: Bool = true,
+    account: String = "Account",
+    merchant: String = ""
+  ) -> CaptureSession {
     let session = admit()
     session.composerText = "What did I spend on the card?"
     let frozen = session.freezeComposerTurn(accountName: "Everyday", localDate: "2026-09-06")
     session.pendingQuery = LedgerQueryResolution(
-      spec: LedgerQuerySpec(kind: .spending, category: "", account: "Account", merchant: "", from: "2026-09-01", to: "2026-09-06"),
+      spec: LedgerQuerySpec(kind: .spending, category: "", account: account, merchant: merchant, from: "2026-09-01", to: "2026-09-06"),
       from: "2026-09-01",
       to: "2026-09-06",
       priorFrom: nil,
