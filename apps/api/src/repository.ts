@@ -396,8 +396,49 @@ export class LedgerRepository {
   async listAccounts(planId: string): Promise<any[]> {
     await this.ensurePlan(planId);
     return (await this.db
-      .query(`${ACCOUNT_SELECT_SQL} WHERE plan_id = ? AND deleted = 0 ORDER BY closed, name`)
-      .all(planId)).map(formatAccount);
+      .query(
+        `SELECT accounts.*, COALESCE(recon.max_statement_date, rec.max_date) AS last_reconciled_date
+         FROM accounts
+         LEFT JOIN (
+           SELECT account_id, MAX(statement_date) AS max_statement_date
+           FROM account_reconciliation_assertions
+           WHERE plan_id = ?
+           GROUP BY account_id
+         ) recon ON recon.account_id = accounts.id
+         LEFT JOIN (
+           SELECT account_id, MAX(date) AS max_date
+           FROM transactions
+           WHERE plan_id = ? AND deleted = 0 AND cleared = 'reconciled'
+           GROUP BY account_id
+         ) rec ON rec.account_id = accounts.id
+         WHERE accounts.plan_id = ? AND accounts.deleted = 0
+         ORDER BY accounts.closed, accounts.name`,
+      )
+      .all(planId, planId, planId)).map(formatAccount);
+  }
+
+  async findAccount(planId: string, accountId: string): Promise<any | null> {
+    const row = await this.db.query(`${ACCOUNT_SELECT_SQL} WHERE id = ? AND plan_id = ? AND deleted = 0`).get(accountId, planId) as Row | null;
+    return row ? formatAccount(row) : null;
+  }
+
+  async findPayee(planId: string, payeeId: string): Promise<any | null> {
+    const row = await this.db.query("SELECT * FROM payees WHERE id = ? AND plan_id = ? AND deleted = 0").get(payeeId, planId) as Row | null;
+    return row ? formatPayee(row) : null;
+  }
+
+  private async liveAccounts(planId: string): Promise<Map<string, { id: string; closed: boolean; type: string }>> {
+    const rows = await this.db.query("SELECT id, closed, type FROM accounts WHERE plan_id = ? AND deleted = 0").all(planId) as Row[];
+    return new Map(rows.map((row) => [String(row.id), { id: String(row.id), closed: toBoolean(row.closed), type: String(row.type ?? "checking") }]));
+  }
+
+  private async liveAccount(planId: string, accountId: string): Promise<{ id: string; closed: boolean; type: string } | null> {
+    const row = await this.db.query("SELECT id, closed, type FROM accounts WHERE id = ? AND plan_id = ? AND deleted = 0").get(accountId, planId) as Row | null;
+    return row ? { id: String(row.id), closed: toBoolean(row.closed), type: String(row.type ?? "checking") } : null;
+  }
+
+  private async liveCategory(planId: string, categoryId: string): Promise<boolean> {
+    return Boolean(await this.db.query("SELECT 1 FROM categories WHERE id = ? AND plan_id = ? AND deleted = 0").get(categoryId, planId));
   }
 
   async getAccount(planId: string, accountId: string): Promise<any> {
@@ -482,7 +523,7 @@ export class LedgerRepository {
 
     const completedResult = result as Omit<AccountReconciliationResult, "account" | "replayed" | "server_knowledge"> | null;
     if (!completedResult) throw new Error("Reconciliation result is missing");
-    const reconciledAccount = (await this.listAccounts(planId)).find((candidate: { id: string }) => candidate.id === accountId);
+    const reconciledAccount = await this.findAccount(planId, accountId);
     if (!reconciledAccount) throw new NotFoundError("Account not found");
     return {
       ...completedResult,
@@ -566,7 +607,7 @@ export class LedgerRepository {
   async listPayees(planId: string): Promise<any[]> {
     await this.ensurePlan(planId);
     return (await this.db
-      .query("SELECT * FROM payees WHERE plan_id = ? AND deleted = 0 ORDER BY name")
+      .query("SELECT id, name, transfer_account_id, deleted FROM payees WHERE plan_id = ? AND deleted = 0 ORDER BY name")
       .all(planId)).map(formatPayee);
   }
 
@@ -1424,6 +1465,7 @@ export class LedgerRepository {
       clauses.push("t.server_knowledge > ?");
       params.push(filters.lastKnowledgeOfServer);
     }
+    let pageFrom = "FROM transactions t";
     if (filters.q) {
       const plan = await this.getPlan(planId);
       const query = parseRegisterQuery(filters.q, plan.currency_format);
@@ -1431,6 +1473,10 @@ export class LedgerRepository {
         const search = transactionSearchSql(query);
         clauses.push(search.sql);
         params.push(...search.params);
+        pageFrom = `FROM transactions t
+           JOIN accounts a ON a.id = t.account_id
+           LEFT JOIN payees p ON p.id = t.payee_id
+           LEFT JOIN categories c ON c.id = t.category_id`;
       }
     }
 
@@ -1439,9 +1485,8 @@ export class LedgerRepository {
       params.push(limit, offset ?? 0);
     }
 
-    const rows = await this.db
-      .query(
-        `SELECT
+    const orderBy = "t.date DESC, t.created_at DESC, t.id DESC";
+    const listed = `SELECT
            t.*,
            a.name AS account_name,
            p.name AS payee_name,
@@ -1451,9 +1496,21 @@ export class LedgerRepository {
          JOIN accounts a ON a.id = t.account_id
          LEFT JOIN payees p ON p.id = t.payee_id
          LEFT JOIN categories c ON c.id = t.category_id
-         LEFT JOIN subtransactions linked_sub ON linked_sub.id = t.transfer_transaction_id AND linked_sub.deleted = 0
+         LEFT JOIN subtransactions linked_sub ON linked_sub.id = t.transfer_transaction_id AND linked_sub.deleted = 0`;
+    const rows = await this.db
+      .query(
+        limit == null
+          ? `${listed}
          WHERE ${clauses.join(" AND ")}
-         ORDER BY t.date DESC, t.created_at DESC, t.id DESC${pagination}`,
+         ORDER BY ${orderBy}`
+          : `${listed}
+         JOIN (
+           SELECT t.id
+           ${pageFrom}
+           WHERE ${clauses.join(" AND ")}
+           ORDER BY ${orderBy}${pagination}
+         ) page ON page.id = t.id
+         ORDER BY ${orderBy}`,
       )
       .all(...params) as Row[];
 
@@ -1846,9 +1903,13 @@ export class LedgerRepository {
   }
 
   async getScheduledTransaction(planId: string, scheduledTransactionId: string): Promise<any> {
-    const transaction = (await this.listScheduledTransactions(planId)).find((candidate) => candidate.id === scheduledTransactionId);
-    if (!transaction) throw new NotFoundError("Scheduled transaction not found");
-    return transaction;
+    const record = await this.readScheduledTransaction(planId, scheduledTransactionId);
+    const payload = { ...record.payload };
+    if (!payload.deleted) delete payload.deleted;
+    return {
+      ...payload,
+      subtransactions: record.subtransactions.filter((subtransaction) => !subtransaction.deleted),
+    };
   }
 
   async createScheduledTransaction(
@@ -1983,7 +2044,7 @@ export class LedgerRepository {
     scheduledOccurrencesThrough(throughDate, throughDate, "never", throughDate, 1);
     if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > 5_000) throw new ValidationError("maximum must be an integer from 1 to 5000");
     const schedules = await this.listScheduledTransactions(planId) as EffectiveScheduledTransaction[];
-    const accounts = new Map((await this.listAccounts(planId)).map((account) => [account.id, account]));
+    const accounts = await this.liveAccounts(planId);
     const planned: Array<{ schedule: EffectiveScheduledTransaction; date: string }> = [];
     const skippedClosed = new Set<string>();
 
@@ -2048,7 +2109,7 @@ export class LedgerRepository {
           const schedule = await this.getScheduledTransaction(planId, listed.id) as EffectiveScheduledTransaction;
           if (typeof schedule.date_next !== "string" || schedule.date_next > throughDate) continue;
 
-          const account = (await this.listAccounts(planId)).find((candidate) => candidate.id === schedule.account_id);
+          const account = await this.liveAccount(planId, schedule.account_id);
           if (account?.closed) {
             skippedClosed.add(schedule.id);
             continue;
@@ -2078,7 +2139,7 @@ export class LedgerRepository {
     }
 
     const remainingSchedules = await this.listScheduledTransactions(planId) as EffectiveScheduledTransaction[];
-    const accounts = new Map((await this.listAccounts(planId)).map((account) => [account.id, account]));
+    const accounts = await this.liveAccounts(planId);
     const hasMore = remainingSchedules.some((schedule) => {
       if (typeof schedule.date_next !== "string" || schedule.date_next > throughDate) return false;
       return !accounts.get(schedule.account_id)?.closed;
@@ -2102,24 +2163,35 @@ export class LedgerRepository {
     requestOperationId?: string,
   ): Promise<TransactionInput> {
     const normalised = scheduledTransactionMutation(schedule.id, {}, schedule, schedule.subtransactions ?? []);
-    const accounts = new Map((await this.listAccounts(planId)).map((account) => [account.id, account]));
-    const payees = new Map((await this.listPayees(planId)).map((payee) => [payee.id, payee]));
-    const categories = new Set((await this.db.query("SELECT id FROM categories WHERE plan_id=? AND deleted=0").all(planId) as Row[]).map((category) => category.id));
-    const sourceAccount = accounts.get(normalised.account_id);
+    const sourceAccount = await this.liveAccount(planId, normalised.account_id);
     if (!sourceAccount) throw new ValidationError("Scheduled transaction account not found");
     if (sourceAccount.closed && !allowClosedAccount) throw new ValidationError("Scheduled transactions in closed accounts do not occur automatically");
+    const accounts = new Map<string, { id: string; closed: boolean; type: string }>([[sourceAccount.id, sourceAccount]]);
+    const payees = new Map<string, any>();
+    const loadAccount = async (accountId: string) => {
+      if (!accounts.has(accountId)) {
+        const account = await this.liveAccount(planId, accountId);
+        if (account) accounts.set(accountId, account);
+        return account;
+      }
+      return accounts.get(accountId);
+    };
+    const loadPayee = async (payeeId: string) => {
+      if (!payees.has(payeeId)) payees.set(payeeId, await this.findPayee(planId, payeeId));
+      return payees.get(payeeId);
+    };
 
-    const prepareLine = (value: Record<string, any>, label: string) => {
-      const payee = value.payee_id == null ? null : payees.get(value.payee_id);
+    const prepareLine = async (value: Record<string, any>, label: string) => {
+      const payee = value.payee_id == null ? null : await loadPayee(value.payee_id);
       if (value.payee_id != null && !payee) throw new ValidationError(`${label} payee not found`);
-      if (value.category_id != null && !categories.has(value.category_id)) throw new ValidationError(`${label} category not found`);
+      if (value.category_id != null && !await this.liveCategory(planId, value.category_id)) throw new ValidationError(`${label} category not found`);
       const explicitTarget = value.transfer_account_id ?? null;
       const payeeTarget = payee?.transfer_account_id ?? null;
       if (explicitTarget && payee && !payeeTarget) throw new ValidationError(`${label} cannot combine a regular payee with transfer_account_id`);
       if (explicitTarget && payeeTarget && payeeTarget !== explicitTarget) throw new ValidationError(`${label} transfer payee does not match transfer_account_id`);
       const transferAccountId = payeeTarget ?? explicitTarget;
       if (transferAccountId) {
-        const target = accounts.get(transferAccountId);
+        const target = await loadAccount(transferAccountId);
         if (!target) throw new ValidationError(`${label} transfer account not found`);
         if (target.id === normalised.account_id) throw new ValidationError(`${label} transfer target must be a different account`);
         if (target.closed && !allowClosedAccount) throw new ValidationError(`${label} transfer target account is closed`);
@@ -2127,19 +2199,20 @@ export class LedgerRepository {
       return { transferAccountId };
     };
 
-    const parent = prepareLine(normalised, "Scheduled transaction");
+    const parent = await prepareLine(normalised, "Scheduled transaction");
     if (parent.transferAccountId && normalised.subtransactions.length) throw new ValidationError("A split scheduled transaction cannot itself be a transfer");
-    const subtransactions = normalised.subtransactions.map((subtransaction, index) => {
-      const line = prepareLine(subtransaction, `Scheduled subtransaction ${index + 1}`);
-      return {
+    const subtransactions = [];
+    for (const [index, subtransaction] of normalised.subtransactions.entries()) {
+      const line = await prepareLine(subtransaction, `Scheduled subtransaction ${index + 1}`);
+      subtransactions.push({
         id: scheduledOccurrenceSubtransactionId(planId, schedule.id, occurrenceDate, subtransaction.id),
         amount: subtransaction.amount,
         payee_id: subtransaction.payee_id ?? null,
         category_id: subtransaction.category_id ?? null,
         memo: subtransaction.memo ?? null,
         transfer_account_id: line.transferAccountId,
-      };
-    });
+      });
+    }
     return {
       id: scheduledOccurrenceTransactionId(planId, schedule.id, occurrenceDate),
       account_id: normalised.account_id,

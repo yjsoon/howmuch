@@ -65,7 +65,7 @@ export class D1LedgerRepository extends LedgerRepository {
   override async getAccountReconciliation(planId: string, accountId: string, statementDate: string): Promise<AccountReconciliationPreview> {
     const date = normaliseReconciliationDate(statementDate);
     const { account, snapshot } = await this.readAccountReconciliationSnapshot(planId, accountId, date);
-    const formattedAccount = (await this.listAccounts(planId)).find((candidate: { id: string }) => candidate.id === account.id);
+    const formattedAccount = await this.findAccount(planId, account.id);
     if (!formattedAccount) throw new NotFoundError("Account not found");
     return {
       account: formattedAccount,
@@ -95,7 +95,7 @@ export class D1LedgerRepository extends LedgerRepository {
       throw new ReconciliationMismatchError(snapshot.priorReconciledBalance, snapshot.projectedReconciledBalance, statementBalance);
     }
     const result = await this.metadata.reconcileAccount(planId, accountId, date, statementBalance, snapshot, context);
-    const reconciledAccount = (await this.listAccounts(planId)).find((candidate: { id: string }) => candidate.id === accountId);
+    const reconciledAccount = await this.findAccount(planId, accountId);
     if (!reconciledAccount) throw new NotFoundError("Account not found");
     return {
       ...result,
@@ -137,9 +137,15 @@ export class D1LedgerRepository extends LedgerRepository {
   override async ensureTransferPayee():Promise<{id:string;name:string}|null>{throw new Error("D1LedgerRepository.ensureTransferPayee is unsupported; use ensureAccount/upsertAccount for atomic provisioning");}
   override async createPayee(planId:string,name:string,id=createId("payee")):Promise<any>{
     const existing=await this.d1.get<Record<string,any>>("SELECT id FROM payees WHERE plan_id=? AND lower(name)=lower(?) AND deleted=0",[planId,name]);
-    if(existing)return (await this.listPayees(planId)).find((p)=>p.id===existing.id);
+    if(existing) {
+      const payee = await this.findPayee(planId, existing.id);
+      if (!payee) throw new NotFoundError("Payee not found");
+      return payee;
+    }
     await this.metadata.createPayee(planId,{id,name},this.context("payee.create",planId,id));
-    return (await this.listPayees(planId)).find((p)=>p.id===id);
+    const created = await this.findPayee(planId, id);
+    if (!created) throw new NotFoundError("Payee not found");
+    return created;
   }
   override async ensurePayee(planId:string,payeeId:string,name?:string):Promise<void>{await this.metadata.upsertPayee(planId,{id:payeeId,name:name??`Imported payee ${payeeId.slice(0,8)}`},this.context("payee.ensure",planId,payeeId));}
   override async upsertPayee(planId:string,payee:any):Promise<void>{await this.metadata.upsertPayee(planId,payee,this.context("payee.upsert",planId,payee.id));}

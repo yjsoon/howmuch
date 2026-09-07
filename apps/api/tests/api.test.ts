@@ -39,6 +39,8 @@ describe("YNAB-compatible API", () => {
 
     const scheduled = await (await request("/v1/plans/plan-test/scheduled_transactions")).json();
     expect(scheduled.data.scheduled_transactions).toEqual([{ id: "scheduled-1", date_next: "2026-07-01", subtransactions: [{ id: "sub-1", scheduled_transaction_id: "scheduled-1", amount: -100 }] }]);
+    const one = await (await request("/v1/plans/plan-test/scheduled_transactions/scheduled-1")).json();
+    expect(one.data.scheduled_transaction).toEqual(scheduled.data.scheduled_transactions[0]);
     const locations = await (await request("/v1/plans/plan-test/payee_locations")).json();
     expect(locations.data.payee_locations).toEqual([{ id: "location-1", payee_id: "payee-1", latitude: "1.2" }]);
     const movements = await (await request("/v1/plans/plan-test/months/2026-06/money_movements")).json();

@@ -10,9 +10,9 @@ export class AsyncReportService {
   constructor(private readonly db: AsyncSqlDatabase) {}
 
   async spendingBreakdown(planId: string, filters: ReportFilters = {}): Promise<any> {
-    const { where, params } = this.lineFilters(planId, filters);
+    const { linesSql, where, params } = this.lineFilters(planId, filters);
     const rows = await this.db.all<Row>(
-      `WITH lines AS (${lineItemsSql()})
+      `WITH lines AS (${linesSql})
        SELECT
          COALESCE(c.id, 'uncategorised') AS category_id,
          COALESCE(c.name, 'Uncategorised') AS category_name,
@@ -30,7 +30,7 @@ export class AsyncReportService {
     );
     const limit = bind(params, filters.topPayeesLimit ?? 5);
     const topPayeeRows = await this.db.all<Row>(
-      `WITH lines AS (${lineItemsSql()})
+      `WITH lines AS (${linesSql})
        SELECT
          COALESCE(lines.payee_id, 'unknown-payee') AS payee_id,
          COALESCE(p.name, lines.payee_name_snapshot, 'Unknown') AS payee_name,
@@ -66,10 +66,10 @@ export class AsyncReportService {
   }
 
   async incomeVsSpending(planId: string, filters: ReportFilters = {}): Promise<any> {
-    const { where, params } = this.lineFilters(planId, filters);
+    const { linesSql, where, params } = this.lineFilters(planId, filters);
     const interval = filters.interval ?? "month";
     const rows = await this.db.all<Row>(
-      `WITH lines AS (${lineItemsSql()})
+      `WITH lines AS (${linesSql})
        SELECT
          ${periodSql(interval)} AS period,
          SUM(CASE WHEN lines.amount_milli > 0 THEN lines.amount_milli ELSE 0 END) AS income,
@@ -150,9 +150,9 @@ export class AsyncReportService {
   async ageOfMoney(planId: string, filters: ReportFilters = {}): Promise<any> {
     const from = filters.from ?? (await earliestDate(this.db, planId)) ?? todayIso();
     const to = filters.to ?? todayIso();
-    const { where, params } = this.lineFilters(planId, filters, true);
+    const { linesSql, where, params } = this.lineFilters(planId, filters, true);
     const rows = await this.db.all<Row>(
-      `WITH lines AS (${lineItemsSql()})
+      `WITH lines AS (${linesSql})
        SELECT date, amount_milli FROM lines
        WHERE ${where}
        ORDER BY date ASC, ledger_sequence ASC, line_sequence ASC`,
@@ -255,21 +255,22 @@ export class AsyncReportService {
 
   private lineFilters(planId: string, filters: ReportFilters, includeTransfers = false) {
     const params: any[] = [];
-    const clauses = [`lines.plan_id = ${bind(params, planId)}`, "lines.deleted = 0"];
-    if (filters.from) clauses.push(`lines.date >= ${bind(params, filters.from)}`);
-    if (filters.to) clauses.push(`lines.date <= ${bind(params, filters.to)}`);
+    const inner = [`t.plan_id = ${bind(params, planId)}`, "t.deleted = 0"];
+    if (filters.from) inner.push(`t.date >= ${bind(params, filters.from)}`);
+    if (filters.to) inner.push(`t.date <= ${bind(params, filters.to)}`);
+    appendInFilter(inner, params, "t.account_id", filters.accountIds);
+    const clauses: string[] = [];
     if (!includeTransfers && filters.includeTransfers !== true) {
       clauses.push("(lines.category_id IS NOT NULL OR (lines.transfer_transaction_id IS NULL AND lines.transfer_account_id IS NULL))");
     }
-    appendInFilter(clauses, params, "lines.account_id", filters.accountIds);
     appendCategoryFilter(clauses, params, filters.categoryIds);
     appendInFilter(clauses, params, "lines.category_group_id", filters.categoryGroupIds);
     appendInFilter(clauses, params, "lines.payee_id", filters.payeeIds);
-    return { where: clauses.join(" AND "), params };
+    return { linesSql: lineItemsSql(inner.join(" AND ")), where: clauses.length ? clauses.join(" AND ") : "1=1", params };
   }
 }
 
-function lineItemsSql(): string {
+function lineItemsSql(innerWhere: string): string {
   return `
     SELECT t.id AS transaction_id, t.ledger_sequence, COALESCE(st.ledger_sequence, 0) AS line_sequence,
       t.plan_id, t.account_id, t.date,
@@ -284,9 +285,11 @@ function lineItemsSql(): string {
     FROM transactions t
     LEFT JOIN subtransactions st ON st.transaction_id = t.id AND st.deleted = 0
     LEFT JOIN categories c ON c.id = COALESCE(st.category_id, t.category_id)
-    WHERE NOT EXISTS (
-      SELECT 1 FROM subtransactions existing WHERE existing.transaction_id = t.id AND existing.deleted = 0
-    ) OR st.id IS NOT NULL`;
+    WHERE (${innerWhere}) AND (
+      NOT EXISTS (
+        SELECT 1 FROM subtransactions existing WHERE existing.transaction_id = t.id AND existing.deleted = 0
+      ) OR st.id IS NOT NULL
+    )`;
 }
 
 const UNCATEGORISED_ID = "uncategorised";

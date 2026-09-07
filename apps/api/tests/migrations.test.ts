@@ -237,4 +237,24 @@ describe("local schema migrations", () => {
       db.close();
     }
   });
+
+  test("query indexes serve transfer-graph and live register lookups", () => {
+    const db = new Database(":memory:");
+    try {
+      applyMigrations(db);
+      db.run("INSERT INTO plans(id,name) VALUES ('p','Plan')");
+      db.run("INSERT INTO accounts(id,plan_id,name) VALUES ('a','p','Cash')");
+      const detail = (sql: string) => JSON.stringify(db.query(`EXPLAIN QUERY PLAN ${sql}`).all());
+      expect(detail("SELECT * FROM transactions WHERE transfer_transaction_id = 'x' AND deleted = 0")).toContain("idx_transactions_transfer_transaction_id");
+      expect(detail("SELECT t.id FROM transactions t WHERE t.plan_id = 'p' AND t.deleted = 0 ORDER BY t.date DESC, t.created_at DESC, t.id DESC LIMIT 51")).toContain("idx_transactions_plan_live_register");
+      expect(detail("SELECT t.id FROM transactions t WHERE t.account_id = 'a' AND t.deleted = 0 ORDER BY t.date DESC, t.created_at DESC, t.id DESC LIMIT 51")).toContain("idx_transactions_account_live_register");
+      expect(detail("SELECT MAX(date) FROM transactions WHERE account_id = 'a' AND deleted = 0 AND cleared = 'reconciled'")).toContain("idx_transactions_account_reconciled_date");
+      expect(detail("SELECT id, name, transfer_account_id, deleted FROM payees WHERE plan_id = 'p' AND deleted = 0 ORDER BY name")).toContain("idx_payees_plan_live_name");
+      expect(db.query("SELECT version FROM schema_migrations WHERE version='019_query_covering_indexes'").get()).toEqual({
+        version: "019_query_covering_indexes",
+      });
+    } finally {
+      db.close();
+    }
+  });
 });

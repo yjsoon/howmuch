@@ -10,10 +10,10 @@ export class ReportService {
   constructor(private readonly db: Database) {}
 
   spendingBreakdown(planId: string, filters: ReportFilters = {}): any {
-    const { where, params } = this.lineFilters(planId, filters);
+    const { linesSql, where, params } = this.lineFilters(planId, filters);
     const rows = this.db
       .query(
-        `WITH lines AS (${lineItemsSql()})
+        `WITH lines AS (${linesSql})
          SELECT
            COALESCE(c.id, 'uncategorised') AS category_id,
            COALESCE(c.name, 'Uncategorised') AS category_name,
@@ -31,7 +31,7 @@ export class ReportService {
       .all(...params) as Row[];
     const topPayeeRows = this.db
       .query(
-        `WITH lines AS (${lineItemsSql()})
+        `WITH lines AS (${linesSql})
          SELECT
            COALESCE(lines.payee_id, 'unknown-payee') AS payee_id,
            COALESCE(p.name, lines.payee_name_snapshot, 'Unknown') AS payee_name,
@@ -67,12 +67,12 @@ export class ReportService {
   }
 
   incomeVsSpending(planId: string, filters: ReportFilters = {}): any {
-    const { where, params } = this.lineFilters(planId, filters);
+    const { linesSql, where, params } = this.lineFilters(planId, filters);
     const interval = filters.interval ?? "month";
     const periodExpression = periodSql(interval);
     const rows = this.db
       .query(
-        `WITH lines AS (${lineItemsSql()})
+        `WITH lines AS (${linesSql})
          SELECT
            ${periodExpression} AS period,
            SUM(CASE WHEN lines.amount_milli > 0 THEN lines.amount_milli ELSE 0 END) AS income,
@@ -155,10 +155,10 @@ export class ReportService {
   ageOfMoney(planId: string, filters: ReportFilters = {}): any {
     const from = filters.from ?? earliestDate(this.db, planId) ?? todayIso();
     const to = filters.to ?? todayIso();
-    const { where, params } = this.lineFilters(planId, filters, true);
+    const { linesSql, where, params } = this.lineFilters(planId, filters, true);
     const rows = this.db
       .query(
-        `WITH lines AS (${lineItemsSql()})
+        `WITH lines AS (${linesSql})
          SELECT date, amount_milli
          FROM lines
          WHERE ${where}
@@ -278,18 +278,21 @@ export class ReportService {
     });
   }
 
-  private lineFilters(planId: string, filters: ReportFilters, includeTransfers = false): { where: string; params: any[] } {
-    const clauses = ["lines.plan_id = ?", "lines.deleted = 0"];
+  private lineFilters(planId: string, filters: ReportFilters, includeTransfers = false): { linesSql: string; where: string; params: any[] } {
+    const inner = ["t.plan_id = ?", "t.deleted = 0"];
     const params: any[] = [planId];
 
     if (filters.from) {
-      clauses.push("lines.date >= ?");
+      inner.push("t.date >= ?");
       params.push(filters.from);
     }
     if (filters.to) {
-      clauses.push("lines.date <= ?");
+      inner.push("t.date <= ?");
       params.push(filters.to);
     }
+    appendInFilter(inner, params, "t.account_id", filters.accountIds);
+
+    const clauses: string[] = [];
     if (!includeTransfers && filters.includeTransfers !== true) {
       // YNAB counts categorised transfers (e.g. paying a tracking-account
       // loan) as spending; only uncategorised transfer legs stay out.
@@ -297,16 +300,15 @@ export class ReportService {
         "(lines.category_id IS NOT NULL OR (lines.transfer_transaction_id IS NULL AND lines.transfer_account_id IS NULL))",
       );
     }
-    appendInFilter(clauses, params, "lines.account_id", filters.accountIds);
     appendCategoryFilter(clauses, params, filters.categoryIds);
     appendInFilter(clauses, params, "lines.category_group_id", filters.categoryGroupIds);
     appendInFilter(clauses, params, "lines.payee_id", filters.payeeIds);
 
-    return { where: clauses.join(" AND "), params };
+    return { linesSql: lineItemsSql(inner.join(" AND ")), where: clauses.length ? clauses.join(" AND ") : "1=1", params };
   }
 }
 
-function lineItemsSql(): string {
+function lineItemsSql(innerWhere: string): string {
   return `
     SELECT
       t.id AS transaction_id,
@@ -326,11 +328,13 @@ function lineItemsSql(): string {
     FROM transactions t
     LEFT JOIN subtransactions st ON st.transaction_id = t.id AND st.deleted = 0
     LEFT JOIN categories c ON c.id = COALESCE(st.category_id, t.category_id)
-    WHERE NOT EXISTS (
-      SELECT 1 FROM subtransactions existing
-      WHERE existing.transaction_id = t.id AND existing.deleted = 0
+    WHERE (${innerWhere}) AND (
+      NOT EXISTS (
+        SELECT 1 FROM subtransactions existing
+        WHERE existing.transaction_id = t.id AND existing.deleted = 0
+      )
+      OR st.id IS NOT NULL
     )
-    OR st.id IS NOT NULL
   `;
 }
 
