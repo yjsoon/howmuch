@@ -162,7 +162,7 @@ struct RewardsImportView: View {
         payloadJSON: payloadJSON
       )
       result = imported
-      model.noteRewardsImport()
+      await model.noteRewardsImport()
       await refreshSnapshot()
     } catch {
       errorMessage = error.localizedDescription

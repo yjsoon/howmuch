@@ -1265,9 +1265,9 @@ final class AppModel {
     wipeIntentCatalog()
   }
 
-  func noteRewardsImport() {
+  func noteRewardsImport() async {
     rewardsRefreshGeneration &+= 1
-    ledgerPageGeneration &+= 1
+    await refreshAll(quiet: true)
   }
 
   func publishIntentCatalog(using store: IntentCatalogStore = .shared) {
