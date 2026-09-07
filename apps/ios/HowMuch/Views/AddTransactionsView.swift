@@ -766,6 +766,12 @@ struct AddTransactionsView: View {
     guard isCurrent(turnScope), session.matchesTurn(generation: expectedGeneration) else {
       return
     }
+    if let error = LedgerQueryPlanner.capabilityError(for: resolution.spec) {
+      session.pendingQuery = nil
+      session.pendingQueryReplyID = nil
+      session.recordFailedTurn(error.localizedDescription)
+      return
+    }
     if !resolution.unresolvedAccount.isEmpty || !resolution.unresolvedCategory.isEmpty {
       session.pendingQuery = resolution
       session.pendingQueryReplyID = session.frozenTurn?.replyMessageID

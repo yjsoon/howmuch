@@ -110,6 +110,22 @@ struct LedgerQueryResult: Equatable, Codable, Identifiable, Sendable {
 }
 
 enum LedgerQueryPlanner {
+  static func capabilityError(for spec: LedgerQuerySpec) -> LedgerQueryError? {
+    if spec.kind == .unsupported {
+      return .message("I can answer recorded spending for a date range, compare a category with the previous period, or find a merchant’s recent payments. I cannot change saved transactions.")
+    }
+    let namedMerchant = spec.merchant.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !namedMerchant.isEmpty {
+      switch spec.kind {
+      case .spending, .today, .spendingThisMonth, .compareCategory:
+        return .message("I can look up a merchant’s recent payments, but I cannot filter spending reports or category comparisons by merchant.")
+      case .findMerchant, .unsupported:
+        break
+      }
+    }
+    return nil
+  }
+
   static func resolve(
     spec: LedgerQuerySpec,
     accounts: [Account],
@@ -122,18 +138,8 @@ enum LedgerQueryPlanner {
     let monthStart = today.startOfMonth(calendar: calendar)
     let formatter = isoFormatter(calendar: calendar)
 
-    if spec.kind == .unsupported {
-      return .failure(.message("I can answer recorded spending for a date range, compare a category with the previous period, or find a merchant’s recent payments. I cannot change saved transactions."))
-    }
-
-    let namedMerchant = spec.merchant.trimmingCharacters(in: .whitespacesAndNewlines)
-    if !namedMerchant.isEmpty {
-      switch spec.kind {
-      case .spending, .today, .spendingThisMonth, .compareCategory:
-        return .failure(.message("I can look up a merchant’s recent payments, but I cannot filter spending reports or category comparisons by merchant."))
-      case .findMerchant, .unsupported:
-        break
-      }
+    if let error = capabilityError(for: spec) {
+      return .failure(error)
     }
 
     let suppliedFrom = parseISO(spec.from, calendar: calendar)
