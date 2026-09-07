@@ -126,6 +126,16 @@ enum LedgerQueryPlanner {
       return .failure(.message("I can answer recorded spending for a date range, compare a category with the previous period, or find a merchant’s recent payments. I cannot change saved transactions."))
     }
 
+    let namedMerchant = spec.merchant.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !namedMerchant.isEmpty {
+      switch spec.kind {
+      case .spending, .today, .spendingThisMonth, .compareCategory:
+        return .failure(.message("I can look up a merchant’s recent payments, but I cannot filter spending reports or category comparisons by merchant."))
+      case .findMerchant, .unsupported:
+        break
+      }
+    }
+
     let suppliedFrom = parseISO(spec.from, calendar: calendar)
     let suppliedTo = parseISO(spec.to, calendar: calendar)
     if !spec.from.isEmpty && suppliedFrom == nil {

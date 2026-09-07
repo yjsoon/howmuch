@@ -649,6 +649,59 @@ final class CaptureWorkspaceTests: XCTestCase {
     XCTAssertFalse(pending?.errorMessage?.isEmpty ?? true, "legacy empty transcript must restore as explicit recovery")
   }
 
+  func testFreshWorkspacePreservesPendingAttachmentWhenBytesFileIsMissing() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("howmuch-capture-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = CaptureWorkspaceStore(
+      defaults: UserDefaults(suiteName: "howmuch.tests.capture.\(UUID().uuidString)")!,
+      rootURL: directory
+    )
+    let workspace = CaptureWorkspace(store: store)
+    let session = workspace.admit(
+      request: CaptureRequest(kind: .blank, connectionFingerprint: "a", origin: .lastUsedOpen),
+      scopeKey: "scope-a",
+      openAccounts: [Self.account("acct-everyday", "Everyday")],
+      lastUsedAccountID: "acct-everyday",
+      focusedRegisterAccountID: nil
+    )
+    let attachmentID = UUID()
+    session.addAttachment(
+      CaptureAttachment(
+        id: attachmentID,
+        filename: "slip.jpg",
+        data: Data([0xFF, 0xD8, 0x44, 0x55]),
+        recognizedText: "",
+        errorMessage: "I could not read text from that image. It is still attached."
+      )
+    )
+    workspace.persistCurrentIfNeeded()
+    guard let file = Self.firstAttachmentFile(in: directory) else {
+      return XCTFail("persisted pending attachment needs a bytes file to delete")
+    }
+    try FileManager.default.removeItem(at: file)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+
+    let fresh = CaptureWorkspace(store: store)
+    fresh.activate(scopeKey: "scope-a")
+    let restored = fresh.resume(session.id)
+    XCTAssertEqual(restored?.attachments.count, 1)
+    XCTAssertEqual(restored?.attachments.first?.id, attachmentID)
+    XCTAssertEqual(restored?.attachments.first?.filename, "slip.jpg")
+    XCTAssertEqual(restored?.attachments.first?.data, Data())
+    XCTAssertEqual(restored?.attachments.first?.isReading, false)
+    XCTAssertEqual(
+      restored?.attachments.first?.errorMessage,
+      "That image is no longer on this device. Remove it and attach it again."
+    )
+    XCTAssertTrue(restored?.sentAttachments.isEmpty == true)
+    restored?.composerText = "Lunch $12"
+    XCTAssertEqual(restored?.canSendComposer, false, "missing bytes must block Send until the attachment is removed")
+    restored?.removeAttachment(attachmentID)
+    XCTAssertTrue(restored?.attachments.isEmpty == true)
+    XCTAssertEqual(restored?.canSendComposer, true)
+  }
+
   private static func removingAttachmentStatusKeys(_ data: Data) throws -> Data {
     guard var records = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
       return data

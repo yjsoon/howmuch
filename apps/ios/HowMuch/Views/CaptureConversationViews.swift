@@ -115,10 +115,15 @@ struct CaptureAssistantReply: View {
       if !drafts.isEmpty {
         previewGroup
       } else if let undo {
-        Button("Undo", action: undo)
-          .font(.subheadline.weight(.semibold))
-          .frame(minHeight: 44)
-          .tint(Theme.accent)
+        Button(action: undo) {
+          Text("Undo")
+            .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .font(.subheadline.weight(.semibold))
+        .tint(Theme.accent)
+        .disabled(isMutatingLocked)
       }
       if !message.updatedDraftIDs.isEmpty {
         ForEach(message.updatedDraftIDs, id: \.self) { id in
@@ -384,6 +389,7 @@ struct CaptureAssistantReply: View {
               .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
+          .disabled(isMutatingLocked)
         }
         Button {
           saveGroup(selected.map(\.id))
@@ -444,6 +450,8 @@ struct CaptureAssistantReply: View {
             onPick(candidate)
           } label: {
             FilterChip(label: candidate.name, showsChevron: false)
+              .frame(minWidth: 44, minHeight: 44)
+              .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
           .disabled(isMutatingLocked)
@@ -472,8 +480,9 @@ struct CaptureAssistantReply: View {
         .tint(Theme.accent)
         .disabled(isMutatingLocked)
         .accessibilityLabel(
-          "Use \(item.draft.payeeName.isEmpty ? "this draft" : item.draft.payeeName) for the last instruction"
+          "\(item.draft.payeeName.isEmpty ? "(No payee)" : item.draft.payeeName) \(amountText(item.draft)) \(dateText(item.draft))"
         )
+        .accessibilityHint("Use this draft for the last instruction")
       }
     }
   }
@@ -535,6 +544,7 @@ struct CaptureComposerDock: View {
   var onStop: () -> Void
   var onImages: ([UIImage]) -> Void
   var onRemove: (UUID) -> Void
+  var onRetry: (UUID) -> Void
   var onOpenInAssistant: (() -> Void)? = nil
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -572,10 +582,22 @@ struct CaptureComposerDock: View {
         }
       }
       VStack(alignment: .leading, spacing: 8) {
-        if !pending.isEmpty {
+        let recovery = pending.filter { $0.errorMessage != nil }
+        let ready = pending.filter { $0.errorMessage == nil }
+        if !recovery.isEmpty {
+          ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 8) {
+              ForEach(recovery) { attachment in
+                pendingRecovery(attachment)
+                  .containerRelativeFrame(.horizontal)
+              }
+            }
+          }
+        }
+        if !ready.isEmpty {
           ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-              ForEach(pending) { attachment in
+              ForEach(ready) { attachment in
                 pendingThumb(attachment)
               }
             }
@@ -632,38 +654,70 @@ struct CaptureComposerDock: View {
     .background(Theme.canvas)
   }
 
-  private func pendingThumb(_ attachment: CaptureAttachment) -> some View {
-    VStack(alignment: .leading, spacing: 4) {
-      ZStack(alignment: .topTrailing) {
-        if let image = UIImage(data: attachment.data), !attachment.data.isEmpty {
-          Image(uiImage: image)
-            .resizable()
-            .scaledToFill()
-            .frame(width: 64, height: 64)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        } else {
-          RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(Theme.surfaceMuted)
-            .frame(width: 64, height: 64)
-        }
-        Button {
-          onRemove(attachment.id)
-        } label: {
-          Image(systemName: "xmark.circle.fill")
-            .foregroundStyle(.white, .black.opacity(0.6))
-            .frame(width: 44, height: 44)
-        }
-        .offset(x: 8, y: -8)
-        .accessibilityLabel("Remove attachment")
-      }
-      .frame(width: 64, height: 64)
+  @ViewBuilder
+  private func pendingRecovery(_ attachment: CaptureAttachment) -> some View {
+    let details = VStack(alignment: .leading, spacing: 4) {
       if let error = attachment.errorMessage {
         Text(error)
           .font(.caption2)
           .foregroundStyle(Theme.outflow)
-          .frame(width: 72, alignment: .leading)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      if !attachment.isReading {
+        Button {
+          onRetry(attachment.id)
+        } label: {
+          Text("Retry")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Theme.accent)
+            .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!canChangeAccount || isIngesting)
+        .accessibilityLabel("Retry reading image")
       }
     }
+    Group {
+      if dynamicTypeSize.isAccessibilitySize {
+        VStack(alignment: .leading, spacing: 8) {
+          pendingThumb(attachment)
+          details
+        }
+      } else {
+        HStack(alignment: .top, spacing: 8) {
+          pendingThumb(attachment)
+          details
+        }
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  private func pendingThumb(_ attachment: CaptureAttachment) -> some View {
+    ZStack(alignment: .topTrailing) {
+      if let image = UIImage(data: attachment.data), !attachment.data.isEmpty {
+        Image(uiImage: image)
+          .resizable()
+          .scaledToFill()
+          .frame(width: 64, height: 64)
+          .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+      } else {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+          .fill(Theme.surfaceMuted)
+          .frame(width: 64, height: 64)
+      }
+      Button {
+        onRemove(attachment.id)
+      } label: {
+        Image(systemName: "xmark.circle.fill")
+          .foregroundStyle(.white, .black.opacity(0.6))
+          .frame(width: 44, height: 44)
+      }
+      .offset(x: 8, y: -8)
+      .accessibilityLabel("Remove attachment")
+    }
+    .frame(width: 64, height: 64)
   }
 }
 

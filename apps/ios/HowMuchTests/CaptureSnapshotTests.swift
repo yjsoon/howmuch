@@ -850,37 +850,111 @@ final class CaptureSnapshotTests: XCTestCase {
   }
 
   func testInterruptedImageOffersRetryReadingAndKeepsRemove() async {
-    let harness = SnapshotHarness.make()
-    let session = harness.admitInterruptedImage()
-    guard let surface = SnapshotSurface(
-      root: AddTransactionsView(session: session, workspace: harness.workspace)
-        .environment(harness.model),
+    let cases: [(suffix: String, size: DynamicTypeSize?)] = [
+      ("", nil),
+      ("-accessibility3", .accessibility3),
+    ]
+    for item in cases {
+      let harness = SnapshotHarness.make()
+      let session = harness.admitInterruptedImage()
+      XCTAssertEqual(session.attachments.count, 1)
+      let attachmentID = session.attachments[0].id
+      let bytes = session.attachments[0].data
+      XCTAssertFalse(bytes.isEmpty)
+      let messageIDs = session.messages.map(\.id)
+      let draftIDs = session.drafts.map(\.id)
+      let ledgerIDs = harness.model.transactions.map(\.id)
+      let root: AnyView
+      if let size = item.size {
+        root = AnyView(
+          AddTransactionsView(session: session, workspace: harness.workspace)
+            .environment(harness.model)
+            .environment(\.dynamicTypeSize, size)
+        )
+      } else {
+        root = AnyView(
+          AddTransactionsView(session: session, workspace: harness.workspace)
+            .environment(harness.model)
+        )
+      }
+      guard let surface = SnapshotSurface(root: root, size: CGSize(width: 390, height: 844)) else {
+        XCTFail("interrupted image\(item.suffix) needs a connected UIWindowScene")
+        continue
+      }
+      defer { surface.detach() }
+      _ = await surface.captureUntilOCR(contains: ["Remove attachment"])
+      attachImage(surface.captureVisible(), name: "capture-interrupted-image-recovery\(item.suffix)")
+      guard let retry = await revealControl(on: surface, label: "Retry reading image") else {
+        XCTFail("Retry reading image missing\(item.suffix) in \(surface.accessibilityLabels())")
+        continue
+      }
+      surface.assertMinimumHitTarget(retry)
+      guard let remove = await revealControl(on: surface, label: "Remove attachment") else {
+        XCTFail("Remove attachment must stay reachable\(item.suffix) in \(surface.accessibilityLabels())")
+        continue
+      }
+      surface.assertMinimumHitTarget(remove)
+      XCTAssertTrue(surface.activate(retry), "Retry reading image must run Vision on the retained bytes\(item.suffix)")
+      let recovered = await surface.waitUntil(timeoutNanoseconds: 5_000_000_000, {
+        session.attachments.first?.recognizedText.isEmpty == false
+          && session.attachments.first?.isReading == false
+          && session.attachments.first?.errorMessage == nil
+      })
+      XCTAssertTrue(recovered, "retry must recover text from the retained SLIP image\(item.suffix)")
+      XCTAssertTrue(session.canSendComposer)
+      XCTAssertEqual(session.attachments.map(\.id), [attachmentID])
+      XCTAssertEqual(session.attachments.first?.data, bytes)
+      XCTAssertEqual(session.attachments.count, 1)
+      XCTAssertTrue(session.sentAttachments.isEmpty, "retry must not create a sent image\(item.suffix)")
+      XCTAssertEqual(session.messages.map(\.id), messageIDs, "retry must not append conversation messages\(item.suffix)")
+      XCTAssertTrue(session.queryCards.isEmpty, "retry must not write a query card\(item.suffix)")
+      XCTAssertEqual(session.drafts.map(\.id), draftIDs, "retry must not create drafts\(item.suffix)")
+      XCTAssertEqual(
+        harness.model.transactions.map(\.id),
+        ledgerIDs,
+        "retry must not write the ledger\(item.suffix)"
+      )
+      surface.layoutNow()
+      attachImage(surface.captureVisible(), name: "capture-interrupted-image-recovered\(item.suffix)")
+    }
+
+    let many = SnapshotHarness.make()
+    let crowded = many.admitInterruptedImages(3)
+    XCTAssertEqual(crowded.attachments.count, 3)
+    guard let crowdedSurface = SnapshotSurface(
+      root: AddTransactionsView(session: crowded, workspace: many.workspace)
+        .environment(many.model)
+        .environment(\.dynamicTypeSize, .accessibility3),
       size: CGSize(width: 390, height: 844)
     ) else {
-      XCTFail("interrupted image needs a connected UIWindowScene")
+      XCTFail("three-error AX3 recovery needs a connected UIWindowScene")
       return
     }
-    defer { surface.detach() }
-    _ = await surface.captureUntilOCR(contains: ["Remove attachment"])
-    attachImage(surface.captureVisible(), name: "capture-interrupted-image-recovery")
-    guard let retry = await revealControl(on: surface, label: "Retry reading image") else {
-      XCTFail("Retry reading image missing in \(surface.accessibilityLabels())")
+    defer { crowdedSurface.detach() }
+    _ = await crowdedSurface.captureUntilOCR(contains: ["Add an expense", "Remove attachment"])
+    attachImage(crowdedSurface.captureVisible(), name: "capture-interrupted-image-recovery-three-accessibility3")
+    guard let firstRetry = await revealControl(on: crowdedSurface, label: "Retry reading image") else {
+      XCTFail("first Retry missing in three-error AX3 \(crowdedSurface.accessibilityLabels())")
       return
     }
-    surface.assertMinimumHitTarget(retry)
-    guard let remove = await revealControl(on: surface, label: "Remove attachment") else {
-      XCTFail("Remove attachment must stay reachable in \(surface.accessibilityLabels())")
+    crowdedSurface.assertMinimumHitTarget(firstRetry)
+    guard let firstRemove = await revealControl(on: crowdedSurface, label: "Remove attachment") else {
+      XCTFail("first Remove missing in three-error AX3 \(crowdedSurface.accessibilityLabels())")
       return
     }
-    surface.assertMinimumHitTarget(remove)
-    XCTAssertTrue(surface.activate(retry), "Retry reading image must run Vision on the retained bytes")
-    let recovered = await surface.waitUntil(timeoutNanoseconds: 5_000_000_000, {
-      session.attachments.first?.recognizedText.isEmpty == false
-        && session.attachments.first?.isReading == false
-        && session.attachments.first?.errorMessage == nil
-    })
-    XCTAssertTrue(recovered, "retry must recover text from the retained SLIP image")
-    XCTAssertTrue(session.canSendComposer)
+    crowdedSurface.assertMinimumHitTarget(firstRemove)
+    XCTAssertNotNil(
+      crowdedSurface.firstControl(labelContains: "Account for next message"),
+      "three-error AX3 must keep the account context visible \(crowdedSurface.accessibilityLabels())"
+    )
+    XCTAssertNotNil(
+      crowdedSurface.firstControl(label: "Send"),
+      "three-error AX3 must keep composer Send visible \(crowdedSurface.accessibilityLabels())"
+    )
+    XCTAssertNotNil(
+      crowdedSurface.firstControl(label: "Add a photo, paste, or enter manually"),
+      "three-error AX3 must keep composer plus visible \(crowdedSurface.accessibilityLabels())"
+    )
   }
 
   func testStopCancelsPendingQueryTransportWithoutLateCard() async {
@@ -937,6 +1011,71 @@ final class CaptureSnapshotTests: XCTestCase {
     try? await Task.sleep(nanoseconds: 2_200_000_000)
     surface.layoutNow()
     XCTAssertTrue(session.queryCards.isEmpty, "cancelled query must not apply a late card")
+  }
+
+  func testManualAndScopeChangeCancelPendingQueryTransportWithoutLateCard() async {
+    SnapshotQueryDelayProtocol.reset()
+    XCTAssertTrue(
+      URLProtocol.registerClass(SnapshotQueryDelayProtocol.self),
+      "query delay stub must register on URLSession.shared"
+    )
+    defer { URLProtocol.unregisterClass(SnapshotQueryDelayProtocol.self) }
+    let cancels: [(String, (SnapshotHarness, SnapshotSurface, CaptureSession) async -> Void)] = [
+      ("manual", { _, surface, _ in
+        guard let enter = await self.revealControl(on: surface, label: "Enter manually") else {
+          XCTFail("Enter manually missing after query start in \(surface.accessibilityLabels())")
+          return
+        }
+        XCTAssertTrue(surface.activate(enter), "Enter manually must be the production control")
+      }),
+      ("scope", { harness, _, _ in
+        harness.workspace.dropForScopeChange()
+      }),
+    ]
+    for (name, cancel) in cancels {
+      SnapshotQueryDelayProtocol.reset()
+      let harness = SnapshotHarness.make(baseURLString: SnapshotQueryDelayProtocol.fixtureBaseURL)
+      let session = harness.admitPendingQueryClarification(includeCategory: false)
+      XCTAssertTrue(session.queryCards.isEmpty)
+      guard let surface = SnapshotSurface(
+        root: AddTransactionsView(session: session, workspace: harness.workspace)
+          .environment(harness.model),
+        size: CGSize(width: 390, height: 844)
+      ) else {
+        XCTFail("\(name) pending query cancel needs a connected UIWindowScene")
+        continue
+      }
+      defer { surface.detach() }
+      _ = await surface.captureUntilOCR(contains: ["Which account"])
+      guard let candidate = await revealControl(on: surface, label: "Everyday") else {
+        XCTFail("\(name) query account candidate missing in \(surface.accessibilityLabels())")
+        continue
+      }
+      XCTAssertTrue(surface.activate(candidate), "\(name) tapping Everyday must start the pending query")
+      let beganTurn = await surface.waitUntil(timeoutNanoseconds: 1_500_000_000, { session.isBusy })
+      XCTAssertTrue(beganTurn, "\(name) pending query pick must begin a turn")
+      let startedReport = await surface.waitUntil(timeoutNanoseconds: 1_500_000_000, {
+        SnapshotQueryDelayProtocol.started.contains { $0.path.contains("spending-breakdown") }
+      })
+      XCTAssertTrue(
+        startedReport,
+        "\(name) delayed query stub must see the spending-breakdown request; started \(SnapshotQueryDelayProtocol.started)"
+      )
+      guard startedReport else {
+        continue
+      }
+      await cancel(harness, surface, session)
+      let stoppedTransport = await surface.waitUntil(timeoutNanoseconds: 1_000_000_000, {
+        SnapshotQueryDelayProtocol.stopped > 0
+      })
+      XCTAssertTrue(
+        stoppedTransport,
+        "\(name) must cancel URLProtocol promptly; stopped \(SnapshotQueryDelayProtocol.stopped) started \(SnapshotQueryDelayProtocol.started)"
+      )
+      try? await Task.sleep(nanoseconds: 2_200_000_000)
+      surface.layoutNow()
+      XCTAssertTrue(session.queryCards.isEmpty, "\(name) cancelled query must not apply a late card")
+    }
   }
 
   private func revealControl(on surface: SnapshotSurface, label: String) async -> SnapshotAXNode? {
@@ -1003,16 +1142,13 @@ final class CaptureSnapshotTests: XCTestCase {
     let ocrText: String
     let isBlank: Bool
     if scanUntilExpectedTogether {
-      let choiceLabels = [
-        "Use Coffee for the last instruction",
-        "Use Lunch for the last instruction",
-      ]
+      let choicePayees = ["Coffee", "Lunch"]
       func frameShowsClarification(_ lines: [String]) -> Bool {
         let blob = lines.map { Self.normalizedOCR($0) }.joined(separator: " ")
         guard expected.allSatisfy({ blob.contains(Self.normalizedOCR($0)) }) else {
           return false
         }
-        return choiceLabels.allSatisfy { surface.hasVisibleTimelineControl(label: $0) }
+        return choicePayees.allSatisfy { surface.hasVisibleMeaningfulChoice(payee: $0) }
       }
       await surface.setMainScrollOffsetY(surface.mainScrollMaxOffset())
       await surface.settleVisible()
@@ -1024,7 +1160,7 @@ final class CaptureSnapshotTests: XCTestCase {
       capturedImage = scanned.image
       ocrText = scanned.lines.map { Self.normalizedOCR($0) }.joined(separator: " ")
       isBlank = scanned.image.cgImage == nil || scanned.image.size.width < 2 || scanned.image.size.height < 2 || scanned.lines.isEmpty
-      let missingChoices = choiceLabels.filter { !surface.hasVisibleTimelineControl(label: $0) }
+      let missingChoices = choicePayees.filter { !surface.hasVisibleMeaningfulChoice(payee: $0) }
       XCTAssertTrue(
         missingChoices.isEmpty,
         "\(name) missing visible clarification choices \(missingChoices) in timeline \(surface.timelineVisibleFrame()) AX \(surface.accessibilityLabels())"
@@ -1492,15 +1628,21 @@ private final class SnapshotHarness {
   }
 
   func admitInterruptedImage() -> CaptureSession {
+    admitInterruptedImages(1)
+  }
+
+  func admitInterruptedImages(_ count: Int) -> CaptureSession {
     let session = admit()
-    session.addAttachment(
-      CaptureAttachment(
-        filename: "slip.jpg",
-        data: Self.validThumbnailJPEG(),
-        recognizedText: "",
-        errorMessage: "I could not read text from that image. It is still attached."
+    for index in 1...count {
+      session.addAttachment(
+        CaptureAttachment(
+          filename: count == 1 ? "slip.jpg" : "slip-\(index).jpg",
+          data: Self.validThumbnailJPEG(),
+          recognizedText: "",
+          errorMessage: "I could not read text from that image. It is still attached."
+        )
       )
-    )
+    }
     return session
   }
 
@@ -1727,6 +1869,22 @@ private final class SnapshotSurface {
       return false
     }
     return timelineVisibleFrame().contains(frame)
+  }
+
+  func hasVisibleMeaningfulChoice(payee: String) -> Bool {
+    controls(labelContains: payee).contains { node in
+      let frame = node.frame
+      guard frame.width > 0, frame.height > 0 else {
+        return false
+      }
+      guard timelineVisibleFrame().contains(frame) else {
+        return false
+      }
+      let label = node.label
+      return label.localizedStandardContains(payee)
+        && !label.localizedStandardContains("last instruction")
+        && (label.contains("$") || label.rangeOfCharacter(from: .decimalDigits) != nil)
+    }
   }
 
   func hostNavigationController() -> UINavigationController? {

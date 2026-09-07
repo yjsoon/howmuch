@@ -296,16 +296,34 @@ struct CaptureWorkspaceStore {
     guard let scope else {
       return []
     }
+    let pendingIDs: Set<UUID>
+    if snapshot.pendingAttachmentIDs == nil, snapshot.messages.allSatisfy(\.attachmentIDs.isEmpty) {
+      pendingIDs = Set(snapshot.attachmentRecords.map(\.id))
+    } else {
+      pendingIDs = Set(snapshot.pendingAttachmentIDs ?? [])
+    }
     return snapshot.attachmentRecords.compactMap { record in
       let url = attachmentURL(sessionID: snapshot.id, attachmentID: record.id, scope: scope)
-      guard let data = try? Data(contentsOf: url) else {
+      if let data = try? Data(contentsOf: url) {
+        return CaptureAttachment(
+          id: record.id,
+          filename: record.filename,
+          data: data,
+          recognizedText: record.recognizedText,
+          isReading: record.isReading ?? false,
+          errorMessage: record.errorMessage
+        )
+      }
+      guard pendingIDs.contains(record.id) else {
         return nil
       }
       return CaptureAttachment(
         id: record.id,
         filename: record.filename,
-        data: data,
-        recognizedText: record.recognizedText
+        data: Data(),
+        recognizedText: record.recognizedText,
+        isReading: false,
+        errorMessage: "That image is no longer on this device. Remove it and attach it again."
       )
     }
   }

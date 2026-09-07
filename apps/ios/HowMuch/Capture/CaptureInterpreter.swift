@@ -86,7 +86,7 @@ enum CaptureInterpreterPrompt {
 
   For update, set targetDraftID to the existing draft id when the user is clearly talking about that row. Leave it empty when a single draft exists or when the change applies to every current draft (applyToAllDrafts true). If two drafts could match and the user did not say which, leave targetDraftID empty and applyToAllDrafts false.
 
-  For query, fill queryKind as spending, today, spendingThisMonth, compareCategory, or findMerchant. Query scope comes from the latest spending question, or from a follow-up that continues a prior spending query. Never copy the selected capture account, a prior add or update instruction, or a current unsaved draft into queryAccount, queryCategory, queryMerchant, or spends. For an unqualified Today question, use all accounts, all categories, and no merchant: leave queryAccount, queryCategory, and queryMerchant empty, and leave spends empty. Preserve any dates the user named. Optional from and to are yyyy-MM-dd. Use today only for this local calendar day. Do not rewrite yesterday or last month as this month.
+  For query, fill queryKind as spending, today, spendingThisMonth, compareCategory, or findMerchant. Named merchant lookup uses findMerchant. Do not put a merchant on spending, today, spendingThisMonth, or compareCategory; those combinations cannot manufacture merchant-filtered totals. Query scope comes from the latest spending question, or from a follow-up that continues a prior spending query. Never copy the selected capture account, a prior add or update instruction, or a current unsaved draft into queryAccount, queryCategory, queryMerchant, or spends. For an unqualified Today question, use all accounts, all categories, and no merchant: leave queryAccount, queryCategory, and queryMerchant empty, and leave spends empty. Preserve any dates the user named. Optional from and to are yyyy-MM-dd. Use today only for this local calendar day. Do not rewrite yesterday or last month as this month.
 
   Feedback is warm, concise conversational British English: one or two short sentences, with contractions. Do not write robotic status fragments or cheerleading. For add and update, call it a draft ready for review and make clear it is not saved yet. Never claim that anything was saved, and never invent actions or results. Questions and clarifications stay natural and truthful.
   """
@@ -413,13 +413,13 @@ struct GenerableCaptureTurn {
   var applyToAllDrafts: Bool
   @Guide(description: "New or changed spends for add or update. Empty for query.")
   var spends: [GenerableCaptureSpend]
-  @Guide(description: "Query kind when kind is query: spending, today, spendingThisMonth, compareCategory, or findMerchant")
+  @Guide(description: "Query kind when kind is query: spending, today, spendingThisMonth, compareCategory, or findMerchant. Use findMerchant for a named merchant lookup.")
   var queryKind: String
   @Guide(description: "Named category from the latest spending question or an explicit spending-query follow-up. Empty unless that question or follow-up named a category. Never from capture drafts or the selected account.")
   var queryCategory: String
   @Guide(description: "Named account from the latest spending question or an explicit spending-query follow-up. Empty unless that question or follow-up named an account. Never the selected capture account.")
   var queryAccount: String
-  @Guide(description: "Named merchant from the latest spending question or an explicit spending-query follow-up. Empty unless that question or follow-up named a merchant.")
+  @Guide(description: "Named merchant for findMerchant lookup from the latest spending question or an explicit spending-query follow-up. Empty unless that question or follow-up named a merchant. Never set this on spending, today, spendingThisMonth, or compareCategory; those cannot manufacture merchant-filtered totals.")
   var queryMerchant: String
   @Guide(description: "Query start date yyyy-MM-dd from the latest spending question or an explicit spending-query follow-up. Empty when none was named.")
   var queryFrom: String

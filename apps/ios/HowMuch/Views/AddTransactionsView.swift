@@ -102,6 +102,7 @@ struct AddTransactionsView: View {
             onStop: stopReply,
             onImages: { beginIngest(images: $0, filenamePrefix: "paste") },
             onRemove: { session.removeAttachment($0) },
+            onRetry: { retryReadingImage($0) },
             onOpenInAssistant: embeddedInAssistant
               ? nil
               : {
@@ -240,6 +241,7 @@ struct AddTransactionsView: View {
         isComposerFocused = false
         claimComposerFocus = false
         if session.isBusy {
+          workspace.cancelOwnedConversationWork()
           session.stopActiveReply()
         }
       }
@@ -441,10 +443,10 @@ struct AddTransactionsView: View {
           model.openAccounts.contains { $0.id == draft.accountID && !$0.deleted }
         },
         resolveQueryAccount: { candidate in
-          Task { await resolvePendingQuery(account: candidate) }
+          resolvePendingQuery(account: candidate)
         },
         resolveQueryCategory: { candidate in
-          Task { await resolvePendingQuery(category: candidate) }
+          resolvePendingQuery(category: candidate)
         },
         saveError: groupSaveErrors[message.id],
         canSave: session.canSaveGroup(ids: saveIDs) && !accountClosed,
@@ -794,7 +796,7 @@ struct AddTransactionsView: View {
     }
   }
 
-  private func resolvePendingQuery(account: SlipCandidate? = nil, category: SlipCandidate? = nil) async {
+  private func resolvePendingQuery(account: SlipCandidate? = nil, category: SlipCandidate? = nil) {
     guard !session.isBusy, isCurrent(capturedTurnScope()), let pending = session.pendingQuery else {
       return
     }
@@ -811,10 +813,20 @@ struct AddTransactionsView: View {
     }
     session.pendingQuery = nil
     session.pendingQueryReplyID = nil
-    await fulfilResolution(resolved, turnScope: turnScope, client: client, expectedGeneration: token.generation)
-    _ = session.finishTurn(generation: token.generation)
-    if isCurrent(turnScope) {
-      workspace.persistCurrentIfNeeded()
+    workspace.runConversationTurn {
+      defer {
+        _ = self.session.finishTurn(generation: token.generation)
+        if self.isCurrent(turnScope) {
+          self.workspace.persistCurrentIfNeeded()
+        }
+      }
+      guard !Task.isCancelled else {
+        return
+      }
+      guard self.isCurrent(turnScope), self.session.matchesTurn(generation: token.generation) else {
+        return
+      }
+      await self.fulfilResolution(resolved, turnScope: turnScope, client: client, expectedGeneration: token.generation)
     }
   }
 
@@ -1285,18 +1297,58 @@ struct AddTransactionsView: View {
     }
     attachment.data = data
     attachment.isReading = true
+    attachment.errorMessage = nil
     session.updateAttachment(attachment)
     let text = await SlipImageText.recognize(data)
-    guard isCurrent(turnScope) else {
-      if session.id == turnScope.sessionID {
-        attachment.isReading = false
-        session.updateAttachment(attachment)
-      }
+    applyOCRCompletion(text, attachmentID: attachment.id, turnScope: turnScope)
+  }
+
+  private func retryReadingImage(_ id: UUID) {
+    let turnScope = capturedTurnScope()
+    guard isCurrent(turnScope), !session.isBusy, !session.isSaving, !session.isIngesting else {
       return
     }
-    attachment.recognizedText = text
+    guard var attachment = session.attachments.first(where: { $0.id == id }) else {
+      return
+    }
+    if attachment.data.isEmpty || UIImage(data: attachment.data) == nil {
+      attachment.isReading = false
+      attachment.errorMessage = attachment.data.isEmpty
+        ? "I could not keep that image on this device."
+        : "I could not read text from that image. It is still attached."
+      session.updateAttachment(attachment)
+      workspace.persistCurrentIfNeeded()
+      return
+    }
+    attachment.isReading = true
+    attachment.errorMessage = nil
+    session.updateAttachment(attachment)
+    workspace.persistCurrentIfNeeded()
+    let bytes = attachment.data
+    Task { @MainActor in
+      let text = await SlipImageText.recognize(bytes)
+      self.applyOCRCompletion(text, attachmentID: id, turnScope: turnScope)
+    }
+  }
+
+  private func applyOCRCompletion(_ text: String, attachmentID: UUID, turnScope: CaptureTurnScope) {
+    guard session.id == turnScope.sessionID else {
+      return
+    }
+    guard var attachment = session.attachments.first(where: { $0.id == attachmentID }) else {
+      return
+    }
     attachment.isReading = false
-    if text.isEmpty {
+    if isCurrent(turnScope) {
+      attachment.recognizedText = text
+      attachment.errorMessage = text.isEmpty
+        ? "I could not read text from that image. It is still attached."
+        : nil
+      session.updateAttachment(attachment)
+      workspace.persistCurrentIfNeeded()
+      return
+    }
+    if attachment.errorMessage?.isEmpty != false {
       attachment.errorMessage = "I could not read text from that image. It is still attached."
     }
     session.updateAttachment(attachment)

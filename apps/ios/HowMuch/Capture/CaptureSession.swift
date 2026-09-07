@@ -352,7 +352,10 @@ final class CaptureSession: Identifiable {
 
   var canSendComposer: Bool {
     let hasText = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    return (hasText || !attachments.isEmpty) && !isBusy && !isIngesting && !isSaving
+    let hasUnresolvedOCR = attachments.contains { attachment in
+      attachment.isReading || !(attachment.errorMessage?.isEmpty ?? true)
+    }
+    return (hasText || !attachments.isEmpty) && !isBusy && !isIngesting && !isSaving && !hasUnresolvedOCR
   }
 
   var canSaveIncluded: Bool {
@@ -1104,7 +1107,9 @@ final class CaptureSession: Identifiable {
         CaptureAttachmentRecord(
           id: $0.id,
           filename: $0.filename,
-          recognizedText: $0.recognizedText
+          recognizedText: $0.recognizedText,
+          isReading: $0.isReading,
+          errorMessage: $0.errorMessage
         )
       },
       pendingAttachmentIDs: attachments.map(\.id) as [UUID]?,
@@ -1140,11 +1145,15 @@ final class CaptureSession: Identifiable {
     session.messages = snapshot.messages
     let pendingIDs = Set(snapshot.pendingAttachmentIDs ?? [])
     if snapshot.pendingAttachmentIDs == nil, snapshot.messages.allSatisfy(\.attachmentIDs.isEmpty) {
-      session.attachments = attachments
+      session.attachments = attachments.map { normalizedRestoredAttachment($0, isPending: true) }
       session.sentAttachments = []
     } else {
-      session.attachments = attachments.filter { pendingIDs.contains($0.id) }
-      session.sentAttachments = attachments.filter { !pendingIDs.contains($0.id) }
+      session.attachments = attachments
+        .filter { pendingIDs.contains($0.id) }
+        .map { normalizedRestoredAttachment($0, isPending: true) }
+      session.sentAttachments = attachments
+        .filter { !pendingIDs.contains($0.id) }
+        .map { normalizedRestoredAttachment($0, isPending: false) }
     }
     session.lastFeedback = snapshot.lastFeedback
     session.claimedInboxIDs = snapshot.claimedInboxIDs
@@ -1161,6 +1170,25 @@ final class CaptureSession: Identifiable {
     session.hydrateOwnershipIfNeeded()
     session.interruptGeneratingReplies()
     return session
+  }
+
+  private static func normalizedRestoredAttachment(
+    _ attachment: CaptureAttachment,
+    isPending: Bool
+  ) -> CaptureAttachment {
+    var next = attachment
+    let wasReading = next.isReading
+    next.isReading = false
+    guard isPending else {
+      return next
+    }
+    if let error = next.errorMessage, !error.isEmpty {
+      return next
+    }
+    if wasReading || next.recognizedText.isEmpty {
+      next.errorMessage = "I could not read text from that image. It is still attached."
+    }
+    return next
   }
 
   private func applyAdditions(
@@ -1306,6 +1334,8 @@ struct CaptureAttachmentRecord: Equatable, Codable, Sendable {
   var id: UUID
   var filename: String
   var recognizedText: String
+  var isReading: Bool? = nil
+  var errorMessage: String? = nil
 }
 
 struct CaptureSessionSnapshot: Equatable, Codable, Sendable {
