@@ -96,7 +96,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive web through `.curs
 
 - [ ] `apps/api/src/rewards/write.test.ts` covers create, patch, soft-delete, unknown account, and missing account id. Run `bun test apps/api/src/rewards/write.test.ts`.
 - [ ] `apps/api/tests/api.test.ts` covers the HTTP routes. Run `bun test apps/api/tests/api.test.ts`.
-- [ ] Existing import tests still pass. Run `bun test apps/api/src/importers/rewards-tracker.test.ts apps/api/src/rewards/build.test.ts`.
+- [ ] Existing import and calculator tests still pass. Run `bun test apps/api/src/importers/rewards-tracker.test.ts apps/api/src/rewards/build.test.ts apps/api/src/rewards/engine/simple-calculator.test.ts`.
 
 **Verify, live.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked. Ten lanes on `grok-4.6-fast-xhigh` at the PR head, per the boot recipe.
 
@@ -149,9 +149,10 @@ Each live lane runs on its own cloud VM at the PR head. Drive web through `.curs
 
 - [ ] Add `api.createRewardCard`, `api.updateRewardCard`, `api.deleteRewardCard`, and `api.updateRewardSettings` in `apps/web/src/api/client.ts`.
 - [ ] Put **Add card** on the Rewards empty state and on the filled board in `Rewards.tsx`.
-- [ ] Build the editor in `RewardCardEdit.tsx` using HowMuch field styles from `ScheduledTransactions.tsx`. Cover name, issuer, cashback or miles, HowMuch account, featured, billing cycle, reward period, promotional period, earning rate, block size, minimum spend, maximum spend, flag subcategories, and spending tiers.
-- [ ] Route `/rewards/:cardId` in `apps/web/src/main.tsx`. A tile click opens the editor. Delete uses the existing confirm pattern.
-- [ ] Keep Settings then Rewards import. Add miles valuation on Rewards or Settings.
+- [ ] Build the editor in `RewardCardEdit.tsx` using HowMuch field styles from `ScheduledTransactions.tsx` and `ApiTokens.tsx`. Cover name, issuer, cashback or miles, HowMuch account, featured, billing cycle, reward period, promotional period, earning rate, block size, minimum spend, maximum spend, flag subcategories including unflagged, spending tiers, and import of HowMuch categories onto those flags.
+- [ ] Route `/rewards/:cardId` in `apps/web/src/main.tsx`. A tile click opens the editor. The editor lists that card's ledger rows with a flag picker that PATCHes the existing transaction. Delete uses the existing confirm pattern.
+- [ ] Hide capped cards on the Rewards board when maximum spend is exceeded. Keep them visible on the editor.
+- [ ] Keep Settings then Rewards import. Add miles valuation on Rewards or Settings. Do not add a `TagMapping` editor. The calculator keys on `flagColor`.
 - [ ] Write the verify recipe `rewards-card-edit.md` and point `rewards.md` at Add card.
 
 **You see.**
@@ -160,6 +161,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive web through `.curs
 - [ ] Saving a new card mapped to Travel Card shows a tile on `/rewards` with All selected.
 - [ ] Editing a rate and saving updates the tile without a file upload.
 - [ ] Deleting the last card returns the empty state.
+- [ ] A capped card drops off the board and remains on its editor URL.
 - [ ] Import still creates Travel Card from `fixtures/rewards-tracker-export.json`.
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
@@ -219,9 +221,10 @@ Each live lane runs on its own cloud VM at the PR head. Drive web through `.curs
 **Build.**
 
 - [ ] Add create, update, and delete methods on `APIClient` next to `importRewardsTracker`.
-- [ ] Mirror `NewAccountSheet` and `EditAccountSheet` in `RewardCardEditorView`. Cover the same fields as the web editor.
-- [ ] Put **Add card** on the Rewards empty state. Tile tap opens the editor. Keep **Rewards import**.
-- [ ] Decode write errors into the existing phase error label.
+- [ ] Mirror `NewAccountSheet`, `EditAccountSheet`, and `ScheduledTransactionEditorView` in `RewardCardEditorView`. Cover the same fields as the web editor, including unflagged and category-to-flag import.
+- [ ] Put **Add card** on the Rewards empty state. Tile tap opens the editor. The editor lists that card's ledger rows with a flag picker. Keep **Rewards import**.
+- [ ] Hide capped cards on the tab board. Keep them on the editor.
+- [ ] Decode write errors into the existing phase error label. Do not add a `TagMapping` editor.
 - [ ] Add native tests in `RewardCardEditorTests.swift`. Run them with `scripts/ios-xcodebuild.sh test`.
 - [ ] Write `ios-rewards-card-edit.md` and point `ios-rewards.md` at Add card.
 
@@ -231,6 +234,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive web through `.curs
 - [ ] Saving a card mapped to Travel Card shows a tile on All Time after refresh.
 - [ ] Editing flags updates the tile.
 - [ ] Deleting the last card returns the empty state.
+- [ ] A capped card drops off the tab board and remains in the editor.
 - [ ] Import still lists Travel Card under Stored cards.
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
@@ -284,9 +288,9 @@ No throwaway prototype ran. HowMuch already has the `CreditCard` type, `SimpleRe
 
 Wrap `rewards.soon.sg` or the Expo app inside HowMuch. It would ship a second visual language and keep a YNAB PAT. HowMuch is the ledger. Cards map to HowMuch accounts.
 
-Port the legacy `RewardRule` engine in `packages/app-core/src/rewards-engine/calculator.ts`. Live Rewards Tracker sends `/rules` and `/card-rules` to the dashboard. The live editor is `CardSettingsEditor`. HowMuch already vendors `SimpleRewardsCalculator`.
+Port the legacy `RewardRule` engine in `packages/app-core/src/rewards-engine/calculator.ts`. Live Rewards Tracker sends `/rules` and `/card-rules` to the dashboard. The live editor is `CardSettingsEditor`. HowMuch already vendors `SimpleRewardsCalculator`. Snapshot `rules` and `tagMappings` do not score. Flag colour on `CardSubcategory` does.
 
-Bring Cloud Sync, the statement formatter, the Agent API page, or recommendations. Recommendations stay off in `featureFlags.ts`. Formatter is a different product. Cloud Sync and PAT are what HowMuch import already strips. Plan D1 is the sync.
+Bring Cloud Sync, the statement formatter, the Agent API page, recommendations, or theme groups. Recommendations stay off in `featureFlags.ts`. Formatter is a different product. Cloud Sync and PAT are what HowMuch import already strips. Plan D1 is the sync. HowMuch already groups tiles by cashback and miles.
 
 New SQL tables for rules and tag mappings. The snapshot JSON and `rewards_tracker_cards.payload_json` already store the live shape. Laziness keeps those tables.
 
@@ -298,14 +302,16 @@ HowMuch trunk does not vendor `pstack/`. Owners read the plugin copy of autopilo
 
 Linux cloud VMs often lack Simulator. `rewards-ios-manage` live lanes then cannot drive the tab. The owner records the skip, still runs `scripts/ios-xcodebuild.sh test` when Xcode exists, and does not mark Simulator lanes PASS from web. Watch this in `rewards-ios-manage`.
 
-Import remains a full replace. A later export that omits a HowMuch-created card will soft-delete it. The editor copy must say that. Watch this in `rewards-web-manage` and `rewards-ios-manage`.
+Import remains a full replace. A later export that omits a HowMuch-created card will soft-delete it. An empty `cards` array soft-deletes every card on the plan. The editor copy must say that. Watch this in `rewards-web-manage` and `rewards-ios-manage`.
+
+Subcategories enabled with no matching flag earn 0, including unflagged. Watch this in both editor PRs.
 
 `cursor-team-kit` `control-ui` is not in this repo. Lanes use `verify-howmuch`. Watch this in the boot recipe.
 
 ## Appendix D. Links and reading list
 
-Read `yjsoon/ynab-rewards-tracker` `CLAUDE.md`, `apps/web/components/CardSettingsEditor.tsx`, `apps/web/app/cards/[id]/CardSettings.tsx`, and `packages/app-core/src/rewards-engine/simple-calculator.ts` before editing.
+Read `yjsoon/ynab-rewards-tracker` `CLAUDE.md`, `apps/web/components/CardSettingsEditor.tsx`, `apps/web/components/CardSubcategoriesEditor.tsx`, `apps/web/components/CategoryImportComposer.tsx`, `apps/web/app/cards/[id]/CardSettings.tsx`, and `packages/app-core/src/rewards-engine/simple-calculator.ts` before editing.
 
-Read HowMuch `apps/api/src/rewards/types.ts`, `apps/api/src/rewards/engine/simple-calculator.ts`, `apps/api/src/importers/rewards-tracker.ts`, `apps/api/src/http.ts`, `apps/web/src/pages/Rewards.tsx`, `apps/web/src/pages/ScheduledTransactions.tsx`, `apps/ios/HowMuch/Views/NewAccountSheet.swift`, `apps/ios/HowMuch/Views/EditAccountSheet.swift`, `docs/api-contract.md`, and `.cursor/skills/verify-howmuch/SKILL.md`.
+Read HowMuch `apps/api/src/rewards/types.ts`, `apps/api/src/rewards/engine/simple-calculator.ts`, `apps/api/src/importers/rewards-tracker.ts`, `apps/api/src/http.ts`, `apps/web/src/pages/Rewards.tsx`, `apps/web/src/pages/ScheduledTransactions.tsx`, `apps/web/src/pages/ApiTokens.tsx`, `apps/ios/HowMuch/Views/NewAccountSheet.swift`, `apps/ios/HowMuch/Views/EditAccountSheet.swift`, `apps/ios/HowMuch/Views/ScheduledTransactionEditorView.swift`, `docs/api-contract.md`, and `.cursor/skills/verify-howmuch/SKILL.md`.
 
 `rewards-card-api` runs `pstack/skills/how/SKILL.md` Explain on the write path before coding. `rewards-web-manage` and `rewards-ios-manage` run `pstack/skills/interrogate/SKILL.md` on the editor before review. Each owner keeps a `decisions.tsv` trail per `pstack/skills/show-me-your-work/SKILL.md`.
