@@ -35,7 +35,7 @@ Tests alone are not sufficient verification. A PR is verified only when its unit
   - [ ] `rewards-card-api` is first. It branches from `main`.
   - [ ] `rewards-web-manage` after `rewards-card-api`.
   - [ ] `rewards-ios-manage` after `rewards-card-api`. It may stack on `rewards-web-manage` so the chain stays linear.
-- [ ] Hold the file boundaries. `rewards-card-api` touches only `apps/api/**` and `docs/api-contract.md`. `rewards-web-manage` touches only `apps/web/**`, `docs/frontend/brief.md`, and `.cursor/skills/verify-howmuch/features/**`. `rewards-ios-manage` touches only `apps/ios/**` and `.cursor/skills/verify-howmuch/features/ios-*.md`.
+- [ ] Hold the file boundaries. `rewards-card-api` touches only `apps/api/**` and `docs/api-contract.md`. `rewards-web-manage` touches only `apps/web/**`, `docs/frontend/brief.md`, and `.cursor/skills/verify-howmuch/features/**`. `rewards-ios-manage` touches only `apps/ios/**`, `.cursor/skills/verify-howmuch/features/ios-*.md`, and `.cursor/skills/verify-howmuch/features/README.md`.
 - [ ] Hold the review gate. `rewards-web-manage` and `rewards-ios-manage` change an interaction. They wait for the operator's review in chat with screenshots and a video before merge.
 
 ### PR mechanics, for every PR
@@ -44,7 +44,7 @@ Tests alone are not sufficient verification. A PR is verified only when its unit
 - [ ] Open the PR ready, never draft, with `origin pr create --status open --base <base-branch>` or `gh pr create --base <base-branch>` according to the resolved forge. A stack child targets its parent branch.
 - [ ] Run the repo's lint and typecheck once before the PR-facing push. Push with hooks on.
 - [ ] Run `/deslop` before each commit and `/no-comments` before review.
-- [ ] Triage every Bugbot and security-reviewer comment per `../references/bugbot-triage.md`.
+- [ ] Triage every Bugbot and security-reviewer comment on its merits. HowMuch has no `bugbot-triage.md`.
 - [ ] Rebase onto current trunk before babysit and again before the merge-ready report.
 
 ### Verdict and merge, for every PR
@@ -79,22 +79,23 @@ Each live lane runs on its own cloud VM at the PR head. Drive web through `.curs
 **Build.**
 
 - [ ] Add `upsertRewardsTrackerCard` and `deleteRewardsTrackerCard` on `LedgerRepository` in `apps/api/src/repository.ts`.
-- [ ] Parse and validate one `CreditCard` in `parseCreditCard` and `apps/api/src/rewards/write.ts`. Require `ynabAccountId` to be a live plan account.
-- [ ] Handle `POST`, `PATCH`, and `DELETE` on `/api/rewards/cards` in `apps/api/src/http.ts`. Keep `GET` and `POST` on `/api/import/rewards-tracker`.
-- [ ] Persist miles valuation on the snapshot `settings` object through `PATCH /api/rewards/settings`.
+- [ ] Parse and validate one `CreditCard` in `parseCreditCard` and `apps/api/src/rewards/write.ts`. Require `ynabAccountId` to be a live plan account via a non-mutating lookup. Do not call `ensureAccount`.
+- [ ] Handle `POST`, `PATCH`, and `DELETE` on `/api/rewards/cards` in `apps/api/src/http.ts`. Keep `GET` and `POST` on `/api/import/rewards-tracker`. Re-run `authorizePlan` on `body.plan_id` like import.
+- [ ] Persist miles valuation on plan display settings, same merge path as `flag_names`. A later import must not clobber a native valuation unless the export sets one. PATCH `/api/rewards/settings` allowlists `milesValuation` and runs `sanitizeSettings` before persist.
+- [ ] Strip secret keys on card write. Reject `cachedData`, `pat`, and Cloud Sync fields. Viewers may GET the snapshot.
 - [ ] Document the new routes in `docs/api-contract.md`.
 
 **You see.**
 
 - [ ] `POST /api/rewards/cards` with a Travel Card body returns 201 and `GET /api/import/rewards-tracker` lists that card.
 - [ ] `GET /api/reports/rewards` scores the new card against HowMuch transactions.
-- [ ] `DELETE /api/rewards/cards` sets `deleted = 1`. The report omits the card.
+- [ ] `DELETE /api/rewards/cards` sets `deleted = 1`. The report omits the card. `GET /api/import/rewards-tracker` omits it too.
 - [ ] A card whose `ynabAccountId` is missing or unknown returns 422.
 - [ ] Import still upserts by `(plan_id, id)` and still strips secrets.
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] `apps/api/src/rewards/write.test.ts` covers create, patch, soft-delete, unknown account, and missing account id. Run `bun test apps/api/src/rewards/write.test.ts`.
+- [ ] `apps/api/src/rewards/write.test.ts` covers create, patch, soft-delete, unknown account, missing account id, and secret stripping. Run `bun test apps/api/src/rewards/write.test.ts`.
 - [ ] `apps/api/tests/api.test.ts` covers the HTTP routes. Run `bun test apps/api/tests/api.test.ts`.
 - [ ] Existing import and calculator tests still pass. Run `bun test apps/api/src/importers/rewards-tracker.test.ts apps/api/src/rewards/build.test.ts apps/api/src/rewards/engine/simple-calculator.test.ts`.
 
@@ -104,7 +105,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive web through `.curs
 - [ ] Lane 2. Create a cashback card mapped to `acct-credit`. Save `card-api-cashback.png`. Pass when the snapshot lists the card and Rewards shows a Cashback tile.
 - [ ] Lane 3. Create a miles card with Dining red and Online blue subcategories. Save `card-api-miles-flags.png`. Pass when the Travel Card tile lists both flags.
 - [ ] Lane 4. PATCH `earningRate` on the miles card. Save `card-api-patch-rate.png`. Pass when a second report GET shows a changed Value figure.
-- [ ] Lane 5. DELETE the cashback card. Save `card-api-delete.png`. Pass when Rewards omits that tile and the snapshot marks `deleted`.
+- [ ] Lane 5. DELETE the cashback card. Save `card-api-delete.png`. Pass when Rewards omits that tile and `GET /api/import/rewards-tracker` no longer lists the card.
 - [ ] Lane 6. POST a card with an unknown `ynabAccountId`. Save `card-api-unknown-account.png`. Pass when the response is 422 and no row is inserted.
 - [ ] Lane 7. POST a card with no `ynabAccountId`. Save `card-api-missing-account.png`. Pass when the response is 422.
 - [ ] Lane 8. Import `fixtures/rewards-tracker-export.json` after a manual card that the file omits. Save `card-api-reimport.png`. Pass when Travel Card is present and the omitted manual card is gone.
@@ -140,6 +141,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive web through `.curs
 - [ ] Edit `apps/web/src/api/types.ts`.
 - [ ] Edit `apps/web/src/app.css`.
 - [ ] Edit `apps/web/src/pages/Settings.tsx`.
+- [ ] Edit `apps/web/src/pages/RewardsImport.tsx`.
 - [ ] Edit `docs/frontend/brief.md`.
 - [ ] Create `.cursor/skills/verify-howmuch/features/rewards-card-edit.md`.
 - [ ] Edit `.cursor/skills/verify-howmuch/features/rewards.md`.
@@ -152,7 +154,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive web through `.curs
 - [ ] Build the editor in `RewardCardEdit.tsx` using HowMuch field styles from `ScheduledTransactions.tsx` and `ApiTokens.tsx`. Cover name, issuer, cashback or miles, HowMuch account, featured, billing cycle, reward period, promotional period, earning rate, block size, minimum spend, maximum spend, flag subcategories including unflagged, spending tiers, and import of HowMuch categories onto those flags.
 - [ ] Route `/rewards/:cardId` in `apps/web/src/main.tsx`. A tile click opens the editor. The editor lists that card's ledger rows with a flag picker that PATCHes the existing transaction. Delete uses the existing confirm pattern.
 - [ ] Hide capped cards on the Rewards board when maximum spend is exceeded. Keep them visible on the editor.
-- [ ] Keep Settings then Rewards import. Add miles valuation on Rewards or Settings. Do not add a `TagMapping` editor. The calculator keys on `flagColor`.
+- [ ] Keep Settings then Rewards import. Warn on the import page that a file replace soft-deletes omitted HowMuch cards and can change miles valuation. Add miles valuation on Rewards or Settings. Do not add a `TagMapping` editor. The calculator keys on `flagColor`.
 - [ ] Write the verify recipe `rewards-card-edit.md` and point `rewards.md` at Add card.
 
 **You see.**
@@ -222,7 +224,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive web through `.curs
 
 - [ ] Add create, update, and delete methods on `APIClient` next to `importRewardsTracker`.
 - [ ] Mirror `NewAccountSheet`, `EditAccountSheet`, and `ScheduledTransactionEditorView` in `RewardCardEditorView`. Cover the same fields as the web editor, including unflagged and category-to-flag import.
-- [ ] Put **Add card** on the Rewards empty state. Tile tap opens the editor. The editor lists that card's ledger rows with a flag picker. Keep **Rewards import**.
+- [ ] Put **Add card** on the Rewards empty state. Tile tap opens the editor. The editor lists that card's ledger rows with a flag picker. Keep **Rewards import**. Warn on that import screen that a file replace soft-deletes omitted HowMuch cards.
 - [ ] Hide capped cards on the tab board. Keep them on the editor.
 - [ ] Decode write errors into the existing phase error label. Do not add a `TagMapping` editor.
 - [ ] Add native tests in `RewardCardEditorTests.swift`. Run them with `scripts/ios-xcodebuild.sh test`.
