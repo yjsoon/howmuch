@@ -480,6 +480,189 @@ final class CaptureWorkspaceTests: XCTestCase {
     XCTAssertEqual(Set(both.map(\.data)), Set([Data([0x0A, 0x0B, 0x0C]), Data([0x11, 0x22, 0x33])]))
   }
 
+  func testFreshWorkspaceRoundtripRestoresPendingOCRAsRecoverableError() {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("howmuch-capture-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = CaptureWorkspaceStore(
+      defaults: UserDefaults(suiteName: "howmuch.tests.capture.\(UUID().uuidString)")!,
+      rootURL: directory
+    )
+    let workspace = CaptureWorkspace(store: store)
+    let session = workspace.admit(
+      request: CaptureRequest(kind: .blank, connectionFingerprint: "a", origin: .lastUsedOpen),
+      scopeKey: "scope-a",
+      openAccounts: [Self.account("acct-everyday", "Everyday")],
+      lastUsedAccountID: "acct-everyday",
+      focusedRegisterAccountID: nil
+    )
+    let attachmentID = UUID()
+    let bytes = Data([0xFF, 0xD8, 0xAA, 0xBB, 0xCC, 0xDD])
+    session.addAttachment(
+      CaptureAttachment(
+        id: attachmentID,
+        filename: "slip.jpg",
+        data: bytes,
+        recognizedText: "",
+        isReading: true
+      )
+    )
+    XCTAssertTrue(session.attachments[0].isReading)
+    XCTAssertFalse(session.canSendComposer)
+    workspace.persistCurrentIfNeeded()
+
+    let fresh = CaptureWorkspace(store: store)
+    fresh.activate(scopeKey: "scope-a")
+    let restored = fresh.resume(session.id)
+    XCTAssertEqual(restored?.attachments.first?.id, attachmentID)
+    XCTAssertEqual(restored?.attachments.first?.data, bytes)
+    XCTAssertEqual(restored?.attachments.first?.filename, "slip.jpg")
+    XCTAssertEqual(restored?.attachments.first?.recognizedText, "")
+    XCTAssertEqual(restored?.attachments.count, 1)
+    XCTAssertNotNil(restored)
+    XCTAssertEqual(restored?.attachments.first?.isReading, false)
+    XCTAssertFalse(restored?.attachments.first?.errorMessage?.isEmpty ?? true, "pending empty transcript needs an explicit recoverable error")
+    restored?.composerText = "Lunch $12"
+    XCTAssertEqual(restored?.canSendComposer, false, "Send must stay blocked for pending recovery, including typed text")
+  }
+
+  func testFreshWorkspaceRoundtripKeepsRecognizedImageReadyToSend() {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("howmuch-capture-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = CaptureWorkspaceStore(
+      defaults: UserDefaults(suiteName: "howmuch.tests.capture.\(UUID().uuidString)")!,
+      rootURL: directory
+    )
+    let workspace = CaptureWorkspace(store: store)
+    let session = workspace.admit(
+      request: CaptureRequest(kind: .blank, connectionFingerprint: "a", origin: .lastUsedOpen),
+      scopeKey: "scope-a",
+      openAccounts: [Self.account("acct-everyday", "Everyday")],
+      lastUsedAccountID: "acct-everyday",
+      focusedRegisterAccountID: nil
+    )
+    let attachmentID = UUID()
+    let bytes = Data([0xFF, 0xD8, 0x11, 0x22])
+    session.addAttachment(
+      CaptureAttachment(
+        id: attachmentID,
+        filename: "slip.jpg",
+        data: bytes,
+        recognizedText: "SLIP"
+      )
+    )
+    workspace.persistCurrentIfNeeded()
+    let fresh = CaptureWorkspace(store: store)
+    fresh.activate(scopeKey: "scope-a")
+    let restored = fresh.resume(session.id)
+    XCTAssertEqual(restored?.attachments.first?.id, attachmentID)
+    XCTAssertEqual(restored?.attachments.first?.recognizedText, "SLIP")
+    XCTAssertEqual(restored?.attachments.first?.isReading, false)
+    XCTAssertNil(restored?.attachments.first?.errorMessage)
+    XCTAssertEqual(restored?.canSendComposer, true)
+  }
+
+  func testPersistedAttachmentErrorSurvivesFreshWorkspaceLoad() {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("howmuch-capture-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = CaptureWorkspaceStore(
+      defaults: UserDefaults(suiteName: "howmuch.tests.capture.\(UUID().uuidString)")!,
+      rootURL: directory
+    )
+    let workspace = CaptureWorkspace(store: store)
+    let session = workspace.admit(
+      request: CaptureRequest(kind: .blank, connectionFingerprint: "a", origin: .lastUsedOpen),
+      scopeKey: "scope-a",
+      openAccounts: [Self.account("acct-everyday", "Everyday")],
+      lastUsedAccountID: "acct-everyday",
+      focusedRegisterAccountID: nil
+    )
+    session.addAttachment(
+      CaptureAttachment(
+        filename: "slip.jpg",
+        data: Data([0xFF, 0xD8, 0x33]),
+        recognizedText: "",
+        errorMessage: "I could not read text from that image. It is still attached."
+      )
+    )
+    workspace.persistCurrentIfNeeded()
+    let fresh = CaptureWorkspace(store: store)
+    fresh.activate(scopeKey: "scope-a")
+    let restored = fresh.resume(session.id)
+    XCTAssertEqual(
+      restored?.attachments.first?.errorMessage,
+      "I could not read text from that image. It is still attached."
+    )
+    XCTAssertEqual(restored?.attachments.first?.isReading, false)
+    XCTAssertEqual(restored?.canSendComposer, false)
+  }
+
+  func testLegacyAttachmentJSONWithoutReadingOrErrorFieldsStaysCompatible() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("howmuch-capture-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = CaptureWorkspaceStore(
+      defaults: UserDefaults(suiteName: "howmuch.tests.capture.\(UUID().uuidString)")!,
+      rootURL: directory
+    )
+    let workspace = CaptureWorkspace(store: store)
+    let session = workspace.admit(
+      request: CaptureRequest(kind: .blank, connectionFingerprint: "a", origin: .lastUsedOpen),
+      scopeKey: "scope-a",
+      openAccounts: [Self.account("acct-everyday", "Everyday")],
+      lastUsedAccountID: "acct-everyday",
+      focusedRegisterAccountID: nil
+    )
+    let pendingID = UUID()
+    let readyID = UUID()
+    session.addAttachment(
+      CaptureAttachment(id: pendingID, filename: "pending.jpg", data: Data([0x01, 0x02]), recognizedText: "")
+    )
+    session.addAttachment(
+      CaptureAttachment(id: readyID, filename: "ready.jpg", data: Data([0x03, 0x04]), recognizedText: "SLIP")
+    )
+    workspace.persistCurrentIfNeeded()
+    let original = store.load(scope: "scope-a")
+    XCTAssertEqual(original.count, 1)
+    let encodedRecords = try JSONEncoder().encode(original[0].attachmentRecords)
+    let stripped = try Self.removingAttachmentStatusKeys(encodedRecords)
+    let records = try JSONDecoder().decode([CaptureAttachmentRecord].self, from: stripped)
+    XCTAssertEqual(records.count, 2)
+    var decoded = original[0]
+    decoded.attachmentRecords = records
+    let bytes = store.loadAttachments(snapshot: original[0], scope: "scope-a")
+    store.save(snapshot: decoded, attachments: bytes, scope: "scope-a")
+
+    let fresh = CaptureWorkspace(store: store)
+    fresh.activate(scopeKey: "scope-a")
+    let restored = fresh.resume(decoded.id)
+    let pending = restored?.attachments.first { $0.id == pendingID }
+    let ready = restored?.attachments.first { $0.id == readyID }
+    XCTAssertEqual(pending?.data, Data([0x01, 0x02]))
+    XCTAssertEqual(ready?.data, Data([0x03, 0x04]))
+    XCTAssertEqual(ready?.recognizedText, "SLIP")
+    XCTAssertEqual(ready?.isReading, false)
+    XCTAssertNil(ready?.errorMessage)
+    XCTAssertEqual(pending?.isReading, false)
+    XCTAssertFalse(pending?.errorMessage?.isEmpty ?? true, "legacy empty transcript must restore as explicit recovery")
+  }
+
+  private static func removingAttachmentStatusKeys(_ data: Data) throws -> Data {
+    guard var records = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+      return data
+    }
+    records = records.map { record in
+      var next = record
+      next.removeValue(forKey: "isReading")
+      next.removeValue(forKey: "error")
+      next.removeValue(forKey: "errorMessage")
+      return next
+    }
+    return try JSONSerialization.data(withJSONObject: records)
+  }
+
   private static func firstAttachmentFile(in directory: URL) -> URL? {
     guard let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: nil) else {
       return nil

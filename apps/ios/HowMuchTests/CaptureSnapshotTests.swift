@@ -669,6 +669,306 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertEqual(session.attachments[0].filename, "slip.jpg")
   }
 
+  func testBusyUndoInMultiGroupFooterDoesNotMutate() async {
+    let harness = SnapshotHarness.make()
+    let session = harness.admitMulti()
+    let coffee = session.currentDrafts[0]
+    var edited = coffee.draft
+    edited.amountMagnitudeMilli = 8_000
+    session.applyManualEdit(edited, id: coffee.id)
+    session.composerText = "Add another coffee"
+    _ = session.freezeComposerTurn(accountName: "Everyday", localDate: "2026-09-06")
+    _ = session.beginTurn()
+    XCTAssertTrue(session.isBusy)
+    XCTAssertTrue(session.canUndo(ownedIDs: [coffee.id]))
+    let ids = session.drafts.map(\.id)
+    let revision = session.revision
+    guard let surface = SnapshotSurface(
+      root: AddTransactionsView(session: session, workspace: harness.workspace)
+        .environment(harness.model),
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("busy footer Undo needs a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+    _ = await surface.captureUntilOCR(contains: ["Coffee", "Lunch"])
+    guard let undo = await revealControl(on: surface, label: "Undo") else {
+      XCTFail("multi-group footer Undo missing in \(surface.accessibilityLabels())")
+      return
+    }
+    attachImage(surface.captureVisible(), name: "capture-busy-undo-footer")
+    XCTAssertFalse(surface.isControlEnabled(undo), "Undo must be disabled while a turn is in flight")
+    XCTAssertFalse(surface.activate(undo), "disabled Undo must not activate")
+    XCTAssertEqual(session.drafts.map(\.id), ids)
+    XCTAssertEqual(session.revision, revision)
+    XCTAssertEqual(session.drafts.first { $0.id == coffee.id }?.draft.amountMagnitudeMilli, 8_000)
+    session.cancelTurn()
+    surface.layoutNow()
+    guard await surface.waitUntil(timeoutNanoseconds: 1_500_000_000, {
+      surface.firstControl(label: "Undo").map(surface.isControlEnabled) == true
+    }) else {
+      XCTFail("Undo must become enabled after the turn ends")
+      return
+    }
+    guard let enabled = surface.firstControl(label: "Undo") else {
+      XCTFail("Undo missing after turn ended")
+      return
+    }
+    XCTAssertTrue(surface.activate(enabled), "Undo must act once the turn has ended")
+    XCTAssertEqual(session.drafts.first { $0.id == coffee.id }?.draft.amountMagnitudeMilli, 5_000)
+  }
+
+  func testBusyUndoOnRemovedGroupRecoveryDoesNotMutate() async {
+    let harness = SnapshotHarness.make()
+    let session = harness.admitMulti()
+    let ids = session.drafts.map(\.id)
+    XCTAssertEqual(ids.count, 2)
+    var edited = session.drafts[0].draft
+    edited.amountMagnitudeMilli = 8_000
+    session.applyManualEdit(edited, id: ids[0])
+    session.removeDraft(ids[0])
+    session.removeDraft(ids[1])
+    XCTAssertTrue(session.drafts.isEmpty)
+    session.composerText = "Follow up"
+    _ = session.freezeComposerTurn(accountName: "Everyday", localDate: "2026-09-06")
+    _ = session.beginTurn()
+    let revision = session.revision
+    guard let surface = SnapshotSurface(
+      root: AddTransactionsView(session: session, workspace: harness.workspace)
+        .environment(harness.model),
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("recovery Undo needs a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+    _ = await surface.captureUntilOCR(contains: ["Undo"])
+    guard let undo = await revealControl(on: surface, label: "Undo") else {
+      XCTFail("removed-group recovery Undo missing in \(surface.accessibilityLabels())")
+      return
+    }
+    attachImage(surface.captureVisible(), name: "capture-busy-undo-recovery")
+    XCTAssertFalse(surface.isControlEnabled(undo), "recovery Undo must be disabled while a turn is in flight")
+    XCTAssertFalse(surface.activate(undo), "disabled recovery Undo must not activate")
+    XCTAssertTrue(session.drafts.isEmpty)
+    XCTAssertEqual(session.revision, revision)
+    session.cancelTurn()
+    surface.layoutNow()
+    guard await surface.waitUntil(timeoutNanoseconds: 1_500_000_000, {
+      surface.firstControl(label: "Undo").map(surface.isControlEnabled) == true
+    }) else {
+      XCTFail("recovery Undo must become enabled after the turn ends")
+      return
+    }
+    guard let enabled = surface.firstControl(label: "Undo") else {
+      XCTFail("recovery Undo missing after turn ended")
+      return
+    }
+    XCTAssertTrue(surface.activate(enabled))
+    XCTAssertFalse(session.drafts.isEmpty, "Undo should restore the removed drafts after the turn ends")
+  }
+
+  func testSamePayeeClarificationChoiceLabelsIncludeAmountAndDate() async {
+    let harness = SnapshotHarness.make()
+    let session = harness.admitSamePayeeClarification()
+    let drafts = session.currentDrafts
+    XCTAssertEqual(drafts.map(\.draft.payeeName), ["Coffee", "Coffee"])
+    guard let surface = SnapshotSurface(
+      root: AddTransactionsView(session: session, workspace: harness.workspace)
+        .environment(harness.model),
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("equal-payee clarification needs a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+    _ = await surface.captureUntilOCR(contains: ["Coffee", "Which transaction should I change?"])
+    attachImage(surface.captureVisible(), name: "capture-equal-payee-clarification")
+    let formatter = DateFormatter()
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .none
+    let expected = drafts.map { item in
+      (
+        payee: item.draft.payeeName,
+        amount: MoneyCodec.signedDisplayString(
+          for: item.draft.signedMilliunits,
+          currencyFormat: harness.model.currencyFormat
+        ),
+        date: formatter.string(from: item.draft.date)
+      )
+    }
+    let labels = surface.controls(labelContains: "Coffee").map(\.label)
+    XCTAssertEqual(labels.count, 2, "same-payee choices must be two Coffee buttons: \(labels) \(surface.accessibilityLabels())")
+    XCTAssertEqual(Set(labels).count, 2, "same-payee choices must have distinct AX labels: \(labels)")
+    for parts in expected {
+      XCTAssertTrue(
+        labels.contains { label in
+          label.localizedStandardContains(parts.payee)
+            && label.localizedStandardContains(parts.amount)
+            && label.localizedStandardContains(parts.date)
+        },
+        "missing payee/amount/date in \(labels) expected \(parts)"
+      )
+    }
+  }
+
+  func testCandidateRailsMeetHitTargetsAtDefaultAndAccessibility3() async {
+    let cases: [(String, (SnapshotHarness) -> CaptureSession, [String])] = [
+      ("ambiguity", { $0.admitAmbiguous() }, ["Everyday", "Travel", "Groceries", "Dining Out"]),
+      ("query", { $0.admitPendingQueryClarification() }, ["Everyday", "Travel", "Groceries", "Dining Out"]),
+    ]
+    for size in [DynamicTypeSize.large, .accessibility3] {
+      for (name, build, labels) in cases {
+        let harness = SnapshotHarness.make()
+        guard let surface = SnapshotSurface(
+          root: AddTransactionsView(session: build(harness), workspace: harness.workspace)
+            .environment(harness.model)
+            .environment(\.dynamicTypeSize, size),
+          size: CGSize(width: 390, height: 844)
+        ) else {
+          XCTFail("\(size) \(name) candidates need a connected UIWindowScene")
+          continue
+        }
+        defer { surface.detach() }
+        _ = await surface.captureUntilOCR(contains: ["Which"])
+        attachImage(surface.captureVisible(), name: "capture-\(name)-candidates-\(size)")
+        for label in labels {
+          guard let control = await revealControl(on: surface, label: label) else {
+            XCTFail("\(size) \(name) missing candidate \(label) in \(surface.accessibilityLabels())")
+            continue
+          }
+          XCTAssertNotEqual(
+            control.label,
+            "Account for next message, \(label), change account",
+            "candidate \(label) must not be the account chooser"
+          )
+          surface.assertMinimumHitTarget(control)
+        }
+      }
+    }
+  }
+
+  func testInterruptedImageOffersRetryReadingAndKeepsRemove() async {
+    let harness = SnapshotHarness.make()
+    let session = harness.admitInterruptedImage()
+    guard let surface = SnapshotSurface(
+      root: AddTransactionsView(session: session, workspace: harness.workspace)
+        .environment(harness.model),
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("interrupted image needs a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+    _ = await surface.captureUntilOCR(contains: ["Remove attachment"])
+    attachImage(surface.captureVisible(), name: "capture-interrupted-image-recovery")
+    guard let retry = await revealControl(on: surface, label: "Retry reading image") else {
+      XCTFail("Retry reading image missing in \(surface.accessibilityLabels())")
+      return
+    }
+    surface.assertMinimumHitTarget(retry)
+    guard let remove = await revealControl(on: surface, label: "Remove attachment") else {
+      XCTFail("Remove attachment must stay reachable in \(surface.accessibilityLabels())")
+      return
+    }
+    surface.assertMinimumHitTarget(remove)
+    XCTAssertTrue(surface.activate(retry), "Retry reading image must run Vision on the retained bytes")
+    let recovered = await surface.waitUntil(timeoutNanoseconds: 5_000_000_000, {
+      session.attachments.first?.recognizedText.isEmpty == false
+        && session.attachments.first?.isReading == false
+        && session.attachments.first?.errorMessage == nil
+    })
+    XCTAssertTrue(recovered, "retry must recover text from the retained SLIP image")
+    XCTAssertTrue(session.canSendComposer)
+  }
+
+  func testStopCancelsPendingQueryTransportWithoutLateCard() async {
+    SnapshotQueryDelayProtocol.reset()
+    XCTAssertTrue(
+      URLProtocol.registerClass(SnapshotQueryDelayProtocol.self),
+      "query delay stub must register on URLSession.shared"
+    )
+    defer { URLProtocol.unregisterClass(SnapshotQueryDelayProtocol.self) }
+    let harness = SnapshotHarness.make(baseURLString: SnapshotQueryDelayProtocol.fixtureBaseURL)
+    let session = harness.admitPendingQueryClarification(includeCategory: false)
+    XCTAssertTrue(session.queryCards.isEmpty)
+    XCTAssertTrue(session.pendingQuery?.unresolvedCategory.isEmpty == true)
+    guard let surface = SnapshotSurface(
+      root: AddTransactionsView(session: session, workspace: harness.workspace)
+        .environment(harness.model),
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("pending query cancel needs a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+    _ = await surface.captureUntilOCR(contains: ["Which account"])
+    attachImage(surface.captureVisible(), name: "capture-pending-query-choices")
+    guard let candidate = await revealControl(on: surface, label: "Everyday") else {
+      XCTFail("query account candidate missing in \(surface.accessibilityLabels())")
+      return
+    }
+    XCTAssertTrue(surface.activate(candidate), "tapping Everyday must start the pending query")
+    let beganTurn = await surface.waitUntil(timeoutNanoseconds: 1_500_000_000, { session.isBusy })
+    XCTAssertTrue(beganTurn, "pending query pick must begin a turn")
+    let startedReport = await surface.waitUntil(timeoutNanoseconds: 1_500_000_000, {
+      SnapshotQueryDelayProtocol.started.contains { $0.path.contains("spending-breakdown") }
+    })
+    XCTAssertTrue(
+      startedReport,
+      "delayed query stub must see the spending-breakdown request; started \(SnapshotQueryDelayProtocol.started)"
+    )
+    guard startedReport else {
+      return
+    }
+    guard let stop = await revealControl(on: surface, label: "Stop response") else {
+      XCTFail("Stop response missing after query start in \(surface.accessibilityLabels())")
+      return
+    }
+    XCTAssertTrue(surface.activate(stop), "Stop response must be the production control")
+    let stoppedTransport = await surface.waitUntil(timeoutNanoseconds: 1_000_000_000, {
+      SnapshotQueryDelayProtocol.stopped > 0
+    })
+    XCTAssertTrue(
+      stoppedTransport,
+      "URLProtocol.stopLoading must run promptly after Stop; stopped \(SnapshotQueryDelayProtocol.stopped) started \(SnapshotQueryDelayProtocol.started)"
+    )
+    try? await Task.sleep(nanoseconds: 2_200_000_000)
+    surface.layoutNow()
+    XCTAssertTrue(session.queryCards.isEmpty, "cancelled query must not apply a late card")
+  }
+
+  private func revealControl(on surface: SnapshotSurface, label: String) async -> SnapshotAXNode? {
+    func usable(_ node: SnapshotAXNode) -> Bool {
+      guard node.frame.width > 0, node.frame.height > 0 else {
+        return false
+      }
+      let visible = node.frame.intersection(surface.windowBounds)
+      return visible.width >= min(44, node.frame.width)
+        && visible.height >= min(44, node.frame.height)
+    }
+    if let node = surface.firstControl(label: label), usable(node) {
+      return node
+    }
+    await surface.setMainScrollOffsetY(0)
+    if let node = surface.firstControl(label: label), usable(node) {
+      return node
+    }
+    var offset: CGFloat = 0
+    let maxOffset = surface.mainScrollMaxOffset()
+    while offset < maxOffset {
+      offset = min(maxOffset, offset + surface.mainScrollStep())
+      guard await surface.setMainScrollOffsetY(offset) else {
+        break
+      }
+      if let node = surface.firstControl(label: label), usable(node) {
+        return node
+      }
+    }
+    return nil
+  }
+
   private static func actionCaptureSlug(_ names: Set<String>) -> String {
     names.sorted().map {
       $0.replacingOccurrences(of: " ", with: "-")
@@ -868,6 +1168,7 @@ private final class SnapshotHarness {
         deleted: false,
         categories: [
           Category(id: "cat-groceries", categoryGroupID: "grp-spend", name: "Groceries", deleted: false),
+          Category(id: "cat-dining", categoryGroupID: "grp-spend", name: "Dining Out", deleted: false),
         ]
       ),
     ]
@@ -932,11 +1233,16 @@ private final class SnapshotHarness {
 
   func admitAmbiguous() -> CaptureSession {
     let session = admit()
-    var draft = item(payee: "Lunch", amount: 12_000, account: "", category: "cat-groceries")
+    var draft = item(payee: "Lunch", amount: 12_000, account: "")
     draft.accountWasExplicit = true
+    draft.categoryWasExplicit = true
     draft.accountCandidates = [
       SlipCandidate(id: "acct-everyday", name: "Everyday"),
       SlipCandidate(id: "acct-travel", name: "Travel"),
+    ]
+    draft.categoryCandidates = [
+      SlipCandidate(id: "cat-groceries", name: "Groceries"),
+      SlipCandidate(id: "cat-dining", name: "Dining Out"),
     ]
     session.replaceDrafts([draft])
     session.appendUserMessage("Lunch $12 on the card")
@@ -1111,6 +1417,90 @@ private final class SnapshotHarness {
       session.messages[index].replyState = .failed
       session.messages[index].text = "Couldn't finish. Nothing was saved; existing drafts are unchanged."
     }
+    return session
+  }
+
+  func admitSamePayeeClarification() -> CaptureSession {
+    let session = admit()
+    var morning = item(payee: "Coffee", amount: 5_000, account: "acct-everyday")
+    morning.draft.date = Calendar.current.date(from: DateComponents(year: 2026, month: 8, day: 1)) ?? morning.draft.date
+    var afternoon = item(payee: "Coffee", amount: 12_000, account: "acct-everyday")
+    afternoon.draft.date = Calendar.current.date(from: DateComponents(year: 2026, month: 8, day: 15)) ?? afternoon.draft.date
+    session.replaceDrafts([morning, afternoon])
+    session.ownUnownedDrafts(as: "Entered from a shortcut")
+    session.composerText = "Make that 21"
+    _ = session.freezeComposerTurn(accountName: "Everyday", localDate: "2026-08-20")
+    _ = session.beginTurn()
+    var mapped = TransactionDraft()
+    mapped.payeeName = "Coffee"
+    mapped.amountMagnitudeMilli = 21_000
+    session.apply(
+      turn: CaptureInterpretedTurn(
+        intent: .update,
+        feedback: "Which transaction should I change?",
+        mutations: [CaptureDraftMutation(targetDraftID: nil, extraction: .init(amount: "21"))],
+        query: nil,
+        applyToAllDrafts: false
+      ),
+      mapped: [
+        SlipMappedDraft(
+          draft: mapped,
+          parsedAmount: true,
+          parsedDate: false,
+          parsedAccount: false,
+          parsedCategory: false,
+          parsedDirection: false,
+          accountCandidates: [],
+          categoryCandidates: []
+        ),
+      ],
+      expectedGeneration: session.generation
+    )
+    _ = session.finishTurn(generation: session.generation)
+    return session
+  }
+
+  func admitPendingQueryClarification(includeCategory: Bool = true) -> CaptureSession {
+    let session = admit()
+    session.composerText = "What did I spend on the card?"
+    let frozen = session.freezeComposerTurn(accountName: "Everyday", localDate: "2026-09-06")
+    session.pendingQuery = LedgerQueryResolution(
+      spec: LedgerQuerySpec(kind: .spending, category: "", account: "Account", merchant: "", from: "2026-09-01", to: "2026-09-06"),
+      from: "2026-09-01",
+      to: "2026-09-06",
+      priorFrom: nil,
+      priorTo: nil,
+      accountIDs: [],
+      categoryIDs: [],
+      accountLabel: "All accounts",
+      categoryLabel: "Recorded spending",
+      unresolvedAccount: [
+        SlipCandidate(id: "acct-everyday", name: "Everyday"),
+        SlipCandidate(id: "acct-travel", name: "Travel"),
+      ],
+      unresolvedCategory: includeCategory
+        ? [
+          SlipCandidate(id: "cat-groceries", name: "Groceries"),
+          SlipCandidate(id: "cat-dining", name: "Dining Out"),
+        ]
+        : [],
+      categoryWasExplicit: false
+    )
+    session.pendingQueryReplyID = frozen.replyMessageID
+    session.recordFailedTurn("Which account or category did you mean? I will not guess.")
+    return session
+  }
+
+  func admitInterruptedImage() -> CaptureSession {
+    let session = admit()
+    session.addAttachment(
+      CaptureAttachment(
+        filename: "slip.jpg",
+        data: Self.validThumbnailJPEG(),
+        recognizedText: "",
+        errorMessage: "I could not read text from that image. It is still attached."
+      )
+    )
     return session
   }
 
@@ -1290,15 +1680,33 @@ private final class SnapshotSurface {
   }
 
   func firstControl(labelContains needle: String) -> SnapshotAXNode? {
+    controls(labelContains: needle).first
+  }
+
+  func controls(labelContains needle: String) -> [SnapshotAXNode] {
     let nodes = accessibilityNodes()
-    return nodes.first {
-      $0.label.contains(needle) && $0.traits.contains(.button)
-    } ?? nodes.first { $0.label.contains(needle) }
+    let buttons = nodes.filter {
+      $0.label.localizedStandardContains(needle) && $0.traits.contains(.button)
+    }
+    if !buttons.isEmpty {
+      return buttons
+    }
+    return nodes.filter { $0.label.localizedStandardContains(needle) }
   }
 
   func assertMinimumHitTarget(_ node: SnapshotAXNode, file: StaticString = #filePath, line: UInt = #line) {
     XCTAssertGreaterThanOrEqual(node.frame.width, 44, "\(node.label) width \(node.frame)", file: file, line: line)
     XCTAssertGreaterThanOrEqual(node.frame.height, 44, "\(node.label) height \(node.frame)", file: file, line: line)
+  }
+
+  func isControlEnabled(_ node: SnapshotAXNode) -> Bool {
+    if node.traits.contains(.notEnabled) {
+      return false
+    }
+    if let control = Self.nearestControl(from: node.object) {
+      return control.isEnabled
+    }
+    return true
   }
 
   func timelineVisibleFrame() -> CGRect {
@@ -1665,4 +2073,108 @@ private final class SnapshotHomeBriefFailureProtocol: URLProtocol {
   }
 
   override func stopLoading() {}
+}
+
+private final class SnapshotQueryDelayLog: @unchecked Sendable {
+  static let shared = SnapshotQueryDelayLog()
+  private let lock = NSLock()
+  private var startedURLs: [URL] = []
+  private var stopCount = 0
+
+  func reset() {
+    lock.lock()
+    startedURLs = []
+    stopCount = 0
+    lock.unlock()
+  }
+
+  func appendStarted(_ url: URL) {
+    lock.lock()
+    startedURLs.append(url)
+    lock.unlock()
+  }
+
+  func markStopped() {
+    lock.lock()
+    stopCount += 1
+    lock.unlock()
+  }
+
+  func started() -> [URL] {
+    lock.lock()
+    defer { lock.unlock() }
+    return startedURLs
+  }
+
+  func stopped() -> Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return stopCount
+  }
+}
+
+private final class SnapshotQueryDelayProtocol: URLProtocol {
+  static let fixtureHost = "howmuch-snapshot-query.test"
+  static let fixtureBaseURL = "https://howmuch-snapshot-query.test"
+
+  static var started: [URL] {
+    SnapshotQueryDelayLog.shared.started()
+  }
+
+  static var stopped: Int {
+    SnapshotQueryDelayLog.shared.stopped()
+  }
+
+  static func reset() {
+    SnapshotQueryDelayLog.shared.reset()
+  }
+
+  private let stateLock = NSLock()
+  private var cancelled = false
+  private var workItem: DispatchWorkItem?
+
+  override class func canInit(with request: URLRequest) -> Bool {
+    request.url?.host?.lowercased() == fixtureHost
+  }
+
+  override class func canInit(with task: URLSessionTask) -> Bool {
+    guard let request = task.currentRequest ?? task.originalRequest else {
+      return false
+    }
+    return canInit(with: request)
+  }
+
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+    request
+  }
+
+  override func startLoading() {
+    if let url = request.url {
+      SnapshotQueryDelayLog.shared.appendStarted(url)
+    }
+    let item = DispatchWorkItem { [weak self] in
+      guard let self else {
+        return
+      }
+      self.stateLock.lock()
+      let cancelled = self.cancelled
+      self.stateLock.unlock()
+      guard !cancelled else {
+        return
+      }
+      self.client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
+    }
+    stateLock.lock()
+    workItem = item
+    stateLock.unlock()
+    DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 2, execute: item)
+  }
+
+  override func stopLoading() {
+    stateLock.lock()
+    cancelled = true
+    workItem?.cancel()
+    stateLock.unlock()
+    SnapshotQueryDelayLog.shared.markStopped()
+  }
 }

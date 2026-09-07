@@ -128,6 +128,106 @@ final class LedgerQueryTests: XCTestCase {
     XCTAssertTrue((error.localizedDescription ?? "").contains("merchant"))
   }
 
+  func testReportKindsRejectNamedMerchantWhileFindMerchantStaysSupported() {
+    let accounts = [Self.account("acct-everyday", "Everyday")]
+    let groups = [Self.everydayGroup]
+    let unsupported: [(LedgerQueryKind, String, String, String)] = [
+      (.spending, "", "2025-05-01", "2025-05-04"),
+      (.today, "", "2025-05-04", "2025-05-04"),
+      (.spendingThisMonth, "", "2025-05-01", "2025-05-04"),
+      (.compareCategory, "Dining Out", "2025-05-01", "2025-05-04"),
+    ]
+    for (kind, category, from, to) in unsupported {
+      let resolved = LedgerQueryPlanner.resolve(
+        spec: LedgerQuerySpec(kind: kind, category: category, account: "", merchant: "Starbucks", from: from, to: to),
+        accounts: accounts,
+        categoryGroups: groups,
+        calendar: Self.calendar,
+        now: Self.now
+      )
+      guard case .failure(let error) = resolved else {
+        XCTFail("\(kind) with a merchant must be rejected before execution")
+        continue
+      }
+      XCTAssertTrue(
+        (error.localizedDescription ?? "").localizedCaseInsensitiveContains("merchant"),
+        "\(kind) should name the unsupported merchant honestly: \(error)"
+      )
+    }
+
+    let whitespace = LedgerQueryPlanner.resolve(
+      spec: LedgerQuerySpec(kind: .spending, category: "", account: "", merchant: "   \t  ", from: "2025-05-01", to: "2025-05-04"),
+      accounts: accounts,
+      categoryGroups: groups,
+      calendar: Self.calendar,
+      now: Self.now
+    )
+    guard case .success = whitespace else {
+      return XCTFail("whitespace-only merchant must not reject a spending report")
+    }
+
+    let merchant = LedgerQueryPlanner.resolve(
+      spec: LedgerQuerySpec(kind: .findMerchant, category: "", account: "", merchant: "Starbucks", from: "2025-05-01", to: "2025-05-04"),
+      accounts: accounts,
+      categoryGroups: groups,
+      calendar: Self.calendar,
+      now: Self.now
+    )
+    guard case .success(let value) = merchant else {
+      return XCTFail("findMerchant with a named merchant must stay supported")
+    }
+    XCTAssertEqual(value.spec.merchant, "Starbucks")
+
+    let starbucks = Self.transaction(id: "t-sbux", payee: "Starbucks", amount: -5_000)
+    let elsewhere = Self.transaction(id: "t-else", payee: "Elsewhere Cafe", amount: -20_000)
+    let mixedResolution = LedgerQueryResolution(
+      spec: LedgerQuerySpec(kind: .spending, category: "", account: "", merchant: "Starbucks", from: "2025-05-01", to: "2025-05-04"),
+      from: "2025-05-01",
+      to: "2025-05-04",
+      priorFrom: nil,
+      priorTo: nil,
+      accountIDs: [],
+      categoryIDs: [],
+      accountLabel: "All accounts",
+      categoryLabel: "Recorded spending",
+      unresolvedAccount: [],
+      unresolvedCategory: [],
+      categoryWasExplicit: false
+    )
+    let merchantRows = LedgerQueryPlanner.sourceRows(
+      from: [starbucks, elsewhere],
+      resolution: mixedResolution,
+      categoryGroups: groups,
+      includeQuiet: false,
+      merchant: "Starbucks"
+    )
+    XCTAssertEqual(merchantRows.map(\.payee), ["Starbucks"])
+    XCTAssertEqual(merchantRows.reduce(0) { $0 + abs($1.amount) }, 5_000)
+    let unfiltered = LedgerQueryPlanner.recordedSpendingTotal(
+      from: SpendingBreakdownReport(
+        total: 25_000,
+        groups: [
+          SpendingBreakdownGroup(
+            categoryID: "cat-dining",
+            categoryName: "Dining Out",
+            categoryGroupID: "grp-spend",
+            categoryGroupName: "Everyday",
+            amount: -25_000,
+            share: 1,
+            transactionCount: 2
+          ),
+        ]
+      ),
+      includeQuiet: false
+    )
+    XCTAssertEqual(unfiltered, 25_000)
+    XCTAssertNotEqual(
+      unfiltered,
+      merchantRows.reduce(0) { $0 + abs($1.amount) },
+      "rationale: unfiltered $25 report total is not the $5 Starbucks + $20 elsewhere mix"
+    )
+  }
+
   func testRecordedSpendingTotalUsesReportIntegersNotQuietRows() {
     let report = SpendingBreakdownReport(
       total: 40_000,
