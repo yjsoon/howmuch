@@ -396,25 +396,8 @@ export class LedgerRepository {
   async listAccounts(planId: string): Promise<any[]> {
     await this.ensurePlan(planId);
     return (await this.db
-      .query(
-        `SELECT accounts.*, COALESCE(recon.max_statement_date, rec.max_date) AS last_reconciled_date
-         FROM accounts
-         LEFT JOIN (
-           SELECT account_id, MAX(statement_date) AS max_statement_date
-           FROM account_reconciliation_assertions
-           WHERE plan_id = ?
-           GROUP BY account_id
-         ) recon ON recon.account_id = accounts.id
-         LEFT JOIN (
-           SELECT account_id, MAX(date) AS max_date
-           FROM transactions
-           WHERE plan_id = ? AND deleted = 0 AND cleared = 'reconciled'
-           GROUP BY account_id
-         ) rec ON rec.account_id = accounts.id
-         WHERE accounts.plan_id = ? AND accounts.deleted = 0
-         ORDER BY accounts.closed, accounts.name`,
-      )
-      .all(planId, planId, planId)).map(formatAccount);
+      .query(`${ACCOUNT_SELECT_SQL} WHERE plan_id = ? AND deleted = 0 ORDER BY closed, name`)
+      .all(planId)).map(formatAccount);
   }
 
   async findAccount(planId: string, accountId: string): Promise<any | null> {
