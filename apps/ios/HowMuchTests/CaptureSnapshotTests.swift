@@ -369,6 +369,17 @@ final class CaptureSnapshotTests: XCTestCase {
     }
   }
 
+  func testComposerFittedHeightDoesNotClipWrappedUsedRect() {
+    let font = CaptureComposerMetrics.bodyFont()
+    let inset = CaptureComposerMetrics.textContainerInset(for: font)
+    let wrappedUsed = font.lineHeight * 1.2
+    let needed = wrappedUsed + inset.top + inset.bottom
+    let height = CaptureComposerMetrics.fittedHeight(usedRectHeight: wrappedUsed, font: font, inset: inset)
+    XCTAssertGreaterThanOrEqual(height, needed - 0.5, "wrapped usedRect must fit: used \(wrappedUsed) height \(height)")
+    XCTAssertGreaterThan(height, CaptureComposerMetrics.minHeight)
+    XCTAssertLessThanOrEqual(height, CaptureComposerMetrics.maxHeight)
+  }
+
   func testConversationDockStaysPinnedWithIconActionLabels() async {
     let harness = SnapshotHarness.make()
     let session = harness.admitEmpty()
@@ -454,6 +465,12 @@ final class CaptureSnapshotTests: XCTestCase {
     surface.layoutNow()
     XCTAssertGreaterThan(field.bounds.height, 44, "multiline composer should grow: \(field.bounds)")
     XCTAssertLessThanOrEqual(field.bounds.height, 120, "composer must cap internally: \(field.bounds)")
+    XCTAssertGreaterThanOrEqual(
+      field.contentOffset.y,
+      -0.5,
+      "multiline must drop the single-line centering offset: \(field.contentOffset)"
+    )
+    XCTAssertEqual(field.contentInset.top, 0, accuracy: 0.5, "multiline must drop centering contentInset: \(field.contentInset)")
     XCTAssertEqual(session.composerText, field.text)
     guard let handoff = surface.firstControl(label: "Open in Assistant") else {
       XCTFail("Open in Assistant missing after multiline input in \(surface.accessibilityLabels())")

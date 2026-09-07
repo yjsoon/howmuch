@@ -1401,6 +1401,12 @@ enum CaptureComposerMetrics {
     let vertical = max(8, ((minHeight - font.lineHeight) / 2).rounded())
     return UIEdgeInsets(top: vertical, left: horizontalInset, bottom: vertical, right: horizontalInset)
   }
+
+  static func fittedHeight(usedRectHeight: CGFloat, font: UIFont, inset: UIEdgeInsets) -> CGFloat {
+    let line = max(font.lineHeight, 1)
+    let content = max(usedRectHeight, line) + inset.top + inset.bottom
+    return min(max(content.rounded(.up), minHeight), maxHeight)
+  }
 }
 
 struct CaptureComposerField: UIViewRepresentable {
@@ -1463,20 +1469,20 @@ struct CaptureComposerField: UIViewRepresentable {
     }
     applyComposerChrome(uiView)
     let font = uiView.font ?? CaptureComposerMetrics.bodyFont()
-    let line = max(font.lineHeight, 1)
     uiView.textContainer.size = CGSize(
       width: max(0, width - uiView.textContainerInset.left - uiView.textContainerInset.right),
       height: .greatestFiniteMagnitude
     )
     uiView.layoutManager.ensureLayout(for: uiView.textContainer)
     let used = uiView.layoutManager.usedRect(for: uiView.textContainer).height
-    let lines = max(1, (max(used, line) / line).rounded())
-    let vertical = uiView.textContainerInset.top + uiView.textContainerInset.bottom
-    let height = min(
-      max(lines * line + vertical, CaptureComposerMetrics.minHeight),
-      CaptureComposerMetrics.maxHeight
+    return CGSize(
+      width: width,
+      height: CaptureComposerMetrics.fittedHeight(
+        usedRectHeight: used,
+        font: font,
+        inset: uiView.textContainerInset
+      )
     )
-    return CGSize(width: width, height: height)
   }
 
   private func applyComposerChrome(_ uiView: UITextView) {
@@ -1501,6 +1507,7 @@ struct CaptureComposerField: UIViewRepresentable {
 
     func textViewDidChange(_ textView: UITextView) {
       text.wrappedValue = textView.text ?? ""
+      (textView as? PasteAwareTextView)?.alignTextToVerticalCenterIfNeeded()
     }
 
     func textViewDidBeginEditing(_ textView: UITextView) {
@@ -1592,8 +1599,12 @@ final class PasteAwareTextView: UITextView {
       contentInset = inset
       setNeedsDisplay()
     }
-    if slack > 0, abs(contentOffset.y + top) > 0.5 {
-      contentOffset = CGPoint(x: 0, y: -top)
+    if slack > 0 {
+      if abs(contentOffset.y + top) > 0.5 {
+        contentOffset = CGPoint(x: 0, y: -top)
+      }
+    } else if contentOffset.y < -0.5 {
+      contentOffset = .zero
     }
   }
 
