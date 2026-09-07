@@ -130,8 +130,9 @@ struct RegisterView: View {
   }
 
   var body: some View {
+    let transactions = visibleTransactions
     let snapshot = RegisterSnapshot(
-      transactions: visibleTransactions,
+      transactions: transactions,
       pending: visiblePendingRows,
       schedules: visibleSchedules,
       today: Date.now.isoDateString,
@@ -179,10 +180,10 @@ struct RegisterView: View {
           .accessibilityHint("Opens the account editor")
         }
       }
-      if showingUnapprovedQueue, let approveAllTitle = model.approveAllTitle(for: visibleTransactions) {
+      if showingUnapprovedQueue, let approveAllTitle = model.approveAllTitle(for: transactions) {
         ToolbarItem(placement: .topBarTrailing) {
           Button(approveAllTitle) {
-            Task { await model.approveEligible(from: visibleTransactions) }
+            Task { await model.approveEligible(from: transactions) }
           }
           .disabled(model.isApprovalInFlight)
         }
@@ -572,7 +573,8 @@ struct RegisterView: View {
         model.presentCapture(
           CaptureRequest(
             kind: .draft(TransactionDraft(duplicating: transaction)),
-            connectionFingerprint: model.settings.connectionFingerprint
+            connectionFingerprint: model.settings.connectionFingerprint,
+            origin: .presetDraft
           )
         )
       } label: {

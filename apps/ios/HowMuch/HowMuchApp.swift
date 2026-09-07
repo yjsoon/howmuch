@@ -33,13 +33,13 @@ enum QuickAction {
 
   static func enqueueBlankCapture() {
     CaptureRouter.shared.enqueue(
-      CaptureRequest(kind: .blank, connectionFingerprint: nil)
+      CaptureRequest(kind: .blank, connectionFingerprint: nil, origin: .homeScreenShortcut)
     )
   }
 
   static func enqueueInboxCapture() {
     CaptureRouter.shared.enqueue(
-      CaptureRequest(kind: .inbox, connectionFingerprint: nil)
+      CaptureRequest(kind: .inbox, connectionFingerprint: nil, origin: .inbox)
     )
   }
 }
@@ -98,7 +98,20 @@ enum AppTab: Hashable {
   case accounts
   case plan
   case reflect
-  case transaction
+  case assistant
+
+  var captureSurface: CaptureSurface {
+    switch self {
+    case .accounts:
+      return .accounts
+    case .plan:
+      return .plan
+    case .reflect:
+      return .reflect
+    case .assistant:
+      return .assistant
+    }
+  }
 }
 
 private struct RootView: View {
@@ -110,24 +123,9 @@ private struct RootView: View {
   var body: some View {
     @Bindable var model = model
     @Bindable var capture = CaptureRouter.shared
+    @Bindable var workspace = CaptureWorkspace.shared
 
-    let selection = Binding(
-      get: { tab },
-      set: { (next: AppTab) in
-        if next == .transaction {
-          model.presentCapture(
-            CaptureRequest(
-              kind: .blank,
-              connectionFingerprint: model.settings.connectionFingerprint
-            )
-          )
-        } else {
-          tab = next
-        }
-      }
-    )
-
-    TabView(selection: selection) {
+    TabView(selection: $tab) {
       Tab("Accounts", systemImage: "building.columns", value: AppTab.accounts) {
         NavigationStack {
           AccountsView()
@@ -146,11 +144,20 @@ private struct RootView: View {
         }
       }
 
-      Tab("Transaction", systemImage: "plus", value: AppTab.transaction, role: .search) {
-        Color.clear
+      Tab("Assistant", systemImage: "bubble.left.and.bubble.right", value: AppTab.assistant) {
+        NavigationStack {
+          AssistantView(workspace: workspace)
+        }
       }
     }
     .tabBarMinimizeBehavior(.onScrollDown)
+    .modifier(RootCaptureAccessoryModifier(
+      isEnabled: !workspace.hidesRootCaptureChrome,
+      add: { model.presentAddTransactions(origin: model.addTransactionsOrigin()) }
+    ))
+    .onChange(of: tab, initial: true) { _, next in
+      model.activeCaptureSurface = next.captureSurface
+    }
     .overlay(alignment: .bottom) {
       Group {
         if let message = model.lastSaveMessage {
@@ -218,6 +225,8 @@ private struct RootView: View {
         enqueueInboxIfNeeded(force: false)
         consumePendingCapture()
         ScreenshotOfferController.shared.startIfNeeded()
+      } else if phase == .background {
+        CaptureWorkspace.shared.persistCurrentIfNeeded()
       }
     }
     .onChange(of: model.settings.isAuthenticated) { _, isAuthenticated in
@@ -226,6 +235,12 @@ private struct RootView: View {
       } else {
         enqueueInboxIfNeeded(force: false)
         consumePendingCapture()
+      }
+    }
+    .onChange(of: workspace.shouldOpenAssistant) { _, shouldOpen in
+      if shouldOpen {
+        tab = .assistant
+        workspace.shouldOpenAssistant = false
       }
     }
     .onOpenURL { url in
@@ -252,7 +267,8 @@ private struct RootView: View {
       model.presentCapture(
         CaptureRequest(
           kind: .inbox,
-          connectionFingerprint: model.settings.connectionFingerprint
+          connectionFingerprint: model.settings.connectionFingerprint,
+          origin: .inbox
         )
       )
       return
@@ -261,7 +277,8 @@ private struct RootView: View {
       model.presentCapture(
         CaptureRequest(
           kind: .inbox,
-          connectionFingerprint: model.settings.connectionFingerprint
+          connectionFingerprint: model.settings.connectionFingerprint,
+          origin: .inbox
         )
       )
       return
@@ -270,7 +287,8 @@ private struct RootView: View {
       model.presentCapture(
         CaptureRequest(
           kind: .inbox,
-          connectionFingerprint: model.settings.connectionFingerprint
+          connectionFingerprint: model.settings.connectionFingerprint,
+          origin: .inbox
         )
       )
     }
@@ -280,34 +298,45 @@ private struct RootView: View {
 private struct CaptureIntakeHost: View {
   @Environment(AppModel.self) private var model
   let request: CaptureRequest
-  @State private var reviewDrafts: [TransactionDraft]?
-  @State private var inboxDraft: TransactionDraft?
+  @State private var session: CaptureSession?
   @State private var claimedInboxIDs: [UUID] = []
+  @State private var isReadingInbox = false
+  @State private var admissionError: String?
+  @State private var didAdmit = false
 
   var body: some View {
     Group {
-      if let reviewDrafts {
-        IntakeReviewListView(
-          drafts: reviewDrafts,
-          preferredAccountID: model.preferredCaptureAccountID
-        )
-      } else if case .inbox = request.kind, inboxDraft == nil {
+      if !didAdmit {
+        admissionPlaceholder
+      } else if isReadingInbox {
         InboxReadingView(
+          preferredAccountID: session?.selectedAccountID,
           onResolved: applyInboxDrafts,
+          onAttachments: { attachments in
+            for incoming in attachments {
+              if session?.attachments.contains(where: { $0.id == incoming.id }) == true {
+                session?.updateAttachment(incoming)
+              } else {
+                session?.addAttachment(incoming)
+              }
+            }
+          },
           onClaimed: { claimedInboxIDs = $0 }
         )
+      } else if let session {
+        AddTransactionsView(session: session)
+          .presentationDetents([.large])
       } else {
-        AddTransactionSheet(request: formRequest) { drafts in
-          reviewDrafts = drafts
-        }
+        Theme.canvas
       }
     }
-    .onChange(of: request.id) { _, _ in
-      reviewDrafts = nil
-      inboxDraft = nil
+    .task(id: request.id) {
       claimedInboxIDs = []
+      didAdmit = false
+      await admitWhenReady()
     }
     .onDisappear {
+      CaptureWorkspace.shared.persistCurrentIfNeeded()
       if CaptureRouter.shared.presented == nil {
         InboxStore.shared.discardReading(ids: claimedInboxIDs)
         claimedInboxIDs = []
@@ -315,29 +344,136 @@ private struct CaptureIntakeHost: View {
     }
   }
 
-  private var formRequest: CaptureRequest {
-    if let inboxDraft {
-      return CaptureRequest(
-        id: request.id,
-        kind: .draft(inboxDraft),
-        connectionFingerprint: request.connectionFingerprint
-      )
+  @ViewBuilder
+  private var admissionPlaceholder: some View {
+    VStack(spacing: 16) {
+      if let admissionError {
+        Text(admissionError)
+          .font(.subheadline)
+          .foregroundStyle(Theme.uncategorised)
+          .multilineTextAlignment(.center)
+        Button("Try again") {
+          Task { await admitWhenReady(explicitRetry: true) }
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(Theme.accent)
+        Button("Continue without accounts") {
+          admitSession()
+        }
+        .font(.subheadline.weight(.semibold))
+      } else {
+        ProgressView()
+        Text("Loading accounts…")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+      }
     }
-    return request
+    .padding(24)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(Theme.canvas)
   }
 
-  private func applyInboxDrafts(_ drafts: [TransactionDraft]) {
-    if drafts.count > 1 {
-      reviewDrafts = drafts
-    } else if let only = drafts.first {
-      inboxDraft = only
-    } else {
-      CaptureRouter.shared.presented = nil
+  private func admitWhenReady(explicitRetry: Bool = false) async {
+    admissionError = nil
+    if CaptureAdmissionGate.shouldRefreshReference(phase: model.referencePhase, explicitRetry: explicitRetry) {
+      await model.refreshAll()
     }
+    while !CaptureAdmissionGate.canAdmit(referencePhase: model.referencePhase) {
+      try? await Task.sleep(for: .milliseconds(50))
+      if Task.isCancelled {
+        return
+      }
+    }
+    if Task.isCancelled {
+      return
+    }
+    if case .failed(let message) = model.referencePhase {
+      admissionError = message
+      return
+    }
+    guard CaptureRouter.shared.presented?.id == request.id else {
+      return
+    }
+    let scopeKey = model.settings.viewPrefsScopeKey
+    CaptureWorkspace.shared.activate(scopeKey: scopeKey)
+    guard CaptureAdmissionGate.shouldAdmitAfterRefresh(
+      request: request,
+      presented: CaptureRouter.shared.presented,
+      isCancelled: Task.isCancelled,
+      settingsScopeKey: scopeKey,
+      workspaceScopeKey: CaptureWorkspace.shared.activeScopeKey
+    ) else {
+      return
+    }
+    admitSession()
+  }
+
+  private func admitSession() {
+    let admitted = CaptureWorkspace.shared.admit(
+      request: request,
+      scopeKey: model.settings.viewPrefsScopeKey,
+      openAccounts: model.openAccounts,
+      lastUsedAccountID: model.lastUsedOpenAccountID,
+      focusedRegisterAccountID: request.origin.ignoresVisibleRegister
+        ? nil
+        : model.visibleRegisterAccountID
+    )
+    session = admitted
+    didAdmit = true
+    admissionError = nil
+    isReadingInbox = {
+      if case .inbox = request.kind {
+        return admitted.drafts.isEmpty && admitted.attachments.isEmpty
+      }
+      return false
+    }()
+  }
+
+  private func applyInboxDrafts(_ drafts: [SlipMappedDraft]) {
+    guard let session else {
+      CaptureRouter.shared.presented = nil
+      return
+    }
+    isReadingInbox = false
+    session.claimedInboxIDs = claimedInboxIDs
+    if drafts.isEmpty, session.drafts.isEmpty {
+      session.recordFailedTurn("I could not read a spend from that share. Nothing was saved.")
+      return
+    }
+    session.replaceDrafts(drafts.map { CaptureDraftItem(mapped: $0) })
+    session.ownUnownedDrafts(as: "Added from a share")
+    CaptureWorkspace.shared.persistCurrentIfNeeded()
   }
 }
 
 private struct ReflectVisitKey: Hashable {
   let tab: AppTab
   let generation: Int
+}
+
+private struct RootCaptureAccessoryModifier: ViewModifier {
+  var isEnabled: Bool
+  let add: () -> Void
+
+  func body(content: Content) -> some View {
+    if #available(iOS 26.1, *) {
+      content.tabViewBottomAccessory(isEnabled: isEnabled) {
+        accessory
+      }
+    } else if isEnabled {
+      content.tabViewBottomAccessory {
+        accessory
+      }
+    } else {
+      content
+    }
+  }
+
+  private var accessory: some View {
+    Button(action: add) {
+      Label("Add Transactions", systemImage: "plus")
+    }
+    .accessibilityLabel("Add Transactions")
+    .accessibilityHint("Adds transactions using the visible account register when one is showing, otherwise the last-used open account.")
+  }
 }

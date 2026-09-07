@@ -4,6 +4,7 @@ struct CaptureRequest: Identifiable, Equatable {
   let id: UUID
   let connectionFingerprint: String?
   var kind: Kind
+  var origin: CaptureOrigin
 
   enum Kind: Equatable {
     case blank
@@ -14,11 +15,24 @@ struct CaptureRequest: Identifiable, Equatable {
   init(
     id: UUID = UUID(),
     kind: Kind,
-    connectionFingerprint: String?
+    connectionFingerprint: String?,
+    origin: CaptureOrigin? = nil
   ) {
     self.id = id
     self.kind = kind
     self.connectionFingerprint = connectionFingerprint
+    if let origin {
+      self.origin = origin
+    } else {
+      switch kind {
+      case .blank:
+        self.origin = .lastUsedOpen
+      case .draft:
+        self.origin = .presetDraft
+      case .inbox:
+        self.origin = .inbox
+      }
+    }
   }
 }
 

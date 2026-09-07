@@ -57,6 +57,32 @@ final class CaptureRequestTests: XCTestCase {
     XCTAssertNotEqual(first.id, second.id)
     XCTAssertNotEqual(first, second)
   }
+
+  func testBlankDefaultsToLastUsedOpenOrigin() {
+    let request = CaptureRequest(kind: .blank, connectionFingerprint: nil)
+    XCTAssertEqual(request.origin, .lastUsedOpen)
+  }
+
+  func testDraftDefaultsToPresetOrigin() {
+    var draft = TransactionDraft()
+    draft.accountID = "acct-everyday"
+    let request = CaptureRequest(kind: .draft(draft), connectionFingerprint: nil)
+    XCTAssertEqual(request.origin, .presetDraft)
+  }
+
+  func testInboxDefaultsToInboxOrigin() {
+    let request = CaptureRequest(kind: .inbox, connectionFingerprint: nil)
+    XCTAssertEqual(request.origin, .inbox)
+  }
+
+  func testExplicitHomeScreenOriginIsPreserved() {
+    let request = CaptureRequest(
+      kind: .blank,
+      connectionFingerprint: nil,
+      origin: .homeScreenShortcut
+    )
+    XCTAssertEqual(request.origin, .homeScreenShortcut)
+  }
 }
 
 @MainActor

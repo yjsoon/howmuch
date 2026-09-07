@@ -266,7 +266,7 @@ final class SlipReaderMappingTests: XCTestCase {
     XCTAssertTrue(mapped[0].accountCandidates.isEmpty)
   }
 
-  func testApplyKeepsSeededAccountWhenNameDoesNotMatch() {
+  func testApplyLeavesAccountUnresolvedWhenNameIsExplicitlyUnrecognized() {
     var draft = TransactionDraft()
     draft.accountID = "acct-everyday"
     draft.direction = .inflow
@@ -279,11 +279,35 @@ final class SlipReaderMappingTests: XCTestCase {
       now: Self.now
     )[0]
     let applied = ComposeParseApply.applying(row, to: draft)
-    XCTAssertEqual(applied.draft.accountID, "acct-everyday")
-    XCTAssertFalse(applied.showAccountPrompt)
+    XCTAssertEqual(applied.draft.accountID, "")
     XCTAssertTrue(applied.accountCandidates.isEmpty)
     XCTAssertEqual(applied.draft.amountMagnitudeMilli, 5_000)
     XCTAssertEqual(applied.draft.direction, .inflow)
+    XCTAssertFalse(applied.draft.canSave)
+  }
+
+  func testApplyClearsSeedWhenUnknownAccountIsNamedInSentence() {
+    var draft = TransactionDraft()
+    draft.accountID = "acct-everyday"
+    draft.direction = .inflow
+    let row = SlipReaderMapping.map(
+      [.init(amount: "5", account: "No Such Bank")],
+      sentence: "5 on No Such Bank",
+      accounts: [Self.account("acct-everyday", "Everyday Account")],
+      categoryGroups: [Self.everydayGroup],
+      payees: [],
+      calendar: Self.calendar,
+      now: Self.now
+    )[0]
+    XCTAssertTrue(row.parsedAccount)
+    XCTAssertTrue(row.accountUnresolved)
+    XCTAssertEqual(row.unrecognizedAccount, "No Such Bank")
+    let applied = ComposeParseApply.applying(row, to: draft)
+    XCTAssertEqual(applied.draft.accountID, "")
+    XCTAssertTrue(applied.accountCandidates.isEmpty)
+    XCTAssertEqual(applied.draft.amountMagnitudeMilli, 5_000)
+    XCTAssertEqual(applied.draft.direction, .inflow)
+    XCTAssertFalse(applied.draft.canSave)
   }
 
   func testApplyDoesNotForceOutflowWhenInflowWasToggled() {
@@ -335,9 +359,10 @@ final class SlipReaderMappingTests: XCTestCase {
       now: Self.now
     )[0]
     XCTAssertFalse(row.parsedAccount)
+    XCTAssertFalse(row.accountUnresolved)
     let applied = ComposeParseApply.applying(row, to: draft)
     XCTAssertEqual(applied.draft.accountID, "acct-travel")
-    XCTAssertFalse(applied.showAccountPrompt)
+    XCTAssertTrue(applied.accountCandidates.isEmpty)
   }
 
   func testApplyShowsChipsAndClearsAccountWhenAmbiguous() {
@@ -357,7 +382,6 @@ final class SlipReaderMappingTests: XCTestCase {
     )[0]
     let applied = ComposeParseApply.applying(row, to: draft)
     XCTAssertEqual(applied.draft.accountID, "")
-    XCTAssertTrue(applied.showAccountPrompt)
     XCTAssertEqual(applied.accountCandidates.map(\.id), ["acct-everyday", "acct-travel"])
   }
 
@@ -378,7 +402,6 @@ final class SlipReaderMappingTests: XCTestCase {
     )[0]
     let applied = ComposeParseApply.applying(row, to: draft)
     XCTAssertEqual(applied.draft.accountID, "acct-everyday")
-    XCTAssertFalse(applied.showAccountPrompt)
   }
 
   func testApplyExplicitTravelCardInSentenceOverwritesADifferentSeed() {
@@ -398,7 +421,8 @@ final class SlipReaderMappingTests: XCTestCase {
     )[0]
     let applied = ComposeParseApply.applying(row, to: draft)
     XCTAssertEqual(applied.draft.accountID, "acct-travel")
-    XCTAssertFalse(applied.showAccountPrompt)
+    XCTAssertFalse(row.accountUnresolved)
+    XCTAssertTrue(applied.accountCandidates.isEmpty)
   }
 
   func testApplyKeepsSeededAccountWhenSentenceDoesNotNameOne() {
@@ -417,10 +441,10 @@ final class SlipReaderMappingTests: XCTestCase {
       now: Self.now
     )[0]
     XCTAssertFalse(row.parsedAccount)
+    XCTAssertFalse(row.accountUnresolved)
     XCTAssertEqual(row.draft.accountID, "")
     let applied = ComposeParseApply.applying(row, to: draft)
     XCTAssertEqual(applied.draft.accountID, "acct-travel")
-    XCTAssertFalse(applied.showAccountPrompt)
     XCTAssertTrue(applied.accountCandidates.isEmpty)
   }
 
@@ -440,9 +464,9 @@ final class SlipReaderMappingTests: XCTestCase {
       now: Self.now
     )[0]
     XCTAssertFalse(row.parsedAccount)
+    XCTAssertFalse(row.accountUnresolved)
     let applied = ComposeParseApply.applying(row, to: draft)
     XCTAssertEqual(applied.draft.accountID, "acct-everyday")
-    XCTAssertFalse(applied.showAccountPrompt)
     XCTAssertTrue(applied.accountCandidates.isEmpty)
   }
 

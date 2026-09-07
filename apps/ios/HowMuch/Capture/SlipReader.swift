@@ -3,27 +3,7 @@ import Foundation
 import FoundationModels
 #endif
 
-enum ComposeIntelligence {
-  static var showsField: Bool {
-    #if canImport(FoundationModels)
-    switch SystemLanguageModel.default.availability {
-    case .available:
-      return true
-    case .unavailable(let reason):
-      if case .modelNotReady = reason {
-        return true
-      }
-      return false
-    @unknown default:
-      return true
-    }
-    #else
-    return true
-    #endif
-  }
-}
-
-struct SlipCandidate: Equatable, Identifiable, Sendable {
+struct SlipCandidate: Equatable, Identifiable, Codable, Sendable {
   let id: String
   let name: String
 }
@@ -39,14 +19,29 @@ enum SlipAccountPick {
   }
 }
 
-struct SlipMappedDraft: Equatable, Sendable {
+struct SlipMappedDraft: Equatable, Codable, Sendable {
   var draft: TransactionDraft
   var parsedAmount: Bool
   var parsedDate: Bool
   var parsedAccount: Bool
-  var parsedInflow: Bool
+  var parsedCategory: Bool
+  var parsedDirection: Bool
   var accountCandidates: [SlipCandidate]
   var categoryCandidates: [SlipCandidate]
+  var unrecognizedAccount: String? = nil
+  var unrecognizedCategory: String? = nil
+
+  var parsedInflow: Bool {
+    parsedDirection && draft.direction == .inflow
+  }
+
+  var accountUnresolved: Bool {
+    parsedAccount && draft.accountID.isEmpty
+  }
+
+  var categoryUnresolved: Bool {
+    parsedCategory && draft.categoryID == nil
+  }
 }
 
 enum ComposeParseApply {
@@ -54,17 +49,15 @@ enum ComposeParseApply {
     var draft: TransactionDraft
     var accountCandidates: [SlipCandidate]
     var categoryCandidates: [SlipCandidate]
-    var showAccountPrompt: Bool
-    var showCategoryPrompt: Bool
   }
 
   static func applying(_ row: SlipMappedDraft, to draft: TransactionDraft) -> Outcome {
     var next = draft
-    if row.parsedAmount {
+    if row.parsedAmount, !draft.isSplit {
       next.amountMagnitudeMilli = row.draft.amountMagnitudeMilli
     }
-    if row.parsedInflow {
-      next.direction = .inflow
+    if row.parsedDirection {
+      next.direction = row.draft.direction
     }
     if row.parsedDate {
       next.date = row.draft.date
@@ -75,43 +68,56 @@ enum ComposeParseApply {
       next.transferAccountID = row.draft.transferAccountID
     }
 
-    var showCategoryPrompt = false
-    if let categoryID = row.draft.categoryID {
-      next.categoryID = categoryID
-    } else if !row.categoryCandidates.isEmpty {
-      showCategoryPrompt = true
-      next.categoryID = nil
+    if row.parsedCategory {
+      next.categoryID = row.draft.categoryID
     }
 
-    var showAccountPrompt = false
-    if row.parsedAccount, !row.draft.accountID.isEmpty {
-      next.accountID = row.draft.accountID
-    } else if row.parsedAccount, !row.accountCandidates.isEmpty {
-      showAccountPrompt = true
-      next.accountID = ""
+    if row.parsedAccount {
+      if !row.draft.accountID.isEmpty {
+        SlipAccountPick.apply(row.draft.accountID, to: &next)
+      } else {
+        next.accountID = ""
+      }
     }
 
     return Outcome(
       draft: next,
       accountCandidates: row.accountCandidates,
-      categoryCandidates: row.categoryCandidates,
-      showAccountPrompt: showAccountPrompt,
-      showCategoryPrompt: showCategoryPrompt
+      categoryCandidates: row.categoryCandidates
     )
   }
 }
 
 enum SlipReaderMapping {
-  struct Extraction: Equatable, Sendable {
+  struct Extraction: Equatable, Codable, Sendable {
     var amount = ""
     var payee = ""
     var category = ""
     var account = ""
     var date = ""
     var isInflow = false
+    /// "inflow", "outflow", or empty when the instruction did not mention direction.
+    var direction = ""
 
     var isBlank: Bool {
-      amount.isEmpty && payee.isEmpty && category.isEmpty && account.isEmpty && date.isEmpty
+      amount.isEmpty
+        && payee.isEmpty
+        && category.isEmpty
+        && account.isEmpty
+        && date.isEmpty
+        && mentionedDirection == nil
+        && !isInflow
+    }
+
+    var mentionedDirection: EntryDirection? {
+      switch direction.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+      case "inflow", "in", "income":
+        return .inflow
+      case "outflow", "out", "spend", "expense":
+        return .outflow
+      default:
+        return nil
+      }
     }
   }
 
@@ -166,7 +172,12 @@ enum SlipReaderMapping {
     now: Date
   ) -> SlipMappedDraft {
     var draft = TransactionDraft()
-    draft.direction = extraction.isInflow ? .inflow : .outflow
+    let parsedDirection = extraction.mentionedDirection != nil || extraction.isInflow
+    if let direction = extraction.mentionedDirection {
+      draft.direction = direction
+    } else if extraction.isInflow {
+      draft.direction = .inflow
+    }
 
     var parsedAmount = false
     if !extraction.amount.isEmpty, let milli = MoneyCodec.milliunits(fromExtraction: extraction.amount) {
@@ -181,24 +192,31 @@ enum SlipReaderMapping {
     }
 
     var accountCandidates: [SlipCandidate] = []
+    var unrecognizedAccount: String?
     let accountQuery = extraction.account.trimmingCharacters(in: .whitespacesAndNewlines)
     let parsedAccount = !accountQuery.isEmpty && mentions(accountQuery, in: sentence)
     if parsedAccount {
       let matches = matchAccounts(accountQuery, in: accounts)
       if matches.count == 1 {
         draft.accountID = matches[0].id
-      } else if (2...3).contains(matches.count) {
-        accountCandidates = matches.map { SlipCandidate(id: $0.id, name: $0.name) }
+      } else if matches.count >= 2 {
+        accountCandidates = matches.prefix(12).map { SlipCandidate(id: $0.id, name: $0.name) }
+      } else {
+        unrecognizedAccount = accountQuery
       }
     }
 
     var categoryCandidates: [SlipCandidate] = []
-    if !extraction.category.isEmpty {
+    var unrecognizedCategory: String?
+    let parsedCategory = !extraction.category.isEmpty
+    if parsedCategory {
       let matches = matchCategories(extraction.category, in: categoryGroups)
       if matches.count == 1 {
         draft.categoryID = matches[0].id
-      } else if (2...3).contains(matches.count) {
-        categoryCandidates = matches.map { SlipCandidate(id: $0.id, name: $0.name) }
+      } else if matches.count >= 2 {
+        categoryCandidates = matches.prefix(12).map { SlipCandidate(id: $0.id, name: $0.name) }
+      } else {
+        unrecognizedCategory = extraction.category
       }
     }
 
@@ -216,9 +234,12 @@ enum SlipReaderMapping {
       parsedAmount: parsedAmount,
       parsedDate: parsedDate,
       parsedAccount: parsedAccount,
-      parsedInflow: extraction.isInflow,
+      parsedCategory: parsedCategory,
+      parsedDirection: parsedDirection,
       accountCandidates: accountCandidates,
-      categoryCandidates: categoryCandidates
+      categoryCandidates: categoryCandidates,
+      unrecognizedAccount: unrecognizedAccount,
+      unrecognizedCategory: unrecognizedCategory
     )
   }
 

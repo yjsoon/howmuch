@@ -22,5 +22,7 @@
 	<string>HowMuch uses the local network only to reach a development server on this LAN.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>HowMuch looks at new screenshots so it can offer to add them. Photos stay on this device.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>HowMuch uses the camera only when you choose to photograph a receipt or slip. The photo stays on this device.</string>
 </dict>
 </plist>

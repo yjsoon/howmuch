@@ -75,8 +75,12 @@ final class AppModel {
   var lastSaveMessage: SaveMessage?
   var isShowingSettings = false
   /// Account registers currently on a navigation stack, deepest last.
-  /// Capture prefers the visible register over the last account a save used.
+  /// Horizon fill uses this stack. Capture origin uses `visibleRegisterAccountID`.
   private(set) var focusedRegisterAccountIDs: [String] = []
+  /// Which destination currently owns the visible chrome. A retained Accounts
+  /// register must not leak into Plan/Reflect/Assistant or Home Screen.
+  var activeCaptureSurface: CaptureSurface = .accounts
+  private var focusedRegisters: [(surface: CaptureSurface, accountID: String)] = []
   private var pendingTransactions: [PendingTransaction] = OutboxStore.load()
   /// True while a replay pass is running, whoever started it — the outbox
   /// card drives its spinner from this rather than view-local state.
@@ -180,13 +184,15 @@ final class AppModel {
     viewPrefs.lastUsedAccountID
   }
 
-  /// The account the + sheet should open on: the register you are looking
-  /// at, or the last saved account if you are not inside one.
+  /// Last-used OPEN account only. Capture admission uses `CaptureOrigin`
+  /// instead of this, so a leftover visible register cannot leak into
+  /// Home Screen or overview entry.
   var preferredCaptureAccountID: String? {
+    lastUsedOpenAccountID
+  }
+
+  var lastUsedOpenAccountID: String? {
     let openIDs = Set(openAccounts.map(\.id))
-    if let focused = focusedRegisterAccountIDs.last, openIDs.contains(focused) {
-      return focused
-    }
     if let lastUsed = lastUsedAccountID, openIDs.contains(lastUsed) {
       return lastUsed
     }
@@ -197,8 +203,19 @@ final class AppModel {
     CaptureRouter.shared.enqueue(request)
   }
 
+  func presentAddTransactions(origin: CaptureOrigin) {
+    presentCapture(
+      CaptureRequest(
+        kind: .blank,
+        connectionFingerprint: settings.connectionFingerprint,
+        origin: origin
+      )
+    )
+  }
+
   func beginFocusedRegisterAccount(_ accountID: String) {
     focusedRegisterAccountIDs.append(accountID)
+    focusedRegisters.append((activeCaptureSurface, accountID))
     Task { await fillFocusedAccountHorizon() }
   }
 
@@ -206,6 +223,25 @@ final class AppModel {
     if let index = focusedRegisterAccountIDs.lastIndex(of: accountID) {
       focusedRegisterAccountIDs.remove(at: index)
     }
+    if let index = focusedRegisters.lastIndex(where: {
+      $0.accountID == accountID && $0.surface == activeCaptureSurface
+    }) {
+      focusedRegisters.remove(at: index)
+    } else if let index = focusedRegisters.lastIndex(where: { $0.accountID == accountID }) {
+      focusedRegisters.remove(at: index)
+    }
+  }
+
+  /// The account-scoped register actually on the visible destination.
+  var visibleRegisterAccountID: String? {
+    focusedRegisters.last(where: { $0.surface == activeCaptureSurface })?.accountID
+  }
+
+  func addTransactionsOrigin() -> CaptureOrigin {
+    if let accountID = visibleRegisterAccountID {
+      return .visibleRegister(accountID: accountID)
+    }
+    return .lastUsedOpen
   }
 
   /// Web parity: the spending report hides bookkeeping groups until asked.
@@ -636,9 +672,15 @@ final class AppModel {
       return
     }
     invalidateAccountUsage()
+    let previousScope = activeViewPrefsScope
+    CaptureWorkspace.shared.dropForScopeChange()
+    if previousScope.map(CaptureWorkspaceStore.isPersistableScope) == true {
+      CaptureRouter.shared.dropForSignOut()
+    }
     activeViewPrefsScope = nextScope
     if let nextScope {
       viewPrefs = scopedViewPrefsStore.activate(scope: nextScope, legacy: legacyViewPrefs)
+      CaptureWorkspace.shared.activate(scopeKey: nextScope)
     } else {
       viewPrefs = ViewPrefs()
     }
@@ -813,7 +855,7 @@ final class AppModel {
       .filter { !$0.deleted }
   }
 
-  private func rebuildLookups() {
+  func rebuildLookups() {
     accountsByID = Dictionary(accounts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     categoriesByID = Dictionary(
       flattenedCategories.map { ($0.id, $0) },
@@ -881,6 +923,13 @@ final class AppModel {
       }
       return pendingRow(from: pending)
     }
+  }
+
+  func hasPendingCreate(importID: String?) -> Bool {
+    guard let importID, !importID.isEmpty else {
+      return false
+    }
+    return pendingTransactions.contains { $0.request.importID == importID }
   }
 
   private func overlayingPendingEdits(on rows: [Transaction]) -> [Transaction] {
@@ -1556,12 +1605,9 @@ final class AppModel {
     for draft in drafts {
       try CommitRejection.check(draft)
     }
-    if let last = drafts.last {
-      viewPrefs.lastUsedAccountID = last.accountID
-      saveViewPrefs()
-    }
     if drafts.count == 1, let draft = drafts.first, let transactionID = draft.id {
       applyPendingEdit(draft, transactionID: transactionID)
+      rememberLastUsedAccount(from: drafts)
       return
     }
     let creates = drafts.filter { $0.id == nil }
@@ -1571,10 +1617,20 @@ final class AppModel {
       }
     }
     guard !creates.isEmpty else {
+      rememberLastUsedAccount(from: drafts)
       return
     }
     try enqueueCreates(creates)
+    rememberLastUsedAccount(from: creates)
     showSaveMessage(savedMessage(for: creates))
+  }
+
+  private func rememberLastUsedAccount(from drafts: [TransactionDraft]) {
+    guard let last = drafts.last, !last.accountID.isEmpty else {
+      return
+    }
+    viewPrefs.lastUsedAccountID = last.accountID
+    saveViewPrefs()
   }
 
   private func savedMessage(for drafts: [TransactionDraft]) -> String {

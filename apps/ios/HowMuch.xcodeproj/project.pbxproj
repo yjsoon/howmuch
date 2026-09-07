@@ -52,7 +52,6 @@
 		A2000000000000000000009B /* AddFromImageIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000009A /* AddFromImageIntent.swift */; };
 		A2000000000000000000009D /* AddFromInboxIntentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000009C /* AddFromInboxIntentTests.swift */; };
 		A2000000000000000000005B /* AddTransactionIntentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005A /* AddTransactionIntentTests.swift */; };
-		A20000000000000000000081 /* IntakeReviewListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000080 /* IntakeReviewListView.swift */; };
 		A20000000000000000000083 /* CommitManyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000082 /* CommitManyTests.swift */; };
 		A20000000000000000000091 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
 		A20000000000000000000093 /* InboxStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000092 /* InboxStoreTests.swift */; };
@@ -61,6 +60,21 @@
 		A200000000000000000000A1 /* ScreenshotOffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000A0 /* ScreenshotOffer.swift */; };
 		A200000000000000000000A3 /* ScreenshotOfferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000A2 /* ScreenshotOfferTests.swift */; };
 		A200000000000000000000B1 /* RegisterSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000B0 /* RegisterSnapshotTests.swift */; };
+		A40000000000000000000011 /* CaptureOrigin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000010 /* CaptureOrigin.swift */; };
+		A40000000000000000000013 /* CaptureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000012 /* CaptureSession.swift */; };
+		A40000000000000000000015 /* CaptureWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000014 /* CaptureWorkspace.swift */; };
+		A40000000000000000000017 /* CaptureInterpreter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000016 /* CaptureInterpreter.swift */; };
+		A40000000000000000000019 /* LedgerQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000018 /* LedgerQuery.swift */; };
+		A40000000000000000000021 /* AddTransactionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000020 /* AddTransactionsView.swift */; };
+		A40000000000000000000023 /* AssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000022 /* AssistantView.swift */; };
+		A40000000000000000000025 /* CaptureConversationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000024 /* CaptureConversationViews.swift */; };
+		A4000000000000000000003D /* CaptureConversationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000003C /* CaptureConversationTests.swift */; };
+		A40000000000000000000031 /* CaptureOriginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000030 /* CaptureOriginTests.swift */; };
+		A40000000000000000000033 /* CaptureSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000032 /* CaptureSessionTests.swift */; };
+		A40000000000000000000035 /* CaptureInterpreterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000034 /* CaptureInterpreterTests.swift */; };
+		A40000000000000000000037 /* LedgerQueryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000036 /* LedgerQueryTests.swift */; };
+		A40000000000000000000039 /* CaptureWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000038 /* CaptureWorkspaceTests.swift */; };
+		A4000000000000000000003B /* CaptureSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000003A /* CaptureSnapshotTests.swift */; };
 		A200000000000000000000B3 /* RegisterQueryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000B2 /* RegisterQueryTests.swift */; };
 		A200000000000000000000C1 /* RegisterApproval.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000C0 /* RegisterApproval.swift */; };
 		A200000000000000000000C3 /* RegisterApprovalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000C2 /* RegisterApprovalTests.swift */; };
@@ -88,7 +102,6 @@
 		A2000000000000000000009A /* AddFromImageIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddFromImageIntent.swift; sourceTree = "<group>"; };
 		A2000000000000000000009C /* AddFromInboxIntentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddFromInboxIntentTests.swift; sourceTree = "<group>"; };
 		A2000000000000000000005A /* AddTransactionIntentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddTransactionIntentTests.swift; sourceTree = "<group>"; };
-		A20000000000000000000080 /* IntakeReviewListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeReviewListView.swift; sourceTree = "<group>"; };
 		A20000000000000000000082 /* CommitManyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitManyTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000090 /* InboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxStore.swift; sourceTree = "<group>"; };
 		A20000000000000000000092 /* InboxStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxStoreTests.swift; sourceTree = "<group>"; };
@@ -97,6 +110,21 @@
 		A200000000000000000000A0 /* ScreenshotOffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotOffer.swift; sourceTree = "<group>"; };
 		A200000000000000000000A2 /* ScreenshotOfferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotOfferTests.swift; sourceTree = "<group>"; };
 		A200000000000000000000B0 /* RegisterSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterSnapshotTests.swift; sourceTree = "<group>"; };
+		A40000000000000000000010 /* CaptureOrigin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureOrigin.swift; sourceTree = "<group>"; };
+		A40000000000000000000012 /* CaptureSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureSession.swift; sourceTree = "<group>"; };
+		A40000000000000000000014 /* CaptureWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureWorkspace.swift; sourceTree = "<group>"; };
+		A40000000000000000000016 /* CaptureInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureInterpreter.swift; sourceTree = "<group>"; };
+		A40000000000000000000018 /* LedgerQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerQuery.swift; sourceTree = "<group>"; };
+		A40000000000000000000020 /* AddTransactionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddTransactionsView.swift; sourceTree = "<group>"; };
+		A40000000000000000000022 /* AssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantView.swift; sourceTree = "<group>"; };
+		A40000000000000000000024 /* CaptureConversationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureConversationViews.swift; sourceTree = "<group>"; };
+		A4000000000000000000003C /* CaptureConversationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureConversationTests.swift; sourceTree = "<group>"; };
+		A40000000000000000000030 /* CaptureOriginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureOriginTests.swift; sourceTree = "<group>"; };
+		A40000000000000000000032 /* CaptureSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureSessionTests.swift; sourceTree = "<group>"; };
+		A40000000000000000000034 /* CaptureInterpreterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureInterpreterTests.swift; sourceTree = "<group>"; };
+		A40000000000000000000036 /* LedgerQueryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerQueryTests.swift; sourceTree = "<group>"; };
+		A40000000000000000000038 /* CaptureWorkspaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureWorkspaceTests.swift; sourceTree = "<group>"; };
+		A4000000000000000000003A /* CaptureSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureSnapshotTests.swift; sourceTree = "<group>"; };
 		A200000000000000000000B2 /* RegisterQueryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterQueryTests.swift; sourceTree = "<group>"; };
 		A200000000000000000000C0 /* RegisterApproval.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterApproval.swift; sourceTree = "<group>"; };
 		A200000000000000000000C2 /* RegisterApprovalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterApprovalTests.swift; sourceTree = "<group>"; };
@@ -275,7 +303,9 @@
 				A10000000000000000000078 /* ScheduledTransactionsView.swift */,
 				A10000000000000000000079 /* ScheduledTransactionEditorView.swift */,
 				A10000000000000000000073 /* TransactionFormView.swift */,
-				A20000000000000000000080 /* IntakeReviewListView.swift */,
+				A40000000000000000000020 /* AddTransactionsView.swift */,
+				A40000000000000000000022 /* AssistantView.swift */,
+				A40000000000000000000024 /* CaptureConversationViews.swift */,
 				A10000000000000000000074 /* Pickers.swift */,
 				A10000000000000000000075 /* ReflectView.swift */,
 				A10000000000000000000076 /* ReflectDetails.swift */,
@@ -288,6 +318,11 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000010 /* CaptureRequest.swift */,
+				A40000000000000000000010 /* CaptureOrigin.swift */,
+				A40000000000000000000012 /* CaptureSession.swift */,
+				A40000000000000000000014 /* CaptureWorkspace.swift */,
+				A40000000000000000000016 /* CaptureInterpreter.swift */,
+				A40000000000000000000018 /* LedgerQuery.swift */,
 				A20000000000000000000012 /* CaptureRouter.swift */,
 				A20000000000000000000090 /* InboxStore.swift */,
 				A20000000000000000000094 /* InboxReadingView.swift */,
@@ -317,6 +352,13 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000020 /* CaptureRequestTests.swift */,
+				A40000000000000000000030 /* CaptureOriginTests.swift */,
+				A40000000000000000000032 /* CaptureSessionTests.swift */,
+				A40000000000000000000034 /* CaptureInterpreterTests.swift */,
+				A40000000000000000000036 /* LedgerQueryTests.swift */,
+				A40000000000000000000038 /* CaptureWorkspaceTests.swift */,
+				A4000000000000000000003A /* CaptureSnapshotTests.swift */,
+				A4000000000000000000003C /* CaptureConversationTests.swift */,
 				A20000000000000000000033 /* IntentCatalogTests.swift */,
 				A20000000000000000000042 /* SlipReaderMappingTests.swift */,
 				A2000000000000000000005A /* AddTransactionIntentTests.swift */,
@@ -497,7 +539,15 @@
 				A10000000000000000000028 /* SettingsView.swift in Sources */,
 				A10000000000000000000020 /* HowMuchApp.swift in Sources */,
 				A20000000000000000000011 /* CaptureRequest.swift in Sources */,
+				A40000000000000000000011 /* CaptureOrigin.swift in Sources */,
+				A40000000000000000000013 /* CaptureSession.swift in Sources */,
+				A40000000000000000000015 /* CaptureWorkspace.swift in Sources */,
+				A40000000000000000000017 /* CaptureInterpreter.swift in Sources */,
+				A40000000000000000000019 /* LedgerQuery.swift in Sources */,
 				A20000000000000000000013 /* CaptureRouter.swift in Sources */,
+				A40000000000000000000021 /* AddTransactionsView.swift in Sources */,
+				A40000000000000000000023 /* AssistantView.swift in Sources */,
+				A40000000000000000000025 /* CaptureConversationViews.swift in Sources */,
 				A20000000000000000000031 /* IntentCatalog.swift in Sources */,
 				A20000000000000000000041 /* SlipReader.swift in Sources */,
 				A20000000000000000000051 /* AccountEntity.swift in Sources */,
@@ -507,7 +557,6 @@
 				A20000000000000000000099 /* AddFromTextIntent.swift in Sources */,
 				A2000000000000000000009B /* AddFromImageIntent.swift in Sources */,
 				A20000000000000000000059 /* AppShortcuts.swift in Sources */,
-				A20000000000000000000081 /* IntakeReviewListView.swift in Sources */,
 				A20000000000000000000091 /* InboxStore.swift in Sources */,
 				A20000000000000000000095 /* InboxReadingView.swift in Sources */,
 				A20000000000000000000097 /* IntelligenceAura.swift in Sources */,
@@ -520,6 +569,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				A20000000000000000000021 /* CaptureRequestTests.swift in Sources */,
+				A40000000000000000000031 /* CaptureOriginTests.swift in Sources */,
+				A40000000000000000000033 /* CaptureSessionTests.swift in Sources */,
+				A40000000000000000000035 /* CaptureInterpreterTests.swift in Sources */,
+				A40000000000000000000037 /* LedgerQueryTests.swift in Sources */,
+				A40000000000000000000039 /* CaptureWorkspaceTests.swift in Sources */,
+				A4000000000000000000003B /* CaptureSnapshotTests.swift in Sources */,
+				A4000000000000000000003D /* CaptureConversationTests.swift in Sources */,
 				A20000000000000000000034 /* IntentCatalogTests.swift in Sources */,
 				A20000000000000000000043 /* SlipReaderMappingTests.swift in Sources */,
 				A2000000000000000000005B /* AddTransactionIntentTests.swift in Sources */,
