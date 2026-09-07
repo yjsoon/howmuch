@@ -1696,6 +1696,141 @@ struct AgeOfMoneyPeriod: Decodable, Identifiable {
   let unmatchedSpending: Int
 }
 
+enum RewardGroupBy: String, CaseIterable, Identifiable, Decodable, Sendable {
+  case flag
+  case payee
+  case category
+  case memo
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .flag:
+      return "Flag"
+    case .payee:
+      return "Payee"
+    case .category:
+      return "Category"
+    case .memo:
+      return "Memo"
+    }
+  }
+}
+
+enum RewardKind: String, Decodable, Sendable {
+  case cashback
+  case miles
+}
+
+struct RewardsReport: Decodable, Sendable {
+  let from: String?
+  let to: String?
+  let groupBy: RewardGroupBy
+  let milesValuation: Double
+  let totals: RewardsTotals
+  let cards: [RewardsCardRow]
+  let groups: [RewardsGroupRow]
+}
+
+struct RewardsTotals: Decodable, Sendable {
+  let spend: Double
+  let rewardDollars: Double
+  let cashback: Double
+  let miles: Double
+}
+
+struct RewardsCardRow: Decodable, Identifiable, Sendable {
+  var id: String { card.id }
+
+  let card: RewardsCard
+  let accountId: String
+  let accountName: String
+  let calculation: RewardsCalculation
+}
+
+struct RewardsCard: Decodable, Sendable {
+  let id: String
+  let name: String
+  let issuer: String
+  let type: RewardKind
+  let ynabAccountId: String
+  let featured: Bool
+}
+
+struct RewardsCalculation: Decodable, Sendable {
+  let period: String
+  let totalSpend: Double
+  let countedSpend: Double
+  let eligibleSpend: Double
+  let rewardEarned: Double
+  let rewardEarnedDollars: Double
+  let rewardType: RewardKind
+  let minimumSpend: Double?
+  let minimumSpendMet: Bool
+  let minimumSpendProgress: Double?
+  let maximumSpend: Double?
+  let maximumSpendExceeded: Bool
+  let maximumSpendProgress: Double?
+  let flags: [RewardsFlagRow]
+}
+
+struct RewardsFlagRow: Decodable, Identifiable, Sendable {
+  var id: String { subcategoryId }
+
+  let subcategoryId: String
+  let name: String
+  let flagColor: String
+  let totalSpend: Double?
+  let eligibleSpend: Double
+  let rewardEarned: Double
+  let rewardEarnedDollars: Double?
+  let rewardRate: Double?
+}
+
+struct RewardsGroupRow: Decodable, Identifiable, Sendable {
+  var id: String { key }
+
+  let key: String
+  let label: String
+  let flagColor: String?
+  let spend: Double
+  let reward: Double
+  let rewardDollars: Double
+  let transactionCount: Int
+}
+
+struct RewardsTrackerSnapshot: Decodable, Sendable {
+  let snapshot: RewardsTrackerStoredSnapshot?
+  let cards: [RewardsTrackerCard]
+  let importedAt: String?
+  let updatedAt: String?
+}
+
+struct RewardsTrackerStoredSnapshot: Decodable, Sendable {
+  let cards: [RewardsTrackerCard]?
+}
+
+struct RewardsTrackerCard: Decodable, Equatable, Identifiable, Sendable {
+  let id: String
+  let name: String
+  let issuer: String?
+  let type: String?
+  let ynabAccountId: String
+}
+
+struct RewardsTrackerImportResult: Decodable, Sendable {
+  let importSessionId: String
+  let cards: Int
+  let rules: Int
+  let tagMappings: Int
+  let themeGroups: Int
+  let accountsUpserted: Int
+  let transactionsImported: Int
+  let transactionsUpdated: Int
+  let flagNames: Int
+}
+
 struct TransactionWriteEnvelope: Encodable {
   let transaction: TransactionWriteRequest
 }

@@ -96,7 +96,7 @@ final class QuickActionSceneDelegate: NSObject, UIWindowSceneDelegate {
 
 enum AppTab: Hashable {
   case accounts
-  case plan
+  case rewards
   case reflect
   case assistant
 
@@ -104,8 +104,8 @@ enum AppTab: Hashable {
     switch self {
     case .accounts:
       return .accounts
-    case .plan:
-      return .plan
+    case .rewards:
+      return .rewards
     case .reflect:
       return .reflect
     case .assistant:
@@ -132,9 +132,9 @@ private struct RootView: View {
         }
       }
 
-      Tab("Plan", systemImage: "square.grid.2x2", value: AppTab.plan) {
+      Tab("Rewards", systemImage: "creditcard", value: AppTab.rewards) {
         NavigationStack {
-          CategoriesView()
+          RewardsView()
         }
       }
 
@@ -202,6 +202,7 @@ private struct RootView: View {
       SettingsView(settings: model.settings) { nextSettings in
         await model.applySettings(nextSettings)
       }
+      .environment(model)
       .interactiveDismissDisabled(!model.settings.isAuthenticated)
       .blocksCapturePresentation()
     }

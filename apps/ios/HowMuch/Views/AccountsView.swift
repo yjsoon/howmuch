@@ -175,6 +175,14 @@ struct AccountsView: View {
       ScheduledTransactionsView()
     }
 
+    let plan = LedgerShortcutTile(
+      icon: "square.grid.2x2",
+      title: "Plan",
+      status: .quiet
+    ) {
+      CategoriesView()
+    }
+
     let allTransactions = LedgerShortcutTile(
       icon: "list.bullet.rectangle",
       title: "All",
@@ -188,6 +196,9 @@ struct AccountsView: View {
         GridRow {
           newTransactions
           scheduled
+        }
+        GridRow {
+          plan
           allTransactions
         }
       } else {
@@ -196,6 +207,9 @@ struct AccountsView: View {
         }
         GridRow {
           scheduled
+        }
+        GridRow {
+          plan
         }
         GridRow {
           allTransactions

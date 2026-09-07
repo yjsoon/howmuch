@@ -88,6 +88,7 @@ struct ReportFilterBar: View {
   var range: Binding<ReportRange>?
   var interval: Binding<ReportInterval>?
   var intervalChoices: [ReportInterval] = []
+  var group: Binding<RewardGroupBy>?
   @Binding var scope: ReportScope
   var showsCategories = false
 
@@ -98,12 +99,14 @@ struct ReportFilterBar: View {
     range: Binding<ReportRange>? = nil,
     interval: Binding<ReportInterval>? = nil,
     intervalChoices: [ReportInterval] = [],
+    group: Binding<RewardGroupBy>? = nil,
     scope: Binding<ReportScope>,
     showsCategories: Bool = false
   ) {
     self.range = range
     self.interval = interval
     self.intervalChoices = intervalChoices
+    self.group = group
     _scope = scope
     self.showsCategories = showsCategories
   }
@@ -116,6 +119,9 @@ struct ReportFilterBar: View {
         }
         if let interval {
           ReportIntervalMenu(interval: interval, choices: intervalChoices)
+        }
+        if let group {
+          RewardGroupMenu(group: group)
         }
         chip(label: accountsLabel, isActive: !scope.accountIDs.isEmpty) {
           isPickingAccounts = true
@@ -242,6 +248,23 @@ struct ReportIntervalMenu: View {
       FilterChip(label: interval.title)
     }
     .accessibilityLabel("Group by, \(interval.title)")
+  }
+}
+
+struct RewardGroupMenu: View {
+  @Binding var group: RewardGroupBy
+
+  var body: some View {
+    Menu {
+      Picker("Group", selection: $group) {
+        ForEach(RewardGroupBy.allCases) { choice in
+          Text(choice.title).tag(choice)
+        }
+      }
+    } label: {
+      FilterChip(label: group.title)
+    }
+    .accessibilityLabel("Group, \(group.title)")
   }
 }
 

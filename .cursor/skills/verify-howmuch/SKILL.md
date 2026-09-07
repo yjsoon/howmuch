@@ -9,7 +9,7 @@ HowMuch has two user surfaces in this repo. Drive the one the change actually to
 
 **Web** (`apps/web`) is the React ledger: first-owner setup, five Reflect reports (including Rewards), register, `/add` quick entry, schedules, tokens, sidebar accounts. There is no monthly Plan edit on the web.
 
-**iOS** (`apps/ios`) is the SwiftUI companion: Accounts / Plan / Reflect, the **Add Transaction** capture sheet, Duplicate for Today, and (when built) typed intake, the `N > 1` review list, Shortcuts App Intents, share, and the screenshot offer. Specs: `docs/frontend/intake-ui.md`, `docs/frontend/app-intents.md`. Issues: [#87](https://github.com/yjsoon/howmuch/issues/87), [#96](https://github.com/yjsoon/howmuch/issues/96) and their children.
+**iOS** (`apps/ios`) is the SwiftUI companion: Accounts / Rewards / Reflect / Assistant, the **Add Transaction** capture sheet, Duplicate for Today, and (when built) typed intake, the `N > 1` review list, Shortcuts App Intents, share, and the screenshot offer. Plan is an Accounts shortcut. Specs: `docs/frontend/intake-ui.md`, `docs/frontend/app-intents.md`. Issues: [#87](https://github.com/yjsoon/howmuch/issues/87), [#96](https://github.com/yjsoon/howmuch/issues/96) and their children.
 
 Not covered here:
 
@@ -88,7 +88,7 @@ xcrun simctl launch "$UDID" sg.soon.howmuch
 
 Computer-use drives the Simulator window, not `{web_url}`. This local installation does not prove or authorize physical-device distribution.
 
-3. Connection (ellipsis **Connection settings** on Accounts, Plan, or Reflect):
+3. Connection (ellipsis **Connection settings** on Accounts, Rewards, or Reflect):
    - **Server** = `{api_url}` from `control-howmuch state` (Simulator: `http://127.0.0.1:{api_port}`). New installs default to `https://howmuch.soon.sg` — change it. HTTP is allowed only for this device or this LAN.
    - **Username** `verifier`, **Password** `howmuch-verify-15`. Choose **Sign in**.
    - Plan becomes `HowMuch Demo` / `local-plan` automatically (only plan on this stack).
@@ -105,6 +105,8 @@ Check the running app, not the spec, before driving a planned recipe. If the han
 | Recipe | Drive when |
 | --- | --- |
 | [iOS connection](features/ios-connection.md) | Connection sheet exists (always) |
+| [iOS rewards](features/ios-rewards.md) | Rewards tab exists |
+| [iOS rewards import](features/ios-rewards-import.md) | Connection **Rewards import** exists |
 | [iOS add account](features/ios-add-account.md) | Accounts trailing plus **New Account** exists |
 | [iOS edit account](features/ios-edit-account.md) | Accounts row **Edit Account** and register title editor exist |
 | [iOS capture](features/ios-capture.md) | Add Transaction sheet exists (always). After #98, Duplicate / + / Quick Action share one door |
@@ -130,7 +132,7 @@ Web browser:
 iOS Simulator:
 
 - Prefer tab titles, navigation titles, and accessibility labels over coordinates.
-- Tab bar: **Accounts**, **Plan**, **Reflect**, plus a search-role **Transaction** tab (plus icon) that opens the capture sheet and does not stay selected.
+- Tab bar: **Accounts**, **Rewards**, **Reflect**, **Assistant**. Capture is the tab-view bottom accessory, not a search-role tab (#133). Plan is an Accounts shortcut.
 - Capture title is **Add Transaction**. Leading **Cancel**. Trailing glass **Save** when the keypad is down. `canSave` is amount + account; payee is optional.
 - Web `/add` is a different product. It does not prove iOS capture.
 
@@ -156,13 +158,13 @@ Stable iOS handles:
 
 | Thing | Handle |
 | --- | --- |
-| Tabs | `Accounts`, `Plan`, `Reflect`, search-role `Transaction` |
+| Tabs | `Accounts`, `Rewards`, `Reflect`, `Assistant` |
 | New account | Accounts trailing `New Account` (plus). Sheet title `New Account` |
 | Connection | `Connection settings` (ellipsis). Sheet title `Connection` |
 | Server field | placeholder `http://192.168.1.10:8787` under header `Server` |
 | Access | `Username`, `Password`, button `Sign in` / `Sign in again` |
 | Sign out | `Sign out / Use another account` |
-| Capture | tab `Transaction`, or home-screen Quick Action `Add Expense` |
+| Capture | tab-view bottom accessory, or home-screen Quick Action `Add Expense` |
 | Capture title | `Add Transaction` (edit is `Transaction`) |
 | Capture cancel | `Cancel` |
 | Capture save | `Save` (hidden while keypad or compose is focused) |

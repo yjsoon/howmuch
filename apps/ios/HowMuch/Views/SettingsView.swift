@@ -131,6 +131,17 @@ struct SettingsView: View {
 
         if sessionMatchesDraft {
           planSection
+          Section {
+            NavigationLink {
+              RewardsImportView()
+            } label: {
+              Text("Rewards import")
+            }
+          } header: {
+            Text("Tools")
+          } footer: {
+            Text("Import a Rewards Tracker for YNAB settings export. This does not connect to live YNAB.")
+          }
         }
 
         Section {
