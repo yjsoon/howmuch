@@ -8,6 +8,7 @@ struct RewardsView: View {
   @State private var report: RewardsReport?
   @State private var phase: LoadPhase = .idle
   @State private var showingImport = false
+  @State private var editorDestination: RewardCardEditorDestination?
 
   var body: some View {
     ScrollView {
@@ -26,6 +27,12 @@ struct RewardsView: View {
           if report.cards.isEmpty {
             emptyState
           } else {
+            Button("Add card") {
+              editorDestination = .create
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.accent)
+            .accessibilityLabel("Add card")
             board(report)
           }
           groupsTable(report)
@@ -53,6 +60,10 @@ struct RewardsView: View {
       }
       .blocksCapturePresentation()
     }
+    .sheet(item: $editorDestination) { destination in
+      RewardCardEditorView(cardID: destination.cardID)
+        .blocksCapturePresentation()
+    }
     .task(id: fetchKey) {
       await fetch()
     }
@@ -65,12 +76,16 @@ struct RewardsView: View {
     "\(model.settings.planID)|\(model.rewardsRefreshGeneration)|\(range.key)|\(scope.key)|\(group.rawValue)"
   }
 
+  private var visibleCards: [RewardsCardRow] {
+    (report?.cards ?? []).filter { !$0.calculation.maximumSpendExceeded }
+  }
+
   private var cashback: [RewardsCardRow] {
-    (report?.cards ?? []).filter { $0.card.type == .cashback }
+    visibleCards.filter { $0.card.type == .cashback }
   }
 
   private var miles: [RewardsCardRow] {
-    (report?.cards ?? []).filter { $0.card.type == .miles }
+    visibleCards.filter { $0.card.type == .miles }
   }
 
   @ViewBuilder
@@ -128,14 +143,19 @@ struct RewardsView: View {
       Text("No reward cards in this range.")
         .font(.headline)
         .foregroundStyle(Theme.textPrimary)
-      Text("Import from Connection settings → Rewards import, or choose accounts that have cards.")
+      Text("Import from Connection settings → Rewards import, or choose Add card.")
         .font(.subheadline)
         .foregroundStyle(.secondary)
-      Button("Rewards import") {
-        showingImport = true
+      Button("Add card") {
+        editorDestination = .create
       }
       .buttonStyle(.borderedProminent)
       .tint(Theme.accent)
+      .accessibilityLabel("Add card")
+      Button("Rewards import") {
+        showingImport = true
+      }
+      .buttonStyle(.bordered)
     }
     .padding(16)
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -158,7 +178,13 @@ struct RewardsView: View {
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(.secondary)
       ForEach(rows) { row in
-        RewardTile(row: row, currencyFormat: model.currencyFormat)
+        Button {
+          editorDestination = .edit(row.card.id)
+        } label: {
+          RewardTile(row: row, currencyFormat: model.currencyFormat)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(row.card.name)
       }
     }
   }
@@ -244,6 +270,29 @@ struct RewardsView: View {
   }
 }
 
+enum RewardCardEditorDestination: Identifiable {
+  case create
+  case edit(String)
+
+  var id: String {
+    switch self {
+    case .create:
+      return "new"
+    case .edit(let cardID):
+      return cardID
+    }
+  }
+
+  var cardID: String? {
+    switch self {
+    case .create:
+      return nil
+    case .edit(let cardID):
+      return cardID
+    }
+  }
+}
+
 private struct RewardTile: View {
   let row: RewardsCardRow
   let currencyFormat: CurrencyFormat?
@@ -314,7 +363,6 @@ private struct RewardTile: View {
     .padding(16)
     .frame(maxWidth: .infinity, alignment: .leading)
     .ynabCard()
-    .opacity(calc.maximumSpendExceeded ? 0.85 : 1)
   }
 
   private var subtitle: String {

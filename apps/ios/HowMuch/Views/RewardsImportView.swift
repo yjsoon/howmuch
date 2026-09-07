@@ -12,6 +12,7 @@ struct RewardsImportView: View {
   @State private var busy = false
   @State private var errorMessage: String?
   @State private var result: RewardsTrackerImportResult?
+  @State private var editorDestination: RewardCardEditorDestination?
 
   var body: some View {
     Form {
@@ -31,6 +32,13 @@ struct RewardsImportView: View {
         Text("Export file")
       } footer: {
         Text("Import a Rewards Tracker for YNAB settings export. Cards, rules, and tag mappings are stored on this plan. Cached YNAB-shaped accounts and transactions in older dumps are upserted by their original IDs, so running the import twice updates the same rows instead of duplicating them. This does not connect to live YNAB.")
+      }
+
+      Section {
+        Text("Import replaces the stored card set.")
+          .font(.headline)
+        Text("Cards omitted from the export are soft-deleted. An empty cards array removes every HowMuch card. Miles valuation in the export replaces a native value when the export sets a finite number.")
+          .foregroundStyle(.secondary)
       }
 
       if let errorMessage {
@@ -69,12 +77,20 @@ struct RewardsImportView: View {
             .foregroundStyle(.secondary)
         } else {
           ForEach(snapshot?.cards ?? []) { card in
-            VStack(alignment: .leading, spacing: 2) {
-              Text(card.name)
-              Text([card.issuer, card.type].compactMap { $0 }.joined(separator: " · "))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Button {
+              editorDestination = .edit(card.id)
+            } label: {
+              VStack(alignment: .leading, spacing: 2) {
+                Text(card.name)
+                  .foregroundStyle(Theme.textPrimary)
+                Text([card.issuer, card.type.rawValue].filter { !$0.isEmpty }.joined(separator: " · "))
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
+              .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(card.name)
           }
         }
       } header: {
@@ -96,6 +112,12 @@ struct RewardsImportView: View {
     }
     .fileImporter(isPresented: $isPicking, allowedContentTypes: [.json], allowsMultipleSelection: false) { outcome in
       choose(outcome)
+    }
+    .sheet(item: $editorDestination, onDismiss: {
+      Task { await refreshSnapshot() }
+    }) { destination in
+      RewardCardEditorView(cardID: destination.cardID)
+        .blocksCapturePresentation()
     }
     .task(id: model.settings.planID) {
       await refreshSnapshot()
@@ -162,10 +184,13 @@ struct RewardsImportView: View {
         payloadJSON: payloadJSON
       )
       result = imported
+      phase = .loaded
       await model.noteRewardsImport()
       await refreshSnapshot()
     } catch {
-      errorMessage = error.localizedDescription
+      let message = error.localizedDescription
+      errorMessage = message
+      phase = .failed(message)
     }
   }
 

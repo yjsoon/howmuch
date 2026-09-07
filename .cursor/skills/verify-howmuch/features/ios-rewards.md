@@ -5,7 +5,7 @@ Rewards is a tab. It shows imported Rewards Tracker cards against the HowMuch le
 ## Sub-features
 
 - `ios-rewards-tab` opens Rewards from the tab bar. Navigation title is `Rewards`.
-- `ios-rewards-empty` on a fresh verify instance, with no export imported, shows `No reward cards in this range.` and a `Rewards import` button.
+- `ios-rewards-empty` on a fresh verify instance, with no export imported, shows `No reward cards in this range.`, **Add card**, and a `Rewards import` button.
 - `ios-rewards-import-then-view` after importing `fixtures/rewards-tracker-export.json` shows Travel Card on All Time.
 - `ios-rewards-flags` lists Dining and Online flag rows on Travel Card.
 - `ios-rewards-group` switches Group to Payee and lists Candlenut.
@@ -13,7 +13,7 @@ Rewards is a tab. It shows imported Rewards Tracker cards against the HowMuch le
 ## How to get to it (user POV)
 
 - Choose **Rewards** in the tab bar.
-- From an empty Rewards screen, choose **Rewards import**, or open **More → Connection settings → Rewards import**.
+- From an empty Rewards screen, choose **Add card** or **Rewards import**, or open **More → Connection settings → Rewards import**.
 - Plan and Reflect are not tabs. Choose **More**, then **Plan** or **Reflect**.
 
 ## Driving it with control-howmuch
@@ -25,7 +25,7 @@ Preconditions:
 - Demo ledger still contains Travel Card spends (Grab, Scoot, MUJI, Candlenut).
 - Xcode Simulator is running HowMuch (`sg.soon.howmuch`). If Simulator is missing, skip this whole file.
 
-- **Open empty.** Choose tab `Rewards`. Navigation title `Rewards`. Date range chip is `All Time`. Status is `No reward cards in this range.` Detail mentions Connection settings → Rewards import. Trailing ellipsis is `More`.
+- **Open empty.** Choose tab `Rewards`. Navigation title `Rewards`. Date range chip is `All Time`. Status is `No reward cards in this range.` Detail mentions Rewards import and **Add card**. Buttons `Add card` and `Rewards import` are present. Trailing ellipsis is `More`.
 - **Import.** Choose `Rewards import`, or Connection settings → `Rewards import`. Choose `fixtures/rewards-tracker-export.json`. Choose `Import export`. Stored cards lists `Travel Card`.
 - **Open filled.** Return to `Rewards` if needed. Pull to refresh. A Miles tile named `Travel Card` is visible. Qualifying spend is greater than `$0.00`. Group chip includes `Flag`, `Payee`, `Category`, `Memo`.
 - **Group by payee.** Choose `Payee`. The groups table heading is `By Payee` and includes `Candlenut`.

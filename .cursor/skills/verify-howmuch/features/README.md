@@ -67,8 +67,9 @@ Keep implementation details out of the map. Name only user paths, stable handles
 iOS (Simulator + same API). Specs in `docs/frontend/intake-ui.md` and `docs/frontend/app-intents.md`.
 
 - [iOS connection](./ios-connection.md) covers pointing Simulator at the verify API, signing in as `verifier`, and refusing production.
-- [iOS rewards](./ios-rewards.md) covers the Rewards tab: empty import copy, Travel Card on All Time, flags, and grouping.
+- [iOS rewards](./ios-rewards.md) covers the Rewards tab: empty **Add card** copy, Travel Card on All Time, flags, and grouping.
 - [iOS rewards import](./ios-rewards-import.md) covers Connection settings → Rewards import and a Rewards Tracker export.
+- [iOS rewards card edit](./ios-rewards-card-edit.md) covers **Add card**, tile edit, Save, Delete card, and hiding a capped tile.
 - [iOS add account](./ios-add-account.md) covers creating a bank account or card from the Accounts plus.
 - [iOS edit account](./ios-edit-account.md) covers changing an account’s name, type, and icon from Accounts or the register.
 - [iOS capture](./ios-capture.md) covers the existing Add Transaction sheet, keypad Save, Duplicate for Today, and the Add Expense Quick Action. After #98 those doors share one sheet.
