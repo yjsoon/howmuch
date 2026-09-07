@@ -1388,6 +1388,27 @@ private enum CapturePasteLoadError: Error {
   case textUnavailable
 }
 
+enum CaptureComposerMetrics {
+  static let minHeight: CGFloat = 44
+  static let maxHeight: CGFloat = 120
+  static let horizontalInset: CGFloat = 4
+
+  static func bodyFont() -> UIFont {
+    UIFont.preferredFont(forTextStyle: .body)
+  }
+
+  static func textContainerInset(for font: UIFont) -> UIEdgeInsets {
+    let vertical = max(8, ((minHeight - font.lineHeight) / 2).rounded())
+    return UIEdgeInsets(top: vertical, left: horizontalInset, bottom: vertical, right: horizontalInset)
+  }
+
+  static func fittedHeight(usedRectHeight: CGFloat, font: UIFont, inset: UIEdgeInsets) -> CGFloat {
+    let line = max(font.lineHeight, 1)
+    let content = max(usedRectHeight, line) + inset.top + inset.bottom
+    return min(max(content.rounded(.up), minHeight), maxHeight)
+  }
+}
+
 struct CaptureComposerField: UIViewRepresentable {
   @Binding var text: String
   @Binding var isComposerFocused: Bool
@@ -1404,9 +1425,11 @@ struct CaptureComposerField: UIViewRepresentable {
     view.onPasteImages = { images in
       context.coordinator.onImages(images)
     }
-    view.font = UIFont.preferredFont(forTextStyle: .body)
+    let font = CaptureComposerMetrics.bodyFont()
+    view.font = font
     view.backgroundColor = .clear
-    view.textContainerInset = UIEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
+    view.textContainer.lineFragmentPadding = 0
+    view.textContainerInset = CaptureComposerMetrics.textContainerInset(for: font)
     view.adjustsFontForContentSizeCategory = true
     view.keyboardDismissMode = .interactive
     return view
@@ -1416,6 +1439,7 @@ struct CaptureComposerField: UIViewRepresentable {
     context.coordinator.text = $text
     context.coordinator.isComposerFocused = $isComposerFocused
     context.coordinator.onImages = onImages
+    applyComposerChrome(uiView)
     if uiView.text != text {
       let selected = uiView.selectedRange
       uiView.text = text
@@ -1428,6 +1452,7 @@ struct CaptureComposerField: UIViewRepresentable {
       pasteView.onPasteImages = { images in
         context.coordinator.onImages(images)
       }
+      pasteView.alignTextToVerticalCenterIfNeeded()
     }
     if claimFocus, !uiView.isFirstResponder {
       _ = uiView.becomeFirstResponder()
@@ -1440,10 +1465,33 @@ struct CaptureComposerField: UIViewRepresentable {
   func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
     let width = proposal.width ?? uiView.bounds.width
     guard width > 0 else {
-      return CGSize(width: 0, height: 44)
+      return CGSize(width: 0, height: CaptureComposerMetrics.minHeight)
     }
-    let fitting = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
-    return CGSize(width: width, height: min(max(fitting.height, 44), 120))
+    applyComposerChrome(uiView)
+    let font = uiView.font ?? CaptureComposerMetrics.bodyFont()
+    uiView.textContainer.size = CGSize(
+      width: max(0, width - uiView.textContainerInset.left - uiView.textContainerInset.right),
+      height: .greatestFiniteMagnitude
+    )
+    uiView.layoutManager.ensureLayout(for: uiView.textContainer)
+    let used = uiView.layoutManager.usedRect(for: uiView.textContainer).height
+    return CGSize(
+      width: width,
+      height: CaptureComposerMetrics.fittedHeight(
+        usedRectHeight: used,
+        font: font,
+        inset: uiView.textContainerInset
+      )
+    )
+  }
+
+  private func applyComposerChrome(_ uiView: UITextView) {
+    let font = uiView.font ?? CaptureComposerMetrics.bodyFont()
+    uiView.textContainer.lineFragmentPadding = 0
+    let inset = CaptureComposerMetrics.textContainerInset(for: font)
+    if uiView.textContainerInset != inset {
+      uiView.textContainerInset = inset
+    }
   }
 
   final class Coordinator: NSObject, UITextViewDelegate {
@@ -1459,6 +1507,7 @@ struct CaptureComposerField: UIViewRepresentable {
 
     func textViewDidChange(_ textView: UITextView) {
       text.wrappedValue = textView.text ?? ""
+      (textView as? PasteAwareTextView)?.alignTextToVerticalCenterIfNeeded()
     }
 
     func textViewDidBeginEditing(_ textView: UITextView) {
@@ -1530,17 +1579,53 @@ final class PasteAwareTextView: UITextView {
     didSet { setNeedsDisplay() }
   }
 
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    alignTextToVerticalCenterIfNeeded()
+  }
+
+  func alignTextToVerticalCenterIfNeeded() {
+    guard bounds.width > 0, bounds.height > 0 else {
+      return
+    }
+    let font = font ?? CaptureComposerMetrics.bodyFont()
+    layoutManager.ensureLayout(for: textContainer)
+    let used = layoutManager.usedRect(for: textContainer).height
+    let contentHeight = max(used, font.lineHeight) + textContainerInset.top + textContainerInset.bottom
+    let slack = max(0, bounds.height - contentHeight)
+    let top = (slack / 2).rounded()
+    let inset = UIEdgeInsets(top: top, left: 0, bottom: slack - top, right: 0)
+    if contentInset != inset {
+      contentInset = inset
+      setNeedsDisplay()
+    }
+    if slack > 0 {
+      if abs(contentOffset.y + top) > 0.5 {
+        contentOffset = CGPoint(x: 0, y: -top)
+      }
+    } else if contentOffset.y < -0.5 {
+      contentOffset = .zero
+    }
+  }
+
   override func draw(_ rect: CGRect) {
     super.draw(rect)
     guard let placeholder, text.isEmpty else {
       return
     }
+    let drawingFont = font ?? CaptureComposerMetrics.bodyFont()
     let attrs: [NSAttributedString.Key: Any] = [
-      .font: font ?? UIFont.preferredFont(forTextStyle: .body),
+      .font: drawingFont,
       .foregroundColor: UIColor.secondaryLabel,
     ]
-    let inset = textContainerInset
-    let drawRect = rect.insetBy(dx: inset.left + 8, dy: inset.top)
+    let dx = textContainerInset.left + textContainer.lineFragmentPadding
+    let dy = textContainerInset.top + contentInset.top
+    let drawRect = CGRect(
+      x: rect.minX + dx,
+      y: rect.minY + dy,
+      width: max(0, rect.width - dx - textContainerInset.right - textContainer.lineFragmentPadding),
+      height: drawingFont.lineHeight
+    )
     placeholder.draw(in: drawRect, withAttributes: attrs)
   }
 

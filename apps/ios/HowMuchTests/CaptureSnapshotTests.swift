@@ -349,6 +349,37 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertTrue(session.composerText.contains("!"))
   }
 
+  func testComposerInsetsCenterBodyLineInMinRow() {
+    let font = CaptureComposerMetrics.bodyFont()
+    let inset = CaptureComposerMetrics.textContainerInset(for: font)
+    XCTAssertEqual(inset.top, inset.bottom)
+    XCTAssertEqual(inset.left, CaptureComposerMetrics.horizontalInset)
+    XCTAssertEqual(inset.right, CaptureComposerMetrics.horizontalInset)
+    let stacked = inset.top + font.lineHeight + inset.bottom
+    if font.lineHeight + 16 <= CaptureComposerMetrics.minHeight {
+      XCTAssertEqual(
+        stacked,
+        CaptureComposerMetrics.minHeight,
+        accuracy: 1,
+        "single-line composer insets must fill the 44pt row: font \(font.lineHeight) inset \(inset.top)"
+      )
+    } else {
+      XCTAssertEqual(inset.top, 8, "large type keeps an 8pt floor rather than a negative inset")
+      XCTAssertGreaterThan(stacked, CaptureComposerMetrics.minHeight)
+    }
+  }
+
+  func testComposerFittedHeightDoesNotClipWrappedUsedRect() {
+    let font = CaptureComposerMetrics.bodyFont()
+    let inset = CaptureComposerMetrics.textContainerInset(for: font)
+    let wrappedUsed = font.lineHeight * 1.2
+    let needed = wrappedUsed + inset.top + inset.bottom
+    let height = CaptureComposerMetrics.fittedHeight(usedRectHeight: wrappedUsed, font: font, inset: inset)
+    XCTAssertGreaterThanOrEqual(height, needed - 0.5, "wrapped usedRect must fit: used \(wrappedUsed) height \(height)")
+    XCTAssertGreaterThan(height, CaptureComposerMetrics.minHeight)
+    XCTAssertLessThanOrEqual(height, CaptureComposerMetrics.maxHeight)
+  }
+
   func testConversationDockStaysPinnedWithIconActionLabels() async {
     let harness = SnapshotHarness.make()
     let session = harness.admitEmpty()
@@ -397,6 +428,34 @@ final class CaptureSnapshotTests: XCTestCase {
     }
     XCTAssertGreaterThanOrEqual(field.bounds.height, 44, "empty composer field must keep the 44pt row: \(field.bounds)")
     XCTAssertLessThanOrEqual(field.bounds.height, 64, "empty composer field must stay compact: \(field.bounds)")
+    field.insertText("Lunch $12")
+    try? await Task.sleep(nanoseconds: 50_000_000)
+    surface.layoutNow()
+    let plusAfter = surface.firstControl(label: "Add a photo, paste, or enter manually") ?? plus
+    let sendAfter = surface.firstControl(label: "Send") ?? send
+    let typedFieldFrame = surface.windowFrame(of: field)
+    let caret = field.caretRect(for: field.endOfDocument)
+    let caretMidY = typedFieldFrame.minY + caret.midY
+    if let plusAfter {
+      XCTAssertEqual(
+        caretMidY,
+        plusAfter.frame.midY,
+        accuracy: 4,
+        "typed composer text must sit on the plus midline: caret \(caretMidY) plus \(plusAfter.frame)"
+      )
+    }
+    if let sendAfter {
+      XCTAssertEqual(
+        caretMidY,
+        sendAfter.frame.midY,
+        accuracy: 4,
+        "typed composer text must sit on the send midline: caret \(caretMidY) send \(sendAfter.frame)"
+      )
+    }
+    field.text = ""
+    session.composerText = ""
+    try? await Task.sleep(nanoseconds: 20_000_000)
+    surface.layoutNow()
     let fieldFrame = surface.windowFrame(of: field)
     let dockLimit = surface.windowBounds.maxY - surface.windowSafeAreaInsets.bottom
     XCTAssertGreaterThan(fieldFrame.maxY, surface.windowBounds.midY, "composer left the dock: \(fieldFrame) window \(surface.windowBounds)")
@@ -406,6 +465,12 @@ final class CaptureSnapshotTests: XCTestCase {
     surface.layoutNow()
     XCTAssertGreaterThan(field.bounds.height, 44, "multiline composer should grow: \(field.bounds)")
     XCTAssertLessThanOrEqual(field.bounds.height, 120, "composer must cap internally: \(field.bounds)")
+    XCTAssertGreaterThanOrEqual(
+      field.contentOffset.y,
+      -0.5,
+      "multiline must drop the single-line centering offset: \(field.contentOffset)"
+    )
+    XCTAssertEqual(field.contentInset.top, 0, accuracy: 0.5, "multiline must drop centering contentInset: \(field.contentInset)")
     XCTAssertEqual(session.composerText, field.text)
     guard let handoff = surface.firstControl(label: "Open in Assistant") else {
       XCTFail("Open in Assistant missing after multiline input in \(surface.accessibilityLabels())")
