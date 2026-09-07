@@ -832,10 +832,9 @@ final class CaptureSnapshotTests: XCTestCase {
         }
         defer { surface.detach() }
         _ = await surface.captureUntilOCR(contains: ["Which"])
-        attachImage(surface.captureVisible(), name: "capture-\(name)-candidates-\(size)")
         for label in labels {
-          guard let control = await revealControl(on: surface, label: label) else {
-            XCTFail("\(size) \(name) missing candidate \(label) in \(surface.accessibilityLabels())")
+          guard let control = await revealControl(on: surface, label: label, requireTimelineVisible: true) else {
+            XCTFail("\(size) \(name) could not scroll candidate \(label) fully into the timeline \(surface.timelineVisibleFrame()) AX \(surface.accessibilityLabels())")
             continue
           }
           XCTAssertNotEqual(
@@ -843,7 +842,13 @@ final class CaptureSnapshotTests: XCTestCase {
             "Account for next message, \(label), change account",
             "candidate \(label) must not be the account chooser"
           )
+          XCTAssertTrue(
+            surface.timelineVisibleFrame().contains(control.frame),
+            "\(size) \(name) \(label) must sit in the timeline, not under the navbar or composer \(control.frame) timeline \(surface.timelineVisibleFrame())"
+          )
           surface.assertMinimumHitTarget(control)
+          let slug = label.replacingOccurrences(of: " ", with: "-")
+          attachImage(surface.captureVisible(), name: "capture-\(name)-candidates-\(size)-\(slug)")
         }
       }
     }
@@ -1170,10 +1175,17 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertTrue(restored.queryCards.isEmpty)
   }
 
-  private func revealControl(on surface: SnapshotSurface, label: String) async -> SnapshotAXNode? {
+  private func revealControl(
+    on surface: SnapshotSurface,
+    label: String,
+    requireTimelineVisible: Bool = false
+  ) async -> SnapshotAXNode? {
     func usable(_ node: SnapshotAXNode) -> Bool {
       guard node.frame.width > 0, node.frame.height > 0 else {
         return false
+      }
+      if requireTimelineVisible {
+        return surface.timelineVisibleFrame().contains(node.frame)
       }
       let visible = node.frame.intersection(surface.windowBounds)
       return visible.width >= min(44, node.frame.width)
