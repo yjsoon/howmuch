@@ -286,6 +286,58 @@ export interface AgeOfMoneyReport {
   }>;
 }
 
+export type RewardCardType = "cashback" | "miles";
+
+export type RewardFlagColour = "red" | "orange" | "yellow" | "green" | "blue" | "purple" | "unflagged";
+
+export interface CardSubcategory {
+  id: string;
+  name: string;
+  flagColor: RewardFlagColour;
+  rewardValue: number;
+  milesBlockSize?: number | null;
+  minimumSpend?: number | null;
+  maximumSpend?: number | null;
+  priority: number;
+  active: boolean;
+  excludeFromRewards?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SpendingTierSubcategory {
+  subcategoryId: string;
+  rewardValue: number;
+  maximumSpend?: number | null;
+}
+
+export interface CardSpendingTier {
+  id: string;
+  spendThreshold: number;
+  earningRate?: number | null;
+  maximumSpend?: number | null;
+  subcategories?: SpendingTierSubcategory[];
+}
+
+export interface CreditCard {
+  id: string;
+  name: string;
+  issuer: string;
+  type: RewardCardType;
+  ynabAccountId: string;
+  billingCycle?: { type: "calendar" | "billing"; dayOfMonth?: number };
+  rewardPeriod?: { monthCount: number; anchorDate: string; monthlyMinimumSpend: number };
+  promotionalPeriod?: { startDate?: string | null; endDate: string; description?: string };
+  featured: boolean;
+  earningRate?: number | null;
+  earningBlockSize?: number | null;
+  minimumSpend?: number | null;
+  maximumSpend?: number | null;
+  subcategoriesEnabled?: boolean;
+  subcategories?: CardSubcategory[];
+  spendingTiers?: CardSpendingTier[];
+}
+
 export interface RewardsReport {
   from: string | null;
   to: string | null;

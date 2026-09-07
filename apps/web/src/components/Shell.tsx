@@ -102,6 +102,8 @@ export function Shell() {
       ?? (location.pathname === "/settings" ? "Settings" : null)
       ?? (location.pathname === "/api-tokens" ? "API tokens" : null)
       ?? (location.pathname === "/import/rewards" ? "Rewards import" : null)
+      ?? (location.pathname === "/rewards/new" ? "Add card" : null)
+      ?? (location.pathname.startsWith("/rewards/") ? "Edit card" : null)
       ?? report?.label;
     document.title = label ? `${label} · HowMuch` : "HowMuch";
   }, [location.pathname, registerLabel]);
@@ -184,7 +186,12 @@ export function Shell() {
             <NavLink
               key={report.to}
               to={{ pathname: report.to, search: location.search }}
-              className={({ isActive }) => (isActive ? "sidebar-report-link sidebar-link-active" : "sidebar-report-link")}
+              className={({ isActive }) => {
+                const active = report.to === "/rewards"
+                  ? location.pathname === "/rewards" || location.pathname.startsWith("/rewards/")
+                  : isActive;
+                return active ? "sidebar-report-link sidebar-link-active" : "sidebar-report-link";
+              }}
             >
               {report.label}
             </NavLink>

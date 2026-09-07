@@ -61,6 +61,108 @@ describe("shouldHandleUnauthorized", () => {
     expect(JSON.parse(String(captured!.init?.body))).toEqual({ expected_cleared: "uncleared", cleared: "cleared" });
   });
 
+  test("creates a reward card with plan_id and the constructed card", async () => {
+    const originalFetch = globalThis.fetch;
+    let captured: { path: string; init?: RequestInit } | null = null;
+    const card = {
+      id: "card_native",
+      name: "Native cashback",
+      issuer: "UOB",
+      type: "cashback" as const,
+      ynabAccountId: "acct-native-card",
+      featured: true,
+      earningRate: 1,
+    };
+    globalThis.fetch = (async (path: string | URL | Request, init?: RequestInit) => {
+      captured = { path: String(path), init };
+      return new Response(JSON.stringify({ data: { card } }), {
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    try {
+      expect(await api.createRewardCard("plan-1", card)).toEqual(card);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(captured).not.toBeNull();
+    expect(captured!.path).toBe("/api/rewards/cards");
+    expect(captured!.init?.method).toBe("POST");
+    expect(JSON.parse(String(captured!.init?.body))).toEqual({ plan_id: "plan-1", card });
+  });
+
+  test("patches a reward card by id", async () => {
+    const originalFetch = globalThis.fetch;
+    let captured: { path: string; init?: RequestInit } | null = null;
+    const card = {
+      id: "card_native",
+      name: "Native cashback",
+      issuer: "UOB",
+      type: "cashback" as const,
+      ynabAccountId: "acct-native-card",
+      featured: true,
+      earningRate: 2,
+    };
+    globalThis.fetch = (async (path: string | URL | Request, init?: RequestInit) => {
+      captured = { path: String(path), init };
+      return new Response(JSON.stringify({ data: { card } }), {
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    try {
+      expect((await api.updateRewardCard("plan-1", "card_native", card)).earningRate).toBe(2);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(captured).not.toBeNull();
+    expect(captured!.path).toBe("/api/rewards/cards/card_native");
+    expect(captured!.init?.method).toBe("PATCH");
+    expect(JSON.parse(String(captured!.init?.body))).toEqual({ plan_id: "plan-1", card });
+  });
+
+  test("deletes a reward card by id", async () => {
+    const originalFetch = globalThis.fetch;
+    let captured: { path: string; init?: RequestInit } | null = null;
+    globalThis.fetch = (async (path: string | URL | Request, init?: RequestInit) => {
+      captured = { path: String(path), init };
+      return new Response(JSON.stringify({ data: { card: { id: "card_native" } } }), {
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    try {
+      expect((await api.deleteRewardCard("plan-1", "card_native")).id).toBe("card_native");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(captured).not.toBeNull();
+    expect(captured!.path).toBe("/api/rewards/cards/card_native");
+    expect(captured!.init?.method).toBe("DELETE");
+    expect(JSON.parse(String(captured!.init?.body))).toEqual({ plan_id: "plan-1" });
+  });
+
+  test("patches miles valuation on reward settings", async () => {
+    const originalFetch = globalThis.fetch;
+    let captured: { path: string; init?: RequestInit } | null = null;
+    globalThis.fetch = (async (path: string | URL | Request, init?: RequestInit) => {
+      captured = { path: String(path), init };
+      return new Response(JSON.stringify({ data: { settings: { milesValuation: 0.04 } } }), {
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    try {
+      expect((await api.updateRewardSettings("plan-1", { milesValuation: 0.04 })).milesValuation).toBe(0.04);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(captured).not.toBeNull();
+    expect(captured!.path).toBe("/api/rewards/settings");
+    expect(captured!.init?.method).toBe("PATCH");
+    expect(JSON.parse(String(captured!.init?.body))).toEqual({ plan_id: "plan-1", milesValuation: 0.04 });
+  });
+
   test("treats account preferences as optional on an older server", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => new Response(JSON.stringify({

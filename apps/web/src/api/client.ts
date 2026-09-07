@@ -7,6 +7,7 @@ import type {
   AccountReconciliationResult,
   AgeOfMoneyReport,
   CategoryGroup,
+  CreditCard,
   IncomeVsSpendingReport,
   NetWorthReport,
   Payee,
@@ -330,15 +331,29 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ plan_id: planId, payload }),
     }),
+  createRewardCard: (planId: string, card: CreditCard) =>
+    request<{ card: CreditCard }>("/api/rewards/cards", {
+      method: "POST",
+      body: JSON.stringify({ plan_id: planId, card }),
+    }).then((data) => data.card),
+  updateRewardCard: (planId: string, cardId: string, card: CreditCard) =>
+    request<{ card: CreditCard }>(`/api/rewards/cards/${encodeURIComponent(cardId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ plan_id: planId, card }),
+    }).then((data) => data.card),
+  deleteRewardCard: (planId: string, cardId: string) =>
+    request<{ card: CreditCard }>(`/api/rewards/cards/${encodeURIComponent(cardId)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ plan_id: planId }),
+    }).then((data) => data.card),
+  updateRewardSettings: (planId: string, settings: { milesValuation: number }) =>
+    request<{ settings: { milesValuation?: number } }>("/api/rewards/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ plan_id: planId, milesValuation: settings.milesValuation }),
+    }).then((data) => data.settings),
 };
 
-export type RewardsTrackerCard = {
-  id: string;
-  name: string;
-  issuer?: string;
-  type?: string;
-  ynabAccountId: string;
-};
+export type RewardsTrackerCard = CreditCard;
 
 export type RewardsTrackerSnapshot = {
   snapshot: { cards?: RewardsTrackerCard[]; settings?: Record<string, unknown> } | null;
