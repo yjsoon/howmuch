@@ -11,8 +11,9 @@ import type {
   ScheduledTransaction,
   Transaction,
 } from "../api/types";
-import { FlagTag } from "../components/FlagTag";
+import { colourNamesByAccount, ledgerFlagNames, namedFlagLabel } from "../lib/reward-flag-names";
 import { FilterRail } from "../components/FilterRail";
+import { FlagTag } from "../components/FlagTag";
 import { RegisterComposeRow } from "../components/RegisterComposeRow";
 import { RegisterEditableRow, type RowEditSurface } from "../components/RegisterEditableRow";
 import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
@@ -91,6 +92,11 @@ export function TransactionsPage() {
   const { filters, setFilters } = useFilters({ defaultRange: () => trailingMonthsRange(2) });
   const { accounts, categoryGroups, planId, reload } = usePlan();
   const payees = useApi(planId, () => api.payees(planId));
+  const rewardsSnapshot = useApi(`${planId}:reward-flag-names`, () => api.rewardsTrackerSnapshot(planId));
+  const colourNamesByAccountId = useMemo(
+    () => colourNamesByAccount(rewardsSnapshot.data?.cards),
+    [rewardsSnapshot.data],
+  );
   const [params] = useSearchParams();
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
@@ -1434,6 +1440,7 @@ export function TransactionsPage() {
                       categoryGroups={categoryGroups}
                       disabled={mutationBusy && mutatingId !== "compose"}
                       focusNonce={composeFocus}
+                      flagNames={ledgerFlagNames(colourNamesByAccountId.get(compose.draft.accountId) ?? {})}
                       onChange={setCompose}
                       onCancel={() => {
                         setCompose(closedCompose());
@@ -1510,7 +1517,8 @@ export function TransactionsPage() {
                               onToggle={() => void toggleCleared(txn)}
                             />
                           )}
-                          payeeExtra={<FlagTag colour={txn.flag_color} name={txn.flag_name} />}
+                          payeeExtra={<FlagTag colour={txn.flag_color} name={namedFlagLabel(colourNamesByAccountId.get(txn.account_id), txn.flag_color, txn.flag_name)} />}
+                          flagNames={ledgerFlagNames(colourNamesByAccountId.get(txn.account_id) ?? {})}
                         />,
                         ...(txn.subtransactions ?? []).map((sub) => (
                           <RegisterEditableRow
@@ -1584,7 +1592,8 @@ export function TransactionsPage() {
                           onToggle={() => void toggleCleared(txn)}
                         />
                       )}
-                      payeeExtra={<FlagTag colour={txn.flag_color} name={txn.flag_name} />}
+                      payeeExtra={<FlagTag colour={txn.flag_color} name={namedFlagLabel(colourNamesByAccountId.get(txn.account_id), txn.flag_color, txn.flag_name)} />}
+                      flagNames={ledgerFlagNames(colourNamesByAccountId.get(txn.account_id) ?? {})}
                     />,
                     ...(txn.subtransactions ?? []).map((sub) => (
                       <RegisterEditableRow

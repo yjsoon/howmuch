@@ -1724,8 +1724,29 @@ a.page-eyebrow:hover {
 .flag-picker {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   gap: 6px;
+}
+
+.flag-picker-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 22px;
+}
+
+.flag-picker-caption {
+  max-width: 52px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .flag-picker-none {
@@ -4142,6 +4163,24 @@ a.rewards-tile:hover {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+.rewards-colour-names {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px 16px;
+  margin: 8px 0 4px;
+}
+
+.rewards-colour-name-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.rewards-colour-name-row .field {
+  margin-bottom: 0;
 }
 
 .rewards-editor-row .transaction-editor-checkbox {

@@ -2,6 +2,7 @@ import { createId } from "../ids";
 import { NotFoundError, ValidationError } from "../repository";
 import { sanitizeSettings } from "../importers/rewards-tracker";
 import type { LedgerStore } from "../storage";
+import { cardFlagNames, flagNameForColour } from "./flag-names";
 import { parseAppSettings, parseCreditCardWrite } from "./parse";
 import type { AppSettings, CreditCard } from "./types";
 
@@ -16,6 +17,7 @@ export async function createRewardsCard(repo: LedgerStore, planId: string, raw: 
   const id = optionalString(draft.id) ?? createId("card");
   const card = parseCreditCardWrite({ ...draft, id, ynabAccountId: accountId });
   await repo.upsertRewardsTrackerCard(planId, card);
+  await retitleAccountFlagNames(repo, planId, card);
   return card;
 }
 
@@ -34,7 +36,39 @@ export async function patchRewardsCard(
   }
   const card = parseCreditCardWrite({ ...draft, ynabAccountId: accountId });
   await repo.upsertRewardsTrackerCard(planId, card);
+  await retitleAccountFlagNames(repo, planId, card);
   return card;
+}
+
+export async function stampTransactionFlagName(
+  repo: LedgerStore,
+  planId: string,
+  accountId: string,
+  patch: { flag_color?: string | null; flag_name?: string | null },
+): Promise<void> {
+  if (!Object.prototype.hasOwnProperty.call(patch, "flag_color")) return;
+  if (Object.prototype.hasOwnProperty.call(patch, "flag_name")) return;
+  const stored = await repo.getRewardsTrackerSnapshot(planId);
+  const card = stored.cards.find((entry) => {
+    return Boolean(entry && typeof entry === "object" && !Array.isArray(entry) && (entry as { ynabAccountId?: string }).ynabAccountId === accountId);
+  }) as CreditCard | undefined;
+  if (!card) return;
+  patch.flag_name = flagNameForColour(cardFlagNames(card), patch.flag_color ?? null);
+}
+
+async function retitleAccountFlagNames(repo: LedgerStore, planId: string, card: CreditCard): Promise<void> {
+  if (!card.flagNames) return;
+  const rows = await repo.listTransactions(planId, { accountId: card.ynabAccountId });
+  const edits = [];
+  for (const txn of rows) {
+    const colour = typeof txn.flag_color === "string" && txn.flag_color ? txn.flag_color : "unflagged";
+    if (!Object.prototype.hasOwnProperty.call(card.flagNames, colour)) continue;
+    const next = card.flagNames[colour] ?? null;
+    if ((txn.flag_name ?? null) === next) continue;
+    edits.push({ lookup: { kind: "id" as const, id: String(txn.id) }, patch: { flag_name: next } });
+  }
+  if (edits.length === 0) return;
+  await repo.updateTransactions(planId, edits);
 }
 
 export async function deleteRewardsCard(repo: LedgerStore, planId: string, cardId: string): Promise<object> {

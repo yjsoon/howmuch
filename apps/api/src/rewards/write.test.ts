@@ -9,6 +9,7 @@ import {
   patchRewardsCard,
   patchRewardsSettings,
   RewardsAccountError,
+  stampTransactionFlagName,
 } from "./write";
 
 let db: Database;
@@ -64,6 +65,18 @@ describe("parseCreditCardWrite", () => {
       issuer: "DBS",
       type: "cashback",
     })).toThrow(ValidationError);
+  });
+
+  test("keeps named ledger colours on the card", () => {
+    const card = parseCreditCardWrite({
+      id: "card-1",
+      name: "Travel Card",
+      issuer: "UOB",
+      type: "cashback",
+      ynabAccountId: "acct-rewards",
+      flagNames: { red: "Dining", blue: " Online ", pink: "Nope" },
+    });
+    expect(card.flagNames).toEqual({ red: "Dining", blue: "Online" });
   });
 });
 
@@ -170,6 +183,88 @@ describe("native rewards card writes", () => {
     expect(settings).toMatchObject({ currency: "SGD", milesValuation: 0.04 });
     expect(snapshotSettings).toEqual({ currency: "SGD", milesValuation: 0.04 });
     expect(snapshotSettings).not.toHaveProperty("cloudSyncMnemonic");
+  });
+
+  test("persists colour names and retitles that account only", async () => {
+    await repo.upsertAccount("plan-test", { id: "acct-other", name: "Everyday Account", type: "checking" });
+    await repo.createTransaction("plan-test", {
+      id: "txn-red",
+      account_id: "acct-rewards",
+      date: "2026-03-02",
+      amount: -1000,
+      flag_color: "red",
+      flag_name: "Red",
+    });
+    await repo.createTransaction("plan-test", {
+      id: "txn-blue",
+      account_id: "acct-rewards",
+      date: "2026-03-03",
+      amount: -2000,
+      flag_color: "blue",
+    });
+    await repo.createTransaction("plan-test", {
+      id: "txn-other-red",
+      account_id: "acct-other",
+      date: "2026-03-02",
+      amount: -3000,
+      flag_color: "red",
+      flag_name: "Red",
+    });
+
+    const card = await createRewardsCard(repo, "plan-test", {
+      id: "card-travel",
+      name: "Travel Card",
+      type: "cashback",
+      ynabAccountId: "acct-rewards",
+      flagNames: { red: "Dining", blue: "Online" },
+    });
+    expect(card.flagNames).toEqual({ red: "Dining", blue: "Online" });
+    expect((await repo.getTransaction("plan-test", "txn-red")).flag_name).toBe("Dining");
+    expect((await repo.getTransaction("plan-test", "txn-blue")).flag_name).toBe("Online");
+    expect((await repo.getTransaction("plan-test", "txn-other-red")).flag_name).toBe("Red");
+  });
+
+  test("does not wipe existing flag names when colour names are omitted", async () => {
+    await repo.createTransaction("plan-test", {
+      id: "txn-named",
+      account_id: "acct-rewards",
+      date: "2026-03-02",
+      amount: -1000,
+      flag_color: "red",
+      flag_name: "Dining",
+    });
+    await createRewardsCard(repo, "plan-test", {
+      id: "card-unnamed",
+      name: "Travel Card",
+      type: "cashback",
+      ynabAccountId: "acct-rewards",
+    });
+    expect((await repo.getTransaction("plan-test", "txn-named")).flag_name).toBe("Dining");
+  });
+
+  test("stamps a transaction flag name from the tracked card", async () => {
+    await createRewardsCard(repo, "plan-test", {
+      id: "card-travel",
+      name: "Travel Card",
+      type: "cashback",
+      ynabAccountId: "acct-rewards",
+      flagNames: { red: "Dining" },
+    });
+    const stamped: { flag_color?: string | null; flag_name?: string | null } = { flag_color: "red" };
+    await stampTransactionFlagName(repo, "plan-test", "acct-rewards", stamped);
+    expect(stamped.flag_name).toBe("Dining");
+
+    const unnamed: { flag_color?: string | null; flag_name?: string | null } = { flag_color: "orange" };
+    await stampTransactionFlagName(repo, "plan-test", "acct-rewards", unnamed);
+    expect(unnamed.flag_name).toBeNull();
+
+    const explicit: { flag_color?: string | null; flag_name?: string | null } = { flag_color: "red", flag_name: "Keep me" };
+    await stampTransactionFlagName(repo, "plan-test", "acct-rewards", explicit);
+    expect(explicit.flag_name).toBe("Keep me");
+
+    const other: { flag_color?: string | null; flag_name?: string | null } = { flag_color: "red" };
+    await stampTransactionFlagName(repo, "plan-test", "acct-missing", other);
+    expect(other).not.toHaveProperty("flag_name");
   });
 
   test("treats a closed account as live", async () => {

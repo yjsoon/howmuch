@@ -200,4 +200,63 @@ final class RewardCardEditorTests: XCTestCase {
     draft.selectAccount(id: "acct-loc", from: [travel, loc])
     XCTAssertEqual(draft.name, "Verify cashback")
   }
+
+  func testWriteEncodesAccountColourNames() throws {
+    var draft = RewardCardDraft.empty()
+    draft.name = "Travel Card"
+    draft.issuer = "UOB"
+    draft.type = .cashback
+    draft.ynabAccountId = "acct-credit"
+    draft.earningRate = "1"
+    draft.flagNames = [.red: "Dining", .blue: " Online "]
+    draft.addFlag(
+      RewardFlagDraft.fresh(priority: "1", name: "Dining Out", flagColor: .red, rewardValue: "4")
+    )
+
+    let card = try draft.write()
+    let payload = card.jsonObject(clearMissing: false)
+    XCTAssertEqual(card.flagNames?["red"], "Dining")
+    XCTAssertEqual(card.flagNames?["blue"], "Online")
+    XCTAssertEqual(card.subcategories?.first?.name, "Dining")
+    XCTAssertEqual((payload["flagNames"] as? [String: String])?["red"], "Dining")
+    XCTAssertEqual((payload["flagNames"] as? [String: String])?["blue"], "Online")
+  }
+
+  func testColourNamesOverlayLedgerTitles() throws {
+    let json = """
+    {
+      "id": "card-travel",
+      "name": "Travel Card",
+      "issuer": "DBS",
+      "type": "miles",
+      "ynabAccountId": "acct-credit",
+      "featured": true,
+      "subcategories": [
+        {
+          "id": "subcat-dining",
+          "name": "Dining Out",
+          "flagColor": "red",
+          "rewardValue": 4,
+          "priority": 1,
+          "active": true,
+          "createdAt": "2026-01-15T00:00:00.000Z",
+          "updatedAt": "2026-01-15T00:00:00.000Z"
+        }
+      ],
+      "flagNames": { "red": "Dining", "blue": "Online" }
+    }
+    """
+    let card = try JSONDecoder().decode(CreditCard.self, from: Data(json.utf8))
+    XCTAssertEqual(card.flagNames?["red"], "Dining")
+    XCTAssertEqual(card.flagNames?["blue"], "Online")
+
+    let draft = RewardCardDraft(card: card)
+    XCTAssertEqual(draft.flagNames[.red], "Dining")
+    XCTAssertEqual(draft.flagNames[.blue], "Online")
+    XCTAssertEqual(draft.ledgerTitle(for: .red), "Dining")
+    XCTAssertEqual(draft.ledgerTitle(for: .blue), "Online")
+    XCTAssertEqual(draft.ledgerTitle(for: .green), "Green")
+    XCTAssertEqual(draft.ledgerTitle(for: .none), "None")
+    XCTAssertEqual(draft.displayName(for: draft.flags[0]), "Dining")
+  }
 }

@@ -1,4 +1,5 @@
 import { ValidationError } from "../repository";
+import { parseCardFlagNames } from "./flag-names";
 import { UNFLAGGED_FLAG, YNAB_FLAG_COLORS, type YnabFlagColor } from "./flags";
 import type {
   AppSettings,
@@ -104,6 +105,8 @@ export function parseCreditCardWrite(value: unknown): CreditCard {
   if (subcategories) card.subcategories = subcategories;
   const spendingTiers = parseSpendingTiers(raw.spendingTiers);
   if (spendingTiers) card.spendingTiers = spendingTiers;
+  const flagNames = parseCardFlagNames(raw.flagNames);
+  if (flagNames) card.flagNames = flagNames;
   return card;
 }
 

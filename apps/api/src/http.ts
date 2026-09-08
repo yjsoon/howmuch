@@ -16,6 +16,7 @@ import {
   patchRewardsCard,
   patchRewardsSettings,
   RewardsAccountError,
+  stampTransactionFlagName,
 } from "./rewards/write";
 import type { LedgerStore, ReportStore } from "./storage";
 import { SQLiteAuthStore, type AuthStore, type AuthUser } from "./auth-store";
@@ -447,6 +448,7 @@ async function handleV1(
         });
       }
       try {
+        await stampTransactionFlagName(repo, planId, input.account_id, input);
         const created = await repo.createTransaction(planId, input);
         return json({ data: { transaction: created, transaction_ids: [created.id], server_knowledge: await repo.getServerKnowledge(planId) } }, 201);
       } catch (error) {
@@ -489,7 +491,12 @@ async function handleV1(
     }
     if (segments.length === 5 && (method === "PUT" || method === "PATCH")) {
       const body = await readJson(request);
-      const updated = await repo.updateTransaction(planId, transactionId, body.transaction ?? body);
+      const patch = body.transaction ?? body;
+      if (Object.prototype.hasOwnProperty.call(patch, "flag_color") && !Object.prototype.hasOwnProperty.call(patch, "flag_name")) {
+        const existing = await repo.getTransaction(planId, transactionId);
+        await stampTransactionFlagName(repo, planId, existing.account_id, patch);
+      }
+      const updated = await repo.updateTransaction(planId, transactionId, patch);
       return json({ data: { transaction: updated, server_knowledge: await repo.getServerKnowledge(planId) } });
     }
     if (segments.length === 5 && method === "DELETE") {
