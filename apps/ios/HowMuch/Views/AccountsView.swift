@@ -304,7 +304,6 @@ struct AccountsView: View {
         DestinationsMenu()
       }
     }
-    .moreDestinations()
     .refreshable {
       await model.refreshAll()
     }

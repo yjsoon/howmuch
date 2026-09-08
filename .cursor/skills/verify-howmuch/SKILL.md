@@ -9,7 +9,7 @@ HowMuch has two user surfaces in this repo. Drive the one the change actually to
 
 **Web** (`apps/web`) is the React ledger: first-owner setup, five Reflect reports (including Rewards), register, `/add` quick entry, schedules, tokens, sidebar accounts. There is no monthly Plan edit on the web.
 
-**iOS** (`apps/ios`) is the SwiftUI companion: Accounts / Rewards / Assistant, a search-role **Add Transactions** tab, the **Add Transaction** capture sheet, Duplicate for Today, and (when built) typed intake, the `N > 1` review list, Shortcuts App Intents, share, and the screenshot offer. Plan and Reflect open from trailing **More**. Specs: `docs/frontend/intake-ui.md`, `docs/frontend/app-intents.md`. Issues: [#87](https://github.com/yjsoon/howmuch/issues/87), [#96](https://github.com/yjsoon/howmuch/issues/96) and their children.
+**iOS** (`apps/ios`) is the SwiftUI companion: Accounts / Rewards / Reflect, a floating **Add Transactions** plus, the **Add Transaction** capture sheet, Duplicate for Today, and (when built) typed intake, the `N > 1` review list, Shortcuts App Intents, share, and the screenshot offer. Plan and Assistant open from trailing **More**. Specs: `docs/frontend/intake-ui.md`, `docs/frontend/app-intents.md`. Issues: [#87](https://github.com/yjsoon/howmuch/issues/87), [#96](https://github.com/yjsoon/howmuch/issues/96) and their children.
 
 Not covered here:
 
@@ -88,7 +88,7 @@ xcrun simctl launch "$UDID" sg.soon.howmuch
 
 Computer-use drives the Simulator window, not `{web_url}`. This local installation does not prove or authorize physical-device distribution.
 
-3. Connection (**More → Connection settings** on Accounts, Rewards, or Assistant):
+3. Connection (**More → Connection settings** on Accounts, Rewards, or Reflect):
    - **Server** = `{api_url}` from `control-howmuch state` (Simulator: `http://127.0.0.1:{api_port}`). New installs default to `https://howmuch.soon.sg` — change it. HTTP is allowed only for this device or this LAN.
    - **Username** `verifier`, **Password** `howmuch-verify-15`. Choose **Sign in**.
    - Plan becomes `HowMuch Demo` / `local-plan` automatically (only plan on this stack).
@@ -132,7 +132,7 @@ Web browser:
 iOS Simulator:
 
 - Prefer tab titles, navigation titles, and accessibility labels over coordinates.
-- Tab bar: **Accounts**, **Rewards**, **Assistant**, plus a search-role **Add Transactions** tab (plus icon) that opens capture and does not stay selected. Plan and Reflect are **More** menu items, not tabs.
+- Tab bar: **Accounts**, **Rewards**, **Reflect**, plus a floating **Add Transactions** plus that opens capture and does not change the selected tab. Plan and Assistant are **More** menu items, not tabs.
 - Capture title is **Add Transaction**. Leading **Cancel**. Trailing glass **Save** when the keypad is down. `canSave` is amount + account; payee is optional.
 - Web `/add` is a different product. It does not prove iOS capture.
 
@@ -158,14 +158,14 @@ Stable iOS handles:
 
 | Thing | Handle |
 | --- | --- |
-| Tabs | `Accounts`, `Rewards`, `Assistant`, search-role `Add Transactions` |
+| Tabs | `Accounts`, `Rewards`, `Reflect`. Floating plus `Add Transactions` |
 | New account | Accounts trailing `New Account` (plus). Sheet title `New Account` |
-| More | `More` (ellipsis). Items `Plan`, `Reflect`, `Connection settings` |
+| More | `More` (ellipsis). Items `Plan`, `Assistant`, `Connection settings` |
 | Connection | `Connection settings` (inside More). Sheet title `Connection` |
 | Server field | placeholder `http://192.168.1.10:8787` under header `Server` |
 | Access | `Username`, `Password`, button `Sign in` / `Sign in again` |
 | Sign out | `Sign out / Use another account` |
-| Capture | search-role tab `Add Transactions`, or home-screen Quick Action `Add Expense` |
+| Capture | floating plus `Add Transactions`, or home-screen Quick Action `Add Expense` |
 | Capture title | `Add Transaction` (edit is `Transaction`) |
 | Capture cancel | `Cancel` |
 | Capture save | `Save` (hidden while keypad or compose is focused) |
