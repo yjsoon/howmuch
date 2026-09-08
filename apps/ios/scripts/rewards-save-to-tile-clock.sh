@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 OCR="$ROOT/apps/ios/scripts/ocr-screenshot.swift"
 NEEDLE="${NEEDLE:-verify cashback}"
 MAX_MS="${MAX_MS:-2000}"
-INTERVAL_MS="${INTERVAL_MS:-70}"
+INTERVAL_MS="${INTERVAL_MS:-0}"
 
 die() {
   echo "$1" >&2
@@ -65,7 +65,9 @@ score() {
     [[ -f "$path" ]] || continue
     text="$(swift "$OCR" "$path" 2>/dev/null || true)"
     lowered="$(printf '%s' "$text" | tr '[:upper:]' '[:lower:]')"
-    if grep -Fq "$needle" <<<"$lowered" && grep -Fq "rewards" <<<"$lowered"; then
+    # The Add card sheet sits on Rewards, so OCR can see the nav title plus the
+    # name field before Save has landed. Skip editor frames ("New card").
+    if grep -Fq "$needle" <<<"$lowered" && grep -Fq "rewards" <<<"$lowered" && ! grep -Fq "new card" <<<"$lowered"; then
       echo "$elapsed"
       printf '%s\n' "$text" >"$dir/hit.txt"
       echo "$idx" >"$dir/hit-frame.txt"
@@ -87,8 +89,9 @@ Fill Add card first. Then:
   apps/ios/scripts/rewards-save-to-tile-clock.sh capture "$DIR"
   apps/ios/scripts/rewards-save-to-tile-clock.sh score "$DIR"
 
-score prints elapsed ms for the first simctl frame whose OCR contains both
-"Verify cashback" and "Rewards". Median of three samples must be ≤800.
+score prints elapsed ms for the first simctl frame whose OCR contains
+"Verify cashback" and "Rewards" and does not contain "New card" (the Add card
+editor). Median of three samples must be ≤800.
 EOF
 }
 

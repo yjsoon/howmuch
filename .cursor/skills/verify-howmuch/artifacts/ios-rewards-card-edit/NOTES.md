@@ -34,22 +34,27 @@ All Time throughout. Demo Travel Card spends remain 2026-03-01 through 2026-05-2
 
 ## Save-to-tile (product clock)
 
-Darwin HowMuch Verification. `axe describe-ui` was used only to drive the form, never as t0 or as the wait. After filling Add card (`Verify cashback`, Travel Card `acct-credit`, earning rate `1`):
+Darwin HowMuch Verification, only that Simulator booted (`simctl io booted` is this UDID). `control-howmuch` run `20260908T084259-43409` as `verifier`. Fill Add card first (`Verify cashback` / UOB / Cashback / Travel Card `acct-credit`). Then:
 
-1. `time.perf_counter()` immediately before `axe tap` on Save (no dump).
-2. Tight loop of `xcrun simctl io BA2CAD1A-0977-4290-8486-760091B333AE screenshot` (PNG). No OCR in the loop.
-3. After the burst, Vision OCR on each frame. Hit = first screenshot whose text has `Verify cashback` on the Rewards board (nav title `Rewards`, not the Add card editor).
+```sh
+DIR=$(apps/ios/scripts/rewards-save-to-tile-clock.sh begin)
+# single axe tap on Save at (351, 103); not describe-ui
+apps/ios/scripts/rewards-save-to-tile-clock.sh capture "$DIR"
+apps/ios/scripts/rewards-save-to-tile-clock.sh score "$DIR"
+```
 
-| Sample | hit_ms | first tile frame |
-| --- | --- | --- |
-| 1 | 591 | `/tmp/s2t-run/1/02.png` |
-| 2 | 640 | `/tmp/s2t-run/2/02.png` |
-| 3 | 598 | `/tmp/s2t-run/3/02.png` |
-| **median** | **598** | |
+`begin` writes t0. Capture is `xcrun simctl io booted screenshot` with no extra sleep. Score OCRs afterwards. Hit = first frame whose text has `Verify cashback` and `Rewards` and does **not** have `New card` (the editor sits on Rewards, so the name field plus the nav title would false-hit).
 
-Median is under 800 ms. Frames 00–01 in each sample were still the Add card editor. Product SHA for this clock includes `fix(ios): show Rewards tile without waiting on full refresh` (`noteRewardsBoardChanged` + animation-free dismiss instead of `await refreshAll`).
+| Sample | hit_ms | dir | hit-frame |
+| --- | --- | --- | --- |
+| 1 | 694 | `/tmp/ios-save-tile.AtYyhd` | 001 |
+| 2 | 701 | `/tmp/ios-save-tile.GyaTZX` | 001 |
+| 3 | 688 | `/tmp/ios-save-tile.UHcwpX` | 001 |
+| **median** | **694** | | |
 
-An earlier accessibility dump after Save was ~1.6 s; that is axe overhead, not this product clock.
+Each hit frame is the Rewards board with Cashback tile `Verify cashback` / `UOB · Travel Card`. Frame 000 in each sample was still Add card. Median is under 800 ms.
+
+An earlier pass that scored frame 000 (559 / 692 / 465) was the open editor. Discarded. An `axe describe-ui` dump after Save is ~1.6 s and is not this clock.
 
 ## Review video
 
