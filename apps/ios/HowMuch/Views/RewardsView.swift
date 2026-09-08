@@ -53,7 +53,6 @@ struct RewardsView: View {
         DestinationsMenu()
       }
     }
-    .moreDestinations()
     .sheet(isPresented: $showingImport) {
       NavigationStack {
         RewardsImportView()

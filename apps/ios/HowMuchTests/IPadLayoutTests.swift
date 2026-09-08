@@ -11,6 +11,7 @@ final class IPadLayoutTests: XCTestCase {
     guard let surface = SnapshotSurface(
       root: AccountsView()
         .environment(harness.model)
+        .environment(RootChromeState())
         .environment(\.horizontalSizeClass, .regular),
       size: CGSize(width: 1180, height: 820)
     ) else {
@@ -53,6 +54,7 @@ final class IPadLayoutTests: XCTestCase {
     guard let surface = SnapshotSurface(
       root: AccountsView()
         .environment(harness.model)
+        .environment(RootChromeState())
         .environment(\.horizontalSizeClass, .compact),
       size: CGSize(width: 390, height: 844)
     ) else {
@@ -231,31 +233,107 @@ final class IPadLayoutTests: XCTestCase {
     )
   }
 
-  func testPhoneKeepsPlanAndReflectInMoreEvenWhenRegularWidth() {
+  func testPhoneDoesNotUseSidebarEvenWhenRegularWidth() {
     XCTAssertFalse(
-      RootChrome.usesSidebarDestinations(idiom: .phone, horizontalSizeClass: .compact)
+      RootChrome.usesSidebar(idiom: .phone, horizontalSizeClass: .compact)
     )
     XCTAssertFalse(
-      RootChrome.usesSidebarDestinations(idiom: .phone, horizontalSizeClass: .regular)
+      RootChrome.usesSidebar(idiom: .phone, horizontalSizeClass: .regular)
     )
   }
 
-  func testPadRegularUsesSidebarDestinations() {
+  func testPadRegularUsesSidebar() {
     XCTAssertTrue(
-      RootChrome.usesSidebarDestinations(idiom: .pad, horizontalSizeClass: .regular)
+      RootChrome.usesSidebar(idiom: .pad, horizontalSizeClass: .regular)
     )
     XCTAssertFalse(
-      RootChrome.usesSidebarDestinations(idiom: .pad, horizontalSizeClass: .compact)
+      RootChrome.usesSidebar(idiom: .pad, horizontalSizeClass: .compact)
     )
   }
 
-  func testAppTabCaptureSurfaceMapsPlanAndReflect() {
+  func testAppTabMapsCompactAndSidebarDestinations() {
+    XCTAssertEqual(AppTab.compactDestinations, [.accounts, .rewards, .reflect])
     XCTAssertEqual(AppTab.accounts.captureSurface, .accounts)
     XCTAssertEqual(AppTab.rewards.captureSurface, .rewards)
-    XCTAssertEqual(AppTab.assistant.captureSurface, .assistant)
-    XCTAssertEqual(AppTab.plan.captureSurface, .plan)
     XCTAssertEqual(AppTab.reflect.captureSurface, .reflect)
-    XCTAssertNil(AppTab.add.captureSurface)
+    XCTAssertEqual(AppTab.plan.captureSurface, .plan)
+    XCTAssertEqual(AppTab.assistant.captureSurface, .assistant)
+  }
+
+  func testOpenMorePlanFromAccountsDoesNotLeakFocusedRegister() {
+    let model = AppModel()
+    let chrome = RootChromeState()
+    chrome.tab = .accounts
+    model.activeCaptureSurface = chrome.captureSurface
+    model.beginFocusedRegisterAccount("acct-everyday")
+    XCTAssertEqual(model.visibleRegisterAccountID, "acct-everyday")
+    XCTAssertEqual(model.addTransactionsOrigin(), .visibleRegister(accountID: "acct-everyday"))
+
+    chrome.openMore(.plan)
+    model.activeCaptureSurface = chrome.captureSurface
+    XCTAssertEqual(chrome.captureSurface, .plan)
+    XCTAssertEqual(chrome.overflow(on: .accounts), .plan)
+    XCTAssertNil(model.visibleRegisterAccountID)
+    XCTAssertEqual(model.addTransactionsOrigin(), .lastUsedOpen)
+
+    chrome.openMore(.plan)
+    XCTAssertEqual(chrome.overflow(on: .accounts), .plan)
+
+    chrome.openMore(.assistant)
+    model.activeCaptureSurface = chrome.captureSurface
+    XCTAssertEqual(chrome.captureSurface, .assistant)
+    XCTAssertEqual(chrome.overflow(on: .accounts), .assistant)
+    XCTAssertNil(model.visibleRegisterAccountID)
+    XCTAssertEqual(model.addTransactionsOrigin(), .lastUsedOpen)
+
+    chrome.dismissMore()
+    model.activeCaptureSurface = chrome.captureSurface
+    XCTAssertEqual(chrome.captureSurface, .accounts)
+    XCTAssertNil(chrome.overflow(on: .accounts))
+    XCTAssertEqual(model.visibleRegisterAccountID, "acct-everyday")
+    XCTAssertEqual(model.addTransactionsOrigin(), .visibleRegister(accountID: "acct-everyday"))
+  }
+
+  func testMoreMenuItemsOmitOnlyTheNamedDestination() {
+    XCTAssertEqual(MoreDestination.menuItems(omitting: nil), [.plan, .assistant])
+    XCTAssertEqual(MoreDestination.menuItems(omitting: .plan), [.assistant])
+    XCTAssertEqual(MoreDestination.menuItems(omitting: .assistant), [.plan])
+  }
+
+  func testOverflowItemsStayOnPhoneAndLeaveIPadSidebar() {
+    XCTAssertEqual(
+      MoreDestination.overflowItems(usesSidebar: false, omitting: nil),
+      [.plan, .assistant]
+    )
+    XCTAssertEqual(
+      MoreDestination.overflowItems(usesSidebar: true, omitting: nil),
+      []
+    )
+    XCTAssertEqual(
+      MoreDestination.overflowItems(usesSidebar: false, omitting: .plan),
+      [.assistant]
+    )
+  }
+
+  func testAdoptSidebarPromotesPhoneOverflowToTab() {
+    let chrome = RootChromeState()
+    chrome.tab = .accounts
+    chrome.openMore(.plan)
+    XCTAssertEqual(chrome.captureSurface, .plan)
+    chrome.adoptSidebarLayout()
+    XCTAssertEqual(chrome.tab, .plan)
+    XCTAssertNil(chrome.overflow(on: .accounts))
+    XCTAssertEqual(chrome.captureSurface, .plan)
+  }
+
+  func testAdoptCompactMovesSidebarTabIntoMore() {
+    let chrome = RootChromeState()
+    chrome.tab = .rewards
+    chrome.tab = .assistant
+    chrome.adoptCompactLayout()
+    XCTAssertEqual(chrome.tab, .rewards)
+    XCTAssertEqual(chrome.overflow(on: .rewards), .assistant)
+    XCTAssertEqual(chrome.captureSurface, .assistant)
   }
 
   private func attachImage(_ image: UIImage, name: String) {

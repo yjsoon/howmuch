@@ -176,39 +176,324 @@ struct MonthStepper: View {
   }
 }
 
-enum MoreDestination: Hashable {
-  case plan
+enum AppTab: Hashable, CaseIterable {
+  case accounts
+  case rewards
   case reflect
+  case plan
+  case assistant
+
+  static let compactDestinations: [AppTab] = [.accounts, .rewards, .reflect]
+
+  var isCompactDestination: Bool {
+    Self.compactDestinations.contains(self)
+  }
+
+  var title: String {
+    switch self {
+    case .accounts: return "Accounts"
+    case .rewards: return "Rewards"
+    case .reflect: return "Reflect"
+    case .plan: return "Plan"
+    case .assistant: return "Assistant"
+    }
+  }
+
+  var systemImage: String {
+    switch self {
+    case .accounts: return "building.columns"
+    case .rewards: return "creditcard"
+    case .reflect: return "chart.bar.fill"
+    case .plan: return "square.grid.2x2"
+    case .assistant: return "bubble.left.and.bubble.right"
+    }
+  }
+
+  var captureSurface: CaptureSurface {
+    switch self {
+    case .accounts: return .accounts
+    case .rewards: return .rewards
+    case .reflect: return .reflect
+    case .plan: return .plan
+    case .assistant: return .assistant
+    }
+  }
+
+  var overflowDestination: MoreDestination? {
+    switch self {
+    case .plan: return .plan
+    case .assistant: return .assistant
+    case .accounts, .rewards, .reflect: return nil
+    }
+  }
+}
+
+enum MoreDestination: Hashable, CaseIterable, Identifiable {
+  case plan
+  case assistant
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .plan: return "Plan"
+    case .assistant: return "Assistant"
+    }
+  }
+
+  var systemImage: String {
+    switch self {
+    case .plan: return "square.grid.2x2"
+    case .assistant: return "bubble.left.and.bubble.right"
+    }
+  }
+
+  var captureSurface: CaptureSurface {
+    switch self {
+    case .plan: return .plan
+    case .assistant: return .assistant
+    }
+  }
+
+  var tab: AppTab {
+    switch self {
+    case .plan: return .plan
+    case .assistant: return .assistant
+    }
+  }
+
+  static func menuItems(omitting: MoreDestination?) -> [MoreDestination] {
+    allCases.filter { $0 != omitting }
+  }
+
+  static func overflowItems(
+    usesSidebar: Bool,
+    omitting: MoreDestination?
+  ) -> [MoreDestination] {
+    guard !usesSidebar else {
+      return []
+    }
+    return menuItems(omitting: omitting)
+  }
 }
 
 enum RootChrome {
-  static func usesSidebarDestinations(
+  static func usesSidebar(
     idiom: UIUserInterfaceIdiom,
     horizontalSizeClass: UserInterfaceSizeClass?
   ) -> Bool {
     idiom == .pad && horizontalSizeClass == .regular
+  }
+
+  static func addControlInsets(
+    idiom: UIUserInterfaceIdiom,
+    horizontalSizeClass: UserInterfaceSizeClass?
+  ) -> EdgeInsets {
+    if usesSidebar(idiom: idiom, horizontalSizeClass: horizontalSizeClass) {
+      return EdgeInsets(top: 0, leading: 0, bottom: 28, trailing: 20)
+    }
+    return EdgeInsets(top: 0, leading: 0, bottom: 90, trailing: 16)
+  }
+
+  static func toastBottomPadding(
+    idiom: UIUserInterfaceIdiom,
+    horizontalSizeClass: UserInterfaceSizeClass?
+  ) -> CGFloat {
+    let clearance = usesSidebar(idiom: idiom, horizontalSizeClass: horizontalSizeClass) ? 28.0 : 90.0
+    return clearance + RootAddControl.diameter + 8
+  }
+}
+
+@MainActor
+@Observable
+final class RootChromeState {
+  var tab: AppTab = .accounts {
+    didSet {
+      if tab.isCompactDestination {
+        lastCompactTab = tab
+      }
+    }
+  }
+  private var lastCompactTab: AppTab = .accounts
+  private var overflowByTab: [AppTab: MoreDestination] = [:]
+
+  func overflow(on tab: AppTab) -> MoreDestination? {
+    overflowByTab[tab]
+  }
+
+  func openMore(_ destination: MoreDestination) {
+    if overflowByTab[tab] == destination {
+      return
+    }
+    overflowByTab[tab] = destination
+  }
+
+  func dismissMore() {
+    overflowByTab[tab] = nil
+  }
+
+  func adoptSidebarLayout() {
+    if let overflow = overflow(on: tab) {
+      tab = overflow.tab
+      dismissMore()
+    }
+  }
+
+  func adoptCompactLayout() {
+    guard let destination = tab.overflowDestination else {
+      return
+    }
+    tab = lastCompactTab
+    openMore(destination)
+  }
+
+  var captureSurface: CaptureSurface {
+    if tab.isCompactDestination, let overflow = overflowByTab[tab] {
+      return overflow.captureSurface
+    }
+    return tab.captureSurface
+  }
+}
+
+struct RootTabHost<Content: View>: View {
+  @Environment(RootChromeState.self) private var chrome
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+  let hostedTab: AppTab
+  var content: Content
+
+  init(for hostedTab: AppTab, @ViewBuilder content: () -> Content) {
+    self.hostedTab = hostedTab
+    self.content = content()
+  }
+
+  var body: some View {
+    let usesSidebar = RootChrome.usesSidebar(
+      idiom: UIDevice.current.userInterfaceIdiom,
+      horizontalSizeClass: horizontalSizeClass
+    )
+    let overflow = usesSidebar ? nil : chrome.overflow(on: hostedTab)
+    ZStack {
+      content
+        .allowsHitTesting(overflow == nil)
+        .accessibilityHidden(overflow != nil)
+      if let overflow {
+        RootMoreHost(destination: overflow)
+          .transition(.move(edge: .trailing))
+      }
+    }
+    .animation(.snappy, value: overflow)
+  }
+}
+
+struct RootMoreHost: View {
+  @Environment(RootChromeState.self) private var chrome
+  let destination: MoreDestination
+
+  var body: some View {
+    NavigationStack {
+      destinationRoot
+        .toolbar {
+          ToolbarItem(placement: .topBarLeading) {
+            Button {
+              chrome.dismissMore()
+            } label: {
+              Label(chrome.tab.title, systemImage: "chevron.left")
+            }
+            .accessibilityLabel("Back")
+          }
+        }
+    }
+    .background(Theme.canvas)
+  }
+
+  @ViewBuilder
+  private var destinationRoot: some View {
+    switch destination {
+    case .plan:
+      CategoriesView()
+    case .assistant:
+      AssistantView(workspace: CaptureWorkspace.shared)
+    }
+  }
+}
+
+struct RootAddControl: View {
+  @Environment(AppModel.self) private var model
+  @Environment(RootChromeState.self) private var chrome
+  var workspace: CaptureWorkspace = .shared
+  var presenting: (() -> Void)?
+  var presentingManually: (() -> Void)?
+
+  static let diameter: CGFloat = 56
+
+  var body: some View {
+    if isVisible {
+      button
+    }
+  }
+
+  private var isVisible: Bool {
+    !(chrome.captureSurface == .assistant && workspace.pendingAssistantSessionID != nil)
+  }
+
+  private var button: some View {
+    Button(action: addConversationally) {
+      Image(systemName: "plus")
+        .font(.title2.weight(.semibold))
+        .foregroundStyle(.white)
+        .frame(width: Self.diameter, height: Self.diameter)
+        .background(Theme.accent, in: Circle())
+        .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
+        .accessibilityHidden(true)
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("Add Transactions")
+    .accessibilityAddTraits(.isButton)
+    .accessibilityAction(named: "Add manually", addManually)
+    .contextMenu {
+      Button("Add manually", systemImage: "square.and.pencil", action: addManually)
+    }
+    .frame(minWidth: 44, minHeight: 44)
+  }
+
+  private func addConversationally() {
+    if let presenting {
+      presenting()
+      return
+    }
+    model.presentAddTransactions(origin: model.addTransactionsOrigin())
+  }
+
+  private func addManually() {
+    if let presentingManually {
+      presentingManually()
+      return
+    }
+    model.presentManualTransaction(origin: model.addTransactionsOrigin())
   }
 }
 
 struct DestinationsMenu: View {
   var omitting: MoreDestination?
   @Environment(AppModel.self) private var model
+  @Environment(RootChromeState.self) private var chrome
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
   var body: some View {
-    Menu {
-      if !RootChrome.usesSidebarDestinations(
+    let overflowItems = MoreDestination.overflowItems(
+      usesSidebar: RootChrome.usesSidebar(
         idiom: UIDevice.current.userInterfaceIdiom,
         horizontalSizeClass: horizontalSizeClass
-      ) {
-        if omitting != .plan {
-          NavigationLink(value: MoreDestination.plan) {
-            Label("Plan", systemImage: "square.grid.2x2")
-          }
-        }
-        if omitting != .reflect {
-          NavigationLink(value: MoreDestination.reflect) {
-            Label("Reflect", systemImage: "chart.bar.fill")
+      ),
+      omitting: omitting
+    )
+    Menu {
+      if !overflowItems.isEmpty {
+        ForEach(overflowItems) { destination in
+          Button {
+            chrome.openMore(destination)
+          } label: {
+            Label(destination.title, systemImage: destination.systemImage)
           }
         }
         Divider()
@@ -223,19 +508,6 @@ struct DestinationsMenu: View {
     }
     .tint(Theme.accent)
     .accessibilityLabel("More")
-  }
-}
-
-extension View {
-  func moreDestinations() -> some View {
-    navigationDestination(for: MoreDestination.self) { destination in
-      switch destination {
-      case .plan:
-        CategoriesView()
-      case .reflect:
-        ReflectView()
-      }
-    }
   }
 }
 

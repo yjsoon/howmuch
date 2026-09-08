@@ -4,7 +4,7 @@ The existing Add Transaction sheet is the confirmation UI. Tab +, Duplicate for 
 
 ## Sub-features
 
-- `capture-open-plus` opens a blank Add Transaction sheet from the search-role Add Transactions tab.
+- `capture-open-plus` opens a blank Add Transaction sheet from the floating Add Transactions plus.
 - `capture-keypad` shows the glass keypad while amount is 0 and hides trailing Save.
 - `capture-save` saves an outflow with amount + account (payee optional) and shows a Saved toast.
 - `capture-register` shows that row on Everyday Account after save.
@@ -14,7 +14,7 @@ The existing Add Transaction sheet is the confirmation UI. Tab +, Duplicate for 
 
 ## How to get to it (user POV)
 
-- Choose the search-role **Add Transactions** tab.
+- Tap the floating **Add Transactions** plus.
 - Long-press a register row → **Duplicate for Today**.
 - Long-press the HowMuch home-screen icon → **Add Expense**.
 - After #98: a second present while the sheet is up replaces the form.
@@ -28,7 +28,7 @@ Preconditions:
 - Everyday Account is open (seeded).
 - Use payee `Capture Toast Verify` so the row is unique.
 
-- **Open blank.** Choose search-role tab `Add Transactions`. Sheet title `Add Transaction`. Leading `Cancel`. Direction `Outflow` selected. Amount shows a minus zero in the plan currency. Detail placeholders `Choose Payee`, `Choose Category`, `Choose Account` unless an account is already seeded (last-used / visible register). Glass keypad is up. Trailing `Save` is hidden.
+- **Open blank.** Tap the floating plus `Add Transactions`. Sheet title `Add Transaction`. Leading `Cancel`. Direction `Outflow` selected. Amount shows a minus zero in the plan currency. Detail placeholders `Choose Payee`, `Choose Category`, `Choose Account` unless an account is already seeded (last-used / visible register). Glass keypad is up. Trailing `Save` is hidden.
 - **Seeded account.** If Account already reads `Everyday Account`, leave it. If it is `Choose Account`, choose `Everyday Account`.
 - **Fill amount.** Keypad digits for `5.40`. Payee `Capture Toast Verify` (optional for `canSave`, required for this unique HTTP check). Category may stay `Choose Category` or `Dining Out`.
 - **Save.** Dismiss keypad (`done` / `next` / `save` on the keypad, or tap outside). Trailing glass `Save` appears and is enabled. Choose `Save`. Toast like `Saved {amount} — Capture Toast Verify`. Sheet dismisses. Accounts (or the register you came from) is back.

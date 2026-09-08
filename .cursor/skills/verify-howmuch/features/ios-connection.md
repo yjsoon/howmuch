@@ -13,7 +13,7 @@ iOS talks to HowMuch over a stored Server URL and a Keychain session. First-owne
 ## How to get to it (user POV)
 
 - First launch of HowMuch in Simulator (Connection is forced until authenticated).
-- Choose **More** (ellipsis) on Accounts, Rewards, or Assistant, then **Connection settings**.
+- Choose **More** (ellipsis) on Accounts, Rewards, or Reflect, then **Connection settings**.
 - After **Sign out / Use another account**, Connection is the whole UI again.
 
 ## Driving it with control-howmuch

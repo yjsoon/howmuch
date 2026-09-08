@@ -94,100 +94,75 @@ final class QuickActionSceneDelegate: NSObject, UIWindowSceneDelegate {
   }
 }
 
-enum AppTab: Hashable {
-  case accounts
-  case rewards
-  case assistant
-  case plan
-  case reflect
-  case add
-
-  var captureSurface: CaptureSurface? {
-    switch self {
-    case .accounts:
-      return .accounts
-    case .rewards:
-      return .rewards
-    case .assistant:
-      return .assistant
-    case .plan:
-      return .plan
-    case .reflect:
-      return .reflect
-    case .add:
-      return nil
-    }
-  }
-}
-
 private struct RootView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-  @State private var tab: AppTab = .accounts
+  @State private var chrome = RootChromeState()
 
   var body: some View {
     @Bindable var model = model
     @Bindable var capture = CaptureRouter.shared
+    @Bindable var chrome = chrome
     @Bindable var workspace = CaptureWorkspace.shared
 
-    let selection = Binding(
-      get: { tab },
-      set: { (next: AppTab) in
-        if next == .add {
-          model.presentAddTransactions(origin: model.addTransactionsOrigin())
-        } else {
-          tab = next
-        }
-      }
-    )
-
-    TabView(selection: selection) {
-      Tab("Accounts", systemImage: "building.columns", value: AppTab.accounts) {
-        AccountsView()
-      }
-
-      Tab("Rewards", systemImage: "creditcard", value: AppTab.rewards) {
-        NavigationStack {
-          RewardsView()
+    TabView(selection: $chrome.tab) {
+      Tab(AppTab.accounts.title, systemImage: AppTab.accounts.systemImage, value: AppTab.accounts) {
+        RootTabHost(for: .accounts) {
+          AccountsView()
         }
       }
 
-      Tab("Assistant", systemImage: "bubble.left.and.bubble.right", value: AppTab.assistant) {
-        NavigationStack {
-          AssistantView(workspace: workspace)
+      Tab(AppTab.rewards.title, systemImage: AppTab.rewards.systemImage, value: AppTab.rewards) {
+        RootTabHost(for: .rewards) {
+          NavigationStack {
+            RewardsView()
+          }
         }
       }
 
-      Tab("Plan", systemImage: "square.grid.2x2", value: AppTab.plan) {
-        NavigationStack {
-          CategoriesView()
-            .moreDestinations()
+      Tab(AppTab.reflect.title, systemImage: AppTab.reflect.systemImage, value: AppTab.reflect) {
+        RootTabHost(for: .reflect) {
+          NavigationStack {
+            ReflectView()
+          }
         }
       }
-      .defaultVisibility(.hidden, for: .tabBar)
 
-      Tab("Reflect", systemImage: "chart.bar.fill", value: AppTab.reflect) {
-        NavigationStack {
-          ReflectView()
-            .moreDestinations()
+      if usesSidebar {
+        Tab(AppTab.plan.title, systemImage: AppTab.plan.systemImage, value: AppTab.plan) {
+          NavigationStack {
+            CategoriesView()
+          }
+        }
+
+        Tab(AppTab.assistant.title, systemImage: AppTab.assistant.systemImage, value: AppTab.assistant) {
+          NavigationStack {
+            AssistantView(workspace: workspace)
+          }
         }
       }
-      .defaultVisibility(.hidden, for: .tabBar)
-
-      RootCaptureTab(addManually: { model.presentManualTransaction(origin: model.addTransactionsOrigin()) })
     }
     .tabViewStyle(.sidebarAdaptable)
     .defaultAdaptableTabBarPlacement(.sidebar)
     .tabBarMinimizeBehavior(.onScrollDown)
-    .background {
-      RootCaptureTabActions(addManually: { model.presentManualTransaction(origin: model.addTransactionsOrigin()) })
-        .frame(width: 0, height: 0)
-    }
-    .onChange(of: tab, initial: true) { _, next in
-      if let surface = next.captureSurface {
-        model.activeCaptureSurface = surface
+    .environment(chrome)
+    .onChange(of: usesSidebar, initial: true) { _, sidebar in
+      if sidebar {
+        chrome.adoptSidebarLayout()
+      } else {
+        chrome.adoptCompactLayout()
       }
+    }
+    .onChange(of: chrome.captureSurface, initial: true) { _, surface in
+      model.activeCaptureSurface = surface
+    }
+    .overlay(alignment: .bottomTrailing) {
+      RootAddControl()
+        .padding(RootChrome.addControlInsets(
+          idiom: UIDevice.current.userInterfaceIdiom,
+          horizontalSizeClass: horizontalSizeClass
+        ))
     }
     .overlay(alignment: .bottom) {
       Group {
@@ -200,10 +175,10 @@ private struct RootView: View {
             .glassEffect(.regular, in: .capsule)
             .padding(
               .bottom,
-              RootChrome.usesSidebarDestinations(
+              RootChrome.toastBottomPadding(
                 idiom: UIDevice.current.userInterfaceIdiom,
                 horizontalSizeClass: horizontalSizeClass
-              ) ? 28 : 90
+              )
             )
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
@@ -269,6 +244,13 @@ private struct RootView: View {
       }
       enqueueInboxIfNeeded(force: true)
     }
+  }
+
+  private var usesSidebar: Bool {
+    RootChrome.usesSidebar(
+      idiom: UIDevice.current.userInterfaceIdiom,
+      horizontalSizeClass: horizontalSizeClass
+    )
   }
 
   private func consumePendingCapture() {
@@ -496,115 +478,5 @@ struct CaptureIntakeHost: View {
     session.replaceDrafts(drafts.map { CaptureDraftItem(mapped: $0) })
     session.ownUnownedDrafts(as: "Added from a share")
     workspace.persistCurrentIfNeeded()
-  }
-}
-
-struct RootCaptureTab: TabContent {
-  let addManually: () -> Void
-
-  var body: some TabContent<AppTab> {
-    Tab("Add Transactions", systemImage: "plus.bubble", value: AppTab.add, role: .search) {
-      Color.clear
-    }
-    .contextMenu {
-      Button(action: addManually) {
-        Label("Add manually", systemImage: "square.and.pencil")
-      }
-    }
-  }
-}
-
-/// SwiftUI's TabContent menu serves the sidebar, not the iPhone tab bar.
-/// Attach standard UIKit interactions to the semantically identified Add control.
-struct RootCaptureTabActions: UIViewControllerRepresentable {
-  let addManually: () -> Void
-
-  func makeUIViewController(context: Context) -> Controller {
-    let controller = Controller()
-    controller.addManually = addManually
-    return controller
-  }
-
-  func updateUIViewController(_ controller: Controller, context: Context) {
-    controller.addManually = addManually
-    controller.install()
-  }
-
-  static func dismantleUIViewController(_ controller: Controller, coordinator: ()) {
-    controller.uninstall()
-  }
-
-  final class Controller: UIViewController, UIContextMenuInteractionDelegate {
-    var addManually: () -> Void = {}
-    private weak var target: UIControl?
-    private var menuInteraction: UIContextMenuInteraction?
-    private var manualAction: UIAccessibilityCustomAction?
-
-    override func loadView() {
-      view = UIView()
-      view.isUserInteractionEnabled = false
-    }
-
-    override func viewDidAppear(_ animated: Bool) {
-      super.viewDidAppear(animated)
-      install()
-    }
-
-    override func viewDidLayoutSubviews() {
-      super.viewDidLayoutSubviews()
-      install()
-    }
-
-    func install() {
-      func tabController(in controller: UIViewController) -> UITabBarController? {
-        if let tab = controller as? UITabBarController { return tab }
-        return controller.children.lazy.compactMap { tabController(in: $0) }.first
-      }
-      func addControl(in view: UIView) -> UIControl? {
-        if let control = view as? UIControl, control.accessibilityLabel == "Add Transactions" {
-          return control
-        }
-        return view.subviews.lazy.compactMap { addControl(in: $0) }.first
-      }
-      guard let root = view.window?.rootViewController,
-            let tab = tabController(in: root),
-            let control = addControl(in: tab.tabBar),
-            control !== target else { return }
-      uninstall()
-      target = control
-      let interaction = UIContextMenuInteraction(delegate: self)
-      menuInteraction = interaction
-      control.addInteraction(interaction)
-      let action = UIAccessibilityCustomAction(name: "Add manually") { [weak self] _ in
-        guard let self else { return false }
-        self.addManually()
-        return true
-      }
-      manualAction = action
-      control.accessibilityCustomActions = (control.accessibilityCustomActions ?? []) + [action]
-    }
-
-    func uninstall() {
-      if let menuInteraction { target?.removeInteraction(menuInteraction) }
-      if let manualAction {
-        target?.accessibilityCustomActions = target?.accessibilityCustomActions?.filter { $0 !== manualAction }
-      }
-      target = nil
-      menuInteraction = nil
-      manualAction = nil
-    }
-
-    func contextMenuInteraction(
-      _ interaction: UIContextMenuInteraction,
-      configurationForMenuAtLocation location: CGPoint
-    ) -> UIContextMenuConfiguration? {
-      UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
-        UIMenu(children: [
-          UIAction(title: "Add manually", image: UIImage(systemName: "square.and.pencil")) { [weak self] _ in
-            self?.addManually()
-          },
-        ])
-      }
-    }
   }
 }

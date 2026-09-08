@@ -156,38 +156,44 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertNotNil(surface.firstControl(label: "Send"))
   }
 
-  func testBalloonTabTapAndAccessibilityActionUseDistinctRoutes() async {
+  func testFloatingAddTapAndAccessibilityActionUseDistinctRoutes() async {
     let router = CaptureRouter.shared
     let previous = router.pending
     defer { router.pending = previous }
     for size in [DynamicTypeSize.large, .accessibility3] {
       let harness = SnapshotHarness.make()
       let origin = CaptureOrigin.visibleRegister(accountID: "acct-travel")
-      var selectedTab = AppTab.accounts
+      let chrome = RootChromeState()
       guard let surface = SnapshotSurface(
-        root: TabView(selection: Binding(
-          get: { selectedTab },
-          set: { next in
-            if next == .add {
-              harness.model.presentAddTransactions(origin: origin)
-            } else {
-              selectedTab = next
+        root: ZStack {
+          TabView(selection: Binding(
+            get: { chrome.tab },
+            set: { chrome.tab = $0 }
+          )) {
+            Tab("Accounts", systemImage: "building.columns", value: AppTab.accounts) {
+              Text("Entry fixture")
+            }
+            Tab("Rewards", systemImage: "creditcard", value: AppTab.rewards) {
+              Text("Rewards fixture")
+            }
+            Tab("Reflect", systemImage: "chart.bar.fill", value: AppTab.reflect) {
+              Text("Reflect fixture")
             }
           }
-        )) {
-          Tab("Accounts", systemImage: "building.columns", value: AppTab.accounts) { Text("Entry fixture") }
-          Tab("Rewards", systemImage: "creditcard", value: AppTab.rewards) { Text("Rewards fixture") }
-          Tab("Assistant", systemImage: "bubble.left.and.bubble.right", value: AppTab.assistant) { Text("Assistant fixture") }
-          RootCaptureTab(addManually: { harness.model.presentManualTransaction(origin: origin) })
+          RootAddControl(presenting: {
+            harness.model.presentAddTransactions(origin: origin)
+          }, presentingManually: {
+            harness.model.presentManualTransaction(origin: origin)
+          })
+          .padding(RootChrome.addControlInsets(idiom: .phone, horizontalSizeClass: .compact))
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         }
-        .background {
-          RootCaptureTabActions(addManually: { harness.model.presentManualTransaction(origin: origin) })
-            .frame(width: 0, height: 0)
-        }
+        .environment(chrome)
+        .environment(harness.model)
         .environment(\.dynamicTypeSize, size),
         size: CGSize(width: 390, height: 844)
       ) else {
-        XCTFail("root Add tab needs a connected UIWindowScene")
+        XCTFail("root Add control needs a connected UIWindowScene")
         continue
       }
       defer { surface.detach() }
@@ -196,25 +202,29 @@ final class CaptureSnapshotTests: XCTestCase {
       guard let button = surface.firstControl(label: "Add Transactions") else { continue }
       surface.assertMinimumHitTarget(button)
       XCTAssertTrue(surface.windowBounds.contains(button.frame))
-      for label in ["Accounts", "Rewards", "Assistant"] {
+      for label in ["Accounts", "Rewards", "Reflect"] {
         guard let destination = surface.firstControl(label: label) else {
           XCTFail("root tab missing \(label)")
           continue
         }
-        XCTAssertEqual(button.frame.midY, destination.frame.midY, accuracy: 12, "Add must share the tab row, not a separate accessory")
+        XCTAssertGreaterThan(
+          abs(button.frame.midY - destination.frame.midY),
+          12,
+          "Add is a floating plus, not a tab-row item"
+        )
         XCTAssertFalse(destination.object.accessibilityCustomActions?.contains { $0.name == "Add manually" } == true)
       }
-      attachImage(surface.captureVisible(), name: "manual-entry-balloon-\(size)")
+      attachImage(surface.captureVisible(), name: "manual-entry-fab-\(size)")
       XCTAssertTrue(surface.activate(button))
       XCTAssertEqual(router.pending?.kind, .blank, "ordinary tap must remain conversational")
       XCTAssertEqual(router.pending?.origin, origin)
-      XCTAssertEqual(selectedTab, .accounts, "Add must not replace the selected destination")
+      XCTAssertEqual(chrome.tab, .accounts, "Add must not replace the selected destination")
       _ = await surface.waitUntil {
         surface.firstControl(label: "Add Transactions")?.object.accessibilityCustomActions?.contains { $0.name == "Add manually" } == true
       }
       guard let manual = surface.firstControl(label: "Add Transactions")?.object.accessibilityCustomActions?.first(where: { $0.name == "Add manually" }),
             let handler = manual.actionHandler else {
-        XCTFail("the balloon must expose an actionable Add manually VoiceOver action")
+        XCTFail("the floating plus must expose an actionable Add manually VoiceOver action")
         continue
       }
       XCTAssertTrue(handler(manual))
@@ -457,7 +467,8 @@ final class CaptureSnapshotTests: XCTestCase {
       NavigationStack {
         AssistantView(workspace: conversation.workspace)
       }
-      .environment(conversation.model),
+      .environment(conversation.model)
+      .environment(RootChromeState()),
       expected: ["Conversation", "What did I spend today?", "Lunch"],
       name: "capture-assistant-conversation"
     )
@@ -483,7 +494,8 @@ final class CaptureSnapshotTests: XCTestCase {
       NavigationStack {
         AssistantView(workspace: home.workspace)
       }
-      .environment(home.model),
+      .environment(home.model)
+      .environment(RootChromeState()),
       expected: ["Today", "New conversation", "unavailable"],
       name: "capture-assistant-home",
       required: ["unavailable"],
@@ -864,7 +876,8 @@ final class CaptureSnapshotTests: XCTestCase {
       root: NavigationStack {
         AssistantView(workspace: harness.workspace)
       }
-      .environment(harness.model),
+      .environment(harness.model)
+      .environment(RootChromeState()),
       size: CGSize(width: 390, height: 844)
     ) else {
       XCTFail("assistant navigation needs a connected UIWindowScene")

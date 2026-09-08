@@ -47,7 +47,7 @@ struct ReflectView: View {
     .navigationBarTitleDisplayMode(.large)
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
-        DestinationsMenu(omitting: .reflect)
+        DestinationsMenu()
       }
     }
     .task(id: model.reportsRefreshGeneration) {

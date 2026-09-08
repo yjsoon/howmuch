@@ -13,7 +13,7 @@ Rewards import takes a Rewards Tracker for YNAB settings export and stores that 
 
 ## How to get to it (user POV)
 
-- On Accounts, Rewards, or Assistant, choose **More** (ellipsis), then **Connection settings**. When signed in, choose **Rewards import** under Tools.
+- On Accounts, Rewards, or Reflect, choose **More** (ellipsis), then **Connection settings**. When signed in, choose **Rewards import** under Tools.
 - On an empty Rewards tab, choose **Rewards import**.
 
 ## Driving it with control-howmuch

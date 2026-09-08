@@ -20,10 +20,9 @@ struct AssistantView: View {
     .navigationBarTitleDisplayMode(.large)
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
-        DestinationsMenu()
+        DestinationsMenu(omitting: .assistant)
       }
     }
-    .moreDestinations()
     .navigationDestination(isPresented: Binding(
       get: { workspace.pendingAssistantSessionID != nil },
       set: { presented in
