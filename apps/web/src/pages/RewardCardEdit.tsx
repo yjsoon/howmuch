@@ -14,10 +14,10 @@ import { CategorySelect } from "../components/CategorySelect";
 import { FlagPicker, FlagTag } from "../components/FlagTag";
 import { splitCategoryGroups } from "../lib/categories";
 import { formatDate } from "../lib/dates";
+import { isFlagColour, ledgerFlagFromReward, rewardFlagFromLedger } from "../lib/flags";
 import { formatMoney } from "../lib/money";
+import { rewardCardAccountChoices, syncedRewardCardName } from "../lib/reward-card-accounts";
 import { usePlan } from "../state/plan";
-
-const FLAG_COLOURS: RewardFlagColour[] = ["red", "orange", "yellow", "green", "blue", "purple", "unflagged"];
 
 type FlagDraft = {
   id: string;
@@ -77,30 +77,27 @@ export function RewardCardEditPage() {
   const { planId } = usePlan();
   const isNew = !cardId;
   const snapshot = useApi(
-    isNew ? `rewards-card-edit:${planId}:new` : `rewards-card-edit:${planId}:${cardId}`,
-    () => (isNew ? Promise.resolve(null) : api.rewardsTrackerSnapshot(planId)),
+    `rewards-card-edit:${planId}:${cardId ?? "new"}`,
+    () => api.rewardsTrackerSnapshot(planId),
   );
 
-  if (isNew) {
-    return <CardEditor card={null} />;
-  }
   if (snapshot.loading && !snapshot.data) {
     return (
       <div className="status-panel">
-        <p className="status-title">Loading card…</p>
+        <p className="status-title">{isNew ? "Loading accounts…" : "Loading card…"}</p>
       </div>
     );
   }
   if (snapshot.error) {
     return (
       <div className="status-panel status-panel-error" role="alert">
-        <p className="status-title">Could not load this card.</p>
+        <p className="status-title">{isNew ? "Could not load accounts." : "Could not load this card."}</p>
         <p className="status-detail">{snapshot.error}</p>
       </div>
     );
   }
-  const card = snapshot.data?.cards.find((entry) => entry.id === cardId);
-  if (!card) {
+  const card = isNew ? null : snapshot.data?.cards.find((entry) => entry.id === cardId) ?? null;
+  if (!isNew && !card) {
     return (
       <div className="status-panel">
         <p className="status-title">Card not found.</p>
@@ -110,10 +107,14 @@ export function RewardCardEditPage() {
       </div>
     );
   }
-  return <CardEditor card={card} />;
+  const takenAccountIds = (snapshot.data?.cards ?? [])
+    .filter((entry) => entry.id !== card?.id)
+    .map((entry) => entry.ynabAccountId)
+    .filter(Boolean);
+  return <CardEditor card={card} takenAccountIds={takenAccountIds} />;
 }
 
-function CardEditor({ card }: { card: CreditCard | null }) {
+function CardEditor({ card, takenAccountIds }: { card: CreditCard | null; takenAccountIds: string[] }) {
   const { planId, accounts, categoryGroups } = usePlan();
   const location = useLocation();
   const navigate = useNavigate();
@@ -126,6 +127,11 @@ function CardEditor({ card }: { card: CreditCard | null }) {
   const [importFlagColor, setImportFlagColor] = useState<RewardFlagColour>("red");
   const [importRate, setImportRate] = useState("");
   const groups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
+  const accountChoices = useMemo(
+    () => rewardCardAccountChoices(accounts, takenAccountIds, card?.ynabAccountId),
+    [accounts, takenAccountIds, card?.ynabAccountId],
+  );
+  const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const categoryName = useMemo(() => {
     for (const group of [...groups.primary, ...groups.quiet]) {
       for (const category of group.categories) {
@@ -232,8 +238,8 @@ function CardEditor({ card }: { card: CreditCard | null }) {
       <section className="transaction-editor" aria-labelledby="card-editor-heading">
         <div className="section-heading">
           <div>
-            <span className="section-title" id="card-editor-heading">{card ? "Card details" : "New card"}</span>
-            <span className="section-meta">Rules apply to the mapped HowMuch account.</span>
+            <span className="section-title" id="card-editor-heading">{card ? "Card details" : "Existing HowMuch card"}</span>
+            <span className="section-meta">Pick a credit card account you already have. This does not create a new ledger account.</span>
           </div>
         </div>
         <form
@@ -243,17 +249,46 @@ function CardEditor({ card }: { card: CreditCard | null }) {
             void save();
           }}
         >
+          {accountChoices.length === 0 && !card && (
+            <p className="field-note">No HowMuch credit cards left to add. Every credit card account already has rewards rules, or add a credit card account first.</p>
+          )}
           <div className="field-row">
+            <label className="field">
+              <span className="field-label">HowMuch card</span>
+              <select
+                value={draft.ynabAccountId}
+                onChange={(event) => {
+                  const nextId = event.target.value;
+                  setDraft((current) => ({
+                    ...current,
+                    ynabAccountId: nextId,
+                    name: syncedRewardCardName({
+                      name: current.name,
+                      previousAccountName: accountById.get(current.ynabAccountId)?.name,
+                      nextAccountName: accountById.get(nextId)?.name,
+                    }),
+                  }));
+                }}
+                required
+              >
+                <option value="">Choose a HowMuch card</option>
+                {accountChoices.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}{account.closed ? " (closed)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="field">
               <span className="field-label">Name</span>
               <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} required />
             </label>
+          </div>
+          <div className="field-row">
             <label className="field">
               <span className="field-label">Issuer</span>
               <input value={draft.issuer} onChange={(event) => setDraft((current) => ({ ...current, issuer: event.target.value }))} />
             </label>
-          </div>
-          <div className="field-row">
             <label className="field">
               <span className="field-label">Type</span>
               <select
@@ -262,21 +297,6 @@ function CardEditor({ card }: { card: CreditCard | null }) {
               >
                 <option value="cashback">Cashback</option>
                 <option value="miles">Miles</option>
-              </select>
-            </label>
-            <label className="field">
-              <span className="field-label">HowMuch account</span>
-              <select
-                value={draft.ynabAccountId}
-                onChange={(event) => setDraft((current) => ({ ...current, ynabAccountId: event.target.value }))}
-                required
-              >
-                <option value="">Choose account</option>
-                {accounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.name}{account.closed ? " (closed)" : ""}
-                  </option>
-                ))}
               </select>
             </label>
           </div>
@@ -411,7 +431,7 @@ function CardEditor({ card }: { card: CreditCard | null }) {
 
           <fieldset className="transaction-editor-splits rewards-editor-block">
             <legend>Flag subcategories</legend>
-            <p className="field-note">Unflagged is a flag colour HowMuch can score. The ledger picker still uses None for no colour.</p>
+            <p className="field-note">These are the same colour tags as the ledger. None is Unflagged spend.</p>
             <div className="field-row">
               <label className="field">
                 <span className="field-label">Import category</span>
@@ -423,14 +443,14 @@ function CardEditor({ card }: { card: CreditCard | null }) {
                   aria-label="Import category"
                 />
               </label>
-              <label className="field">
-                <span className="field-label">Flag colour</span>
-                <select value={importFlagColor} onChange={(event) => setImportFlagColor(event.target.value as RewardFlagColour)}>
-                  {FLAG_COLOURS.map((colour) => (
-                    <option key={colour} value={colour}>{flagColourLabel(colour)}</option>
-                  ))}
-                </select>
-              </label>
+              <div className="field">
+                <span className="field-label" id="import-flag-colour-label">Flag colour</span>
+                <FlagPicker
+                  labelledBy="import-flag-colour-label"
+                  value={ledgerFlagFromReward(importFlagColor)}
+                  onChange={(value) => setImportFlagColor(rewardFlagFromLedger(value))}
+                />
+              </div>
               <label className="field">
                 <span className="field-label">Rate</span>
                 <input type="text" inputMode="decimal" value={importRate} onChange={(event) => setImportRate(event.target.value)} />
@@ -527,18 +547,17 @@ function FlagRow({
         <span className="field-label">Name</span>
         <input value={flag.name} onChange={(event) => patch({ name: event.target.value })} aria-label={`Flag ${index + 1} name`} />
       </label>
-      <label className="field">
-        <span className="field-label">Flag colour</span>
-        <select
-          value={flag.flagColor}
-          onChange={(event) => patch({ flagColor: event.target.value as RewardFlagColour })}
-          aria-label={`Flag ${index + 1} colour`}
-        >
-          {FLAG_COLOURS.map((colour) => (
-            <option key={colour} value={colour}>{flagColourLabel(colour)}</option>
-          ))}
-        </select>
-      </label>
+      <div className="field">
+        <span className="field-label" id={`flag-${index + 1}-colour-label`}>Flag colour</span>
+        <span className="rewards-flag-colour-row">
+          <FlagPicker
+            labelledBy={`flag-${index + 1}-colour-label`}
+            value={ledgerFlagFromReward(flag.flagColor)}
+            onChange={(value) => patch({ flagColor: rewardFlagFromLedger(value) })}
+          />
+          <FlagTag colour={ledgerFlagFromReward(flag.flagColor) || null} name={flag.name} />
+        </span>
+      </div>
       <label className="field">
         <span className="field-label">Reward value</span>
         <input type="text" inputMode="decimal" value={flag.rewardValue} onChange={(event) => patch({ rewardValue: event.target.value })} aria-label={`Flag ${index + 1} reward value`} />
@@ -802,7 +821,7 @@ function draftFromCard(card: CreditCard): CardDraft {
       return {
         id: flag.id || `subcat_${crypto.randomUUID()}`,
         name: flag.name,
-        flagColor: isFlagColour(flag.flagColor) ? flag.flagColor : "unflagged",
+        flagColor: rewardFlagFromLedger(flag.flagColor),
         rewardValue: numberText(flag.rewardValue),
         priority: numberText(flag.priority),
         active: flag.active !== false,
@@ -830,8 +849,8 @@ function draftFromCard(card: CreditCard): CardDraft {
 }
 
 function creditCardWrite(draft: CardDraft, options: { clearMissing?: boolean } = {}): { card: CreditCard } | { error: string } {
+  if (!draft.ynabAccountId) return { error: "Choose a HowMuch card." };
   if (!draft.name.trim()) return { error: "Enter a card name." };
-  if (!draft.ynabAccountId) return { error: "Choose a HowMuch account." };
 
   const card: CreditCard = {
     id: draft.id,
@@ -889,7 +908,7 @@ function creditCardWrite(draft: CardDraft, options: { clearMissing?: boolean } =
   const flags: CardSubcategory[] = [];
   for (const [index, flag] of draft.flags.entries()) {
     if (!flag.name.trim()) return { error: `Flag ${index + 1} needs a name.` };
-    if (!isFlagColour(flag.flagColor)) return { error: `Flag ${index + 1} needs a recognised colour.` };
+    if (!isRewardFlagColour(flag.flagColor)) return { error: `Flag ${index + 1} needs a recognised colour.` };
     const rewardValue = requiredFinite(flag.rewardValue, `Flag ${index + 1} reward value`);
     if (!rewardValue.ok) return { error: rewardValue.error };
     const priority = requiredFinite(flag.priority, `Flag ${index + 1} priority`);
@@ -983,12 +1002,8 @@ function numberText(value: number | null | undefined): string {
   return value == null ? "" : String(value);
 }
 
-function isFlagColour(value: string): value is RewardFlagColour {
-  return FLAG_COLOURS.includes(value as RewardFlagColour);
-}
-
-function flagColourLabel(colour: RewardFlagColour): string {
-  return colour === "unflagged" ? "Unflagged" : colour[0]!.toUpperCase() + colour.slice(1);
+function isRewardFlagColour(value: string): value is RewardFlagColour {
+  return value === "unflagged" || isFlagColour(value);
 }
 
 type ParsedNumber = { ok: true; value?: number | null } | { ok: false; error: string };

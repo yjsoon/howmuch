@@ -4,14 +4,14 @@ import XCTest
 final class RewardCardEditorTests: XCTestCase {
   func testWriteFailsWithoutAccountId() {
     var draft = RewardCardDraft.empty()
-    draft.name = "Verify cashback"
+    draft.name = "Travel Card"
     draft.issuer = "UOB"
     draft.type = .cashback
     draft.ynabAccountId = ""
     draft.earningRate = "1"
 
     XCTAssertThrowsError(try draft.write()) { error in
-      XCTAssertEqual(error.localizedDescription, "Choose a HowMuch account.")
+      XCTAssertEqual(error.localizedDescription, "Choose a HowMuch card.")
     }
   }
 
@@ -151,5 +151,53 @@ final class RewardCardEditorTests: XCTestCase {
     XCTAssertEqual(card.subcategories?.first?.rewardValue, 4)
     XCTAssertEqual(card.subcategories?.first?.priority, 0)
     XCTAssertEqual(card.subcategories?.first?.active, true)
+  }
+
+  func testRewardFlagColoursAreTheLedgerTags() {
+    XCTAssertEqual(Set(FlagColour.allCases.map(\.rawValue)), Set(["", "red", "orange", "yellow", "green", "blue", "purple"]))
+    XCTAssertEqual(RewardFlagColour.red.ledgerColour, .red)
+    XCTAssertEqual(RewardFlagColour.unflagged.ledgerColour, .none)
+    XCTAssertEqual(RewardFlagColour(ledgerColour: .none), .unflagged)
+    XCTAssertEqual(RewardFlagColour(ledgerColour: .blue), .blue)
+    XCTAssertEqual(RewardFlagColour(ledgerColour: .red).rawValue, FlagColour.red.rawValue)
+    for colour in FlagColour.allCases where colour != .none {
+      XCTAssertNotNil(Theme.flagColour(named: colour.rawValue))
+      XCTAssertEqual(
+        Theme.flagColour(named: RewardFlagColour(ledgerColour: colour).rawValue),
+        Theme.flagColour(named: colour.rawValue)
+      )
+    }
+    XCTAssertNil(Theme.flagColour(named: RewardFlagColour.unflagged.rawValue))
+    XCTAssertNil(Theme.flagColour(named: FlagColour.none.rawValue))
+  }
+
+  func testAccountChoicesAreExistingCreditCards() {
+    let travel = Account(id: "acct-credit", name: "Travel Card", icon: nil, type: "creditCard", onBudget: true, closed: false, balance: 0, clearedBalance: 0, unclearedBalance: 0, lastReconciledDate: nil, deleted: false)
+    let loc = Account(id: "acct-loc", name: "Overdraft", icon: nil, type: "lineOfCredit", onBudget: true, closed: false, balance: 0, clearedBalance: 0, unclearedBalance: 0, lastReconciledDate: nil, deleted: false)
+    let everyday = Account(id: "acct-everyday", name: "Everyday Account", icon: nil, type: "checking", onBudget: true, closed: false, balance: 0, clearedBalance: 0, unclearedBalance: 0, lastReconciledDate: nil, deleted: false)
+    let ids = RewardCardAccounts.choices(
+      accounts: [everyday, loc, travel],
+      takenIDs: ["acct-credit"],
+      keepingID: nil
+    ).map(\.id)
+    XCTAssertEqual(ids, ["acct-loc"])
+    let editing = RewardCardAccounts.choices(
+      accounts: [everyday, loc, travel],
+      takenIDs: ["acct-credit"],
+      keepingID: "acct-credit"
+    ).map(\.id)
+    XCTAssertEqual(editing, ["acct-loc", "acct-credit"])
+  }
+
+  func testSelectingAHowMuchCardFillsTheName() {
+    var draft = RewardCardDraft.empty()
+    let travel = Account(id: "acct-credit", name: "Travel Card", icon: nil, type: "creditCard", onBudget: true, closed: false, balance: 0, clearedBalance: 0, unclearedBalance: 0, lastReconciledDate: nil, deleted: false)
+    draft.selectAccount(id: "acct-credit", from: [travel])
+    XCTAssertEqual(draft.ynabAccountId, "acct-credit")
+    XCTAssertEqual(draft.name, "Travel Card")
+    draft.name = "Verify cashback"
+    let loc = Account(id: "acct-loc", name: "Overdraft", icon: nil, type: "lineOfCredit", onBudget: true, closed: false, balance: 0, clearedBalance: 0, unclearedBalance: 0, lastReconciledDate: nil, deleted: false)
+    draft.selectAccount(id: "acct-loc", from: [travel, loc])
+    XCTAssertEqual(draft.name, "Verify cashback")
   }
 }

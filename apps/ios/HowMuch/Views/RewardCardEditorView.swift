@@ -11,6 +11,35 @@ enum RewardCardWriteError: LocalizedError, Equatable {
   }
 }
 
+enum RewardCardAccounts {
+  static func isCreditType(_ type: String) -> Bool {
+    AccountKind(rawValue: type)?.isCredit == true
+  }
+
+  static func choices(accounts: [Account], takenIDs: Set<String>, keepingID: String?) -> [Account] {
+    accounts
+      .filter { account in
+        if account.deleted { return false }
+        if let keepingID, account.id == keepingID { return true }
+        if takenIDs.contains(account.id) { return false }
+        return isCreditType(account.type)
+      }
+      .sorted { left, right in
+        if left.closed != right.closed {
+          return !left.closed && right.closed
+        }
+        return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending
+      }
+  }
+
+  static func syncedName(name: String, previousAccountName: String?, nextAccountName: String?) -> String {
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    let wasSynced = trimmed.isEmpty || trimmed == (previousAccountName ?? "")
+    if !wasSynced { return name }
+    return nextAccountName ?? ""
+  }
+}
+
 struct RewardFlagDraft: Identifiable, Equatable {
   var id: String
   var name: String
@@ -292,13 +321,24 @@ struct RewardCardDraft: Equatable {
     tiers.append(.fresh())
   }
 
+  mutating func selectAccount(id: String, from accounts: [Account]) {
+    let previous = accounts.first { $0.id == ynabAccountId }
+    let next = accounts.first { $0.id == id }
+    name = RewardCardAccounts.syncedName(
+      name: name,
+      previousAccountName: previous?.name,
+      nextAccountName: next?.name
+    )
+    ynabAccountId = id
+  }
+
   func write() throws -> CreditCard {
+    if ynabAccountId.isEmpty {
+      throw RewardCardWriteError.message("Choose a HowMuch card.")
+    }
     let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmedName.isEmpty {
       throw RewardCardWriteError.message("Enter a card name.")
-    }
-    if ynabAccountId.isEmpty {
-      throw RewardCardWriteError.message("Choose a HowMuch account.")
     }
 
     var card = CreditCard(
@@ -463,14 +503,15 @@ struct RewardCardEditorView: View {
   @State private var ledgerPhase: LoadPhase = .idle
   @State private var flagOverrides: [String: String?] = [:]
   @State private var pendingFlagID: String?
+  @State private var takenAccountIDs: Set<String> = []
 
   private var isEditing: Bool { cardID != nil }
 
   var body: some View {
     NavigationStack {
       Group {
-        if cardID != nil, loadPhase == .loading, draft.ynabAccountId.isEmpty, draft.name.isEmpty {
-          ProgressView("Loading card…")
+        if loadPhase == .loading, draft.ynabAccountId.isEmpty, draft.name.isEmpty {
+          ProgressView(isEditing ? "Loading card…" : "Loading accounts…")
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if cardID != nil, case .failed(let message) = loadPhase, draft.name.isEmpty {
           ContentUnavailableView {
@@ -537,23 +578,38 @@ struct RewardCardEditorView: View {
   private var editorForm: some View {
     Form {
       Section {
+        if !isEditing, accountChoices.isEmpty {
+          Text("No HowMuch credit cards left to add. Every credit card account already has rewards rules, or add a credit card account first.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        }
+        Picker("HowMuch card", selection: $draft.ynabAccountId) {
+          Text("Choose a HowMuch card").tag("")
+          ForEach(accountChoices) { account in
+            Text(account.closed ? "\(account.name) (closed)" : account.name).tag(account.id)
+          }
+        }
+        .onChange(of: draft.ynabAccountId) { oldValue, newValue in
+          guard oldValue != newValue else { return }
+          let previous = model.accounts.first { $0.id == oldValue }
+          let next = model.accounts.first { $0.id == newValue }
+          draft.name = RewardCardAccounts.syncedName(
+            name: draft.name,
+            previousAccountName: previous?.name,
+            nextAccountName: next?.name
+          )
+        }
         TextField("Name", text: $draft.name)
         TextField("Issuer", text: $draft.issuer)
         Picker("Type", selection: $draft.type) {
           Text("Cashback").tag(RewardKind.cashback)
           Text("Miles").tag(RewardKind.miles)
         }
-        Picker("HowMuch account", selection: $draft.ynabAccountId) {
-          Text("Choose account").tag("")
-          ForEach(accountChoices) { account in
-            Text(account.closed ? "\(account.name) (closed)" : account.name).tag(account.id)
-          }
-        }
         Toggle("Featured", isOn: $draft.featured)
       } header: {
-        Text(isEditing ? "Card details" : "New card")
+        Text(isEditing ? "Card details" : "Existing HowMuch card")
       } footer: {
-        Text("Rules apply to the mapped HowMuch account.")
+        Text("Pick a credit card account you already have. This does not create a new ledger account.")
       }
 
       Section("Billing cycle") {
@@ -603,9 +659,9 @@ struct RewardCardEditorView: View {
           }
         }
         .accessibilityLabel("Import category")
-        Picker("Flag colour", selection: $importFlagColor) {
-          ForEach(RewardFlagColour.allCases) { colour in
-            Text(colour.title).tag(colour)
+        Picker("Flag colour", selection: importLedgerFlag) {
+          ForEach(FlagColour.allCases) { colour in
+            ledgerFlagOption(colour)
           }
         }
         TextField("Rate", text: $importRate)
@@ -622,7 +678,7 @@ struct RewardCardEditorView: View {
       } header: {
         Text("Flag subcategories")
       } footer: {
-        Text("Unflagged is a flag colour HowMuch can score. The ledger picker still uses None for no colour.")
+        Text("These are the same colour tags as the ledger. None is Unflagged spend.")
       }
 
       Section("Spending tiers") {
@@ -687,7 +743,7 @@ struct RewardCardEditorView: View {
               .foregroundStyle(.secondary)
             Picker("Flag", selection: flagColourBinding(for: transaction)) {
               ForEach(FlagColour.allCases) { colour in
-                Text(colour.title).tag(colour)
+                ledgerFlagOption(colour)
               }
             }
             .disabled(pendingFlagID == transaction.id)
@@ -712,11 +768,11 @@ struct RewardCardEditorView: View {
       ))
       .accessibilityLabel("Flag \(index + 1) name")
       Picker("Flag colour", selection: Binding(
-        get: { flag.wrappedValue.flagColor },
-        set: { flag.wrappedValue.flagColor = $0; flag.wrappedValue.touch() }
+        get: { flag.wrappedValue.flagColor.ledgerColour },
+        set: { flag.wrappedValue.flagColor = RewardFlagColour(ledgerColour: $0); flag.wrappedValue.touch() }
       )) {
-        ForEach(RewardFlagColour.allCases) { colour in
-          Text(colour.title).tag(colour)
+        ForEach(FlagColour.allCases) { colour in
+          ledgerFlagOption(colour)
         }
       }
       .accessibilityLabel("Flag \(index + 1) colour")
@@ -796,13 +852,29 @@ struct RewardCardEditorView: View {
     }
   }
 
-  private var accountChoices: [Account] {
-    model.accounts.sorted { left, right in
-      if left.closed != right.closed {
-        return !left.closed && right.closed
-      }
-      return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending
+  @ViewBuilder
+  private func ledgerFlagOption(_ colour: FlagColour) -> some View {
+    HStack {
+      Image(systemName: colour == .none ? "flag" : "flag.fill")
+        .foregroundStyle(Theme.flagColour(named: colour.rawValue) ?? .secondary)
+      Text(colour.title)
     }
+    .tag(colour)
+  }
+
+  private var importLedgerFlag: Binding<FlagColour> {
+    Binding(
+      get: { importFlagColor.ledgerColour },
+      set: { importFlagColor = RewardFlagColour(ledgerColour: $0) }
+    )
+  }
+
+  private var accountChoices: [Account] {
+    RewardCardAccounts.choices(
+      accounts: model.accounts,
+      takenIDs: takenAccountIDs,
+      keepingID: draft.ynabAccountId.isEmpty ? nil : draft.ynabAccountId
+    )
   }
 
   private var importableCategories: [Category] {
@@ -842,22 +914,32 @@ struct RewardCardEditorView: View {
   }
 
   private func loadCard() async {
-    guard let cardID else {
-      draft = .empty()
-      loadPhase = .loaded
-      return
-    }
     loadPhase = .loading
     do {
       let snapshot = try await model.apiClient.fetchRewardsTrackerSnapshot(planID: model.settings.planID)
-      guard let card = snapshot.cards.first(where: { $0.id == cardID }) else {
-        loadPhase = .failed("This card is not stored on this plan.")
-        return
+      takenAccountIDs = Set(
+        snapshot.cards
+          .filter { $0.id != cardID }
+          .map(\.ynabAccountId)
+          .filter { !$0.isEmpty }
+      )
+      if let cardID {
+        guard let card = snapshot.cards.first(where: { $0.id == cardID }) else {
+          loadPhase = .failed("This card is not stored on this plan.")
+          return
+        }
+        draft = RewardCardDraft(card: card)
+      } else {
+        draft = .empty()
       }
-      draft = RewardCardDraft(card: card)
       loadPhase = .loaded
     } catch {
-      loadPhase = .failed(error.localizedDescription)
+      if cardID != nil {
+        loadPhase = .failed(error.localizedDescription)
+      } else {
+        draft = .empty()
+        loadPhase = .loaded
+      }
     }
   }
 

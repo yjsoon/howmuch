@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { api, useApi } from "../api/client";
 import type { RewardsReport } from "../api/types";
 import { FlagTag } from "../components/FlagTag";
+import { isFlagColour } from "../lib/flags";
 import { FilterRail } from "../components/FilterRail";
 import { formatAmount } from "../lib/money";
 import { useFilters } from "../state/filters";
@@ -124,7 +125,7 @@ export function RewardsPage() {
           <p className="status-title">No reward cards in this range.</p>
           <p className="status-detail">
             Import a Rewards Tracker export from <Link to="/import/rewards">Settings → Rewards import</Link>,
-            or choose <Link to={addCardHref}>Add card</Link>.
+            or choose <Link to={addCardHref}>Add card</Link> to score one of your HowMuch cards.
           </p>
         </div>
       )}
@@ -233,7 +234,9 @@ function RewardTile({ row, search }: { row: RewardsReport["cards"][number]; sear
         <ul className="rewards-flag-list">
           {calc.flags.map((flag) => (
             <li key={flag.subcategoryId}>
-              <FlagTag colour={flag.flagColor} name={flag.name} />
+              {isFlagColour(flag.flagColor)
+                ? <FlagTag colour={flag.flagColor} name={flag.name} />
+                : <span>{flag.name}</span>}
               <span>{flag.rewardRate ? `${flag.rewardRate}×` : ""}</span>
               <span className="num">{formatReward(flag.rewardEarned, calc.reward_type)}</span>
             </li>

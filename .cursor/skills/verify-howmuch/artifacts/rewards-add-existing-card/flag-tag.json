@@ -1,0 +1,21 @@
+{
+  "flagTag": {
+    "text": "Dining Out",
+    "className": "flag-tag flag-tag-red"
+  },
+  "groups": [
+    {
+      "text": "Dining",
+      "className": "flag-tag flag-tag-red"
+    },
+    {
+      "text": "Online",
+      "className": "flag-tag flag-tag-blue"
+    }
+  ],
+  "diningRow": {
+    "selected": "Red",
+    "tagClass": "flag-tag flag-tag-red",
+    "tagText": "Dining Out"
+  }
+}

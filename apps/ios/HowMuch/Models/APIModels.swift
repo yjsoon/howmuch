@@ -1774,6 +1774,14 @@ enum RewardFlagColour: String, Codable, CaseIterable, Identifiable, Sendable {
     var container = encoder.singleValueContainer()
     try container.encode(rawValue)
   }
+
+  var ledgerColour: FlagColour {
+    FlagColour(rawValue: rawValue) ?? .none
+  }
+
+  init(ledgerColour: FlagColour) {
+    self = RewardFlagColour(rawValue: ledgerColour.rawValue) ?? .unflagged
+  }
 }
 
 enum CardBillingType: String, Codable, CaseIterable, Identifiable, Sendable {

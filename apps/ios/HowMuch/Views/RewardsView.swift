@@ -142,7 +142,7 @@ struct RewardsView: View {
       Text("No reward cards in this range.")
         .font(.headline)
         .foregroundStyle(Theme.textPrimary)
-      Text("Import from Connection settings → Rewards import, or choose Add card.")
+      Text("Import from Connection settings → Rewards import, or choose Add card to score one of your HowMuch cards.")
         .font(.subheadline)
         .foregroundStyle(.secondary)
       Button("Add card") {
