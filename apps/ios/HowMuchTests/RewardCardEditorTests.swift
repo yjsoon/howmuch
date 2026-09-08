@@ -222,6 +222,20 @@ final class RewardCardEditorTests: XCTestCase {
     XCTAssertEqual((payload["flagNames"] as? [String: String])?["blue"], "Online")
   }
 
+  func testClearMissingEncodesEmptyColourNames() {
+    let card = CreditCard(
+      id: "card-travel",
+      name: "Travel Card",
+      issuer: "UOB",
+      type: .cashback,
+      ynabAccountId: "acct-credit",
+      featured: true
+    )
+    let payload = card.jsonObject(clearMissing: true)
+    let names = payload["flagNames"] as? [String: String]
+    XCTAssertEqual(names ?? [:], [:])
+  }
+
   func testColourNamesOverlayLedgerTitles() throws {
     let json = """
     {

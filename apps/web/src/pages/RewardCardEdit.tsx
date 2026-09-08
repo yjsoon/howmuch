@@ -1037,8 +1037,7 @@ function creditCardWrite(draft: CardDraft, options: { clearMissing?: boolean } =
   }
   card.subcategoriesEnabled = flags.length > 0;
   card.subcategories = flags;
-  const flagNames = parseRewardFlagNames(draft.flagNames);
-  if (Object.keys(flagNames).length > 0) card.flagNames = flagNames;
+  card.flagNames = parseRewardFlagNames(draft.flagNames);
 
   const tiers: CardSpendingTier[] = [];
   for (const [index, tier] of draft.tiers.entries()) {

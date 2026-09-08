@@ -645,7 +645,7 @@ async function handleNative(
           memo: sub.memo ?? null,
         }))
       : undefined;
-    const transaction = await repo.createTransaction(targetPlanId, {
+    const input = {
       id: body.client_id,
       account_id: body.account_id,
       date: body.date ?? new Date().toISOString().slice(0, 10),
@@ -659,7 +659,9 @@ async function handleNative(
       source_kind: "mobile",
       source_ref: body.client_id ?? null,
       subtransactions,
-    });
+    };
+    await stampTransactionFlagName(repo, targetPlanId, input.account_id, input);
+    const transaction = await repo.createTransaction(targetPlanId, input);
     return json({ data: { transaction, server_knowledge: await repo.getServerKnowledge(targetPlanId) } }, 201);
   }
 

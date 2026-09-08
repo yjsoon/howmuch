@@ -2078,6 +2078,8 @@ struct CreditCard: Codable, Equatable, Identifiable, Sendable {
     object["subcategoriesEnabled"] = subcategoriesEnabled ?? false
     if let flagNames, !flagNames.isEmpty {
       object["flagNames"] = flagNames
+    } else if clearMissing {
+      object["flagNames"] = [String: String]()
     }
     object["subcategories"] = (subcategories ?? []).map { flag in
       var row: [String: Any] = [
