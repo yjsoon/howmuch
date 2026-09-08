@@ -1785,7 +1785,7 @@ final class CaptureSnapshotTests: XCTestCase {
 }
 
 @MainActor
-private final class SnapshotHarness {
+final class SnapshotHarness {
   let model: AppModel
   let workspace: CaptureWorkspace
 
@@ -2234,7 +2234,7 @@ private final class SnapshotHarness {
 }
 
 @MainActor
-private struct SnapshotAXNode {
+struct SnapshotAXNode {
   let object: NSObject
   let label: String
   let traits: UIAccessibilityTraits
@@ -2242,7 +2242,7 @@ private struct SnapshotAXNode {
 }
 
 @MainActor
-private final class SnapshotSurface {
+final class SnapshotSurface {
   private let window: UIWindow
   private let host: UIHostingController<AnyView>
   private let previousKeyWindow: UIWindow?

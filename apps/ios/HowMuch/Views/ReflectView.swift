@@ -12,28 +12,30 @@ struct ReflectView: View {
             await model.refreshReflectOverview()
           }
         } else {
-          ReflectCard(icon: "chart.pie.fill", title: "Spending Breakdown") {
-            SpendingBreakdownDetailView()
-          } content: {
-            spendingContent
-          }
+          LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)], spacing: 12) {
+            ReflectCard(icon: "chart.pie.fill", title: "Spending Breakdown") {
+              SpendingBreakdownDetailView()
+            } content: {
+              spendingContent
+            }
 
-          ReflectCard(icon: "building.columns.fill", title: "Net Worth") {
-            NetWorthDetailView()
-          } content: {
-            netWorthContent
-          }
+            ReflectCard(icon: "building.columns.fill", title: "Net Worth") {
+              NetWorthDetailView()
+            } content: {
+              netWorthContent
+            }
 
-          ReflectCard(icon: "arrow.left.arrow.right", title: "Income vs Spending") {
-            IncomeVsSpendingDetailView()
-          } content: {
-            incomeContent
-          }
+            ReflectCard(icon: "arrow.left.arrow.right", title: "Income vs Spending") {
+              IncomeVsSpendingDetailView()
+            } content: {
+              incomeContent
+            }
 
-          ReflectCard(icon: "clock.fill", title: "Age of Money") {
-            AgeOfMoneyDetailView()
-          } content: {
-            ageContent
+            ReflectCard(icon: "clock.fill", title: "Age of Money") {
+              AgeOfMoneyDetailView()
+            } content: {
+              ageContent
+            }
           }
         }
       }

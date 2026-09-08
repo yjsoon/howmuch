@@ -1,14 +1,219 @@
 import SwiftUI
 
+enum AccountsPane: Hashable, Identifiable {
+  case inbox
+  case scheduled
+  case all
+  case account(String)
+
+  var id: String {
+    switch self {
+    case .inbox:
+      return "inbox"
+    case .scheduled:
+      return "scheduled"
+    case .all:
+      return "all"
+    case .account(let id):
+      return "account-\(id)"
+    }
+  }
+
+  static func defaultSelection(
+    openAccounts: [Account],
+    isFavourite: (String) -> Bool
+  ) -> AccountsPane {
+    if let favourite = openAccounts.first(where: { isFavourite($0.id) }) {
+      return .account(favourite.id)
+    }
+    if let open = openAccounts.first {
+      return .account(open.id)
+    }
+    return .all
+  }
+}
+
+enum AccountsPaneSelection {
+  static func reconciled(
+    current: AccountsPane?,
+    isRegularWidth: Bool,
+    knownAccountIDs: Set<String>,
+    canChooseDefault: Bool,
+    defaultPane: AccountsPane
+  ) -> AccountsPane? {
+    var pane = current
+    if case .account(let id) = pane, !knownAccountIDs.contains(id) {
+      pane = nil
+    }
+    guard isRegularWidth else { return pane }
+    if pane == nil, canChooseDefault {
+      return defaultPane
+    }
+    return pane
+  }
+
+  static func afterSizeClassChange(
+    current: AccountsPane?,
+    isRegularWidth: Bool,
+    knownAccountIDs: Set<String>,
+    canChooseDefault: Bool,
+    defaultPane: AccountsPane
+  ) -> AccountsPane? {
+    guard isRegularWidth else { return nil }
+    return reconciled(
+      current: current,
+      isRegularWidth: true,
+      knownAccountIDs: knownAccountIDs,
+      canChooseDefault: canChooseDefault,
+      defaultPane: defaultPane
+    )
+  }
+}
+
 struct AccountsView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   @State private var collapsedGroups: Set<String> = ["closed"]
   @State private var presentedSheet: AccountsSheet?
   @State private var groupPendingDeletion: CustomAccountGroup?
+  @State private var pane: AccountsPane?
+  @State private var columnVisibility = NavigationSplitViewVisibility.all
 
   var body: some View {
     @Bindable var screenshots = ScreenshotOfferController.shared
+    Group {
+      if horizontalSizeClass == .regular {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+          overview(screenshots: screenshots)
+            .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
+        } detail: {
+          NavigationStack {
+            if let pane {
+              detail(pane)
+                .id(pane)
+            } else {
+              PhasePlaceholder(phase: model.referencePhase) {
+                await model.refreshReferenceData()
+              }
+            }
+          }
+        }
+        .navigationSplitViewStyle(.balanced)
+      } else {
+        NavigationStack {
+          overview(screenshots: screenshots)
+            .navigationDestination(item: $pane) { selected in
+              detail(selected)
+                .id(selected)
+            }
+        }
+      }
+    }
+    .onAppear {
+      reconcilePane()
+    }
+    .onChange(of: horizontalSizeClass) { _, _ in
+      pane = AccountsPaneSelection.afterSizeClassChange(
+        current: pane,
+        isRegularWidth: horizontalSizeClass == .regular,
+        knownAccountIDs: knownAccountIDs,
+        canChooseDefault: canChooseDefaultPane,
+        defaultPane: defaultPane
+      )
+    }
+    .onChange(of: model.accounts.map(\.id)) { _, _ in
+      reconcilePane()
+    }
+    .onChange(of: model.referencePhase) { _, _ in
+      reconcilePane()
+    }
+    .sheet(item: $presentedSheet) { sheet in
+      Group {
+        switch sheet {
+        case .newGroup(let prefilledAccountID):
+          NewCustomAccountGroupSheet(prefilledAccountID: prefilledAccountID)
+        case .manageGroups:
+          ManageAccountGroupsSheet()
+        case .favourites:
+          ChooseFavouritesSheet()
+        case .memberships(let accountID):
+          AccountMembershipSheet(accountID: accountID)
+        case .editGroup(let group):
+          NavigationStack {
+            CustomAccountGroupEditor(group: group)
+              .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                  Button("Cancel") { presentedSheet = nil }
+                }
+              }
+          }
+        case .reorder(let group):
+          AccountGroupReorderSheet(group: group)
+        case .edit(let account):
+          EditAccountSheet(account: account)
+        case .newAccount:
+          NewAccountSheet()
+        }
+      }
+      .blocksCapturePresentation()
+    }
+    .binaryConfirm(
+      "Delete \(groupPendingDeletion?.name ?? "this group")?",
+      presenting: $groupPendingDeletion,
+      confirm: .destructive("Delete Group"),
+      message: { _ in
+        Text("The accounts and their transactions will not be deleted.")
+      }
+    ) { group in
+      model.deleteCustomAccountGroup(id: group.id)
+    }
+  }
+
+  private var defaultPane: AccountsPane {
+    .defaultSelection(
+      openAccounts: model.openAccounts,
+      isFavourite: model.isAccountFavourite
+    )
+  }
+
+  private var knownAccountIDs: Set<String> {
+    Set(model.accounts.map(\.id))
+  }
+
+  private var canChooseDefaultPane: Bool {
+    !model.accounts.isEmpty || model.referencePhase == .loaded
+  }
+
+  private func reconcilePane() {
+    pane = AccountsPaneSelection.reconciled(
+      current: pane,
+      isRegularWidth: horizontalSizeClass == .regular,
+      knownAccountIDs: knownAccountIDs,
+      canChooseDefault: canChooseDefaultPane,
+      defaultPane: defaultPane
+    )
+  }
+
+  private func isShowing(_ candidate: AccountsPane) -> Bool {
+    pane == candidate
+  }
+
+  @ViewBuilder
+  private func detail(_ pane: AccountsPane) -> some View {
+    switch pane {
+    case .inbox:
+      RegisterView(scope: .unapproved)
+    case .scheduled:
+      ScheduledTransactionsView()
+    case .all:
+      RegisterView(scope: .all)
+    case .account(let id):
+      RegisterView(scope: .account(id))
+    }
+  }
+
+  private func overview(screenshots: ScreenshotOfferController) -> some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
         if let offer = screenshots.offer, screenshots.isEnabled {
@@ -109,55 +314,16 @@ struct AccountsView: View {
       }
       await model.refreshAccountUsageLast30Days()
     }
-    .sheet(item: $presentedSheet) { sheet in
-      Group {
-        switch sheet {
-        case .newGroup(let prefilledAccountID):
-          NewCustomAccountGroupSheet(prefilledAccountID: prefilledAccountID)
-        case .manageGroups:
-          ManageAccountGroupsSheet()
-        case .favourites:
-          ChooseFavouritesSheet()
-        case .memberships(let accountID):
-          AccountMembershipSheet(accountID: accountID)
-        case .editGroup(let group):
-          NavigationStack {
-            CustomAccountGroupEditor(group: group)
-              .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                  Button("Cancel") { presentedSheet = nil }
-                }
-              }
-          }
-        case .reorder(let group):
-          AccountGroupReorderSheet(group: group)
-        case .edit(let account):
-          EditAccountSheet(account: account)
-        case .newAccount:
-          NewAccountSheet()
-        }
-      }
-      .blocksCapturePresentation()
-    }
-    .binaryConfirm(
-      "Delete \(groupPendingDeletion?.name ?? "this group")?",
-      presenting: $groupPendingDeletion,
-      confirm: .destructive("Delete Group"),
-      message: { _ in
-        Text("The accounts and their transactions will not be deleted.")
-      }
-    ) { group in
-      model.deleteCustomAccountGroup(id: group.id)
-    }
   }
 
   private var ledgerShortcuts: some View {
     let newTransactions = LedgerShortcutTile(
       icon: "tray",
       title: "New",
-      status: LedgerShortcutStatus.newQueue(count: model.unapprovedTransactions.count)
+      status: LedgerShortcutStatus.newQueue(count: model.unapprovedTransactions.count),
+      isSelected: isShowing(.inbox)
     ) {
-      RegisterView(scope: .unapproved)
+      pane = .inbox
     }
 
     let scheduled = LedgerShortcutTile(
@@ -166,17 +332,19 @@ struct AccountsView: View {
       status: LedgerShortcutStatus.scheduled(
         phase: model.scheduledTransactionsPhase,
         count: model.scheduledTransactions.count
-      )
+      ),
+      isSelected: isShowing(.scheduled)
     ) {
-      ScheduledTransactionsView()
+      pane = .scheduled
     }
 
     let allTransactions = LedgerShortcutTile(
       icon: "list.bullet.rectangle",
       title: "All",
-      status: .quiet
+      status: .quiet,
+      isSelected: isShowing(.all)
     ) {
-      RegisterView(scope: .all)
+      pane = .all
     }
 
     return Grid(alignment: .topLeading, horizontalSpacing: 12, verticalSpacing: 12) {
@@ -338,8 +506,9 @@ struct AccountsView: View {
   }
 
   private func accountRow(_ account: Account) -> some View {
-    NavigationLink {
-      RegisterView(scope: .account(account.id))
+    let selected = isShowing(.account(account.id))
+    return Button {
+      pane = .account(account.id)
     } label: {
       HStack(alignment: .center, spacing: 8) {
         Text(account.displayIcon)
@@ -351,12 +520,14 @@ struct AccountsView: View {
           if dynamicTypeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: 4) {
               Text(account.name)
+                .font(selected ? .body.weight(.semibold) : .body)
                 .foregroundStyle(Theme.textPrimary)
               accountBalance(account)
             }
           } else {
             HStack {
               Text(account.name)
+                .font(selected ? .body.weight(.semibold) : .body)
                 .foregroundStyle(Theme.textPrimary)
               Spacer()
               accountBalance(account)
@@ -368,9 +539,11 @@ struct AccountsView: View {
       .padding(.vertical, 14)
       .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
       .contentShape(Rectangle())
+      .background(selected ? Theme.accent.opacity(0.12) : Color.clear)
     }
     .buttonStyle(.plain)
     .accessibilityLabel("\(account.displayIcon) \(account.name)")
+    .accessibilityAddTraits(selected ? .isSelected : [])
     .accessibilityValue(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
     .accessibilityActions {
       if !account.closed {
@@ -453,17 +626,16 @@ struct AccountsView: View {
     }
   }
 
-  private struct LedgerShortcutTile<Destination: View>: View {
+  private struct LedgerShortcutTile: View {
     let icon: String
     let title: String
     let status: LedgerShortcutStatus
-    @ViewBuilder let destination: () -> Destination
+    var isSelected = false
+    let action: () -> Void
     @ScaledMetric(relativeTo: .title2) private var iconSlot = 32.0
 
     var body: some View {
-      NavigationLink {
-        destination()
-      } label: {
+      Button(action: action) {
         VStack(alignment: .leading, spacing: 10) {
           HStack(alignment: .center, spacing: 8) {
             Image(systemName: icon)
@@ -487,7 +659,12 @@ struct AccountsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .ynabCard()
+        .overlay {
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(isSelected ? Theme.accent : Color.clear, lineWidth: 2)
+        }
         .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityValue(status.detail ?? "")
       }
       .buttonStyle(.plain)
