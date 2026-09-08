@@ -333,10 +333,11 @@ final class RootChromeState {
   }
 
   func adoptSidebarLayout() {
-    if let overflow = overflow(on: tab) {
-      tab = overflow.tab
-      dismissMore()
+    guard let overflow = overflow(on: tab) else {
+      return
     }
+    overflowByTab[tab] = nil
+    tab = overflow.tab
   }
 
   func adoptCompactLayout() {
