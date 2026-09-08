@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A70000000000000000000011 /* CaptureAISettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000000000000000000010 /* CaptureAISettings.swift */; };
+		A60000000000000000000013 /* CaptureAIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000000000000000000012 /* CaptureAIClient.swift */; };
+		A60000000000000000000015 /* CaptureAISettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000000000000000000014 /* CaptureAISettingsView.swift */; };
+		A60000000000000000000017 /* AIModels.json in Resources */ = {isa = PBXBuildFile; fileRef = A60000000000000000000016 /* AIModels.json */; };
+		A60000000000000000000019 /* CaptureAITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000000000000000000018 /* CaptureAITests.swift */; };
 		A10000000000000000000020 /* HowMuchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000010 /* HowMuchApp.swift */; };
 		A10000000000000000000021 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* AppModel.swift */; };
 		A10000000000000000000022 /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* APIModels.swift */; };
@@ -90,6 +95,11 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A70000000000000000000010 /* CaptureAISettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureAISettings.swift; sourceTree = "<group>"; };
+		A60000000000000000000012 /* CaptureAIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureAIClient.swift; sourceTree = "<group>"; };
+		A60000000000000000000014 /* CaptureAISettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureAISettingsView.swift; sourceTree = "<group>"; };
+		A60000000000000000000016 /* AIModels.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = AIModels.json; sourceTree = "<group>"; };
+		A60000000000000000000018 /* CaptureAITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureAITests.swift; sourceTree = "<group>"; };
 		A10000000000000000000001 /* HowMuch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HowMuch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000022 /* HowMuchTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HowMuchTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000010 /* CaptureRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureRequest.swift; sourceTree = "<group>"; };
@@ -325,6 +335,7 @@
 				A10000000000000000000075 /* ReflectView.swift */,
 				A10000000000000000000076 /* ReflectDetails.swift */,
 				A10000000000000000000018 /* SettingsView.swift */,
+				A60000000000000000000014 /* CaptureAISettingsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -337,6 +348,9 @@
 				A40000000000000000000012 /* CaptureSession.swift */,
 				A40000000000000000000014 /* CaptureWorkspace.swift */,
 				A40000000000000000000016 /* CaptureInterpreter.swift */,
+				A70000000000000000000010 /* CaptureAISettings.swift */,
+				A60000000000000000000012 /* CaptureAIClient.swift */,
+				A60000000000000000000016 /* AIModels.json */,
 				A40000000000000000000018 /* LedgerQuery.swift */,
 				A20000000000000000000012 /* CaptureRouter.swift */,
 				A20000000000000000000090 /* InboxStore.swift */,
@@ -370,6 +384,7 @@
 				A40000000000000000000030 /* CaptureOriginTests.swift */,
 				A40000000000000000000032 /* CaptureSessionTests.swift */,
 				A40000000000000000000034 /* CaptureInterpreterTests.swift */,
+				A60000000000000000000018 /* CaptureAITests.swift */,
 				A40000000000000000000036 /* LedgerQueryTests.swift */,
 				A40000000000000000000038 /* CaptureWorkspaceTests.swift */,
 				A4000000000000000000003A /* CaptureSnapshotTests.swift */,
@@ -511,6 +526,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1000000000000000000002A /* Assets.xcassets in Resources */,
+				A60000000000000000000017 /* AIModels.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -564,6 +580,9 @@
 				A40000000000000000000013 /* CaptureSession.swift in Sources */,
 				A40000000000000000000015 /* CaptureWorkspace.swift in Sources */,
 				A40000000000000000000017 /* CaptureInterpreter.swift in Sources */,
+				A70000000000000000000011 /* CaptureAISettings.swift in Sources */,
+				A60000000000000000000013 /* CaptureAIClient.swift in Sources */,
+				A60000000000000000000015 /* CaptureAISettingsView.swift in Sources */,
 				A40000000000000000000019 /* LedgerQuery.swift in Sources */,
 				A20000000000000000000013 /* CaptureRouter.swift in Sources */,
 				A40000000000000000000021 /* AddTransactionsView.swift in Sources */,
@@ -593,6 +612,7 @@
 				A40000000000000000000031 /* CaptureOriginTests.swift in Sources */,
 				A40000000000000000000033 /* CaptureSessionTests.swift in Sources */,
 				A40000000000000000000035 /* CaptureInterpreterTests.swift in Sources */,
+				A60000000000000000000019 /* CaptureAITests.swift in Sources */,
 				A40000000000000000000037 /* LedgerQueryTests.swift in Sources */,
 				A40000000000000000000039 /* CaptureWorkspaceTests.swift in Sources */,
 				A4000000000000000000003B /* CaptureSnapshotTests.swift in Sources */,

@@ -16,7 +16,8 @@ struct AddTransactionsView: View {
 
   @State private var editingDraftID: String?
   @State private var errorMessage: String?
-  private let interpreter: CaptureInterpreter
+  private let interpreter: CaptureInterpreter?
+  @State private var showingAISettings = false
   @State private var isShowingCamera = false
   @State private var isShowingLibraryPicker = false
   @State private var photoItems: [PhotosPickerItem] = []
@@ -42,7 +43,7 @@ struct AddTransactionsView: View {
   init(
     session: CaptureSession,
     embeddedInAssistant: Bool = false,
-    interpreter: CaptureInterpreter = .shared,
+    interpreter: CaptureInterpreter? = nil,
     workspace: CaptureWorkspace = .shared
   ) {
     self.session = session
@@ -58,6 +59,18 @@ struct AddTransactionsView: View {
         .navigationTitle(embeddedInAssistant ? "Conversation" : "Add Transactions")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+          ToolbarItem(placement: .topBarTrailing) {
+            Button {
+              isComposerFocused = false
+              showingAISettings = true
+            } label: {
+              Label("AI provider", systemImage: "sparkles")
+                .labelStyle(.iconOnly)
+            }
+            .tint(Theme.accent)
+            .accessibilityLabel("AI provider")
+            .accessibilityValue(model.captureAI.displayName)
+          }
           if embeddedInAssistant {
             ToolbarItem(placement: .topBarTrailing) {
               Menu {
@@ -89,7 +102,7 @@ struct AddTransactionsView: View {
             accountLabel: currentAccountName,
             isBusy: session.isBusy,
             isIngesting: session.isIngesting,
-            canSend: session.canSendComposer,
+            canSend: session.canSendComposer && intelligence.allowsDescribe,
             canChangeAccount: !session.isBusy && !session.isSaving,
             canOpenPlus: !session.isSaving,
             pending: session.attachments,
@@ -119,6 +132,10 @@ struct AddTransactionsView: View {
             }
           )
         }
+      }
+      .sheet(isPresented: $showingAISettings) {
+        NavigationStack { CaptureAISettingsView(settings: model.captureAI) }
+          .blocksCapturePresentation()
       }
       .sheet(isPresented: $creatingManual) {
         TransactionFormView(
@@ -268,7 +285,7 @@ struct AddTransactionsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
           }
-          if let banner = CaptureIntelligenceStatus.current.banner {
+          if let banner = intelligence.banner {
             Text(banner)
               .font(.footnote)
               .foregroundStyle(Theme.uncategorised)
@@ -414,8 +431,13 @@ struct AddTransactionsView: View {
           model.hasPendingCreate(importID: item.id)
         },
         canRetry: session.canRetry(message),
-        intelligence: CaptureIntelligenceStatus.current
+        intelligence: intelligence,
+        activity: message.replyState == .generating ? session.aiActivity : nil
     )
+  }
+
+  private var intelligence: CaptureIntelligenceStatus {
+    interpreter == nil ? model.captureAI.status : .available
   }
 
   private var plusMenu: some View {
@@ -577,7 +599,7 @@ struct AddTransactionsView: View {
   }
 
   private func send() {
-    guard session.canSendComposer, isCurrent(capturedTurnScope()) else {
+    guard session.canSendComposer, intelligence.allowsDescribe, isCurrent(capturedTurnScope()) else {
       return
     }
     errorMessage = nil
@@ -603,7 +625,25 @@ struct AddTransactionsView: View {
     guard isCurrent(capturedTurnScope()) else {
       return
     }
-    let token = session.beginTurn()
+    let selectedInterpreter: CaptureInterpreter
+    let provider: String
+    do {
+      if let interpreter {
+        selectedInterpreter = interpreter
+        provider = "On-device model"
+      } else if let configuration = try model.captureAI.configuration() {
+        selectedInterpreter = CaptureInterpreter(backend: .remote(configuration))
+        provider = "\(configuration.providerName) · \(configuration.model.name)"
+      } else {
+        selectedInterpreter = .shared
+        provider = "On-device model"
+      }
+    } catch {
+      session.recordFailedTurn(error.localizedDescription)
+      workspace.persistCurrentIfNeeded()
+      return
+    }
+    let token = session.beginTurn(provider: provider)
     let turnScope = capturedTurnScope(generation: token.generation)
     let client = model.apiClient
     let accounts = model.openAccounts
@@ -618,11 +658,15 @@ struct AddTransactionsView: View {
       frozen: frozen
     )
     workspace.runConversationTurn {
-      let result = await self.interpreter.interpret(
+      let result = await selectedInterpreter.interpret(
         context: context,
         accounts: accounts,
         categoryGroups: categories,
-        payees: payees
+        payees: payees,
+        conversationID: self.session.id,
+        progress: { [session = self.session] phase in
+          await session.updateAIPhase(phase, generation: token.generation)
+        }
       )
       defer {
         _ = self.session.finishTurn(generation: token.generation)
@@ -667,6 +711,7 @@ struct AddTransactionsView: View {
       return
     }
     if turn.intent == .query {
+      session.updateAIPhase(.fetching, generation: expectedGeneration)
       await runQuery(turn.query, turnScope: turnScope, client: client, expectedGeneration: expectedGeneration)
       return
     }
@@ -775,6 +820,7 @@ struct AddTransactionsView: View {
     }
     session.pendingQuery = nil
     session.pendingQueryReplyID = nil
+    session.updateAIPhase(.fetching, generation: token.generation)
     workspace.runConversationTurn {
       defer {
         _ = self.session.finishTurn(generation: token.generation)

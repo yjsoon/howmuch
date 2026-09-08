@@ -31,6 +31,7 @@ private enum AccountUsageScanError: LocalizedError {
 @Observable
 final class AppModel {
   var settings: APISettings
+  let captureAI: CaptureAISettings
   var planSettings: PlanSettings?
   var accounts: [Account] = []
   var categoryGroups: [CategoryGroup] = []
@@ -115,13 +116,14 @@ final class AppModel {
   @ObservationIgnored private var accountPreferenceMutationGenerations: [String: Int] = [:]
   @ObservationIgnored private var accountPreferenceSyncedGenerations: [String: Int] = [:]
 
-  init(settings: APISettings = .load(), viewPrefs: ViewPrefs = .load()) {
+  init(settings: APISettings = .load(), viewPrefs: ViewPrefs = .load(), captureAI: CaptureAISettings? = nil) {
     var scopedStore = ScopedViewPrefsStore.load()
     let scope = settings.viewPrefsScopeKey
     if scope == nil {
       scopedStore.discardUnscopedLegacyMigration()
     }
     self.settings = settings
+    self.captureAI = captureAI ?? CaptureAISettings()
     self.legacyViewPrefs = viewPrefs
     self.scopedViewPrefsStore = scopedStore
     self.activeViewPrefsScope = scope

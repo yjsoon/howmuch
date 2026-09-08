@@ -208,15 +208,18 @@ enum CaptureInterpreterPrompt {
 actor CaptureInterpreter {
   enum Backend: Sendable {
     case foundationModels
+    case remote(CaptureAIConfiguration)
     case fixed(@Sendable (CaptureTurnContext) -> CaptureInterpretedTurn)
   }
 
   static let shared = CaptureInterpreter()
 
   private let backend: Backend
+  private let remoteClient: CaptureAIClient?
 
-  init(backend: Backend = .foundationModels) {
+  init(backend: Backend = .foundationModels, remoteClient: CaptureAIClient? = nil) {
     self.backend = backend
+    self.remoteClient = remoteClient
   }
 
   func interpret(
@@ -225,7 +228,9 @@ actor CaptureInterpreter {
     categoryGroups: [CategoryGroup],
     payees: [Payee],
     calendar: Calendar = .current,
-    now: Date = .now
+    now: Date = .now,
+    conversationID: UUID = UUID(),
+    progress: @escaping @Sendable (CaptureAIPhase) async -> Void = { _ in }
   ) async -> Result<(CaptureInterpretedTurn, [CaptureMappedChange]), CaptureInterpreterError> {
     let trimmed = context.text.trimmingCharacters(in: .whitespacesAndNewlines)
     let attachmentText = context.attachmentTranscripts.joined(separator: "\n")
@@ -246,10 +251,27 @@ actor CaptureInterpreter {
       } catch {
         return .failure(.model(error.localizedDescription))
       }
+    case .remote(let configuration):
+      do {
+        let payload = try await (remoteClient ?? CaptureAIClient()).extract(
+          configuration: configuration, context: context, accounts: accounts,
+          categories: categoryGroups, conversationID: conversationID, progress: progress
+        )
+        try Task.checkCancellation()
+        turn = Self.mapPayload(payload)
+      } catch is CancellationError {
+        return .failure(.cancelled)
+      } catch let error as CaptureAIError {
+        return .failure(.model(error.localizedDescription))
+      } catch {
+        return .failure(.model(CaptureAIError.invalidResponse.localizedDescription))
+      }
     case .fixed(let produce):
       turn = produce(context)
     }
 
+    guard !Task.isCancelled else { return .failure(.cancelled) }
+    await progress(.checking)
     let mappingNow = SlipReaderMapping.date(from: context.today, calendar: calendar, now: now)
       ?? calendar.startOfDay(for: now)
     let changes: [CaptureMappedChange] = turn.mutations.compactMap { mutation in
@@ -378,7 +400,7 @@ enum CaptureInterpreterError: Equatable, LocalizedError, Sendable {
   }
 }
 
-struct CaptureTurnPayload: Equatable, Sendable {
+struct CaptureTurnPayload: Codable, Equatable, Sendable {
   var kind = "unsupported"
   var feedback = ""
   var applyToAllDrafts = false
@@ -391,7 +413,7 @@ struct CaptureTurnPayload: Equatable, Sendable {
   var queryTo = ""
 }
 
-struct CaptureTurnSpend: Equatable, Sendable {
+struct CaptureTurnSpend: Codable, Equatable, Sendable {
   var targetDraftID = ""
   var amount = ""
   var payee = ""

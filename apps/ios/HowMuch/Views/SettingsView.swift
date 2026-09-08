@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
+  @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
   @Environment(\.openURL) private var openURL
   @State private var draft: APISettings
@@ -131,6 +132,11 @@ struct SettingsView: View {
 
         if sessionMatchesDraft {
           planSection
+          Section("Intelligence") {
+            NavigationLink("AI provider") {
+              CaptureAISettingsView(settings: model.captureAI)
+            }
+          }
           Section {
             NavigationLink {
               RewardsImportView()

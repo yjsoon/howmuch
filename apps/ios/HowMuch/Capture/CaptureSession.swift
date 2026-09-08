@@ -266,6 +266,7 @@ final class CaptureSession: Identifiable {
   var lastFeedback: String?
   var canUndo: Bool { undoStack.isEmpty == false }
   var isBusy: Bool
+  var aiActivity: CaptureAIActivity?
   var isSaving: Bool
   var claimedInboxIDs: [UUID]
   var generation: Int
@@ -783,10 +784,22 @@ final class CaptureSession: Identifiable {
     touch()
   }
 
-  func beginTurn() -> (generation: Int, revision: Int) {
+  func beginTurn(provider: String = "On-device model") -> (generation: Int, revision: Int) {
     isBusy = true
+    aiActivity = CaptureAIActivity(provider: provider, startedAt: .now)
     generation += 1
     return (generation, revision)
+  }
+
+  func updateAIPhase(_ phase: CaptureAIPhase, generation expected: Int) {
+    guard matchesTurn(generation: expected) else { return }
+    aiActivity?.phase = phase
+  }
+
+  func timeOutTurn(generation expected: Int) {
+    guard matchesTurn(generation: expected) else { return }
+    recordFailedTurn(CaptureAIError.timedOut.localizedDescription)
+    cancelTurn()
   }
 
   func finishTurn(generation expected: Int) -> Bool {
@@ -794,6 +807,7 @@ final class CaptureSession: Identifiable {
       return false
     }
     isBusy = false
+    aiActivity = nil
     return true
   }
 
@@ -804,10 +818,12 @@ final class CaptureSession: Identifiable {
   func cancelTurn() {
     generation += 1
     isBusy = false
+    aiActivity = nil
     interruptGeneratingReplies()
   }
 
   func interruptGeneratingReplies() {
+    aiActivity = nil
     var changed = false
     for index in messages.indices where messages[index].replyState == .generating {
       messages[index].replyState = .stopped

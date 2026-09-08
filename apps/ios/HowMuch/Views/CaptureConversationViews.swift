@@ -93,6 +93,7 @@ struct CaptureAssistantReply: View {
   let isSyncPending: (CaptureDraftItem) -> Bool
   let canRetry: Bool
   let intelligence: CaptureIntelligenceStatus
+  var activity: CaptureAIActivity? = nil
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
   var body: some View {
@@ -143,8 +144,25 @@ struct CaptureAssistantReply: View {
       HStack(alignment: .bottom, spacing: 0) {
         Group {
           if message.replyState == .generating {
-            Text("Let me take a look…")
-              .accessibilityLabel("Working on a reply")
+            VStack(alignment: .leading, spacing: 8) {
+              Text("Let me take a look…")
+                .accessibilityLabel("Working on a reply")
+              if let activity {
+                TimelineView(.periodic(from: activity.startedAt, by: 1)) { context in
+                  let seconds = max(0, Int(context.date.timeIntervalSince(activity.startedAt)))
+                  VStack(alignment: .leading, spacing: 4) {
+                    Text(activity.phase == .fetching ? "HowMuch server" : activity.provider).font(.caption)
+                    Text("\(activity.phase.rawValue) · \(seconds)s")
+                      .monospacedDigit()
+                    if seconds >= 20 {
+                      Text("Taking longer than usual. You can stop and retry, or add manually.")
+                    }
+                  }
+                  .font(.footnote)
+                  .foregroundStyle(.secondary)
+                }
+              }
+            }
           } else {
             Text(message.text)
           }
@@ -170,13 +188,21 @@ struct CaptureAssistantReply: View {
   private var replyRecovery: some View {
     adaptiveFooter {
       if canRetry, intelligence == .available {
-        Button("Retry", action: retry)
-          .frame(minHeight: 44)
+        Button(action: retry) {
+          Text("Retry")
+            .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
       }
-      Button("Add manually", action: enterManually)
-        .frame(minHeight: 44)
+      Button(action: enterManually) {
+        Text("Add manually")
+          .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+          .contentShape(Rectangle())
+      }
     }
+    .buttonStyle(.plain)
     .font(.subheadline.weight(.semibold))
+    .foregroundStyle(Theme.accent)
     .tint(Theme.accent)
   }
 

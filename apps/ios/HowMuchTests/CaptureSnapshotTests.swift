@@ -1577,6 +1577,166 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertTrue(restored.queryCards.isEmpty)
   }
 
+  func testConversationOffersAIProviderSettingsAtDefaultAndAccessibility3() async {
+    for (size, name, embedded) in [
+      (DynamicTypeSize.large, "large", false), (.accessibility3, "accessibility3", false),
+      (.large, "assistant-large", true), (.accessibility3, "assistant-accessibility3", true),
+    ] {
+      let harness = SnapshotHarness.make()
+      let session = harness.admitEmpty()
+      let view = AddTransactionsView(session: session, embeddedInAssistant: embedded, workspace: harness.workspace)
+        .environment(harness.model)
+        .environment(\.dynamicTypeSize, size)
+      guard let surface = SnapshotSurface(
+        root: embedded ? AnyView(NavigationStack { view }) : AnyView(view),
+        size: CGSize(width: 390, height: 844)
+      ) else {
+        XCTFail("AI settings needs a connected UIWindowScene")
+        continue
+      }
+      _ = await surface.captureUntilOCR(contains: [embedded ? "Conversation" : "Add Transactions"])
+      let entry = surface.firstControl(label: "AI provider")
+      XCTAssertNotNil(entry, "Conversation must offer AI provider settings at \(name)")
+      if let entry {
+        XCTAssertTrue(surface.activate(entry))
+        let presented = await surface.waitUntil {
+          surface.accessibilityLabels().contains("On device")
+        }
+        XCTAssertTrue(presented, "AI provider settings must be available without changing ledger connection")
+        attachImage(surface.captureVisible(), name: "byok-settings-on-device-\(name)")
+        if let cancel = surface.firstControl(label: "Cancel") {
+          XCTAssertTrue(surface.activate(cancel))
+          let closed = await surface.waitUntil { surface.firstControl(label: "Cancel") == nil }
+          XCTAssertTrue(closed)
+          await surface.settleNavigation()
+        } else {
+          XCTFail("AI settings must offer Cancel")
+        }
+      }
+      XCTAssertTrue(session.drafts.isEmpty)
+      XCTAssertTrue(harness.model.pendingRows.isEmpty)
+      surface.detach()
+    }
+  }
+
+  func testAIProviderSettingsAndModelsRenderAtDefaultAndAccessibility3() async throws {
+    for (size, name) in [(DynamicTypeSize.large, "large"), (.accessibility3, "accessibility3")] {
+      for provider in CaptureAICatalog.bundled.providers {
+        let suite = "howmuch.byok.snapshot.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = CaptureAISettings(defaults: defaults, keys: CaptureAIMemoryKeys())
+        try settings.save(CaptureAISelection(providerID: provider.id, modelID: provider.models[0].id))
+        await assertRenderedContent(
+          NavigationStack { CaptureAISettingsView(settings: settings) }.environment(\.dynamicTypeSize, size),
+          expected: [provider.name, provider.models[0].name],
+          name: "byok-settings-\(provider.id)-\(name)",
+          forbidden: ["fixture-api-key"]
+        )
+      }
+      let suite = "howmuch.byok.custom.\(UUID().uuidString)"
+      let defaults = UserDefaults(suiteName: suite)!
+      defer { defaults.removePersistentDomain(forName: suite) }
+      let settings = CaptureAISettings(defaults: defaults, keys: CaptureAIMemoryKeys())
+      try settings.save(CaptureAISelection(providerID: "custom", modelID: "fixture-model",
+        customBaseURL: "https://byok.invalid/v1"))
+      await assertRenderedContent(
+        NavigationStack { CaptureAISettingsView(settings: settings) }.environment(\.dynamicTypeSize, size),
+        expected: ["Custom endpoint", "fixture-model"], name: "byok-settings-custom-\(name)"
+      )
+    }
+  }
+
+  func testAIModelSelectionSavesPreferencesWithoutExposingOrReplacingKey() async throws {
+    let suite = "howmuch.byok.selection.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let settings = CaptureAISettings(defaults: defaults, keys: CaptureAIMemoryKeys())
+    let initial = CaptureAISelection(providerID: "opencode-go", modelID: "gpt-5.6-luna", allowsRemote: true)
+    try settings.save(initial, keyChange: "private-fixture-value")
+    guard let surface = SnapshotSurface(
+      root: NavigationStack { CaptureAISettingsView(settings: settings) }, size: CGSize(width: 390, height: 844)
+    ) else { XCTFail("AI model selection needs a window"); return }
+    defer { surface.detach() }
+    _ = await surface.captureUntilOCR(contains: ["GPT 5.6 Luna"])
+    XCTAssertFalse(surface.accessibilityLabels().joined().contains("private-fixture-value"))
+    guard let picker = surface.firstControl(labelContains: "Model") else {
+      XCTFail("Model picker missing: \(surface.accessibilityLabels())"); return
+    }
+    XCTAssertTrue(surface.activate(picker))
+    let choicesVisible = await surface.waitUntil {
+      surface.firstControl(labelContains: "DeepSeek V4 Flash Vision Exp") != nil
+    }
+    XCTAssertTrue(choicesVisible)
+    guard let choice = surface.firstControl(labelContains: "DeepSeek V4 Flash Vision Exp") else { return }
+    XCTAssertTrue(surface.activate(choice))
+    let returned = await surface.waitUntil {
+      surface.firstControl(label: "Save AI settings") != nil
+        && surface.accessibilityLabels().contains("deepseek-v4-flash-vision-exp")
+    }
+    XCTAssertTrue(returned, "Selected model must return to settings: \(surface.accessibilityLabels())")
+    XCTAssertEqual(settings.selection, initial, "Picker edits remain staged until Save")
+    guard let save = surface.firstControl(label: "Save AI settings") else { return }
+    XCTAssertTrue(surface.activate(save))
+    XCTAssertEqual(settings.selection.modelID, "deepseek-v4-flash-vision-exp")
+    XCTAssertFalse(settings.selection.allowsRemote, "Changing models requires acknowledging its data policy")
+    XCTAssertTrue(settings.hasKey(for: settings.selection), "Switching models must not overwrite the provider key")
+  }
+
+  func testAISlowAndTimeoutRecoveryRenderAtDefaultAndAccessibility3() async {
+    for (size, name) in [(DynamicTypeSize.large, "large"), (.accessibility3, "accessibility3")] {
+      let harness = SnapshotHarness.make()
+      let session = harness.admitEmpty()
+      session.composerText = "Lunch $12"
+      _ = session.freezeComposerTurn(accountName: "Everyday", localDate: "2026-09-08")
+      let token = session.beginTurn(provider: "OpenAI · GPT 5.6 Luna")
+      session.aiActivity?.startedAt = Date().addingTimeInterval(-25)
+      let view = AddTransactionsView(session: session, interpreter: CaptureInterpreter(backend: .fixed { _ in
+        CaptureInterpretedTurn(intent: .unsupported, feedback: "Fixture", mutations: [], query: nil, applyToAllDrafts: false)
+      }), workspace: harness.workspace).environment(harness.model).environment(\.dynamicTypeSize, size)
+      await assertRenderedContent(view, expected: ["Waiting for response", "Taking longer"],
+        name: "byok-slow-\(name)", required: ["Stop"])
+      session.updateAIPhase(.fetching, generation: token.generation)
+      await assertRenderedContent(view, expected: ["HowMuch server", "Fetching recorded transactions"],
+        name: "byok-fetching-\(name)")
+      session.timeOutTurn(generation: token.generation)
+      guard let surface = SnapshotSurface(root: view, size: CGSize(width: 390, height: 844)) else {
+        XCTFail("AI recovery needs a window"); continue
+      }
+      defer { surface.detach() }
+      let failed = await surface.captureUntilOCR(contains: ["reply took too long", "Nothing was saved"])
+      XCTAssertFalse(failed.isBlank)
+      await surface.setMainScrollOffsetY(surface.mainScrollMaxOffset())
+      await surface.settleVisible()
+      for label in ["Retry", "Add manually"] {
+        guard let control = surface.controls(labelContains: label).first(where: {
+          $0.label == label && surface.timelineVisibleFrame().contains($0.frame)
+        }) else {
+          XCTFail("\(label) must be fully reachable above the composer at \(name)"); continue
+        }
+        surface.assertMinimumHitTarget(control)
+        XCTAssertTrue(surface.isControlEnabled(control))
+      }
+      attachImage(surface.captureVisible(), name: "byok-timeout-\(name)")
+      guard let manual = surface.controls(labelContains: "Add manually").first(where: {
+        $0.label == "Add manually" && surface.timelineVisibleFrame().contains($0.frame)
+      }) else { XCTFail("Recovery manual action missing"); continue }
+      XCTAssertTrue(surface.activate(manual))
+      let opened = await surface.waitUntil { surface.firstControl(label: "Cancel") != nil }
+      XCTAssertTrue(opened, "Timeout recovery must open the real manual form")
+      _ = await surface.captureUntilOCR(contains: ["Add Transaction"])
+      attachImage(surface.captureVisible(), name: "byok-recovery-manual-\(name)")
+      guard let cancel = surface.firstControl(label: "Cancel") else { XCTFail("Manual Cancel missing"); continue }
+      XCTAssertTrue(surface.activate(cancel))
+      let closed = await surface.waitUntil { surface.firstControl(label: "Cancel") == nil }
+      XCTAssertTrue(closed)
+      await surface.settleNavigation()
+      XCTAssertEqual(session.messages.first(where: { $0.kind == .user })?.text, "Lunch $12")
+      XCTAssertTrue(session.drafts.isEmpty)
+      XCTAssertTrue(harness.model.pendingRows.isEmpty)
+    }
+  }
+
   private func revealControl(
     on surface: SnapshotSurface,
     label: String,
@@ -1805,7 +1965,9 @@ final class SnapshotHarness {
       var preferences = ScopedViewPrefsStore.load()
       preferences.set(ViewPrefs(lastUsedAccountID: lastUsedAccountID), for: scope)
     }
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), captureAI: CaptureAISettings(
+      defaults: UserDefaults(suiteName: "howmuch.tests.ai.\(UUID().uuidString)")!, keys: CaptureAIMemoryKeys()
+    ))
     model.accounts = [
       account("acct-everyday", "Everyday"),
       account("acct-travel", "Travel"),

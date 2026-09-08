@@ -19,6 +19,7 @@ final class CaptureWorkspace {
   private let persistDelay: Duration
   private var persistTask: Task<Void, Never>?
   private var conversationTask: Task<Void, Never>?
+  private var conversationDeadline: Task<Void, Never>?
 
   init(store: CaptureWorkspaceStore = .shared, persistDelay: Duration = .milliseconds(250)) {
     self.store = store
@@ -26,6 +27,8 @@ final class CaptureWorkspace {
   }
 
   func cancelOwnedConversationWork() {
+    conversationDeadline?.cancel()
+    conversationDeadline = nil
     conversationTask?.cancel()
     conversationTask = nil
   }
@@ -54,9 +57,22 @@ final class CaptureWorkspace {
     activeScopeKey = nil
   }
 
-  func runConversationTurn(_ work: @escaping @MainActor () async -> Void) {
-    conversationTask?.cancel()
+  func runConversationTurn(timeout: Duration = .seconds(120), _ work: @escaping @MainActor () async -> Void) {
+    cancelOwnedConversationWork()
+    let session = current
+    let generation = session?.generation
+    // A separate watchdog releases the UI even if an inference framework ignores cooperative cancellation.
+    let deadline = Task { @MainActor [weak self] in
+      do { try await Task.sleep(for: timeout) } catch { return }
+      guard !Task.isCancelled, let self, let session, let generation,
+            self.current?.id == session.id, session.matchesTurn(generation: generation) else { return }
+      self.conversationTask?.cancel()
+      session.timeOutTurn(generation: generation)
+      self.persistCurrentIfNeeded()
+    }
+    conversationDeadline = deadline
     conversationTask = Task { @MainActor in
+      defer { deadline.cancel() }
       guard !Task.isCancelled else {
         return
       }
