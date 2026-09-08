@@ -371,58 +371,66 @@ struct RootTabView: View {
   var body: some View {
     if usesSidebar {
       TabView(selection: $chrome.tab) {
-        tab(.accounts) {
+        Tab(AppTab.accounts.title, systemImage: AppTab.accounts.systemImage, value: AppTab.accounts) {
           RootTabHost(for: .accounts) {
             AccountsView()
           }
+          .environment(chrome)
         }
-        tab(.rewards) {
+        Tab(AppTab.rewards.title, systemImage: AppTab.rewards.systemImage, value: AppTab.rewards) {
           RootTabHost(for: .rewards) {
             NavigationStack {
               RewardsView()
             }
           }
+          .environment(chrome)
         }
-        tab(.reflect) {
+        Tab(AppTab.reflect.title, systemImage: AppTab.reflect.systemImage, value: AppTab.reflect) {
           RootTabHost(for: .reflect) {
             NavigationStack {
               ReflectView()
             }
           }
+          .environment(chrome)
         }
-        tab(.plan) {
+        Tab(AppTab.plan.title, systemImage: AppTab.plan.systemImage, value: AppTab.plan) {
           NavigationStack {
             CategoriesView()
           }
+          .environment(chrome)
         }
-        tab(.assistant) {
+        Tab(AppTab.assistant.title, systemImage: AppTab.assistant.systemImage, value: AppTab.assistant) {
           NavigationStack {
             AssistantView(workspace: workspace)
           }
+          .environment(chrome)
         }
       }
       .tabViewStyle(.sidebarAdaptable)
       .defaultAdaptableTabBarPlacement(.sidebar)
     } else {
       TabView(selection: compactBarSelection) {
-        tab(.accounts) {
+        Tab(AppTab.accounts.title, systemImage: AppTab.accounts.systemImage, value: AppTab.accounts) {
           RootTabHost(for: .accounts) {
             AccountsView()
           }
+          .environment(chrome)
         }
-        tab(.rewards) {
+        Tab(AppTab.rewards.title, systemImage: AppTab.rewards.systemImage, value: AppTab.rewards) {
           RootTabHost(for: .rewards) {
             NavigationStack {
               RewardsView()
             }
           }
+          .environment(chrome)
         }
-        tab(.reflect) {
+        Tab(AppTab.reflect.title, systemImage: AppTab.reflect.systemImage, value: AppTab.reflect) {
           RootTabHost(for: .reflect) {
             NavigationStack {
               ReflectView()
             }
           }
+          .environment(chrome)
         }
       }
       .tabViewStyle(.tabBarOnly)
@@ -435,16 +443,6 @@ struct RootTabView: View {
       get: { chrome.compactBarTab },
       set: { chrome.tab = $0 }
     )
-  }
-
-  private func tab<Content: View>(
-    _ appTab: AppTab,
-    @ViewBuilder content: () -> Content
-  ) -> some View {
-    Tab(appTab.title, systemImage: appTab.systemImage, value: appTab) {
-      content()
-        .environment(chrome)
-    }
   }
 }
 
