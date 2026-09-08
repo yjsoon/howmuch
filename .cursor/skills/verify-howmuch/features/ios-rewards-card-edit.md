@@ -32,11 +32,16 @@ Preconditions:
 - **Lane 5.** Import `fixtures/rewards-tracker-export.json` from Rewards import if Travel Card is not already stored. Open the `Travel Card` tile. Set Maximum spend to `1`. Choose `Save`. The Rewards board omits the Travel Card tile. Open Rewards import and choose stored `Travel Card`. The editor still opens with title `Edit card` and account `Travel Card`.
 - **HTTP match.** After create, `control-howmuch http GET /api/import/rewards-tracker?plan_id=local-plan` includes a card named `Verify cashback` with `ynabAccountId` `acct-credit`. Do not POST the card from `control-howmuch http` and call the tab verified.
 - **Proof.** Screenshot empty Rewards with **Add card** (`artifacts/ios-rewards-card-edit/empty.png`), the Add card editor (`artifacts/ios-rewards-card-edit/new.png`), the board after create (`artifacts/ios-rewards-card-edit/created.png`), the board after the capped save (`artifacts/ios-rewards-card-edit/capped-hidden.png`), and the editor still open for Travel Card (`artifacts/ios-rewards-card-edit/capped-editor.png`).
+- **Save-to-tile clock.** Darwin only. Budget 800 ms median over three samples. Time from the Save tap until the Rewards board shows the `Verify cashback` tile. Do **not** use `axe describe-ui` as t0 or as the wait; that call is about 1.6 s and is not the product clock. Fill Add card first. Then:
+  1. `python3 -c 'import time; print(time.time())'` immediately before tapping Save (or timestamp the tap from `cliclick` / a single `axe tap`, not a dump).
+  2. Poll `xcrun simctl io booted screenshot /tmp/ios-save-tile.png` every 50–100 ms. Stop at the first frame whose pixels show the `Verify cashback` tile on Rewards (navigation title `Rewards`, cashback tile visible). Subtract t0.
+  3. Repeat twice more (delete the card or use a distinct name, then create again). Write all three ms values and the median into `artifacts/ios-rewards-card-edit/NOTES.md`. Median over 800 ms fails.
+- **Review video.** Darwin only. `xcrun simctl io booted recordVideo /tmp/rewards-ios-manage-review.mp4`, then 30–60 s of add, edit flags, delete. Stop the recorder. Keep stills at `/tmp/rewards-ios-manage-review-add.png` and `/tmp/rewards-ios-manage-review-flags.png`.
 
 ## Gotchas
 
 - Empty state is only when the rewards report returns no cards. An all-capped board still has stored cards, so the empty panel stays away.
 - **Add card** is the control on the empty panel and on the filled board. Both open a new card.
 - Flag colour on a subcategory includes Unflagged. The ledger picker is None plus the six colours. None sends `null`.
-- Linux CI cannot run Simulator. Native `RewardCardEditorTests` plus `control-howmuch http` are the proof this VM can produce.
+- Linux CI cannot run Simulator. Native `RewardCardEditorTests` plus `control-howmuch http` are the proof this VM can produce. The 800 ms save-to-tile median and the review video are Darwin-only; an `axe describe-ui` dump after Save is not that median.
 - Do not mark this recipe verified from web `/rewards/new`.
