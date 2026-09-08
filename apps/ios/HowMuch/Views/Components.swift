@@ -361,6 +361,22 @@ final class RootChromeState {
   }
 }
 
+/// Applies chrome inside the hosted view body. TabView drops modifiers
+/// attached to `Tab` content, which otherwise crashes DestinationsMenu.
+struct RootChromeScope<Content: View>: View {
+  var chrome: RootChromeState
+  var content: Content
+
+  init(chrome: RootChromeState, @ViewBuilder content: () -> Content) {
+    self.chrome = chrome
+    self.content = content()
+  }
+
+  var body: some View {
+    content.environment(chrome)
+  }
+}
+
 /// Phone and iPad need separate TabView trees. `sidebarAdaptable` plus a
 /// selection that is not in the current tab set fatal-errors on launch.
 struct RootTabView: View {
@@ -372,38 +388,43 @@ struct RootTabView: View {
     if usesSidebar {
       TabView(selection: $chrome.tab) {
         Tab(AppTab.accounts.title, systemImage: AppTab.accounts.systemImage, value: AppTab.accounts) {
-          RootTabHost(for: .accounts) {
-            AccountsView()
+          RootChromeScope(chrome: chrome) {
+            RootTabHost(for: .accounts) {
+              AccountsView()
+            }
           }
-          .environment(chrome)
         }
         Tab(AppTab.rewards.title, systemImage: AppTab.rewards.systemImage, value: AppTab.rewards) {
-          RootTabHost(for: .rewards) {
-            NavigationStack {
-              RewardsView()
+          RootChromeScope(chrome: chrome) {
+            RootTabHost(for: .rewards) {
+              NavigationStack {
+                RewardsView()
+              }
             }
           }
-          .environment(chrome)
         }
         Tab(AppTab.reflect.title, systemImage: AppTab.reflect.systemImage, value: AppTab.reflect) {
-          RootTabHost(for: .reflect) {
-            NavigationStack {
-              ReflectView()
+          RootChromeScope(chrome: chrome) {
+            RootTabHost(for: .reflect) {
+              NavigationStack {
+                ReflectView()
+              }
             }
           }
-          .environment(chrome)
         }
         Tab(AppTab.plan.title, systemImage: AppTab.plan.systemImage, value: AppTab.plan) {
-          NavigationStack {
-            CategoriesView()
+          RootChromeScope(chrome: chrome) {
+            NavigationStack {
+              CategoriesView()
+            }
           }
-          .environment(chrome)
         }
         Tab(AppTab.assistant.title, systemImage: AppTab.assistant.systemImage, value: AppTab.assistant) {
-          NavigationStack {
-            AssistantView(workspace: workspace)
+          RootChromeScope(chrome: chrome) {
+            NavigationStack {
+              AssistantView(workspace: workspace)
+            }
           }
-          .environment(chrome)
         }
       }
       .tabViewStyle(.sidebarAdaptable)
@@ -411,26 +432,29 @@ struct RootTabView: View {
     } else {
       TabView(selection: compactBarSelection) {
         Tab(AppTab.accounts.title, systemImage: AppTab.accounts.systemImage, value: AppTab.accounts) {
-          RootTabHost(for: .accounts) {
-            AccountsView()
+          RootChromeScope(chrome: chrome) {
+            RootTabHost(for: .accounts) {
+              AccountsView()
+            }
           }
-          .environment(chrome)
         }
         Tab(AppTab.rewards.title, systemImage: AppTab.rewards.systemImage, value: AppTab.rewards) {
-          RootTabHost(for: .rewards) {
-            NavigationStack {
-              RewardsView()
+          RootChromeScope(chrome: chrome) {
+            RootTabHost(for: .rewards) {
+              NavigationStack {
+                RewardsView()
+              }
             }
           }
-          .environment(chrome)
         }
         Tab(AppTab.reflect.title, systemImage: AppTab.reflect.systemImage, value: AppTab.reflect) {
-          RootTabHost(for: .reflect) {
-            NavigationStack {
-              ReflectView()
+          RootChromeScope(chrome: chrome) {
+            RootTabHost(for: .reflect) {
+              NavigationStack {
+                ReflectView()
+              }
             }
           }
-          .environment(chrome)
         }
       }
       .tabViewStyle(.tabBarOnly)

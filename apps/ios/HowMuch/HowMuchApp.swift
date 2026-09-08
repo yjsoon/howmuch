@@ -107,7 +107,6 @@ private struct RootView: View {
     @Bindable var workspace = CaptureWorkspace.shared
 
     RootTabView(chrome: chrome, usesSidebar: usesSidebar, workspace: workspace)
-      .environment(chrome)
       .onChange(of: usesSidebar, initial: true) { _, sidebar in
       if sidebar {
         chrome.adoptSidebarLayout()
@@ -120,6 +119,7 @@ private struct RootView: View {
     }
     .overlay(alignment: .bottomTrailing) {
       RootAddControl()
+        .environment(chrome)
         .padding(RootChrome.addControlInsets(
           idiom: UIDevice.current.userInterfaceIdiom,
           horizontalSizeClass: horizontalSizeClass
@@ -205,6 +205,7 @@ private struct RootView: View {
       }
       enqueueInboxIfNeeded(force: true)
     }
+    .environment(chrome)
   }
 
   private var usesSidebar: Bool {
