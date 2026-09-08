@@ -464,9 +464,6 @@ struct RewardCardEditorView: View {
   @State private var flagOverrides: [String: String?] = [:]
   @State private var pendingFlagID: String?
 
-  private static let ledgerSince = "2026-03-01"
-  private static let ledgerUntil = "2026-05-24"
-
   private var isEditing: Bool { cardID != nil }
 
   var body: some View {
@@ -674,7 +671,7 @@ struct RewardCardEditorView: View {
         Text(message)
           .foregroundStyle(Theme.outflow)
       } else if ledger.isEmpty {
-        Text("No transactions on this account in the demo window.")
+        Text("No transactions on this account.")
           .foregroundStyle(.secondary)
       } else {
         ForEach(ledger) { transaction in
@@ -701,7 +698,7 @@ struct RewardCardEditorView: View {
     } header: {
       Text("Account ledger")
     } footer: {
-      Text("\(Self.ledgerSince) to \(Self.ledgerUntil)")
+      Text("Newest first")
     }
   }
 
@@ -875,9 +872,7 @@ struct RewardCardEditorView: View {
     do {
       let page = try await model.apiClient.fetchTransactions(
         planID: model.settings.planID,
-        accountID: accountID,
-        sinceDate: Self.ledgerSince,
-        untilDate: Self.ledgerUntil
+        accountID: accountID
       )
       guard accountID == draft.ynabAccountId else {
         return
