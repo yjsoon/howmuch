@@ -231,6 +231,24 @@ final class IPadLayoutTests: XCTestCase {
     )
   }
 
+  func testPhoneKeepsPlanAndReflectInMoreEvenWhenRegularWidth() {
+    XCTAssertFalse(
+      RootChrome.usesSidebarDestinations(idiom: .phone, horizontalSizeClass: .compact)
+    )
+    XCTAssertFalse(
+      RootChrome.usesSidebarDestinations(idiom: .phone, horizontalSizeClass: .regular)
+    )
+  }
+
+  func testPadRegularUsesSidebarDestinations() {
+    XCTAssertTrue(
+      RootChrome.usesSidebarDestinations(idiom: .pad, horizontalSizeClass: .regular)
+    )
+    XCTAssertFalse(
+      RootChrome.usesSidebarDestinations(idiom: .pad, horizontalSizeClass: .compact)
+    )
+  }
+
   func testAppTabCaptureSurfaceMapsPlanAndReflect() {
     XCTAssertEqual(AppTab.accounts.captureSurface, .accounts)
     XCTAssertEqual(AppTab.rewards.captureSurface, .rewards)

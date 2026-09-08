@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 extension View {
   /// White rounded card, the basic YNAB surface.
@@ -180,6 +181,15 @@ enum MoreDestination: Hashable {
   case reflect
 }
 
+enum RootChrome {
+  static func usesSidebarDestinations(
+    idiom: UIUserInterfaceIdiom,
+    horizontalSizeClass: UserInterfaceSizeClass?
+  ) -> Bool {
+    idiom == .pad && horizontalSizeClass == .regular
+  }
+}
+
 struct DestinationsMenu: View {
   var omitting: MoreDestination?
   @Environment(AppModel.self) private var model
@@ -187,7 +197,10 @@ struct DestinationsMenu: View {
 
   var body: some View {
     Menu {
-      if horizontalSizeClass != .regular {
+      if !RootChrome.usesSidebarDestinations(
+        idiom: UIDevice.current.userInterfaceIdiom,
+        horizontalSizeClass: horizontalSizeClass
+      ) {
         if omitting != .plan {
           NavigationLink(value: MoreDestination.plan) {
             Label("Plan", systemImage: "square.grid.2x2")

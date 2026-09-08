@@ -198,7 +198,13 @@ private struct RootView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .glassEffect(.regular, in: .capsule)
-            .padding(.bottom, horizontalSizeClass == .regular ? 28 : 90)
+            .padding(
+              .bottom,
+              RootChrome.usesSidebarDestinations(
+                idiom: UIDevice.current.userInterfaceIdiom,
+                horizontalSizeClass: horizontalSizeClass
+              ) ? 28 : 90
+            )
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
       }
