@@ -1,0 +1,20 @@
+{
+  "probe": "hard-goto-/rewards",
+  "samples": {
+    "trunk": [
+      457,
+      371,
+      366
+    ],
+    "head": [
+      468,
+      367,
+      351
+    ]
+  },
+  "trunkMedian": 371,
+  "headMedian": 367,
+  "budgetMs": 200,
+  "delta": -4,
+  "pass": true
+}

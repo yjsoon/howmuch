@@ -4093,3 +4093,51 @@ tr:hover .share-bar {
   align-items: center;
   gap: 8px;
 }
+
+a.rewards-tile {
+  color: inherit;
+  text-decoration: none;
+}
+
+a.rewards-tile {
+  color: inherit;
+  text-decoration: none;
+}
+
+a.rewards-tile:hover {
+  border-color: var(--ink);
+}
+
+.rewards-miles-field {
+  min-width: 148px;
+  margin-bottom: 0;
+}
+
+.rewards-miles-field input {
+  font-family: var(--font-figures);
+  text-align: right;
+}
+
+.rewards-editor-block {
+  margin-top: 8px;
+}
+
+.rewards-editor-row,
+.rewards-editor-override {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px 12px;
+  align-items: end;
+  padding: 12px 0;
+  border-top: 1px solid var(--rule);
+}
+
+.rewards-editor-row .field,
+.rewards-editor-override .field {
+  margin-bottom: 0;
+}
+
+.rewards-editor-row .transaction-editor-checkbox {
+  min-height: 0;
+  margin-bottom: 0;
+}

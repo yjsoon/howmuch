@@ -1,0 +1,19 @@
+{
+  "samples": {
+    "trunk": [
+      38,
+      33,
+      37
+    ],
+    "head": [
+      34,
+      37,
+      35
+    ]
+  },
+  "trunkMedian": 37,
+  "headMedian": 35,
+  "budgetMs": 200,
+  "delta": -2,
+  "pass": true
+}

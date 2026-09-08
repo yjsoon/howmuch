@@ -19,6 +19,7 @@ const ApiTokensPage = lazy(() => import("./pages/ApiTokens").then((module) => ({
 const IncomePage = lazy(() => import("./pages/Income").then((module) => ({ default: module.IncomePage })));
 const NetWorthPage = lazy(() => import("./pages/NetWorth").then((module) => ({ default: module.NetWorthPage })));
 const QuickEntryPage = lazy(() => import("./pages/QuickEntry").then((module) => ({ default: module.QuickEntryPage })));
+const RewardCardEditPage = lazy(() => import("./pages/RewardCardEdit").then((module) => ({ default: module.RewardCardEditPage })));
 const RewardsImportPage = lazy(() => import("./pages/RewardsImport").then((module) => ({ default: module.RewardsImportPage })));
 const RewardsPage = lazy(() => import("./pages/Rewards").then((module) => ({ default: module.RewardsPage })));
 const ScheduledTransactionsPage = lazy(() => import("./pages/ScheduledTransactions").then((module) => ({ default: module.ScheduledTransactionsPage })));
@@ -46,6 +47,8 @@ const router = createBrowserRouter([
       { path: "/net-worth", element: <NetWorthPage /> },
       { path: "/age-of-money", element: <AgeOfMoneyPage /> },
       { path: "/rewards", element: <RewardsPage /> },
+      { path: "/rewards/new", element: <RewardCardEditPage /> },
+      { path: "/rewards/:cardId", element: <RewardCardEditPage /> },
       { path: "/transactions", element: <TransactionsPage /> },
       { path: "*", element: <Navigate to={home} replace /> },
     ],

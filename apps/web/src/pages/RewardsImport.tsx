@@ -59,6 +59,14 @@ export function RewardsImportPage() {
         import twice updates the same rows instead of duplicating them. This does not connect to live YNAB.
       </p>
 
+      <div className="status-panel">
+        <p className="status-title">Import replaces the stored card set.</p>
+        <p className="status-detail">
+          Cards omitted from the export are soft-deleted. An empty <code>cards</code> array removes every HowMuch card.
+          Miles valuation in the export replaces a native value when the export sets a finite number.
+        </p>
+      </div>
+
       {error && (
         <div className="status-panel status-panel-error" role="alert">
           <p className="status-title">Could not import Rewards Tracker export.</p>

@@ -6,7 +6,7 @@ A quiet, dense ledger and Reflect dashboard for a single self-hosted user. It is
 
 ## Non-Goals
 
-- No YNAB write-back. Month-assignment and target overlays stay on the API for iOS. The web app does not edit them. Rewards uses imported card rules against the HowMuch ledger.
+- No YNAB write-back. Month-assignment and target overlays stay on the API for iOS. The web app does not edit them. Rewards scores HowMuch ledger spend against stored cards. You can add and edit those cards in HowMuch, or replace the set with a Rewards Tracker import.
 - No onboarding, marketing, or empty-state theatre.
 - No multi-user auth UI (version one is a single bearer token).
 
@@ -52,12 +52,14 @@ The aesthetic is a broadsheet ledger: ink on paper, hairline rules, controlled d
 | `/scheduled` | Recurring transactions: list, add, enter now |
 | `/settings` | Settings hub: API tokens and Rewards import |
 | `/api-tokens` | Personal API tokens: mint and revoke |
-| `/import/rewards` | Rewards Tracker settings export import |
+| `/import/rewards` | Rewards Tracker settings export import. Replaces the stored card set. |
 | `/spending` | Spending Breakdown: total, share bars per category grouped by category group, click-through to filtered transactions |
 | `/income` | Income vs Spending: paired columns per period, table with income / spending / net / cumulative net |
 | `/net-worth` | Net Worth: stepped area chart, per-account balance table per period, account filter |
 | `/age-of-money` | Age of Money: line of weighted age in days per period, unmatched-spending diagnostics |
-| `/rewards` | Rewards: per-card tiles from imported Rewards Tracker cards, ledger spend, flags, and payee/category/memo grouping |
+| `/rewards` | Rewards board: per-card tiles, ledger spend, flags, grouping, miles valuation, and **Add card**. Tiles whose calculation reports `maximum_spend_exceeded` stay off the board. |
+| `/rewards/new` | Add a native reward card and POST it to `/api/rewards/cards` |
+| `/rewards/:cardId` | Edit a stored card from the rewards snapshot. The capped-card URL still opens. |
 | `/transactions` | Dense register with the same filter rail, payee/memo search, drill-down target for every report |
 | `/add` | Mobile quick entry: thumb-reach form (amount keypad-first, account, payee, optional category/memo), posts to `/api/mobile/quick-entry` with a client-generated `client_id` for idempotency |
 
@@ -82,7 +84,10 @@ Endpoints consumed:
 - `GET /v1/plans/{id}/accounts`, `/categories`, `/payees`, `/settings` (filter options and formatting)
 - `GET /v1/plans/{id}/transactions` (+ scoped variants) for the register
 - `POST /api/mobile/quick-entry` for quick entry
-- `PATCH /v1/plans/{id}/transactions/{id}` for inline edits later
+- `PATCH /v1/plans/{id}/transactions/{id}` for inline edits and reward-card flag changes
+- `GET /api/import/rewards-tracker` for the stored card snapshot the editor loads
+- `POST /api/rewards/cards`, `PATCH /api/rewards/cards/{id}`, `DELETE /api/rewards/cards/{id}` for native card writes
+- `PATCH /api/rewards/settings` for miles valuation
 
 ## Directory Sketch
 
@@ -102,7 +107,7 @@ apps/web/
     components/         # FilterRail, SegmentedControl, MultiSelect,
                         # DataTable, charts/ (ShareBars, Columns, Area, Line)
     pages/              # Spending, Income, NetWorth, AgeOfMoney, Rewards,
-                        # Transactions, QuickEntry, Scheduled, ApiTokens
+                        # RewardCardEdit, Transactions, QuickEntry, Scheduled, ApiTokens
 ```
 
 ## Open Questions (for later, not blockers)

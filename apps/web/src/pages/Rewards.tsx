@@ -1,10 +1,12 @@
-import { Link } from "react-router-dom";
+import { useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { api, useApi } from "../api/client";
 import type { RewardsReport } from "../api/types";
 import { FlagTag } from "../components/FlagTag";
 import { FilterRail } from "../components/FilterRail";
 import { formatAmount } from "../lib/money";
 import { useFilters } from "../state/filters";
+import { usePlan } from "../state/plan";
 
 const ALL_TIME = () => ({});
 const GROUPS = ["flag", "payee", "category", "memo"] as const;
@@ -14,13 +16,40 @@ function dollars(value: number): string {
 }
 
 export function RewardsPage() {
+  const { planId } = usePlan();
+  const location = useLocation();
   const { filters, setFilters, reportQuery } = useFilters({ defaultRange: ALL_TIME });
   const query = { ...reportQuery, category_ids: undefined, interval: undefined };
-  const report = useApi(JSON.stringify(query), () => api.rewards(query));
-  const cards = report.data?.cards ?? [];
-  const cashback = cards.filter((row) => row.card.type === "cashback");
-  const miles = cards.filter((row) => row.card.type === "miles");
-  const emptyImported = report.data && cards.length === 0;
+  const [refresh, setRefresh] = useState(0);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [milesText, setMilesText] = useState<string | null>(null);
+  const report = useApi(`${JSON.stringify(query)}:${refresh}`, () => api.rewards(query));
+  const storedCards = report.data?.cards ?? [];
+  const visibleCards = storedCards.filter((row) => !row.calculation.maximum_spend_exceeded);
+  const cashback = visibleCards.filter((row) => row.card.type === "cashback");
+  const miles = visibleCards.filter((row) => row.card.type === "miles");
+  const emptyImported = report.data && storedCards.length === 0;
+  const addCardHref = { pathname: "/rewards/new", search: location.search };
+  const milesValue = milesText ?? (report.data ? String(report.data.miles_valuation) : "");
+
+  const saveMilesValuation = async () => {
+    const trimmed = milesText?.trim() ?? "";
+    if (!trimmed || !report.data) return;
+    const milesValuation = Number(trimmed);
+    if (!Number.isFinite(milesValuation)) {
+      setSettingsError("Miles valuation must be a number.");
+      return;
+    }
+    if (milesValuation === report.data.miles_valuation) return;
+    setSettingsError(null);
+    try {
+      await api.updateRewardSettings(planId, { milesValuation });
+      setMilesText(String(milesValuation));
+      setRefresh((value) => value + 1);
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
 
   return (
     <>
@@ -54,6 +83,19 @@ export function RewardsPage() {
               <span className="figure-value figure-positive">{dollars(report.data?.totals.cashback ?? 0)}</span>
             </div>
           )}
+          <label className="field rewards-miles-field">
+            <span className="field-label">Miles valuation</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={milesValue}
+              onChange={(event) => setMilesText(event.target.value)}
+              onBlur={() => void saveMilesValuation()}
+              aria-label="Miles valuation"
+            />
+            <span className="field-note">Currency units assigned to each mile.</span>
+          </label>
+          <Link to={addCardHref} className="register-add-link">Add card</Link>
         </div>
       </div>
 
@@ -61,6 +103,13 @@ export function RewardsPage() {
         <div className="status-panel status-panel-error" role="alert">
           <p className="status-title">Could not load rewards.</p>
           <p className="status-detail">{report.error}</p>
+        </div>
+      )}
+
+      {settingsError && (
+        <div className="status-panel status-panel-error" role="alert">
+          <p className="status-title">Could not update miles valuation.</p>
+          <p className="status-detail">{settingsError}</p>
         </div>
       )}
 
@@ -75,18 +124,18 @@ export function RewardsPage() {
           <p className="status-title">No reward cards in this range.</p>
           <p className="status-detail">
             Import a Rewards Tracker export from <Link to="/import/rewards">Settings → Rewards import</Link>,
-            or choose accounts that have cards.
+            or choose <Link to={addCardHref}>Add card</Link>.
           </p>
         </div>
       )}
 
-      {cards.length > 0 && (
+      {storedCards.length > 0 && (
         <div className="rewards-board">
           {cashback.length > 0 && (
             <section className="rewards-type-group" aria-labelledby="rewards-cashback-heading">
               <h2 id="rewards-cashback-heading">Cashback</h2>
               <div className="rewards-card-grid">
-                {cashback.map((row) => <RewardTile key={row.card.id} row={row} />)}
+                {cashback.map((row) => <RewardTile key={row.card.id} row={row} search={location.search} />)}
               </div>
             </section>
           )}
@@ -94,7 +143,7 @@ export function RewardsPage() {
             <section className="rewards-type-group" aria-labelledby="rewards-miles-heading">
               <h2 id="rewards-miles-heading">Miles</h2>
               <div className="rewards-card-grid">
-                {miles.map((row) => <RewardTile key={row.card.id} row={row} />)}
+                {miles.map((row) => <RewardTile key={row.card.id} row={row} search={location.search} />)}
               </div>
             </section>
           )}
@@ -140,12 +189,12 @@ export function RewardsPage() {
   );
 }
 
-function RewardTile({ row }: { row: RewardsReport["cards"][number] }) {
+function RewardTile({ row, search }: { row: RewardsReport["cards"][number]; search: string }) {
   const calc = row.calculation;
   const min = calc.minimum_spend;
   const progress = calc.minimum_spend_progress ?? 0;
   return (
-    <article className={calc.maximum_spend_exceeded ? "rewards-tile rewards-tile-capped" : "rewards-tile"}>
+    <Link to={{ pathname: `/rewards/${row.card.id}`, search }} className={calc.maximum_spend_exceeded ? "rewards-tile rewards-tile-capped" : "rewards-tile"}>
       <header className="rewards-tile-header">
         <div>
           <h3>{row.card.name}</h3>
@@ -191,7 +240,7 @@ function RewardTile({ row }: { row: RewardsReport["cards"][number] }) {
           ))}
         </ul>
       )}
-    </article>
+    </Link>
   );
 }
 
