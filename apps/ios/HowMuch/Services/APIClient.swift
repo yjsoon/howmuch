@@ -478,6 +478,54 @@ struct APIClient {
     return response.data
   }
 
+  func createRewardCard(planID: String, card: CreditCard) async throws -> CreditCard {
+    let response: APIEnvelope<RewardCardPayload> = try await executeRequest(
+      path: "/api/rewards/cards",
+      method: "POST",
+      bodyData: try rewardCardBody(planID: planID, card: card, clearMissing: false)
+    )
+    return response.data.card
+  }
+
+  func updateRewardCard(planID: String, cardID: String, card: CreditCard) async throws -> CreditCard {
+    let response: APIEnvelope<RewardCardPayload> = try await executeRequest(
+      path: "/api/rewards/cards/\(cardID)",
+      method: "PATCH",
+      bodyData: try rewardCardBody(planID: planID, card: card, clearMissing: true)
+    )
+    return response.data.card
+  }
+
+  func deleteRewardCard(planID: String, cardID: String) async throws -> CreditCard {
+    let body = try JSONSerialization.data(withJSONObject: ["plan_id": planID])
+    let response: APIEnvelope<RewardCardPayload> = try await executeRequest(
+      path: "/api/rewards/cards/\(cardID)",
+      method: "DELETE",
+      bodyData: body
+    )
+    return response.data.card
+  }
+
+  func updateRewardSettings(planID: String, milesValuation: Double) async throws -> RewardSettings {
+    let body = try JSONSerialization.data(withJSONObject: [
+      "plan_id": planID,
+      "milesValuation": milesValuation,
+    ])
+    let response: APIEnvelope<RewardSettingsPayload> = try await executeRequest(
+      path: "/api/rewards/settings",
+      method: "PATCH",
+      bodyData: body
+    )
+    return response.data.settings
+  }
+
+  private func rewardCardBody(planID: String, card: CreditCard, clearMissing: Bool) throws -> Data {
+    try JSONSerialization.data(withJSONObject: [
+      "plan_id": planID,
+      "card": card.jsonObject(clearMissing: clearMissing),
+    ])
+  }
+
   func createTransaction(planID: String, request body: TransactionWriteRequest) async throws -> Transaction {
     let response: APIEnvelope<TransactionPayload> = try await request(
       path: "/v1/plans/\(planID)/transactions",

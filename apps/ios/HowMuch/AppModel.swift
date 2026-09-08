@@ -1275,8 +1275,12 @@ final class AppModel {
     wipeIntentCatalog()
   }
 
-  func noteRewardsImport() async {
+  func noteRewardsBoardChanged() {
     rewardsRefreshGeneration &+= 1
+  }
+
+  func noteRewardsImport() async {
+    noteRewardsBoardChanged()
     await refreshAll(quiet: true)
   }
 
