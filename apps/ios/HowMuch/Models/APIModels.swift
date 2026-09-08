@@ -2140,6 +2140,10 @@ struct RewardsReport: Decodable, Sendable {
   let cards: [RewardsCardRow]
   let groups: [RewardsGroupRow]
 
+  private enum CodingKeys: String, CodingKey {
+    case from, to, groupBy, milesValuation, totals, cards, groups
+  }
+
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     from = try container.decodeIfPresent(String.self, forKey: .from)
@@ -2216,6 +2220,10 @@ struct RewardsTrackerSnapshot: Decodable, Sendable {
   let importedAt: String?
   let updatedAt: String?
 
+  private enum CodingKeys: String, CodingKey {
+    case snapshot, cards, importedAt, updatedAt
+  }
+
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     snapshot = try container.decodeIfPresent(RewardsTrackerStoredSnapshot.self, forKey: .snapshot)
@@ -2227,6 +2235,10 @@ struct RewardsTrackerSnapshot: Decodable, Sendable {
 
 struct RewardsTrackerStoredSnapshot: Decodable, Sendable {
   let cards: [RewardsTrackerCard]?
+
+  private enum CodingKeys: String, CodingKey {
+    case cards
+  }
 
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
