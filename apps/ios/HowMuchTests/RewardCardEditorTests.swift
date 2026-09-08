@@ -153,6 +153,24 @@ final class RewardCardEditorTests: XCTestCase {
     XCTAssertEqual(card.subcategories?.first?.active, true)
   }
 
+  func testRewardFlagColoursAreTheLedgerTags() {
+    XCTAssertEqual(Set(FlagColour.allCases.map(\.rawValue)), Set(["", "red", "orange", "yellow", "green", "blue", "purple"]))
+    XCTAssertEqual(RewardFlagColour.red.ledgerColour, .red)
+    XCTAssertEqual(RewardFlagColour.unflagged.ledgerColour, .none)
+    XCTAssertEqual(RewardFlagColour(ledgerColour: .none), .unflagged)
+    XCTAssertEqual(RewardFlagColour(ledgerColour: .blue), .blue)
+    XCTAssertEqual(RewardFlagColour(ledgerColour: .red).rawValue, FlagColour.red.rawValue)
+    for colour in FlagColour.allCases where colour != .none {
+      XCTAssertNotNil(Theme.flagColour(named: colour.rawValue))
+      XCTAssertEqual(
+        Theme.flagColour(named: RewardFlagColour(ledgerColour: colour).rawValue),
+        Theme.flagColour(named: colour.rawValue)
+      )
+    }
+    XCTAssertNil(Theme.flagColour(named: RewardFlagColour.unflagged.rawValue))
+    XCTAssertNil(Theme.flagColour(named: FlagColour.none.rawValue))
+  }
+
   func testAccountChoicesAreExistingCreditCards() {
     let travel = Account(id: "acct-credit", name: "Travel Card", icon: nil, type: "creditCard", onBudget: true, closed: false, balance: 0, clearedBalance: 0, unclearedBalance: 0, lastReconciledDate: nil, deleted: false)
     let loc = Account(id: "acct-loc", name: "Overdraft", icon: nil, type: "lineOfCredit", onBudget: true, closed: false, balance: 0, clearedBalance: 0, unclearedBalance: 0, lastReconciledDate: nil, deleted: false)

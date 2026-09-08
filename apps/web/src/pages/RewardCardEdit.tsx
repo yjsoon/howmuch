@@ -14,11 +14,10 @@ import { CategorySelect } from "../components/CategorySelect";
 import { FlagPicker, FlagTag } from "../components/FlagTag";
 import { splitCategoryGroups } from "../lib/categories";
 import { formatDate } from "../lib/dates";
+import { isFlagColour, ledgerFlagFromReward, rewardFlagFromLedger } from "../lib/flags";
 import { formatMoney } from "../lib/money";
 import { rewardCardAccountChoices, syncedRewardCardName } from "../lib/reward-card-accounts";
 import { usePlan } from "../state/plan";
-
-const FLAG_COLOURS: RewardFlagColour[] = ["red", "orange", "yellow", "green", "blue", "purple", "unflagged"];
 
 type FlagDraft = {
   id: string;
@@ -432,7 +431,7 @@ function CardEditor({ card, takenAccountIds }: { card: CreditCard | null; takenA
 
           <fieldset className="transaction-editor-splits rewards-editor-block">
             <legend>Flag subcategories</legend>
-            <p className="field-note">Unflagged is a flag colour HowMuch can score. The ledger picker still uses None for no colour.</p>
+            <p className="field-note">These are the same colour tags as the ledger. None is Unflagged spend.</p>
             <div className="field-row">
               <label className="field">
                 <span className="field-label">Import category</span>
@@ -444,14 +443,14 @@ function CardEditor({ card, takenAccountIds }: { card: CreditCard | null; takenA
                   aria-label="Import category"
                 />
               </label>
-              <label className="field">
-                <span className="field-label">Flag colour</span>
-                <select value={importFlagColor} onChange={(event) => setImportFlagColor(event.target.value as RewardFlagColour)}>
-                  {FLAG_COLOURS.map((colour) => (
-                    <option key={colour} value={colour}>{flagColourLabel(colour)}</option>
-                  ))}
-                </select>
-              </label>
+              <div className="field">
+                <span className="field-label" id="import-flag-colour-label">Flag colour</span>
+                <FlagPicker
+                  labelledBy="import-flag-colour-label"
+                  value={ledgerFlagFromReward(importFlagColor)}
+                  onChange={(value) => setImportFlagColor(rewardFlagFromLedger(value))}
+                />
+              </div>
               <label className="field">
                 <span className="field-label">Rate</span>
                 <input type="text" inputMode="decimal" value={importRate} onChange={(event) => setImportRate(event.target.value)} />
@@ -548,18 +547,17 @@ function FlagRow({
         <span className="field-label">Name</span>
         <input value={flag.name} onChange={(event) => patch({ name: event.target.value })} aria-label={`Flag ${index + 1} name`} />
       </label>
-      <label className="field">
-        <span className="field-label">Flag colour</span>
-        <select
-          value={flag.flagColor}
-          onChange={(event) => patch({ flagColor: event.target.value as RewardFlagColour })}
-          aria-label={`Flag ${index + 1} colour`}
-        >
-          {FLAG_COLOURS.map((colour) => (
-            <option key={colour} value={colour}>{flagColourLabel(colour)}</option>
-          ))}
-        </select>
-      </label>
+      <div className="field">
+        <span className="field-label" id={`flag-${index + 1}-colour-label`}>Flag colour</span>
+        <span className="rewards-flag-colour-row">
+          <FlagPicker
+            labelledBy={`flag-${index + 1}-colour-label`}
+            value={ledgerFlagFromReward(flag.flagColor)}
+            onChange={(value) => patch({ flagColor: rewardFlagFromLedger(value) })}
+          />
+          <FlagTag colour={ledgerFlagFromReward(flag.flagColor) || null} name={flag.name} />
+        </span>
+      </div>
       <label className="field">
         <span className="field-label">Reward value</span>
         <input type="text" inputMode="decimal" value={flag.rewardValue} onChange={(event) => patch({ rewardValue: event.target.value })} aria-label={`Flag ${index + 1} reward value`} />
@@ -823,7 +821,7 @@ function draftFromCard(card: CreditCard): CardDraft {
       return {
         id: flag.id || `subcat_${crypto.randomUUID()}`,
         name: flag.name,
-        flagColor: isFlagColour(flag.flagColor) ? flag.flagColor : "unflagged",
+        flagColor: rewardFlagFromLedger(flag.flagColor),
         rewardValue: numberText(flag.rewardValue),
         priority: numberText(flag.priority),
         active: flag.active !== false,
@@ -910,7 +908,7 @@ function creditCardWrite(draft: CardDraft, options: { clearMissing?: boolean } =
   const flags: CardSubcategory[] = [];
   for (const [index, flag] of draft.flags.entries()) {
     if (!flag.name.trim()) return { error: `Flag ${index + 1} needs a name.` };
-    if (!isFlagColour(flag.flagColor)) return { error: `Flag ${index + 1} needs a recognised colour.` };
+    if (!isRewardFlagColour(flag.flagColor)) return { error: `Flag ${index + 1} needs a recognised colour.` };
     const rewardValue = requiredFinite(flag.rewardValue, `Flag ${index + 1} reward value`);
     if (!rewardValue.ok) return { error: rewardValue.error };
     const priority = requiredFinite(flag.priority, `Flag ${index + 1} priority`);
@@ -1004,12 +1002,8 @@ function numberText(value: number | null | undefined): string {
   return value == null ? "" : String(value);
 }
 
-function isFlagColour(value: string): value is RewardFlagColour {
-  return FLAG_COLOURS.includes(value as RewardFlagColour);
-}
-
-function flagColourLabel(colour: RewardFlagColour): string {
-  return colour === "unflagged" ? "Unflagged" : colour[0]!.toUpperCase() + colour.slice(1);
+function isRewardFlagColour(value: string): value is RewardFlagColour {
+  return value === "unflagged" || isFlagColour(value);
 }
 
 type ParsedNumber = { ok: true; value?: number | null } | { ok: false; error: string };

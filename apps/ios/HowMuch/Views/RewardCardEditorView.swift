@@ -659,9 +659,9 @@ struct RewardCardEditorView: View {
           }
         }
         .accessibilityLabel("Import category")
-        Picker("Flag colour", selection: $importFlagColor) {
-          ForEach(RewardFlagColour.allCases) { colour in
-            Text(colour.title).tag(colour)
+        Picker("Flag colour", selection: importLedgerFlag) {
+          ForEach(FlagColour.allCases) { colour in
+            ledgerFlagOption(colour)
           }
         }
         TextField("Rate", text: $importRate)
@@ -678,7 +678,7 @@ struct RewardCardEditorView: View {
       } header: {
         Text("Flag subcategories")
       } footer: {
-        Text("Unflagged is a flag colour HowMuch can score. The ledger picker still uses None for no colour.")
+        Text("These are the same colour tags as the ledger. None is Unflagged spend.")
       }
 
       Section("Spending tiers") {
@@ -743,7 +743,7 @@ struct RewardCardEditorView: View {
               .foregroundStyle(.secondary)
             Picker("Flag", selection: flagColourBinding(for: transaction)) {
               ForEach(FlagColour.allCases) { colour in
-                Text(colour.title).tag(colour)
+                ledgerFlagOption(colour)
               }
             }
             .disabled(pendingFlagID == transaction.id)
@@ -768,11 +768,11 @@ struct RewardCardEditorView: View {
       ))
       .accessibilityLabel("Flag \(index + 1) name")
       Picker("Flag colour", selection: Binding(
-        get: { flag.wrappedValue.flagColor },
-        set: { flag.wrappedValue.flagColor = $0; flag.wrappedValue.touch() }
+        get: { flag.wrappedValue.flagColor.ledgerColour },
+        set: { flag.wrappedValue.flagColor = RewardFlagColour(ledgerColour: $0); flag.wrappedValue.touch() }
       )) {
-        ForEach(RewardFlagColour.allCases) { colour in
-          Text(colour.title).tag(colour)
+        ForEach(FlagColour.allCases) { colour in
+          ledgerFlagOption(colour)
         }
       }
       .accessibilityLabel("Flag \(index + 1) colour")
@@ -850,6 +850,23 @@ struct RewardCardEditorView: View {
         draft.tiers.removeAll { $0.id == tier.wrappedValue.id }
       }
     }
+  }
+
+  @ViewBuilder
+  private func ledgerFlagOption(_ colour: FlagColour) -> some View {
+    HStack {
+      Image(systemName: colour == .none ? "flag" : "flag.fill")
+        .foregroundStyle(Theme.flagColour(named: colour.rawValue) ?? .secondary)
+      Text(colour.title)
+    }
+    .tag(colour)
+  }
+
+  private var importLedgerFlag: Binding<FlagColour> {
+    Binding(
+      get: { importFlagColor.ledgerColour },
+      set: { importFlagColor = RewardFlagColour(ledgerColour: $0) }
+    )
   }
 
   private var accountChoices: [Account] {

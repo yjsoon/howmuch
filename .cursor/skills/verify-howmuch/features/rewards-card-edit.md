@@ -35,5 +35,5 @@ Preconditions:
 
 - Empty state is only when the rewards report returns no cards. An all-capped board still has stored cards, so the empty panel stays away.
 - **Add card** is the control on the board and in the empty copy. Both go to `/rewards/new`. The editor picks an existing credit card account. It does not invent a new ledger account.
-- Flag colour on a subcategory uses a select that includes Unflagged. The ledger FlagPicker is None plus the six colours. None sends `null`.
+- Flag colour on a subcategory uses the same FlagPicker colour tags as the ledger (None plus the six colours). None stores `unflagged` and matches unflagged spend. Ledger None sends `null`.
 - Viewport ≤720px hides the sidebar. Open **Open menu** before **Rewards**.
