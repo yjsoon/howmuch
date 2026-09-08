@@ -14,7 +14,7 @@ Rewards is a tab. It shows imported Rewards Tracker cards against the HowMuch le
 
 - Choose **Rewards** in the tab bar.
 - From an empty Rewards screen, choose **Add card** or **Rewards import**, or open **More → Connection settings → Rewards import**.
-- Plan and Assistant are not tabs. Choose **More**, then **Plan** or **Assistant**. Reflect is a tab.
+- Plan and Assistant are not iPhone tabs. Choose **More**, then **Plan** or **Assistant**. On iPad regular width they are sidebar destinations. Reflect is a tab.
 
 ## Driving it with control-howmuch
 

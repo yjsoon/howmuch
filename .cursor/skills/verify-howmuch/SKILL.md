@@ -9,7 +9,7 @@ HowMuch has two user surfaces in this repo. Drive the one the change actually to
 
 **Web** (`apps/web`) is the React ledger: first-owner setup, five Reflect reports (including Rewards), register, `/add` quick entry, schedules, tokens, sidebar accounts. There is no monthly Plan edit on the web.
 
-**iOS** (`apps/ios`) is the SwiftUI companion: Accounts / Rewards / Reflect, a floating **Add Transactions** plus, the **Add Transaction** capture sheet, Duplicate for Today, and (when built) typed intake, the `N > 1` review list, Shortcuts App Intents, share, and the screenshot offer. Plan and Assistant open from trailing **More**. Specs: `docs/frontend/intake-ui.md`, `docs/frontend/app-intents.md`. Issues: [#87](https://github.com/yjsoon/howmuch/issues/87), [#96](https://github.com/yjsoon/howmuch/issues/96) and their children.
+**iOS** (`apps/ios`) is the SwiftUI companion: Accounts / Rewards / Reflect on iPhone, Plan and Assistant in trailing **More** (and in the iPad sidebar), a floating **Add Transactions** plus, the **Add Transaction** capture sheet, Duplicate for Today, and (when built) typed intake, the `N > 1` review list, Shortcuts App Intents, share, and the screenshot offer. Specs: `docs/frontend/intake-ui.md`, `docs/frontend/app-intents.md`. Issues: [#87](https://github.com/yjsoon/howmuch/issues/87), [#96](https://github.com/yjsoon/howmuch/issues/96) and their children.
 
 Not covered here:
 
@@ -132,7 +132,7 @@ Web browser:
 iOS Simulator:
 
 - Prefer tab titles, navigation titles, and accessibility labels over coordinates.
-- Tab bar: **Accounts**, **Rewards**, **Reflect**, plus a floating **Add Transactions** plus that opens capture and does not change the selected tab. Plan and Assistant are **More** menu items, not tabs.
+- Tab bar (iPhone): **Accounts**, **Rewards**, **Reflect**, plus a floating **Add Transactions** plus that opens capture and does not change the selected tab. Plan and Assistant are **More** menu items, not tabs. iPad regular-width sidebar lists Accounts, Rewards, Reflect, Plan, and Assistant.
 - Capture title is **Add Transaction**. Leading **Cancel**. Trailing glass **Save** when the keypad is down. `canSave` is amount + account; payee is optional.
 - Web `/add` is a different product. It does not prove iOS capture.
 
@@ -158,9 +158,9 @@ Stable iOS handles:
 
 | Thing | Handle |
 | --- | --- |
-| Tabs | `Accounts`, `Rewards`, `Reflect`. Floating plus `Add Transactions` |
+| Tabs | iPhone `Accounts`, `Rewards`, `Reflect`. iPad sidebar also `Plan`, `Assistant`. Floating plus `Add Transactions` |
 | New account | Accounts trailing `New Account` (plus). Sheet title `New Account` |
-| More | `More` (ellipsis). Items `Plan`, `Assistant`, `Connection settings` |
+| More | `More` (ellipsis). iPhone items `Plan`, `Assistant`, `Connection settings`. iPad regular: `Connection settings` only |
 | Connection | `Connection settings` (inside More). Sheet title `Connection` |
 | Server field | placeholder `http://192.168.1.10:8787` under header `Server` |
 | Access | `Username`, `Password`, button `Sign in` / `Sign in again` |

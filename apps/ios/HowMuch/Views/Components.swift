@@ -180,12 +180,22 @@ enum AppTab: Hashable, CaseIterable {
   case accounts
   case rewards
   case reflect
+  case plan
+  case assistant
+
+  static let compactDestinations: [AppTab] = [.accounts, .rewards, .reflect]
+
+  var isCompactDestination: Bool {
+    Self.compactDestinations.contains(self)
+  }
 
   var title: String {
     switch self {
     case .accounts: return "Accounts"
     case .rewards: return "Rewards"
     case .reflect: return "Reflect"
+    case .plan: return "Plan"
+    case .assistant: return "Assistant"
     }
   }
 
@@ -194,6 +204,8 @@ enum AppTab: Hashable, CaseIterable {
     case .accounts: return "building.columns"
     case .rewards: return "creditcard"
     case .reflect: return "chart.bar.fill"
+    case .plan: return "square.grid.2x2"
+    case .assistant: return "bubble.left.and.bubble.right"
     }
   }
 
@@ -202,6 +214,16 @@ enum AppTab: Hashable, CaseIterable {
     case .accounts: return .accounts
     case .rewards: return .rewards
     case .reflect: return .reflect
+    case .plan: return .plan
+    case .assistant: return .assistant
+    }
+  }
+
+  var overflowDestination: MoreDestination? {
+    switch self {
+    case .plan: return .plan
+    case .assistant: return .assistant
+    case .accounts, .rewards, .reflect: return nil
     }
   }
 }
@@ -233,8 +255,25 @@ enum MoreDestination: Hashable, CaseIterable, Identifiable {
     }
   }
 
+  var tab: AppTab {
+    switch self {
+    case .plan: return .plan
+    case .assistant: return .assistant
+    }
+  }
+
   static func menuItems(omitting: MoreDestination?) -> [MoreDestination] {
     allCases.filter { $0 != omitting }
+  }
+
+  static func overflowItems(
+    usesSidebar: Bool,
+    omitting: MoreDestination?
+  ) -> [MoreDestination] {
+    guard !usesSidebar else {
+      return []
+    }
+    return menuItems(omitting: omitting)
   }
 }
 
@@ -268,7 +307,14 @@ enum RootChrome {
 @MainActor
 @Observable
 final class RootChromeState {
-  var tab: AppTab = .accounts
+  var tab: AppTab = .accounts {
+    didSet {
+      if tab.isCompactDestination {
+        lastCompactTab = tab
+      }
+    }
+  }
+  private var lastCompactTab: AppTab = .accounts
   private var overflowByTab: [AppTab: MoreDestination] = [:]
 
   func overflow(on tab: AppTab) -> MoreDestination? {
@@ -286,13 +332,32 @@ final class RootChromeState {
     overflowByTab[tab] = nil
   }
 
+  func adoptSidebarLayout() {
+    if let overflow = overflow(on: tab) {
+      tab = overflow.tab
+      dismissMore()
+    }
+  }
+
+  func adoptCompactLayout() {
+    guard let destination = tab.overflowDestination else {
+      return
+    }
+    tab = lastCompactTab
+    openMore(destination)
+  }
+
   var captureSurface: CaptureSurface {
-    overflowByTab[tab]?.captureSurface ?? tab.captureSurface
+    if tab.isCompactDestination, let overflow = overflowByTab[tab] {
+      return overflow.captureSurface
+    }
+    return tab.captureSurface
   }
 }
 
 struct RootTabHost<Content: View>: View {
   @Environment(RootChromeState.self) private var chrome
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   let hostedTab: AppTab
   var content: Content
 
@@ -302,7 +367,11 @@ struct RootTabHost<Content: View>: View {
   }
 
   var body: some View {
-    let overflow = chrome.overflow(on: hostedTab)
+    let usesSidebar = RootChrome.usesSidebar(
+      idiom: UIDevice.current.userInterfaceIdiom,
+      horizontalSizeClass: horizontalSizeClass
+    )
+    let overflow = usesSidebar ? nil : chrome.overflow(on: hostedTab)
     ZStack {
       content
         .allowsHitTesting(overflow == nil)
@@ -364,10 +433,7 @@ struct RootAddControl: View {
   }
 
   private var isVisible: Bool {
-    if chrome.overflow(on: chrome.tab) == .assistant, workspace.pendingAssistantSessionID != nil {
-      return false
-    }
-    return true
+    !(chrome.captureSurface == .assistant && workspace.pendingAssistantSessionID != nil)
   }
 
   private var button: some View {
@@ -411,17 +477,27 @@ struct DestinationsMenu: View {
   var omitting: MoreDestination?
   @Environment(AppModel.self) private var model
   @Environment(RootChromeState.self) private var chrome
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
   var body: some View {
+    let overflowItems = MoreDestination.overflowItems(
+      usesSidebar: RootChrome.usesSidebar(
+        idiom: UIDevice.current.userInterfaceIdiom,
+        horizontalSizeClass: horizontalSizeClass
+      ),
+      omitting: omitting
+    )
     Menu {
-      ForEach(MoreDestination.menuItems(omitting: omitting)) { destination in
-        Button {
-          chrome.openMore(destination)
-        } label: {
-          Label(destination.title, systemImage: destination.systemImage)
+      if !overflowItems.isEmpty {
+        ForEach(overflowItems) { destination in
+          Button {
+            chrome.openMore(destination)
+          } label: {
+            Label(destination.title, systemImage: destination.systemImage)
+          }
         }
+        Divider()
       }
-      Divider()
       Button {
         model.isShowingSettings = true
       } label: {

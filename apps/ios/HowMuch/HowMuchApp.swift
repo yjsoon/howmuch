@@ -104,6 +104,7 @@ private struct RootView: View {
     @Bindable var model = model
     @Bindable var capture = CaptureRouter.shared
     @Bindable var chrome = chrome
+    @Bindable var workspace = CaptureWorkspace.shared
 
     TabView(selection: $chrome.tab) {
       Tab(AppTab.accounts.title, systemImage: AppTab.accounts.systemImage, value: AppTab.accounts) {
@@ -127,11 +128,32 @@ private struct RootView: View {
           }
         }
       }
+
+      if usesSidebar {
+        Tab(AppTab.plan.title, systemImage: AppTab.plan.systemImage, value: AppTab.plan) {
+          NavigationStack {
+            CategoriesView()
+          }
+        }
+
+        Tab(AppTab.assistant.title, systemImage: AppTab.assistant.systemImage, value: AppTab.assistant) {
+          NavigationStack {
+            AssistantView(workspace: workspace)
+          }
+        }
+      }
     }
     .tabViewStyle(.sidebarAdaptable)
     .defaultAdaptableTabBarPlacement(.sidebar)
     .tabBarMinimizeBehavior(.onScrollDown)
     .environment(chrome)
+    .onChange(of: usesSidebar, initial: true) { _, sidebar in
+      if sidebar {
+        chrome.adoptSidebarLayout()
+      } else {
+        chrome.adoptCompactLayout()
+      }
+    }
     .onChange(of: chrome.captureSurface, initial: true) { _, surface in
       model.activeCaptureSurface = surface
     }
@@ -222,6 +244,13 @@ private struct RootView: View {
       }
       enqueueInboxIfNeeded(force: true)
     }
+  }
+
+  private var usesSidebar: Bool {
+    RootChrome.usesSidebar(
+      idiom: UIDevice.current.userInterfaceIdiom,
+      horizontalSizeClass: horizontalSizeClass
+    )
   }
 
   private func consumePendingCapture() {

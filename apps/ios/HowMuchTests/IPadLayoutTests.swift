@@ -251,11 +251,13 @@ final class IPadLayoutTests: XCTestCase {
     )
   }
 
-  func testAppTabCaptureSurfaceMapsVisibleTabsOnly() {
-    XCTAssertEqual(AppTab.allCases, [.accounts, .rewards, .reflect])
+  func testAppTabMapsCompactAndSidebarDestinations() {
+    XCTAssertEqual(AppTab.compactDestinations, [.accounts, .rewards, .reflect])
     XCTAssertEqual(AppTab.accounts.captureSurface, .accounts)
     XCTAssertEqual(AppTab.rewards.captureSurface, .rewards)
     XCTAssertEqual(AppTab.reflect.captureSurface, .reflect)
+    XCTAssertEqual(AppTab.plan.captureSurface, .plan)
+    XCTAssertEqual(AppTab.assistant.captureSurface, .assistant)
   }
 
   func testOpenMorePlanFromAccountsDoesNotLeakFocusedRegister() {
@@ -296,6 +298,42 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertEqual(MoreDestination.menuItems(omitting: nil), [.plan, .assistant])
     XCTAssertEqual(MoreDestination.menuItems(omitting: .plan), [.assistant])
     XCTAssertEqual(MoreDestination.menuItems(omitting: .assistant), [.plan])
+  }
+
+  func testOverflowItemsStayOnPhoneAndLeaveIPadSidebar() {
+    XCTAssertEqual(
+      MoreDestination.overflowItems(usesSidebar: false, omitting: nil),
+      [.plan, .assistant]
+    )
+    XCTAssertEqual(
+      MoreDestination.overflowItems(usesSidebar: true, omitting: nil),
+      []
+    )
+    XCTAssertEqual(
+      MoreDestination.overflowItems(usesSidebar: false, omitting: .plan),
+      [.assistant]
+    )
+  }
+
+  func testAdoptSidebarPromotesPhoneOverflowToTab() {
+    let chrome = RootChromeState()
+    chrome.tab = .accounts
+    chrome.openMore(.plan)
+    XCTAssertEqual(chrome.captureSurface, .plan)
+    chrome.adoptSidebarLayout()
+    XCTAssertEqual(chrome.tab, .plan)
+    XCTAssertNil(chrome.overflow(on: .accounts))
+    XCTAssertEqual(chrome.captureSurface, .plan)
+  }
+
+  func testAdoptCompactMovesSidebarTabIntoMore() {
+    let chrome = RootChromeState()
+    chrome.tab = .rewards
+    chrome.tab = .assistant
+    chrome.adoptCompactLayout()
+    XCTAssertEqual(chrome.tab, .rewards)
+    XCTAssertEqual(chrome.overflow(on: .rewards), .assistant)
+    XCTAssertEqual(chrome.captureSurface, .assistant)
   }
 
   private func attachImage(_ image: UIImage, name: String) {
