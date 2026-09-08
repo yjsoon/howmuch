@@ -932,11 +932,19 @@ struct RewardCardEditorView: View {
           card: written
         )
       }
-      await model.noteRewardsImport()
-      dismiss()
+      closeAfterWrite()
     } catch {
       errorMessage = error.localizedDescription
       isSaving = false
+    }
+  }
+
+  private func closeAfterWrite() {
+    model.noteRewardsBoardChanged()
+    var transaction = Transaction()
+    transaction.disablesAnimations = true
+    withTransaction(transaction) {
+      dismiss()
     }
   }
 
@@ -948,8 +956,7 @@ struct RewardCardEditorView: View {
     errorMessage = nil
     do {
       _ = try await model.apiClient.deleteRewardCard(planID: model.settings.planID, cardID: cardID)
-      await model.noteRewardsImport()
-      dismiss()
+      closeAfterWrite()
     } catch {
       errorMessage = error.localizedDescription
       isDeleting = false
