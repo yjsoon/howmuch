@@ -941,7 +941,7 @@ struct RewardCardEditorView: View {
 
   private func closeAfterWrite() {
     model.noteRewardsBoardChanged()
-    var transaction = Transaction()
+    var transaction = SwiftUI.Transaction()
     transaction.disablesAnimations = true
     withTransaction(transaction) {
       dismiss()
