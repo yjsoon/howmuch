@@ -112,4 +112,44 @@ final class RewardCardEditorTests: XCTestCase {
     let box = try JSONDecoder().decode(FlagColourBox.self, from: json)
     XCTAssertEqual(box.flagColor, .unflagged)
   }
+
+  func testUnknownRewardKindDecodesAsCashback() throws {
+    let json = """
+    {
+      "id": "card-points",
+      "name": "Legacy points",
+      "issuer": "UOB",
+      "type": "points",
+      "ynabAccountId": "acct-credit",
+      "featured": true
+    }
+    """
+    let card = try JSONDecoder().decode(CreditCard.self, from: Data(json.utf8))
+    XCTAssertEqual(card.type, .cashback)
+    XCTAssertEqual(card.name, "Legacy points")
+  }
+
+  func testSparseSubcategoryDoesNotFailTheCard() throws {
+    let json = """
+    {
+      "id": "card-travel",
+      "name": "Travel Card",
+      "issuer": "DBS",
+      "type": "miles",
+      "ynabAccountId": "acct-credit",
+      "featured": true,
+      "subcategories": [
+        { "id": "subcat-dining", "name": "Dining", "flagColor": "red", "rewardValue": 4 },
+        { "not": "a subcategory" }
+      ]
+    }
+    """
+    let card = try JSONDecoder().decode(CreditCard.self, from: Data(json.utf8))
+    XCTAssertEqual(card.subcategories?.count, 1)
+    XCTAssertEqual(card.subcategories?.first?.name, "Dining")
+    XCTAssertEqual(card.subcategories?.first?.flagColor, .red)
+    XCTAssertEqual(card.subcategories?.first?.rewardValue, 4)
+    XCTAssertEqual(card.subcategories?.first?.priority, 0)
+    XCTAssertEqual(card.subcategories?.first?.active, true)
+  }
 }

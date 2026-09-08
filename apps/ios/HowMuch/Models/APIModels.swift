@@ -1696,6 +1696,22 @@ struct AgeOfMoneyPeriod: Decodable, Identifiable {
   let unmatchedSpending: Int
 }
 
+private extension KeyedDecodingContainer {
+  func decodeLossyArray<T: Decodable>(_ type: T.Type, forKey key: Key) throws -> [T] {
+    guard contains(key) else { return [] }
+    if try decodeNil(forKey: key) { return [] }
+    var nested = try nestedUnkeyedContainer(forKey: key)
+    var items: [T] = []
+    while !nested.isAtEnd {
+      let element = try nested.superDecoder()
+      if let item = try? T(from: element) {
+        items.append(item)
+      }
+    }
+    return items
+  }
+}
+
 enum RewardGroupBy: String, CaseIterable, Identifiable, Decodable, Sendable {
   case flag
   case payee
@@ -1721,6 +1737,16 @@ enum RewardGroupBy: String, CaseIterable, Identifiable, Decodable, Sendable {
 enum RewardKind: String, Codable, Hashable, Sendable {
   case cashback
   case miles
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    if container.decodeNil() {
+      self = .cashback
+      return
+    }
+    let raw = (try? container.decode(String.self)) ?? ""
+    self = RewardKind(rawValue: raw) ?? .cashback
+  }
 }
 
 enum RewardFlagColour: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -1764,6 +1790,16 @@ enum CardBillingType: String, Codable, CaseIterable, Identifiable, Sendable {
       return "Billing cycle"
     }
   }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    if container.decodeNil() {
+      self = .calendar
+      return
+    }
+    let raw = (try? container.decode(String.self)) ?? ""
+    self = CardBillingType(rawValue: raw) ?? .calendar
+  }
 }
 
 struct CardBillingCycle: Codable, Equatable, Sendable {
@@ -1796,6 +1832,57 @@ struct CardSubcategory: Codable, Equatable, Identifiable, Sendable {
   var excludeFromRewards: Bool?
   var createdAt: String
   var updatedAt: String
+
+  init(
+    id: String,
+    name: String,
+    flagColor: RewardFlagColour,
+    rewardValue: Double,
+    milesBlockSize: Double? = nil,
+    minimumSpend: Double? = nil,
+    maximumSpend: Double? = nil,
+    priority: Double,
+    active: Bool,
+    excludeFromRewards: Bool? = nil,
+    createdAt: String,
+    updatedAt: String
+  ) {
+    self.id = id
+    self.name = name
+    self.flagColor = flagColor
+    self.rewardValue = rewardValue
+    self.milesBlockSize = milesBlockSize
+    self.minimumSpend = minimumSpend
+    self.maximumSpend = maximumSpend
+    self.priority = priority
+    self.active = active
+    self.excludeFromRewards = excludeFromRewards
+    self.createdAt = createdAt
+    self.updatedAt = updatedAt
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let decodedId = try container.decodeIfPresent(String.self, forKey: .id)
+    let decodedName = try container.decodeIfPresent(String.self, forKey: .name)
+    guard decodedId != nil || decodedName != nil else {
+      throw DecodingError.dataCorrupted(
+        DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Card subcategory needs an id or name.")
+      )
+    }
+    id = decodedId ?? UUID().uuidString
+    name = decodedName ?? ""
+    flagColor = try container.decodeIfPresent(RewardFlagColour.self, forKey: .flagColor) ?? .unflagged
+    rewardValue = try container.decodeIfPresent(Double.self, forKey: .rewardValue) ?? 0
+    milesBlockSize = try container.decodeIfPresent(Double.self, forKey: .milesBlockSize)
+    minimumSpend = try container.decodeIfPresent(Double.self, forKey: .minimumSpend)
+    maximumSpend = try container.decodeIfPresent(Double.self, forKey: .maximumSpend)
+    priority = try container.decodeIfPresent(Double.self, forKey: .priority) ?? 0
+    active = try container.decodeIfPresent(Bool.self, forKey: .active) ?? true
+    excludeFromRewards = try container.decodeIfPresent(Bool.self, forKey: .excludeFromRewards)
+    createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt) ?? ""
+    updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt) ?? ""
+  }
 }
 
 struct SpendingTierSubcategory: Codable, Equatable, Sendable {
@@ -1901,8 +1988,16 @@ struct CreditCard: Codable, Equatable, Identifiable, Sendable {
     minimumSpend = try container.decodeIfPresent(Double.self, forKey: .minimumSpend)
     maximumSpend = try container.decodeIfPresent(Double.self, forKey: .maximumSpend)
     subcategoriesEnabled = try container.decodeIfPresent(Bool.self, forKey: .subcategoriesEnabled)
-    subcategories = try container.decodeIfPresent([CardSubcategory].self, forKey: .subcategories)
-    spendingTiers = try container.decodeIfPresent([CardSpendingTier].self, forKey: .spendingTiers)
+    if container.contains(.subcategories) {
+      subcategories = try container.decodeLossyArray(CardSubcategory.self, forKey: .subcategories)
+    } else {
+      subcategories = nil
+    }
+    if container.contains(.spendingTiers) {
+      spendingTiers = try container.decodeLossyArray(CardSpendingTier.self, forKey: .spendingTiers)
+    } else {
+      spendingTiers = nil
+    }
   }
 
   func encode(to encoder: Encoder) throws {
@@ -2044,6 +2139,17 @@ struct RewardsReport: Decodable, Sendable {
   let totals: RewardsTotals
   let cards: [RewardsCardRow]
   let groups: [RewardsGroupRow]
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    from = try container.decodeIfPresent(String.self, forKey: .from)
+    to = try container.decodeIfPresent(String.self, forKey: .to)
+    groupBy = try container.decode(RewardGroupBy.self, forKey: .groupBy)
+    milesValuation = try container.decode(Double.self, forKey: .milesValuation)
+    totals = try container.decode(RewardsTotals.self, forKey: .totals)
+    cards = try container.decodeLossyArray(RewardsCardRow.self, forKey: .cards)
+    groups = try container.decodeIfPresent([RewardsGroupRow].self, forKey: .groups) ?? []
+  }
 }
 
 struct RewardsTotals: Decodable, Sendable {
@@ -2109,10 +2215,27 @@ struct RewardsTrackerSnapshot: Decodable, Sendable {
   let cards: [RewardsTrackerCard]
   let importedAt: String?
   let updatedAt: String?
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    snapshot = try container.decodeIfPresent(RewardsTrackerStoredSnapshot.self, forKey: .snapshot)
+    cards = try container.decodeLossyArray(RewardsTrackerCard.self, forKey: .cards)
+    importedAt = try container.decodeIfPresent(String.self, forKey: .importedAt)
+    updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
+  }
 }
 
 struct RewardsTrackerStoredSnapshot: Decodable, Sendable {
   let cards: [RewardsTrackerCard]?
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    if container.contains(.cards) {
+      cards = try container.decodeLossyArray(RewardsTrackerCard.self, forKey: .cards)
+    } else {
+      cards = nil
+    }
+  }
 }
 
 struct RewardsTrackerImportResult: Decodable, Sendable {

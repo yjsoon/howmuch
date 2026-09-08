@@ -75,6 +75,54 @@ final class RewardsReportTests: XCTestCase {
     XCTAssertEqual(snapshot.snapshot?.cards?.first?.ynabAccountId, "acct-travel")
   }
 
+  func testSkipsAMalformedCardWithoutDroppingSiblings() throws {
+    let json = """
+    {
+      "from": null,
+      "to": null,
+      "group_by": "flag",
+      "miles_valuation": 0.01,
+      "totals": { "spend": 830.8, "reward_dollars": 8.31, "cashback": 8.31, "miles": 0 },
+      "cards": [
+        {
+          "account_id": "acct-junk",
+          "account_name": "Broken",
+          "calculation": { "not": "valid" }
+        },
+        {
+          "card": {
+            "id": "card-travel",
+            "name": "Travel Card",
+            "issuer": "DBS",
+            "type": "miles",
+            "ynabAccountId": "acct-credit",
+            "featured": true
+          },
+          "account_id": "acct-credit",
+          "account_name": "Travel Card",
+          "calculation": {
+            "period": "all",
+            "total_spend": 830.8,
+            "counted_spend": 830.8,
+            "eligible_spend": 830.8,
+            "reward_earned": 8.308,
+            "reward_earned_dollars": 8.308,
+            "reward_type": "cashback",
+            "minimum_spend_met": true,
+            "maximum_spend_exceeded": false,
+            "flags": []
+          }
+        }
+      ],
+      "groups": []
+    }
+    """
+    let report = try decoder.decode(RewardsReport.self, from: Data(json.utf8))
+    XCTAssertEqual(report.cards.count, 1)
+    XCTAssertEqual(report.cards[0].card.name, "Travel Card")
+    XCTAssertEqual(report.cards[0].accountId, "acct-credit")
+  }
+
   func testCurrencyUnitsFormatterMatchesMilliunits() {
     let format = CurrencyFormat(
       isoCode: "SGD",
