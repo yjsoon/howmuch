@@ -1924,6 +1924,7 @@ struct CreditCard: Codable, Equatable, Identifiable, Sendable {
   var subcategoriesEnabled: Bool?
   var subcategories: [CardSubcategory]?
   var spendingTiers: [CardSpendingTier]?
+  var flagNames: [String: String]?
 
   private enum CodingKeys: String, CodingKey {
     case id
@@ -1942,6 +1943,7 @@ struct CreditCard: Codable, Equatable, Identifiable, Sendable {
     case subcategoriesEnabled
     case subcategories
     case spendingTiers
+    case flagNames
   }
 
   init(
@@ -1960,7 +1962,8 @@ struct CreditCard: Codable, Equatable, Identifiable, Sendable {
     maximumSpend: Double? = nil,
     subcategoriesEnabled: Bool? = nil,
     subcategories: [CardSubcategory]? = nil,
-    spendingTiers: [CardSpendingTier]? = nil
+    spendingTiers: [CardSpendingTier]? = nil,
+    flagNames: [String: String]? = nil
   ) {
     self.id = id
     self.name = name
@@ -1978,6 +1981,7 @@ struct CreditCard: Codable, Equatable, Identifiable, Sendable {
     self.subcategoriesEnabled = subcategoriesEnabled
     self.subcategories = subcategories
     self.spendingTiers = spendingTiers
+    self.flagNames = flagNames
   }
 
   init(from decoder: Decoder) throws {
@@ -2006,6 +2010,7 @@ struct CreditCard: Codable, Equatable, Identifiable, Sendable {
     } else {
       spendingTiers = nil
     }
+    flagNames = try container.decodeIfPresent([String: String].self, forKey: .flagNames)
   }
 
   func encode(to encoder: Encoder) throws {
@@ -2026,6 +2031,7 @@ struct CreditCard: Codable, Equatable, Identifiable, Sendable {
     try container.encodeIfPresent(subcategoriesEnabled, forKey: .subcategoriesEnabled)
     try container.encodeIfPresent(subcategories, forKey: .subcategories)
     try container.encodeIfPresent(spendingTiers, forKey: .spendingTiers)
+    try container.encodeIfPresent(flagNames, forKey: .flagNames)
   }
 
   func jsonObject(clearMissing: Bool = false) -> [String: Any] {
@@ -2070,6 +2076,11 @@ struct CreditCard: Codable, Equatable, Identifiable, Sendable {
     object["minimumSpend"] = minimumSpend ?? NSNull()
     object["maximumSpend"] = maximumSpend ?? NSNull()
     object["subcategoriesEnabled"] = subcategoriesEnabled ?? false
+    if let flagNames, !flagNames.isEmpty {
+      object["flagNames"] = flagNames
+    } else if clearMissing {
+      object["flagNames"] = [String: String]()
+    }
     object["subcategories"] = (subcategories ?? []).map { flag in
       var row: [String: Any] = [
         "id": flag.id,

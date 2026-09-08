@@ -24,13 +24,16 @@ export function FlagPicker({
   value,
   onChange,
   disabled,
+  names,
 }: {
   labelledBy?: string;
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  names?: Record<string, string>;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const noneLabel = names?.[""]?.trim() || "None";
 
   useEffect(() => {
     const root = rootRef.current;
@@ -68,20 +71,26 @@ export function FlagPicker({
         role="radio"
         tabIndex={value ? -1 : 0}
         aria-checked={!value}
+        aria-label={noneLabel}
         className={value ? "flag-picker-none" : "flag-picker-none is-selected"}
         onClick={() => onChange("")}
         disabled={disabled}
       >
-        None
+        {noneLabel}
       </button>
       {FLAG_COLOURS.map((colour) => (
-        <FlagSwatch
-          key={colour}
-          colour={colour}
-          selected={value === colour}
-          disabled={disabled}
-          onSelect={() => onChange(colour)}
-        />
+        <span className="flag-picker-option" key={colour}>
+          <FlagSwatch
+            colour={colour}
+            selected={value === colour}
+            disabled={disabled}
+            name={names?.[colour]}
+            onSelect={() => onChange(colour)}
+          />
+          {names?.[colour]?.trim() ? (
+            <span className="flag-picker-caption">{names[colour]}</span>
+          ) : null}
+        </span>
       ))}
     </div>
   );
@@ -91,20 +100,24 @@ function FlagSwatch({
   colour,
   selected,
   disabled,
+  name,
   onSelect,
 }: {
   colour: FlagColour;
   selected: boolean;
   disabled?: boolean;
+  name?: string;
   onSelect: () => void;
 }) {
+  const label = flagTitle(colour, name);
   return (
     <button
       type="button"
       role="radio"
       tabIndex={selected ? 0 : -1}
       aria-checked={selected}
-      aria-label={flagTitle(colour)}
+      aria-label={label}
+      title={label}
       className={selected ? `flag-picker-swatch flag-colour-${colour} is-selected` : `flag-picker-swatch flag-colour-${colour}`}
       onClick={onSelect}
       disabled={disabled}

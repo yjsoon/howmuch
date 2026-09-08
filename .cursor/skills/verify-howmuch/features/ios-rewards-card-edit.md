@@ -43,5 +43,6 @@ Preconditions:
 - Empty state is only when the rewards report returns no cards. An all-capped board still has stored cards, so the empty panel stays away.
 - **Add card** is the control on the empty panel and on the filled board. Both open the editor for an existing HowMuch credit card.
 - Flag colour on a subcategory uses the same colour tags as the ledger (None plus the six colours). None stores Unflagged and matches unflagged spend. Ledger None sends `null`.
+- Colour names live on the rewards-tracked account. Name Red Dining and Blue Online on Travel Card; the editor flag picker then shows those names. Untracked accounts keep Red/Blue titles.
 - Linux CI cannot run Simulator. Native `RewardCardEditorTests` plus `control-howmuch http` are the proof this VM can produce. The 800 ms save-to-tile median and the review video are Darwin-only; an `axe describe-ui` dump after Save is not that median.
 - Do not mark this recipe verified from web `/rewards/new`.

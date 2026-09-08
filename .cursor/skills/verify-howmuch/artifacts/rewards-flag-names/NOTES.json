@@ -1,0 +1,67 @@
+{
+  "colourValues": {
+    "Red name": "Dining",
+    "Blue name": "Online",
+    "Orange name": "",
+    "None name": ""
+  },
+  "savedNames": {
+    "red": "Dining",
+    "blue": "Online"
+  },
+  "ledgerTags": [
+    {
+      "className": "flag-tag flag-tag-red",
+      "text": "Dining"
+    },
+    {
+      "className": "flag-tag flag-tag-orange",
+      "text": "Orange"
+    },
+    {
+      "className": "flag-tag flag-tag-yellow",
+      "text": "Yellow"
+    },
+    {
+      "className": "flag-tag flag-tag-green",
+      "text": "Green"
+    },
+    {
+      "className": "flag-tag flag-tag-blue",
+      "text": "Online"
+    },
+    {
+      "className": "flag-tag flag-tag-purple",
+      "text": "Purple"
+    },
+    {
+      "className": "flag-tag flag-tag-red",
+      "text": "Dining"
+    }
+  ],
+  "pickerCaptions": [
+    "Dining",
+    "Online"
+  ],
+  "registerHeading": "Travel Card",
+  "registerTags": [
+    {
+      "className": "flag-tag flag-tag-red",
+      "text": "Dining"
+    },
+    {
+      "className": "flag-tag flag-tag-blue",
+      "text": "Online"
+    },
+    {
+      "className": "flag-tag flag-tag-red",
+      "text": "Dining"
+    },
+    {
+      "className": "flag-tag flag-tag-red",
+      "text": "Dining"
+    }
+  ],
+  "everydayHeading": "Everyday Account",
+  "everydayTags": []
+}

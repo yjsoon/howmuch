@@ -196,6 +196,7 @@ struct RewardCardDraft: Equatable {
   var minimumSpend: String
   var maximumSpend: String
   var flags: [RewardFlagDraft]
+  var flagNames: [RewardFlagColour: String]
   var tiers: [RewardTierDraft]
 
   static var nowISO: String {
@@ -230,6 +231,7 @@ struct RewardCardDraft: Equatable {
       minimumSpend: "",
       maximumSpend: "",
       flags: [],
+      flagNames: [:],
       tiers: []
     )
   }
@@ -254,6 +256,7 @@ struct RewardCardDraft: Equatable {
     minimumSpend: String,
     maximumSpend: String,
     flags: [RewardFlagDraft],
+    flagNames: [RewardFlagColour: String],
     tiers: [RewardTierDraft]
   ) {
     self.id = id
@@ -275,6 +278,7 @@ struct RewardCardDraft: Equatable {
     self.minimumSpend = minimumSpend
     self.maximumSpend = maximumSpend
     self.flags = flags
+    self.flagNames = flagNames
     self.tiers = tiers
   }
 
@@ -298,7 +302,24 @@ struct RewardCardDraft: Equatable {
     minimumSpend = Self.numberText(card.minimumSpend)
     maximumSpend = Self.numberText(card.maximumSpend)
     flags = (card.subcategories ?? []).map(RewardFlagDraft.init)
+    flagNames = Self.colourNames(from: card)
     tiers = (card.spendingTiers ?? []).map(RewardTierDraft.init)
+  }
+
+  static func colourNames(from card: CreditCard) -> [RewardFlagColour: String] {
+    var names: [RewardFlagColour: String] = [:]
+    for flag in card.subcategories ?? [] {
+      let trimmed = flag.name.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty {
+        names[flag.flagColor] = trimmed
+      }
+    }
+    for (raw, name) in card.flagNames ?? [:] {
+      let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !trimmed.isEmpty, let colour = RewardFlagColour(rawValue: raw) else { continue }
+      names[colour] = trimmed
+    }
+    return names
   }
 
   mutating func addFlag(_ flag: RewardFlagDraft? = nil) {
@@ -307,6 +328,9 @@ struct RewardCardDraft: Equatable {
 
   mutating func addImportedFlag(name: String, flagColor: RewardFlagColour, rewardValue: String) throws {
     let rate = try Self.requiredFinite(rewardValue, label: "Category flag rate")
+    if (flagNames[flagColor] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      flagNames[flagColor] = name
+    }
     addFlag(
       RewardFlagDraft.fresh(
         priority: String(flags.count + 1),
@@ -394,14 +418,15 @@ struct RewardCardDraft: Equatable {
 
     var writtenFlags: [CardSubcategory] = []
     for (index, flag) in flags.enumerated() {
-      if flag.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        throw RewardCardWriteError.message("Flag \(index + 1) needs a name.")
+      let colourName = (flagNames[flag.flagColor] ?? flag.name).trimmingCharacters(in: .whitespacesAndNewlines)
+      if colourName.isEmpty {
+        throw RewardCardWriteError.message("Name the \(flag.flagColor.ledgerColour.title) colour on this card.")
       }
       let rewardValue = try Self.requiredFinite(flag.rewardValue, label: "Flag \(index + 1) reward value")
       let priority = try Self.requiredFinite(flag.priority, label: "Flag \(index + 1) priority")
       var written = CardSubcategory(
         id: flag.id,
-        name: flag.name.trimmingCharacters(in: .whitespacesAndNewlines),
+        name: colourName,
         flagColor: flag.flagColor,
         rewardValue: rewardValue,
         milesBlockSize: nil,
@@ -423,6 +448,13 @@ struct RewardCardDraft: Equatable {
     }
     card.subcategoriesEnabled = !writtenFlags.isEmpty
     card.subcategories = writtenFlags
+    let encodedNames = Dictionary(uniqueKeysWithValues: flagNames.compactMap { colour, name -> (String, String)? in
+      let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+      return trimmed.isEmpty ? nil : (colour.rawValue, trimmed)
+    })
+    if !encodedNames.isEmpty {
+      card.flagNames = encodedNames
+    }
 
     var writtenTiers: [CardSpendingTier] = []
     for (index, tier) in tiers.enumerated() {
@@ -463,6 +495,21 @@ struct RewardCardDraft: Equatable {
     }
     card.spendingTiers = writtenTiers
     return card
+  }
+
+  func ledgerTitle(for colour: FlagColour) -> String {
+    let named = flagNames[RewardFlagColour(ledgerColour: colour)]?
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return named.isEmpty ? colour.title : named
+  }
+
+  func displayName(for flag: RewardFlagDraft) -> String {
+    let named = flagNames[flag.flagColor]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !named.isEmpty {
+      return named
+    }
+    let fallback = flag.name.trimmingCharacters(in: .whitespacesAndNewlines)
+    return fallback.isEmpty ? flag.flagColor.title : fallback
   }
 
   private static func optionalFinite(_ text: String, label: String) throws -> Double? {
@@ -652,6 +699,29 @@ struct RewardCardEditorView: View {
       }
 
       Section {
+        ForEach(RewardFlagColour.allCases) { colour in
+          HStack {
+            if colour == .unflagged {
+              Text("None")
+                .frame(width: 72, alignment: .leading)
+            } else {
+              Image(systemName: "flag.fill")
+                .foregroundStyle(Theme.flagColour(named: colour.rawValue) ?? .secondary)
+                .frame(width: 24)
+              Text(colour.title)
+                .frame(width: 48, alignment: .leading)
+            }
+            TextField(colour == .unflagged ? "None" : colour.title, text: colourNameBinding(for: colour))
+              .accessibilityLabel("\(colour == .unflagged ? "None" : colour.title) name")
+          }
+        }
+      } header: {
+        Text("Colour names")
+      } footer: {
+        Text("These names show on this account’s flags. Everyday Account and other untracked accounts keep the plain colour tags.")
+      }
+
+      Section {
         Picker("Import category", selection: $importCategoryId) {
           Text("Choose category").tag("")
           ForEach(importableCategories, id: \.id) { category in
@@ -678,7 +748,7 @@ struct RewardCardEditorView: View {
       } header: {
         Text("Flag subcategories")
       } footer: {
-        Text("These are the same colour tags as the ledger. None is Unflagged spend.")
+        Text("These are the same colour tags as the ledger. None is Unflagged spend. Name the colour above and it appears on this account.")
       }
 
       Section("Spending tiers") {
@@ -762,14 +832,18 @@ struct RewardCardEditorView: View {
   private func flagEditor(_ flag: Binding<RewardFlagDraft>) -> some View {
     let index = draft.flags.firstIndex(where: { $0.id == flag.wrappedValue.id }) ?? 0
     VStack(alignment: .leading, spacing: 8) {
-      TextField("Name", text: Binding(
-        get: { flag.wrappedValue.name },
-        set: { flag.wrappedValue.name = $0; flag.wrappedValue.touch() }
-      ))
-      .accessibilityLabel("Flag \(index + 1) name")
+      Text(draft.displayName(for: flag.wrappedValue))
+        .font(.headline)
       Picker("Flag colour", selection: Binding(
         get: { flag.wrappedValue.flagColor.ledgerColour },
-        set: { flag.wrappedValue.flagColor = RewardFlagColour(ledgerColour: $0); flag.wrappedValue.touch() }
+        set: { nextColour in
+          let next = RewardFlagColour(ledgerColour: nextColour)
+          if (draft.flagNames[next] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            draft.flagNames[next] = flag.wrappedValue.name
+          }
+          flag.wrappedValue.flagColor = next
+          flag.wrappedValue.touch()
+        }
       )) {
         ForEach(FlagColour.allCases) { colour in
           ledgerFlagOption(colour)
@@ -830,7 +904,7 @@ struct RewardCardEditorView: View {
         Picker("Flag override", selection: $override.subcategoryId) {
           Text("Choose flag").tag("")
           ForEach(draft.flags) { flag in
-            Text(flag.name.isEmpty ? flag.flagColor.title : flag.name).tag(flag.id)
+            Text(draft.displayName(for: flag)).tag(flag.id)
           }
         }
         TextField("Override rate", text: $override.rewardValue)
@@ -857,9 +931,22 @@ struct RewardCardEditorView: View {
     HStack {
       Image(systemName: colour == .none ? "flag" : "flag.fill")
         .foregroundStyle(Theme.flagColour(named: colour.rawValue) ?? .secondary)
-      Text(colour.title)
+      Text(draft.ledgerTitle(for: colour))
     }
     .tag(colour)
+  }
+
+  private func colourNameBinding(for colour: RewardFlagColour) -> Binding<String> {
+    Binding(
+      get: { draft.flagNames[colour] ?? "" },
+      set: { value in
+        draft.flagNames[colour] = value
+        for index in draft.flags.indices where draft.flags[index].flagColor == colour {
+          draft.flags[index].name = value
+          draft.flags[index].touch()
+        }
+      }
+    )
   }
 
   private var importLedgerFlag: Binding<FlagColour> {

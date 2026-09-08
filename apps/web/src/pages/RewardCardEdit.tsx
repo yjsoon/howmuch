@@ -17,6 +17,7 @@ import { formatDate } from "../lib/dates";
 import { isFlagColour, ledgerFlagFromReward, rewardFlagFromLedger } from "../lib/flags";
 import { formatMoney } from "../lib/money";
 import { rewardCardAccountChoices, syncedRewardCardName } from "../lib/reward-card-accounts";
+import { ledgerFlagNames, namedFlagLabel, namesFromSubcategories, parseRewardFlagNames, REWARD_NAME_COLOURS, snapshotFlagLabel } from "../lib/reward-flag-names";
 import { usePlan } from "../state/plan";
 
 type FlagDraft = {
@@ -69,6 +70,7 @@ type CardDraft = {
   minimumSpend: string;
   maximumSpend: string;
   flags: FlagDraft[];
+  flagNames: Partial<Record<RewardFlagColour, string>>;
   tiers: TierDraft[];
 };
 
@@ -140,6 +142,17 @@ function CardEditor({ card, takenAccountIds }: { card: CreditCard | null; takenA
     }
     return "";
   }, [groups, importCategoryId]);
+  const pickerNames = ledgerFlagNames(draft.flagNames);
+
+  const setColourName = (colour: RewardFlagColour, value: string) => {
+    setDraft((current) => ({
+      ...current,
+      flagNames: { ...current.flagNames, [colour]: value },
+      flags: current.flags.map((flag) => (
+        flag.flagColor === colour ? { ...flag, name: value, updatedAt: new Date().toISOString() } : flag
+      )),
+    }));
+  };
 
   const save = async () => {
     const written = creditCardWrite(draft, { clearMissing: Boolean(card) });
@@ -188,15 +201,21 @@ function CardEditor({ card, takenAccountIds }: { card: CreditCard | null; takenA
       return;
     }
     setError(null);
-    setDraft((current) => ({
-      ...current,
-      flags: [...current.flags, newFlag({
-        name: categoryName,
-        flagColor: importFlagColor,
-        rewardValue: String(rate.value),
-        priority: String(current.flags.length + 1),
-      })],
-    }));
+    setDraft((current) => {
+      const named = current.flagNames[importFlagColor]?.trim() || categoryName;
+      return {
+        ...current,
+        flags: [...current.flags, newFlag({
+          name: named,
+          flagColor: importFlagColor,
+          rewardValue: String(rate.value),
+          priority: String(current.flags.length + 1),
+        })],
+        flagNames: current.flagNames[importFlagColor]?.trim()
+          ? current.flagNames
+          : { ...current.flagNames, [importFlagColor]: categoryName },
+      };
+    });
     setImportCategoryId("");
     setImportRate("");
   };
@@ -430,8 +449,36 @@ function CardEditor({ card, takenAccountIds }: { card: CreditCard | null; takenA
           </div>
 
           <fieldset className="transaction-editor-splits rewards-editor-block">
+            <legend>Colour names</legend>
+            <p className="field-note">These names show on this account’s flags. Everyday Account and other untracked accounts keep the plain colour tags.</p>
+            <div className="rewards-colour-names">
+              {REWARD_NAME_COLOURS.map((colour) => {
+                const label = colour === "unflagged" ? "None" : colour[0]!.toUpperCase() + colour.slice(1);
+                return (
+                  <div className="rewards-colour-name-row" key={colour}>
+                    {colour === "unflagged" ? (
+                      <span className="field-label">None</span>
+                    ) : (
+                      <FlagTag colour={colour} name={draft.flagNames[colour] || label} />
+                    )}
+                    <label className="field">
+                      <span className="sr-only">{label} name</span>
+                      <input
+                        value={draft.flagNames[colour] ?? ""}
+                        placeholder={label}
+                        aria-label={`${label} name`}
+                        onChange={(event) => setColourName(colour, event.target.value)}
+                      />
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+          </fieldset>
+
+          <fieldset className="transaction-editor-splits rewards-editor-block">
             <legend>Flag subcategories</legend>
-            <p className="field-note">These are the same colour tags as the ledger. None is Unflagged spend.</p>
+            <p className="field-note">These are the same colour tags as the ledger. None is Unflagged spend. Name the colour above and it appears on this account.</p>
             <div className="field-row">
               <label className="field">
                 <span className="field-label">Import category</span>
@@ -449,6 +496,7 @@ function CardEditor({ card, takenAccountIds }: { card: CreditCard | null; takenA
                   labelledBy="import-flag-colour-label"
                   value={ledgerFlagFromReward(importFlagColor)}
                   onChange={(value) => setImportFlagColor(rewardFlagFromLedger(value))}
+                  names={pickerNames}
                 />
               </div>
               <label className="field">
@@ -462,9 +510,14 @@ function CardEditor({ card, takenAccountIds }: { card: CreditCard | null; takenA
                 key={flag.id}
                 flag={flag}
                 index={index}
+                colourName={draft.flagNames[flag.flagColor] ?? flag.name}
+                pickerNames={pickerNames}
                 onChange={(next) => setDraft((current) => ({
                   ...current,
                   flags: current.flags.map((entry) => entry.id === flag.id ? next : entry),
+                  flagNames: next.flagColor === flag.flagColor
+                    ? current.flagNames
+                    : { ...current.flagNames, [next.flagColor]: current.flagNames[next.flagColor] ?? next.name },
                 }))}
                 onRemove={() => setDraft((current) => ({
                   ...current,
@@ -491,6 +544,7 @@ function CardEditor({ card, takenAccountIds }: { card: CreditCard | null; takenA
                 key={tier.id}
                 tier={tier}
                 flags={draft.flags}
+                flagNames={draft.flagNames}
                 onChange={(next) => setDraft((current) => ({
                   ...current,
                   tiers: current.tiers.map((entry) => entry.id === tier.id ? next : entry),
@@ -524,7 +578,7 @@ function CardEditor({ card, takenAccountIds }: { card: CreditCard | null; takenA
         </form>
       </section>
 
-      <CardLedger planId={planId} accountId={draft.ynabAccountId} />
+      <CardLedger planId={planId} accountId={draft.ynabAccountId} flagNames={draft.flagNames} pickerNames={pickerNames} />
     </>
   );
 }
@@ -532,30 +586,32 @@ function CardEditor({ card, takenAccountIds }: { card: CreditCard | null; takenA
 function FlagRow({
   flag,
   index,
+  colourName,
+  pickerNames,
   onChange,
   onRemove,
 }: {
   flag: FlagDraft;
   index: number;
+  colourName: string;
+  pickerNames: Record<string, string>;
   onChange: (flag: FlagDraft) => void;
   onRemove: () => void;
 }) {
   const patch = (next: Partial<FlagDraft>) => onChange({ ...flag, ...next, updatedAt: new Date().toISOString() });
+  const ledgerColour = ledgerFlagFromReward(flag.flagColor);
   return (
     <div className="rewards-editor-row">
-      <label className="field">
-        <span className="field-label">Name</span>
-        <input value={flag.name} onChange={(event) => patch({ name: event.target.value })} aria-label={`Flag ${index + 1} name`} />
-      </label>
       <div className="field">
         <span className="field-label" id={`flag-${index + 1}-colour-label`}>Flag colour</span>
         <span className="rewards-flag-colour-row">
           <FlagPicker
             labelledBy={`flag-${index + 1}-colour-label`}
-            value={ledgerFlagFromReward(flag.flagColor)}
-            onChange={(value) => patch({ flagColor: rewardFlagFromLedger(value) })}
+            value={ledgerColour}
+            onChange={(value) => patch({ flagColor: rewardFlagFromLedger(value), name: pickerNames[value] || flag.name })}
+            names={pickerNames}
           />
-          <FlagTag colour={ledgerFlagFromReward(flag.flagColor) || null} name={flag.name} />
+          <FlagTag colour={ledgerColour || null} name={namedFlagLabel({ [flag.flagColor]: colourName }, ledgerColour, colourName)} />
         </span>
       </div>
       <label className="field">
@@ -594,11 +650,13 @@ function FlagRow({
 function TierRow({
   tier,
   flags,
+  flagNames,
   onChange,
   onRemove,
 }: {
   tier: TierDraft;
   flags: FlagDraft[];
+  flagNames: Partial<Record<RewardFlagColour, string>>;
   onChange: (tier: TierDraft) => void;
   onRemove: () => void;
 }) {
@@ -629,7 +687,7 @@ function TierRow({
             >
               <option value="">Choose flag</option>
               {flags.map((flag) => (
-                <option key={flag.id} value={flag.id}>{flag.name || flag.flagColor}</option>
+                <option key={flag.id} value={flag.id}>{flagNames[flag.flagColor]?.trim() || flag.name || flag.flagColor}</option>
               ))}
             </select>
           </label>
@@ -678,8 +736,18 @@ function TierRow({
   );
 }
 
-function CardLedger({ planId, accountId }: { planId: string; accountId: string }) {
-  const [overrides, setOverrides] = useState<Record<string, string | null>>({});
+function CardLedger({
+  planId,
+  accountId,
+  flagNames,
+  pickerNames,
+}: {
+  planId: string;
+  accountId: string;
+  flagNames: Partial<Record<RewardFlagColour, string>>;
+  pickerNames: Record<string, string>;
+}) {
+  const [overrides, setOverrides] = useState<Record<string, { flag_color: string | null; flag_name: string | null }>>({});
   const [flagError, setFlagError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   useEffect(() => {
@@ -697,12 +765,32 @@ function CardLedger({ planId, accountId }: { planId: string; accountId: string }
 
   const setFlag = async (transaction: Transaction, value: string) => {
     const flagColor = value === "" ? null : value;
+    const previous = overrides[transaction.id];
     setPendingId(transaction.id);
     setFlagError(null);
+    setOverrides((current) => ({
+      ...current,
+      [transaction.id]: {
+        flag_color: flagColor,
+        flag_name: namedFlagLabel(flagNames, flagColor) ?? null,
+      },
+    }));
     try {
-      await api.updateTransaction(planId, transaction.id, { flag_color: flagColor });
-      setOverrides((current) => ({ ...current, [transaction.id]: flagColor }));
+      const updated = await api.updateTransaction(planId, transaction.id, { flag_color: flagColor });
+      setOverrides((current) => ({
+        ...current,
+        [transaction.id]: {
+          flag_color: updated.flag_color ?? null,
+          flag_name: updated.flag_name ?? null,
+        },
+      }));
     } catch (cause) {
+      setOverrides((current) => {
+        const next = { ...current };
+        if (previous) next[transaction.id] = previous;
+        else delete next[transaction.id];
+        return next;
+      });
       setFlagError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setPendingId(null);
@@ -743,13 +831,15 @@ function CardLedger({ planId, accountId }: { planId: string; accountId: string }
           </thead>
           <tbody>
             {ledger.data?.transactions.map((transaction) => {
-              const colour = transaction.id in overrides ? overrides[transaction.id] : transaction.flag_color;
+              const snapshot = overrides[transaction.id] ?? transaction;
+              const colour = snapshot.flag_color;
+              const flagName = snapshotFlagLabel(flagNames, colour, snapshot);
               return (
                 <tr key={transaction.id}>
                   <td>{formatDate(transaction.date)}</td>
                   <td>
                     <span className="rewards-group-label">
-                      <FlagTag colour={colour} />
+                      <FlagTag colour={colour} name={flagName} />
                       {transaction.payee_name ?? "No payee"}
                     </span>
                   </td>
@@ -759,6 +849,7 @@ function CardLedger({ planId, accountId }: { planId: string; accountId: string }
                       value={colour ?? ""}
                       onChange={(value) => void setFlag(transaction, value)}
                       disabled={pendingId === transaction.id}
+                      names={pickerNames}
                     />
                   </td>
                 </tr>
@@ -792,6 +883,7 @@ function emptyDraft(): CardDraft {
     minimumSpend: "",
     maximumSpend: "",
     flags: [],
+    flagNames: {},
     tiers: [],
   };
 }
@@ -833,6 +925,13 @@ function draftFromCard(card: CreditCard): CardDraft {
         updatedAt: flag.updatedAt || now,
       };
     }),
+    flagNames: {
+      ...namesFromSubcategories((card.subcategories ?? []).map((flag) => ({
+        flagColor: rewardFlagFromLedger(flag.flagColor),
+        name: flag.name,
+      }))),
+      ...parseRewardFlagNames(card.flagNames),
+    },
     tiers: (card.spendingTiers ?? []).map((tier) => ({
       id: tier.id,
       spendThreshold: numberText(tier.spendThreshold),
@@ -907,7 +1006,8 @@ function creditCardWrite(draft: CardDraft, options: { clearMissing?: boolean } =
 
   const flags: CardSubcategory[] = [];
   for (const [index, flag] of draft.flags.entries()) {
-    if (!flag.name.trim()) return { error: `Flag ${index + 1} needs a name.` };
+    const colourName = draft.flagNames[flag.flagColor]?.trim() || flag.name.trim();
+    if (!colourName) return { error: `Name the ${flag.flagColor === "unflagged" ? "None" : flag.flagColor} colour on this card.` };
     if (!isRewardFlagColour(flag.flagColor)) return { error: `Flag ${index + 1} needs a recognised colour.` };
     const rewardValue = requiredFinite(flag.rewardValue, `Flag ${index + 1} reward value`);
     if (!rewardValue.ok) return { error: rewardValue.error };
@@ -921,7 +1021,7 @@ function creditCardWrite(draft: CardDraft, options: { clearMissing?: boolean } =
     if (!flagMaximum.ok) return { error: flagMaximum.error };
     const written: CardSubcategory = {
       id: flag.id,
-      name: flag.name.trim(),
+      name: colourName,
       flagColor: flag.flagColor,
       rewardValue: rewardValue.value,
       priority: priority.value,
@@ -937,6 +1037,7 @@ function creditCardWrite(draft: CardDraft, options: { clearMissing?: boolean } =
   }
   card.subcategoriesEnabled = flags.length > 0;
   card.subcategories = flags;
+  card.flagNames = parseRewardFlagNames(draft.flagNames);
 
   const tiers: CardSpendingTier[] = [];
   for (const [index, tier] of draft.tiers.entries()) {

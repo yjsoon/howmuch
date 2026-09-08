@@ -336,6 +336,7 @@ export interface CreditCard {
   subcategoriesEnabled?: boolean;
   subcategories?: CardSubcategory[];
   spendingTiers?: CardSpendingTier[];
+  flagNames?: Record<string, string>;
 }
 
 export interface RewardsReport {

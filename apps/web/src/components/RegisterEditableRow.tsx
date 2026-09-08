@@ -41,8 +41,9 @@ export function RegisterEditableRow(props: {
   actions: ReactNode;
   status: ReactNode;
   payeeExtra?: ReactNode;
+  flagNames?: Record<string, string>;
 }): ReactElement | null {
-  const { row, surface, leading, account, actions, status, payeeExtra } = props;
+  const { row, surface, leading, account, actions, status, payeeExtra, flagNames } = props;
   const line = row.kind === "split-line"
     ? row.parent.subtransactions?.find((sub) => sub.id === row.lineId)
     : undefined;
@@ -292,6 +293,7 @@ export function RegisterEditableRow(props: {
                   value={draft.flagColor}
                   onChange={(flagColor) => surface.dispatch({ type: "patch", draft: { flagColor } })}
                   disabled={busy}
+                  names={flagNames}
                 />
               </>
             )}

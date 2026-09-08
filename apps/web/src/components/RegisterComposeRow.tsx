@@ -23,6 +23,7 @@ export function RegisterComposeRow({
   onChange,
   onCancel,
   onSave,
+  flagNames,
 }: {
   state: Extract<RegisterComposeState, { status: "open" }>;
   accounts: Account[];
@@ -34,6 +35,7 @@ export function RegisterComposeRow({
   onChange: (next: RegisterComposeState) => void;
   onCancel: () => void;
   onSave: (keepOpen: boolean) => void;
+  flagNames?: Record<string, string>;
 }) {
   const dateRef = useRef<HTMLInputElement>(null);
   const orderedGroups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
@@ -224,6 +226,7 @@ export function RegisterComposeRow({
               value={state.draft.flagColor}
               onChange={(flagColor) => patch({ flagColor })}
               disabled={busy}
+              names={flagNames}
             />
             <button type="button" className="register-compose-cancel" onClick={onCancel} disabled={busy}>
               Cancel
