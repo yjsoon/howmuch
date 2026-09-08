@@ -106,48 +106,9 @@ private struct RootView: View {
     @Bindable var chrome = chrome
     @Bindable var workspace = CaptureWorkspace.shared
 
-    TabView(selection: $chrome.tab) {
-      Tab(AppTab.accounts.title, systemImage: AppTab.accounts.systemImage, value: AppTab.accounts) {
-        RootTabHost(for: .accounts) {
-          AccountsView()
-        }
-      }
-
-      Tab(AppTab.rewards.title, systemImage: AppTab.rewards.systemImage, value: AppTab.rewards) {
-        RootTabHost(for: .rewards) {
-          NavigationStack {
-            RewardsView()
-          }
-        }
-      }
-
-      Tab(AppTab.reflect.title, systemImage: AppTab.reflect.systemImage, value: AppTab.reflect) {
-        RootTabHost(for: .reflect) {
-          NavigationStack {
-            ReflectView()
-          }
-        }
-      }
-
-      if usesSidebar {
-        Tab(AppTab.plan.title, systemImage: AppTab.plan.systemImage, value: AppTab.plan) {
-          NavigationStack {
-            CategoriesView()
-          }
-        }
-
-        Tab(AppTab.assistant.title, systemImage: AppTab.assistant.systemImage, value: AppTab.assistant) {
-          NavigationStack {
-            AssistantView(workspace: workspace)
-          }
-        }
-      }
-    }
-    .tabViewStyle(.sidebarAdaptable)
-    .defaultAdaptableTabBarPlacement(.sidebar)
-    .tabBarMinimizeBehavior(.onScrollDown)
-    .environment(chrome)
-    .onChange(of: usesSidebar, initial: true) { _, sidebar in
+    RootTabView(chrome: chrome, usesSidebar: usesSidebar, workspace: workspace)
+      .environment(chrome)
+      .onChange(of: usesSidebar, initial: true) { _, sidebar in
       if sidebar {
         chrome.adoptSidebarLayout()
       } else {

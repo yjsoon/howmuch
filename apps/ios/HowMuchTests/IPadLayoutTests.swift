@@ -336,6 +336,71 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertEqual(chrome.captureSurface, .assistant)
   }
 
+  func testCompactBarTabIgnoresOverflowSelection() {
+    let chrome = RootChromeState()
+    XCTAssertEqual(chrome.compactBarTab, .accounts)
+
+    chrome.tab = .rewards
+    XCTAssertEqual(chrome.compactBarTab, .rewards)
+
+    chrome.tab = .plan
+    XCTAssertEqual(chrome.tab, .plan)
+    XCTAssertEqual(chrome.compactBarTab, .rewards)
+
+    chrome.tab = .assistant
+    XCTAssertEqual(chrome.compactBarTab, .rewards)
+  }
+
+  func testCompactRootTabViewRendersThreeTabs() async {
+    let harness = SnapshotHarness.make()
+    let chrome = RootChromeState()
+    guard let surface = SnapshotSurface(
+      root: RootTabView(chrome: chrome, usesSidebar: false)
+        .environment(harness.model)
+        .environment(chrome)
+        .environment(\.horizontalSizeClass, .compact),
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("compact root tabs need a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    let appeared = await surface.waitUntil {
+      surface.firstControl(label: "Accounts") != nil
+        && surface.firstControl(label: "Rewards") != nil
+        && surface.firstControl(label: "Reflect") != nil
+    }
+    XCTAssertTrue(appeared, "compact root must show three tabs: \(surface.accessibilityLabels())")
+    XCTAssertNotNil(surface.firstControl(label: "More"), "Accounts must still host DestinationsMenu")
+  }
+
+  func testCompactRootTabViewAcceptsOverflowSelectionWithoutCrashing() async {
+    let harness = SnapshotHarness.make()
+    let chrome = RootChromeState()
+    chrome.tab = .plan
+    guard let surface = SnapshotSurface(
+      root: RootTabView(chrome: chrome, usesSidebar: false)
+        .environment(harness.model)
+        .environment(chrome)
+        .environment(\.horizontalSizeClass, .compact),
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("compact root tabs need a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    let appeared = await surface.waitUntil {
+      surface.firstControl(label: "Accounts") != nil
+    }
+    XCTAssertTrue(
+      appeared,
+      "overflow selection must still render compact tabs: \(surface.accessibilityLabels())"
+    )
+    XCTAssertEqual(chrome.compactBarTab, .accounts)
+  }
+
   private func attachImage(_ image: UIImage, name: String) {
     let attachment = XCTAttachment(image: image)
     attachment.name = name
