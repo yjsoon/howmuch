@@ -13,4 +13,10 @@
 4. Save card. Board Cashback tile is Travel Card / UOB · Travel Card. Qualifying spend `$830.80` / `$8.31`. No invented Verify cashback name. `created.png`.
 5. HTTP `GET /api/import/rewards-tracker?plan_id=local-plan`: one card named `Travel Card`, `ynabAccountId` `acct-credit`. Card was not POSTed from `control-howmuch http`.
 
-Linux cannot run `scripts/ios-xcodebuild.sh`. iOS picker uses the same unused credit-card filter.
+## Flag colour tags
+
+Editor FlagPicker is the ledger control: None, Red, Orange, Yellow, Green, Blue, Purple. Same swatches on the account ledger. Dining Out + Red stores `flagColor: "red"`. None stores `unflagged`.
+
+After save, the Travel Card tile uses `flag-tag flag-tag-red` for Dining Out at 4×. Qualifying spend is `$601.90` (the three red Travel Card rows) and value `$24.08`. By flag uses the same red Dining and blue Online tags as the register. `flags.png` / `flagged-board.png` / `flag-tag.json`.
+
+Linux cannot run `scripts/ios-xcodebuild.sh`. iOS picker uses the same unused credit-card filter and the same ledger FlagColour tags (None plus the six colours).
