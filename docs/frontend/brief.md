@@ -58,7 +58,7 @@ The aesthetic is a broadsheet ledger: ink on paper, hairline rules, controlled d
 | `/net-worth` | Net Worth: stepped area chart, per-account balance table per period, account filter |
 | `/age-of-money` | Age of Money: line of weighted age in days per period, unmatched-spending diagnostics |
 | `/rewards` | Rewards board: per-card tiles, ledger spend, flags, grouping, miles valuation, and **Add card**. Tiles whose calculation reports `maximum_spend_exceeded` stay off the board. |
-| `/rewards/new` | Add a native reward card and POST it to `/api/rewards/cards` |
+| `/rewards/new` | Add rewards rules for an existing HowMuch credit card and POST them to `/api/rewards/cards` |
 | `/rewards/:cardId` | Edit a stored card from the rewards snapshot. The capped-card URL still opens. |
 | `/transactions` | Dense register with the same filter rail, payee/memo search, drill-down target for every report |
 | `/add` | Mobile quick entry: thumb-reach form (amount keypad-first, account, payee, optional category/memo), posts to `/api/mobile/quick-entry` with a client-generated `client_id` for idempotency |

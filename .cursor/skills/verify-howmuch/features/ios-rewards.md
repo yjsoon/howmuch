@@ -25,7 +25,7 @@ Preconditions:
 - Demo ledger still contains Travel Card spends (Grab, Scoot, MUJI, Candlenut).
 - Xcode Simulator is running HowMuch (`sg.soon.howmuch`). If Simulator is missing, skip this whole file.
 
-- **Open empty.** Choose tab `Rewards`. Navigation title `Rewards`. Date range chip is `All Time`. Status is `No reward cards in this range.` Detail mentions Rewards import and **Add card**. Buttons `Add card` and `Rewards import` are present. Trailing ellipsis is `More`.
+- **Open empty.** Choose tab `Rewards`. Navigation title `Rewards`. Date range chip is `All Time`. Status is `No reward cards in this range.` Detail mentions Rewards import and **Add card** to score one of your HowMuch cards. Buttons `Add card` and `Rewards import` are present. Trailing ellipsis is `More`.
 - **Import.** Choose `Rewards import`, or Connection settings → `Rewards import`. Choose `fixtures/rewards-tracker-export.json`. Choose `Import export`. Stored cards lists `Travel Card`.
 - **Open filled.** Return to `Rewards` if needed. Pull to refresh. A Miles tile named `Travel Card` is visible. Qualifying spend is greater than `$0.00`. Group chip includes `Flag`, `Payee`, `Category`, `Memo`.
 - **Group by payee.** Choose `Payee`. The groups table heading is `By Payee` and includes `Candlenut`.

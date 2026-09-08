@@ -6,7 +6,7 @@ Rewards shows stored reward cards against the HowMuch ledger. It is a Reflect re
 
 - `rewards-nav` opens the report from Primary navigation and from `/rewards`.
 - `rewards-add-card` shows **Add card** on the empty board and opens `/rewards/new`.
-- `rewards-empty-import` on a fresh verify instance, with no export imported, points at Rewards import and **Add card**.
+- `rewards-empty-import` on a fresh verify instance, with no export imported, points at Rewards import and **Add card** for an existing HowMuch card.
 - `rewards-import-then-view` after importing `fixtures/rewards-tracker-export.json` shows Travel Card on the All range.
 - `rewards-flags` lists Dining and Online flag rows on Travel Card.
 - `rewards-group` switches Group to Payee and lists Candlenut.
@@ -26,7 +26,7 @@ Preconditions:
 - Owner `verifier` is signed in.
 - Demo ledger still contains Travel Card spends (Grab, Scoot, MUJI, Candlenut).
 
-- **Open empty.** Open `{web_url}/rewards`. Title is `Rewards · HowMuch`. Heading is `Rewards`. Active preset is `All`. **Add card** is present. Status is `No reward cards in this range.` with links to `Settings → Rewards import` and **Add card**.
+- **Open empty.** Open `{web_url}/rewards`. Title is `Rewards · HowMuch`. Heading is `Rewards`. Active preset is `All`. **Add card** is present. Status is `No reward cards in this range.` with links to `Settings → Rewards import` and **Add card** to score one of your HowMuch cards.
 - **Import.** Choose `Settings`, then `Rewards import`. Choose `fixtures/rewards-tracker-export.json`. Choose `Import export`. Stored cards lists `Travel Card`.
 - **Open filled.** Choose `Rewards`. Title is `Rewards · HowMuch`. A Miles tile named `Travel Card` is visible. Qualifying spend is greater than `$0.00`. Group rail includes `Flag`, `Payee`, `Category`, `Memo`.
 - **Group by payee.** Choose `Payee`. The groups table includes `Candlenut`.

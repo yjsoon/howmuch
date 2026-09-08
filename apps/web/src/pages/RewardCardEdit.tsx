@@ -15,6 +15,7 @@ import { FlagPicker, FlagTag } from "../components/FlagTag";
 import { splitCategoryGroups } from "../lib/categories";
 import { formatDate } from "../lib/dates";
 import { formatMoney } from "../lib/money";
+import { rewardCardAccountChoices, syncedRewardCardName } from "../lib/reward-card-accounts";
 import { usePlan } from "../state/plan";
 
 const FLAG_COLOURS: RewardFlagColour[] = ["red", "orange", "yellow", "green", "blue", "purple", "unflagged"];
@@ -77,30 +78,27 @@ export function RewardCardEditPage() {
   const { planId } = usePlan();
   const isNew = !cardId;
   const snapshot = useApi(
-    isNew ? `rewards-card-edit:${planId}:new` : `rewards-card-edit:${planId}:${cardId}`,
-    () => (isNew ? Promise.resolve(null) : api.rewardsTrackerSnapshot(planId)),
+    `rewards-card-edit:${planId}:${cardId ?? "new"}`,
+    () => api.rewardsTrackerSnapshot(planId),
   );
 
-  if (isNew) {
-    return <CardEditor card={null} />;
-  }
   if (snapshot.loading && !snapshot.data) {
     return (
       <div className="status-panel">
-        <p className="status-title">Loading card…</p>
+        <p className="status-title">{isNew ? "Loading accounts…" : "Loading card…"}</p>
       </div>
     );
   }
   if (snapshot.error) {
     return (
       <div className="status-panel status-panel-error" role="alert">
-        <p className="status-title">Could not load this card.</p>
+        <p className="status-title">{isNew ? "Could not load accounts." : "Could not load this card."}</p>
         <p className="status-detail">{snapshot.error}</p>
       </div>
     );
   }
-  const card = snapshot.data?.cards.find((entry) => entry.id === cardId);
-  if (!card) {
+  const card = isNew ? null : snapshot.data?.cards.find((entry) => entry.id === cardId) ?? null;
+  if (!isNew && !card) {
     return (
       <div className="status-panel">
         <p className="status-title">Card not found.</p>
@@ -110,10 +108,14 @@ export function RewardCardEditPage() {
       </div>
     );
   }
-  return <CardEditor card={card} />;
+  const takenAccountIds = (snapshot.data?.cards ?? [])
+    .filter((entry) => entry.id !== card?.id)
+    .map((entry) => entry.ynabAccountId)
+    .filter(Boolean);
+  return <CardEditor card={card} takenAccountIds={takenAccountIds} />;
 }
 
-function CardEditor({ card }: { card: CreditCard | null }) {
+function CardEditor({ card, takenAccountIds }: { card: CreditCard | null; takenAccountIds: string[] }) {
   const { planId, accounts, categoryGroups } = usePlan();
   const location = useLocation();
   const navigate = useNavigate();
@@ -126,6 +128,11 @@ function CardEditor({ card }: { card: CreditCard | null }) {
   const [importFlagColor, setImportFlagColor] = useState<RewardFlagColour>("red");
   const [importRate, setImportRate] = useState("");
   const groups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
+  const accountChoices = useMemo(
+    () => rewardCardAccountChoices(accounts, takenAccountIds, card?.ynabAccountId),
+    [accounts, takenAccountIds, card?.ynabAccountId],
+  );
+  const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const categoryName = useMemo(() => {
     for (const group of [...groups.primary, ...groups.quiet]) {
       for (const category of group.categories) {
@@ -232,8 +239,8 @@ function CardEditor({ card }: { card: CreditCard | null }) {
       <section className="transaction-editor" aria-labelledby="card-editor-heading">
         <div className="section-heading">
           <div>
-            <span className="section-title" id="card-editor-heading">{card ? "Card details" : "New card"}</span>
-            <span className="section-meta">Rules apply to the mapped HowMuch account.</span>
+            <span className="section-title" id="card-editor-heading">{card ? "Card details" : "Existing HowMuch card"}</span>
+            <span className="section-meta">Pick a credit card account you already have. This does not create a new ledger account.</span>
           </div>
         </div>
         <form
@@ -243,17 +250,46 @@ function CardEditor({ card }: { card: CreditCard | null }) {
             void save();
           }}
         >
+          {accountChoices.length === 0 && !card && (
+            <p className="field-note">No HowMuch credit cards left to add. Every credit card account already has rewards rules, or add a credit card account first.</p>
+          )}
           <div className="field-row">
+            <label className="field">
+              <span className="field-label">HowMuch card</span>
+              <select
+                value={draft.ynabAccountId}
+                onChange={(event) => {
+                  const nextId = event.target.value;
+                  setDraft((current) => ({
+                    ...current,
+                    ynabAccountId: nextId,
+                    name: syncedRewardCardName({
+                      name: current.name,
+                      previousAccountName: accountById.get(current.ynabAccountId)?.name,
+                      nextAccountName: accountById.get(nextId)?.name,
+                    }),
+                  }));
+                }}
+                required
+              >
+                <option value="">Choose a HowMuch card</option>
+                {accountChoices.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}{account.closed ? " (closed)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="field">
               <span className="field-label">Name</span>
               <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} required />
             </label>
+          </div>
+          <div className="field-row">
             <label className="field">
               <span className="field-label">Issuer</span>
               <input value={draft.issuer} onChange={(event) => setDraft((current) => ({ ...current, issuer: event.target.value }))} />
             </label>
-          </div>
-          <div className="field-row">
             <label className="field">
               <span className="field-label">Type</span>
               <select
@@ -262,21 +298,6 @@ function CardEditor({ card }: { card: CreditCard | null }) {
               >
                 <option value="cashback">Cashback</option>
                 <option value="miles">Miles</option>
-              </select>
-            </label>
-            <label className="field">
-              <span className="field-label">HowMuch account</span>
-              <select
-                value={draft.ynabAccountId}
-                onChange={(event) => setDraft((current) => ({ ...current, ynabAccountId: event.target.value }))}
-                required
-              >
-                <option value="">Choose account</option>
-                {accounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.name}{account.closed ? " (closed)" : ""}
-                  </option>
-                ))}
               </select>
             </label>
           </div>
@@ -830,8 +851,8 @@ function draftFromCard(card: CreditCard): CardDraft {
 }
 
 function creditCardWrite(draft: CardDraft, options: { clearMissing?: boolean } = {}): { card: CreditCard } | { error: string } {
+  if (!draft.ynabAccountId) return { error: "Choose a HowMuch card." };
   if (!draft.name.trim()) return { error: "Enter a card name." };
-  if (!draft.ynabAccountId) return { error: "Choose a HowMuch account." };
 
   const card: CreditCard = {
     id: draft.id,
