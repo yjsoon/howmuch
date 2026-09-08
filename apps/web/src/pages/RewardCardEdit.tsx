@@ -17,8 +17,6 @@ import { formatDate } from "../lib/dates";
 import { formatMoney } from "../lib/money";
 import { usePlan } from "../state/plan";
 
-const LEDGER_SINCE = "2026-03-01";
-const LEDGER_UNTIL = "2026-05-24";
 const FLAG_COLOURS: RewardFlagColour[] = ["red", "orange", "yellow", "green", "blue", "purple", "unflagged"];
 
 type FlagDraft = {
@@ -672,7 +670,7 @@ function CardLedger({ planId, accountId }: { planId: string; accountId: string }
   const ledger = useApi(
     accountId ? `${planId}:card-ledger:${accountId}` : "card-ledger:none",
     () => (accountId
-      ? api.accountTransactions(planId, accountId, { since_date: LEDGER_SINCE, until_date: LEDGER_UNTIL, limit: 250 })
+      ? api.accountTransactions(planId, accountId, { limit: 250 })
       : Promise.resolve({ transactions: [] as Transaction[], has_more: false, next_offset: null, server_knowledge: 0 })),
   );
 
@@ -696,7 +694,7 @@ function CardLedger({ planId, accountId }: { planId: string; accountId: string }
     <section className="report-section" aria-labelledby="card-ledger-heading">
       <div className="section-heading">
         <span className="section-title" id="card-ledger-heading">Account ledger</span>
-        <span className="section-meta">{LEDGER_SINCE} to {LEDGER_UNTIL}</span>
+        <span className="section-meta">Newest first</span>
       </div>
       {flagError && (
         <div className="status-panel status-panel-error" role="alert">
@@ -712,7 +710,7 @@ function CardLedger({ planId, accountId }: { planId: string; accountId: string }
         </div>
       )}
       {!ledger.loading && (ledger.data?.transactions.length ?? 0) === 0 && (
-        <p className="field-note">No transactions on this account in the demo window.</p>
+        <p className="field-note">No transactions on this account.</p>
       )}
       {(ledger.data?.transactions.length ?? 0) > 0 && (
         <table className="report-table">
