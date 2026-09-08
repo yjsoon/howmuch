@@ -84,13 +84,15 @@ export class D1TransactionRepository {
       if (target.plan_id !== planId) throw new Error("Transaction belongs to another plan");
       const parentId = snapshot.linkedSub?.transaction_id ?? transactionId;
       const rows = await this.db.all<Record<string, any>>(
-        `SELECT * FROM transactions WHERE plan_id = ? AND deleted = 0 AND (
-           id = ? OR transfer_transaction_id = ? OR id IN (
-             SELECT transfer_transaction_id FROM subtransactions
-             WHERE transaction_id = ? AND deleted = 0 AND transfer_transaction_id IS NOT NULL
-           )
-         ) ORDER BY id`,
-        [planId, parentId, parentId, parentId],
+        `SELECT * FROM transactions WHERE plan_id = ? AND deleted = 0 AND id = ?
+         UNION
+         SELECT * FROM transactions WHERE plan_id = ? AND deleted = 0 AND transfer_transaction_id = ?
+         UNION
+         SELECT t.* FROM transactions t
+         INNER JOIN subtransactions s ON s.transfer_transaction_id = t.id AND s.deleted = 0
+         WHERE t.plan_id = ? AND t.deleted = 0 AND s.transaction_id = ?
+         ORDER BY id`,
+        [planId, parentId, planId, parentId, planId, parentId],
       );
       const body: PlannedStatement[] = rows.map((row) => assertion(stable.commandId, "graph_transaction", row.id, planId));
       body.push(statement(
@@ -193,11 +195,16 @@ export class D1TransactionRepository {
       { sql: "SELECT write_version FROM write_state WHERE singleton = 1" },
       { sql: "SELECT * FROM transactions WHERE id = $1", values: [transactionId] },
       { sql: "SELECT * FROM subtransactions WHERE transaction_id = $1 AND deleted = 0 ORDER BY id", values: [transactionId] },
-      { sql: `SELECT * FROM transactions WHERE id IN (
-          SELECT transfer_transaction_id FROM transactions WHERE id=$1 AND transfer_transaction_id IS NOT NULL
-          UNION SELECT transfer_transaction_id FROM subtransactions WHERE transaction_id=$1 AND deleted=0 AND transfer_transaction_id IS NOT NULL
-          UNION SELECT id FROM transactions WHERE transfer_transaction_id=$1 AND deleted=0
-        ) ORDER BY id`, values: [transactionId] },
+      { sql: `SELECT * FROM transactions WHERE id = (
+            SELECT transfer_transaction_id FROM transactions WHERE id=$1 AND transfer_transaction_id IS NOT NULL
+          )
+          UNION
+          SELECT t.* FROM transactions t
+          INNER JOIN subtransactions s ON s.transfer_transaction_id = t.id
+          WHERE s.transaction_id=$1 AND s.deleted=0 AND s.transfer_transaction_id IS NOT NULL
+          UNION
+          SELECT * FROM transactions WHERE transfer_transaction_id=$1 AND deleted=0
+          ORDER BY id`, values: [transactionId] },
       { sql: `SELECT s.*,t.plan_id parent_plan_id FROM subtransactions s JOIN transactions t ON t.id=s.transaction_id
               WHERE s.id=(SELECT transfer_transaction_id FROM transactions WHERE id=$1) AND s.deleted=0`, values: [transactionId] },
     ]);

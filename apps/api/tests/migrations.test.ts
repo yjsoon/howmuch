@@ -57,7 +57,8 @@ describe("local schema migrations", () => {
         INSERT INTO payees(id,plan_id,name,external_ynab_id) VALUES ('legacy-payee','p','Same merchant','legacy-payee');
         INSERT INTO transactions(id,payee_id) VALUES ('legacy-transaction','legacy-payee');
         INSERT INTO schema_migrations(version) VALUES
-          ('001_initial'),('002_transaction_server_knowledge'),('003_transfer_payees'),('004_auth_foundation'),('005_password_auth');
+          ('001_initial'),('002_transaction_server_knowledge'),('003_transfer_payees'),('004_auth_foundation'),('005_password_auth'),
+          ('019_query_covering_indexes');
       `);
 
       applyMigrations(db);
@@ -126,7 +127,8 @@ describe("local schema migrations", () => {
         INSERT INTO schema_migrations(version) VALUES
           ('001_initial'),('002_transaction_server_knowledge'),('003_transfer_payees'),('004_auth_foundation'),('005_password_auth'),
           ('006_allow_duplicate_payee_names'),('007_ynab_raw_objects'),('008_plan_month_assignments'),('009_plan_month_category_targets'),
-          ('010_scheduled_transaction_edits'),('011_scheduled_transaction_snapshot_assertions'),('012_account_reconciliation_assertions');
+          ('010_scheduled_transaction_edits'),('011_scheduled_transaction_snapshot_assertions'),('012_account_reconciliation_assertions'),
+          ('019_query_covering_indexes');
       `);
 
       applyMigrations(db);
@@ -189,7 +191,8 @@ describe("local schema migrations", () => {
           ('001_initial'),('002_transaction_server_knowledge'),('003_transfer_payees'),('004_auth_foundation'),('005_password_auth'),
           ('006_allow_duplicate_payee_names'),('007_ynab_raw_objects'),('008_plan_month_assignments'),('009_plan_month_category_targets'),
           ('010_scheduled_transaction_edits'),('011_scheduled_transaction_snapshot_assertions'),('012_account_reconciliation_assertions'),
-          ('013_unique_live_import_id'),('014_personal_api_tokens'),('015_account_preferences');
+          ('013_unique_live_import_id'),('014_personal_api_tokens'),('015_account_preferences'),
+          ('019_query_covering_indexes');
       `);
 
       applyMigrations(db);
@@ -233,6 +236,26 @@ describe("local schema migrations", () => {
       db.run("DELETE FROM users WHERE id='owner'");
       expect(db.query("SELECT id FROM personal_api_tokens").get()).toBeNull();
       expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("query indexes serve transfer-graph and live register lookups", () => {
+    const db = new Database(":memory:");
+    try {
+      applyMigrations(db);
+      db.run("INSERT INTO plans(id,name) VALUES ('p','Plan')");
+      db.run("INSERT INTO accounts(id,plan_id,name) VALUES ('a','p','Cash')");
+      const detail = (sql: string) => JSON.stringify(db.query(`EXPLAIN QUERY PLAN ${sql}`).all());
+      expect(detail("SELECT * FROM transactions WHERE transfer_transaction_id = 'x' AND deleted = 0")).toContain("idx_transactions_transfer_transaction_id");
+      expect(detail("SELECT t.id FROM transactions t WHERE t.plan_id = 'p' AND t.deleted = 0 ORDER BY t.date DESC, t.created_at DESC, t.id DESC LIMIT 51")).toContain("idx_transactions_plan_live_register");
+      expect(detail("SELECT t.id FROM transactions t WHERE t.account_id = 'a' AND t.deleted = 0 ORDER BY t.date DESC, t.created_at DESC, t.id DESC LIMIT 51")).toContain("idx_transactions_account_live_register");
+      expect(detail("SELECT MAX(date) FROM transactions WHERE account_id = 'a' AND deleted = 0 AND cleared = 'reconciled'")).toContain("idx_transactions_account_reconciled_date");
+      expect(detail("SELECT id, name, transfer_account_id, deleted FROM payees WHERE plan_id = 'p' AND deleted = 0 ORDER BY name")).toContain("idx_payees_plan_live_name");
+      expect(db.query("SELECT version FROM schema_migrations WHERE version='019_query_covering_indexes'").get()).toEqual({
+        version: "019_query_covering_indexes",
+      });
     } finally {
       db.close();
     }

@@ -25,7 +25,11 @@ export function applyMigrations(db: Database): void {
     "CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
   );
 
-  const migrations: Array<{ version: string; path: string; rebuildsForeignKeyTarget?: boolean }> = [
+  const migrations: Array<{
+    version: string;
+    path: string;
+    rebuildsForeignKeyTarget?: boolean;
+  }> = [
     {
       version: "001_initial",
       path: join(migrationsDir, "001_initial.sql"),
@@ -98,6 +102,10 @@ export function applyMigrations(db: Database): void {
     {
       version: "018_rewards_tracker",
       path: join(migrationsDir, "018_rewards_tracker.sql"),
+    },
+    {
+      version: "019_query_covering_indexes",
+      path: join(migrationsDir, "019_query_covering_indexes.sql"),
     },
   ];
 

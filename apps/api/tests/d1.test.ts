@@ -50,10 +50,10 @@ describe("D1 foundation", () => {
 
   test("canonical schema applies cleanly with auth constraints and cascades", async () => {
     const db = sqlite();
-    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql", "../d1-migrations/0011_personal_api_tokens.sql", "../d1-migrations/0012_account_preferences.sql", "../d1-migrations/0013_account_icons.sql", "../d1-migrations/0014_account_icon_emoji_backfill.sql", "../d1-migrations/0015_rewards_tracker.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
+    for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql", "../d1-migrations/0011_personal_api_tokens.sql", "../d1-migrations/0012_account_preferences.sql", "../d1-migrations/0013_account_icons.sql", "../d1-migrations/0014_account_icon_emoji_backfill.sql", "../d1-migrations/0015_rewards_tracker.sql", "../d1-migrations/0016_query_covering_indexes.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
     const objects = db.query("SELECT name,type FROM sqlite_master WHERE type IN ('table','index','trigger')").all() as Array<{name:string;type:string}>;
     const names = new Set(objects.map((row) => row.name));
-    for (const name of ["plans","import_sessions","import_rows","ynab_raw_objects","plan_month_assignments","plan_month_category_targets","scheduled_transaction_edits","scheduled_subtransaction_edits","scheduled_transaction_snapshot_assertions","account_reconciliation_assertions","users","auth_identities","sessions","personal_api_tokens","account_preferences","plan_memberships","password_credentials","auth_setup","login_rate_limits","sync_runs","sync_attempts","sync_transition_receipts","audit_events","write_state","write_commands","write_assertions","rewards_tracker_snapshots","rewards_tracker_cards","idx_sessions_user","idx_sessions_expiry","idx_personal_api_tokens_user","idx_plan_memberships_user_plan","transactions_assign_ledger_sequence","accounts_transfer_payee_plan_guard"]) expect(names.has(name)).toBeTrue();
+    for (const name of ["plans","import_sessions","import_rows","ynab_raw_objects","plan_month_assignments","plan_month_category_targets","scheduled_transaction_edits","scheduled_subtransaction_edits","scheduled_transaction_snapshot_assertions","account_reconciliation_assertions","users","auth_identities","sessions","personal_api_tokens","account_preferences","plan_memberships","password_credentials","auth_setup","login_rate_limits","sync_runs","sync_attempts","sync_transition_receipts","audit_events","write_state","write_commands","write_assertions","rewards_tracker_snapshots","rewards_tracker_cards","idx_sessions_user","idx_sessions_expiry","idx_personal_api_tokens_user","idx_plan_memberships_user_plan","idx_transactions_transfer_transaction_id","idx_subtransactions_transfer_transaction_id","idx_transactions_plan_live_register","idx_transactions_account_live_register","idx_transactions_account_reconciled_date","idx_payees_plan_live_name","idx_account_reconciliation_assertions_account_date","transactions_assign_ledger_sequence","accounts_transfer_payee_plan_guard"]) expect(names.has(name)).toBeTrue();
     expect(db.query("SELECT name FROM pragma_table_info('accounts') WHERE name='icon'").get()).toEqual({ name: "icon" });
     expect(names.has("schema_migrations")).toBeFalse();
     expect(names.has("migration_runs")).toBeFalse();
@@ -425,7 +425,8 @@ describe("D1 foundation", () => {
     const updated = await repo.updateScheduledTransaction("p", source.id, { date_next: "2026-10-01", memo: "edited" }, { operationId: "schedule-update-once" });
     const replayedUpdate = await repo.updateScheduledTransaction("p", source.id, { date_next: "2026-10-01", memo: "edited" }, { operationId: "schedule-update-once" });
     expect(replayedUpdate).toEqual(updated);
-    expect(updated).toMatchObject({ id: source.id, date_next: "2026-10-01", memo: "edited", source_marker: "immutable" });
+    expect(updated).toMatchObject({ id: source.id, date_next: "2026-10-01", memo: "edited", source_marker: "immutable", deleted: false });
+    expect(Object.hasOwn(updated, "deleted")).toBe(true);
     expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='scheduled_transaction' AND object_id=?").get(source.id)).toEqual(rawBefore);
     expect(db.query("SELECT origin FROM scheduled_transaction_edits WHERE id=?").get(source.id)).toEqual({ origin: "ynab-overlay" });
     expect(db.query("SELECT write_version FROM write_state").get()).toEqual({ write_version: versionBefore + 1 });
@@ -440,7 +441,12 @@ describe("D1 foundation", () => {
     const created = await repo.createScheduledTransaction("p", splitInput, { operationId: "schedule-create-once" });
     const replayedCreate = await repo.createScheduledTransaction("p", splitInput, { operationId: "schedule-create-once" });
     expect(replayedCreate).toEqual(created);
-    expect(created).toMatchObject({ account_id: "a", date_next: "2026-08-15", amount: -3000 });
+    expect(created).toMatchObject({ account_id: "a", date_next: "2026-08-15", amount: -3000, deleted: false });
+    expect(Object.hasOwn(created, "deleted")).toBe(true);
+    const patched = await repo.updateScheduledTransaction("p", created.id, { memo: "after create" }, { operationId: "schedule-patch-created" });
+    expect(Object.hasOwn(patched, "deleted")).toBe(true);
+    expect(patched.deleted).toBe(false);
+    expect(patched.memo).toBe("after create");
     expect(created.subtransactions).toEqual(expect.arrayContaining([
       expect.objectContaining({ amount: -1000, category_id: "food" }),
       expect.objectContaining({ amount: -2000, payee_id: transferPayee.id, transfer_account_id: "b" }),
@@ -1604,7 +1610,7 @@ describe("D1 foundation", () => {
 
 async function ledgerSqlite(): Promise<Database> {
   const db = sqlite();
-  for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql", "../d1-migrations/0011_personal_api_tokens.sql", "../d1-migrations/0012_account_preferences.sql", "../d1-migrations/0013_account_icons.sql", "../d1-migrations/0014_account_icon_emoji_backfill.sql", "../d1-migrations/0015_rewards_tracker.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
+  for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql", "../d1-migrations/0011_personal_api_tokens.sql", "../d1-migrations/0012_account_preferences.sql", "../d1-migrations/0013_account_icons.sql", "../d1-migrations/0014_account_icon_emoji_backfill.sql", "../d1-migrations/0015_rewards_tracker.sql", "../d1-migrations/0016_query_covering_indexes.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
   db.run("INSERT INTO plans (id, name) VALUES ('p', 'Plan')");
   db.run("INSERT INTO accounts (id, plan_id, name) VALUES ('a', 'p', 'Cash')");
   return db;
