@@ -148,6 +148,40 @@ final class CaptureAITests: XCTestCase {
     }
   }
 
+  func testMalformedRemoteAmountsAreRejected() throws {
+    for amount in ["1 2", "1 .25", "1\t2", "1\n2", "12\n", " 12", "12 ", "1.-2",
+      "--1", "-+1", "1,234", "$12", "12 dollars", "1e3", "1.2345", "+", "-", ".",
+      "9223372036854776"] {
+      var payload = Self.payload
+      payload.spends[0].amount = amount
+      XCTAssertThrowsError(try CaptureTurnPayload.decodeRemote(JSONEncoder().encode(payload)),
+        "Malformed amount \(amount.debugDescription) must not become a saveable draft")
+    }
+    var partial = Self.payload
+    partial.spends[0].amount = ""
+    XCTAssertEqual(try CaptureTurnPayload.decodeRemote(JSONEncoder().encode(partial)), partial)
+  }
+
+  func testRemoteDecimalAmountsPreserveMagnitudeThroughMapping() async throws {
+    let cases: [(String, Int)] = [
+      ("0", 0), ("12", 12_000), ("12.34", 12_340), ("12.345", 12_345),
+      ("+12.345", 12_345), ("-12.345", 12_345), (".125", 125), ("-.125", 125),
+      ("0012.300", 12_300), ("9007199254740.991", 9_007_199_254_740_991),
+    ]
+    for (amount, expected) in cases {
+      var payload = Self.payload
+      payload.spends[0].amount = amount
+      let text = String(decoding: try JSONEncoder().encode(payload), as: UTF8.self)
+      let event = Self.json(["type": "response.completed", "response": Self.responseObject(text)])
+      CaptureAIStub.configure(body: "data: \(event)\r\n\r\n")
+      let result = await CaptureInterpreter(backend: .remote(Self.configuration(.responses)), remoteClient: Self.client()).interpret(
+        context: Self.context, accounts: [], categoryGroups: [], payees: [])
+      let value = try result.get()
+      XCTAssertEqual(value.1.count, 1)
+      XCTAssertEqual(value.1.first?.mapped.draft.amountMagnitudeMilli, expected, amount)
+    }
+  }
+
   func testStreamRequiresSuccessfulTerminalAndRejectsTruncationRefusalOrToolCalls() throws {
     let text = String(decoding: try JSONEncoder().encode(Self.payload), as: UTF8.self)
     var parser = CaptureAIStream(api: .chatCompletions)

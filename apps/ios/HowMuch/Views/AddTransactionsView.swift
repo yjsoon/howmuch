@@ -817,6 +817,7 @@ struct AddTransactionsView: View {
     )
     if let owner = session.pendingQueryReplyID {
       session.frozenTurn = session.messages.first { $0.id == owner }?.frozenTurn
+      session.finishReply(text: "", state: .generating, replyID: owner)
     }
     session.pendingQuery = nil
     session.pendingQueryReplyID = nil

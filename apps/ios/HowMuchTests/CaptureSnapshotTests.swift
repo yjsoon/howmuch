@@ -1365,59 +1365,72 @@ final class CaptureSnapshotTests: XCTestCase {
   }
 
   func testStopCancelsPendingQueryTransportWithoutLateCard() async {
-    SnapshotQueryDelayProtocol.reset()
     XCTAssertTrue(
       URLProtocol.registerClass(SnapshotQueryDelayProtocol.self),
       "query delay stub must register on URLSession.shared"
     )
     defer { URLProtocol.unregisterClass(SnapshotQueryDelayProtocol.self) }
-    let harness = SnapshotHarness.make(baseURLString: SnapshotQueryDelayProtocol.fixtureBaseURL)
-    let session = harness.admitPendingQueryClarification(includeCategory: false)
-    XCTAssertTrue(session.queryCards.isEmpty)
-    XCTAssertTrue(session.pendingQuery?.unresolvedCategory.isEmpty == true)
-    guard let surface = SnapshotSurface(
-      root: AddTransactionsView(session: session, workspace: harness.workspace)
-        .environment(harness.model),
-      size: CGSize(width: 390, height: 844)
-    ) else {
-      XCTFail("pending query cancel needs a connected UIWindowScene")
-      return
+    for size in [DynamicTypeSize.large, .accessibility3] {
+      SnapshotQueryDelayProtocol.reset()
+      let harness = SnapshotHarness.make(baseURLString: SnapshotQueryDelayProtocol.fixtureBaseURL)
+      let session = harness.admitPendingQueryClarification(includeCategory: false)
+      XCTAssertTrue(session.queryCards.isEmpty)
+      XCTAssertTrue(session.pendingQuery?.unresolvedCategory.isEmpty == true)
+      let owner = session.pendingQueryReplyID
+      let messageCount = session.messages.count
+      guard let surface = SnapshotSurface(
+        root: AddTransactionsView(session: session, workspace: harness.workspace)
+          .environment(harness.model)
+          .environment(\.dynamicTypeSize, size),
+        size: CGSize(width: 390, height: 844)
+      ) else {
+        XCTFail("pending query cancel needs a connected UIWindowScene")
+        return
+      }
+      defer { surface.detach() }
+      _ = await surface.captureUntilOCR(contains: ["Which account"])
+      attachImage(surface.captureVisible(), name: "capture-pending-query-choices-\(size)")
+      guard let candidate = await revealControl(on: surface, label: "Everyday") else {
+        XCTFail("query account candidate missing in \(surface.accessibilityLabels())")
+        return
+      }
+      XCTAssertTrue(surface.activate(candidate), "tapping Everyday must start the pending query")
+      let beganTurn = await surface.waitUntil(timeoutNanoseconds: 1_500_000_000, { session.isBusy })
+      XCTAssertTrue(beganTurn, "pending query pick must begin a turn")
+      let startedReport = await surface.waitUntil(timeoutNanoseconds: 1_500_000_000, {
+        SnapshotQueryDelayProtocol.started.contains { $0.path.contains("spending-breakdown") }
+      })
+      XCTAssertTrue(
+        startedReport,
+        "delayed query stub must see the spending-breakdown request; started \(SnapshotQueryDelayProtocol.started)"
+      )
+      guard startedReport else {
+        return
+      }
+      XCTAssertEqual(session.messages.first { $0.id == owner }?.replyState, .generating)
+      XCTAssertEqual(session.messages.count, messageCount, "clarification resumes the existing reply")
+      XCTAssertEqual(session.aiActivity?.phase, .fetching)
+      surface.layoutNow()
+      let labels = surface.accessibilityLabels().joined(separator: " | ")
+      XCTAssertTrue(labels.contains("HowMuch server"), labels)
+      XCTAssertNotNil(labels.range(of: #"Fetching recorded transactions · [0-9]+s"#, options: .regularExpression), labels)
+      attachImage(surface.captureVisible(), name: "capture-pending-query-fetching-\(size)")
+      guard let stop = await revealControl(on: surface, label: "Stop response") else {
+        XCTFail("Stop response missing after query start in \(surface.accessibilityLabels())")
+        return
+      }
+      XCTAssertTrue(surface.activate(stop), "Stop response must be the production control")
+      let stoppedTransport = await surface.waitUntil(timeoutNanoseconds: 1_000_000_000, {
+        SnapshotQueryDelayProtocol.stopped > 0
+      })
+      XCTAssertTrue(
+        stoppedTransport,
+        "URLProtocol.stopLoading must run promptly after Stop; stopped \(SnapshotQueryDelayProtocol.stopped) started \(SnapshotQueryDelayProtocol.started)"
+      )
+      try? await Task.sleep(nanoseconds: 2_200_000_000)
+      surface.layoutNow()
+      XCTAssertTrue(session.queryCards.isEmpty, "cancelled query must not apply a late card")
     }
-    defer { surface.detach() }
-    _ = await surface.captureUntilOCR(contains: ["Which account"])
-    attachImage(surface.captureVisible(), name: "capture-pending-query-choices")
-    guard let candidate = await revealControl(on: surface, label: "Everyday") else {
-      XCTFail("query account candidate missing in \(surface.accessibilityLabels())")
-      return
-    }
-    XCTAssertTrue(surface.activate(candidate), "tapping Everyday must start the pending query")
-    let beganTurn = await surface.waitUntil(timeoutNanoseconds: 1_500_000_000, { session.isBusy })
-    XCTAssertTrue(beganTurn, "pending query pick must begin a turn")
-    let startedReport = await surface.waitUntil(timeoutNanoseconds: 1_500_000_000, {
-      SnapshotQueryDelayProtocol.started.contains { $0.path.contains("spending-breakdown") }
-    })
-    XCTAssertTrue(
-      startedReport,
-      "delayed query stub must see the spending-breakdown request; started \(SnapshotQueryDelayProtocol.started)"
-    )
-    guard startedReport else {
-      return
-    }
-    guard let stop = await revealControl(on: surface, label: "Stop response") else {
-      XCTFail("Stop response missing after query start in \(surface.accessibilityLabels())")
-      return
-    }
-    XCTAssertTrue(surface.activate(stop), "Stop response must be the production control")
-    let stoppedTransport = await surface.waitUntil(timeoutNanoseconds: 1_000_000_000, {
-      SnapshotQueryDelayProtocol.stopped > 0
-    })
-    XCTAssertTrue(
-      stoppedTransport,
-      "URLProtocol.stopLoading must run promptly after Stop; stopped \(SnapshotQueryDelayProtocol.stopped) started \(SnapshotQueryDelayProtocol.started)"
-    )
-    try? await Task.sleep(nanoseconds: 2_200_000_000)
-    surface.layoutNow()
-    XCTAssertTrue(session.queryCards.isEmpty, "cancelled query must not apply a late card")
   }
 
   func testManualAndScopeChangeCancelPendingQueryTransportWithoutLateCard() async {

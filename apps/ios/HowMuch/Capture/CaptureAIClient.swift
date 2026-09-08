@@ -115,6 +115,7 @@ struct CaptureAIClient: Sendable {
       .replacingOccurrences(of: "on-device capture helper", with: "capture helper")
       + "\nReturn exactly one JSON object matching this schema. All fields are required. Use empty strings/arrays for unused fields. Do not include markdown, tools, or additional keys.\n"
       + "Use yyyy-MM-dd for every nonempty date field, including spend dates.\n"
+      + "Use ASCII decimal amounts with at most three fractional digits and an optional leading sign; no whitespace, currency symbols, grouping separators, or trailing text.\n"
       + schemaText
     let model = configuration.model
     var body: [String: Any] = ["model": model.id, "stream": true]
@@ -306,7 +307,10 @@ extension CaptureTurnPayload {
             payload.kind != "query" || ["spending", "today", "spendingThisMonth", "compareCategory", "findMerchant"].contains(payload.queryKind),
             payload.spends.allSatisfy({
               ["", "inflow", "outflow"].contains($0.direction)
-                && ($0.amount.isEmpty || MoneyCodec.milliunits(from: $0.amount) != nil)
+                // Shared OCR mapping is permissive; remote amounts must be one complete decimal.
+                && ($0.amount.isEmpty || ($0.amount.range(
+                  of: #"\A[+-]?(?:[0-9]+(?:\.[0-9]{1,3})?|\.[0-9]{1,3})\z"#, options: .regularExpression) != nil
+                  && MoneyCodec.milliunits(from: $0.amount) != nil))
                 && ($0.date.isEmpty || LedgerQueryPlanner.parseISO($0.date, calendar: .current) != nil)
             }) else { throw CaptureAIError.invalidResponse }
       return payload
