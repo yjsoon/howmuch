@@ -28,18 +28,18 @@ struct AccountsView: View {
   @State private var presentedSheet: AccountsSheet?
   @State private var groupPendingDeletion: CustomAccountGroup?
   @State private var pane: AccountsPane?
+  @State private var columnVisibility = NavigationSplitViewVisibility.all
 
   var body: some View {
     @Bindable var screenshots = ScreenshotOfferController.shared
     Group {
       if horizontalSizeClass == .regular {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
           overview(screenshots: screenshots)
             .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
         } detail: {
           NavigationStack {
             detail(resolvedPane)
-              // Recreate the register so appear/disappear keep the focused-account stack honest.
               .id(resolvedPane)
           }
         }

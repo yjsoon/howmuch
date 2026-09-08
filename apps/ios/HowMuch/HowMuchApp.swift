@@ -123,6 +123,7 @@ enum AppTab: Hashable {
 private struct RootView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   @State private var tab: AppTab = .accounts
 
   var body: some View {
@@ -197,7 +198,7 @@ private struct RootView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .glassEffect(.regular, in: .capsule)
-            .padding(.bottom, 90)
+            .padding(.bottom, horizontalSizeClass == .regular ? 28 : 90)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
       }
