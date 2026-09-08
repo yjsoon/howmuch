@@ -6,7 +6,7 @@ Most use is adding transactions. Occasional use is read-only questions about rec
 
 ## Destinations
 
-Keep **Accounts**, **Rewards**, and **Assistant**. **Add Transactions** is a search-role tab with a **balloon +** (`plus.bubble`) icon: tapping opens conversational Quick Add without changing the selected tab. There is no second, full-width Add accessory. **Plan** and **Reflect** open from trailing **More**. Holding Add opens **Add manually**, also available as a VoiceOver action. SwiftUI supplies the sidebar menu; a scoped UIKit context-menu interaction supplies the iPhone tab-bar menu without changing its layout or selection delegate. The conversation dock also exposes **Add manually**. Accessibility label for capture: **Add Transactions**. A visible account-scoped register supplies that account for either path; a hidden retained Accounts stack does not leak. Home Screen Add Expense uses last-used open.
+Keep **Accounts**, **Rewards**, and **Assistant**. **Add Transactions** is a search-role tab with a **balloon +** (`plus.bubble`) icon: tapping opens conversational Quick Add without changing the selected tab. There is no second, full-width Add accessory. Add tap still does not stay selected. On iPhone, **Plan** and **Reflect** open from trailing **More**. On iPad, a sidebar-adaptable TabView shows **Plan** and **Reflect** in the sidebar (hidden from the compact tab bar). Accounts on regular width is list | register. Holding Add opens **Add manually**, also available as a VoiceOver action. SwiftUI supplies the sidebar menu; a scoped UIKit context-menu interaction supplies the iPhone tab-bar menu without changing its layout or selection delegate. The conversation dock also exposes **Add manually**. Accessibility label for capture: **Add Transactions**. A visible account-scoped register supplies that account for either path; a hidden retained Accounts stack does not leak. Home Screen Add Expense uses last-used open.
 
 Pushed Assistant conversations hide the tab bar. Native Back (AX or a real tap on the system control) pops to Assistant home, restores the tab bar and the search-role Add tab, keeps the conversation session, and does not write the ledger. Hosted snapshot tests prove that same `navigationDestination` binding with `UINavigationController.popViewController(animated: false)`, not a synthesized Back tap. Quick Add’s modal covers them.
 
@@ -19,7 +19,7 @@ Resolve account context at session admission. Composer **Account** is the next m
 | Entry | Account |
 | --- | --- |
 | + from a specific account register | that open account |
-| + from overview, Rewards, Assistant, or pushed Plan / Reflect | last-used **open** account |
+| + from overview, Rewards, Assistant, Plan, or Reflect | last-used **open** account |
 | Home Screen **Add Expense** | last-used **open** account, even if a register was left open |
 | Duplicate / structured App Intent | the draft’s explicit account |
 | Share / inbox | last-used open account |

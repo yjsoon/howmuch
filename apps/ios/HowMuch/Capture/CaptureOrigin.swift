@@ -5,7 +5,7 @@ import Foundation
 enum CaptureOrigin: Equatable, Codable, Sendable {
   /// + from a specific account register.
   case visibleRegister(accountID: String)
-  /// + from overview, Rewards, Assistant, or a pushed Plan or Reflect screen.
+  /// + from overview, Rewards, Assistant, Plan, or Reflect.
   case lastUsedOpen
   /// Home Screen Add Expense quick action. Ignores a leftover visible register.
   case homeScreenShortcut
@@ -80,6 +80,8 @@ enum CaptureSurface: Hashable, Sendable {
   case accounts
   case rewards
   case assistant
+  case plan
+  case reflect
 }
 
 enum CaptureAdmissionGate {

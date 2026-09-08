@@ -177,14 +177,16 @@ struct RewardsView: View {
       Text(title)
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(.secondary)
-      ForEach(rows) { row in
-        Button {
-          editorDestination = .edit(row.card.id)
-        } label: {
-          RewardTile(row: row, currencyFormat: model.currencyFormat)
+      LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)], spacing: 12) {
+        ForEach(rows) { row in
+          Button {
+            editorDestination = .edit(row.card.id)
+          } label: {
+            RewardTile(row: row, currencyFormat: model.currencyFormat)
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel(row.card.name)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(row.card.name)
       }
     }
   }

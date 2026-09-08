@@ -98,6 +98,8 @@ enum AppTab: Hashable {
   case accounts
   case rewards
   case assistant
+  case plan
+  case reflect
   case add
 
   var captureSurface: CaptureSurface? {
@@ -108,6 +110,10 @@ enum AppTab: Hashable {
       return .rewards
     case .assistant:
       return .assistant
+    case .plan:
+      return .plan
+    case .reflect:
+      return .reflect
     case .add:
       return nil
     }
@@ -137,9 +143,7 @@ private struct RootView: View {
 
     TabView(selection: selection) {
       Tab("Accounts", systemImage: "building.columns", value: AppTab.accounts) {
-        NavigationStack {
-          AccountsView()
-        }
+        AccountsView()
       }
 
       Tab("Rewards", systemImage: "creditcard", value: AppTab.rewards) {
@@ -154,8 +158,26 @@ private struct RootView: View {
         }
       }
 
+      Tab("Plan", systemImage: "square.grid.2x2", value: AppTab.plan) {
+        NavigationStack {
+          CategoriesView()
+            .moreDestinations()
+        }
+      }
+      .defaultVisibility(.hidden, for: .tabBar)
+
+      Tab("Reflect", systemImage: "chart.bar.fill", value: AppTab.reflect) {
+        NavigationStack {
+          ReflectView()
+            .moreDestinations()
+        }
+      }
+      .defaultVisibility(.hidden, for: .tabBar)
+
       RootCaptureTab(addManually: { model.presentManualTransaction(origin: model.addTransactionsOrigin()) })
     }
+    .tabViewStyle(.sidebarAdaptable)
+    .defaultAdaptableTabBarPlacement(.sidebar)
     .tabBarMinimizeBehavior(.onScrollDown)
     .background {
       RootCaptureTabActions(addManually: { model.presentManualTransaction(origin: model.addTransactionsOrigin()) })

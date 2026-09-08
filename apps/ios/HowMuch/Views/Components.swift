@@ -183,20 +183,23 @@ enum MoreDestination: Hashable {
 struct DestinationsMenu: View {
   var omitting: MoreDestination?
   @Environment(AppModel.self) private var model
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
   var body: some View {
     Menu {
-      if omitting != .plan {
-        NavigationLink(value: MoreDestination.plan) {
-          Label("Plan", systemImage: "square.grid.2x2")
+      if horizontalSizeClass != .regular {
+        if omitting != .plan {
+          NavigationLink(value: MoreDestination.plan) {
+            Label("Plan", systemImage: "square.grid.2x2")
+          }
         }
-      }
-      if omitting != .reflect {
-        NavigationLink(value: MoreDestination.reflect) {
-          Label("Reflect", systemImage: "chart.bar.fill")
+        if omitting != .reflect {
+          NavigationLink(value: MoreDestination.reflect) {
+            Label("Reflect", systemImage: "chart.bar.fill")
+          }
         }
+        Divider()
       }
-      Divider()
       Button {
         model.isShowingSettings = true
       } label: {
