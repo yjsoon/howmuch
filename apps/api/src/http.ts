@@ -10,6 +10,13 @@ import { importCsvRows } from "./importers/csv";
 import { importRewardsTrackerExport } from "./importers/rewards-tracker";
 import { importYnabFromApi } from "./importers/ynab";
 import { parseRewardGroupBy } from "./rewards/parse";
+import {
+  createRewardsCard,
+  deleteRewardsCard,
+  patchRewardsCard,
+  patchRewardsSettings,
+  RewardsAccountError,
+} from "./rewards/write";
 import type { LedgerStore, ReportStore } from "./storage";
 import { SQLiteAuthStore, type AuthStore, type AuthUser } from "./auth-store";
 import {
@@ -88,6 +95,9 @@ export function createHandler(options: HandlerOptions): (request: Request) => Pr
       }
       if (error instanceof ValidationError) {
         return apiError(400, "bad_request", error.message);
+      }
+      if (error instanceof RewardsAccountError) {
+        return apiError(422, "unprocessable_entity", error.message);
       }
       if (error instanceof TransactionStateConflictError) {
         return apiError(409, "transaction_state_conflict", error.message);
@@ -687,6 +697,31 @@ async function handleNative(
       const payload = rewardsTrackerPayload(body);
       const result = await importRewardsTrackerExport(repo, targetPlanId, payload);
       return json({ data: result }, 201);
+    }
+  }
+
+  if (segments[1] === "rewards") {
+    const body = isUnsafeMethod(method) ? await readJson(request) : {};
+    const targetPlanId = body.plan_id ?? planId;
+    const denied = authorizePlan(principal, targetPlanId, defaultPlanId, method);
+    if (denied) return denied;
+    await repo.ensurePlan(targetPlanId);
+
+    if (segments[2] === "cards" && segments.length === 3 && method === "POST") {
+      const card = await createRewardsCard(repo, targetPlanId, body.card);
+      return json({ data: { card } }, 201);
+    }
+    if (segments[2] === "cards" && segments.length === 4 && method === "PATCH") {
+      const card = await patchRewardsCard(repo, targetPlanId, segments[3], body.card);
+      return json({ data: { card } });
+    }
+    if (segments[2] === "cards" && segments.length === 4 && method === "DELETE") {
+      const card = await deleteRewardsCard(repo, targetPlanId, segments[3]);
+      return json({ data: { card } });
+    }
+    if (segments[2] === "settings" && segments.length === 3 && method === "PATCH") {
+      const settings = await patchRewardsSettings(repo, targetPlanId, body);
+      return json({ data: { settings } });
     }
   }
 

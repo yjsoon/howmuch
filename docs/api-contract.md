@@ -533,6 +533,22 @@ Accepts a Rewards Tracker for YNAB settings export (`cards` required). Official 
 
 Returns the stored portable snapshot and live cards for the plan.
 
+`POST /api/rewards/cards`
+
+Creates a Rewards Tracker card mapped to a live HowMuch account. Body is `{ "plan_id"?: string, "card": { ... } }`. If `card.id` is omitted, the server assigns one. Native writes allowlist the `CreditCard` fields and strip secrets (`pat`, `howmuchToken`, Cloud Sync fields, cached data). Unknown or missing `ynabAccountId` returns 422. Closed accounts are still live. Returns `201 { "data": { "card" } }`.
+
+`PATCH /api/rewards/cards/:id`
+
+Merges the supplied card fields onto the live card. Missing cards return 404. Unknown or missing `ynabAccountId` after the merge returns 422. Returns `{ "data": { "card" } }`.
+
+`DELETE /api/rewards/cards/:id`
+
+Soft-deletes the card (`deleted = 1`) and removes that id from the stored snapshot card list. Returns `{ "data": { "card" } }` of the deleted payload, or 404. Does not replace the snapshot with an empty cards array.
+
+`PATCH /api/rewards/settings`
+
+Merges `milesValuation` (a finite number) into the stored Rewards Tracker settings without replacing cards. Other body keys, including Cloud Sync secrets, are ignored. Returns `{ "data": { "settings" } }` parsed as app settings.
+
 `POST /api/import/csv`
 
 Accepts rows shaped like:

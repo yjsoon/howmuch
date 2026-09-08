@@ -114,4 +114,21 @@ describe("importRewardsTrackerExport", () => {
       flag_names_json: JSON.stringify({ orange: "Dining", green: "Groceries" }),
     });
   });
+
+  test("lets a finite export milesValuation replace a native value", async () => {
+    await repo.patchRewardsTrackerSettings("plan-test", { milesValuation: 0.05 });
+    await importRewardsTrackerExport(repo, "plan-test", officialExport);
+    const snapshot = await repo.getRewardsTrackerSnapshot("plan-test");
+    expect((snapshot.snapshot as { settings: { milesValuation: number } }).settings.milesValuation).toBe(0.015);
+  });
+
+  test("keeps the native milesValuation when the export omits it", async () => {
+    await repo.patchRewardsTrackerSettings("plan-test", { milesValuation: 0.05 });
+    await importRewardsTrackerExport(repo, "plan-test", {
+      ...officialExport,
+      settings: { currency: "SGD" },
+    });
+    const snapshot = await repo.getRewardsTrackerSnapshot("plan-test");
+    expect((snapshot.snapshot as { settings: { milesValuation: number } }).settings.milesValuation).toBe(0.05);
+  });
 });

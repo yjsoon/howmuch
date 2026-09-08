@@ -5,6 +5,7 @@ import { createHandler } from "../src/http";
 import { importYnabExport, parseExportDate, parseMoneyToMilliunits } from "../src/importers/ynab-export";
 import { LedgerRepository } from "../src/repository";
 import { nextScheduledOccurrence, scheduledOccurrencesThrough } from "../src/scheduled-transactions";
+import officialRewardsExport from "../../../fixtures/rewards-tracker-export.json";
 
 let db: Database;
 let handler: (request: Request) => Promise<Response>;
@@ -2381,6 +2382,169 @@ describe("native reports and imports", () => {
     ]);
   });
 
+  test("creates, patches, and deletes a native rewards card", async () => {
+    await createAccount("acct-native-card", { name: "Native card" });
+    await createTransaction({
+      account_id: "acct-native-card",
+      date: "2026-06-10",
+      amount: -100000,
+      payee_name: "Cafe",
+    });
+
+    const created = await request("/api/rewards/cards?plan_id=plan-test", {
+      method: "POST",
+      body: {
+        card: {
+          name: "Native cashback",
+          issuer: "UOB",
+          type: "cashback",
+          ynabAccountId: "acct-native-card",
+          earningRate: 1,
+        },
+      },
+    });
+    expect(created.status).toBe(201);
+    const createdCard = (await created.json()).data.card;
+    expect(createdCard).toMatchObject({
+      name: "Native cashback",
+      ynabAccountId: "acct-native-card",
+      earningRate: 1,
+    });
+    expect(createdCard.id).toStartWith("card_");
+
+    const listed = await (await request("/api/import/rewards-tracker?plan_id=plan-test")).json();
+    expect(listed.data.cards).toEqual([expect.objectContaining({ id: createdCard.id, earningRate: 1 })]);
+    const before = await (await request("/api/reports/rewards?plan_id=plan-test&from=2026-06-01&to=2026-06-30")).json();
+    expect(before.data.cards).toEqual([
+      expect.objectContaining({
+        account_id: "acct-native-card",
+        calculation: expect.objectContaining({ reward_earned: 1, reward_type: "cashback" }),
+      }),
+    ]);
+
+    const patched = await request(`/api/rewards/cards/${createdCard.id}?plan_id=plan-test`, {
+      method: "PATCH",
+      body: { card: { earningRate: 2 } },
+    });
+    expect(patched.status).toBe(200);
+    expect((await patched.json()).data.card).toMatchObject({ id: createdCard.id, earningRate: 2 });
+    const patchedAgain = await request(`/api/rewards/cards/${createdCard.id}?plan_id=plan-test`, {
+      method: "PATCH",
+      body: { card: { earningRate: 2 } },
+    });
+    expect(patchedAgain.status).toBe(200);
+    expect((await patchedAgain.json()).data.card.id).toBe(createdCard.id);
+    const after = await (await request("/api/reports/rewards?plan_id=plan-test&from=2026-06-01&to=2026-06-30")).json();
+    expect(after.data.cards[0].calculation.reward_earned).toBe(2);
+
+    const deleted = await request(`/api/rewards/cards/${createdCard.id}?plan_id=plan-test`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    expect((await deleted.json()).data.card).toMatchObject({ id: createdCard.id });
+    const afterDelete = await (await request("/api/import/rewards-tracker?plan_id=plan-test")).json();
+    expect(afterDelete.data.cards).toEqual([]);
+    expect(afterDelete.data.cards.some((card: { deleted?: number }) => card.deleted === 1)).toBeFalse();
+    const report = await (await request("/api/reports/rewards?plan_id=plan-test&from=2026-06-01&to=2026-06-30")).json();
+    expect(report.data.cards).toEqual([]);
+  });
+
+  test("rejects unknown or missing ynabAccountId with 422", async () => {
+    const unknown = await request("/api/rewards/cards?plan_id=plan-test", {
+      method: "POST",
+      body: {
+        card: { name: "Ghost", issuer: "UOB", type: "cashback", ynabAccountId: "acct-missing" },
+      },
+    });
+    expect(unknown.status).toBe(422);
+    expect(db.query("SELECT COUNT(*) AS count FROM rewards_tracker_cards").get()).toEqual({ count: 0 });
+
+    const missing = await request("/api/rewards/cards?plan_id=plan-test", {
+      method: "POST",
+      body: {
+        card: { name: "Ghost", issuer: "UOB", type: "cashback" },
+      },
+    });
+    expect(missing.status).toBe(422);
+  });
+
+  test("strips secrets from native card and settings writes", async () => {
+    await createAccount("acct-secret-card", { name: "Secret card" });
+    const created = await request("/api/rewards/cards?plan_id=plan-test", {
+      method: "POST",
+      body: {
+        card: {
+          name: "Secret",
+          issuer: "DBS",
+          type: "miles",
+          ynabAccountId: "acct-secret-card",
+          earningRate: 1,
+          pat: "secret-pat",
+          cloudSyncMnemonic: "one two three",
+          settings: { cloudSyncMnemonic: "nested" },
+        },
+      },
+    });
+    expect(created.status).toBe(201);
+    const card = (await created.json()).data.card;
+    expect(card).not.toHaveProperty("pat");
+    expect(card).not.toHaveProperty("cloudSyncMnemonic");
+    expect(card).not.toHaveProperty("settings");
+
+    const settings = await request("/api/rewards/settings?plan_id=plan-test", {
+      method: "PATCH",
+      body: { milesValuation: 0.04, cloudSyncMnemonic: "do not store" },
+    });
+    expect(settings.status).toBe(200);
+    expect((await settings.json()).data.settings.milesValuation).toBe(0.04);
+    const stored = await (await request("/api/import/rewards-tracker?plan_id=plan-test")).json();
+    expect(stored.data.snapshot.settings.cloudSyncMnemonic).toBeUndefined();
+    expect(JSON.stringify(stored.data.snapshot.settings)).not.toContain("do not store");
+    const report = await (await request("/api/reports/rewards?plan_id=plan-test")).json();
+    expect(report.data.miles_valuation).toBe(0.04);
+  });
+
+  test("imports keep or replace native milesValuation as the export dictates", async () => {
+    await createAccount("acct-credit", { name: "Travel Card" });
+    await request("/api/rewards/cards?plan_id=plan-test", {
+      method: "POST",
+      body: {
+        card: {
+          id: "card-native-miles",
+          name: "Native miles",
+          issuer: "DBS",
+          type: "miles",
+          ynabAccountId: "acct-credit",
+          earningRate: 1,
+        },
+      },
+    });
+    const nativeSettings = await request("/api/rewards/settings?plan_id=plan-test", {
+      method: "PATCH",
+      body: { milesValuation: 0.05 },
+    });
+    expect(nativeSettings.status).toBe(200);
+    expect((await (await request("/api/reports/rewards?plan_id=plan-test")).json()).data.miles_valuation).toBe(0.05);
+
+    const imported = await request("/api/import/rewards-tracker?plan_id=plan-test", {
+      method: "POST",
+      body: { payload: officialRewardsExport },
+    });
+    expect(imported.status).toBe(201);
+    expect((await (await request("/api/reports/rewards?plan_id=plan-test")).json()).data.miles_valuation).toBe(0.015);
+
+    await request("/api/rewards/settings?plan_id=plan-test", {
+      method: "PATCH",
+      body: { milesValuation: 0.07 },
+    });
+    const omitted = await request("/api/import/rewards-tracker?plan_id=plan-test", {
+      method: "POST",
+      body: { payload: { ...officialRewardsExport, settings: { currency: "SGD" } } },
+    });
+    expect(omitted.status).toBe(201);
+    const snapshot = await (await request("/api/import/rewards-tracker?plan_id=plan-test")).json();
+    expect(snapshot.data.snapshot.settings.milesValuation).toBe(0.07);
+    expect((await (await request("/api/reports/rewards?plan_id=plan-test")).json()).data.miles_valuation).toBe(0.07);
+  });
+
   test("updates account opening balances on reseed", async () => {
     await createAccount("acct-reseeded", { name: "Reseeded", opening_balance: 0 });
     await createAccount("acct-reseeded", { name: "Reseeded", opening_balance: 38000000 });
@@ -2939,6 +3103,14 @@ describe("password authentication", () => {
       body: JSON.stringify({ account: { name: "Cash" } }),
     }));
     expect(viewerWrite.status).toBe(403);
+    const viewerRewards = await handler(new Request("https://howmuch.test/api/rewards/cards?plan_id=viewer-plan", {
+      method: "POST",
+      headers: { cookie, origin: "https://howmuch.test", "content-type": "application/json" },
+      body: JSON.stringify({
+        card: { name: "Viewer", issuer: "DBS", type: "cashback", ynabAccountId: "cash" },
+      }),
+    }));
+    expect(viewerRewards.status).toBe(403);
     const viewerPreferences = await handler(new Request("https://howmuch.test/v1/plans/viewer-plan/account_preferences", {
       method: "PUT",
       headers: { cookie, origin: "https://howmuch.test", "content-type": "application/json" },

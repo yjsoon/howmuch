@@ -102,6 +102,8 @@ export async function importRewardsTrackerExport(
   const sessionId = await repo.createImportSession(planId, SOURCE_KIND);
 
   try {
+    const existing = await repo.getRewardsTrackerSnapshot(planId);
+    parsed.portable.settings = mergeImportedMilesValuation(existing.snapshot, parsed.portable.settings);
     await repo.upsertRewardsTrackerSnapshot(planId, parsed.portable);
 
     const existingSettings = await repo.getSettings(planId);
@@ -248,7 +250,7 @@ function parseYnab(value: unknown): RewardsTrackerPortablePayload["ynab"] {
   };
 }
 
-function sanitizeSettings(value: unknown): Record<string, unknown> {
+export function sanitizeSettings(value: unknown): Record<string, unknown> {
   if (value == null) return {};
   if (typeof value !== "object" || Array.isArray(value)) {
     throw new ValidationError("settings must be an object");
@@ -353,6 +355,25 @@ function collectTransactions(cached: Record<string, unknown>): Array<Record<stri
     if (id && !byId.has(id)) byId.set(id, transaction as Record<string, unknown>);
   }
   return [...byId.values()];
+}
+
+function mergeImportedMilesValuation(
+  snapshot: unknown,
+  settings: Record<string, unknown>,
+): Record<string, unknown> {
+  if (finiteNumber(settings.milesValuation) !== undefined) return settings;
+  const existing = snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+    ? (snapshot as { settings?: unknown }).settings
+    : undefined;
+  const kept = existing && typeof existing === "object" && !Array.isArray(existing)
+    ? finiteNumber((existing as { milesValuation?: unknown }).milesValuation)
+    : undefined;
+  if (kept === undefined) return settings;
+  return { ...settings, milesValuation: kept };
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function mergeCurrency(existing: Record<string, unknown> | undefined, currency: unknown): Record<string, unknown> | undefined {
