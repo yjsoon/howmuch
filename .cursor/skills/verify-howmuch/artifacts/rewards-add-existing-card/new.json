@@ -1,0 +1,37 @@
+{
+  "heading": "Add card",
+  "section": "Existing HowMuch card",
+  "labels": [
+    "HowMuch card",
+    "Name",
+    "Issuer",
+    "Type",
+    "Billing cycle",
+    "Day of month",
+    "Reward period months",
+    "Anchor date",
+    "Monthly minimum spend",
+    "Promotional start",
+    "Promotional end",
+    "Promotional description",
+    "Earning rate",
+    "Block size",
+    "Minimum spend",
+    "Maximum spend",
+    "Import category",
+    "Flag colour",
+    "Rate"
+  ],
+  "options": [
+    {
+      "value": "",
+      "text": "Choose a HowMuch card"
+    },
+    {
+      "value": "acct-credit",
+      "text": "Travel Card"
+    }
+  ],
+  "name": "",
+  "href": "http://127.0.0.1:59151/rewards/new?range=all"
+}
