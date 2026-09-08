@@ -9,6 +9,15 @@
 - Side effect: screenshots in this directory. Review copies at `/tmp/rewards-web-manage-review-add.png` and `/tmp/rewards-web-manage-review-flags.png`. Review video on run `20260908T001853-17256` at `/tmp/rewards-web-manage-review.mp4`.
 - Billing-day 15 reload was not driven; the editor field is present.
 
+## Live re-drive after the ledger-date fix
+
+Headed Chrome on `control-howmuch` run `20260908T013559-32348` (`c206be2`): web `http://127.0.0.1:51915`, api `http://127.0.0.1:39787`. First-owner `verifier`. No Rewards Tracker JSON file.
+
+- Editor ledger request is `/v1/plans/local-plan/accounts/acct-credit/transactions?limit=250` with no `since_date` / `until_date`.
+- Rows newest first: 13 May 2026 Candlenut, 4 May 2026 MUJI, 12 Apr 2026 Scoot, 11 Mar 2026 Grab. Footer **Newest first**.
+- Native **Verify cashback** on Travel Card scores `$830.80` spend / `$8.31` at earning rate 1. Dining Out red 4× then scores `$601.90` / `$24.08`.
+- Save to tile 47 ms (budget 800 ms). Delete returns the empty board.
+
 ## Perf, Rewards load vs trunk
 
 Travel Card stored from `fixtures/rewards-tracker-export.json` on both stacks. Head is this branch. Trunk is `773f86f` (`origin/main`) in `/tmp/howmuch-trunk`.
