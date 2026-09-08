@@ -146,8 +146,30 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertEqual(pane, .account("acct-everyday"))
   }
 
-  func testCompactClearsPaneSoOverviewDoesNotAutoPush() {
+  func testCompactRefreshKeepsPushedRegister() {
     let pane = AccountsPaneSelection.reconciled(
+      current: .account("acct-everyday"),
+      isRegularWidth: false,
+      knownAccountIDs: ["acct-everyday"],
+      canChooseDefault: false,
+      defaultPane: .all
+    )
+    XCTAssertEqual(pane, .account("acct-everyday"))
+  }
+
+  func testCompactPrunesDeletedAccount() {
+    let pane = AccountsPaneSelection.reconciled(
+      current: .account("acct-gone"),
+      isRegularWidth: false,
+      knownAccountIDs: ["acct-everyday"],
+      canChooseDefault: true,
+      defaultPane: .account("acct-everyday")
+    )
+    XCTAssertNil(pane)
+  }
+
+  func testLeavingRegularWidthClearsPaneSoCompactDoesNotAutoPush() {
+    let pane = AccountsPaneSelection.afterSizeClassChange(
       current: .account("acct-everyday"),
       isRegularWidth: false,
       knownAccountIDs: ["acct-everyday"],

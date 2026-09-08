@@ -41,15 +41,32 @@ enum AccountsPaneSelection {
     canChooseDefault: Bool,
     defaultPane: AccountsPane
   ) -> AccountsPane? {
-    guard isRegularWidth else { return nil }
     var pane = current
     if case .account(let id) = pane, !knownAccountIDs.contains(id) {
       pane = nil
     }
+    guard isRegularWidth else { return pane }
     if pane == nil, canChooseDefault {
       return defaultPane
     }
     return pane
+  }
+
+  static func afterSizeClassChange(
+    current: AccountsPane?,
+    isRegularWidth: Bool,
+    knownAccountIDs: Set<String>,
+    canChooseDefault: Bool,
+    defaultPane: AccountsPane
+  ) -> AccountsPane? {
+    guard isRegularWidth else { return nil }
+    return reconciled(
+      current: current,
+      isRegularWidth: true,
+      knownAccountIDs: knownAccountIDs,
+      canChooseDefault: canChooseDefault,
+      defaultPane: defaultPane
+    )
   }
 }
 
@@ -72,8 +89,14 @@ struct AccountsView: View {
             .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
         } detail: {
           NavigationStack {
-            detail(resolvedPane)
-              .id(resolvedPane)
+            if let pane {
+              detail(pane)
+                .id(pane)
+            } else {
+              PhasePlaceholder(phase: model.referencePhase) {
+                await model.refreshReferenceData()
+              }
+            }
           }
         }
         .navigationSplitViewStyle(.balanced)
@@ -91,7 +114,13 @@ struct AccountsView: View {
       reconcilePane()
     }
     .onChange(of: horizontalSizeClass) { _, _ in
-      reconcilePane()
+      pane = AccountsPaneSelection.afterSizeClassChange(
+        current: pane,
+        isRegularWidth: horizontalSizeClass == .regular,
+        knownAccountIDs: knownAccountIDs,
+        canChooseDefault: canChooseDefaultPane,
+        defaultPane: defaultPane
+      )
     }
     .onChange(of: model.accounts.map(\.id)) { _, _ in
       reconcilePane()
@@ -141,10 +170,6 @@ struct AccountsView: View {
     }
   }
 
-  private var resolvedPane: AccountsPane {
-    pane ?? defaultPane
-  }
-
   private var defaultPane: AccountsPane {
     .defaultSelection(
       openAccounts: model.openAccounts,
@@ -152,21 +177,26 @@ struct AccountsView: View {
     )
   }
 
+  private var knownAccountIDs: Set<String> {
+    Set(model.accounts.map(\.id))
+  }
+
+  private var canChooseDefaultPane: Bool {
+    !model.accounts.isEmpty || model.referencePhase == .loaded
+  }
+
   private func reconcilePane() {
     pane = AccountsPaneSelection.reconciled(
       current: pane,
       isRegularWidth: horizontalSizeClass == .regular,
-      knownAccountIDs: Set(model.accounts.map(\.id)),
-      canChooseDefault: !model.accounts.isEmpty || model.referencePhase == .loaded,
+      knownAccountIDs: knownAccountIDs,
+      canChooseDefault: canChooseDefaultPane,
       defaultPane: defaultPane
     )
   }
 
   private func isShowing(_ candidate: AccountsPane) -> Bool {
-    if horizontalSizeClass == .regular {
-      return resolvedPane == candidate
-    }
-    return pane == candidate
+    pane == candidate
   }
 
   @ViewBuilder
