@@ -46,6 +46,22 @@ export function namedFlagLabel(
   return named || fallback?.trim() || undefined;
 }
 
+export function sameFlagColour(left: string | null | undefined, right: string | null | undefined): boolean {
+  return (left || null) === (right || null);
+}
+
+export function snapshotFlagLabel(
+  names: Partial<Record<RewardFlagColour, string>> | undefined,
+  colour: string | null | undefined,
+  snapshot: { flag_color?: string | null; flag_name?: string | null },
+): string | undefined {
+  return namedFlagLabel(
+    names,
+    colour,
+    sameFlagColour(colour, snapshot.flag_color) ? snapshot.flag_name : undefined,
+  );
+}
+
 export function colourNamesForCard(card: {
   flagNames?: Record<string, string>;
   subcategories?: Array<{ flagColor: RewardFlagColour; name: string }>;

@@ -17,7 +17,7 @@ import { formatDate } from "../lib/dates";
 import { isFlagColour, ledgerFlagFromReward, rewardFlagFromLedger } from "../lib/flags";
 import { formatMoney } from "../lib/money";
 import { rewardCardAccountChoices, syncedRewardCardName } from "../lib/reward-card-accounts";
-import { ledgerFlagNames, namedFlagLabel, namesFromSubcategories, parseRewardFlagNames, REWARD_NAME_COLOURS } from "../lib/reward-flag-names";
+import { ledgerFlagNames, namedFlagLabel, namesFromSubcategories, parseRewardFlagNames, REWARD_NAME_COLOURS, snapshotFlagLabel } from "../lib/reward-flag-names";
 import { usePlan } from "../state/plan";
 
 type FlagDraft = {
@@ -747,7 +747,7 @@ function CardLedger({
   flagNames: Partial<Record<RewardFlagColour, string>>;
   pickerNames: Record<string, string>;
 }) {
-  const [overrides, setOverrides] = useState<Record<string, string | null>>({});
+  const [overrides, setOverrides] = useState<Record<string, { flag_color: string | null; flag_name: string | null }>>({});
   const [flagError, setFlagError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   useEffect(() => {
@@ -765,12 +765,32 @@ function CardLedger({
 
   const setFlag = async (transaction: Transaction, value: string) => {
     const flagColor = value === "" ? null : value;
+    const previous = overrides[transaction.id];
     setPendingId(transaction.id);
     setFlagError(null);
+    setOverrides((current) => ({
+      ...current,
+      [transaction.id]: {
+        flag_color: flagColor,
+        flag_name: namedFlagLabel(flagNames, flagColor) ?? null,
+      },
+    }));
     try {
-      await api.updateTransaction(planId, transaction.id, { flag_color: flagColor });
-      setOverrides((current) => ({ ...current, [transaction.id]: flagColor }));
+      const updated = await api.updateTransaction(planId, transaction.id, { flag_color: flagColor });
+      setOverrides((current) => ({
+        ...current,
+        [transaction.id]: {
+          flag_color: updated.flag_color ?? null,
+          flag_name: updated.flag_name ?? null,
+        },
+      }));
     } catch (cause) {
+      setOverrides((current) => {
+        const next = { ...current };
+        if (previous) next[transaction.id] = previous;
+        else delete next[transaction.id];
+        return next;
+      });
       setFlagError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setPendingId(null);
@@ -811,8 +831,9 @@ function CardLedger({
           </thead>
           <tbody>
             {ledger.data?.transactions.map((transaction) => {
-              const colour = transaction.id in overrides ? overrides[transaction.id] : transaction.flag_color;
-              const flagName = namedFlagLabel(flagNames, colour, transaction.flag_name);
+              const snapshot = overrides[transaction.id] ?? transaction;
+              const colour = snapshot.flag_color;
+              const flagName = snapshotFlagLabel(flagNames, colour, snapshot);
               return (
                 <tr key={transaction.id}>
                   <td>{formatDate(transaction.date)}</td>
