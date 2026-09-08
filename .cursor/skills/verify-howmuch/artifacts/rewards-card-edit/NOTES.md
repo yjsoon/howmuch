@@ -7,7 +7,7 @@
 - UI result: Cashback tile scored $830.80 spend. Flags listed Dining Out and Shopping. Minimum spend label showed $830.80 / $99,999.00. Capped tile left the board while `/rewards/card_5561ca61-f367-4fb8-9dac-9f22c99418f8` still opened Edit card. Delete returned the empty board. 390px Open menu still reached Add card and `/rewards/new`.
 - Save to tile: 79 ms on this stack (budget 800 ms).
 - Side effect: screenshots in this directory. Review copies at `/tmp/rewards-web-manage-review-add.png` and `/tmp/rewards-web-manage-review-flags.png`. Review video on run `20260908T001853-17256` at `/tmp/rewards-web-manage-review.mp4`.
-- Billing-day 15 reload was not driven; the editor field is present.
+- Billing-day 15 reload and fixture import were driven later on run `20260908T021240-43644` (see below).
 
 ## Live re-drive after the ledger-date fix
 
@@ -42,3 +42,12 @@ Hard `goto /rewards` until the same headline, interleaved trunk/head × 3. `perf
 | head | 468, 367, 351 | 367 |
 
 Head median − trunk median = −4 ms (budget +200 ms). Pass.
+
+## Live lanes 7–8 (billing-day 15 + import)
+
+Headed Chrome on `control-howmuch` run `20260908T021240-43644` against this web editor: web `http://127.0.0.1:36013`, api `http://127.0.0.1:34083`. First-owner `verifier`. Never `howmuch.soon.sg`.
+
+- Native **Verify cashback** on Travel Card (`acct-credit`), billing cycle `billing`, day of month `15`, earning rate `1`. Save returned to `/rewards?range=all`.
+- Editor `/rewards/card_096150f6-aacb-4d2c-a7a1-e4caea679287` after a hard reload still shows heading **Edit card**, account Travel Card, Billing cycle **Billing cycle**, Day of month **15**. Ledger still newest first (13 May Candlenut → 11 Mar Grab). `web-billing-cycle.png`.
+- Settings → Rewards import warned that a file replace soft-deletes omitted HowMuch cards (`web-import-warning.png`). Chose `fixtures/rewards-tracker-export.json`, **Import export**. Stored cards lists Travel Card (`web-import-still.png`).
+- Rewards All then scores imported Travel Card miles `$830.80` / `$46.42` / 3,094 mi with Dining 4× and Online 3× (`web-import-board.png`). HTTP `GET /api/import/rewards-tracker?plan_id=local-plan` has `card-travel` miles; report flags Dining and Online, spend `830.8`.
