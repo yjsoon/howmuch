@@ -425,7 +425,8 @@ describe("D1 foundation", () => {
     const updated = await repo.updateScheduledTransaction("p", source.id, { date_next: "2026-10-01", memo: "edited" }, { operationId: "schedule-update-once" });
     const replayedUpdate = await repo.updateScheduledTransaction("p", source.id, { date_next: "2026-10-01", memo: "edited" }, { operationId: "schedule-update-once" });
     expect(replayedUpdate).toEqual(updated);
-    expect(updated).toMatchObject({ id: source.id, date_next: "2026-10-01", memo: "edited", source_marker: "immutable" });
+    expect(updated).toMatchObject({ id: source.id, date_next: "2026-10-01", memo: "edited", source_marker: "immutable", deleted: false });
+    expect(Object.hasOwn(updated, "deleted")).toBe(true);
     expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='scheduled_transaction' AND object_id=?").get(source.id)).toEqual(rawBefore);
     expect(db.query("SELECT origin FROM scheduled_transaction_edits WHERE id=?").get(source.id)).toEqual({ origin: "ynab-overlay" });
     expect(db.query("SELECT write_version FROM write_state").get()).toEqual({ write_version: versionBefore + 1 });
@@ -440,7 +441,12 @@ describe("D1 foundation", () => {
     const created = await repo.createScheduledTransaction("p", splitInput, { operationId: "schedule-create-once" });
     const replayedCreate = await repo.createScheduledTransaction("p", splitInput, { operationId: "schedule-create-once" });
     expect(replayedCreate).toEqual(created);
-    expect(created).toMatchObject({ account_id: "a", date_next: "2026-08-15", amount: -3000 });
+    expect(created).toMatchObject({ account_id: "a", date_next: "2026-08-15", amount: -3000, deleted: false });
+    expect(Object.hasOwn(created, "deleted")).toBe(true);
+    const patched = await repo.updateScheduledTransaction("p", created.id, { memo: "after create" }, { operationId: "schedule-patch-created" });
+    expect(Object.hasOwn(patched, "deleted")).toBe(true);
+    expect(patched.deleted).toBe(false);
+    expect(patched.memo).toBe("after create");
     expect(created.subtransactions).toEqual(expect.arrayContaining([
       expect.objectContaining({ amount: -1000, category_id: "food" }),
       expect.objectContaining({ amount: -2000, payee_id: transferPayee.id, transfer_account_id: "b" }),

@@ -1887,12 +1887,10 @@ export class LedgerRepository {
 
   async getScheduledTransaction(planId: string, scheduledTransactionId: string): Promise<any> {
     const record = await this.readScheduledTransaction(planId, scheduledTransactionId);
-    const payload = { ...record.payload };
-    if (!payload.deleted) delete payload.deleted;
-    return {
-      ...payload,
-      subtransactions: record.subtransactions.filter((subtransaction) => !subtransaction.deleted),
-    };
+    return projectScheduledPayload(
+      record.payloadJson,
+      record.subtransactions.filter((subtransaction) => !subtransaction.deleted),
+    );
   }
 
   async createScheduledTransaction(
@@ -2151,6 +2149,7 @@ export class LedgerRepository {
     if (sourceAccount.closed && !allowClosedAccount) throw new ValidationError("Scheduled transactions in closed accounts do not occur automatically");
     const accounts = new Map<string, { id: string; closed: boolean; type: string }>([[sourceAccount.id, sourceAccount]]);
     const payees = new Map<string, any>();
+    const categories = new Map<string, boolean>();
     const loadAccount = async (accountId: string) => {
       if (!accounts.has(accountId)) {
         const account = await this.liveAccount(planId, accountId);
@@ -2163,11 +2162,15 @@ export class LedgerRepository {
       if (!payees.has(payeeId)) payees.set(payeeId, await this.findPayee(planId, payeeId));
       return payees.get(payeeId);
     };
+    const categoryExists = async (categoryId: string) => {
+      if (!categories.has(categoryId)) categories.set(categoryId, await this.liveCategory(planId, categoryId));
+      return categories.get(categoryId) === true;
+    };
 
     const prepareLine = async (value: Record<string, any>, label: string) => {
       const payee = value.payee_id == null ? null : await loadPayee(value.payee_id);
       if (value.payee_id != null && !payee) throw new ValidationError(`${label} payee not found`);
-      if (value.category_id != null && !await this.liveCategory(planId, value.category_id)) throw new ValidationError(`${label} category not found`);
+      if (value.category_id != null && !await categoryExists(value.category_id)) throw new ValidationError(`${label} category not found`);
       const explicitTarget = value.transfer_account_id ?? null;
       const payeeTarget = payee?.transfer_account_id ?? null;
       if (explicitTarget && payee && !payeeTarget) throw new ValidationError(`${label} cannot combine a regular payee with transfer_account_id`);
@@ -2233,14 +2236,14 @@ export class LedgerRepository {
       const subs = await this.db.query("SELECT payload_json FROM scheduled_subtransaction_edits WHERE plan_id=? AND scheduled_transaction_id=? ORDER BY id").all(planId, id) as Row[];
       const subtransactions = subs.map((row) => parseRawYnabObject(row.payload_json, "scheduled subtransaction"));
       const payload = { ...parseRawYnabObject(edit.payload_json, "scheduled transaction"), deleted: Boolean(edit.deleted) };
-      return { ...payload, payload, subtransactions, origin: edit.origin as "howmuch-local" | "ynab-overlay" } as any;
+      return { ...payload, payload, payloadJson: String(edit.payload_json), subtransactions, origin: edit.origin as "howmuch-local" | "ynab-overlay" } as any;
     }
     const source = await this.db.query("SELECT payload_json,deleted FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_transaction' AND object_id=?").get(planId, id) as Row | null;
     if (!source || (Boolean(source.deleted) && !includeDeleted)) throw new NotFoundError("Scheduled transaction not found");
     const rows = await this.db.query("SELECT payload_json FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_subtransaction' ORDER BY object_id").all(planId) as Row[];
     const subtransactions = rows.map((row) => parseRawYnabObject(row.payload_json, "scheduled subtransaction")).filter((row) => row.scheduled_transaction_id === id);
     const payload = { ...parseRawYnabObject(source.payload_json, "scheduled transaction"), deleted: Boolean(source.deleted) };
-    return { ...payload, payload, subtransactions, origin: "ynab-overlay" };
+    return { ...payload, payload, payloadJson: String(source.payload_json), subtransactions, origin: "ynab-overlay" };
   }
 
   private async validateScheduledReferences(planId: string, transaction: EffectiveScheduledTransaction): Promise<void> {

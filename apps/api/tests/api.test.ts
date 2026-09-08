@@ -41,6 +41,7 @@ describe("YNAB-compatible API", () => {
     expect(scheduled.data.scheduled_transactions).toEqual([{ id: "scheduled-1", date_next: "2026-07-01", subtransactions: [{ id: "sub-1", scheduled_transaction_id: "scheduled-1", amount: -100 }] }]);
     const one = await (await request("/v1/plans/plan-test/scheduled_transactions/scheduled-1")).json();
     expect(one.data.scheduled_transaction).toEqual(scheduled.data.scheduled_transactions[0]);
+    expect(Object.hasOwn(one.data.scheduled_transaction, "deleted")).toBe(false);
     const locations = await (await request("/v1/plans/plan-test/payee_locations")).json();
     expect(locations.data.payee_locations).toEqual([{ id: "location-1", payee_id: "payee-1", latitude: "1.2" }]);
     const movements = await (await request("/v1/plans/plan-test/months/2026-06/money_movements")).json();
@@ -97,6 +98,88 @@ describe("YNAB-compatible API", () => {
     expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='scheduled_transaction' AND object_id=?").get(source.id)).toEqual(rawBefore);
     const remaining = await (await request("/v1/plans/plan-test/scheduled_transactions")).json();
     expect(remaining.data.scheduled_transactions.map((transaction: any) => transaction.id)).toEqual([created.id]);
+  });
+
+  test("keyed schedule reads keep stored deleted presence and drop deleted split lines", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await repo.upsertAccount("plan-test", { id: "cash", name: "Cash" });
+    await repo.upsertYnabRawObject("plan-test", "scheduled_transaction", "explicit-false", {
+      id: "explicit-false", account_id: "cash", date_first: "2026-09-09", date_next: "2026-09-09",
+      frequency: "never", amount: -100, deleted: false,
+    });
+    await repo.upsertYnabRawObject("plan-test", "scheduled_transaction", "absent-deleted", {
+      id: "absent-deleted", date_next: "2026-09-10",
+    });
+    await repo.upsertYnabRawObject("plan-test", "scheduled_transaction", "split-parent", {
+      id: "split-parent", date_next: "2026-09-11",
+    });
+    await repo.upsertYnabRawObject("plan-test", "scheduled_subtransaction", "split-parent\u001flive", {
+      id: "live", scheduled_transaction_id: "split-parent", amount: -100, deleted: false,
+    });
+    await repo.upsertYnabRawObject("plan-test", "scheduled_subtransaction", "split-parent\u001fdead", {
+      id: "dead", scheduled_transaction_id: "split-parent", amount: -200, deleted: true,
+    });
+
+    const listed = await repo.listScheduledTransactions("plan-test");
+    const byId = Object.fromEntries(listed.map((row: { id: string }) => [row.id, row]));
+    expect(Object.hasOwn(byId["explicit-false"], "deleted")).toBe(true);
+    expect(byId["explicit-false"].deleted).toBe(false);
+    expect(Object.hasOwn(byId["absent-deleted"], "deleted")).toBe(false);
+    expect(byId["split-parent"].subtransactions).toEqual([
+      expect.objectContaining({ id: "live", amount: -100 }),
+    ]);
+    expect(byId["split-parent"].subtransactions.map((row: { id: string }) => row.id)).not.toContain("dead");
+
+    expect(await repo.getScheduledTransaction("plan-test", "explicit-false")).toEqual(byId["explicit-false"]);
+    expect(await repo.getScheduledTransaction("plan-test", "absent-deleted")).toEqual(byId["absent-deleted"]);
+    expect(await repo.getScheduledTransaction("plan-test", "split-parent")).toEqual(byId["split-parent"]);
+
+    const created = await repo.createScheduledTransaction("plan-test", {
+      account_id: "cash", date_first: "2026-09-12", frequency: "never", amount: -500,
+    });
+    expect(Object.hasOwn(created, "deleted")).toBe(true);
+    expect(created.deleted).toBe(false);
+    expect(await repo.getScheduledTransaction("plan-test", created.id)).toEqual(created);
+    const overlay = await repo.updateScheduledTransaction("plan-test", "explicit-false", { memo: "local overlay" });
+    expect(Object.hasOwn(overlay, "deleted")).toBe(true);
+    expect(overlay.deleted).toBe(false);
+    expect(overlay.memo).toBe("local overlay");
+  });
+
+  test("scheduled occurrence preparation reuses category lookups within one split", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await repo.upsertAccount("plan-test", { id: "cash", name: "Cash" });
+    await repo.upsertCategoryGroup("plan-test", { id: "living", name: "Living" });
+    await repo.upsertCategory("plan-test", { id: "food", category_group_id: "living", name: "Food" });
+    const lines = Array.from({ length: 20 }, (_, index) => ({ amount: -100, category_id: "food", memo: `line-${index}` }));
+    await repo.createScheduledTransaction("plan-test", {
+      id: "split-repeat-category",
+      account_id: "cash",
+      date_first: "2026-09-08",
+      frequency: "never",
+      amount: -2000,
+      subtransactions: lines,
+    });
+
+    let categoryLookups = 0;
+    const original = db.query.bind(db);
+    Object.defineProperty(db, "query", {
+      configurable: true,
+      value: (sql: string) => {
+        if (String(sql).includes("FROM categories WHERE id = ? AND plan_id = ? AND deleted = 0")) categoryLookups += 1;
+        return original(sql);
+      },
+    });
+    try {
+      await repo.materializeScheduledOccurrence("plan-test", "split-repeat-category", "2026-09-08", "2026-09-08", {
+        requestOperationId: "split-repeat-category",
+      });
+    } finally {
+      Object.defineProperty(db, "query", { configurable: true, value: original });
+    }
+    expect(categoryLookups).toBe(1);
   });
 
   test("serialises concurrent local SQLite schedule patches without dropping fields", async () => {

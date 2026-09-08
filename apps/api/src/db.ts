@@ -29,7 +29,6 @@ export function applyMigrations(db: Database): void {
     version: string;
     path: string;
     rebuildsForeignKeyTarget?: boolean;
-    skipUnlessColumn?: { table: string; column: string };
   }> = [
     {
       version: "001_initial",
@@ -107,7 +106,6 @@ export function applyMigrations(db: Database): void {
     {
       version: "019_query_covering_indexes",
       path: join(migrationsDir, "019_query_covering_indexes.sql"),
-      skipUnlessColumn: { table: "transactions", column: "transfer_transaction_id" },
     },
   ];
 
@@ -118,15 +116,6 @@ export function applyMigrations(db: Database): void {
 
     if (applied) {
       continue;
-    }
-
-    if (migration.skipUnlessColumn) {
-      // Incremental stub tests apply later migrations on incomplete ledgers.
-      // Skip the SQL, but do not record the version, so a later complete schema still applies it.
-      const ready = db
-        .query(`SELECT 1 AS ok FROM pragma_table_info('${migration.skipUnlessColumn.table}') WHERE name = ?`)
-        .get(migration.skipUnlessColumn.column);
-      if (!ready) continue;
     }
 
     const sql = readFileSync(migration.path, "utf8");
