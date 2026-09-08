@@ -18,6 +18,39 @@ enum AccountsPane: Hashable, Identifiable {
       return "account-\(id)"
     }
   }
+
+  static func defaultSelection(
+    openAccounts: [Account],
+    isFavourite: (String) -> Bool
+  ) -> AccountsPane {
+    if let favourite = openAccounts.first(where: { isFavourite($0.id) }) {
+      return .account(favourite.id)
+    }
+    if let open = openAccounts.first {
+      return .account(open.id)
+    }
+    return .all
+  }
+}
+
+enum AccountsPaneSelection {
+  static func reconciled(
+    current: AccountsPane?,
+    isRegularWidth: Bool,
+    knownAccountIDs: Set<String>,
+    canChooseDefault: Bool,
+    defaultPane: AccountsPane
+  ) -> AccountsPane? {
+    guard isRegularWidth else { return nil }
+    var pane = current
+    if case .account(let id) = pane, !knownAccountIDs.contains(id) {
+      pane = nil
+    }
+    if pane == nil, canChooseDefault {
+      return defaultPane
+    }
+    return pane
+  }
 }
 
 struct AccountsView: View {
@@ -55,13 +88,16 @@ struct AccountsView: View {
       }
     }
     .onAppear {
-      ensureDefaultPane()
+      reconcilePane()
     }
     .onChange(of: horizontalSizeClass) { _, _ in
-      ensureDefaultPane()
+      reconcilePane()
     }
     .onChange(of: model.accounts.map(\.id)) { _, _ in
-      ensureDefaultPane()
+      reconcilePane()
+    }
+    .onChange(of: model.referencePhase) { _, _ in
+      reconcilePane()
     }
     .sheet(item: $presentedSheet) { sheet in
       Group {
@@ -110,20 +146,20 @@ struct AccountsView: View {
   }
 
   private var defaultPane: AccountsPane {
-    if let favourite = model.openAccounts.first(where: { model.isAccountFavourite($0.id) }) {
-      return .account(favourite.id)
-    }
-    if let open = model.openAccounts.first {
-      return .account(open.id)
-    }
-    return .all
+    .defaultSelection(
+      openAccounts: model.openAccounts,
+      isFavourite: model.isAccountFavourite
+    )
   }
 
-  private func ensureDefaultPane() {
-    guard horizontalSizeClass == .regular, pane == nil else {
-      return
-    }
-    pane = defaultPane
+  private func reconcilePane() {
+    pane = AccountsPaneSelection.reconciled(
+      current: pane,
+      isRegularWidth: horizontalSizeClass == .regular,
+      knownAccountIDs: Set(model.accounts.map(\.id)),
+      canChooseDefault: !model.accounts.isEmpty || model.referencePhase == .loaded,
+      defaultPane: defaultPane
+    )
   }
 
   private func isShowing(_ candidate: AccountsPane) -> Bool {

@@ -114,6 +114,101 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertEqual(model.addTransactionsOrigin(), .visibleRegister(accountID: "acct-everyday"))
   }
 
+  func testRegularPaneWaitsForAccountsThenPicksDefault() {
+    var pane: AccountsPane?
+    pane = AccountsPaneSelection.reconciled(
+      current: pane,
+      isRegularWidth: true,
+      knownAccountIDs: [],
+      canChooseDefault: false,
+      defaultPane: .all
+    )
+    XCTAssertNil(pane, "must not pin .all while accounts are still loading")
+
+    pane = AccountsPaneSelection.reconciled(
+      current: pane,
+      isRegularWidth: true,
+      knownAccountIDs: ["acct-rainy", "acct-everyday"],
+      canChooseDefault: true,
+      defaultPane: .account("acct-everyday")
+    )
+    XCTAssertEqual(pane, .account("acct-everyday"))
+  }
+
+  func testRegularPaneReplacesDeletedAccount() {
+    let pane = AccountsPaneSelection.reconciled(
+      current: .account("acct-gone"),
+      isRegularWidth: true,
+      knownAccountIDs: ["acct-everyday"],
+      canChooseDefault: true,
+      defaultPane: .account("acct-everyday")
+    )
+    XCTAssertEqual(pane, .account("acct-everyday"))
+  }
+
+  func testCompactClearsPaneSoOverviewDoesNotAutoPush() {
+    let pane = AccountsPaneSelection.reconciled(
+      current: .account("acct-everyday"),
+      isRegularWidth: false,
+      knownAccountIDs: ["acct-everyday"],
+      canChooseDefault: true,
+      defaultPane: .account("acct-everyday")
+    )
+    XCTAssertNil(pane)
+  }
+
+  func testRegularKeepsExplicitAllWhenAccountsArrive() {
+    let pane = AccountsPaneSelection.reconciled(
+      current: .all,
+      isRegularWidth: true,
+      knownAccountIDs: ["acct-everyday"],
+      canChooseDefault: true,
+      defaultPane: .account("acct-everyday")
+    )
+    XCTAssertEqual(pane, .all)
+  }
+
+  func testDefaultSelectionPrefersFavouriteThenFirstOpen() {
+    let everyday = Account(
+      id: "acct-everyday",
+      name: "Everyday",
+      icon: nil,
+      type: "checking",
+      onBudget: true,
+      closed: false,
+      balance: 0,
+      clearedBalance: 0,
+      unclearedBalance: 0,
+      lastReconciledDate: nil,
+      deleted: false
+    )
+    let travel = Account(
+      id: "acct-travel",
+      name: "Travel",
+      icon: nil,
+      type: "checking",
+      onBudget: true,
+      closed: false,
+      balance: 0,
+      clearedBalance: 0,
+      unclearedBalance: 0,
+      lastReconciledDate: nil,
+      deleted: false
+    )
+    XCTAssertEqual(
+      AccountsPane.defaultSelection(openAccounts: [everyday, travel], isFavourite: { $0 == "acct-travel" }),
+      .account("acct-travel")
+    )
+    XCTAssertEqual(
+      AccountsPane.defaultSelection(openAccounts: [everyday, travel], isFavourite: { _ in false }),
+      .account("acct-everyday")
+    )
+    XCTAssertEqual(
+      AccountsPane.defaultSelection(openAccounts: [], isFavourite: { _ in false }),
+      .all
+    )
+  }
+
   func testAppTabCaptureSurfaceMapsPlanAndReflect() {
     XCTAssertEqual(AppTab.accounts.captureSurface, .accounts)
     XCTAssertEqual(AppTab.rewards.captureSurface, .rewards)
