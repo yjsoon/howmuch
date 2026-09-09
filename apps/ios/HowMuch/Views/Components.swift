@@ -333,10 +333,11 @@ final class RootChromeState {
   }
 
   func adoptSidebarLayout() {
-    if let overflow = overflow(on: tab) {
-      tab = overflow.tab
-      dismissMore()
+    guard let overflow = overflow(on: tab) else {
+      return
     }
+    overflowByTab[tab] = nil
+    tab = overflow.tab
   }
 
   func adoptCompactLayout() {
@@ -347,11 +348,126 @@ final class RootChromeState {
     openMore(destination)
   }
 
+  /// Compact TabView only hosts Accounts / Rewards / Reflect. Plan and Assistant
+  /// stay in More overlays, so the bar selection must never be those values.
+  var compactBarTab: AppTab {
+    tab.isCompactDestination ? tab : lastCompactTab
+  }
+
   var captureSurface: CaptureSurface {
     if tab.isCompactDestination, let overflow = overflowByTab[tab] {
       return overflow.captureSurface
     }
     return tab.captureSurface
+  }
+}
+
+/// Applies chrome inside the hosted view body. TabView drops modifiers
+/// attached to `Tab` content, which otherwise crashes DestinationsMenu.
+struct RootChromeScope<Content: View>: View {
+  var chrome: RootChromeState
+  var content: Content
+
+  init(chrome: RootChromeState, @ViewBuilder content: () -> Content) {
+    self.chrome = chrome
+    self.content = content()
+  }
+
+  var body: some View {
+    content.environment(chrome)
+  }
+}
+
+/// Phone and iPad need separate TabView trees. `sidebarAdaptable` plus a
+/// selection that is not in the current tab set fatal-errors on launch.
+struct RootTabView: View {
+  @Bindable var chrome: RootChromeState
+  var usesSidebar: Bool
+  var workspace: CaptureWorkspace = .shared
+
+  var body: some View {
+    if usesSidebar {
+      TabView(selection: $chrome.tab) {
+        Tab(AppTab.accounts.title, systemImage: AppTab.accounts.systemImage, value: AppTab.accounts) {
+          RootChromeScope(chrome: chrome) {
+            RootTabHost(for: .accounts) {
+              AccountsView()
+            }
+          }
+        }
+        Tab(AppTab.rewards.title, systemImage: AppTab.rewards.systemImage, value: AppTab.rewards) {
+          RootChromeScope(chrome: chrome) {
+            RootTabHost(for: .rewards) {
+              NavigationStack {
+                RewardsView()
+              }
+            }
+          }
+        }
+        Tab(AppTab.reflect.title, systemImage: AppTab.reflect.systemImage, value: AppTab.reflect) {
+          RootChromeScope(chrome: chrome) {
+            RootTabHost(for: .reflect) {
+              NavigationStack {
+                ReflectView()
+              }
+            }
+          }
+        }
+        Tab(AppTab.plan.title, systemImage: AppTab.plan.systemImage, value: AppTab.plan) {
+          RootChromeScope(chrome: chrome) {
+            NavigationStack {
+              CategoriesView()
+            }
+          }
+        }
+        Tab(AppTab.assistant.title, systemImage: AppTab.assistant.systemImage, value: AppTab.assistant) {
+          RootChromeScope(chrome: chrome) {
+            NavigationStack {
+              AssistantView(workspace: workspace)
+            }
+          }
+        }
+      }
+      .tabViewStyle(.sidebarAdaptable)
+      .defaultAdaptableTabBarPlacement(.sidebar)
+    } else {
+      TabView(selection: compactBarSelection) {
+        Tab(AppTab.accounts.title, systemImage: AppTab.accounts.systemImage, value: AppTab.accounts) {
+          RootChromeScope(chrome: chrome) {
+            RootTabHost(for: .accounts) {
+              AccountsView()
+            }
+          }
+        }
+        Tab(AppTab.rewards.title, systemImage: AppTab.rewards.systemImage, value: AppTab.rewards) {
+          RootChromeScope(chrome: chrome) {
+            RootTabHost(for: .rewards) {
+              NavigationStack {
+                RewardsView()
+              }
+            }
+          }
+        }
+        Tab(AppTab.reflect.title, systemImage: AppTab.reflect.systemImage, value: AppTab.reflect) {
+          RootChromeScope(chrome: chrome) {
+            RootTabHost(for: .reflect) {
+              NavigationStack {
+                ReflectView()
+              }
+            }
+          }
+        }
+      }
+      .tabViewStyle(.tabBarOnly)
+      .tabBarMinimizeBehavior(.onScrollDown)
+    }
+  }
+
+  private var compactBarSelection: Binding<AppTab> {
+    Binding(
+      get: { chrome.compactBarTab },
+      set: { chrome.tab = $0 }
+    )
   }
 }
 
