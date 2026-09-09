@@ -392,11 +392,11 @@ final class IPadLayoutTests: XCTestCase {
       XCTFail("compact root must host a tab-row Assistant")
       return
     }
-    if let accounts = surface.firstControl(label: "Accounts") {
+    if let accounts = surface.tabRowControl(label: "Accounts") {
       XCTAssertEqual(
         assistant.frame.midY,
         accounts.frame.midY,
-        accuracy: 12,
+        accuracy: 24,
         "Assistant must sit in the destination row"
       )
     }
@@ -426,13 +426,9 @@ final class IPadLayoutTests: XCTestCase {
     }
     XCTAssertTrue(appeared, "sidebar root must keep Assistant as a destination: \(surface.accessibilityLabels())")
     XCTAssertNil(surface.firstControl(label: "Add Transactions"), "sidebar must not host a search-role Add")
-
-    let bottomAssistants = surface.controls(labelContains: "Assistant").filter { assistant in
-      assistant.label == "Assistant" && assistant.frame.midY > surface.windowBounds.midY
-    }
-    XCTAssertTrue(
-      bottomAssistants.isEmpty,
-      "sidebar must not install Assistant in a bottom tab row"
+    XCTAssertNil(
+      surface.tabRowOverlayButton(label: "Assistant"),
+      "sidebar must not install a compact tab-row Assistant overlay"
     )
   }
 

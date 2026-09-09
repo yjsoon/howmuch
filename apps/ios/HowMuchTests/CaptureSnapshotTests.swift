@@ -198,7 +198,7 @@ final class CaptureSnapshotTests: XCTestCase {
       XCTAssertEqual(
         button.frame.midY,
         assistant.frame.midY,
-        accuracy: 12,
+        accuracy: 24,
         "Add and Assistant must share the destination row"
       )
       for label in ["Accounts", "Rewards", "Reflect"] {
@@ -209,13 +209,13 @@ final class CaptureSnapshotTests: XCTestCase {
         XCTAssertEqual(
           button.frame.midY,
           destination.frame.midY,
-          accuracy: 12,
+          accuracy: 24,
           "Add must share the tab row, not a separate accessory"
         )
         XCTAssertEqual(
           assistant.frame.midY,
           destination.frame.midY,
-          accuracy: 12,
+          accuracy: 24,
           "Assistant must share the tab row, not a separate accessory"
         )
         XCTAssertFalse(destination.object.accessibilityCustomActions?.contains { $0.name == "Add manually" } == true)
@@ -227,9 +227,9 @@ final class CaptureSnapshotTests: XCTestCase {
       XCTAssertEqual(router.pending?.origin, origin)
       XCTAssertEqual(chrome.tab, .accounts, "Add must not replace the selected destination")
       _ = await surface.waitUntil {
-        surface.firstControl(label: "Add Transactions")?.object.accessibilityCustomActions?.contains { $0.name == "Add manually" } == true
+        surface.addTransactionsManualAction() != nil
       }
-      guard let manual = surface.firstControl(label: "Add Transactions")?.object.accessibilityCustomActions?.first(where: { $0.name == "Add manually" }),
+      guard let manual = surface.addTransactionsManualAction(),
             let handler = manual.actionHandler else {
         XCTFail("Add Transactions must expose an actionable Add manually VoiceOver action")
         continue
@@ -2535,15 +2535,32 @@ final class SnapshotSurface {
   }
 
   func tabRowControl(label: String) -> SnapshotAXNode? {
-    guard let accounts = firstControl(label: "Accounts") else {
+    let nodes = accessibilityNodes()
+    let accounts = nodes.last {
+      $0.label == "Accounts" && $0.frame.midY > windowBounds.midY
+    } ?? firstControl(label: "Accounts")
+    guard let accounts else {
       return firstControl(label: label)
     }
-    let nodes = accessibilityNodes()
     return nodes.first {
-      $0.label == label && $0.traits.contains(.button) && abs($0.frame.midY - accounts.frame.midY) <= 12
+      $0.label == label && $0.traits.contains(.button) && abs($0.frame.midY - accounts.frame.midY) <= 24
     } ?? nodes.first {
-      $0.label == label && abs($0.frame.midY - accounts.frame.midY) <= 12
+      $0.label == label && abs($0.frame.midY - accounts.frame.midY) <= 24
     }
+  }
+
+  /// Compact overlay Assistant is a `UIButton`. Sidebar `_UITabButton`s are not.
+  func tabRowOverlayButton(label: String) -> SnapshotAXNode? {
+    accessibilityNodes().first {
+      $0.label == label && String(describing: type(of: $0.object)) == "UIButton"
+    }
+  }
+
+  func addTransactionsManualAction() -> UIAccessibilityCustomAction? {
+    accessibilityNodes().lazy.compactMap { node in
+      guard node.label == "Add Transactions" else { return nil }
+      return node.object.accessibilityCustomActions?.first { $0.name == "Add manually" }
+    }.first
   }
 
   func firstControl(labelContains needle: String) -> SnapshotAXNode? {

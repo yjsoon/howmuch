@@ -589,19 +589,23 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
     controller.install()
   }
 
-  static func dismantleUIViewController(_ controller: Controller, coordinator: ()) {
-    controller.uninstall()
-  }
+    static func dismantleUIViewController(_ controller: Controller, coordinator: ()) {
+      controller.stopTracking()
+      controller.uninstall()
+    }
 
   final class Controller: UIViewController, UIContextMenuInteractionDelegate {
     var addManually: () -> Void = {}
     var openAssistant: () -> Void = {}
-    private weak var target: UIControl?
+    private weak var target: UIView?
     private var menuInteraction: UIContextMenuInteraction?
     private var manualAction: UIAccessibilityCustomAction?
     private var assistantButton: UIButton?
+    private var attachedManualTargets: [NSObject] = []
+    private var displayLink: CADisplayLink?
     private weak var hostedBar: UITabBar?
     private weak var reservedCluster: UIView?
+    private weak var destinationPlatter: UIView?
     private var originalClusterMargins: NSDirectionalEdgeInsets?
     private var reservedWidth: CGFloat = 0
     private var destinationShift: CGFloat = 0
@@ -613,7 +617,13 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
 
     override func viewDidAppear(_ animated: Bool) {
       super.viewDidAppear(animated)
+      startTracking()
       install()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+      stopTracking()
+      super.viewDidDisappear(animated)
     }
 
     override func viewDidLayoutSubviews() {
@@ -622,35 +632,46 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
     }
 
     func install() {
-      guard let tabBar = hostedTabBar(),
-            let add = labelledControl(RootTrailingAction.addTransactions.title, in: tabBar)
-      else {
+      guard let window = view.window else {
         return
       }
-      if add !== target {
+      let accounts = tabRowView(AppTab.accounts.title, in: window)
+      let addView = accounts.flatMap { searchRoleAdd(in: window, alignedWith: $0) }
+        ?? rightmostCompactView(inBottomBandOf: window)
+      guard let addView else {
+        return
+      }
+      startTracking()
+      let tabBar = hostedTabBar()
+      if addView !== target {
         uninstall()
-        target = add
+        target = addView
         hostedBar = tabBar
+        if addView.accessibilityLabel == nil || addView.accessibilityLabel?.isEmpty == true {
+          addView.accessibilityLabel = RootTrailingAction.addTransactions.title
+        }
         let interaction = UIContextMenuInteraction(delegate: self)
         menuInteraction = interaction
-        add.addInteraction(interaction)
-        let action = UIAccessibilityCustomAction(name: "Add manually") { [weak self] _ in
-          guard let self else { return false }
-          self.addManually()
-          return true
-        }
-        manualAction = action
-        add.accessibilityCustomActions = (add.accessibilityCustomActions ?? []) + [action]
+        addView.addInteraction(interaction)
       }
+      attachManualEntryAction(in: window, preferring: addView)
       hostedBar = tabBar
-      layoutAssistant(relativeTo: add, in: tabBar)
+      layoutAssistant(
+        relativeTo: addView,
+        alignedWith: accounts ?? addView,
+        tabBar: tabBar,
+        in: window
+      )
     }
 
     func uninstall() {
       if let menuInteraction { target?.removeInteraction(menuInteraction) }
       if let manualAction {
-        target?.accessibilityCustomActions = target?.accessibilityCustomActions?.filter { $0 !== manualAction }
+        for object in attachedManualTargets {
+          object.accessibilityCustomActions = object.accessibilityCustomActions?.filter { $0 !== manualAction }
+        }
       }
+      attachedManualTargets = []
       assistantButton?.removeFromSuperview()
       restoreReservation()
       target = nil
@@ -673,60 +694,48 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
       }
     }
 
-    private func layoutAssistant(relativeTo add: UIControl, in tabBar: UITabBar) {
-      guard let host = add.superview else {
-        assistantButton?.isHidden = true
-        return
-      }
+    private func layoutAssistant(
+      relativeTo add: UIView,
+      alignedWith _: UIView,
+      tabBar: UITabBar?,
+      in window: UIWindow
+    ) {
+      let host = hostForAssistant(add: add, window: window)
+      let pin = circularPin(from: add, in: window)
       let button = assistantButton ?? makeAssistantButton()
       if button.superview !== host {
         button.removeFromSuperview()
-        host.insertSubview(button, belowSubview: add)
+        host.addSubview(button)
       }
       assistantButton = button
-      button.tintColor = tabBar.tintColor
+      button.tintColor = tabBar?.tintColor ?? window.tintColor
 
       let gap: CGFloat = 8
-      let size = CGSize(width: max(44, add.bounds.width), height: max(44, add.bounds.height))
-      func chatFrame() -> CGRect {
-        CGRect(
-          x: add.frame.minX - gap - size.width,
-          y: add.frame.midY - size.height / 2,
-          width: size.width,
-          height: size.height
-        )
-      }
-      var frame = chatFrame()
-      if let reflect = labelledControl(AppTab.reflect.title, in: tabBar) {
-        let chatInBar = host.convert(frame, to: tabBar)
-        let reflectInBar = reflect.convert(reflect.bounds, to: tabBar)
-        if chatInBar.intersects(reflectInBar) {
-          let needed = chatInBar.intersection(reflectInBar).width + gap
-          reserveLane(add: add, reflect: reflect, width: needed)
-          tabBar.layoutIfNeeded()
-          frame = chatFrame()
-        }
-        var placed = host.convert(frame, to: tabBar)
-        var reflectAfter = reflect.convert(reflect.bounds, to: tabBar)
-        if placed.intersects(reflectAfter) {
-          shiftDestinations(in: tabBar, excluding: add, width: placed.intersection(reflectAfter).width + gap)
-          frame = chatFrame()
-          placed = host.convert(frame, to: tabBar)
-          reflectAfter = reflect.convert(reflect.bounds, to: tabBar)
-        }
-        if placed.intersects(reflectAfter) {
-          button.isHidden = true
-          return
-        }
-      }
+      let pinInHost = pin.convert(pin.bounds, to: host)
+      let side = max(44, min(pinInHost.width, pinInHost.height))
+      let size = CGSize(width: side, height: side)
+      let needed = size.width + gap
+      shiftDestinationCapsule(in: window, excluding: pin, width: needed)
+      let frame = CGRect(
+        x: pinInHost.minX - gap - size.width,
+        y: pinInHost.midY - size.height / 2,
+        width: size.width,
+        height: size.height
+      )
       button.isHidden = false
+      button.layer.cornerRadius = size.height / 2
+      button.clipsToBounds = true
       button.frame = frame
+      host.bringSubviewToFront(button)
     }
 
     private func makeAssistantButton() -> UIButton {
       let button = UIButton(type: .system)
       var configuration = UIButton.Configuration.plain()
       configuration.image = UIImage(systemName: RootTrailingAction.assistant.systemImage)
+      configuration.baseForegroundColor = .label
+      configuration.background.backgroundColor = .white.withAlphaComponent(0.92)
+      configuration.cornerStyle = .capsule
       button.configuration = configuration
       button.accessibilityLabel = RootTrailingAction.assistant.title
       button.accessibilityTraits = .button
@@ -748,9 +757,12 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
         for title in AppTab.compactDestinations.map(\.title) {
           labelledControl(title, in: hostedBar)?.transform = .identity
         }
+        hostedBar.transform = .identity
       }
+      destinationPlatter?.transform = .identity
       reservedCluster = nil
       originalClusterMargins = nil
+      destinationPlatter = nil
       reservedWidth = 0
       destinationShift = 0
     }
@@ -795,7 +807,7 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
       if let bar = view as? UITabBar {
         return bar
       }
-      return view.subviews.lazy.compactMap { firstTabBar(in: $0) }.first
+      return view.subviews.lazy.compactMap { self.firstTabBar(in: $0) }.first
     }
 
     private func destinationCluster(reflect: UIView, add: UIView, tabBar: UITabBar) -> UIView? {
@@ -813,14 +825,231 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
 
     private func tabController(in controller: UIViewController) -> UITabBarController? {
       if let tab = controller as? UITabBarController { return tab }
-      return controller.children.lazy.compactMap { tabController(in: $0) }.first
+      return controller.children.lazy.compactMap { self.tabController(in: $0) }.first
+    }
+
+    private func shiftDestinationCapsule(in window: UIWindow, excluding add: UIView, width: CGFloat) {
+      destinationShift = max(destinationShift, width)
+      let bandMinY = window.bounds.maxY - 160
+      var capsule: UIView?
+      var capsuleWidth: CGFloat = 0
+      func walk(_ view: UIView) {
+        if view !== add, !add.isDescendant(of: view) {
+          let frame = view.convert(view.bounds, to: window)
+          let inBand = frame.midY >= bandMinY
+          let shape = frame.width >= 180 && frame.width <= 360 && frame.height >= 48 && frame.height <= 88
+          if inBand, shape, frame.width > capsuleWidth {
+            capsule = view
+            capsuleWidth = frame.width
+          }
+        }
+        for subview in view.subviews {
+          walk(subview)
+        }
+      }
+      walk(window)
+      guard let capsule else {
+        return
+      }
+      destinationPlatter = capsule
+      capsule.transform = CGAffineTransform(translationX: -destinationShift, y: 0)
+    }
+
+    private func destinationCluster(reflect: UIView, add: UIView, stopAt ancestor: UIView?) -> UIView? {
+      var cluster: UIView?
+      var current: UIView? = reflect.superview
+      while let view = current, view !== ancestor, view !== add.window {
+        if add.isDescendant(of: view) {
+          break
+        }
+        cluster = view
+        current = view.superview
+      }
+      return cluster
+    }
+
+    private func attachManualEntryAction(in window: UIWindow, preferring view: UIView) {
+      let title = RootTrailingAction.addTransactions.title
+      if view.accessibilityLabel == nil || view.accessibilityLabel?.isEmpty == true {
+        view.accessibilityLabel = title
+      }
+      let action = manualAction ?? UIAccessibilityCustomAction(name: "Add manually") { [weak self] _ in
+        guard let self else { return false }
+        self.addManually()
+        return true
+      }
+      manualAction = action
+      applyManualEntry(action, to: view)
+      applyManualEntry(action, to: circularPin(from: view, in: window))
+      var seen = Set<ObjectIdentifier>()
+      func walk(_ object: NSObject) {
+        let identity = ObjectIdentifier(object)
+        guard !seen.contains(identity) else { return }
+        seen.insert(identity)
+        if object.accessibilityLabel == title {
+          applyManualEntry(action, to: object)
+        }
+        let count = object.accessibilityElementCount()
+        if count != NSNotFound, count > 0 {
+          for index in 0..<count {
+            if let element = object.accessibilityElement(at: index) as? NSObject {
+              walk(element)
+            }
+          }
+        } else if let elements = object.accessibilityElements {
+          for element in elements {
+            if let child = element as? NSObject {
+              walk(child)
+            }
+          }
+        }
+        if let host = object as? UIView {
+          for subview in host.subviews {
+            walk(subview)
+          }
+        }
+      }
+      walk(window)
+    }
+
+    private func startTracking() {
+      guard displayLink == nil else { return }
+      let link = CADisplayLink(target: self, selector: #selector(onDisplayTick))
+      link.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 10)
+      link.add(to: .main, forMode: .common)
+      displayLink = link
+    }
+
+    func stopTracking() {
+      displayLink?.invalidate()
+      displayLink = nil
+    }
+
+    @objc private func onDisplayTick() {
+      install()
+    }
+
+    private func applyManualEntry(_ action: UIAccessibilityCustomAction, to object: NSObject) {
+      let existing = object.accessibilityCustomActions ?? []
+      if existing.contains(where: { $0 === action || $0.name == "Add manually" }) {
+        if !attachedManualTargets.contains(where: { $0 === object }) {
+          attachedManualTargets.append(object)
+        }
+        return
+      }
+      object.accessibilityCustomActions = existing + [action]
+      attachedManualTargets.append(object)
+    }
+
+    private func hostForAssistant(add: UIView, window: UIWindow) -> UIView {
+      window
+    }
+
+    /// iOS 26's search-role pin is often an inner image; walk up to the visible circle.
+    private func circularPin(from view: UIView, in window: UIWindow) -> UIView {
+      var pin = view
+      var current = view.superview
+      while let parent = current {
+        if parent === assistantButton { break }
+        let frame = parent.convert(parent.bounds, to: window)
+        let compact = abs(frame.width - frame.height) <= 14 && frame.width >= 40 && frame.width <= 80
+        if compact {
+          pin = parent
+          current = parent.superview
+        } else {
+          break
+        }
+      }
+      return pin
+    }
+
+    private func searchRoleAdd(in window: UIWindow, alignedWith accounts: UIView) -> UIView? {
+      let title = RootTrailingAction.addTransactions.title
+      let rowY = accounts.convert(accounts.bounds, to: window).midY
+      let labelled = labelledViews(title, in: window).filter { view in
+        abs(view.convert(view.bounds, to: window).midY - rowY) <= 28
+      }
+      if let add = labelled.max(by: { $0.convert($0.bounds, to: window).minX < $1.convert($1.bounds, to: window).minX }) {
+        return add
+      }
+      let accountsFrame = accounts.convert(accounts.bounds, to: window)
+      let destinations = Set(AppTab.compactDestinations.map(\.title) + [RootTrailingAction.assistant.title])
+      var candidates: [UIView] = []
+      func walk(_ view: UIView) {
+        if view !== accounts, view !== assistantButton {
+          let frame = view.convert(view.bounds, to: window)
+          let aligned = abs(frame.midY - rowY) <= 28
+          let trailing = frame.minX > accountsFrame.maxX + 8
+          let compact = abs(frame.width - frame.height) <= 14 && frame.width >= 40 && frame.width <= 76
+          let label = view.accessibilityLabel ?? ""
+          if aligned, trailing, compact, !destinations.contains(label) {
+            candidates.append(view)
+          }
+        }
+        for subview in view.subviews {
+          walk(subview)
+        }
+      }
+      walk(window)
+      let controls = candidates.compactMap { $0 as? UIControl }
+      let pool = controls.isEmpty ? candidates : controls
+      let roots = pool.filter { candidate in
+        !pool.contains { $0 !== candidate && candidate.isDescendant(of: $0) }
+      }
+      return roots.max { $0.convert($0.bounds, to: window).minX < $1.convert($1.bounds, to: window).minX }
+    }
+
+    private func rightmostCompactView(inBottomBandOf window: UIWindow) -> UIView? {
+      let bandMinY = window.bounds.maxY - 160
+      var candidates: [UIView] = []
+      func walk(_ view: UIView) {
+        guard view !== assistantButton else { return }
+        let frame = view.convert(view.bounds, to: window)
+        let inBand = frame.midY >= bandMinY && frame.maxY <= window.bounds.maxY - 8
+        let compact = abs(frame.width - frame.height) <= 14 && frame.width >= 40 && frame.width <= 76
+        if inBand, compact {
+          candidates.append(view)
+        }
+        for subview in view.subviews {
+          walk(subview)
+        }
+      }
+      walk(window)
+      let controls = candidates.compactMap { $0 as? UIControl }
+      let pool = controls.isEmpty ? candidates : controls
+      let roots = pool.filter { candidate in
+        !pool.contains { $0 !== candidate && candidate.isDescendant(of: $0) }
+      }
+      return roots.max { $0.convert($0.bounds, to: window).minX < $1.convert($1.bounds, to: window).minX }
+    }
+
+    private func tabRowView(_ label: String, in window: UIWindow) -> UIView? {
+      labelledViews(label, in: window)
+        .filter { $0.convert($0.bounds, to: window).midY > window.bounds.midY }
+        .max { $0.convert($0.bounds, to: window).midY < $1.convert($1.bounds, to: window).midY }
+    }
+
+    private func labelledViews(_ label: String, in view: UIView) -> [UIView] {
+      var matches: [UIView] = []
+      if view.accessibilityLabel == label {
+        matches.append(view)
+      }
+      for subview in view.subviews {
+        matches.append(contentsOf: labelledViews(label, in: subview))
+      }
+      return matches
+    }
+
+    private func tabRowControl(_ label: String, in window: UIWindow) -> UIControl? {
+      tabRowView(label, in: window) as? UIControl
     }
 
     private func labelledControl(_ label: String, in view: UIView) -> UIControl? {
-      if let control = view as? UIControl, control.accessibilityLabel == label {
-        return control
-      }
-      return view.subviews.lazy.compactMap { labelledControl(label, in: $0) }.first
+      labelledControls(label, in: view).first
+    }
+
+    private func labelledControls(_ label: String, in view: UIView) -> [UIControl] {
+      labelledViews(label, in: view).compactMap { $0 as? UIControl }
     }
   }
 }
