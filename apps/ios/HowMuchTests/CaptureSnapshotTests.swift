@@ -2540,6 +2540,8 @@ final class SnapshotSurface {
     }
     let nodes = accessibilityNodes()
     return nodes.first {
+      $0.label == label && $0.traits.contains(.button) && abs($0.frame.midY - accounts.frame.midY) <= 12
+    } ?? nodes.first {
       $0.label == label && abs($0.frame.midY - accounts.frame.midY) <= 12
     }
   }

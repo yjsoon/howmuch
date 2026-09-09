@@ -601,9 +601,11 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
     private var menuInteraction: UIContextMenuInteraction?
     private var manualAction: UIAccessibilityCustomAction?
     private var assistantButton: UIButton?
+    private weak var hostedBar: UITabBar?
     private weak var reservedCluster: UIView?
     private var originalClusterMargins: NSDirectionalEdgeInsets?
     private var reservedWidth: CGFloat = 0
+    private var destinationShift: CGFloat = 0
 
     override func loadView() {
       view = UIView()
@@ -621,15 +623,15 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
     }
 
     func install() {
-      guard let root = view.window?.rootViewController,
-            let tab = tabController(in: root),
-            let add = labelledControl(RootTrailingAction.addTransactions.title, in: tab.tabBar)
+      guard let tabBar = hostedTabBar(),
+            let add = labelledControl(RootTrailingAction.addTransactions.title, in: tabBar)
       else {
         return
       }
       if add !== target {
         uninstall()
         target = add
+        hostedBar = tabBar
         let interaction = UIContextMenuInteraction(delegate: self)
         menuInteraction = interaction
         add.addInteraction(interaction)
@@ -641,7 +643,8 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
         manualAction = action
         add.accessibilityCustomActions = (add.accessibilityCustomActions ?? []) + [action]
       }
-      layoutAssistant(relativeTo: add, in: tab.tabBar)
+      hostedBar = tabBar
+      layoutAssistant(relativeTo: add, in: tabBar)
     }
 
     func uninstall() {
@@ -650,16 +653,12 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
         target?.accessibilityCustomActions = target?.accessibilityCustomActions?.filter { $0 !== manualAction }
       }
       assistantButton?.removeFromSuperview()
-      if let reservedCluster, let originalClusterMargins {
-        reservedCluster.directionalLayoutMargins = originalClusterMargins
-      }
+      restoreReservation()
       target = nil
       menuInteraction = nil
       manualAction = nil
       assistantButton = nil
-      reservedCluster = nil
-      originalClusterMargins = nil
-      reservedWidth = 0
+      hostedBar = nil
     }
 
     func contextMenuInteraction(
@@ -676,35 +675,46 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
     }
 
     private func layoutAssistant(relativeTo add: UIControl, in tabBar: UITabBar) {
+      guard let host = add.superview else {
+        assistantButton?.isHidden = true
+        return
+      }
       let button = assistantButton ?? makeAssistantButton()
-      if button.superview !== add.superview {
+      if button.superview !== host {
         button.removeFromSuperview()
-        add.superview?.insertSubview(button, belowSubview: add)
+        host.insertSubview(button, belowSubview: add)
       }
       assistantButton = button
       button.tintColor = tabBar.tintColor
 
       let gap: CGFloat = 8
       let size = CGSize(width: max(44, add.bounds.width), height: max(44, add.bounds.height))
-      let addFrame = add.frame
-      var frame = CGRect(
-        x: addFrame.minX - gap - size.width,
-        y: addFrame.midY - size.height / 2,
-        width: size.width,
-        height: size.height
-      )
+      func chatFrame() -> CGRect {
+        CGRect(
+          x: add.frame.minX - gap - size.width,
+          y: add.frame.midY - size.height / 2,
+          width: size.width,
+          height: size.height
+        )
+      }
+      var frame = chatFrame()
       if let reflect = labelledControl(AppTab.reflect.title, in: tabBar) {
-        let chatInBar = add.superview?.convert(frame, to: tabBar) ?? frame
+        let chatInBar = host.convert(frame, to: tabBar)
         let reflectInBar = reflect.convert(reflect.bounds, to: tabBar)
         if chatInBar.intersects(reflectInBar) {
           let needed = chatInBar.intersection(reflectInBar).width + gap
           reserveLane(add: add, reflect: reflect, width: needed)
           tabBar.layoutIfNeeded()
-          frame.origin.x = add.frame.minX - gap - size.width
-          frame.origin.y = add.frame.midY - size.height / 2
+          frame = chatFrame()
         }
-        let placed = add.superview?.convert(frame, to: tabBar) ?? frame
-        let reflectAfter = reflect.convert(reflect.bounds, to: tabBar)
+        var placed = host.convert(frame, to: tabBar)
+        var reflectAfter = reflect.convert(reflect.bounds, to: tabBar)
+        if placed.intersects(reflectAfter) {
+          shiftDestinations(in: tabBar, excluding: add, width: placed.intersection(reflectAfter).width + gap)
+          frame = chatFrame()
+          placed = host.convert(frame, to: tabBar)
+          reflectAfter = reflect.convert(reflect.bounds, to: tabBar)
+        }
         if placed.intersects(reflectAfter) {
           button.isHidden = true
           return
@@ -731,8 +741,24 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
       return button
     }
 
+    private func restoreReservation() {
+      if let reservedCluster, let originalClusterMargins {
+        reservedCluster.directionalLayoutMargins = originalClusterMargins
+      }
+      if let hostedBar {
+        for title in AppTab.compactDestinations.map(\.title) {
+          labelledControl(title, in: hostedBar)?.transform = .identity
+        }
+      }
+      reservedCluster = nil
+      originalClusterMargins = nil
+      reservedWidth = 0
+      destinationShift = 0
+    }
+
     private func reserveLane(add: UIView, reflect: UIView, width: CGFloat) {
-      guard let cluster = destinationCluster(reflect: reflect, add: add, tabBar: tabBar) else {
+      guard let tabBar = hostedBar,
+            let cluster = destinationCluster(reflect: reflect, add: add, tabBar: tabBar) else {
         return
       }
       if reservedCluster == nil {
@@ -744,6 +770,33 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
       margins.trailing = (originalClusterMargins?.trailing ?? margins.trailing) + reservedWidth
       cluster.directionalLayoutMargins = margins
       (cluster as? UIStackView)?.isLayoutMarginsRelativeArrangement = true
+    }
+
+    private func shiftDestinations(in tabBar: UITabBar, excluding add: UIView, width: CGFloat) {
+      destinationShift = max(destinationShift, width)
+      for title in AppTab.compactDestinations.map(\.title) {
+        guard let control = labelledControl(title, in: tabBar), control !== add else {
+          continue
+        }
+        control.transform = CGAffineTransform(translationX: -destinationShift, y: 0)
+      }
+    }
+
+    private func hostedTabBar() -> UITabBar? {
+      if let root = view.window?.rootViewController, let tab = tabController(in: root) {
+        return tab.tabBar
+      }
+      guard let window = view.window else {
+        return nil
+      }
+      return firstTabBar(in: window)
+    }
+
+    private func firstTabBar(in view: UIView) -> UITabBar? {
+      if let bar = view as? UITabBar {
+        return bar
+      }
+      return view.subviews.lazy.compactMap { firstTabBar(in: $0) }.first
     }
 
     private func destinationCluster(reflect: UIView, add: UIView, tabBar: UITabBar) -> UIView? {
