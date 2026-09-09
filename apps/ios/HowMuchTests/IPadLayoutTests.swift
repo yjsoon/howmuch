@@ -258,6 +258,13 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertEqual(AppTab.reflect.captureSurface, .reflect)
     XCTAssertEqual(AppTab.plan.captureSurface, .plan)
     XCTAssertEqual(AppTab.assistant.captureSurface, .assistant)
+    XCTAssertEqual(AppTab.accounts.compactBarSelection, .accounts)
+    XCTAssertEqual(AppTab.rewards.compactBarSelection, .rewards)
+    XCTAssertEqual(AppTab.reflect.compactBarSelection, .reflect)
+    XCTAssertNil(AppTab.plan.compactBarSelection)
+    XCTAssertNil(AppTab.assistant.compactBarSelection)
+    XCTAssertEqual(CompactBarSelection.accounts.tab, .accounts)
+    XCTAssertNil(CompactBarSelection.addTransactions.tab)
   }
 
   func testOpenMorePlanFromAccountsDoesNotLeakFocusedRegister() {
@@ -370,9 +377,63 @@ final class IPadLayoutTests: XCTestCase {
       surface.firstControl(label: "Accounts") != nil
         && surface.firstControl(label: "Rewards") != nil
         && surface.firstControl(label: "Reflect") != nil
+        && surface.firstControl(label: "Add Transactions") != nil
+        && surface.tabRowControl(label: "Assistant") != nil
     }
-    XCTAssertTrue(appeared, "compact root must show three tabs: \(surface.accessibilityLabels())")
+    XCTAssertTrue(
+      appeared,
+      "compact root must show three tabs plus Add and Assistant: \(surface.accessibilityLabels())"
+    )
     XCTAssertNotNil(surface.firstControl(label: "More"), "Accounts must still host DestinationsMenu")
+    XCTAssertEqual(chrome.compactBarTab, .accounts)
+    XCTAssertNil(chrome.overflow(on: .accounts))
+
+    guard let assistant = surface.tabRowControl(label: "Assistant") else {
+      XCTFail("compact root must host a tab-row Assistant")
+      return
+    }
+    if let accounts = surface.firstControl(label: "Accounts") {
+      XCTAssertEqual(
+        assistant.frame.midY,
+        accounts.frame.midY,
+        accuracy: 12,
+        "Assistant must sit in the destination row"
+      )
+    }
+    XCTAssertTrue(surface.activate(assistant))
+    XCTAssertEqual(chrome.overflow(on: .accounts), .assistant)
+    XCTAssertEqual(chrome.compactBarTab, .accounts)
+    XCTAssertEqual(chrome.tab, .accounts)
+  }
+
+  func testSidebarRootTabViewDoesNotInstallTabRowAssistant() async {
+    let harness = SnapshotHarness.make()
+    let chrome = RootChromeState()
+    guard let surface = SnapshotSurface(
+      root: RootTabView(chrome: chrome, usesSidebar: true)
+        .environment(harness.model)
+        .environment(chrome)
+        .environment(\.horizontalSizeClass, .regular),
+      size: CGSize(width: 1180, height: 820)
+    ) else {
+      XCTFail("sidebar root tabs need a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    let appeared = await surface.waitUntil {
+      surface.firstControl(label: "Assistant") != nil
+    }
+    XCTAssertTrue(appeared, "sidebar root must keep Assistant as a destination: \(surface.accessibilityLabels())")
+    XCTAssertNil(surface.firstControl(label: "Add Transactions"), "sidebar must not host a search-role Add")
+
+    let bottomAssistants = surface.controls(labelContains: "Assistant").filter { assistant in
+      assistant.label == "Assistant" && assistant.frame.midY > surface.windowBounds.midY
+    }
+    XCTAssertTrue(
+      bottomAssistants.isEmpty,
+      "sidebar must not install Assistant in a bottom tab row"
+    )
   }
 
   func testCompactRootTabViewAcceptsOverflowSelectionWithoutCrashing() async {

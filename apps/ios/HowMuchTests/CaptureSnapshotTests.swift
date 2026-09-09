@@ -156,7 +156,7 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertNotNil(surface.firstControl(label: "Send"))
   }
 
-  func testFloatingAddTapAndAccessibilityActionUseDistinctRoutes() async {
+  func testTabRowAddTapAndAccessibilityActionUseDistinctRoutes() async {
     let router = CaptureRouter.shared
     let previous = router.pending
     defer { router.pending = previous }
@@ -165,56 +165,63 @@ final class CaptureSnapshotTests: XCTestCase {
       let origin = CaptureOrigin.visibleRegister(accountID: "acct-travel")
       let chrome = RootChromeState()
       guard let surface = SnapshotSurface(
-        root: ZStack {
-          TabView(selection: Binding(
-            get: { chrome.tab },
-            set: { chrome.tab = $0 }
-          )) {
-            Tab("Accounts", systemImage: "building.columns", value: AppTab.accounts) {
-              Text("Entry fixture")
-            }
-            Tab("Rewards", systemImage: "creditcard", value: AppTab.rewards) {
-              Text("Rewards fixture")
-            }
-            Tab("Reflect", systemImage: "chart.bar.fill", value: AppTab.reflect) {
-              Text("Reflect fixture")
-            }
-          }
-          RootAddControl(presenting: {
-            harness.model.presentAddTransactions(origin: origin)
-          }, presentingManually: {
-            harness.model.presentManualTransaction(origin: origin)
-          })
-          .padding(RootChrome.addControlInsets(idiom: .phone, horizontalSizeClass: .compact))
-          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        }
+        root: RootTabView(
+          chrome: chrome,
+          usesSidebar: false,
+          presenting: { harness.model.presentAddTransactions(origin: origin) },
+          presentingManually: { harness.model.presentManualTransaction(origin: origin) }
+        )
         .environment(chrome)
         .environment(harness.model)
-        .environment(\.dynamicTypeSize, size),
+        .environment(\.dynamicTypeSize, size)
+        .environment(\.horizontalSizeClass, .compact),
         size: CGSize(width: 390, height: 844)
       ) else {
-        XCTFail("root Add control needs a connected UIWindowScene")
+        XCTFail("root tab row needs a connected UIWindowScene")
         continue
       }
       defer { surface.detach() }
-      let appeared = await surface.waitUntil { surface.firstControl(label: "Add Transactions") != nil }
-      XCTAssertTrue(appeared)
+      let appeared = await surface.waitUntil {
+        surface.firstControl(label: "Add Transactions") != nil
+          && surface.tabRowControl(label: "Assistant") != nil
+      }
+      XCTAssertTrue(appeared, "compact tab row must host Add and Assistant: \(surface.accessibilityLabels())")
       guard let button = surface.firstControl(label: "Add Transactions") else { continue }
+      guard let assistant = surface.tabRowControl(label: "Assistant") else {
+        XCTFail("tab-row Assistant missing")
+        continue
+      }
       surface.assertMinimumHitTarget(button)
+      surface.assertMinimumHitTarget(assistant)
       XCTAssertTrue(surface.windowBounds.contains(button.frame))
+      XCTAssertTrue(surface.windowBounds.contains(assistant.frame))
+      XCTAssertEqual(
+        button.frame.midY,
+        assistant.frame.midY,
+        accuracy: 12,
+        "Add and Assistant must share the destination row"
+      )
       for label in ["Accounts", "Rewards", "Reflect"] {
         guard let destination = surface.firstControl(label: label) else {
           XCTFail("root tab missing \(label)")
           continue
         }
-        XCTAssertGreaterThan(
-          abs(button.frame.midY - destination.frame.midY),
-          12,
-          "Add is a floating plus, not a tab-row item"
+        XCTAssertEqual(
+          button.frame.midY,
+          destination.frame.midY,
+          accuracy: 12,
+          "Add must share the tab row, not a separate accessory"
+        )
+        XCTAssertEqual(
+          assistant.frame.midY,
+          destination.frame.midY,
+          accuracy: 12,
+          "Assistant must share the tab row, not a separate accessory"
         )
         XCTAssertFalse(destination.object.accessibilityCustomActions?.contains { $0.name == "Add manually" } == true)
+        XCTAssertFalse(assistant.object.accessibilityCustomActions?.contains { $0.name == "Add manually" } == true)
       }
-      attachImage(surface.captureVisible(), name: "manual-entry-fab-\(size)")
+      attachImage(surface.captureVisible(), name: "manual-entry-tab-row-\(size)")
       XCTAssertTrue(surface.activate(button))
       XCTAssertEqual(router.pending?.kind, .blank, "ordinary tap must remain conversational")
       XCTAssertEqual(router.pending?.origin, origin)
@@ -224,7 +231,7 @@ final class CaptureSnapshotTests: XCTestCase {
       }
       guard let manual = surface.firstControl(label: "Add Transactions")?.object.accessibilityCustomActions?.first(where: { $0.name == "Add manually" }),
             let handler = manual.actionHandler else {
-        XCTFail("the floating plus must expose an actionable Add manually VoiceOver action")
+        XCTFail("Add Transactions must expose an actionable Add manually VoiceOver action")
         continue
       }
       XCTAssertTrue(handler(manual))
@@ -2525,6 +2532,16 @@ final class SnapshotSurface {
     return nodes.first {
       $0.label == label && $0.traits.contains(.button)
     } ?? nodes.first { $0.label == label }
+  }
+
+  func tabRowControl(label: String) -> SnapshotAXNode? {
+    guard let accounts = firstControl(label: "Accounts") else {
+      return firstControl(label: label)
+    }
+    let nodes = accessibilityNodes()
+    return nodes.first {
+      $0.label == label && abs($0.frame.midY - accounts.frame.midY) <= 12
+    }
   }
 
   func firstControl(labelContains needle: String) -> SnapshotAXNode? {

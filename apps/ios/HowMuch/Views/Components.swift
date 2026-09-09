@@ -226,6 +226,50 @@ enum AppTab: Hashable, CaseIterable {
     case .accounts, .rewards, .reflect: return nil
     }
   }
+
+  var compactBarSelection: CompactBarSelection? {
+    switch self {
+    case .accounts: return .accounts
+    case .rewards: return .rewards
+    case .reflect: return .reflect
+    case .plan, .assistant: return nil
+    }
+  }
+}
+
+enum CompactBarSelection: Hashable {
+  case accounts
+  case rewards
+  case reflect
+  case addTransactions
+
+  var tab: AppTab? {
+    switch self {
+    case .accounts: return .accounts
+    case .rewards: return .rewards
+    case .reflect: return .reflect
+    case .addTransactions: return nil
+    }
+  }
+}
+
+enum RootTrailingAction {
+  case addTransactions
+  case assistant
+
+  var title: String {
+    switch self {
+    case .addTransactions: return "Add Transactions"
+    case .assistant: return "Assistant"
+    }
+  }
+
+  var systemImage: String {
+    switch self {
+    case .addTransactions: return "plus.bubble"
+    case .assistant: return "bubble.left.and.bubble.right"
+    }
+  }
 }
 
 enum MoreDestination: Hashable, CaseIterable, Identifiable {
@@ -299,8 +343,10 @@ enum RootChrome {
     idiom: UIUserInterfaceIdiom,
     horizontalSizeClass: UserInterfaceSizeClass?
   ) -> CGFloat {
-    let clearance = usesSidebar(idiom: idiom, horizontalSizeClass: horizontalSizeClass) ? 28.0 : 90.0
-    return clearance + RootAddControl.diameter + 8
+    if usesSidebar(idiom: idiom, horizontalSizeClass: horizontalSizeClass) {
+      return 28 + RootAddControl.diameter + 8
+    }
+    return 90
   }
 }
 
@@ -381,9 +427,12 @@ struct RootChromeScope<Content: View>: View {
 /// Phone and iPad need separate TabView trees. `sidebarAdaptable` plus a
 /// selection that is not in the current tab set fatal-errors on launch.
 struct RootTabView: View {
+  @Environment(AppModel.self) private var model
   @Bindable var chrome: RootChromeState
   var usesSidebar: Bool
   var workspace: CaptureWorkspace = .shared
+  var presenting: (() -> Void)?
+  var presentingManually: (() -> Void)?
 
   var body: some View {
     if usesSidebar {
@@ -432,14 +481,14 @@ struct RootTabView: View {
       .defaultAdaptableTabBarPlacement(.sidebar)
     } else {
       TabView(selection: compactBarSelection) {
-        Tab(AppTab.accounts.title, systemImage: AppTab.accounts.systemImage, value: AppTab.accounts) {
+        Tab(AppTab.accounts.title, systemImage: AppTab.accounts.systemImage, value: CompactBarSelection.accounts) {
           RootChromeScope(chrome: chrome) {
             RootTabHost(for: .accounts) {
               AccountsView()
             }
           }
         }
-        Tab(AppTab.rewards.title, systemImage: AppTab.rewards.systemImage, value: AppTab.rewards) {
+        Tab(AppTab.rewards.title, systemImage: AppTab.rewards.systemImage, value: CompactBarSelection.rewards) {
           RootChromeScope(chrome: chrome) {
             RootTabHost(for: .rewards) {
               NavigationStack {
@@ -448,7 +497,7 @@ struct RootTabView: View {
             }
           }
         }
-        Tab(AppTab.reflect.title, systemImage: AppTab.reflect.systemImage, value: AppTab.reflect) {
+        Tab(AppTab.reflect.title, systemImage: AppTab.reflect.systemImage, value: CompactBarSelection.reflect) {
           RootChromeScope(chrome: chrome) {
             RootTabHost(for: .reflect) {
               NavigationStack {
@@ -457,17 +506,270 @@ struct RootTabView: View {
             }
           }
         }
+        RootCaptureTab(addManually: presentManual)
       }
       .tabViewStyle(.tabBarOnly)
       .tabBarMinimizeBehavior(.onScrollDown)
+      .background {
+        RootTabBarTrailingActions(
+          addManually: presentManual,
+          openAssistant: { chrome.openMore(.assistant) }
+        )
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
+      }
     }
   }
 
-  private var compactBarSelection: Binding<AppTab> {
+  private var compactBarSelection: Binding<CompactBarSelection> {
     Binding(
-      get: { chrome.compactBarTab },
-      set: { chrome.tab = $0 }
+      get: { chrome.compactBarTab.compactBarSelection ?? .accounts },
+      set: { selection in
+        if selection == .addTransactions {
+          presentCapture()
+          return
+        }
+        if let tab = selection.tab {
+          chrome.tab = tab
+        }
+      }
     )
+  }
+
+  private func presentCapture() {
+    if let presenting {
+      presenting()
+      return
+    }
+    model.presentAddTransactions(origin: model.addTransactionsOrigin())
+  }
+
+  private func presentManual() {
+    if let presentingManually {
+      presentingManually()
+      return
+    }
+    model.presentManualTransaction(origin: model.addTransactionsOrigin())
+  }
+}
+
+struct RootCaptureTab: TabContent {
+  let addManually: () -> Void
+
+  var body: some TabContent<CompactBarSelection> {
+    Tab(
+      RootTrailingAction.addTransactions.title,
+      systemImage: RootTrailingAction.addTransactions.systemImage,
+      value: CompactBarSelection.addTransactions,
+      role: .search
+    ) {
+      Color.clear
+    }
+    .contextMenu {
+      Button("Add manually", systemImage: "square.and.pencil", action: addManually)
+    }
+  }
+}
+
+/// SwiftUI's TabContent menu serves the sidebar, not the iPhone tab bar.
+/// Attach standard UIKit interactions to the semantically identified Add control.
+struct RootTabBarTrailingActions: UIViewControllerRepresentable {
+  var addManually: () -> Void
+  var openAssistant: () -> Void
+
+  func makeUIViewController(context: Context) -> Controller {
+    let controller = Controller()
+    controller.addManually = addManually
+    controller.openAssistant = openAssistant
+    return controller
+  }
+
+  func updateUIViewController(_ controller: Controller, context: Context) {
+    controller.addManually = addManually
+    controller.openAssistant = openAssistant
+    controller.install()
+  }
+
+  static func dismantleUIViewController(_ controller: Controller, coordinator: ()) {
+    controller.uninstall()
+  }
+
+  final class Controller: UIViewController, UIContextMenuInteractionDelegate {
+    var addManually: () -> Void = {}
+    var openAssistant: () -> Void = {}
+    private weak var target: UIControl?
+    private var menuInteraction: UIContextMenuInteraction?
+    private var manualAction: UIAccessibilityCustomAction?
+    private var assistantButton: UIButton?
+    private weak var reservedCluster: UIView?
+    private var originalClusterMargins: NSDirectionalEdgeInsets?
+    private var reservedWidth: CGFloat = 0
+
+    override func loadView() {
+      view = UIView()
+      view.isUserInteractionEnabled = false
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+      super.viewDidAppear(animated)
+      install()
+    }
+
+    override func viewDidLayoutSubviews() {
+      super.viewDidLayoutSubviews()
+      install()
+    }
+
+    func install() {
+      guard let root = view.window?.rootViewController,
+            let tab = tabController(in: root),
+            let add = labelledControl(RootTrailingAction.addTransactions.title, in: tab.tabBar)
+      else {
+        return
+      }
+      if add !== target {
+        uninstall()
+        target = add
+        let interaction = UIContextMenuInteraction(delegate: self)
+        menuInteraction = interaction
+        add.addInteraction(interaction)
+        let action = UIAccessibilityCustomAction(name: "Add manually") { [weak self] _ in
+          guard let self else { return false }
+          self.addManually()
+          return true
+        }
+        manualAction = action
+        add.accessibilityCustomActions = (add.accessibilityCustomActions ?? []) + [action]
+      }
+      layoutAssistant(relativeTo: add, in: tab.tabBar)
+    }
+
+    func uninstall() {
+      if let menuInteraction { target?.removeInteraction(menuInteraction) }
+      if let manualAction {
+        target?.accessibilityCustomActions = target?.accessibilityCustomActions?.filter { $0 !== manualAction }
+      }
+      assistantButton?.removeFromSuperview()
+      if let reservedCluster, let originalClusterMargins {
+        reservedCluster.directionalLayoutMargins = originalClusterMargins
+      }
+      target = nil
+      menuInteraction = nil
+      manualAction = nil
+      assistantButton = nil
+      reservedCluster = nil
+      originalClusterMargins = nil
+      reservedWidth = 0
+    }
+
+    func contextMenuInteraction(
+      _ interaction: UIContextMenuInteraction,
+      configurationForMenuAtLocation location: CGPoint
+    ) -> UIContextMenuConfiguration? {
+      UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+        UIMenu(children: [
+          UIAction(title: "Add manually", image: UIImage(systemName: "square.and.pencil")) { [weak self] _ in
+            self?.addManually()
+          },
+        ])
+      }
+    }
+
+    private func layoutAssistant(relativeTo add: UIControl, in tabBar: UITabBar) {
+      let button = assistantButton ?? makeAssistantButton()
+      if button.superview !== add.superview {
+        button.removeFromSuperview()
+        add.superview?.insertSubview(button, belowSubview: add)
+      }
+      assistantButton = button
+      button.tintColor = tabBar.tintColor
+
+      let gap: CGFloat = 8
+      let size = CGSize(width: max(44, add.bounds.width), height: max(44, add.bounds.height))
+      let addFrame = add.frame
+      var frame = CGRect(
+        x: addFrame.minX - gap - size.width,
+        y: addFrame.midY - size.height / 2,
+        width: size.width,
+        height: size.height
+      )
+      if let reflect = labelledControl(AppTab.reflect.title, in: tabBar) {
+        let chatInBar = add.superview?.convert(frame, to: tabBar) ?? frame
+        let reflectInBar = reflect.convert(reflect.bounds, to: tabBar)
+        if chatInBar.intersects(reflectInBar) {
+          let needed = chatInBar.intersection(reflectInBar).width + gap
+          reserveLane(add: add, reflect: reflect, width: needed)
+          tabBar.layoutIfNeeded()
+          frame.origin.x = add.frame.minX - gap - size.width
+          frame.origin.y = add.frame.midY - size.height / 2
+        }
+        let placed = add.superview?.convert(frame, to: tabBar) ?? frame
+        let reflectAfter = reflect.convert(reflect.bounds, to: tabBar)
+        if placed.intersects(reflectAfter) {
+          button.isHidden = true
+          return
+        }
+      }
+      button.isHidden = false
+      button.frame = frame
+    }
+
+    private func makeAssistantButton() -> UIButton {
+      let button = UIButton(type: .system)
+      var configuration = UIButton.Configuration.plain()
+      configuration.image = UIImage(systemName: RootTrailingAction.assistant.systemImage)
+      button.configuration = configuration
+      button.accessibilityLabel = RootTrailingAction.assistant.title
+      button.accessibilityTraits = .button
+      button.isAccessibilityElement = true
+      button.addAction(UIAction { [weak self] _ in
+        self?.openAssistant()
+      }, for: .touchUpInside)
+      button.addAction(UIAction { [weak self] _ in
+        self?.openAssistant()
+      }, for: .primaryActionTriggered)
+      return button
+    }
+
+    private func reserveLane(add: UIView, reflect: UIView, width: CGFloat) {
+      guard let cluster = destinationCluster(reflect: reflect, add: add, tabBar: tabBar) else {
+        return
+      }
+      if reservedCluster == nil {
+        reservedCluster = cluster
+        originalClusterMargins = cluster.directionalLayoutMargins
+      }
+      reservedWidth = max(reservedWidth, width)
+      var margins = originalClusterMargins ?? cluster.directionalLayoutMargins
+      margins.trailing = (originalClusterMargins?.trailing ?? margins.trailing) + reservedWidth
+      cluster.directionalLayoutMargins = margins
+      (cluster as? UIStackView)?.isLayoutMarginsRelativeArrangement = true
+    }
+
+    private func destinationCluster(reflect: UIView, add: UIView, tabBar: UITabBar) -> UIView? {
+      var cluster: UIView?
+      var current: UIView? = reflect.superview
+      while let view = current, view !== tabBar {
+        if add.isDescendant(of: view) {
+          break
+        }
+        cluster = view
+        current = view.superview
+      }
+      return cluster
+    }
+
+    private func tabController(in controller: UIViewController) -> UITabBarController? {
+      if let tab = controller as? UITabBarController { return tab }
+      return controller.children.lazy.compactMap { tabController(in: $0) }.first
+    }
+
+    private func labelledControl(_ label: String, in view: UIView) -> UIControl? {
+      if let control = view as? UIControl, control.accessibilityLabel == label {
+        return control
+      }
+      return view.subviews.lazy.compactMap { labelledControl(label, in: $0) }.first
+    }
   }
 }
 
