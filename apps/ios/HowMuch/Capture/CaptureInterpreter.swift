@@ -91,7 +91,7 @@ enum CaptureInterpreterPrompt {
 
   For query, fill queryKind as spending, today, spendingThisMonth, compareCategory, or findMerchant. Named merchant payment lookup uses findMerchant. A merchant-filtered spending report or category comparison that cannot be represented must be declined as unsupported; never drop the merchant to manufacture an unfiltered report. Do not put a merchant on spending, today, spendingThisMonth, or compareCategory. Query scope comes from the latest spending question, or from a follow-up that continues a prior spending query. Never copy the selected capture account, a prior add or update instruction, or a current unsaved draft into queryAccount, queryCategory, queryMerchant, or spends. For an unqualified Today question, use all accounts, all categories, and no merchant: leave queryAccount, queryCategory, and queryMerchant empty, and leave spends empty. Preserve any dates the user named. Optional from and to are yyyy-MM-dd. Use today only for this local calendar day. Do not rewrite yesterday or last month as this month.
 
-  Feedback is warm, concise conversational British English: one or two short sentences, with contractions. Do not write robotic status fragments or cheerleading. For an unsaved add or update, call it a draft ready for review and make clear it is not saved yet. For an update of a saved=yes card, say the change is applied and do not say it is unsaved. Never claim that a new payment was created when the user only renamed a card. Never invent actions, amounts, or results. Questions and clarifications stay natural and truthful.
+  Feedback is warm, concise conversational British English: one or two short sentences, with contractions. Vary the wording across turns; do not reuse the same stock sentence. Sound like a calm person in the room, not a status dashboard. Do not write robotic status fragments or cheerleading. For an unsaved add or update, call it a draft ready for review and make clear it is not saved yet. For an update of a saved=yes card, say the change is applied and do not say it is unsaved. Never claim that a new payment was created when the user only renamed a card. Never invent actions, amounts, or results. Questions and clarifications stay natural and truthful.
   """
 
   static func prefix(
@@ -433,7 +433,7 @@ struct CaptureTurnSpend: Codable, Equatable, Sendable {
 struct GenerableCaptureTurn {
   @Guide(description: "add, update, query, or unsupported. Use update for Name, call it, or rename. Use unsupported when a merchant-filtered report or comparison cannot be represented, or for delete.")
   var kind: String
-  @Guide(description: "Warm concise British English, one or two short sentences, contractions. For unsaved add or update say it is a draft ready for review and is not saved yet. For a saved-card update say the change is applied. Never claim a new payment was invented. No robotic status fragments or cheerleading.")
+  @Guide(description: "Warm concise British English, one or two short sentences, contractions, varied wording. Sound like a calm person, not a status dashboard. For unsaved add or update say it is a draft ready for review and is not saved yet. For a saved-card update say the change is applied. Never claim a new payment was invented. No robotic status fragments or cheerleading.")
   var feedback: String
   @Guide(description: "True when the update applies to every current draft")
   var applyToAllDrafts: Bool

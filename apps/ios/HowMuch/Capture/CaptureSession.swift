@@ -726,9 +726,9 @@ final class CaptureSession: Identifiable {
     cancelTurn()
     if let replyID, let index = messages.firstIndex(where: { $0.id == replyID }) {
       messages[index].replyState = .stopped
-      messages[index].text = "Stopped · Nothing saved"
+      messages[index].text = CaptureAssistantPresence.stoppedCopy
     }
-    lastFeedback = "Stopped · Nothing saved"
+    lastFeedback = CaptureAssistantPresence.stoppedCopy
     touch()
   }
 
@@ -828,7 +828,7 @@ final class CaptureSession: Identifiable {
     for index in messages.indices where messages[index].replyState == .generating {
       messages[index].replyState = .stopped
       if messages[index].text.isEmpty {
-        messages[index].text = "Stopped · Nothing saved"
+        messages[index].text = CaptureAssistantPresence.stoppedCopy
       }
       changed = true
     }
@@ -837,7 +837,7 @@ final class CaptureSession: Identifiable {
       changed = true
     }
     if changed {
-      lastFeedback = "Stopped · Nothing saved"
+      lastFeedback = CaptureAssistantPresence.stoppedCopy
       touch()
     }
   }

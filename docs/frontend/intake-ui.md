@@ -34,6 +34,8 @@ User bubbles sit on the right. Assistant prose sits in a shaded incoming bubble 
 
 Quick Add toolbar: **Close | Add Transactions**. An understated **Add manually** text action sits on the composer account row and opens the normal transaction form without replacing the conversation. There is no Open in Assistant handoff; saved local conversation history remains accessible from Assistant. No auto-dismiss after a conversation group's Save. No segmented Describe/Manual control, global Save, bottom Continue, or clipped transcript.
 
+While a reply is in flight, the incoming bubble types a short, varying British waiting line character by character, then cycles to another line if the model is still working. Photo turns use slip-reading copy; recorded-spending fetches name the ledger. VoiceOver announces **Working on a reply**, not each letter. Reduce Motion shows the current line in full. A completed reply that just finished generating types out once; history does not replay it. Activity captions stay secondary. Composer ingestion reads **Reading the photo…**. Stop copy is **Stopped — nothing was saved.**
+
 One keyboard-safe dock: compact account line with **Add manually**, plus a single white plus/text/send (or Stop) shell. Input grows about 1–5 lines and caps near 120pt. Add manually stays reachable during an in-flight model turn and stops that owned work. The inner plus opens attachment/paste choices; Photo Library, Camera, and `PasteButton` stay blocked while a turn is busy or an image is ingesting. Native edit-menu paste remains. Pending images live in the shell; sent images live in the user bubble. Blank Quick Add and Assistant **New conversation** focus the field; resume and image entry do not.
 
 ## Save
@@ -54,4 +56,4 @@ Today is the local calendar day, using recorded-spending reports and excluding u
 
 ## Apple Intelligence
 
-Show unavailable, downloading, and error states explicitly. Stop and Retry reuse the same frozen turn and reply slot. Later typed text is not swallowed. True unavailable status offers Add manually, not a fake fallback. There is no cloud or regex fallback for reading amounts. A Name / call it / rename line can still update payee when the model returns no spends. Simulator model unavailability is a validation limit. Tests may inject deterministic doubles.
+Show unavailable, downloading, and error states explicitly. Stop and Retry reuse the same frozen turn and reply slot. Later typed text is not swallowed. True unavailable status offers Add manually, not a fake fallback. There is no cloud or regex fallback for reading amounts. A Name / call it / rename line can still update payee when the model returns no spends. Simulator model unavailability is a validation limit. Tests may inject deterministic doubles. In-flight replies use typed waiting copy rather than a single frozen status line.

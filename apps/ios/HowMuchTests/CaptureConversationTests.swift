@@ -171,7 +171,7 @@ final class CaptureConversationTests: XCTestCase {
     XCTAssertEqual(session.messages.filter { $0.kind == .user }.count, 1)
     XCTAssertEqual(session.messages.filter { $0.kind == .assistant }.count, 1)
     XCTAssertEqual(session.messages.last?.replyState, .stopped)
-    XCTAssertEqual(session.messages.last?.text, "Stopped · Nothing saved")
+    XCTAssertEqual(session.messages.last?.text, CaptureAssistantPresence.stoppedCopy)
     XCTAssertEqual(session.composerText, "Typed for next turn")
 
     let retried = session.prepareRetry(replyID: frozen.replyMessageID)
