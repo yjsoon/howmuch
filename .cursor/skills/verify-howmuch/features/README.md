@@ -73,6 +73,7 @@ iOS (Simulator + same API). Specs in `docs/frontend/intake-ui.md` and `docs/fron
 - [iOS add account](./ios-add-account.md) covers creating a bank account or card from the Accounts plus.
 - [iOS edit account](./ios-edit-account.md) covers changing an account’s name, type, and icon from Accounts or the register.
 - [iOS capture](./ios-capture.md) covers the existing Add Transaction sheet, keypad Save, Duplicate for Today, and the Add Expense Quick Action. After #98 those doors share one sheet.
+- [iOS capture typed replies](./ios-capture-typed-replies.md) covers the conversational Add Transactions waiting typewriter (already proven) and the unfinished finished-reply typewriter on a successful parse (#153). Darwin / Xcode only; needs a working remote capture model.
 - [iOS intake compose](./ios-intake-compose.md) covers the typed/pasted compose field, `N == 1` prefill, ambiguous ochre chips, and Apple Intelligence off (#99 / #102). Skip until the field exists.
 - [iOS intake review list](./ios-intake-review-list.md) covers two spends in one sentence opening **{N} Transactions** (#103). Skip until that sheet exists.
 - [iOS App Intents](./ios-app-intents.md) covers structured Shortcuts **Add Transaction** landing on the sheet without auto-save (#101). Skip until Shortcuts lists the intent.
