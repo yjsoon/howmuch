@@ -38,7 +38,7 @@ One keyboard-safe dock: compact account line with **Add manually**, plus a singl
 
 ## Save
 
-Group-local Save commits only that reply’s included, unsaved draft IDs through `AppModel.commit(_ drafts:)`. Successful local enqueue reads **Saved on device** (and **Sync pending** only when an outbox row exists). No remote-success claim, no cross-group Save, no auto-dismiss. Committed cards are immutable. No Undo back to a recommit. Undo is only on the reply that owns the drafts that actually changed or were removed.
+Group-local Save commits only that reply’s included, unsaved draft IDs through `AppModel.commit(_ drafts:)`. Successful local enqueue reads **Saved on device** (and **Sync pending** only when an outbox row exists). No remote-success claim, no cross-group Save, no auto-dismiss. Cards in this conversation stay visible after Save. A later field change (name, category, date, account, amount, direction) updates that row. There is no second Save. Delete remains unsupported. No Undo back to a recommit of the original add. Undo can restore a later field change on that card. Undo is only on the reply that owns the drafts that actually changed or were removed.
 
 ## Manual
 
@@ -50,8 +50,8 @@ Editing an existing conversation draft remains different: **Done** resolves arit
 
 Home stays at the root: **Today**, **New conversation**, recents. Opening a recent or new conversation pushes the shared surface. Recents use a short user-derived title, or **Message draft** when only pending text/images exist. History is scoped to endpoint, user, and plan. Discard is a confirmed local action and does not delete saved payments.
 
-Today is the local calendar day, using recorded-spending reports and excluding uncategorised on-budget transfer legs. Loading, unavailable, and zero are distinct. Query answers render once in the owning reply; scope and source sit beneath and do not repeat the detail. Legacy snapshots without `queryID` hydrate each unmatched card onto a matching assistant detail or a system result event so Inspect remains reachable. Source lists use existing matching-payment navigation. Questions cannot mutate saved transactions. No push notifications.
+Today is the local calendar day, using recorded-spending reports and excluding uncategorised on-budget transfer legs. Loading, unavailable, and zero are distinct. Query answers render once in the owning reply; scope and source sit beneath and do not repeat the detail. Legacy snapshots without `queryID` hydrate each unmatched card onto a matching assistant detail or a system result event so Inspect remains reachable. Source lists use existing matching-payment navigation. Questions cannot delete saved transactions. Field changes to cards still in this conversation revise those rows. No push notifications.
 
 ## Apple Intelligence
 
-Show unavailable, downloading, and error states explicitly. Stop and Retry reuse the same frozen turn and reply slot. Later typed text is not swallowed. True unavailable status offers Add manually, not a fake fallback. There is no cloud or regex fallback. Simulator model unavailability is a validation limit. Tests may inject deterministic doubles.
+Show unavailable, downloading, and error states explicitly. Stop and Retry reuse the same frozen turn and reply slot. Later typed text is not swallowed. True unavailable status offers Add manually, not a fake fallback. There is no cloud or regex fallback for reading amounts. A Name / call it / rename line can still update payee when the model returns no spends. Simulator model unavailability is a validation limit. Tests may inject deterministic doubles.

@@ -888,6 +888,12 @@ final class CaptureSession: Identifiable {
     }
     let replyID = frozenTurn?.replyMessageID
     let existingIDs = Set(drafts.map(\.id))
+    var changes = changes
+    var turn = coercePayeeOnlyAddToUpdate(turn, changes: changes)
+    if let synthesized = synthesizedPayeeUpdate(turn: turn, changes: changes) {
+      turn = synthesized.turn
+      changes = synthesized.changes
+    }
     switch turn.intent {
     case .query:
       return turn.feedback
@@ -904,7 +910,7 @@ final class CaptureSession: Identifiable {
         if shouldHold {
           pendingUpdateTurn = turn
           pendingUpdateChanges = changes
-          pendingTargetDraftIDs = currentDrafts.map(\.id)
+          pendingTargetDraftIDs = drafts.map(\.id)
           pendingUpdateReplyID = replyID ?? messages.last(where: { $0.kind == .assistant })?.id
         } else {
           pendingUpdateTurn = nil
@@ -968,9 +974,10 @@ final class CaptureSession: Identifiable {
     }
   }
 
-  func undo() {
+  @discardableResult
+  func undo() -> [String] {
     guard let snapshot = undoStack.popLast() else {
-      return
+      return []
     }
     let prior = Dictionary(uniqueKeysWithValues: snapshot.drafts.map { ($0.id, $0) })
     var next = drafts
@@ -978,6 +985,10 @@ final class CaptureSession: Identifiable {
       if let saved = prior[id] {
         if let index = next.firstIndex(where: { $0.id == id }) {
           if next[index].committed {
+            var restored = saved
+            restored.committed = true
+            restored.included = false
+            next[index] = restored
             continue
           }
           next[index] = saved
@@ -999,6 +1010,7 @@ final class CaptureSession: Identifiable {
     messages.append(CaptureMessage(kind: .system, text: "Update undone"))
     annotateOwners(snapshot.affectedDraftIDs, "Update undone")
     touch()
+    return snapshot.affectedDraftIDs
   }
 
   func recordFailedTurn(_ message: String) {
@@ -1084,7 +1096,7 @@ final class CaptureSession: Identifiable {
   }
 
   func chooseTargetDraft(_ id: String) {
-    guard drafts.contains(where: { $0.id == id && !$0.committed }) else {
+    guard drafts.contains(where: { $0.id == id }) else {
       return
     }
     if let owner = pendingUpdateReplyID, owner != frozenTurn?.replyMessageID {
@@ -1230,6 +1242,64 @@ final class CaptureSession: Identifiable {
     touch()
   }
 
+  private func coercePayeeOnlyAddToUpdate(
+    _ turn: CaptureInterpretedTurn,
+    changes: [CaptureMappedChange]
+  ) -> CaptureInterpretedTurn {
+    guard turn.intent == .add, !drafts.isEmpty, !changes.isEmpty else {
+      return turn
+    }
+    let payeeOnly = changes.allSatisfy { change in
+      let payee = change.mapped.draft.payeeName.trimmingCharacters(in: .whitespacesAndNewlines)
+      return !change.mapped.parsedAmount
+        && change.mapped.draft.amountMagnitudeMilli == 0
+        && !payee.isEmpty
+        && !change.mapped.parsedDate
+        && !change.mapped.parsedAccount
+        && !change.mapped.parsedCategory
+    }
+    guard payeeOnly else {
+      return turn
+    }
+    var next = turn
+    next.intent = .update
+    return next
+  }
+
+  private func synthesizedPayeeUpdate(
+    turn: CaptureInterpretedTurn,
+    changes: [CaptureMappedChange]
+  ) -> (turn: CaptureInterpretedTurn, changes: [CaptureMappedChange])? {
+    guard changes.isEmpty, !drafts.isEmpty else {
+      return nil
+    }
+    switch turn.intent {
+    case .query:
+      return nil
+    case .add, .update, .unsupported:
+      break
+    }
+    let text = frozenTurn?.text ?? messages.last(where: { $0.kind == .user })?.text ?? ""
+    guard let payee = CapturePayeeRename.payee(from: text) else {
+      return nil
+    }
+    var draft = TransactionDraft()
+    draft.payeeName = payee
+    let mapped = SlipMappedDraft(
+      draft: draft,
+      parsedAmount: false,
+      parsedDate: false,
+      parsedAccount: false,
+      parsedCategory: false,
+      parsedDirection: false,
+      accountCandidates: [],
+      categoryCandidates: []
+    )
+    var next = turn
+    next.intent = .update
+    return (next, [CaptureMappedChange(targetDraftID: nil, mapped: mapped)])
+  }
+
   private enum PreparedUpdates {
     case clarification(String, shouldHold: Bool)
     case assignments([(index: Int, change: CaptureMappedChange)], String?)
@@ -1245,7 +1315,7 @@ final class CaptureSession: Identifiable {
       var assignments: [(index: Int, change: CaptureMappedChange)] = []
       var splitWarning: String?
       for change in changes {
-        for index in drafts.indices where !drafts[index].committed {
+        for index in drafts.indices {
           if let warning = unsupportedSplitChange(change.mapped, item: drafts[index]) {
             splitWarning = warning
             continue
@@ -1260,19 +1330,19 @@ final class CaptureSession: Identifiable {
       return nil
     }
 
-    let live = currentDrafts
+    let live = drafts
     var resolved: [(index: Int, change: CaptureMappedChange)] = []
     for change in changes {
       let targetID = change.targetDraftID
       if let targetID {
-        guard let index = drafts.firstIndex(where: { $0.id == targetID && !$0.committed }) else {
+        guard let index = drafts.firstIndex(where: { $0.id == targetID }) else {
           return .clarification("Which transaction should I change?", shouldHold: true)
         }
         if let warning = unsupportedSplitChange(change.mapped, item: drafts[index]) {
           return .clarification(warning, shouldHold: false)
         }
         resolved.append((index, change))
-      } else if live.count == 1, let index = drafts.firstIndex(where: { !$0.committed }) {
+      } else if live.count == 1, let index = drafts.indices.first {
         if let warning = unsupportedSplitChange(change.mapped, item: drafts[index]) {
           return .clarification(warning, shouldHold: false)
         }

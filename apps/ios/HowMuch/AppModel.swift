@@ -945,6 +945,36 @@ final class AppModel {
     return pendingTransactions.contains { $0.request.importID == importID }
   }
 
+  func reviseConversationCapture(_ item: CaptureDraftItem) {
+    let importID = item.id
+    if let existing = serverTransactions.first(where: { $0.importID == importID })
+      ?? serverUnapprovedTransactions.first(where: { $0.importID == importID }) {
+      var draft = item.draft
+      draft.id = existing.id
+      applyPendingEdit(draft, transactionID: existing.id)
+      return
+    }
+    replacePendingCreate(importID: importID, draft: item.draft)
+  }
+
+  private func replacePendingCreate(importID: String, draft: TransactionDraft) {
+    guard let index = pendingTransactions.firstIndex(where: { $0.request.importID == importID }) else {
+      return
+    }
+    let old = pendingTransactions[index]
+    if inFlightCreates.contains(old.id) {
+      return
+    }
+    var next = pendingTransactions
+    next[index] = old.replacing(request: draft.writeRequest(includeCleared: draft.shouldWriteCleared))
+    do {
+      try OutboxStore.save(next)
+      pendingTransactions = next
+    } catch {
+      showSaveMessage("Couldn’t save changes — \(error.localizedDescription)", kind: .failure)
+    }
+  }
+
   private func overlayingPendingEdits(on rows: [Transaction]) -> [Transaction] {
     guard !pendingEdits.isEmpty else {
       return rows

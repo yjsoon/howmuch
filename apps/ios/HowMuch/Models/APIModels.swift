@@ -2530,6 +2530,34 @@ struct PendingTransaction: Codable, Equatable, Identifiable {
     self.connectionFingerprint = connectionFingerprint
     self.capturedAt = capturedAt
   }
+
+  init(
+    id: UUID,
+    request: TransactionWriteRequest,
+    connectionFingerprint: String,
+    capturedAt: Date,
+    lastSyncError: String? = nil
+  ) {
+    self.id = id
+    self.request = request
+    self.connectionFingerprint = connectionFingerprint
+    self.capturedAt = capturedAt
+    self.lastSyncError = lastSyncError
+  }
+
+  func replacing(request: TransactionWriteRequest) -> PendingTransaction {
+    var request = request
+    if request.importID == nil {
+      request.importID = self.request.importID ?? id.uuidString.lowercased()
+    }
+    return PendingTransaction(
+      id: id,
+      request: request,
+      connectionFingerprint: connectionFingerprint,
+      capturedAt: capturedAt,
+      lastSyncError: lastSyncError
+    )
+  }
 }
 
 enum OutboxStore {
