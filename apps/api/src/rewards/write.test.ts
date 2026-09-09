@@ -81,6 +81,16 @@ describe("parseCreditCardWrite", () => {
 });
 
 describe("native rewards card writes", () => {
+  test("valuation writes preserve zero and omissions and reject negative or nonnumeric values", async () => {
+    await patchRewardsSettings(repo, "plan-test", { milesValuation: 0.03 });
+    expect((await patchRewardsSettings(repo, "plan-test", {})).milesValuation).toBe(0.03);
+    expect((await patchRewardsSettings(repo, "plan-test", { milesValuation: 0 })).milesValuation).toBe(0);
+    for (const milesValuation of [-0.01, null, "0.02", Infinity, NaN]) {
+      await expect(patchRewardsSettings(repo, "plan-test", { milesValuation })).rejects.toThrow(ValidationError);
+    }
+    expect((await patchRewardsSettings(repo, "plan-test", {})).milesValuation).toBe(0);
+  });
+
   test("creates a card and a portable snapshot without wiping siblings", async () => {
     const first = await createRewardsCard(repo, "plan-test", {
       id: "card-cash",

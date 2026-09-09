@@ -23,9 +23,18 @@ const everyday = account({ id: "acct-everyday", name: "Everyday Account", type: 
 const closed = account({ id: "acct-old", name: "Old Card", type: "creditCard", closed: true });
 
 describe("rewardCardAccountChoices", () => {
-  test("lists unused credit cards and lines of credit, not checking", () => {
+  test("lists all unused open on-budget accounts, including checking", () => {
     expect(rewardCardAccountChoices([everyday, loc, travel, closed], []).map((entry) => entry.id))
-      .toEqual(["acct-loc", "acct-credit", "acct-old"]);
+      .toEqual(["acct-everyday", "acct-loc", "acct-credit"]);
+  });
+
+  test("excludes off-budget and deleted accounts, retains current closed/off-budget but never deleted", () => {
+    const offBudget = { ...everyday, on_budget: false };
+    const deleted = { ...travel, deleted: true };
+    expect(rewardCardAccountChoices([offBudget, deleted, closed], [])).toEqual([]);
+    expect(rewardCardAccountChoices([offBudget, deleted, closed], [], offBudget.id)).toEqual([offBudget]);
+    expect(rewardCardAccountChoices([offBudget, deleted, closed], [], closed.id)).toEqual([closed]);
+    expect(rewardCardAccountChoices([deleted], [], deleted.id)).toEqual([]);
   });
 
   test("drops accounts already mapped unless they are the card being edited", () => {

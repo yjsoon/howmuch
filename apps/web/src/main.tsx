@@ -20,6 +20,8 @@ const IncomePage = lazy(() => import("./pages/Income").then((module) => ({ defau
 const NetWorthPage = lazy(() => import("./pages/NetWorth").then((module) => ({ default: module.NetWorthPage })));
 const QuickEntryPage = lazy(() => import("./pages/QuickEntry").then((module) => ({ default: module.QuickEntryPage })));
 const RewardCardEditPage = lazy(() => import("./pages/RewardCardEdit").then((module) => ({ default: module.RewardCardEditPage })));
+const RewardTermsPage = lazy(() => import("./pages/RewardTerms").then((module) => ({ default: module.RewardTermsPage })));
+const StatementFormatterPage = lazy(() => import("./pages/StatementFormatter").then((module) => ({ default: module.StatementFormatterPage })));
 const RewardsImportPage = lazy(() => import("./pages/RewardsImport").then((module) => ({ default: module.RewardsImportPage })));
 const RewardsPage = lazy(() => import("./pages/Rewards").then((module) => ({ default: module.RewardsPage })));
 const ScheduledTransactionsPage = lazy(() => import("./pages/ScheduledTransactions").then((module) => ({ default: module.ScheduledTransactionsPage })));
@@ -42,6 +44,8 @@ const router = createBrowserRouter([
       { path: "/settings", element: <SettingsPage /> },
       { path: "/api-tokens", element: <ApiTokensPage /> },
       { path: "/import/rewards", element: <RewardsImportPage /> },
+      { path: "/tools/reward-terms", element: <RewardTermsPage /> },
+      { path: "/tools/statement-formatter", element: <StatementFormatterPage /> },
       { path: "/spending", element: <SpendingPage /> },
       { path: "/income", element: <IncomePage /> },
       { path: "/net-worth", element: <NetWorthPage /> },

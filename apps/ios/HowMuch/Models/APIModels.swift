@@ -1881,7 +1881,7 @@ struct CardSubcategory: Codable, Equatable, Identifiable, Sendable {
     id = decodedId ?? UUID().uuidString
     name = decodedName ?? ""
     flagColor = try container.decodeIfPresent(RewardFlagColour.self, forKey: .flagColor) ?? .unflagged
-    rewardValue = try container.decodeIfPresent(Double.self, forKey: .rewardValue) ?? 0
+    rewardValue = try container.decode(Double.self, forKey: .rewardValue)
     milesBlockSize = try container.decodeIfPresent(Double.self, forKey: .milesBlockSize)
     minimumSpend = try container.decodeIfPresent(Double.self, forKey: .minimumSpend)
     maximumSpend = try container.decodeIfPresent(Double.self, forKey: .maximumSpend)
@@ -2101,8 +2101,8 @@ struct CreditCard: Codable, Equatable, Identifiable, Sendable {
       if let maximumSpend = flag.maximumSpend {
         row["maximumSpend"] = maximumSpend
       }
-      if flag.excludeFromRewards == true {
-        row["excludeFromRewards"] = true
+      if let excludeFromRewards = flag.excludeFromRewards {
+        row["excludeFromRewards"] = excludeFromRewards
       }
       return row
     }
@@ -2153,6 +2153,9 @@ typealias RewardsTrackerCard = CreditCard
 struct RewardsReport: Decodable, Sendable {
   let from: String?
   let to: String?
+  let asOf: String?
+  let period: String?
+  let transactionRewards: [String: RewardsTransactionReward]?
   let groupBy: RewardGroupBy
   let milesValuation: Double
   let totals: RewardsTotals
@@ -2160,13 +2163,16 @@ struct RewardsReport: Decodable, Sendable {
   let groups: [RewardsGroupRow]
 
   private enum CodingKeys: String, CodingKey {
-    case from, to, groupBy, milesValuation, totals, cards, groups
+    case from, to, asOf, period, transactionRewards, groupBy, milesValuation, totals, cards, groups
   }
 
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     from = try container.decodeIfPresent(String.self, forKey: .from)
     to = try container.decodeIfPresent(String.self, forKey: .to)
+    asOf = try container.decodeIfPresent(String.self, forKey: .asOf)
+    period = try container.decodeIfPresent(String.self, forKey: .period)
+    transactionRewards = try container.decodeIfPresent([String: RewardsTransactionReward].self, forKey: .transactionRewards)
     groupBy = try container.decode(RewardGroupBy.self, forKey: .groupBy)
     milesValuation = try container.decode(Double.self, forKey: .milesValuation)
     totals = try container.decode(RewardsTotals.self, forKey: .totals)
@@ -2205,7 +2211,35 @@ struct RewardsCalculation: Decodable, Sendable {
   let maximumSpend: Double?
   let maximumSpendExceeded: Bool
   let maximumSpendProgress: Double?
+  let qualificationStatus: String?
+  let monthlyQualifications: [RewardsMonthlyQualification]?
+  let monthlyMinimumSpend: Double?
+  let activeSpendingTierId: String?
+  let hasNextSpendingTier: Bool?
+  let nextSpendingTierId: String?
+  let nextSpendingTierThreshold: Double?
+  let shouldStopUsing: Bool?
+  let periods: [RewardsCalculationPeriod]?
   let flags: [RewardsFlagRow]
+}
+
+struct RewardsCalculationPeriod: Decodable, Sendable {
+  let start: String
+  let end: String
+  let calculation: RewardsCalculation
+}
+
+struct RewardsMonthlyQualification: Decodable, Sendable {
+  let start: String
+  let end: String
+  let spend: Double
+  let minimumSpend: Double
+  let status: String
+}
+
+struct RewardsTransactionReward: Decodable, Sendable {
+  let reward: Double
+  let rewardDollars: Double
 }
 
 struct RewardsFlagRow: Decodable, Identifiable, Sendable {
@@ -2235,6 +2269,7 @@ struct RewardsGroupRow: Decodable, Identifiable, Sendable {
 
 struct RewardsTrackerSnapshot: Decodable, Sendable {
   let snapshot: RewardsTrackerStoredSnapshot?
+  let configuration: RewardsConfigurationJSON?
   let cards: [RewardsTrackerCard]
   let importedAt: String?
   let updatedAt: String?
@@ -2246,9 +2281,64 @@ struct RewardsTrackerSnapshot: Decodable, Sendable {
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     snapshot = try container.decodeIfPresent(RewardsTrackerStoredSnapshot.self, forKey: .snapshot)
+    configuration = try container.decodeIfPresent(RewardsConfigurationJSON.self, forKey: .snapshot)
     cards = try container.decodeLossyArray(RewardsTrackerCard.self, forKey: .cards)
     importedAt = try container.decodeIfPresent(String.self, forKey: .importedAt)
     updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
+  }
+
+  func configurationData() throws -> Data {
+    var object = configuration?.objectValue ?? [:]
+    let allowed = Set(["ynab", "rules", "tagMappings", "themeGroups", "hiddenCards", "settings"])
+    object = object.filter { allowed.contains($0.key) }
+    object["cards"] = cards.map { $0.jsonObject() }
+    object["calculations"] = [Any]()
+    return try JSONSerialization.data(withJSONObject: RewardsConfigurationJSON.sanitize(object), options: [.prettyPrinted, .sortedKeys])
+  }
+}
+
+// Dictionary decoding preserves tracker camelCase keys despite the API's snake-case decoder.
+indirect enum RewardsConfigurationJSON: Decodable, Sendable {
+  case object([String: RewardsConfigurationJSON])
+  case array([RewardsConfigurationJSON])
+  case string(String)
+  case number(Double)
+  case bool(Bool)
+  case null
+
+  init(from decoder: Decoder) throws {
+    let value = try decoder.singleValueContainer()
+    if value.decodeNil() { self = .null }
+    else if let object = try? value.decode([String: Self].self) { self = .object(object) }
+    else if let array = try? value.decode([Self].self) { self = .array(array) }
+    else if let bool = try? value.decode(Bool.self) { self = .bool(bool) }
+    else if let number = try? value.decode(Double.self) { self = .number(number) }
+    else { self = .string(try value.decode(String.self)) }
+  }
+
+  var objectValue: [String: Any]? { value as? [String: Any] }
+
+  private var value: Any {
+    switch self {
+    case .object(let object): return object.mapValues(\.value)
+    case .array(let array): return array.map(\.value)
+    case .string(let string): return string
+    case .number(let number): return number
+    case .bool(let bool): return bool
+    case .null: return NSNull()
+    }
+  }
+
+  static func sanitize(_ value: Any) -> Any {
+    if let object = value as? [String: Any] {
+      return object.filter { key, _ in
+        let key = key.lowercased().filter { $0.isLetter || $0.isNumber }
+        return key != "pat" && key != "authorization" && key != "cacheddata"
+          && !["token", "apikey", "secret", "password", "credential", "mnemonic", "cloudsync"].contains(where: key.contains)
+      }.mapValues(sanitize)
+    }
+    if let array = value as? [Any] { return array.map(sanitize) }
+    return value
   }
 }
 

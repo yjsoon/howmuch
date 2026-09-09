@@ -12,17 +12,13 @@ enum RewardCardWriteError: LocalizedError, Equatable {
 }
 
 enum RewardCardAccounts {
-  static func isCreditType(_ type: String) -> Bool {
-    AccountKind(rawValue: type)?.isCredit == true
-  }
-
   static func choices(accounts: [Account], takenIDs: Set<String>, keepingID: String?) -> [Account] {
     accounts
       .filter { account in
         if account.deleted { return false }
         if let keepingID, account.id == keepingID { return true }
         if takenIDs.contains(account.id) { return false }
-        return isCreditType(account.type)
+        return account.onBudget && !account.closed
       }
       .sorted { left, right in
         if left.closed != right.closed {
@@ -101,8 +97,7 @@ struct RewardFlagDraft: Identifiable, Equatable {
   }
 
   init(flag: CardSubcategory) {
-    let now = RewardCardDraft.nowISO
-    id = flag.id.isEmpty ? "subcat_\(UUID().uuidString)" : flag.id
+    id = flag.id
     name = flag.name
     flagColor = flag.flagColor
     rewardValue = RewardCardDraft.numberText(flag.rewardValue)
@@ -112,8 +107,8 @@ struct RewardFlagDraft: Identifiable, Equatable {
     milesBlockSize = RewardCardDraft.numberText(flag.milesBlockSize)
     minimumSpend = RewardCardDraft.numberText(flag.minimumSpend)
     maximumSpend = RewardCardDraft.numberText(flag.maximumSpend)
-    createdAt = flag.createdAt.isEmpty ? now : flag.createdAt
-    updatedAt = flag.updatedAt.isEmpty ? now : flag.updatedAt
+    createdAt = flag.createdAt
+    updatedAt = flag.updatedAt
   }
 
   mutating func touch() {
@@ -135,7 +130,7 @@ struct RewardTierOverrideDraft: Identifiable, Equatable {
   }
 
   init(override: SpendingTierSubcategory) {
-    id = UUID().uuidString
+    id = override.subcategoryId
     subcategoryId = override.subcategoryId
     rewardValue = RewardCardDraft.numberText(override.rewardValue)
     maximumSpend = RewardCardDraft.numberText(override.maximumSpend)
@@ -198,6 +193,8 @@ struct RewardCardDraft: Equatable {
   var flags: [RewardFlagDraft]
   var flagNames: [RewardFlagColour: String]
   var tiers: [RewardTierDraft]
+  var subcategoriesEnabled = false
+  private var originalCard: CreditCard?
 
   static var nowISO: String {
     ISO8601DateFormatter().string(from: Date())
@@ -304,6 +301,8 @@ struct RewardCardDraft: Equatable {
     flags = (card.subcategories ?? []).map(RewardFlagDraft.init)
     flagNames = Self.colourNames(from: card)
     tiers = (card.spendingTiers ?? []).map(RewardTierDraft.init)
+    subcategoriesEnabled = card.subcategoriesEnabled ?? false
+    originalCard = card
   }
 
   static func colourNames(from card: CreditCard) -> [RewardFlagColour: String] {
@@ -358,7 +357,7 @@ struct RewardCardDraft: Equatable {
 
   func write() throws -> CreditCard {
     if ynabAccountId.isEmpty {
-      throw RewardCardWriteError.message("Choose a HowMuch card.")
+      throw RewardCardWriteError.message("Choose a HowMuch account.")
     }
     let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmedName.isEmpty {
@@ -375,6 +374,13 @@ struct RewardCardDraft: Equatable {
     )
 
     let billingDay = try Self.optionalFinite(self.billingDay, label: "Billing day of month")
+    if let billingDay {
+      guard billingDay.rounded() == billingDay, (1...31).contains(billingDay) else {
+        throw RewardCardWriteError.message("Billing day must be an integer from 1 to 31.")
+      }
+    } else if billingType == .billing {
+      throw RewardCardWriteError.message("Billing cycle needs a day of month.")
+    }
     card.billingCycle = CardBillingCycle(type: billingType, dayOfMonth: billingDay)
 
     let rewardTouched = !rewardMonthCount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -382,9 +388,10 @@ struct RewardCardDraft: Equatable {
       || !rewardMonthlyMinimum.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     if rewardTouched {
       let monthCount = try Self.requiredFinite(rewardMonthCount, label: "Reward period months")
-      if rewardAnchorDate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        throw RewardCardWriteError.message("Reward period needs an anchor date.")
+      guard monthCount.rounded() == monthCount, (2...24).contains(monthCount) else {
+        throw RewardCardWriteError.message("Reward period must be an integer from 2 to 24 months.")
       }
+      try Self.validateDate(rewardAnchorDate, label: "Anchor date")
       let monthlyMinimum = try Self.requiredFinite(rewardMonthlyMinimum, label: "Monthly minimum spend")
       card.rewardPeriod = CardRewardPeriod(
         monthCount: monthCount,
@@ -401,7 +408,12 @@ struct RewardCardDraft: Equatable {
         throw RewardCardWriteError.message("Promotional period needs an end date.")
       }
       var promo = CardPromotionalPeriod(startDate: nil, endDate: promoEnd, description: nil)
+      try Self.validateDate(promoEnd, label: "Promotional end")
       if !promoStart.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        try Self.validateDate(promoStart, label: "Promotional start")
+        guard promoStart <= promoEnd else {
+          throw RewardCardWriteError.message("Promotional start must be on or before its end.")
+        }
         promo.startDate = promoStart
       }
       let description = promoDescription.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -423,7 +435,7 @@ struct RewardCardDraft: Equatable {
         throw RewardCardWriteError.message("Name the \(flag.flagColor.ledgerColour.title) colour on this card.")
       }
       let rewardValue = try Self.requiredFinite(flag.rewardValue, label: "Flag \(index + 1) reward value")
-      let priority = try Self.requiredFinite(flag.priority, label: "Flag \(index + 1) priority")
+      let priority = try Self.requiredFinite(flag.priority, label: "Flag \(index + 1) priority", nonnegative: false)
       var written = CardSubcategory(
         id: flag.id,
         name: colourName,
@@ -443,10 +455,18 @@ struct RewardCardDraft: Equatable {
       written.maximumSpend = try Self.optionalFinite(flag.maximumSpend, label: "Flag \(index + 1) maximum spend")
       if flag.excludeFromRewards {
         written.excludeFromRewards = true
+      } else if originalCard?.subcategories?.first(where: { $0.id == flag.id })?.excludeFromRewards != nil {
+        written.excludeFromRewards = false
+      }
+      if let originalCard,
+        let original = originalCard.subcategories?.first(where: { $0.id == flag.id }),
+        flag.name == original.name,
+        flagNames[flag.flagColor] == Self.colourNames(from: originalCard)[flag.flagColor] {
+        written.name = original.name
       }
       writtenFlags.append(written)
     }
-    card.subcategoriesEnabled = !writtenFlags.isEmpty
+    card.subcategoriesEnabled = subcategoriesEnabled
     card.subcategories = writtenFlags
     let encodedNames = Dictionary(uniqueKeysWithValues: flagNames.compactMap { colour, name -> (String, String)? in
       let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -494,6 +514,25 @@ struct RewardCardDraft: Equatable {
       writtenTiers.append(written)
     }
     card.spendingTiers = writtenTiers
+    // Preserve absent optional configuration and independent labels on unrelated edits.
+    if let originalCard {
+      let original = Self(card: originalCard)
+      if name == original.name { card.name = originalCard.name }
+      if issuer == original.issuer { card.issuer = originalCard.issuer }
+      if billingType == original.billingType, self.billingDay == original.billingDay {
+        card.billingCycle = originalCard.billingCycle
+      }
+      if promoStart == original.promoStart, promoEnd == original.promoEnd,
+        promoDescription == original.promoDescription {
+        card.promotionalPeriod = originalCard.promotionalPeriod
+      }
+      if flags == original.flags { card.subcategories = originalCard.subcategories }
+      if tiers == original.tiers { card.spendingTiers = originalCard.spendingTiers }
+      if flagNames == original.flagNames { card.flagNames = originalCard.flagNames }
+      if subcategoriesEnabled == original.subcategoriesEnabled {
+        card.subcategoriesEnabled = originalCard.subcategoriesEnabled
+      }
+    }
     return card
   }
 
@@ -512,7 +551,7 @@ struct RewardCardDraft: Equatable {
     return fallback.isEmpty ? flag.flagColor.title : fallback
   }
 
-  private static func optionalFinite(_ text: String, label: String) throws -> Double? {
+  private static func optionalFinite(_ text: String, label: String, nonnegative: Bool = true) throws -> Double? {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmed.isEmpty {
       return nil
@@ -520,11 +559,26 @@ struct RewardCardDraft: Equatable {
     guard let value = Double(trimmed), value.isFinite else {
       throw RewardCardWriteError.message("\(label) must be a number.")
     }
+    if nonnegative && value < 0 {
+      throw RewardCardWriteError.message("\(label) must be nonnegative.")
+    }
     return value
   }
 
-  private static func requiredFinite(_ text: String, label: String) throws -> Double {
-    guard let value = try optionalFinite(text, label: label) else {
+  private static func validateDate(_ text: String, label: String) throws {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.calendar = Calendar(identifier: .gregorian)
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "yyyy-MM-dd"
+    formatter.isLenient = false
+    guard let date = formatter.date(from: text), formatter.string(from: date) == text else {
+      throw RewardCardWriteError.message("\(label) must be a real date in YYYY-MM-DD format.")
+    }
+  }
+
+  private static func requiredFinite(_ text: String, label: String, nonnegative: Bool = true) throws -> Double {
+    guard let value = try optionalFinite(text, label: label, nonnegative: nonnegative) else {
       throw RewardCardWriteError.message("\(label) is required.")
     }
     return value
@@ -548,6 +602,8 @@ struct RewardCardEditorView: View {
   @State private var importRate = ""
   @State private var ledger: [Transaction] = []
   @State private var ledgerPhase: LoadPhase = .idle
+  @State private var ledgerRange = ReportRange()
+  @State private var ledgerReport: RewardsReport?
   @State private var flagOverrides: [String: String?] = [:]
   @State private var pendingFlagID: String?
   @State private var takenAccountIDs: Set<String> = []
@@ -616,7 +672,7 @@ struct RewardCardEditorView: View {
       .task(id: cardID ?? "new") {
         await loadCard()
       }
-      .task(id: draft.ynabAccountId) {
+      .task(id: ledgerKey) {
         await loadLedger()
       }
     }
@@ -626,12 +682,12 @@ struct RewardCardEditorView: View {
     Form {
       Section {
         if !isEditing, accountChoices.isEmpty {
-          Text("No HowMuch credit cards left to add. Every credit card account already has rewards rules, or add a credit card account first.")
+          Text("No available accounts. Add an open on-budget account, or edit an account already tracked for rewards.")
             .font(.footnote)
             .foregroundStyle(.secondary)
         }
-        Picker("HowMuch card", selection: $draft.ynabAccountId) {
-          Text("Choose a HowMuch card").tag("")
+        Picker("HowMuch account", selection: $draft.ynabAccountId) {
+          Text("Choose a HowMuch account").tag("")
           ForEach(accountChoices) { account in
             Text(account.closed ? "\(account.name) (closed)" : account.name).tag(account.id)
           }
@@ -654,9 +710,9 @@ struct RewardCardEditorView: View {
         }
         Toggle("Featured", isOn: $draft.featured)
       } header: {
-        Text(isEditing ? "Card details" : "Existing HowMuch card")
+        Text(isEditing ? "Card details" : "Existing HowMuch account")
       } footer: {
-        Text("Pick a credit card account you already have. This does not create a new ledger account.")
+        Text("Pick an open on-budget account, including checking or debit accounts. This does not create a new ledger account.")
       }
 
       Section("Billing cycle") {
@@ -722,6 +778,7 @@ struct RewardCardEditorView: View {
       }
 
       Section {
+        Toggle("Enable flag subcategories", isOn: $draft.subcategoriesEnabled)
         Picker("Import category", selection: $importCategoryId) {
           Text("Choose category").tag("")
           ForEach(importableCategories, id: \.id) { category in
@@ -787,13 +844,34 @@ struct RewardCardEditorView: View {
 
   private var ledgerSection: some View {
     Section {
+      ReportRangeMenu(range: $ledgerRange)
+      ReportRangeAccessory(range: $ledgerRange)
+      if let calculation = ledgerReport?.cards.first(where: { $0.id == cardID })?.calculation {
+        if let periods = calculation.periods, !periods.isEmpty {
+          ForEach(Array(periods.enumerated()), id: \.offset) { _, period in
+            VStack(alignment: .leading, spacing: 4) {
+              Text("Full period: \(period.start) – \(period.end)")
+              Text("Spend: \(MoneyCodec.displayString(forCurrencyUnits: period.calculation.totalSpend, currencyFormat: model.currencyFormat))")
+              if let status = period.calculation.qualificationStatus {
+                Text("Qualification: \(status.replacingOccurrences(of: "_", with: " "))")
+              }
+              ForEach(Array((period.calculation.monthlyQualifications ?? []).enumerated()), id: \.offset) { _, month in
+                Text("\(month.start): \(MoneyCodec.displayString(forCurrencyUnits: month.spend, currencyFormat: model.currencyFormat)) / \(MoneyCodec.displayString(forCurrencyUnits: month.minimumSpend, currencyFormat: model.currencyFormat)) · \(month.status)")
+              }
+            }
+            .font(.caption).foregroundStyle(.secondary)
+          }
+        } else {
+          Text("Reward context: \(calculation.period)").font(.caption).foregroundStyle(.secondary)
+        }
+      }
       if ledgerPhase == .loading && ledger.isEmpty {
         HStack {
           Text("Loading transactions…")
           Spacer()
           ProgressView()
         }
-      } else if let message = ledgerPhase.errorMessage, ledger.isEmpty {
+      } else if let message = ledgerPhase.errorMessage {
         Text(message)
           .foregroundStyle(Theme.outflow)
       } else if ledger.isEmpty {
@@ -811,6 +889,12 @@ struct RewardCardEditorView: View {
             }
             Text(transaction.payeeName ?? "No payee")
               .foregroundStyle(.secondary)
+            if let reward = ledgerReport?.transactionRewards?[transaction.id] {
+              Text("Reward: \(reward.reward.formatted())\(draft.type == .miles ? " miles" : " cashback") · \(MoneyCodec.displayString(forCurrencyUnits: reward.rewardDollars, currencyFormat: model.currencyFormat)) value")
+                .font(.caption).foregroundStyle(Theme.inflow)
+            } else {
+              Text("Reward attribution unavailable").font(.caption).foregroundStyle(.secondary)
+            }
             Picker("Flag", selection: flagColourBinding(for: transaction)) {
               ForEach(FlagColour.allCases) { colour in
                 ledgerFlagOption(colour)
@@ -824,7 +908,7 @@ struct RewardCardEditorView: View {
     } header: {
       Text("Account ledger")
     } footer: {
-      Text("Newest first")
+      Text("Newest first. Rewards use saved rules and full-period qualification, including spend outside these display dates.")
     }
   }
 
@@ -1030,8 +1114,18 @@ struct RewardCardEditorView: View {
     }
   }
 
+  private var ledgerKey: String {
+    "\(model.settings.planID)|\(draft.ynabAccountId)|\(ledgerRange.key)"
+  }
+
   private func loadLedger() async {
     let accountID = draft.ynabAccountId
+    let planID = model.settings.planID
+    let key = ledgerKey
+    let from = ledgerRange.fromISO
+    let to = ledgerRange.toISO
+    ledger = []
+    ledgerReport = nil
     guard !accountID.isEmpty else {
       ledger = []
       ledgerPhase = .loaded
@@ -1039,20 +1133,40 @@ struct RewardCardEditorView: View {
     }
     ledgerPhase = .loading
     do {
-      let page = try await model.apiClient.fetchTransactions(
-        planID: model.settings.planID,
-        accountID: accountID
+      var transactions: [Transaction] = []
+      var offset = 0
+      while true {
+        try Task.checkCancellation()
+        let page = try await model.apiClient.fetchTransactions(
+          planID: planID, accountID: accountID, offset: offset,
+          sinceDate: from, untilDate: to
+        )
+        transactions.append(contentsOf: page.transactions)
+        guard page.hasMore else { break }
+        guard let next = page.nextOffset, next > offset else {
+          throw RewardCardWriteError.message("Could not load the complete ledger: missing next page.")
+        }
+        offset = next
+      }
+      let rewards = try await model.apiClient.fetchRewards(
+        planID: planID,
+        from: from ?? transactions.map(\.date).min(),
+        to: to,
+        accountIDs: [accountID],
+        group: .flag
       )
-      guard accountID == draft.ynabAccountId else {
+      guard key == ledgerKey else {
         return
       }
-      ledger = page.transactions
+      ledger = transactions
+      ledgerReport = rewards
       flagOverrides = [:]
       ledgerPhase = .loaded
     } catch {
-      guard accountID == draft.ynabAccountId else {
+      guard key == ledgerKey else {
         return
       }
+      if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
       ledgerPhase = .failed(error.localizedDescription)
     }
   }
@@ -1067,6 +1181,8 @@ struct RewardCardEditorView: View {
         request: transaction.rewardFlagWriteRequest(flagColor: value)
       )
       flagOverrides[transaction.id] = value
+      model.noteRewardsBoardChanged()
+      await loadLedger()
     } catch {
       errorMessage = error.localizedDescription
     }

@@ -33,6 +33,7 @@ import {
 import { randomBytes } from "node:crypto";
 import { ScheduledTransactionValidationError } from "./scheduled-transactions";
 import { ACCOUNT_KINDS, parseAccountKind, type AccountUpdatePatch } from "./account-kind";
+import { handleRewardTool } from "./reward-tools";
 
 type HandlerOptions = {
   db?: Database;
@@ -606,6 +607,14 @@ async function handleNative(
 ): Promise<Response> {
   const method = request.method.toUpperCase();
   const planId = url.searchParams.get("plan_id") ?? defaultPlanId;
+
+  if (segments[1] === "tools" && segments.length === 3 && method === "POST"
+    && ["reward-terms", "statement-formatter"].includes(segments[2])) {
+    if (!sameOrigin(request, url)) return apiError(403, "forbidden", "CSRF validation failed");
+    const denied = authorizePlan(principal, planId, defaultPlanId, method);
+    if (denied) return denied;
+    return handleRewardTool(request, segments[2]);
+  }
 
   if (segments[1] === "reports" && method === "GET") {
     const denied = authorizePlan(principal, planId, defaultPlanId, method);

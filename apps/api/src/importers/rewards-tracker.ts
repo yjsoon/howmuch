@@ -1,4 +1,5 @@
 import { ValidationError } from "../repository";
+import { rewardsToday } from "../rewards/engine/date-utils";
 import type { LedgerStore } from "../storage";
 import type { TransactionInput } from "../types";
 
@@ -67,9 +68,27 @@ export function parseRewardsTrackerExport(input: unknown): ParsedRewardsTrackerE
     throw new ValidationError("Rewards Tracker export must include a cards array");
   }
 
-  const cards = raw.cards.map((card, index) => parseCard(card, index));
+  const rules = asArray(raw.rules).map((rule) => {
+    if (!rule || typeof rule !== "object" || Array.isArray(rule)) return rule;
+    const entry = rule as Record<string, unknown>;
+    return entry.rewardType === "points" ? { ...entry, rewardType: "miles" } : entry;
+  });
+  const cards = raw.cards.map((card, index) => {
+    const parsed = parseCard(card, index);
+    if (!Object.prototype.hasOwnProperty.call(parsed, "earningRate")) {
+      const first = rules.find((rule): rule is Record<string, unknown> => Boolean(
+        rule && typeof rule === "object" && "cardId" in rule && rule.cardId === parsed.id && "active" in rule && rule.active,
+      ));
+      parsed.earningRate = typeof first?.rewardValue === "number" ? first.rewardValue : 1;
+    }
+    return parsed;
+  });
   const ynab = parseYnab(raw.ynab);
   const settings = sanitizeSettings(raw.settings);
+  if (typeof settings.milesValuation !== "number" && typeof settings.pointsValuation === "number") {
+    settings.milesValuation = settings.pointsValuation;
+  }
+  delete settings.pointsValuation;
   const cached = raw.cachedData && typeof raw.cachedData === "object" && !Array.isArray(raw.cachedData)
     ? raw.cachedData as Record<string, unknown>
     : {};
@@ -77,7 +96,7 @@ export function parseRewardsTrackerExport(input: unknown): ParsedRewardsTrackerE
   const portable: RewardsTrackerPortablePayload = {
     ynab,
     cards,
-    rules: asArray(raw.rules),
+    rules,
     tagMappings: asArray(raw.tagMappings),
     calculations: [],
     themeGroups: asArray(raw.themeGroups),
@@ -99,6 +118,16 @@ export async function importRewardsTrackerExport(
   input: unknown,
 ): Promise<RewardsTrackerImportResult> {
   const parsed = parseRewardsTrackerExport(input);
+  const [year, month] = rewardsToday().split("-").map(Number);
+  const previousMonthStart = new Date(Date.UTC(year, month - 2, 1)).toISOString().slice(0, 10);
+  for (const card of parsed.portable.cards) {
+    const promotion = card.promotionalPeriod;
+    // Legacy omission is a fixed start at migration time; modern null stays dynamic.
+    if (promotion && typeof promotion === "object" && !Array.isArray(promotion)
+      && !Object.prototype.hasOwnProperty.call(promotion, "startDate")) {
+      card.promotionalPeriod = { ...promotion, startDate: previousMonthStart };
+    }
+  }
   const sessionId = await repo.createImportSession(planId, SOURCE_KIND);
 
   try {
@@ -140,10 +169,18 @@ export async function importRewardsTrackerExport(
       accountIds.add(account.id);
     }
 
+    const categoriesByName = new Map<string, string | null>();
+    for (const group of await repo.listCategoryGroups(planId)) {
+      for (const category of group.categories) {
+        const name = optionalString(category.name);
+        if (name) categoriesByName.set(name, categoriesByName.has(name) ? null : category.id);
+      }
+    }
+
     let imported = 0;
     let updated = 0;
     for (const [index, transaction] of parsed.transactions.entries()) {
-      const written = await upsertCachedTransaction(repo, planId, sessionId, index, transaction);
+      const written = await upsertCachedTransaction(repo, planId, sessionId, index, transaction, categoriesByName);
       if (written === "imported") imported += 1;
       if (written === "updated") updated += 1;
     }
@@ -172,6 +209,7 @@ async function upsertCachedTransaction(
   sessionId: string,
   index: number,
   raw: Record<string, unknown>,
+  categoriesByName: Map<string, string | null>,
 ): Promise<"imported" | "updated" | "skipped"> {
   const id = optionalString(raw.id);
   const accountId = optionalString(raw.account_id);
@@ -188,22 +226,40 @@ async function upsertCachedTransaction(
     date,
     amount,
     import_id: optionalString(raw.import_id),
+    deleted: raw.deleted === true,
   });
+  // Upstream CachedTransaction carries category_name but no category_id.
+  // Prefer matched ledger identity; never rename an authoritative category.
+  let categoryId = importedString(raw, "category_id", existing?.category_id);
+  const categoryName = optionalString(raw.category_name);
+  if (raw.category_id === undefined && raw.category_name === null) categoryId = null;
+  if (raw.category_id === undefined && !categoryId && categoryName) {
+    categoryId = categoriesByName.get(categoryName) ?? null;
+    if (!categoryId) {
+      // JSON tuples keep the plan/name boundary unambiguous, including names
+      // containing separators. The identity is stable across import sessions.
+      categoryId = `rewards-tracker-category:${JSON.stringify([planId, categoryName])}`;
+      await repo.ensureCategory(planId, categoryId, categoryName, `rewards-tracker-categories:${planId}`);
+      if (!categoriesByName.has(categoryName)) categoriesByName.set(categoryName, categoryId);
+    }
+  }
+  if (categoryId) await repo.ensureCategory(planId, categoryId, categoryName);
   const input: TransactionInput = {
     id: existing?.id ?? id,
     account_id: accountId,
     date,
     amount,
-    payee_name: optionalString(raw.payee_name) ?? existing?.payee_name ?? null,
-    category_id: optionalString(raw.category_id) ?? existing?.category_id ?? null,
-    memo: optionalString(raw.memo) ?? existing?.memo ?? null,
-    cleared: parseCleared(raw.cleared) ?? existing?.cleared ?? "uncleared",
-    approved: typeof raw.approved === "boolean" ? raw.approved : existing?.approved ?? true,
-    flag_color: optionalString(raw.flag_color) ?? existing?.flag_color ?? null,
-    flag_name: optionalString(raw.flag_name) ?? existing?.flag_name ?? null,
-    transfer_account_id: optionalString(raw.transfer_account_id) ?? existing?.transfer_account_id ?? null,
-    transfer_transaction_id: optionalString(raw.transfer_transaction_id) ?? existing?.transfer_transaction_id ?? null,
-    import_id: optionalString(raw.import_id) ?? existing?.import_id ?? null,
+    payee_name: importedString(raw, "payee_name", existing?.payee_name),
+    category_id: categoryId,
+    memo: importedString(raw, "memo", existing?.memo),
+    cleared: raw.cleared === null ? null : parseCleared(raw.cleared) ?? existing?.cleared ?? "uncleared",
+    approved: raw.approved === null ? null : typeof raw.approved === "boolean" ? raw.approved : existing?.approved ?? true,
+    flag_color: importedString(raw, "flag_color", existing?.flag_color),
+    flag_name: importedString(raw, "flag_name", existing?.flag_name),
+    transfer_account_id: importedString(raw, "transfer_account_id", existing?.transfer_account_id),
+    transfer_transaction_id: importedString(raw, "transfer_transaction_id", existing?.transfer_transaction_id),
+    import_id: importedString(raw, "import_id", existing?.import_id),
+    deleted: raw.deleted === undefined ? existing?.deleted ?? false : raw.deleted === true,
     source_kind: SOURCE_KIND,
     source_ref: sessionId,
     external_ynab_id: existing?.external_ynab_id ?? id,
@@ -230,7 +286,7 @@ function parseCard(value: unknown, index: number): RewardsTrackerCard {
     id,
     name,
     issuer: optionalString(card.issuer) ?? "",
-    type: optionalString(card.type) ?? "cashback",
+    type: card.type === "points" ? "miles" : optionalString(card.type) ?? "cashback",
     ynabAccountId: accountId,
   };
 }
@@ -361,7 +417,7 @@ function mergeImportedMilesValuation(
   snapshot: unknown,
   settings: Record<string, unknown>,
 ): Record<string, unknown> {
-  if (finiteNumber(settings.milesValuation) !== undefined) return settings;
+  if (settings.milesValuation === null || finiteNumber(settings.milesValuation) !== undefined) return settings;
   const existing = snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
     ? (snapshot as { settings?: unknown }).settings
     : undefined;
@@ -403,4 +459,8 @@ function optionalString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function importedString(raw: Record<string, unknown>, key: string, existing: string | null | undefined): string | null {
+  return raw[key] === undefined ? existing ?? null : optionalString(raw[key]) ?? null;
 }

@@ -102,6 +102,8 @@ export function Shell() {
       ?? (location.pathname === "/settings" ? "Settings" : null)
       ?? (location.pathname === "/api-tokens" ? "API tokens" : null)
       ?? (location.pathname === "/import/rewards" ? "Rewards import" : null)
+      ?? (location.pathname === "/tools/reward-terms" ? "Reward terms" : null)
+      ?? (location.pathname === "/tools/statement-formatter" ? "Statement formatter" : null)
       ?? (location.pathname === "/rewards/new" ? "Add card" : null)
       ?? (location.pathname.startsWith("/rewards/") ? "Edit card" : null)
       ?? report?.label;
@@ -284,7 +286,8 @@ export function Shell() {
 }
 
 function isSettingsPath(pathname: string): boolean {
-  return pathname === "/settings" || pathname === "/api-tokens" || pathname === "/import/rewards";
+  return pathname === "/settings" || pathname === "/api-tokens" || pathname === "/import/rewards"
+    || pathname === "/tools/reward-terms" || pathname === "/tools/statement-formatter";
 }
 
 function SettingsLink({ className }: { className: (state: { isActive: boolean }) => string }) {

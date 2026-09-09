@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, useApi, type RewardsTrackerImportResult } from "../api/client";
 import { SettingsCrumb } from "../components/SettingsCrumb";
+import { portableRewardsExport } from "../lib/rewards-export";
 import { usePlan } from "../state/plan";
 
 export function RewardsImportPage() {
@@ -46,12 +47,26 @@ export function RewardsImportPage() {
   };
 
   const cards = snapshot.data?.cards ?? [];
+  const exportFile = () => {
+    if (!snapshot.data) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(portableRewardsExport(snapshot.data), null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "howmuch-rewards.json";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 
   return (
     <>
       <header className="report-header">
         <SettingsCrumb current="Rewards import" />
       </header>
+
+      <section className="report-section" aria-label="Export rewards">
+        <button type="button" className="save-button" disabled={!snapshot.data || snapshot.loading || busy} onClick={exportFile}>Export rewards JSON</button>
+        <p className="field-note">Portable current cards, rules, tag mappings, and reward settings. No API credentials, connection settings, or cached transactions. Account IDs are retained for re-import.</p>
+      </section>
 
       <p className="diagnostic-note">
         Import a Rewards Tracker for YNAB settings export. Cards, rules, and tag mappings are stored on this plan.

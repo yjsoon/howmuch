@@ -214,12 +214,12 @@ export class AsyncReportService {
     const accountIds = cards.map((card) => card.ynabAccountId);
     const params: any[] = [];
     const clauses = [`t.plan_id = ${bind(params, planId)}`, "t.deleted = 0"];
-    if (filters.from) clauses.push(`t.date >= ${bind(params, filters.from)}`);
+    // Keep earlier period history for caps and minimum-spend qualification.
     if (filters.to) clauses.push(`t.date <= ${bind(params, filters.to)}`);
     const selectedAccounts = filters.accountIds?.length ? filters.accountIds : accountIds;
     if (selectedAccounts.length) appendInFilter(clauses, params, "t.account_id", selectedAccounts);
     else clauses.push("1 = 0");
-    const rows = await this.db.all<Record<string, any>>(
+    const rows = await this.db.all<Parameters<typeof mapRewardTransactionRow>[0]>(
       `SELECT t.id, t.date, t.amount_milli, t.account_id, a.name AS account_name,
          t.flag_color, t.flag_name, t.memo, t.transfer_account_id,
          COALESCE(p.name, t.payee_name_snapshot) AS payee_name,

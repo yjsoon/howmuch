@@ -30,7 +30,7 @@ export async function patchRewardsCard(
   const existing = findLiveCard((await repo.getRewardsTrackerSnapshot(planId)).cards, cardId);
   if (!existing) throw new NotFoundError("Rewards card not found");
   const previousNames = parseCardFlagNames(existing.flagNames);
-  const draft = { ...existing, ...asCardObject(raw), id: cardId };
+  const draft: Record<string, unknown> = { ...existing, ...asCardObject(raw), id: cardId };
   const accountId = requireLiveAccountId(draft.ynabAccountId);
   if (!await repo.findLiveAccountId(planId, accountId)) {
     throw new RewardsAccountError("ynabAccountId must match a live account");
@@ -104,6 +104,9 @@ export function parseSettingsWrite(body: Record<string, unknown>): { milesValuat
   }
   if (typeof body.milesValuation !== "number" || !Number.isFinite(body.milesValuation)) {
     throw new ValidationError("milesValuation must be a finite number");
+  }
+  if (body.milesValuation < 0) {
+    throw new ValidationError("milesValuation must be nonnegative");
   }
   return { milesValuation: body.milesValuation };
 }

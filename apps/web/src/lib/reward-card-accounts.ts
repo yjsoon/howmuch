@@ -1,12 +1,6 @@
 import type { Account } from "../api/types";
 
-const CREDIT_TYPES = new Set(["creditCard", "lineOfCredit"]);
-
-export function isRewardCardAccountType(type: string | null | undefined): boolean {
-  return CREDIT_TYPES.has(type ?? "");
-}
-
-/** Credit and LOC accounts that are not already mapped, plus the card's current account. */
+/** Open on-budget accounts not already mapped, plus the nondeleted current account. */
 export function rewardCardAccountChoices(
   accounts: Account[],
   takenIds: Iterable<string>,
@@ -18,7 +12,7 @@ export function rewardCardAccountChoices(
       if (account.deleted) return false;
       if (keepId && account.id === keepId) return true;
       if (taken.has(account.id)) return false;
-      return isRewardCardAccountType(account.type);
+      return account.on_budget && !account.closed;
     })
     .sort((left, right) => {
       if (left.closed !== right.closed) return left.closed ? 1 : -1;

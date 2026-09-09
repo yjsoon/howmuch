@@ -52,7 +52,7 @@ function parseCreditCard(value: unknown): CreditCard | null {
   if (!id || !name || !accountId) return null;
   const type = raw.type === "miles" ? "miles" : "cashback";
   return {
-    ...(raw as CreditCard),
+    ...raw,
     id,
     name,
     issuer: stringValue(raw.issuer) ?? "",
@@ -121,8 +121,8 @@ function parseBillingCycle(value: unknown): CreditCard["billingCycle"] | undefin
   }
   const cycle: NonNullable<CreditCard["billingCycle"]> = { type: raw.type };
   if (raw.dayOfMonth !== undefined) {
-    if (typeof raw.dayOfMonth !== "number" || !Number.isFinite(raw.dayOfMonth)) {
-      throw new ValidationError("billingCycle dayOfMonth must be a finite number");
+    if (typeof raw.dayOfMonth !== "number" || !Number.isInteger(raw.dayOfMonth) || raw.dayOfMonth < 1 || raw.dayOfMonth > 31) {
+      throw new ValidationError("billingCycle dayOfMonth must be an integer from 1 to 31");
     }
     cycle.dayOfMonth = raw.dayOfMonth;
   }
@@ -136,8 +136,10 @@ function parseRewardPeriod(value: unknown): CardRewardPeriod | undefined {
   }
   const raw = value as Record<string, unknown>;
   const monthCount = requiredFiniteNumber(raw.monthCount, "rewardPeriod.monthCount");
-  const anchorDate = stringValue(raw.anchorDate);
-  if (!anchorDate) throw new ValidationError("rewardPeriod.anchorDate is required");
+  if (!Number.isInteger(monthCount) || monthCount < 2 || monthCount > 24) {
+    throw new ValidationError("rewardPeriod.monthCount must be an integer from 2 to 24");
+  }
+  const anchorDate = requiredDate(raw.anchorDate, "rewardPeriod.anchorDate");
   return {
     monthCount,
     anchorDate,
@@ -151,13 +153,12 @@ function parsePromotionalPeriod(value: unknown): CreditCard["promotionalPeriod"]
     throw new ValidationError("promotionalPeriod must be an object");
   }
   const raw = value as Record<string, unknown>;
-  const endDate = stringValue(raw.endDate);
-  if (!endDate) throw new ValidationError("promotionalPeriod.endDate is required");
+  const endDate = requiredDate(raw.endDate, "promotionalPeriod.endDate");
   const period: NonNullable<CreditCard["promotionalPeriod"]> = { endDate };
   if (raw.startDate === null) period.startDate = null;
   else if (raw.startDate !== undefined) {
-    const startDate = stringValue(raw.startDate);
-    if (!startDate) throw new ValidationError("promotionalPeriod.startDate is invalid");
+    const startDate = requiredDate(raw.startDate, "promotionalPeriod.startDate");
+    if (startDate > endDate) throw new ValidationError("promotionalPeriod.startDate must not follow endDate");
     period.startDate = startDate;
   }
   const description = stringValue(raw.description);
@@ -189,7 +190,7 @@ function parseSubcategory(value: unknown, index: number): CardSubcategory {
     name,
     flagColor: parseFlagColour(raw.flagColor, `subcategories[${index}].flagColour`),
     rewardValue: requiredFiniteNumber(raw.rewardValue, `subcategories[${index}].rewardValue`),
-    priority: requiredFiniteNumber(raw.priority, `subcategories[${index}].priority`),
+    priority: requiredFiniteNumber(raw.priority, `subcategories[${index}].priority`, false),
     active: raw.active !== false,
     createdAt,
     updatedAt,
@@ -207,7 +208,11 @@ function parseSubcategory(value: unknown, index: number): CardSubcategory {
 function parseSpendingTiers(value: unknown): CardSpendingTier[] | undefined {
   if (value == null) return undefined;
   if (!Array.isArray(value)) throw new ValidationError("spendingTiers must be an array");
-  return value.map((entry, index) => parseSpendingTier(entry, index));
+  const tiers = value.map((entry, index) => parseSpendingTier(entry, index));
+  if (new Set(tiers.map(tier => tier.spendThreshold)).size !== tiers.length) {
+    throw new ValidationError("spendingTiers spendThreshold values must be unique");
+  }
+  return tiers;
 }
 
 function parseSpendingTier(value: unknown, index: number): CardSpendingTier {
@@ -260,9 +265,12 @@ function parseFlagColour(value: unknown, field: string): YnabFlagColor {
   return value as YnabFlagColor;
 }
 
-function requiredFiniteNumber(value: unknown, field: string): number {
+function requiredFiniteNumber(value: unknown, field: string, nonnegative = true): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new ValidationError(`${field} must be a finite number`);
+  }
+  if (nonnegative && value < 0) {
+    throw new ValidationError(`${field} must be nonnegative`);
   }
   return value;
 }
@@ -275,4 +283,13 @@ function optionalFiniteNumber(value: unknown, field: string): number | null | un
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function requiredDate(value: unknown, field: string): string {
+  const date = stringValue(value);
+  const parsed = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T00:00:00Z`) : null;
+  if (!date || !parsed || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
+    throw new ValidationError(`${field} must be a valid YYYY-MM-DD date`);
+  }
+  return date;
 }

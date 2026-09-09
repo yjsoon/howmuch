@@ -2382,6 +2382,14 @@ describe("native reports and imports", () => {
     ]);
   });
 
+  test("rewards report rejects malformed legacy reward periods with HTTP 400", async () => {
+    await createAccount("legacy-rewards", { name: "Legacy card" });
+    const card = { id: "legacy", name: "Legacy", issuer: "Bank", type: "miles", ynabAccountId: "legacy-rewards", featured: false, earningRate: 2, rewardPeriod: { monthCount: 0, anchorDate: "2026-01-01", monthlyMinimumSpend: 100 } };
+    db.run("INSERT INTO rewards_tracker_cards(plan_id,id,account_id,name,issuer,type,payload_json) VALUES('plan-test','legacy','legacy-rewards','Legacy','Bank','miles',?)", JSON.stringify(card));
+    const response = await request("/api/reports/rewards?plan_id=plan-test&from=2026-01-01&to=2026-05-31");
+    expect(response.status).toBe(400);
+  });
+
   test("creates, patches, and deletes a native rewards card", async () => {
     await createAccount("acct-native-card", { name: "Native card" });
     await createTransaction({

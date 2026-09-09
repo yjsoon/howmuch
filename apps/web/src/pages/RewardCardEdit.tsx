@@ -13,7 +13,7 @@ import type {
 import { CategorySelect } from "../components/CategorySelect";
 import { FlagPicker, FlagTag } from "../components/FlagTag";
 import { splitCategoryGroups } from "../lib/categories";
-import { formatDate } from "../lib/dates";
+import { formatDate, monthRange, todayIso } from "../lib/dates";
 import { isFlagColour, ledgerFlagFromReward, rewardFlagFromLedger } from "../lib/flags";
 import { formatMoney } from "../lib/money";
 import { rewardCardAccountChoices, syncedRewardCardName } from "../lib/reward-card-accounts";
@@ -57,6 +57,7 @@ type CardDraft = {
   type: RewardCardType;
   ynabAccountId: string;
   featured: boolean;
+  subcategoriesEnabled: boolean;
   billingType: "calendar" | "billing";
   billingDay: string;
   rewardMonthCount: string;
@@ -226,6 +227,7 @@ function CardEditor({ card, takenAccountIds }: { card: CreditCard | null; takenA
         <div>
           <Link to={rewardsHref} className="page-eyebrow">← Rewards</Link>
           <h1>{card ? "Edit card" : "Add card"}</h1>
+          {card && <Link to={`/tools/reward-terms?card=${encodeURIComponent(card.id)}`}>Generate rules from card terms</Link>}
         </div>
       </header>
 
@@ -258,7 +260,7 @@ function CardEditor({ card, takenAccountIds }: { card: CreditCard | null; takenA
         <div className="section-heading">
           <div>
             <span className="section-title" id="card-editor-heading">{card ? "Card details" : "Existing HowMuch card"}</span>
-            <span className="section-meta">Pick a credit card account you already have. This does not create a new ledger account.</span>
+            <span className="section-meta">Pick an existing open on-budget account, including checking or debit. This does not create a new ledger account.</span>
           </div>
         </div>
         <form
@@ -269,7 +271,7 @@ function CardEditor({ card, takenAccountIds }: { card: CreditCard | null; takenA
           }}
         >
           {accountChoices.length === 0 && !card && (
-            <p className="field-note">No HowMuch credit cards left to add. Every credit card account already has rewards rules, or add a credit card account first.</p>
+            <p className="field-note">No eligible accounts left to add. Every open on-budget account already has rewards rules, or add an account first.</p>
           )}
           <div className="field-row">
             <label className="field">
@@ -478,6 +480,12 @@ function CardEditor({ card, takenAccountIds }: { card: CreditCard | null; takenA
 
           <fieldset className="transaction-editor-splits rewards-editor-block">
             <legend>Flag subcategories</legend>
+            <label className="transaction-editor-checkbox">
+              <input type="checkbox" checked={draft.subcategoriesEnabled}
+                onChange={(event) => setDraft((current) => ({ ...current, subcategoriesEnabled: event.target.checked }))} />
+              Enable flag subcategories
+            </label>
+            <p className="field-note">Disabling keeps every rule and tier override for later use.</p>
             <p className="field-note">These are the same colour tags as the ledger. None is Unflagged spend. Name the colour above and it appears on this account.</p>
             <div className="field-row">
               <label className="field">
@@ -578,7 +586,7 @@ function CardEditor({ card, takenAccountIds }: { card: CreditCard | null; takenA
         </form>
       </section>
 
-      <CardLedger planId={planId} accountId={draft.ynabAccountId} flagNames={draft.flagNames} pickerNames={pickerNames} />
+      <CardLedger key={`${planId}:${draft.ynabAccountId}`} planId={planId} cardId={card?.id} accountId={draft.ynabAccountId} flagNames={draft.flagNames} pickerNames={pickerNames} />
     </>
   );
 }
@@ -738,11 +746,13 @@ function TierRow({
 
 function CardLedger({
   planId,
+  cardId,
   accountId,
   flagNames,
   pickerNames,
 }: {
   planId: string;
+  cardId?: string;
   accountId: string;
   flagNames: Partial<Record<RewardFlagColour, string>>;
   pickerNames: Record<string, string>;
@@ -750,14 +760,32 @@ function CardLedger({
   const [overrides, setOverrides] = useState<Record<string, { flag_color: string | null; flag_name: string | null }>>({});
   const [flagError, setFlagError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const location = useLocation();
+  const [range, setRange] = useState<{ from?: string; to?: string }>(() => {
+    const params = new URLSearchParams(location.search);
+    return { from: params.get("from") || undefined, to: params.get("to") || undefined };
+  });
+  const [offset, setOffset] = useState(0);
+  const [search, setSearch] = useState("");
+  const [generation, setGeneration] = useState(0);
+  const rewardQuery = { plan_id: planId, account_ids: accountId, ...range };
+  const rewards = useApi(`card-ledger-rewards:${JSON.stringify(rewardQuery)}:${generation}`, () => api.rewards(rewardQuery));
+  const calculation = rewards.data?.cards.find((row) => row.card.id === cardId)?.calculation;
+  const periods = calculation?.periods;
+  const since = range.from ?? periods?.[0]?.start;
+  const cutoff = range.to ?? rewards.data?.as_of;
+  const periodEnd = !range.from ? periods?.[0]?.end : undefined;
+  const until = periodEnd && cutoff && periodEnd < cutoff ? periodEnd : cutoff;
+  const ready = Boolean(accountId && (range.from || since) && (!since || !until || since <= until));
+  const changeRange = (next: typeof range) => { setRange(next); setOffset(0); };
   useEffect(() => {
     setOverrides({});
     setFlagError(null);
   }, [accountId]);
   const ledger = useApi(
-    accountId ? `${planId}:card-ledger:${accountId}` : "card-ledger:none",
-    () => (accountId
-      ? api.accountTransactions(planId, accountId, { limit: 250 })
+    `${planId}:card-ledger:${accountId}:${since}:${until}:${offset}:${search}:${ready}`,
+    () => (ready
+      ? api.accountTransactions(planId, accountId, { since_date: since, until_date: until, limit: 100, offset, q: search || undefined })
       : Promise.resolve({ transactions: [] as Transaction[], has_more: false, next_offset: null, server_knowledge: 0 })),
   );
 
@@ -777,6 +805,7 @@ function CardLedger({
     }));
     try {
       const updated = await api.updateTransaction(planId, transaction.id, { flag_color: flagColor });
+      setGeneration((value) => value + 1);
       setOverrides((current) => ({
         ...current,
         [transaction.id]: {
@@ -803,6 +832,23 @@ function CardLedger({
         <span className="section-title" id="card-ledger-heading">Account ledger</span>
         <span className="section-meta">Newest first</span>
       </div>
+      <div className="rewards-controls">
+        <button type="button" onClick={() => changeRange({})}>Current card period</button>
+        <button type="button" onClick={() => changeRange(monthRange())}>This month</button>
+        <button type="button" onClick={() => changeRange(monthRange(-1))}>Last month</button>
+        <button type="button" onClick={() => changeRange({ from: "1970-01-01", to: todayIso() })}>All history</button>
+        <label className="field"><span className="field-label">Ledger from</span><input type="date" value={since ?? ""}
+          onChange={(event) => changeRange({ from: event.target.value || undefined, to: until })} /></label>
+        <label className="field"><span className="field-label">Ledger to</span><input type="date" value={until ?? ""}
+          min={since} onChange={(event) => changeRange({ from: since, to: event.target.value || undefined })} /></label>
+        <label className="field"><span className="field-label">Filter transactions</span><input type="search" value={search}
+          placeholder="Payee, memo, flag:red…" onChange={(event) => { setSearch(event.target.value); setOffset(0); }} /></label>
+      </div>
+      <p className="field-note">Earned rewards use saved card rules and full cycle context, not only this page or the search results. Save rule changes to recalculate.</p>
+      {calculation && <p className="field-note">Card period: {calculation.period}</p>}
+      {rewards.error && <p role="alert">Could not calculate rewards: {rewards.error}</p>}
+      {!range.from && !since && !rewards.loading && <p role="status">Current-period boundaries unavailable. Choose a date preset to view the ledger.</p>}
+      {range.from && range.to && range.from > range.to && <p role="alert">Ledger start must be on or before the end date.</p>}
       {flagError && (
         <div className="status-panel status-panel-error" role="alert">
           <p className="status-title">Could not update the flag.</p>
@@ -820,12 +866,14 @@ function CardLedger({
         <p className="field-note">No transactions on this account.</p>
       )}
       {(ledger.data?.transactions.length ?? 0) > 0 && (
-        <table className="report-table">
+        <div className="rewards-table-scroll" tabIndex={0} role="region" aria-label="Card transactions">
+        <table className="report-table rewards-ledger-table">
           <thead>
             <tr>
               <th>Date</th>
               <th>Payee</th>
               <th className="num">Amount</th>
+              <th className="num">Earned</th>
               <th>Flag</th>
             </tr>
           </thead>
@@ -834,6 +882,7 @@ function CardLedger({
               const snapshot = overrides[transaction.id] ?? transaction;
               const colour = snapshot.flag_color;
               const flagName = snapshotFlagLabel(flagNames, colour, snapshot);
+              const earned = rewards.data?.transaction_rewards?.[transaction.id];
               return (
                 <tr key={transaction.id}>
                   <td>{formatDate(transaction.date)}</td>
@@ -844,11 +893,16 @@ function CardLedger({
                     </span>
                   </td>
                   <td className={transaction.amount < 0 ? "num amount-negative" : "num"}>{formatMoney(transaction.amount)}</td>
+                  <td className="num">{rewards.loading ? "…" : earned && calculation
+                    ? calculation.reward_type === "miles"
+                      ? `${earned.reward.toLocaleString("en-GB")} mi`
+                      : formatMoney(Math.round(earned.reward_dollars * 1000))
+                    : "Unavailable"}</td>
                   <td>
                     <FlagPicker
                       value={colour ?? ""}
                       onChange={(value) => void setFlag(transaction, value)}
-                      disabled={pendingId === transaction.id}
+                      disabled={pendingId !== null}
                       names={pickerNames}
                     />
                   </td>
@@ -857,7 +911,15 @@ function CardLedger({
             })}
           </tbody>
         </table>
+        </div>
       )}
+      <div className="rewards-controls" aria-label="Ledger pagination">
+        <button type="button" disabled={offset === 0 || ledger.loading} onClick={() => setOffset(Math.max(0, offset - 100))}>Previous page</button>
+        <span>Page {Math.floor(offset / 100) + 1} · {ledger.data?.transactions.length ?? 0} transactions</span>
+        <button type="button" disabled={!ledger.data?.has_more || ledger.loading} onClick={() => {
+          if (ledger.data?.next_offset != null) setOffset(ledger.data.next_offset);
+        }}>Next page</button>
+      </div>
     </section>
   );
 }
@@ -870,6 +932,7 @@ function emptyDraft(): CardDraft {
     type: "cashback",
     ynabAccountId: "",
     featured: true,
+    subcategoriesEnabled: false,
     billingType: "calendar",
     billingDay: "",
     rewardMonthCount: "",
@@ -888,7 +951,7 @@ function emptyDraft(): CardDraft {
   };
 }
 
-function draftFromCard(card: CreditCard): CardDraft {
+export function draftFromCard(card: CreditCard): CardDraft {
   return {
     id: card.id,
     name: card.name,
@@ -896,6 +959,7 @@ function draftFromCard(card: CreditCard): CardDraft {
     type: card.type === "miles" ? "miles" : "cashback",
     ynabAccountId: card.ynabAccountId,
     featured: card.featured !== false,
+    subcategoriesEnabled: card.subcategoriesEnabled === true,
     billingType: card.billingCycle?.type === "billing" ? "billing" : "calendar",
     billingDay: numberText(card.billingCycle?.dayOfMonth),
     rewardMonthCount: numberText(card.rewardPeriod?.monthCount),
@@ -947,7 +1011,7 @@ function draftFromCard(card: CreditCard): CardDraft {
   };
 }
 
-function creditCardWrite(draft: CardDraft, options: { clearMissing?: boolean } = {}): { card: CreditCard } | { error: string } {
+export function creditCardWrite(draft: CardDraft, options: { clearMissing?: boolean } = {}): { card: CreditCard } | { error: string } {
   if (!draft.ynabAccountId) return { error: "Choose a HowMuch card." };
   if (!draft.name.trim()) return { error: "Enter a card name." };
 
@@ -962,6 +1026,9 @@ function creditCardWrite(draft: CardDraft, options: { clearMissing?: boolean } =
 
   const billingDay = optionalFinite(draft.billingDay, "Billing day of month");
   if (!billingDay.ok) return { error: billingDay.error };
+  if (billingDay.value != null && (!Number.isInteger(billingDay.value) || billingDay.value < 1 || billingDay.value > 31)) {
+    return { error: "Billing day must be an integer from 1 to 31." };
+  }
   card.billingCycle = { type: draft.billingType };
   if (billingDay.value != null) card.billingCycle.dayOfMonth = billingDay.value;
 
@@ -969,7 +1036,10 @@ function creditCardWrite(draft: CardDraft, options: { clearMissing?: boolean } =
   if (rewardTouched) {
     const monthCount = requiredFinite(draft.rewardMonthCount, "Reward period months");
     if (!monthCount.ok) return { error: monthCount.error };
-    if (!draft.rewardAnchorDate.trim()) return { error: "Reward period needs an anchor date." };
+    if (!Number.isInteger(monthCount.value) || monthCount.value < 2 || monthCount.value > 24) {
+      return { error: "Reward period months must be an integer from 2 to 24." };
+    }
+    if (!validDate(draft.rewardAnchorDate)) return { error: "Reward period needs a valid anchor date." };
     const monthlyMinimum = requiredFinite(draft.rewardMonthlyMinimum, "Monthly minimum spend");
     if (!monthlyMinimum.ok) return { error: monthlyMinimum.error };
     card.rewardPeriod = {
@@ -983,7 +1053,10 @@ function creditCardWrite(draft: CardDraft, options: { clearMissing?: boolean } =
 
   const promoTouched = draft.promoStart.trim() || draft.promoEnd.trim() || draft.promoDescription.trim();
   if (promoTouched) {
-    if (!draft.promoEnd.trim()) return { error: "Promotional period needs an end date." };
+    if (!validDate(draft.promoEnd)) return { error: "Promotional period needs a valid end date." };
+    if (draft.promoStart && (!validDate(draft.promoStart) || draft.promoStart > draft.promoEnd)) {
+      return { error: "Promotional start must be a valid date on or before the end." };
+    }
     card.promotionalPeriod = { endDate: draft.promoEnd };
     if (draft.promoStart.trim()) card.promotionalPeriod.startDate = draft.promoStart;
     if (draft.promoDescription.trim()) card.promotionalPeriod.description = draft.promoDescription.trim();
@@ -1011,7 +1084,7 @@ function creditCardWrite(draft: CardDraft, options: { clearMissing?: boolean } =
     if (!isRewardFlagColour(flag.flagColor)) return { error: `Flag ${index + 1} needs a recognised colour.` };
     const rewardValue = requiredFinite(flag.rewardValue, `Flag ${index + 1} reward value`);
     if (!rewardValue.ok) return { error: rewardValue.error };
-    const priority = requiredFinite(flag.priority, `Flag ${index + 1} priority`);
+    const priority = requiredFinite(flag.priority, `Flag ${index + 1} priority`, false);
     if (!priority.ok) return { error: priority.error };
     const milesBlockSize = optionalFinite(flag.milesBlockSize, `Flag ${index + 1} miles block`);
     if (!milesBlockSize.ok) return { error: milesBlockSize.error };
@@ -1035,7 +1108,7 @@ function creditCardWrite(draft: CardDraft, options: { clearMissing?: boolean } =
     if (flag.excludeFromRewards) written.excludeFromRewards = true;
     flags.push(written);
   }
-  card.subcategoriesEnabled = flags.length > 0;
+  card.subcategoriesEnabled = draft.subcategoriesEnabled;
   card.subcategories = flags;
   card.flagNames = parseRewardFlagNames(draft.flagNames);
 
@@ -1043,6 +1116,7 @@ function creditCardWrite(draft: CardDraft, options: { clearMissing?: boolean } =
   for (const [index, tier] of draft.tiers.entries()) {
     const spendThreshold = requiredFinite(tier.spendThreshold, `Spending tier ${index + 1} threshold`);
     if (!spendThreshold.ok) return { error: spendThreshold.error };
+    if (tiers.some((entry) => entry.spendThreshold === spendThreshold.value)) return { error: "Spending tier thresholds must be unique." };
     const written: CardSpendingTier = { id: tier.id, spendThreshold: spendThreshold.value };
     const earningRate = optionalFinite(tier.earningRate, `Spending tier ${index + 1} earning rate`);
     if (!earningRate.ok) return { error: earningRate.error };
@@ -1054,6 +1128,8 @@ function creditCardWrite(draft: CardDraft, options: { clearMissing?: boolean } =
       const overrides: SpendingTierSubcategory[] = [];
       for (const [overrideIndex, override] of tier.overrides.entries()) {
         if (!override.subcategoryId) return { error: `Spending tier ${index + 1} override ${overrideIndex + 1} needs a flag.` };
+        if (!flags.some((flag) => flag.id === override.subcategoryId)) return { error: `Spending tier ${index + 1} references a removed flag. Remove or reassign its override.` };
+        if (overrides.some((entry) => entry.subcategoryId === override.subcategoryId)) return { error: `Spending tier ${index + 1} has duplicate flag overrides.` };
         const overrideRate = requiredFinite(override.rewardValue, `Spending tier ${index + 1} override ${overrideIndex + 1} rate`);
         if (!overrideRate.ok) return { error: overrideRate.error };
         const mapped: SpendingTierSubcategory = { subcategoryId: override.subcategoryId, rewardValue: overrideRate.value };
@@ -1109,16 +1185,23 @@ function isRewardFlagColour(value: string): value is RewardFlagColour {
 
 type ParsedNumber = { ok: true; value?: number | null } | { ok: false; error: string };
 
-function optionalFinite(text: string, label: string): ParsedNumber {
+function validDate(text: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+  const date = new Date(`${text}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === text;
+}
+
+function optionalFinite(text: string, label: string, nonnegative = true): ParsedNumber {
   const trimmed = text.trim();
-  if (!trimmed) return { ok: true, value: undefined };
+  if (!trimmed) return { ok: true, value: null };
   const value = Number(trimmed);
   if (!Number.isFinite(value)) return { ok: false, error: `${label} must be a number.` };
+  if (nonnegative && value < 0) return { ok: false, error: `${label} must be nonnegative.` };
   return { ok: true, value };
 }
 
-function requiredFinite(text: string, label: string): { ok: true; value: number } | { ok: false; error: string } {
-  const parsed = optionalFinite(text, label);
+function requiredFinite(text: string, label: string, nonnegative = true): { ok: true; value: number } | { ok: false; error: string } {
+  const parsed = optionalFinite(text, label, nonnegative);
   if (!parsed.ok) return parsed;
   if (parsed.value == null) return { ok: false, error: `${label} is required.` };
   return { ok: true, value: parsed.value };

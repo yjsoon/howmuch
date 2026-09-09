@@ -984,6 +984,20 @@ describe("D1 foundation", () => {
     expect(await actual.ageOfMoney("p", { from: "2026-01-01", to: "2026-01-31" })).toEqual(expected.ageOfMoney("p", { from: "2026-01-01", to: "2026-01-31" }));
   });
 
+  test("D1 and SQLite rewards retain history before a cut-in range and reset monthly caps", async () => {
+    const db = await ledgerSqlite();
+    const card = { id: "card", name: "Card", issuer: "Bank", type: "miles", ynabAccountId: "a", featured: false, earningRate: 2, maximumSpend: 100 };
+    db.run("INSERT INTO rewards_tracker_cards(plan_id,id,account_id,name,issuer,type,payload_json) VALUES('p','card','a','Card','Bank','miles',?)", JSON.stringify(card));
+    db.run("INSERT INTO transactions(id,plan_id,account_id,date,amount_milli) VALUES('early','p','a','2026-04-03',-80000),('late','p','a','2026-04-20',-60000),('may','p','a','2026-05-02',-130000),('excluded','p','a','2026-06-01',-999000)");
+    const filters = { from: "2026-04-15", to: "2026-05-31" };
+    const local = new ReportService(db).rewards("p", filters);
+    const remote = await new D1ReportService(fakeD1(db)).rewards("p", filters);
+    expect(remote).toEqual(local);
+    expect(local.totals).toEqual({ spend: 190, miles: 240, cashback: 0, reward_dollars: 2.4 });
+    expect(local.transaction_rewards).toEqual({ late: { reward: 40, reward_dollars: 0.4 }, may: { reward: 200, reward_dollars: 2 } });
+    expect(local.cards[0]!.calculation.counted_spend).toBe(120);
+  });
+
   test("D1 net-worth reports stay below the binding cap across long daily ranges", async () => {
     const db = await ledgerSqlite();
     db.run("INSERT INTO transactions(id,plan_id,account_id,date,amount_milli) VALUES('long-range-row','p','a','2026-01-02',100)");

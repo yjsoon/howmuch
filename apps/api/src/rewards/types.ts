@@ -174,27 +174,44 @@ export interface RewardsCardRow {
   card: CreditCard;
   account_id: string;
   account_name: string;
-  calculation: {
-    period: string;
-    total_spend: number;
-    counted_spend: number;
-    eligible_spend: number;
-    reward_earned: number;
-    reward_earned_dollars: number;
-    reward_type: "cashback" | "miles";
-    minimum_spend: number | null;
-    minimum_spend_met: boolean;
-    minimum_spend_progress: number | null;
-    maximum_spend: number | null;
-    maximum_spend_exceeded: boolean;
-    maximum_spend_progress: number | null;
-    flags: SubcategoryBreakdown[];
+  calculation: RewardsCardCalculation & {
+    /** Full-period state; card-level amounts are attributed to the requested range. */
+    periods?: Array<{ start: string; end: string; calculation: RewardsCardCalculation }>;
   };
+}
+
+export interface RewardsCardCalculation {
+  period: string;
+  total_spend: number;
+  counted_spend: number;
+  eligible_spend: number;
+  reward_earned: number;
+  reward_earned_dollars: number;
+  reward_type: "cashback" | "miles";
+  minimum_spend: number | null;
+  minimum_spend_met: boolean;
+  minimum_spend_progress: number | null;
+  maximum_spend: number | null;
+  maximum_spend_exceeded: boolean;
+  maximum_spend_progress: number | null;
+  qualification_status?: RewardQualificationStatus;
+  monthly_qualifications?: MonthlyQualificationBreakdown[];
+  monthly_minimum_spend?: number;
+  active_spending_tier_id?: string | null;
+  has_next_spending_tier?: boolean;
+  next_spending_tier_id?: string | null;
+  next_spending_tier_threshold?: number | null;
+  should_stop_using?: boolean;
+  flags: SubcategoryBreakdown[];
 }
 
 export interface RewardsReport {
   from: string | null;
   to: string | null;
+  /** Effective cutoff, clamped to today's Asia/Singapore date. */
+  as_of?: string;
+  period?: string;
+  transaction_rewards?: Record<string, { reward: number; reward_dollars: number }>;
   group_by: RewardGroupBy;
   miles_valuation: number;
   totals: {

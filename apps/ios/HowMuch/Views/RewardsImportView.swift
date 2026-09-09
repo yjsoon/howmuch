@@ -13,9 +13,19 @@ struct RewardsImportView: View {
   @State private var errorMessage: String?
   @State private var result: RewardsTrackerImportResult?
   @State private var editorDestination: RewardCardEditorDestination?
+  @State private var exportDocument: RewardsConfigurationDocument?
+  @State private var isExporting = false
 
   var body: some View {
     Form {
+      Section {
+        Button("Export configuration JSON") {
+          Task { await prepareExport() }
+        }
+        .disabled(busy)
+      } footer: {
+        Text("Exports current cards, rules, tag mappings and settings without connection credentials or cached transactions.")
+      }
       Section {
         Button("Choose export") {
           isPicking = true
@@ -43,7 +53,7 @@ struct RewardsImportView: View {
 
       if let errorMessage {
         Section {
-          Text("Could not import Rewards Tracker export.")
+          Text("Could not complete rewards import / export.")
             .font(.headline)
           Text(errorMessage)
             .foregroundStyle(Theme.outflow)
@@ -101,7 +111,7 @@ struct RewardsImportView: View {
         }
       }
     }
-    .navigationTitle("Rewards import")
+    .navigationTitle("Rewards import / export")
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
       ToolbarItem(placement: .confirmationAction) {
@@ -112,6 +122,11 @@ struct RewardsImportView: View {
     }
     .fileImporter(isPresented: $isPicking, allowedContentTypes: [.json], allowsMultipleSelection: false) { outcome in
       choose(outcome)
+    }
+    .fileExporter(isPresented: $isExporting, document: exportDocument, contentType: .json,
+      defaultFilename: "howmuch-rewards-\(Date.now.isoDateString).json") { outcome in
+      if case .failure(let error) = outcome { errorMessage = error.localizedDescription }
+      exportDocument = nil
     }
     .sheet(item: $editorDestination, onDismiss: {
       Task { await refreshSnapshot() }
@@ -210,5 +225,40 @@ struct RewardsImportView: View {
       }
       phase = .failed(error.localizedDescription)
     }
+  }
+
+  private func prepareExport() async {
+    guard !busy else { return }
+    busy = true
+    errorMessage = nil
+    defer { busy = false }
+    let planID = model.settings.planID
+    do {
+      let current = try await model.apiClient.fetchRewardsTrackerSnapshot(planID: planID)
+      guard planID == model.settings.planID else { return }
+      exportDocument = RewardsConfigurationDocument(data: try current.configurationData())
+      snapshot = current
+      isExporting = true
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+  }
+}
+
+struct RewardsConfigurationDocument: FileDocument {
+  static var readableContentTypes: [UTType] { [.json] }
+  var data: Data
+
+  init(data: Data) { self.data = data }
+
+  init(configuration: ReadConfiguration) throws {
+    guard let data = configuration.file.regularFileContents else {
+      throw CocoaError(.fileReadCorruptFile)
+    }
+    self.data = data
+  }
+
+  func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+    FileWrapper(regularFileWithContents: data)
   }
 }

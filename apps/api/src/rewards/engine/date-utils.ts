@@ -2,6 +2,13 @@
  * Date helpers tailored for YNAB's local-time date strings.
  */
 
+/** The API's business date is Singapore's date, independent of server timezone. */
+export function rewardsToday(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Singapore', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+}
+
 /**
  * Parse a YNAB date string (YYYY-MM-DD) as a local date, preserving the user's timezone.
  */

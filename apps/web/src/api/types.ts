@@ -342,6 +342,9 @@ export interface CreditCard {
 export interface RewardsReport {
   from: string | null;
   to: string | null;
+  as_of?: string;
+  period?: string;
+  transaction_rewards?: Record<string, { reward: number; reward_dollars: number }>;
   group_by: "flag" | "payee" | "category" | "memo";
   miles_valuation: number;
   totals: {
@@ -363,6 +366,15 @@ export interface RewardsReport {
     account_name: string;
     calculation: {
       period: string;
+      periods?: Array<{ start: string; end: string; calculation: Omit<RewardsReport["cards"][number]["calculation"], "periods"> }>;
+      qualification_status?: "not_required" | "met" | "pending" | "failed";
+      monthly_qualifications?: Array<{ start: string; end: string; spend: number; minimumSpend: number; status: "met" | "pending" | "failed" }>;
+      monthly_minimum_spend?: number | null;
+      active_spending_tier_id?: string | null;
+      has_next_spending_tier?: boolean;
+      next_spending_tier_id?: string | null;
+      next_spending_tier_threshold?: number | null;
+      should_stop_using?: boolean;
       total_spend: number;
       counted_spend: number;
       eligible_spend: number;

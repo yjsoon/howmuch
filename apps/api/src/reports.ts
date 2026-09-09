@@ -228,10 +228,7 @@ export class ReportService {
     const accountIds = cards.map((card) => card.ynabAccountId);
     const clauses = ["t.plan_id = ?", "t.deleted = 0"];
     const params: any[] = [planId];
-    if (filters.from) {
-      clauses.push("t.date >= ?");
-      params.push(filters.from);
-    }
+    // Keep earlier period history for caps and minimum-spend qualification.
     if (filters.to) {
       clauses.push("t.date <= ?");
       params.push(filters.to);
@@ -256,7 +253,7 @@ export class ReportService {
          WHERE ${clauses.join(" AND ")}
          ORDER BY t.date, t.id`,
       )
-      .all(...params) as Array<Record<string, any>>;
+      .all(...params) as Array<Parameters<typeof mapRewardTransactionRow>[0]>;
     const accountNames = Object.fromEntries(rows.map((row) => [String(row.account_id), String(row.account_name)]));
     for (const card of cards) {
       if (!accountNames[card.ynabAccountId]) {

@@ -336,7 +336,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ plan_id: planId, card }),
     }).then((data) => data.card),
-  updateRewardCard: (planId: string, cardId: string, card: CreditCard) =>
+  updateRewardCard: (planId: string, cardId: string, card: Partial<CreditCard>) =>
     request<{ card: CreditCard }>(`/api/rewards/cards/${encodeURIComponent(cardId)}`, {
       method: "PATCH",
       body: JSON.stringify({ plan_id: planId, card }),
@@ -356,7 +356,7 @@ export const api = {
 export type RewardsTrackerCard = CreditCard;
 
 export type RewardsTrackerSnapshot = {
-  snapshot: { cards?: RewardsTrackerCard[]; settings?: Record<string, unknown> } | null;
+  snapshot: { cards?: RewardsTrackerCard[]; settings?: Record<string, unknown>; rules?: unknown[]; tagMappings?: unknown[]; themeGroups?: unknown[]; hiddenCards?: unknown[] } | null;
   cards: RewardsTrackerCard[];
   imported_at: string | null;
   updated_at: string | null;

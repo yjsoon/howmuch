@@ -2,6 +2,16 @@ import { NavLink } from "react-router-dom";
 
 const TOOLS = [
   {
+    to: "/tools/reward-terms",
+    name: "Reward terms",
+    detail: "Use your own AI provider key to draft and review card reward rules.",
+  },
+  {
+    to: "/tools/statement-formatter",
+    name: "Statement formatter",
+    detail: "Extract statement images into editable CSV rows with your own provider key.",
+  },
+  {
     to: "/api-tokens",
     name: "API tokens",
     detail: "Mint and revoke personal tokens for the /v1 API.",

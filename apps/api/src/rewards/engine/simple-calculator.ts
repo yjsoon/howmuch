@@ -30,6 +30,7 @@ import {
 } from './utils/subcategories';
 import { applyBlock, getBlockSize, getRewardRate } from './utils/reward-math';
 import { resolveCardSpendingTier } from './utils/spending-tiers';
+import { rewardsToday } from './date-utils';
 
 export interface SubcategoryCalculation {
   id: string;
@@ -171,7 +172,7 @@ function calculateMonthlyQualification(
   breakdowns?: MonthlyQualificationBreakdown[];
   progress?: number;
 } {
-  const today = dateValue(new Date());
+  const today = rewardsToday();
   const qualificationDateValue = period.asOf
     ?? (period.end < today ? period.end : today);
   const qualificationDate = parseDateValue(qualificationDateValue);
@@ -344,7 +345,7 @@ export class SimpleRewardsCalculator {
     const requestedCutoff = period.asOf && period.asOf < period.end
       ? period.asOf
       : period.end;
-    const today = dateValue(new Date());
+    const today = rewardsToday();
     const transactionCutoff = period.asOf && requestedCutoff > today
       ? today
       : requestedCutoff;

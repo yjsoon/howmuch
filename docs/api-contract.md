@@ -468,6 +468,21 @@ Transaction response fields:
 
 Rewards reads imported Rewards Tracker cards and the HowMuch ledger. It does not call YNAB. Spend and reward figures are currency units, not milliunits.
 
+Rewards has two date modes:
+
+- **No `from`:** each card's own current calendar, billing, promotional or anchored reward period, evaluated as of `to` (or today). `as_of` is clamped to today's **Asia/Singapore** date; future purchases never earn early.
+- **With `from`:** historical attribution from that date through `to` (or today). Calculations retain the complete history within each actual reward period before attributing rewards to the selected transactions. A range boundary does not reset caps, minimums or spending tiers.
+
+Dates must be real `YYYY-MM-DD` dates and `from` must not follow an explicit `to`; invalid values return 400. Account filters select cards. Reward rules use transaction flags, not the general report category/transfer filters described below.
+
+The response retains `cards`, `groups`, `totals`, `from`, `to`, `group_by` and `miles_valuation`, and adds:
+
+- `as_of` and a human-readable `period` label.
+- `transaction_rewards[id] = { reward, reward_dollars }` for every selected transaction, including explicit zeros for non-earning rows and refunds. Missing IDs are outside the selected accounts/date windows. `reward` is native miles or cashback; `reward_dollars` applies miles valuation, including a valuation of zero.
+- Each card's calculation exposes `qualification_status` (`not_required`, `met`, `pending`, `failed`), optional `monthly_minimum_spend`, and optional `monthly_qualifications`: `{ start, end, spend, minimumSpend, status }` (the nested `minimumSpend` retains the engine's camelCase spelling).
+- Tier state: `active_spending_tier_id`, `has_next_spending_tier`, `next_spending_tier_id`, `next_spending_tier_threshold`, `should_stop_using`. Hitting a cap while another tier is available does not set `should_stop_using`.
+- `calculation.periods[] = { start, end, calculation }` contains full-period totals and qualification context. Top-level card amounts are attributed to the selected range; top-level qualification/progress describes the cutoff period. Do **not** sum the nested full-period amounts: calendar windows can overlap a one-off promotional window. The top-level totals and transaction map already handle attribution.
+
 Common filters:
 
 - `from`
@@ -529,6 +544,10 @@ Starts a YNAB migration using a supplied token and plan id. The importer should 
 
 Accepts a Rewards Tracker for YNAB settings export (`cards` required). Official Settings exports are the Cloud Sync portable payload: cards, rules, tag mappings, theme groups, hidden cards, and budget selection. Older localStorage dumps may also include `cachedData` with YNAB-shaped accounts, flag names, and dashboard transactions. Those objects are upserted through the same ledger IDs the tracker already syncs over `/v1`. Secrets (`pat`, `howmuchToken`, Cloud Sync phrases, formatter API keys) are stripped. Replaying the same file updates existing cards and transactions instead of duplicating them.
 
+Legacy `points` configurations migrate to miles; absent earning rates use the first active legacy rule's rate or the tracker's default. Explicit modern null/zero rates are preserved. Cached transaction omissions preserve existing fields; explicit nulls clear nullable metadata, and tombstones remain deleted. Name-only cached categories reuse a unique matching ledger category or receive a stable plan-scoped imported identity; existing matched transaction category IDs remain authoritative. This preserves purchase-refund versus inflow classification without inventing source category IDs.
+
+Import replaces the stored card set: omitted cards are removed, and `cards: []` removes all cards. Export configuration before replacing it. A portable configuration export contains no transaction history; importing it alone does not migrate the ledger.
+
 `GET /api/import/rewards-tracker`
 
 Returns the stored portable snapshot and live cards for the plan.
@@ -536,6 +555,8 @@ Returns the stored portable snapshot and live cards for the plan.
 `POST /api/rewards/cards`
 
 Creates a Rewards Tracker card mapped to a live HowMuch account. Body is `{ "plan_id"?: string, "card": { ... } }`. If `card.id` is omitted, the server assigns one. Native writes allowlist the `CreditCard` fields and strip secrets (`pat`, `howmuchToken`, Cloud Sync fields, cached data). Unknown or missing `ynabAccountId` returns 422. Closed accounts are still live. Returns `201 { "data": { "card" } }`.
+
+Rates, spend limits and block sizes must be finite and nonnegative. Repeating reward periods require integer `monthCount` from 2 through 24 and a real anchor date; billing days are integers from 1 through 31. Promotional dates must be real and ordered. Additional tier thresholds must be unique. Card/tier optional rates and limits accept null; category and category-override rates require numbers. `subcategoriesEnabled` is independent of retained category definitions.
 
 `PATCH /api/rewards/cards/:id`
 
@@ -547,7 +568,7 @@ Soft-deletes the card (`deleted = 1`) and removes that id from the stored snapsh
 
 `PATCH /api/rewards/settings`
 
-Merges `milesValuation` (a finite number) into the stored Rewards Tracker settings without replacing cards. Other body keys, including Cloud Sync secrets, are ignored. Returns `{ "data": { "settings" } }` parsed as app settings.
+Merges `milesValuation` (a finite nonnegative number, including zero) into the stored Rewards Tracker settings without replacing cards. Other body keys, including Cloud Sync secrets, are ignored. Returns `{ "data": { "settings" } }` parsed as app settings.
 
 `POST /api/import/csv`
 
@@ -567,3 +588,43 @@ Accepts rows shaped like:
   ]
 }
 ```
+
+### AI-assisted reward tools
+
+Both routes require authentication, same-origin CSRF validation and write access to
+`plan_id`. Keys are transient and requests use fixed provider endpoints, without
+fallbacks. Neither route persists keys, drafts, images or extracted rows.
+
+`POST /api/tools/reward-terms?plan_id=...`
+
+Body: `{ provider: "openai" | "openrouter" | "opencode", apiKey, model,
+cardType: "cashback" | "miles", terms?, url?, instructions?, consent: true }`.
+Returns `{ data: { raw } }` containing validated model JSON. URL fetching permits
+only the exact bank HTTPS hosts listed in the UI; redirects and PDFs are rejected.
+Paste text for other sources. The browser compiles the draft against the selected
+card, shows the proposed categories/limits/tiers, and requires an explicit save
+through the normal card PATCH endpoint. Notes do not become executable rules.
+Null/omitted card limits and bucket minimum/maximum spend or block size preserve
+matched existing values (normalized name, or unflagged default identity); zero
+remains explicit. An omitted catch-all preserves the existing unflagged rule's
+rate/constraints, otherwise uses the proposed/preserved card base rate.
+Null/omitted `spendingTiers` preserves existing tier IDs and relinks overrides;
+`[]` removes tiers. Explicit tiers replace them and can include
+`subcategories: [{ name, rewardValue, maximumSpend? }]`: unique normalized bucket
+names are resolved to compiled IDs; unknown/duplicate references are rejected.
+A nonnull tier `earningRate` overrides the default bucket rate (retaining its cap)
+unless explicitly overridden; named buckets retain their rates unless overridden.
+Null/omitted tier `earningRate` adds no default override. Explicit tier category
+overrides require a nonnegative rate; their null/omitted cap means no cap, zero
+also means unlimited, and positive caps limit eligible spend. Tier card caps use
+the same null/zero/positive semantics. Overrides retain category minimums, blocks,
+and exclusions; tier nulls do not preserve values from replaced tiers.
+
+`POST /api/tools/statement-formatter?plan_id=...`
+
+Body: `{ provider: "gemini" | "openai" | "openrouter", apiKey, model,
+image: "data:image/...;base64,...", instructions?, consent: true }`.
+Accepts PNG, JPEG or WebP, up to 5 MiB per image. Returns
+`{ data: { rows: [{ date, payee, memo, outflow, inflow }] } }`.
+The browser handles sequential images, cancellation, review and CSV export;
+this endpoint does not import transactions. Consent is mandatory for both tools.
