@@ -521,6 +521,76 @@ final class CaptureSessionTests: XCTestCase {
     XCTAssertEqual(session.drafts[0].draft.direction, .outflow)
   }
 
+  func testPayeeOnlyRenameUpdatesUncommittedInflowWithoutInventingAmount() {
+    let session = Self.session(accountID: "acct-posb")
+    var draft = Self.draft(payee: "POSB", amount: 54_530)
+    draft.direction = .inflow
+    draft.accountID = "acct-posb"
+    session.replaceDrafts([CaptureDraftItem(draft: draft)])
+    var renamed = session.drafts[0].draft
+    renamed.payeeName = "POSB rebate"
+    let mapped = SlipMappedDraft(
+      draft: renamed,
+      parsedAmount: false,
+      parsedDate: false,
+      parsedAccount: false,
+      parsedCategory: false,
+      parsedDirection: false,
+      accountCandidates: [],
+      categoryCandidates: []
+    )
+    session.apply(
+      turn: CaptureInterpretedTurn(
+        intent: .update,
+        feedback: "Renamed the draft.",
+        mutations: [CaptureDraftMutation(targetDraftID: nil, extraction: .init(payee: "POSB rebate"))],
+        query: nil,
+        applyToAllDrafts: false
+      ),
+      mapped: [mapped]
+    )
+    XCTAssertEqual(session.drafts[0].draft.payeeName, "POSB rebate")
+    XCTAssertEqual(session.drafts[0].draft.amountMagnitudeMilli, 54_530)
+    XCTAssertEqual(session.drafts[0].draft.direction, .inflow)
+    XCTAssertFalse(session.drafts[0].committed)
+  }
+
+  func testPayeeOnlyRenameUpdatesSavedConversationCard() {
+    let session = Self.session(accountID: "acct-posb")
+    var draft = Self.draft(payee: "POSB", amount: 54_530)
+    draft.direction = .inflow
+    draft.accountID = "acct-posb"
+    session.replaceDrafts([CaptureDraftItem(draft: draft)])
+    session.markCommittedIncluded()
+    XCTAssertTrue(session.drafts[0].committed)
+    var renamed = session.drafts[0].draft
+    renamed.payeeName = "POSB rebate"
+    let mapped = SlipMappedDraft(
+      draft: renamed,
+      parsedAmount: false,
+      parsedDate: false,
+      parsedAccount: false,
+      parsedCategory: false,
+      parsedDirection: false,
+      accountCandidates: [],
+      categoryCandidates: []
+    )
+    session.apply(
+      turn: CaptureInterpretedTurn(
+        intent: .update,
+        feedback: "Renamed the saved card.",
+        mutations: [CaptureDraftMutation(targetDraftID: session.drafts[0].id, extraction: .init(payee: "POSB rebate"))],
+        query: nil,
+        applyToAllDrafts: false
+      ),
+      mapped: [mapped]
+    )
+    XCTAssertEqual(session.drafts[0].draft.payeeName, "POSB rebate")
+    XCTAssertEqual(session.drafts[0].draft.amountMagnitudeMilli, 54_530)
+    XCTAssertEqual(session.drafts[0].draft.direction, .inflow)
+    XCTAssertTrue(session.drafts[0].committed)
+  }
+
   func testSplitAmountChangeIsRejectedAndDraftKept() {
     let session = Self.session(accountID: "acct-everyday")
     var draft = Self.draft(payee: "Market", amount: 15_000)

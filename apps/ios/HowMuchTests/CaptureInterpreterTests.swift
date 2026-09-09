@@ -226,6 +226,88 @@ final class CaptureInterpreterTests: XCTestCase {
     XCTAssertTrue(context.drafts.isEmpty)
   }
 
+  func testPayeeOnlyRenameMapsWithoutInventingAmount() async {
+    let interpreter = CaptureInterpreter(backend: .fixed { context in
+      XCTAssertEqual(context.text, "Name POSB rebate")
+      return CaptureInterpretedTurn(
+        intent: .update,
+        feedback: "Renamed the draft.",
+        mutations: [
+          CaptureDraftMutation(
+            targetDraftID: "draft-posb",
+            extraction: .init(payee: "POSB rebate")
+          ),
+        ],
+        query: nil,
+        applyToAllDrafts: false
+      )
+    })
+    let result = await interpreter.interpret(
+      context: CaptureTurnContext(
+        text: "Name POSB rebate",
+        selectedAccountName: "POSB Savings",
+        selectedAccountID: "acct-posb",
+        today: "2026-09-07",
+        drafts: [
+          CaptureDraftPromptRow(
+            id: "draft-posb",
+            payee: "POSB",
+            amount: "+54.53",
+            account: "POSB Savings",
+            category: "Savings",
+            date: "2026-09-07"
+          ),
+        ],
+        priorInstructions: [],
+        priorAnswers: [],
+        attachmentTranscripts: []
+      ),
+      accounts: [Self.account("acct-posb", "POSB Savings")],
+      categoryGroups: [Self.everydayGroup],
+      payees: []
+    )
+    guard case .success(let value) = result else {
+      return XCTFail("expected mapped payee-only update")
+    }
+    XCTAssertEqual(value.0.intent, .update)
+    XCTAssertEqual(value.1.count, 1)
+    XCTAssertEqual(value.1.first?.targetDraftID, "draft-posb")
+    XCTAssertEqual(value.1.first?.mapped.draft.payeeName, "POSB rebate")
+    XCTAssertFalse(value.1.first?.mapped.parsedAmount ?? true)
+    XCTAssertEqual(value.1.first?.mapped.draft.amountMagnitudeMilli, 0)
+  }
+
+  func testSavedConversationCardStaysVisibleForRename() {
+    let session = CaptureSession(
+      scopeKey: "scope-a",
+      origin: .lastUsedOpen,
+      selectedAccountID: "acct-posb"
+    )
+    var draft = TransactionDraft()
+    draft.importID = "draft-posb"
+    draft.payeeName = "POSB"
+    draft.amountMagnitudeMilli = 54_530
+    draft.direction = .inflow
+    draft.accountID = "acct-posb"
+    session.replaceDrafts([CaptureDraftItem(draft: draft)])
+    session.markCommittedIncluded()
+    let context = CaptureInterpreterPrompt.context(
+      text: "Name POSB rebate",
+      session: session,
+      accounts: [Self.account("acct-posb", "POSB Savings")]
+    )
+    XCTAssertEqual(context.drafts.count, 1)
+    XCTAssertEqual(context.drafts.first?.id, "draft-posb")
+    XCTAssertEqual(context.drafts.first?.payee, "POSB")
+    let prefix = CaptureInterpreterPrompt.prefix(
+      context: context,
+      accounts: [Self.account("acct-posb", "POSB Savings")],
+      categoryGroups: []
+    )
+    XCTAssertTrue(prefix.contains("id=draft-posb"))
+    XCTAssertTrue(prefix.contains("payee=POSB"))
+  }
+
   func testMapPayloadUnqualifiedTodayQueryStaysUnfilteredAndSpendless() {
     let turn = CaptureInterpreter.mapPayload(
       CaptureTurnPayload(
@@ -412,6 +494,53 @@ final class CaptureInterpreterTests: XCTestCase {
     XCTAssertEqual(session.drafts[0].draft.accountID, "acct-everyday")
     XCTAssertTrue(session.canSaveIncluded)
     XCTAssertFalse(session.drafts[0].committed)
+
+    let renameInput = "Name it Starbucks"
+    let renamed = try await interpretLiveTurn(
+      step: "rename-starbucks",
+      text: renameInput,
+      session: session,
+      interpreter: interpreter,
+      accounts: accounts,
+      categoryGroups: categoryGroups,
+      payees: payees
+    )
+    XCTAssertEqual(renamed.turn.intent, .update, "raw intent for \(renameInput)")
+    XCTAssertEqual(
+      renamed.changes.first?.mapped.draft.payeeName,
+      "Starbucks",
+      "raw payee \(renamed.turn.mutations.first?.extraction.payee ?? "")"
+    )
+    XCTAssertFalse(renamed.changes.first?.mapped.parsedAmount ?? true)
+    session.apply(turn: renamed.turn, changes: renamed.changes)
+    attachAppliedDrafts(step: "rename-starbucks-applied", session: session)
+    XCTAssertEqual(session.drafts[0].id, draftID)
+    XCTAssertEqual(session.drafts[0].draft.payeeName, "Starbucks")
+    XCTAssertEqual(session.drafts[0].draft.amountMagnitudeMilli, 7_000)
+
+    session.markCommittedIncluded()
+    let savedRenameInput = "Name it Coffee rebate"
+    let savedRename = try await interpretLiveTurn(
+      step: "rename-saved-coffee-rebate",
+      text: savedRenameInput,
+      session: session,
+      interpreter: interpreter,
+      accounts: accounts,
+      categoryGroups: categoryGroups,
+      payees: payees
+    )
+    XCTAssertEqual(savedRename.turn.intent, .update, "raw intent for \(savedRenameInput)")
+    XCTAssertEqual(
+      savedRename.changes.first?.mapped.draft.payeeName,
+      "Coffee rebate",
+      "raw payee \(savedRename.turn.mutations.first?.extraction.payee ?? "")"
+    )
+    session.apply(turn: savedRename.turn, changes: savedRename.changes)
+    attachAppliedDrafts(step: "rename-saved-coffee-rebate-applied", session: session)
+    XCTAssertEqual(session.drafts[0].id, draftID)
+    XCTAssertEqual(session.drafts[0].draft.payeeName, "Coffee rebate")
+    XCTAssertEqual(session.drafts[0].draft.amountMagnitudeMilli, 7_000)
+    XCTAssertTrue(session.drafts[0].committed)
 
     let queryInput = "How much did I spend today?"
     let queried = try await interpretLiveTurn(
