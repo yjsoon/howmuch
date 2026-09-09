@@ -572,7 +572,6 @@ struct RootCaptureTab: TabContent {
 }
 
 /// SwiftUI's TabContent menu serves the sidebar, not the iPhone tab bar.
-/// Attach standard UIKit interactions to the semantically identified Add control.
 struct RootTabBarTrailingActions: UIViewControllerRepresentable {
   var addManually: () -> Void
   var openAssistant: () -> Void
