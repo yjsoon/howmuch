@@ -9,5 +9,6 @@ Follow the repo skill at `.agents/skills/howmuch-speedflight/SKILL.md` and the r
 
 - Publication requires explicit user authorization — completed iOS work alone does not authorize it. Offer the build when the handoff is obvious; wait for the yes.
 - `git fetch origin` and build the exact requested revision (default fetched `origin/main`), never a stale local branch. Set `SPEEDFLIGHT_SOURCE_REF` to the full containing ref.
+- Increment every `CURRENT_PROJECT_VERSION` in `apps/ios/HowMuch.xcodeproj/project.pbxproj` first so the phone replaces the last IPA. Do not rotate `SPEEDFLIGHT_SECRET`; the page URL stays the same.
 - Preflight gitignored `.env.speedflight` and the Tinkertanker (`PQ6U5ESLN2`) `.p8`; never switch `DEVELOPMENT_TEAM` to T Krobot. On any failed check, stop and report the remedy from the runbook's blocker table.
 - Post the Speedflight page URL only in the private chat, never in PRs, issues, or public logs.

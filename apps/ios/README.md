@@ -59,4 +59,4 @@ scripts/ios-xcodebuild.sh test
 
 Local unsigned builds/tests use the intended worktree; they do not require signing secrets, committed/pushed code, or updating to `main`. Simulator installation/launch is local validation, not physical-device distribution.
 
-For explicitly authorized signed publication to a registered iPhone, follow the [Speedflight runbook](../../docs/speedflight.md). `scripts/speedflight.sh` signs, exports, and uploads in one invocation; do not use it as a local build check.
+For explicitly authorized signed publication to a registered iPhone, follow the [Speedflight runbook](../../docs/speedflight.md). `scripts/speedflight.sh` signs, exports, and uploads in one invocation; do not use it as a local build check. Bump `CURRENT_PROJECT_VERSION` in the Xcode project before each cut; the install page URL does not change.

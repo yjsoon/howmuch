@@ -7,7 +7,11 @@
 #
 # The page link is the only auth for installing. The secret in
 # .env.speedflight is the only auth for uploading. Do not paste either
-# anywhere public.
+# anywhere public. The page URL is derived from the secret + bundle id;
+# do not rotate the secret unless a new page was requested. Increment
+# CURRENT_PROJECT_VERSION in apps/ios/HowMuch.xcodeproj/project.pbxproj
+# before each cut so iOS replaces the previous IPA. Runbook:
+# docs/speedflight.md
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

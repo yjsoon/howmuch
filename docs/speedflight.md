@@ -13,6 +13,14 @@ For local validation, use [apps/ios/AGENTS.md](../apps/ios/AGENTS.md). Safe loca
 
 The page records the exact HEAD commit and the containing branch/tag name. Local tags, stale remote-tracking refs, or `CI=1` are not substitutes for origin verification. If shallow history prevents proving ancestry, fetch the needed history rather than bypass the check.
 
+## Version and install page
+
+iOS will not replace an installed IPA that has the same marketing version and build number. Before every Speedflight cut, increment `CURRENT_PROJECT_VERSION` in `apps/ios/HowMuch.xcodeproj/project.pbxproj`. There are six occurrences (HowMuch, HowMuchTests, HowMuchShare × Debug/Release); they must stay in lockstep. Leave `MARKETING_VERSION` unless the user asked for a new marketing version.
+
+The install page id is the first 32 hex characters of SHA-256 over `bundleId`, a newline, then `SPEEDFLIGHT_SECRET`. That URL is stable across cuts. Do not mint a new `SPEEDFLIGHT_SECRET` unless the user explicitly wants a new page. A request for a “new link” means a new build on the existing page, not a new page.
+
+Commit and push the version bump (and any other authorized revision changes) before running the script. Publication still requires HEAD to be contained in the fetched origin ref.
+
 ## Preflight on the publishing Mac
 
 Confirm these checks without printing secrets or private provisioning/device data. The script checks required values, key-file existence, and Git provenance; Darwin, key permissions/ownership, signing readiness, and device registration remain operator preflight duties.
@@ -33,7 +41,7 @@ Report the failed check and the applicable remedy below; this table does not aut
 | Gap | Owner remedy |
 |---|---|
 | Not Darwin / no Xcode | Use a suitable Mac, or explicitly request a CI setup/publication path. `CODE_SIGNING_ALLOWED=NO` is not a substitute for signed distribution. |
-| Missing `.env.speedflight` / upload secret | Restore the private configuration and the correct existing upload secret. For an explicitly authorized new setup, mint a secret with `openssl rand -hex 24`; do not replace an existing app's upload identity accidentally. Keep `SPEEDFLIGHT_DEEP_LINK=howmuch://`. |
+| Missing `.env.speedflight` / upload secret | Restore the private configuration and the correct existing upload secret. For an explicitly authorized new setup, mint a secret with `openssl rand -hex 24`; do not replace an existing app's upload identity accidentally — rotating the secret creates a new page. Keep `SPEEDFLIGHT_DEEP_LINK=howmuch://`. |
 | Missing ASC key ID / issuer | App Store Connect → Users and Access → Integrations → App Store Connect API, with **Tinkertanker** selected. Issuer ID is per team; a new Team Key should be Admin or App Manager. |
 | Missing `.p8` | The key downloads once. Locate the saved Tinkertanker key, set its explicit path, and use mode `600`. A replacement key requires owner action. |
 | `.p8` is `644` | Correct the configured key's mode to `600` with authorization. |
@@ -56,4 +64,4 @@ The script owns canonical Release signing/archive/export arguments, including `-
 
 Keep `build/xcode/DerivedData-archive` separate from simulator/device caches. Archive/export products live in `build/share`, which the script replaces on each run; preserve any needed prior evidence privately before a new authorized run. Keep diagnostic logs outside DerivedData under `build/xcode/logs`. Do not erase shared caches, terminate another owner's work, or launch competing Xcode workloads. Use the available `validating-xcode-runners` skill for diagnosis rather than duplicating its process/memory playbook here. A failure does not authorize another publication; diagnose and test locally within scope before retrying an authorized handoff. Do not install external skills as a workaround.
 
-Post `Build page: https://speedflight.dev/a/<pageId>` as a plain URL on its own line **only in the authorized private chat**. The page URL is installation authorization: open it in Safari on a Tinkertanker-registered iPhone. Never put it in PRs, issues, public logs, or other public text; never share a URL with a build ID after the page ID. Never print `SPEEDFLIGHT_SECRET` or expose it in shell tracing. Report archive/export/upload and physical installation separately; an uploaded IPA is not proof that the phone installed it.
+Post `Build page: https://speedflight.dev/a/<pageId>` as a plain URL on its own line **only in the authorized private chat**. The page URL is installation authorization: open it in Safari on a Tinkertanker-registered iPhone. It is the same URL every cut; tell the user to Get the new build number, not to look for a different page. Never put it in PRs, issues, public logs, or other public text; never share a URL with a build ID after the page ID. Never print `SPEEDFLIGHT_SECRET` or expose it in shell tracing. Report archive/export/upload and physical installation separately; an uploaded IPA is not proof that the phone installed it.

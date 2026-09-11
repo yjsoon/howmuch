@@ -46,3 +46,11 @@ Cloudflare Email Routing) stays in the YJ account — do not move it.
 - Speedflight is signed archive, export, and external publication in one command, not a validation step. Run it only for an explicitly authorized publication, following [the Speedflight runbook](docs/speedflight.md) and the repo skill [.agents/skills/howmuch-speedflight](.agents/skills/howmuch-speedflight/SKILL.md). iOS work alone does not authorize it.
 - Preserve Apple team **Tinkertanker `PQ6U5ESLN2`**, bundle **`sg.soon.howmuch`**, and registered-device/signing blockers. Never substitute unsigned archives or change teams to bypass a blocker.
 - Install-page links are private bearer credentials: share only in the authorized private chat, never PRs/issues/public logs. Do not install an external skill or trigger CI as a fallback without an explicit request.
+
+### iOS Speedflight
+
+Signed archive, export, and upload in one command: `scripts/speedflight.sh`. Follow [the Speedflight runbook](docs/speedflight.md). iOS work alone does not authorize a cut; “build it on Speedflight” (or an equivalent share-a-build request) does.
+
+- Increment every `CURRENT_PROJECT_VERSION` in `apps/ios/HowMuch.xcodeproj/project.pbxproj` before the cut so the phone replaces the last IPA. Leave `MARKETING_VERSION` unless a new marketing version was requested.
+- The install page URL is derived from `SPEEDFLIGHT_SECRET` + bundle id. It stays the same across cuts. Do not rotate the secret unless the user explicitly wants a new page. “New link” means a new build on that page.
+- Post the page URL only in the authorized private chat, never in PRs, issues, or public logs. There is no GitHub Actions publication path; do not invent one without an explicit request.
