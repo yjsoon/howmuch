@@ -19,6 +19,7 @@
     "baseline:sqlite": "bun scripts/ledger-baseline.ts",
     "test:d1": "bun test apps/api/tests/d1.test.ts",
     "smoke": "bun scripts/smoke.ts",
+    "backup:d1": "./scripts/backup-d1.sh",
     "verify:ios-focus-zoom": "bun scripts/verify-ios-focus-zoom.ts",
     "verify:ios-confirm-presentation": "bun scripts/verify-ios-confirm-presentation.ts",
     "verify:ios-register-swipe": "bun scripts/verify-ios-register-swipe.ts",

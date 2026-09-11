@@ -36,6 +36,7 @@ Cloudflare Email Routing) stays in the YJ account — do not move it.
 
 - Before running any remote D1 migration or Worker deployment, verify that Wrangler has selected the intended account (`Tinkertanker` or `YJ`, IDs above) and that the configured resources exist there. The account ID and resource IDs are authoritative; do not block deployment solely because Cloudflare displays `cloudflare@yjsoon.com` instead of the owner's `yjsoon@gmail.com` shorthand.
 - Never create replacement Cloudflare resources or change bindings merely because Wrangler is authenticated to the wrong account. Switch to the correct account instead.
+- Run `scripts/backup-d1.sh` at least monthly and before any D1 migration (see `docs/deployment.md`). Dumps and checksums stay in gitignored `data/backups/`; the repository is public, so never commit them, upload them to GitHub releases or artifacts, or paste them anywhere world-readable. Restore is the manual chunked procedure, not a single command.
 - Follow `docs/deployment.md` for migration, deployment, and verification order.
 
 ## iOS validation and publication

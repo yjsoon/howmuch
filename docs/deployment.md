@@ -78,6 +78,49 @@ top-level vars in `wrangler.jsonc`, set `HOWMUCH_TRANSITION_READ_ONLY=false`,
 deploy with `--profile yj`, and point clients back. Any writes made on the
 Tinkertanker stack after cutover live only in its database.
 
+## Backing up production D1
+
+Recovery options are D1 Time Travel (~30 days, in-place) and the frozen
+2026-09-11 cutover snapshot in the YJ account. Neither is a periodic export, so
+run the backup routine from the repo root:
+
+```sh
+scripts/backup-d1.sh
+# or, equivalently:
+bun run backup:d1
+```
+
+- Destination: gitignored `data/backups/` (override with `HOWMUCH_BACKUP_DIR`).
+  Each run writes `howmuch-production-YYYY-MM-DD.sql` (UTC date) and
+  `howmuch-production-YYYY-MM-DD.sql.sha256`, and appends diagnostics to
+  `data/backups/.backup-d1.log`.
+- The script is read-only against production. It first verifies that Wrangler
+  profile `tinkertanker` exposes `howmuch-production` = `df039dbc-...`, then
+  exports with `wrangler d1 export howmuch-production --env tk --remote
+  --profile tinkertanker`. It loads the dump into a throwaway local sqlite copy
+  and compares count-only statistics with the live database: the application
+  table count must match exactly and a small non-sensitive set of row counts
+  must match within a tolerance. It never prints rows, payees, memos, or
+  amounts. Validation failure exits non-zero before publishing, so a failed run
+  leaves the previous archive untouched.
+- Cadence: **monthly at minimum**, and always before a D1 migration or other
+  risky change. The YNAB raw mirror dominates the ~204 MB dump.
+- Retention: keeps the newest archive from each of the most recent 6 calendar
+  months (`HOWMUCH_BACKUP_RETENTION_MONTHS`). Pruning removes only
+  `howmuch-production-*.sql` and its `.sha256` inside the configured backup
+  directory; it never touches `data/tk-migration/` or other artefacts, and the
+  newest dump is always kept.
+- Other overrides: `HOWMUCH_BACKUP_COUNT_TOLERANCE`, `HOWMUCH_BACKUP_MIN_BYTES`,
+  `HOWMUCH_BACKUP_EXPECTED_BYTES`, `HOWMUCH_BACKUP_MAX_BYTES`.
+- The dump is a complete, unencrypted ledger and stays on local disk only. Do
+  not commit it and do not upload it to GitHub (the repository is public) or
+  any other world-readable location. Copying it to a private off-machine store
+  (for example a private R2 bucket) is a separate owner decision; the script
+  deliberately creates no Cloudflare resources and implements no scheduling.
+- Restore is **not** a single command: use the chunked procedure below and
+  budget roughly 30 minutes. Time Travel is the fast in-place option; this
+  export is the independent copy that survives database or account loss.
+
 ## Restoring or bulk-loading D1 data
 
 A plain `d1 export` dump cannot be re-imported in one shot: D1's import
