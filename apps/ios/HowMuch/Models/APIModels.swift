@@ -21,8 +21,15 @@ struct ServerError: Decodable {
 
 struct APISettings: Codable, Equatable {
   static let userDefaultsKey = "HowMuch.APISettings"
-  static let productionBaseURL = "https://howmuch.soon.sg"
-  private static let legacyBaseURL = "http://127.0.0.1:8787"
+  static let productionBaseURL = "https://howmuch.tk.sg"
+  /// The development-only default from before the app shipped against a
+  /// hosted API. Its session never authenticated with production, so the
+  /// token must not follow the connection change.
+  private static let legacyDevelopmentBaseURL = "http://127.0.0.1:8787"
+  /// The hosted default used before production moved to `tk.sg`. The same
+  /// service answers on both hosts (the former one redirects permanently), so
+  /// an existing session stays valid and moves with the connection setting.
+  private static let legacyProductionBaseURL = "https://howmuch.soon.sg"
 #if DEBUG
   /// A development-signed build may receive these once at launch through
   /// `devicectl`'s process environment. This marker makes the hand-off
@@ -237,11 +244,25 @@ struct APISettings: Codable, Equatable {
       return APISettings()
     }
     var settings = decoded
-    if settings.normalizedBaseURLString == normalizedBaseURLString(from: legacyBaseURL) {
+    if settings.normalizedBaseURLString == normalizedBaseURLString(from: legacyDevelopmentBaseURL) {
       settings.baseURLString = productionBaseURL
       settings.sessionToken = ""
       settings.authenticatedUserID = ""
       settings.save(to: defaults)
+      return settings
+    }
+
+    if let storedBaseURL = settings.normalizedBaseURLString,
+       storedBaseURL == normalizedBaseURLString(from: legacyProductionBaseURL) {
+      // Anyone who left the connection on an earlier version's hosted default
+      // is following production, not a deliberate custom endpoint, so the
+      // setting moves with the service. The token is scoped to the old host,
+      // so re-save it under the new one before dropping the old copy. A very
+      // old install may still hold the single unscoped legacy token instead.
+      settings.baseURLString = productionBaseURL
+      settings.sessionToken = CredentialStore.load(for: storedBaseURL) ?? CredentialStore.loadLegacy() ?? ""
+      settings.save(to: defaults)
+      CredentialStore.remove(for: storedBaseURL)
       return settings
     }
 
@@ -302,12 +323,33 @@ struct APISettings: Codable, Equatable {
     }
     defaults.set(data, forKey: Self.userDefaultsKey)
   }
+
+#if DEBUG
+  /// Points credential storage at a service the caller owns, so a test never
+  /// reads or migrates the token the installed app keeps for a real server.
+  /// Returns the previous service for the test to restore.
+  @discardableResult
+  static func useCredentialService(_ name: String) -> String {
+    CredentialStore.useService(name)
+  }
+#endif
 }
 
 private enum CredentialStore {
-  private static let service = Bundle.main.bundleIdentifier ?? "HowMuch"
+  /// Tests run inside the app host, so by default they would share the
+  /// installed app's Keychain items. `APISettings.useCredentialService` points
+  /// a test at a service it owns instead.
+  private static var service = Bundle.main.bundleIdentifier ?? "HowMuch"
   private static let legacyAccount = "session-token"
   private static let accountPrefix = "session-token:"
+#if DEBUG
+  @discardableResult
+  static func useService(_ name: String) -> String {
+    let previous = service
+    service = name
+    return previous
+  }
+#endif
 
   static func load(for normalizedBaseURL: String) -> String? {
     load(account: accountPrefix + normalizedBaseURL)
@@ -315,6 +357,17 @@ private enum CredentialStore {
 
   static func loadLegacy() -> String? {
     load(account: legacyAccount)
+  }
+
+  /// Drops a token scoped to an endpoint the app has left, so a migrated
+  /// connection does not leave its old copy of the session behind.
+  static func remove(for normalizedBaseURL: String) {
+    let identity: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrAccount as String: accountPrefix + normalizedBaseURL,
+    ]
+    SecItemDelete(identity as CFDictionary)
   }
 
   private static func load(account: String) -> String? {
@@ -2530,6 +2583,34 @@ struct PendingTransaction: Codable, Equatable, Identifiable {
     self.connectionFingerprint = connectionFingerprint
     self.capturedAt = capturedAt
   }
+
+  init(
+    id: UUID,
+    request: TransactionWriteRequest,
+    connectionFingerprint: String,
+    capturedAt: Date,
+    lastSyncError: String? = nil
+  ) {
+    self.id = id
+    self.request = request
+    self.connectionFingerprint = connectionFingerprint
+    self.capturedAt = capturedAt
+    self.lastSyncError = lastSyncError
+  }
+
+  func replacing(request: TransactionWriteRequest) -> PendingTransaction {
+    var request = request
+    if request.importID == nil {
+      request.importID = self.request.importID ?? id.uuidString.lowercased()
+    }
+    return PendingTransaction(
+      id: id,
+      request: request,
+      connectionFingerprint: connectionFingerprint,
+      capturedAt: capturedAt,
+      lastSyncError: lastSyncError
+    )
+  }
 }
 
 enum OutboxStore {
@@ -2574,6 +2655,27 @@ enum OutboxBatch {
       }
     }
     return next
+  }
+}
+
+enum CaptureOutboxRevision {
+  enum Action: Equatable {
+    case replaceOutbox(index: Int)
+    case queueUntilCreateSettles
+  }
+
+  static func action(
+    importID: String,
+    pending: [PendingTransaction],
+    inFlightIDs: Set<UUID>
+  ) -> Action {
+    guard let index = pending.firstIndex(where: { $0.request.importID == importID }) else {
+      return .queueUntilCreateSettles
+    }
+    if inFlightIDs.contains(pending[index].id) {
+      return .queueUntilCreateSettles
+    }
+    return .replaceOutbox(index: index)
   }
 }
 

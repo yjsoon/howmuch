@@ -1,10 +1,10 @@
 import Foundation
 
 enum CaptureAIPhase: String, Sendable {
-  case waiting = "Waiting for response"
-  case receiving = "Receiving response"
-  case checking = "Checking response"
-  case fetching = "Fetching recorded transactions"
+  case waiting = "Still thinking"
+  case receiving = "Words coming in"
+  case checking = "Checking that over"
+  case fetching = "Looking up recorded spending"
 }
 
 struct CaptureAIActivity: Equatable {

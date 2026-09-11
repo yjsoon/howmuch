@@ -20,6 +20,7 @@ interface Env {
   HOWMUCH_YNAB_TOKEN?: string;
   HOWMUCH_YNAB_PLAN_ID?: string;
   HOWMUCH_TRANSITION_READ_ONLY?: string;
+  HOWMUCH_REDIRECT_TARGET?: string;
 }
 
 const APP_SITE_ASSOCIATION = JSON.stringify({
@@ -30,6 +31,12 @@ const APP_SITE_ASSOCIATION = JSON.stringify({
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    if (env.HOWMUCH_REDIRECT_TARGET) {
+      const url = new URL(request.url);
+      // 308 preserves method and body, so API clients (including the iOS app)
+      // follow the redirect without turning POSTs into GETs.
+      return Response.redirect(`${env.HOWMUCH_REDIRECT_TARGET}${url.pathname}${url.search}`, 308);
+    }
     const pathname = new URL(request.url).pathname;
     if (pathname === "/.well-known/apple-app-site-association" || pathname === "/apple-app-site-association") {
       return new Response(APP_SITE_ASSOCIATION, {

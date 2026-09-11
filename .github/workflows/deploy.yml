@@ -1,0 +1,31 @@
+name: Deploy
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Build web app
+        working-directory: apps/worker
+        run: bun run build:web
+      - name: Deploy Worker to Tinkertanker production
+        working-directory: apps/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: b8b1032c61d9475cd00229c74db7ec72
+        run: npx wrangler deploy --env tk
+      - name: Verify deployment
+        run: |
+          sleep 10
+          curl -fsS --max-time 30 https://howmuch.tk.sg/health

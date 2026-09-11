@@ -95,6 +95,7 @@ struct CaptureAssistantReply: View {
   let intelligence: CaptureIntelligenceStatus
   var activity: CaptureAIActivity? = nil
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @State private var animateCompletion = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -136,6 +137,17 @@ struct CaptureAssistantReply: View {
         }
       }
     }
+    .onAppear {
+      animateCompletion = message.replyState == .generating
+    }
+    .onChange(of: message.id) { _, _ in
+      animateCompletion = message.replyState == .generating
+    }
+    .onChange(of: message.replyState) { _, new in
+      if new == .generating {
+        animateCompletion = true
+      }
+    }
   }
 
   @ViewBuilder
@@ -144,27 +156,14 @@ struct CaptureAssistantReply: View {
       HStack(alignment: .bottom, spacing: 0) {
         Group {
           if message.replyState == .generating {
-            VStack(alignment: .leading, spacing: 8) {
-              Text("Let me take a look…")
-                .accessibilityLabel("Working on a reply")
-              if let activity {
-                TimelineView(.periodic(from: activity.startedAt, by: 1)) { context in
-                  let seconds = max(0, Int(context.date.timeIntervalSince(activity.startedAt)))
-                  VStack(alignment: .leading, spacing: 4) {
-                    Text(activity.phase == .fetching ? "HowMuch server" : activity.provider).font(.caption)
-                    Text("\(activity.phase.rawValue) · \(seconds)s")
-                      .monospacedDigit()
-                    if seconds >= 20 {
-                      Text("Taking longer than usual. You can stop and retry, or add manually.")
-                    }
-                  }
-                  .font(.footnote)
-                  .foregroundStyle(.secondary)
-                }
-              }
-            }
+            waitingProse
           } else {
-            Text(message.text)
+            CaptureTypedProse(
+              fullText: message.text,
+              animate: animateCompletion && message.replyState == .complete,
+              charactersPerSecond: CaptureAssistantPresence.replyCharactersPerSecond,
+              accessibilityLabel: message.text
+            )
           }
         }
         .font(.body)
@@ -179,6 +178,38 @@ struct CaptureAssistantReply: View {
         )
         if !dynamicTypeSize.isAccessibilitySize {
           Spacer(minLength: 24)
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var waitingProse: some View {
+    let clock = activity?.startedAt ?? message.createdAt
+    let hasAttachments = !(message.frozenTurn?.attachmentIDs.isEmpty ?? true)
+    VStack(alignment: .leading, spacing: 8) {
+      TimelineView(.periodic(from: clock, by: 1.0 / 30.0)) { context in
+        CaptureWaitingLine(
+          messageID: message.id,
+          hasAttachments: hasAttachments,
+          phase: activity?.phase,
+          elapsed: max(0, context.date.timeIntervalSince(clock)),
+          now: context.date
+        )
+      }
+      if let activity {
+        TimelineView(.periodic(from: activity.startedAt, by: 1)) { context in
+          let seconds = max(0, Int(context.date.timeIntervalSince(activity.startedAt)))
+          VStack(alignment: .leading, spacing: 4) {
+            Text(activity.phase == .fetching ? "HowMuch server" : activity.provider).font(.caption)
+            Text("\(activity.phase.rawValue) · \(seconds)s")
+              .monospacedDigit()
+            if seconds >= 20 {
+              Text("Taking longer than usual — you can stop and retry, or add it manually.")
+            }
+          }
+          .font(.footnote)
+          .foregroundStyle(.secondary)
         }
       }
     }
@@ -629,7 +660,7 @@ struct CaptureComposerDock: View {
           }
         }
         if isIngesting {
-          Text("Reading image…")
+          Text("Reading the photo…")
             .font(.caption)
             .foregroundStyle(.secondary)
         }
@@ -743,6 +774,71 @@ struct CaptureComposerDock: View {
       .accessibilityLabel("Remove attachment")
     }
     .frame(width: 64, height: 64)
+  }
+}
+
+private struct CaptureWaitingLine: View {
+  let messageID: UUID
+  let hasAttachments: Bool
+  let phase: CaptureAIPhase?
+  let elapsed: TimeInterval
+  let now: Date
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  var body: some View {
+    let frame = CaptureAssistantPresence.waitingFrame(
+      messageID: messageID,
+      hasAttachments: hasAttachments,
+      phase: phase,
+      elapsed: elapsed,
+      reduceMotion: reduceMotion
+    )
+    let blinkOn = Int(now.timeIntervalSinceReferenceDate * 2) % 2 == 0
+    let cursor = !reduceMotion && frame.showsCursor && blinkOn ? "▍" : ""
+    Text(frame.visibleText + cursor)
+      .accessibilityLabel(CaptureAssistantPresence.workingAccessibilityLabel)
+  }
+}
+
+private struct CaptureTypedProse: View {
+  let fullText: String
+  var animate = false
+  var charactersPerSecond = CaptureAssistantPresence.replyCharactersPerSecond
+  let accessibilityLabel: String
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var startedAt: Date?
+
+  var body: some View {
+    let shouldType = animate && !reduceMotion
+    TimelineView(.periodic(from: startedAt ?? .now, by: shouldType ? 1.0 / 30.0 : 3_600)) { context in
+      let visible = revealed(shouldType: shouldType, now: context.date)
+      let cursor = shouldType && visible != fullText
+        && Int(context.date.timeIntervalSinceReferenceDate * 2) % 2 == 0 ? "▍" : ""
+      Text(visible + cursor)
+        .accessibilityHidden(true)
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(accessibilityLabel)
+    .onAppear {
+      if shouldType, startedAt == nil {
+        startedAt = Date()
+      }
+    }
+  }
+
+  private func revealed(shouldType: Bool, now: Date) -> String {
+    if !shouldType {
+      return fullText
+    }
+    guard let startedAt else {
+      return ""
+    }
+    return CaptureAssistantPresence.revealedText(
+      fullText,
+      elapsed: max(0, now.timeIntervalSince(startedAt)),
+      reduceMotion: false,
+      charactersPerSecond: charactersPerSecond
+    )
   }
 }
 

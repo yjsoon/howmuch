@@ -5,7 +5,7 @@ description: Drive HowMuch in a real browser (web ledger) and, for capture/intak
 
 # Verify HowMuch
 
-HowMuch has two user surfaces in this repo. Drive the one the change actually touched. Both talk to the same disposable local API from `control-howmuch launch`. Never point either at `howmuch.soon.sg`.
+HowMuch has two user surfaces in this repo. Drive the one the change actually touched. Both talk to the same disposable local API from `control-howmuch launch`. Never point either at production (`howmuch.tk.sg`, or the legacy `howmuch.soon.sg` that redirects to it).
 
 **Web** (`apps/web`) is the React ledger: first-owner setup, five Reflect reports (including Rewards), register, `/add` quick entry, schedules, tokens, sidebar accounts. There is no monthly Plan edit on the web.
 
@@ -89,14 +89,14 @@ xcrun simctl launch "$UDID" sg.soon.howmuch
 Computer-use drives the Simulator window, not `{web_url}`. This local installation does not prove or authorize physical-device distribution.
 
 3. Connection (**More → Connection settings** on Accounts, Rewards, or Reflect):
-   - **Server** = `{api_url}` from `control-howmuch state` (Simulator: `http://127.0.0.1:{api_port}`). New installs default to `https://howmuch.soon.sg` — change it. HTTP is allowed only for this device or this LAN.
+   - **Server** = `{api_url}` from `control-howmuch state` (Simulator: `http://127.0.0.1:{api_port}`). New installs default to `https://howmuch.tk.sg` — change it. HTTP is allowed only for this device or this LAN.
    - **Username** `verifier`, **Password** `howmuch-verify-15`. Choose **Sign in**.
    - Plan becomes `HowMuch Demo` / `local-plan` automatically (only plan on this stack).
    - If the sheet says setup is required, you skipped web first-owner setup. Finish that, then **Retry Setup Check**. iOS has no Setup token field.
 
 4. After sign-in, Accounts shows Everyday Account, Rainy Day Saver, Travel Card.
 
-Do not paste a production token. Do not leave Server on `howmuch.soon.sg`. A Debug launch-environment bootstrap is production-only — do not use it for verify.
+Do not paste a production token. Do not leave Server on production (`howmuch.tk.sg` or the legacy `howmuch.soon.sg`). A Debug launch-environment bootstrap is production-only — do not use it for verify.
 
 ### Intake gate (shipped vs planned)
 
@@ -110,6 +110,7 @@ Check the running app, not the spec, before driving a planned recipe. If the han
 | [iOS add account](features/ios-add-account.md) | Accounts trailing plus **New Account** exists |
 | [iOS edit account](features/ios-edit-account.md) | Accounts row **Edit Account** and register title editor exist |
 | [iOS capture](features/ios-capture.md) | Add Transaction sheet exists (always). After #98, Duplicate / + / Quick Action share one door |
+| [iOS capture typed replies](features/ios-capture-typed-replies.md) | Conversational Add Transactions on #153. Darwin / Xcode. `typed-wait` and `typed-reply-complete` proven; do not retry on-device Foundation Models on HowMuch Verification |
 | [iOS intake compose](features/ios-intake-compose.md) | A compose `TextField` sits above the amount header on Add Transaction (#99 / #102) |
 | [iOS intake review list](features/ios-intake-review-list.md) | Two spends in one typed sentence open **{N} Transactions** (#103) |
 | [iOS App Intents](features/ios-app-intents.md) | Shortcuts lists **Add Transaction** (#101). Catalog #100 is a precondition |
