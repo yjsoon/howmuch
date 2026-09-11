@@ -106,7 +106,7 @@ describe("YNAB-compatible API", () => {
     expect(remaining.data.scheduled_transactions.map((transaction: any) => transaction.id)).toEqual([created.id]);
   });
 
-  test("keyed schedule reads keep stored deleted presence and drop deleted split lines", async () => {
+  test("keyed schedule reads fill deleted and drop deleted split lines", async () => {
     const repo = new LedgerRepository(db, "plan-test");
     await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
     await repo.upsertAccount("plan-test", { id: "cash", name: "Cash" });
