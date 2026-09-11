@@ -50,11 +50,31 @@ export class BulkApprovalError extends Error {
 }
 
 let onUnauthorized: (() => void) | null = null;
+let onLocalWrite: (() => void) | null = null;
 let requestEpoch = 0;
 
 /** Register a handler for expired sessions on authenticated endpoints. */
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
   onUnauthorized = handler;
+}
+
+/**
+ * Register a handler called after any successful write from this client.
+ *
+ * It lives here rather than at the twenty-odd call sites so no write, present
+ * or future, can slip past the client cache's invalidation. A write returns
+ * the new `server_knowledge` but not everything that number now covers — a
+ * transaction changes account balances the response does not carry — so the
+ * cache is dropped rather than retagged.
+ */
+export function setLocalWriteHandler(handler: (() => void) | null): void {
+  onLocalWrite = handler;
+}
+
+/** Whether a completed request should be treated as a write by the cache. */
+export function isWriteRequest(method: string | undefined): boolean {
+  const verb = (method ?? "GET").toUpperCase();
+  return verb !== "GET" && verb !== "HEAD";
 }
 
 /** Invalidate in-flight 401s from a previous session after login or reload. */
@@ -117,6 +137,9 @@ async function request<T>(path: string, init?: RequestInit, options?: ApiRequest
   }
   if (!body || typeof body !== "object" || !("data" in body)) {
     throw new ApiError("Unexpected response from HowMuch", response.status);
+  }
+  if (isWriteRequest(init?.method)) {
+    onLocalWrite?.();
   }
   return (body as { data: T }).data;
 }

@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { ApiError, api, BulkApprovalError, setUnauthorizedHandler, shouldHandleUnauthorized } from "./client";
+import {
+  ApiError,
+  api,
+  BulkApprovalError,
+  isWriteRequest,
+  setLocalWriteHandler,
+  setUnauthorizedHandler,
+  shouldHandleUnauthorized,
+} from "./client";
 
 describe("speculative requests", () => {
   test("a 401 does not end the session when the caller decides for itself", async () => {
@@ -305,5 +313,54 @@ describe("approveTransactions", () => {
 
   test("rejects an empty approval", async () => {
     await expect(api.approveTransactions("plan-1", [])).rejects.toThrow("must not be empty");
+  });
+});
+
+describe("write invalidation", () => {
+  test("classifies the verbs that change server state", () => {
+    expect(isWriteRequest("POST")).toBe(true);
+    expect(isWriteRequest("PATCH")).toBe(true);
+    expect(isWriteRequest("put")).toBe(true);
+    expect(isWriteRequest("DELETE")).toBe(true);
+    expect(isWriteRequest("GET")).toBe(false);
+    expect(isWriteRequest("HEAD")).toBe(false);
+    // `fetch` defaults to GET, so an absent method is a read.
+    expect(isWriteRequest(undefined)).toBe(false);
+  });
+
+  test("a successful write notifies the cache once; a read does not", async () => {
+    const originalFetch = globalThis.fetch;
+    let writes = 0;
+    setLocalWriteHandler(() => { writes += 1; });
+    globalThis.fetch = (async () => new Response(
+      JSON.stringify({ data: { settings: {}, account: { id: "account-1" } } }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )) as typeof fetch;
+    try {
+      await api.settings("plan-1");
+      expect(writes).toBe(0);
+      await api.updateAccountIcon("plan-1", "account-1", "bank");
+      expect(writes).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      setLocalWriteHandler(null);
+    }
+  });
+
+  test("a failed write leaves the cache alone", async () => {
+    const originalFetch = globalThis.fetch;
+    let writes = 0;
+    setLocalWriteHandler(() => { writes += 1; });
+    globalThis.fetch = (async () => new Response(
+      JSON.stringify({ error: { name: "conflict", detail: "Nope" } }),
+      { status: 409, headers: { "content-type": "application/json" } },
+    )) as typeof fetch;
+    try {
+      await expect(api.updateAccountIcon("plan-1", "account-1", "bank")).rejects.toThrow();
+      expect(writes).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+      setLocalWriteHandler(null);
+    }
   });
 });
