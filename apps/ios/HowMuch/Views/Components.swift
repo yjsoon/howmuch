@@ -513,7 +513,8 @@ struct RootTabView: View {
       .background {
         RootTabBarTrailingActions(
           addManually: presentManual,
-          openAssistant: { chrome.openMore(.assistant) }
+          openAssistant: { chrome.openMore(.assistant) },
+          hidesAssistant: CaptureRouter.shared.hidesTabRowOverlay
         )
         .frame(width: 0, height: 0)
         .accessibilityHidden(true)
@@ -575,6 +576,7 @@ struct RootCaptureTab: TabContent {
 struct RootTabBarTrailingActions: UIViewControllerRepresentable {
   var addManually: () -> Void
   var openAssistant: () -> Void
+  var hidesAssistant = false
 
   func makeUIViewController(context: Context) -> Controller {
     let controller = Controller()
@@ -632,6 +634,11 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
     }
 
     func install() {
+      if CaptureRouter.shared.hidesTabRowOverlay {
+        assistantButton?.isHidden = true
+        assistantButton?.removeFromSuperview()
+        return
+      }
       guard let window = view.window else {
         return
       }
@@ -700,14 +707,19 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
       tabBar: UITabBar?,
       in window: UIWindow
     ) {
+      let button = assistantButton ?? makeAssistantButton()
+      assistantButton = button
+      if CaptureRouter.shared.hidesTabRowOverlay {
+        button.isHidden = true
+        button.removeFromSuperview()
+        return
+      }
       let host = hostForAssistant(add: add, window: window)
       let pin = circularPin(from: add, in: window)
-      let button = assistantButton ?? makeAssistantButton()
       if button.superview !== host {
         button.removeFromSuperview()
         host.addSubview(button)
       }
-      assistantButton = button
       button.tintColor = tabBar?.tintColor ?? window.tintColor
 
       let gap: CGFloat = 8
@@ -722,14 +734,10 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
         width: size.width,
         height: size.height
       )
-      let suppress = CaptureRouter.shared.hidesTabRowOverlay
-      button.isHidden = suppress
+      button.isHidden = false
       button.layer.cornerRadius = size.height / 2
       button.clipsToBounds = true
       button.frame = frame
-      if suppress {
-        return
-      }
       host.bringSubviewToFront(button)
     }
 

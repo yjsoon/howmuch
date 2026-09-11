@@ -253,6 +253,8 @@ final class CaptureSnapshotTests: XCTestCase {
       router.pending = previousPending
       router.presented = previousPresented
     }
+    router.pending = nil
+    router.presented = nil
     let harness = SnapshotHarness.make()
     let chrome = RootChromeState()
     guard let surface = SnapshotSurface(
@@ -2617,7 +2619,9 @@ final class SnapshotSurface {
   /// Compact overlay Assistant is a `UIButton`. Sidebar `_UITabButton`s are not.
   func tabRowOverlayButton(label: String) -> SnapshotAXNode? {
     accessibilityNodes().first {
-      $0.label == label && String(describing: type(of: $0.object)) == "UIButton"
+      $0.label == label
+        && String(describing: type(of: $0.object)) == "UIButton"
+        && ($0.object as? UIView).map { !$0.isHidden && $0.window != nil } == true
     }
   }
 
