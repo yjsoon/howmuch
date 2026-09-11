@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { createId } from "./ids";
+import { CLEAR_ONE_PLAN, REMATERIALISE_ONE_PLAN } from "./ynab-month-activity";
 import { SqliteRepositoryDatabase, type RepositoryDatabase } from "./repository-db";
 import {
   DEFAULT_TRANSACTION_PAGE_SIZE,
@@ -1668,15 +1669,86 @@ export class LedgerRepository {
     const uncategorisedCategoryID = await this.uncategorisedCategoryID(planId, sourceCategories);
     const currentRows = await this.monthCategoryActivityRows(planId, start, uncategorisedCategoryID);
     const current = activityMap(currentRows);
+    const source = await this.sourceMonthActivity(planId, start, uncategorisedCategoryID);
+    if (source === null) return current;
+
+    const categoryIDs = new Set([...current.keys(), ...source.keys()]);
+    const deltas = new Map<string, number>();
+    for (const categoryID of categoryIDs) {
+      const delta = (current.get(categoryID) ?? 0) - (source.get(categoryID) ?? 0);
+      if (delta !== 0) deltas.set(categoryID, delta);
+    }
+    return deltas;
+  }
+
+  /**
+   * The imported source activity for one month, by category.
+   *
+   * Reads `ynab_source_month_activity` (materialised by migration 020/0017).
+   * Returns `null` for "this plan has no YNAB source transactions at all", in
+   * which case every current ledger row is a local change.
+   *
+   * Three cases, in order:
+   *
+   *  1. Rows for this month — the normal path, one indexed read, no contact
+   *     with `ynab_raw_objects`.
+   *  2. No rows for this month but rows for the plan — the plan is
+   *     materialised and this month genuinely has no source activity. A month
+   *     the user has not spent in yet must not be mistaken for a missing
+   *     backfill.
+   *  3. No rows for the plan — either there is no source mirror (null, the
+   *     pre-existing fallback) or the mirror was never materialised. The
+   *     latter happens if a deploy lands before the migration, which
+   *     `docs/deployment.md` allows; raising there would 500 the iOS
+   *     Categories tab, so it falls back to the old in-Worker scan and logs.
+   *     The same branch keeps parity when every raw transaction is deleted and
+   *     the backfill therefore produced no rows.
+   */
+  private async sourceMonthActivity(
+    planId: string,
+    start: string,
+    uncategorisedCategoryID: string | null,
+  ): Promise<Map<string, number> | null> {
+    const rows = await this.db
+      .query("SELECT category_id, activity FROM ynab_source_month_activity WHERE plan_id = ? AND month = ?")
+      .all(planId, start) as Row[];
+    if (rows.length > 0) return materialisedActivityMap(rows, uncategorisedCategoryID);
+
+    // One round trip answers both "is the plan materialised?" and "is there a
+    // source mirror at all?". Both are indexed existence probes, not scans.
+    const probe = await this.db
+      .query(
+        `SELECT EXISTS(SELECT 1 FROM ynab_source_month_activity WHERE plan_id = ?) AS materialised,
+                EXISTS(SELECT 1 FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'transaction') AS has_source`,
+      )
+      .get(planId, planId) as Row | null;
+    if (Number(probe?.materialised ?? 0) === 1) return new Map();
+    if (Number(probe?.has_source ?? 0) === 0) return null;
+
+    console.warn(JSON.stringify({
+      event: "month_activity_unmaterialised",
+      plan_id: planId,
+      month: start,
+      detail: "ynab_source_month_activity is empty for a plan that has raw transactions; falling back to the raw scan",
+    }));
+    return await this.scanSourceMonthActivity(planId, start, uncategorisedCategoryID);
+  }
+
+  /**
+   * The pre-materialisation baseline: load every raw transaction and
+   * subtransaction object in the plan and filter by date in the Worker.
+   *
+   * Kept only as the unmaterialised fallback above and as the reference
+   * implementation the parity script checks the materialised table against.
+   */
+  private async scanSourceMonthActivity(
+    planId: string,
+    start: string,
+    uncategorisedCategoryID: string | null,
+  ): Promise<Map<string, number>> {
     const sourceTransactions = await this.db
       .query("SELECT object_id, payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'transaction'")
       .all(planId) as Row[];
-
-    // An older/incomplete import can have month snapshots without individual
-    // transaction objects. In that case all current ledger rows are local
-    // changes relative to the only available source baseline.
-    if (sourceTransactions.length === 0) return current;
-
     const sourceSubtransactions = await this.db
       .query("SELECT payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'subtransaction'")
       .all(planId) as Row[];
@@ -1706,14 +1778,7 @@ export class LedgerRepository {
         addActivity(source, categoryID, integerMilliunits(line.amount, "source transaction amount"));
       }
     }
-
-    const categoryIDs = new Set([...current.keys(), ...source.keys()]);
-    const deltas = new Map<string, number>();
-    for (const categoryID of categoryIDs) {
-      const delta = (current.get(categoryID) ?? 0) - (source.get(categoryID) ?? 0);
-      if (delta !== 0) deltas.set(categoryID, delta);
-    }
-    return deltas;
+    return source;
   }
 
   /** Maps genuine uncategorised ledger lines to YNAB's imported internal category. */
@@ -1932,6 +1997,21 @@ export class LedgerRepository {
       .query("SELECT payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = ? ORDER BY object_id")
       .all(planId, objectType) as Row[];
     return rows.map((row) => parseRawYnabObject(row.payload_json, objectType));
+  }
+
+  /**
+   * Rebuilds `ynab_source_month_activity` for one plan from its raw mirror.
+   *
+   * Only the YNAB import path writes raw objects, and only local development
+   * runs it (production has no YNAB config and no sync cron), so this runs at
+   * the end of an import rather than per object: a subtransaction can arrive
+   * before its parent, and a re-imported transaction whose date moved would
+   * otherwise leave a stale row in its old month. Clearing and recomputing the
+   * whole plan is correct in both cases and cheap at local-dev sizes.
+   */
+  async rematerialiseYnabMonthActivity(planId: string): Promise<void> {
+    await this.db.query(CLEAR_ONE_PLAN).run(planId);
+    await this.db.query(REMATERIALISE_ONE_PLAN).run(planId, planId);
   }
 
   /** Effective schedules: immutable YNAB rows plus HowMuch-owned overlays. */
@@ -3484,6 +3564,25 @@ function activityMap(rows: Row[]): Map<string, number> {
   for (const row of rows) {
     if (row.id == null) continue;
     addActivity(amounts, String(row.id), integerMilliunits(row.activity, "transaction activity"));
+  }
+  return amounts;
+}
+
+/**
+ * Turns materialised source rows into the same map the raw scan produced.
+ *
+ * `category_id = ''` is the "no category on the source line" sentinel: the
+ * backfill cannot resolve it because the imported "Uncategorized" category is
+ * read per month from the month snapshot. Resolving to nothing drops the line,
+ * which is what the raw scan did.
+ */
+function materialisedActivityMap(rows: Row[], uncategorisedCategoryID: string | null): Map<string, number> {
+  const amounts = new Map<string, number>();
+  for (const row of rows) {
+    const stored = String(row.category_id ?? "");
+    const categoryID = stored === "" ? uncategorisedCategoryID : stored;
+    if (!categoryID) continue;
+    addActivity(amounts, categoryID, integerMilliunits(row.activity, "source month activity"));
   }
   return amounts;
 }

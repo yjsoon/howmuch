@@ -241,6 +241,9 @@ export async function importYnabFromApi(
     }
 
     await repo.relinkYnabTransferTargets(options.planId);
+    // Raw objects have just changed, so the materialised month activity the
+    // month view reads must be rebuilt. Production never runs this path.
+    await repo.rematerialiseYnabMonthActivity(options.planId);
 
     await repo.finishImportSession(sessionId, "completed", { imported_transactions: imported, raw_objects: rawCounts, server_knowledge: serverKnowledge });
     return { import_session_id: sessionId, imported_transactions: imported, raw_objects: rawCounts, server_knowledge: serverKnowledge };

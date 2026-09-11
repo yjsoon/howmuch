@@ -6,6 +6,7 @@ import { D1GuardedCommandExecutor, statement } from "./d1-guarded-command";
 import type { EffectiveScheduledTransaction } from "./scheduled-transactions";
 import { resolveAccountPresentation } from "./account-icon";
 import { onBudgetForKind, type AccountUpdatePatch } from "./account-kind";
+import { CLEAR_ONE_PLAN, REMATERIALISE_ONE_PLAN } from "./ynab-month-activity";
 
 /** Exact effective-source snapshot required to merge a scheduled mutation. */
 export type ScheduledMutationSnapshot = Readonly<{
@@ -154,6 +155,16 @@ export class D1MetadataRepository {
       assertion(commandId,"metadata_plan_exists",planId,planId),
       statement(`INSERT INTO ynab_raw_objects(plan_id,object_type,object_id,payload_json,deleted,server_knowledge,updated_at) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)
         ON CONFLICT(plan_id,object_type,object_id) DO UPDATE SET payload_json=excluded.payload_json,deleted=excluded.deleted,server_knowledge=excluded.server_knowledge,updated_at=CURRENT_TIMESTAMP`,[planId,objectType,objectId,json,deleted,serverKnowledge??null]),
+    ]);
+  }
+
+  /** Rebuilds a plan's materialised month activity as one guarded write. */
+  async rematerialiseYnabMonthActivity(planId:string,context?:D1WriteContext):Promise<void>{
+    const commandId=this.id(context);
+    await this.run("ynab.month_activity.rematerialise",planId,planId,{},context,[
+      assertion(commandId,"metadata_plan_exists",planId,planId),
+      statement(CLEAR_ONE_PLAN,[planId]),
+      statement(REMATERIALISE_ONE_PLAN,[planId,planId]),
     ]);
   }
 
