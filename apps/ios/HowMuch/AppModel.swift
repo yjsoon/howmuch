@@ -1105,13 +1105,23 @@ final class AppModel {
 
   func applySettings(_ nextSettings: APISettings) async {
     let scopeChanged = nextSettings.viewPrefsScopeKey != activeViewPrefsScope
+    // A change to the launch identity (endpoint or signed-in user) is picked
+    // up by HowMuchApp's `.task(id: settings.launchFingerprint)`, which
+    // restarts and calls `refreshAll()` on its own once this assignment is
+    // observed. Calling it again here would run the whole launch waterfall
+    // twice (e.g. once per sign-in), so only call it explicitly when the
+    // identity is unchanged and no task restart will happen — such as
+    // switching plans, or saving unrelated settings.
+    let launchIdentityChanged = nextSettings.launchFingerprint != settings.launchFingerprint
     settings = nextSettings
     settings.save()
     if scopeChanged {
       clearConnectionOwnedState()
     }
     switchViewPrefsScope()
-    await refreshAll()
+    if !launchIdentityChanged {
+      await refreshAll()
+    }
   }
 
   func refreshAll(quiet: Bool = false) async {

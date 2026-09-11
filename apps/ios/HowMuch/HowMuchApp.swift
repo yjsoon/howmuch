@@ -158,7 +158,7 @@ private struct RootView: View {
         return nil
       }
     }
-    .task(id: model.settings.connectionFingerprint) {
+    .task(id: model.settings.launchFingerprint) {
       await model.refreshAll()
     }
     .sheet(isPresented: $model.isShowingSettings) {

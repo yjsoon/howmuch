@@ -97,6 +97,21 @@ struct APISettings: Codable, Equatable {
     [normalizedBaseURLString ?? trimmedBaseURL, planID, authenticatedUserID].joined(separator: "|")
   }
 
+  /// Identifies "the same signed-in connection" without the plan id.
+  ///
+  /// `resolvePlanSelection()` writes `planID` from inside the first
+  /// `refreshAll()` of a launch (adopting a sole plan, or clearing an
+  /// unavailable one). Keying the launch `.task` on `connectionFingerprint`
+  /// made that write change the task's identity, cancelling the in-flight
+  /// refresh and restarting the whole waterfall a second time. This
+  /// fingerprint omits `planID` so resolving the plan mid-flight no longer
+  /// restarts the launch task; explicit plan switches call `refreshAll()`
+  /// directly (see `AppModel.applySettings`) rather than relying on a task
+  /// restart, so they are unaffected.
+  var launchFingerprint: String {
+    [normalizedBaseURLString ?? trimmedBaseURL, authenticatedUserID].joined(separator: "|")
+  }
+
   func matchesCurrentOrLegacyOutboxStamp(_ stamp: String) -> Bool {
     stamp == connectionFingerprint
       || stamp == [trimmedBaseURL, planID, authenticatedUserID].joined(separator: "|")
