@@ -722,10 +722,14 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
         width: size.width,
         height: size.height
       )
-      button.isHidden = false
+      let suppress = CaptureRouter.shared.hidesTabRowOverlay
+      button.isHidden = suppress
       button.layer.cornerRadius = size.height / 2
       button.clipsToBounds = true
       button.frame = frame
+      if suppress {
+        return
+      }
       host.bringSubviewToFront(button)
     }
 

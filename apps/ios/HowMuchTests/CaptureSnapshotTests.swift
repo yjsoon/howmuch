@@ -245,6 +245,51 @@ final class CaptureSnapshotTests: XCTestCase {
     }
   }
 
+  func testTabRowAssistantHidesWhileCaptureIsPresented() async {
+    let router = CaptureRouter.shared
+    let previousPending = router.pending
+    let previousPresented = router.presented
+    defer {
+      router.pending = previousPending
+      router.presented = previousPresented
+    }
+    let harness = SnapshotHarness.make()
+    let chrome = RootChromeState()
+    guard let surface = SnapshotSurface(
+      root: RootTabView(
+        chrome: chrome,
+        usesSidebar: false,
+        presenting: { harness.model.presentAddTransactions(origin: .lastUsedOpen) },
+        presentingManually: {}
+      )
+      .environment(chrome)
+      .environment(harness.model)
+      .environment(\.horizontalSizeClass, .compact),
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("root tab row needs a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+    let appeared = await surface.waitUntil {
+      surface.tabRowOverlayButton(label: "Assistant") != nil
+    }
+    XCTAssertTrue(appeared, "compact tab row must host overlay Assistant: \(surface.accessibilityLabels())")
+    router.presented = CaptureRequest(
+      kind: .blank,
+      connectionFingerprint: harness.model.settings.connectionFingerprint
+    )
+    let hidden = await surface.waitUntil {
+      surface.tabRowOverlayButton(label: "Assistant") == nil
+    }
+    XCTAssertTrue(hidden, "Assistant overlay must not cover Add Transactions: \(surface.accessibilityLabels())")
+    router.presented = nil
+    let restored = await surface.waitUntil {
+      surface.tabRowOverlayButton(label: "Assistant") != nil
+    }
+    XCTAssertTrue(restored, "Assistant overlay must return after capture dismisses")
+  }
+
   func testManualIntakeHostPreservesConversationAndAccountIntent() async {
     let router = CaptureRouter.shared
     let previous = router.presented
