@@ -1,6 +1,13 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { ApiError, api, bumpRequestEpoch, setUnauthorizedHandler } from "../api/client";
-import type { Account, AccountPreferences, Category, CategoryGroup } from "../api/types";
+import { ApiError, api, bumpRequestEpoch, setUnauthorizedHandler, type ApiRequestOptions } from "../api/client";
+import type {
+  Account,
+  AccountPreferences,
+  AccountPreferencesSnapshot,
+  Category,
+  CategoryGroup,
+  PlanSettings,
+} from "../api/types";
 import { configureMoney } from "../lib/money";
 import { HalationMark } from "../components/Brand";
 import {
@@ -8,6 +15,15 @@ import {
   emptyAccountPreferences,
   type AccountPreferencesState,
 } from "./account-preferences";
+import {
+  controllerKey as bootstrapControllerKey,
+  decideBootstrap,
+  decideSession,
+  planBootstrapRequests,
+  resolveReferenceBatch,
+  type Settled,
+} from "./bootstrap";
+import { loadPrefs, savePrefs } from "./prefs";
 
 export interface PlanContextValue {
   planId: string;
@@ -35,6 +51,37 @@ export function usePlan(): PlanContextValue {
   return value;
 }
 
+/** Flatten a promise so a decision can be made on its outcome either way. */
+function settle<T>(promise: Promise<T>): Promise<Settled<T>> {
+  return promise.then(
+    (value) => ({ ok: true, value }) as Settled<T>,
+    (error: unknown) => ({ ok: false, error }) as Settled<T>,
+  );
+}
+
+interface ReferenceBatch {
+  settings: PlanSettings;
+  accounts: { accounts: Account[]; server_knowledge: number };
+  /** null means the server has no account preferences; undefined, not asked. */
+  accountPreferences: AccountPreferencesSnapshot | null | undefined;
+  categoryGroups: CategoryGroup[];
+}
+
+/** The four reads the shell needs before it can render a plan. */
+async function fetchReferenceBatch(
+  planId: string,
+  withPreferences: boolean,
+  options: ApiRequestOptions,
+): Promise<ReferenceBatch> {
+  const [settings, accounts, accountPreferences, categoryGroups] = await Promise.all([
+    api.settings(planId, options),
+    api.accounts(planId, options),
+    withPreferences ? api.accountPreferences(planId, options) : Promise.resolve(undefined),
+    api.categories(planId, options),
+  ]);
+  return { settings, accounts, accountPreferences, categoryGroups };
+}
+
 export function PlanProvider({ children }: { children: ReactNode }) {
   const [value, setValue] = useState<PlanContextValue | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +90,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
   const [generation, setGeneration] = useState(0);
   const accountPreferencesControllerRef = useRef<{
     key: string;
+    planId: string;
     controller: AccountPreferencesController;
   } | null>(null);
 
@@ -65,35 +113,78 @@ export function PlanProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        const status = await api.authStatus();
+        // The session check, the plans list and - when a plan is remembered -
+        // its reference data all start now, instead of one after another. The
+        // pure helpers in ./bootstrap decide afterwards which answers survive.
+        const attached = accountPreferencesControllerRef.current;
+        const requests = planBootstrapRequests({
+          hint: loadPrefs().planId ?? null,
+          existingPlanId: attached?.planId ?? null,
+        });
+        const quiet = { handleUnauthorized: false } as const;
+        const statusPromise = api.authStatus(quiet);
+        const plansPromise = settle(api.plans(quiet));
+        const speculativePlanId = requests.speculativePlanId;
+        const speculativeBatch = speculativePlanId
+          ? settle(fetchReferenceBatch(speculativePlanId, requests.fetchPreferences, quiet))
+          : null;
+
+        const status = await statusPromise;
         if (cancelled) return;
         setBootstrapRequired(status.bootstrap_required);
-        if (!status.user) {
+        const session = decideSession(status);
+        if (session.kind === "signed-out") {
+          // The sign-in form goes up now. Whatever the two speculative calls
+          // return is never awaited, never read, and never reaches state.
           setValue(null);
           setError(null);
-          setAuthMode(status.setup_required ? "setup" : "login");
+          setAuthMode(session.mode);
           return;
         }
         setAuthMode("ready");
-        const plans = await api.plans();
-        const planId = plans[0]?.id;
-        if (!planId) {
+        const plansResult = await plansPromise;
+        const batchResult = speculativeBatch ? await speculativeBatch : null;
+        if (cancelled) return;
+        if (!plansResult.ok) {
+          throw plansResult.error;
+        }
+        const decision = decideBootstrap({
+          status,
+          plans: plansResult.value,
+          speculativePlanId,
+        });
+        if (decision.kind !== "ready") {
           throw new Error("No plans are available yet.");
         }
-        const controllerKey = `${status.user.id}:${planId}`;
+        const planId = decision.planId;
+        const controllerKey = bootstrapControllerKey(decision.userId, planId);
         const existingController = accountPreferencesControllerRef.current?.key === controllerKey
           ? accountPreferencesControllerRef.current.controller
           : null;
-        const [settings, accountsSnapshot, accountPreferencesSnapshot, categoryGroups] = await Promise.all([
-          api.settings(planId),
-          api.accounts(planId),
-          existingController ? Promise.resolve(null) : api.accountPreferences(planId),
-          api.categories(planId),
-        ]);
+        const outcome = resolveReferenceBatch(decision, batchResult);
+        if (outcome.kind === "fail") {
+          throw outcome.error;
+        }
+        const batch = outcome.kind === "use"
+          ? outcome.value
+          : await fetchReferenceBatch(planId, !existingController, quiet);
+        if (cancelled) {
+          return;
+        }
+        const { settings, accounts: accountsSnapshot, categoryGroups } = batch;
+        // The batch skips preferences when a controller is already attached.
+        // If that controller turns out to belong to another user or plan, ask
+        // now rather than mistaking "not asked" for "server does not support".
+        const accountPreferencesSnapshot = existingController
+          ? null
+          : batch.accountPreferences !== undefined
+            ? batch.accountPreferences
+            : await api.accountPreferences(planId, quiet);
         if (cancelled) {
           return;
         }
         configureMoney(settings.currency_format);
+        savePrefs({ planId });
         const categories = categoryGroups.flatMap((group) => group.categories ?? []);
         let accountPreferencesSync: AccountPreferencesState;
         let accountPreferencesController = existingController;
@@ -113,7 +204,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
                 : current);
             },
           );
-          accountPreferencesControllerRef.current = { key: controllerKey, controller: accountPreferencesController };
+          accountPreferencesControllerRef.current = { key: controllerKey, planId, controller: accountPreferencesController };
         }
         if (accountPreferencesController) {
           accountPreferencesSync = accountPreferencesController.state;
@@ -171,6 +262,8 @@ export function PlanProvider({ children }: { children: ReactNode }) {
       } catch (cause) {
         if (!cancelled) {
           if (cause instanceof ApiError && cause.status === 401) {
+            accountPreferencesControllerRef.current?.controller.detach();
+            accountPreferencesControllerRef.current = null;
             setValue(null);
             setAuthMode("login");
           }
