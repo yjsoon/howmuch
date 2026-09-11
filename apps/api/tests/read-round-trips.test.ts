@@ -16,6 +16,11 @@ const PLAN_ID = "p";
  * values: #170 batches the remaining statements and should only lower them.
  * Two of every count are the session lookup shared by all authenticated
  * requests.
+ *
+ * The transactions route is one trip cheaper here than in production:
+ * `formatTransactions` fetches subtransactions 90 transactions at a time, so a
+ * full `limit=100` register page costs two of those batches where this
+ * single-transaction fixture costs one.
  */
 const BUDGET: Record<string, number> = {
   "GET /v1/plans": 3,

@@ -724,7 +724,9 @@ async function handleNative(
     const targetPlanId = body.plan_id ?? planId;
     const denied = authorizePlan(principal, targetPlanId, defaultPlanId, method);
     if (denied) return denied;
-    await repo.ensurePlan(targetPlanId);
+    // Every branch below is a write. Ensuring unconditionally meant a GET that
+    // matches no branch still created the plan on its way to a 404.
+    if (isUnsafeMethod(method)) await repo.ensurePlan(targetPlanId);
 
     if (segments[2] === "cards" && segments.length === 3 && method === "POST") {
       const card = await createRewardsCard(repo, targetPlanId, body.card);

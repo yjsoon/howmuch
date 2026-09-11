@@ -3259,6 +3259,16 @@ describe("plans that do not exist", () => {
     }
   });
 
+  test("a native read that matches no route leaves the plan uncreated", async () => {
+    // Every `/api/rewards` branch is a write, so a GET falls through to a 404.
+    // It must not create the plan on the way there.
+    for (const path of ["/api/rewards/cards?plan_id=plan-ghost", "/api/rewards/settings?plan_id=plan-ghost"]) {
+      const response = await ghostRequest(path);
+      expect(`${path} -> ${response.status}`).toBe(`${path} -> 404`);
+      expect(db.query("SELECT id FROM plans WHERE id = 'plan-ghost'").get()).toBeNull();
+    }
+  });
+
   test("writes still bootstrap the plan", async () => {
     const created = await ghostRequest("/v1/plans/plan-ghost/accounts", {
       method: "POST",
