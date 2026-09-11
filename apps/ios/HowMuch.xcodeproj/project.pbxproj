@@ -79,6 +79,8 @@
 		A40000000000000000000021 /* AddTransactionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000020 /* AddTransactionsView.swift */; };
 		A40000000000000000000023 /* AssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000022 /* AssistantView.swift */; };
 		A40000000000000000000025 /* CaptureConversationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000024 /* CaptureConversationViews.swift */; };
+		A80000000000000000000011 /* CaptureAssistantPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000000000000000000010 /* CaptureAssistantPresence.swift */; };
+		A80000000000000000000013 /* CaptureAssistantPresenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000000000000000000012 /* CaptureAssistantPresenceTests.swift */; };
 		A4000000000000000000003D /* CaptureConversationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4000000000000000000003C /* CaptureConversationTests.swift */; };
 		A40000000000000000000031 /* CaptureOriginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000030 /* CaptureOriginTests.swift */; };
 		A40000000000000000000033 /* CaptureSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000032 /* CaptureSessionTests.swift */; };
@@ -134,6 +136,8 @@
 		A40000000000000000000020 /* AddTransactionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddTransactionsView.swift; sourceTree = "<group>"; };
 		A40000000000000000000022 /* AssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantView.swift; sourceTree = "<group>"; };
 		A40000000000000000000024 /* CaptureConversationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureConversationViews.swift; sourceTree = "<group>"; };
+		A80000000000000000000010 /* CaptureAssistantPresence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureAssistantPresence.swift; sourceTree = "<group>"; };
+		A80000000000000000000012 /* CaptureAssistantPresenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureAssistantPresenceTests.swift; sourceTree = "<group>"; };
 		A4000000000000000000003C /* CaptureConversationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureConversationTests.swift; sourceTree = "<group>"; };
 		A40000000000000000000030 /* CaptureOriginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureOriginTests.swift; sourceTree = "<group>"; };
 		A40000000000000000000032 /* CaptureSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureSessionTests.swift; sourceTree = "<group>"; };
@@ -346,6 +350,7 @@
 				A20000000000000000000010 /* CaptureRequest.swift */,
 				A40000000000000000000010 /* CaptureOrigin.swift */,
 				A40000000000000000000012 /* CaptureSession.swift */,
+				A80000000000000000000010 /* CaptureAssistantPresence.swift */,
 				A40000000000000000000014 /* CaptureWorkspace.swift */,
 				A40000000000000000000016 /* CaptureInterpreter.swift */,
 				A70000000000000000000010 /* CaptureAISettings.swift */,
@@ -389,6 +394,7 @@
 				A40000000000000000000038 /* CaptureWorkspaceTests.swift */,
 				A4000000000000000000003A /* CaptureSnapshotTests.swift */,
 				A4000000000000000000003C /* CaptureConversationTests.swift */,
+				A80000000000000000000012 /* CaptureAssistantPresenceTests.swift */,
 				A20000000000000000000033 /* IntentCatalogTests.swift */,
 				A20000000000000000000042 /* SlipReaderMappingTests.swift */,
 				A2000000000000000000005A /* AddTransactionIntentTests.swift */,
@@ -578,6 +584,7 @@
 				A20000000000000000000011 /* CaptureRequest.swift in Sources */,
 				A40000000000000000000011 /* CaptureOrigin.swift in Sources */,
 				A40000000000000000000013 /* CaptureSession.swift in Sources */,
+				A80000000000000000000011 /* CaptureAssistantPresence.swift in Sources */,
 				A40000000000000000000015 /* CaptureWorkspace.swift in Sources */,
 				A40000000000000000000017 /* CaptureInterpreter.swift in Sources */,
 				A70000000000000000000011 /* CaptureAISettings.swift in Sources */,
@@ -617,6 +624,7 @@
 				A40000000000000000000039 /* CaptureWorkspaceTests.swift in Sources */,
 				A4000000000000000000003B /* CaptureSnapshotTests.swift in Sources */,
 				A4000000000000000000003D /* CaptureConversationTests.swift in Sources */,
+				A80000000000000000000013 /* CaptureAssistantPresenceTests.swift in Sources */,
 				A20000000000000000000034 /* IntentCatalogTests.swift in Sources */,
 				A20000000000000000000043 /* SlipReaderMappingTests.swift in Sources */,
 				A2000000000000000000005B /* AddTransactionIntentTests.swift in Sources */,

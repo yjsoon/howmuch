@@ -68,27 +68,30 @@ struct CaptureDraftPromptRow: Equatable, Sendable {
   var account: String
   var category: String
   var date: String
+  var saved: Bool
 }
 
 enum CaptureInterpreterPrompt {
   static let instructions = """
-  You are HowMuch's on-device capture helper. Today's local date is the calendar date. Do not invent ledger totals. Do not delete saved transactions.
+  You are HowMuch's on-device capture helper. Today's local date is the calendar date. Do not invent ledger totals or amounts. Do not delete saved transactions.
 
-  Current drafts and the selected account are capture-only. Use them only for add and update. They are not spending-query scope.
+  Current drafts and the selected account are capture-only. Use them only for add and update. They are not spending-query scope. A draft with saved=yes is already on the device in this conversation. Update it. Do not add a duplicate.
 
   Classify the instruction:
-  - add: new spend or income to append as new drafts
-  - update: change one or more existing drafts (amount, date, account, category, payee)
+  - add: new spend or income that is not already a current draft
+  - update: change one or more current drafts, including saved=yes cards (amount, date, account, category, payee)
   - query: a read-only question about recorded spending
-  - unsupported: anything else, including editing or deleting already saved ledger rows
+  - unsupported: anything else, including deleting saved transactions or editing ledger rows that are not listed as current drafts
 
-  For add and update, return spends with decimal amounts such as 5 or 5.00, never milliunits or IDs. Copy account and category names from the provided lists when they match. Leave a field empty when it was not mentioned. When the user does not name an account, leave account empty so the selected account can fill it. When they name an account, copy that name even if it is ambiguous.
+  "Name X", "call it X", and "rename to X" are payee updates of the matching current draft. Leave amount empty. Do not add a new incoming payment.
+
+  For add, return spends with decimal amounts such as 5 or 5.00, never milliunits or IDs. For update, return only the fields the user named. Leave amount empty on a rename or other field-only change. Never copy or invent an amount the user did not state. Copy account and category names from the provided lists when they match. Leave a field empty when it was not mentioned. When the user does not name an account, leave account empty so the selected account can fill it. When they name an account, copy that name even if it is ambiguous.
 
   For update, set targetDraftID to the existing draft id when the user is clearly talking about that row. Leave it empty when a single draft exists or when the change applies to every current draft (applyToAllDrafts true). If two drafts could match and the user did not say which, leave targetDraftID empty and applyToAllDrafts false.
 
   For query, fill queryKind as spending, today, spendingThisMonth, compareCategory, or findMerchant. Named merchant payment lookup uses findMerchant. A merchant-filtered spending report or category comparison that cannot be represented must be declined as unsupported; never drop the merchant to manufacture an unfiltered report. Do not put a merchant on spending, today, spendingThisMonth, or compareCategory. Query scope comes from the latest spending question, or from a follow-up that continues a prior spending query. Never copy the selected capture account, a prior add or update instruction, or a current unsaved draft into queryAccount, queryCategory, queryMerchant, or spends. For an unqualified Today question, use all accounts, all categories, and no merchant: leave queryAccount, queryCategory, and queryMerchant empty, and leave spends empty. Preserve any dates the user named. Optional from and to are yyyy-MM-dd. Use today only for this local calendar day. Do not rewrite yesterday or last month as this month.
 
-  Feedback is warm, concise conversational British English: one or two short sentences, with contractions. Do not write robotic status fragments or cheerleading. For add and update, call it a draft ready for review and make clear it is not saved yet. Never claim that anything was saved, and never invent actions or results. Questions and clarifications stay natural and truthful.
+  Feedback is warm, concise conversational British English: one or two short sentences, with contractions. Vary the wording across turns; do not reuse the same stock sentence. Sound like a calm person in the room, not a status dashboard. Do not write robotic status fragments or cheerleading. For an unsaved add or update, call it a draft ready for review and make clear it is not saved yet. For an update of a saved=yes card, say the change is applied and do not say it is unsaved. Never claim that a new payment was created when the user only renamed a card. Never invent actions, amounts, or results. Questions and clarifications stay natural and truthful.
   """
 
   static func prefix(
@@ -103,7 +106,7 @@ enum CaptureInterpreterPrompt {
     let draftLines = context.drafts.isEmpty
       ? "none"
       : context.drafts.map { row in
-        "id=\(row.id) payee=\(row.payee) amount=\(row.amount) account=\(row.account) category=\(row.category) date=\(row.date)"
+        "id=\(row.id) payee=\(row.payee) amount=\(row.amount) account=\(row.account) category=\(row.category) date=\(row.date) saved=\(row.saved ? "yes" : "no")"
       }.joined(separator: "\n")
     let prior = context.priorInstructions.isEmpty
       ? "none"
@@ -169,14 +172,15 @@ enum CaptureInterpreterPrompt {
       selectedAccountName: frozen.map(\.accountName) ?? selected?.name ?? "Choose Account",
       selectedAccountID: accountID ?? "",
       today: frozen?.localDate ?? formatter.string(from: calendar.startOfDay(for: now)),
-      drafts: session.currentDrafts.map { item in
+      drafts: session.drafts.map { item in
         CaptureDraftPromptRow(
           id: item.id,
           payee: item.draft.payeeName,
           amount: MoneyCodec.displayString(for: item.draft.signedMilliunits, currencyFormat: nil),
           account: accounts.first(where: { $0.id == item.draft.accountID })?.name ?? "",
           category: categoryName(item.draft.categoryID, in: categoryGroups),
-          date: formatter.string(from: item.draft.date)
+          date: formatter.string(from: item.draft.date),
+          saved: item.committed
         )
       },
       priorInstructions: session.messages.filter { $0.kind == .user }.suffix(6).map(\.text),
@@ -427,9 +431,9 @@ struct CaptureTurnSpend: Codable, Equatable, Sendable {
 #if canImport(FoundationModels)
 @Generable
 struct GenerableCaptureTurn {
-  @Guide(description: "add, update, query, or unsupported. Use unsupported when a merchant-filtered report or comparison cannot be represented.")
+  @Guide(description: "add, update, query, or unsupported. Use update for Name, call it, or rename. Use unsupported when a merchant-filtered report or comparison cannot be represented, or for delete.")
   var kind: String
-  @Guide(description: "Warm concise British English, one or two short sentences, contractions. For add or update say it is a draft ready for review and is not saved yet. Never claim anything was saved or invent actions or results. No robotic status fragments or cheerleading.")
+  @Guide(description: "Warm concise British English, one or two short sentences, contractions, varied wording. Sound like a calm person, not a status dashboard. For unsaved add or update say it is a draft ready for review and is not saved yet. For a saved-card update say the change is applied. Never claim a new payment was invented. No robotic status fragments or cheerleading.")
   var feedback: String
   @Guide(description: "True when the update applies to every current draft")
   var applyToAllDrafts: Bool
@@ -453,7 +457,7 @@ struct GenerableCaptureTurn {
 struct GenerableCaptureSpend {
   @Guide(description: "Existing draft id for an update, otherwise empty")
   var targetDraftID: String
-  @Guide(description: "Amount as a decimal string like 5.00, no currency symbol")
+  @Guide(description: "Decimal amount like 5.00 when the user stated one. Empty for a rename or other field-only update. Never invent an amount.")
   var amount: String
   var payee: String
   var category: String
@@ -492,3 +496,29 @@ extension CaptureInterpreter {
   }
 }
 #endif
+
+enum CapturePayeeRename {
+  static func payee(from text: String) -> String? {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+      return nil
+    }
+    let prefixes = ["name it ", "call it ", "rename to ", "rename it ", "name "]
+    let lowered = trimmed.lowercased()
+    for prefix in prefixes {
+      guard lowered.hasPrefix(prefix) else {
+        continue
+      }
+      let name = String(trimmed.dropFirst(prefix.count))
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !name.isEmpty else {
+        return nil
+      }
+      if name.lowercased().hasPrefix("of ") {
+        return nil
+      }
+      return name
+    }
+    return nil
+  }
+}

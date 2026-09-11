@@ -489,6 +489,48 @@ final class CaptureSessionTests: XCTestCase {
     XCTAssertEqual(session.drafts[0].draft.amountMagnitudeMilli, 5_000)
     XCTAssertEqual(session.drafts[1].draft.amountMagnitudeMilli, 21_000)
     XCTAssertTrue(session.pendingTargetDraftIDs.isEmpty)
+    XCTAssertEqual(session.messages.last?.updatedDraftIDs, [session.drafts[1].id])
+  }
+
+  func testChooseTargetDraftRecordsUpdatedIDsOnCommittedCard() {
+    let session = Self.session(accountID: "acct-everyday")
+    var lunch = Self.draft(payee: "Lunch", amount: 12_000)
+    lunch.accountID = "acct-everyday"
+    var coffee = Self.draft(payee: "Coffee", amount: 5_000)
+    coffee.accountID = "acct-everyday"
+    session.replaceDrafts([
+      CaptureDraftItem(draft: lunch),
+      CaptureDraftItem(draft: coffee),
+    ])
+    session.markCommittedIncluded()
+    var renamed = session.drafts[1].draft
+    renamed.payeeName = "Capture Rename Verify"
+    let mapped = SlipMappedDraft(
+      draft: renamed,
+      parsedAmount: false,
+      parsedDate: false,
+      parsedAccount: false,
+      parsedCategory: false,
+      parsedDirection: false,
+      accountCandidates: [],
+      categoryCandidates: []
+    )
+    session.apply(
+      turn: CaptureInterpretedTurn(
+        intent: .update,
+        feedback: "Which transaction?",
+        mutations: [CaptureDraftMutation(targetDraftID: nil, extraction: .init(payee: "Capture Rename Verify"))],
+        query: nil,
+        applyToAllDrafts: false
+      ),
+      mapped: [mapped]
+    )
+    XCTAssertFalse(session.pendingTargetDraftIDs.isEmpty)
+    session.chooseTargetDraft(session.drafts[1].id)
+    XCTAssertEqual(session.drafts[1].draft.payeeName, "Capture Rename Verify")
+    XCTAssertEqual(session.drafts[0].draft.payeeName, "Lunch")
+    XCTAssertEqual(session.messages.last?.updatedDraftIDs, [session.drafts[1].id])
+    XCTAssertTrue(session.drafts[1].committed)
   }
 
   func testExplicitOutflowCorrectionDoesNotStayInflow() {
@@ -519,6 +561,135 @@ final class CaptureSessionTests: XCTestCase {
       mapped: [mapped]
     )
     XCTAssertEqual(session.drafts[0].draft.direction, .outflow)
+  }
+
+  func testPayeeOnlyRenameUpdatesUncommittedInflowWithoutInventingAmount() {
+    let session = Self.session(accountID: "acct-posb")
+    var draft = Self.draft(payee: "POSB", amount: 54_530)
+    draft.direction = .inflow
+    draft.accountID = "acct-posb"
+    session.replaceDrafts([CaptureDraftItem(draft: draft)])
+    var renamed = session.drafts[0].draft
+    renamed.payeeName = "POSB rebate"
+    let mapped = SlipMappedDraft(
+      draft: renamed,
+      parsedAmount: false,
+      parsedDate: false,
+      parsedAccount: false,
+      parsedCategory: false,
+      parsedDirection: false,
+      accountCandidates: [],
+      categoryCandidates: []
+    )
+    session.apply(
+      turn: CaptureInterpretedTurn(
+        intent: .update,
+        feedback: "Renamed the draft.",
+        mutations: [CaptureDraftMutation(targetDraftID: nil, extraction: .init(payee: "POSB rebate"))],
+        query: nil,
+        applyToAllDrafts: false
+      ),
+      mapped: [mapped]
+    )
+    XCTAssertEqual(session.drafts[0].draft.payeeName, "POSB rebate")
+    XCTAssertEqual(session.drafts[0].draft.amountMagnitudeMilli, 54_530)
+    XCTAssertEqual(session.drafts[0].draft.direction, .inflow)
+    XCTAssertFalse(session.drafts[0].committed)
+  }
+
+  func testPayeeOnlyRenameUpdatesSavedConversationCard() {
+    let session = Self.session(accountID: "acct-posb")
+    var draft = Self.draft(payee: "POSB", amount: 54_530)
+    draft.direction = .inflow
+    draft.accountID = "acct-posb"
+    session.replaceDrafts([CaptureDraftItem(draft: draft)])
+    session.markCommittedIncluded()
+    XCTAssertTrue(session.drafts[0].committed)
+    var renamed = session.drafts[0].draft
+    renamed.payeeName = "POSB rebate"
+    let mapped = SlipMappedDraft(
+      draft: renamed,
+      parsedAmount: false,
+      parsedDate: false,
+      parsedAccount: false,
+      parsedCategory: false,
+      parsedDirection: false,
+      accountCandidates: [],
+      categoryCandidates: []
+    )
+    session.apply(
+      turn: CaptureInterpretedTurn(
+        intent: .update,
+        feedback: "Renamed the saved card.",
+        mutations: [CaptureDraftMutation(targetDraftID: session.drafts[0].id, extraction: .init(payee: "POSB rebate"))],
+        query: nil,
+        applyToAllDrafts: false
+      ),
+      mapped: [mapped]
+    )
+    XCTAssertEqual(session.drafts[0].draft.payeeName, "POSB rebate")
+    XCTAssertEqual(session.drafts[0].draft.amountMagnitudeMilli, 54_530)
+    XCTAssertEqual(session.drafts[0].draft.direction, .inflow)
+    XCTAssertTrue(session.drafts[0].committed)
+  }
+
+  func testPayeeOnlyAddBecomesUpdateWhenADraftAlreadyExists() {
+    let session = Self.session(accountID: "acct-posb")
+    var draft = Self.draft(payee: "POSB", amount: 54_530)
+    draft.direction = .inflow
+    draft.accountID = "acct-posb"
+    session.replaceDrafts([CaptureDraftItem(draft: draft)])
+    var renamed = TransactionDraft()
+    renamed.payeeName = "POSB rebate"
+    let mapped = SlipMappedDraft(
+      draft: renamed,
+      parsedAmount: false,
+      parsedDate: false,
+      parsedAccount: false,
+      parsedCategory: false,
+      parsedDirection: false,
+      accountCandidates: [],
+      categoryCandidates: []
+    )
+    session.apply(
+      turn: CaptureInterpretedTurn(
+        intent: .add,
+        feedback: "It's a draft ready for review and not saved yet, mate. We can't invent the incoming payments, though.",
+        mutations: [CaptureDraftMutation(targetDraftID: nil, extraction: .init(payee: "POSB rebate"))],
+        query: nil,
+        applyToAllDrafts: false
+      ),
+      mapped: [mapped]
+    )
+    XCTAssertEqual(session.drafts.count, 1)
+    XCTAssertEqual(session.drafts[0].draft.payeeName, "POSB rebate")
+    XCTAssertEqual(session.drafts[0].draft.amountMagnitudeMilli, 54_530)
+    XCTAssertEqual(session.drafts[0].draft.direction, .inflow)
+  }
+
+  func testEmptyModelRenameStillRenamesTheVisibleCard() {
+    let session = Self.session(accountID: "acct-posb")
+    var draft = Self.draft(payee: "POSB", amount: 54_530)
+    draft.direction = .inflow
+    draft.accountID = "acct-posb"
+    session.replaceDrafts([CaptureDraftItem(draft: draft)])
+    session.markCommittedIncluded()
+    session.appendUserMessage("Name POSB rebate")
+    session.apply(
+      turn: CaptureInterpretedTurn(
+        intent: .add,
+        feedback: "It's a draft ready for review and not saved yet, mate. We can't invent the incoming payments, though.",
+        mutations: [],
+        query: nil,
+        applyToAllDrafts: false
+      ),
+      mapped: []
+    )
+    XCTAssertEqual(session.drafts.count, 1)
+    XCTAssertEqual(session.drafts[0].draft.payeeName, "POSB rebate")
+    XCTAssertEqual(session.drafts[0].draft.amountMagnitudeMilli, 54_530)
+    XCTAssertEqual(session.drafts[0].draft.direction, .inflow)
+    XCTAssertTrue(session.drafts[0].committed)
   }
 
   func testSplitAmountChangeIsRejectedAndDraftKept() {
@@ -783,7 +954,7 @@ final class CaptureSessionTests: XCTestCase {
     XCTAssertTrue(session.currentDrafts.isEmpty)
   }
 
-  func testCommittedDraftsAreOutOfManualEditorAndInterpreter() {
+  func testCommittedDraftsStayOutOfManualEditor() {
     let session = Self.session(accountID: "acct-everyday")
     session.apply(
       turn: CaptureInterpretedTurn(intent: .add, feedback: "Added coffee.", mutations: [], query: nil, applyToAllDrafts: false),
@@ -794,12 +965,6 @@ final class CaptureSessionTests: XCTestCase {
     lunch.amountMagnitudeMilli = 12_000
     session.applyManualEdit(lunch, id: session.drafts[0].id)
     XCTAssertEqual(session.drafts[0].draft.payeeName, "Coffee")
-    let context = CaptureInterpreterPrompt.context(
-      text: "Add tea $3",
-      session: session,
-      accounts: [Account(id: "acct-everyday", name: "Everyday", icon: nil, type: "checking", onBudget: true, closed: false, balance: 0, clearedBalance: 0, unclearedBalance: 0, lastReconciledDate: nil, deleted: false)]
-    )
-    XCTAssertTrue(context.drafts.isEmpty)
   }
 
   func testDelayedManualCallbackUsesDraftImportIDNotNewlySelectedID() {

@@ -399,7 +399,10 @@ struct AddTransactionsView: View {
         },
         chooseUnresolvedAccount: { resolvingAccountDraftID = $0 },
         chooseUnresolvedCategory: { resolvingCategoryDraftID = $0 },
-        chooseTarget: { session.chooseTargetDraft($0) },
+        chooseTarget: { id in
+          session.chooseTargetDraft(id)
+          persistCommittedCaptures(session.messages.last?.updatedDraftIDs ?? [])
+        },
         inspectQuery: { inspectQueryCard = $0 },
         jumpToDraft: { id in
           highlightDraftID = id
@@ -409,7 +412,11 @@ struct AddTransactionsView: View {
         },
         retry: { retryReply(message.id) },
         enterManually: beginManualEntry,
-        undo: session.canUndo(ownedIDs: message.ownedDraftIDs) ? { session.undo() } : nil,
+        undo: session.canUndo(ownedIDs: message.ownedDraftIDs)
+          ? {
+            persistCommittedCaptures(session.undo())
+          }
+          : nil,
         pendingQuery: message.id == session.pendingQueryReplyID ? session.pendingQuery : nil,
         pendingTargetDrafts: message.id == session.pendingUpdateReplyID ? session.pendingTargetDrafts() : [],
         accountIsOpen: { draft in
@@ -716,8 +723,10 @@ struct AddTransactionsView: View {
       return
     }
     if turn.intent == .add || turn.intent == .update, changes.isEmpty, turn.feedback.isEmpty {
-      session.recordFailedTurn("I could not read a spend in that. Your drafts are still here.")
-      return
+      if CapturePayeeRename.payee(from: session.frozenTurn?.text ?? "") == nil {
+        session.recordFailedTurn("I could not read a spend in that. Your drafts are still here.")
+        return
+      }
     }
     _ = session.apply(
       turn: turn,
@@ -725,6 +734,16 @@ struct AddTransactionsView: View {
       expectedRevision: expectedRevision,
       expectedGeneration: expectedGeneration
     )
+    persistCommittedCaptures(session.messages.last?.updatedDraftIDs ?? [])
+  }
+
+  private func persistCommittedCaptures(_ ids: [String]) {
+    guard !ids.isEmpty else {
+      return
+    }
+    for item in session.drafts where item.committed && ids.contains(item.id) {
+      model.reviseConversationCapture(item)
+    }
   }
 
   private func runQuery(

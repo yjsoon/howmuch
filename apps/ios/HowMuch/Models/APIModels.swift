@@ -2530,6 +2530,34 @@ struct PendingTransaction: Codable, Equatable, Identifiable {
     self.connectionFingerprint = connectionFingerprint
     self.capturedAt = capturedAt
   }
+
+  init(
+    id: UUID,
+    request: TransactionWriteRequest,
+    connectionFingerprint: String,
+    capturedAt: Date,
+    lastSyncError: String? = nil
+  ) {
+    self.id = id
+    self.request = request
+    self.connectionFingerprint = connectionFingerprint
+    self.capturedAt = capturedAt
+    self.lastSyncError = lastSyncError
+  }
+
+  func replacing(request: TransactionWriteRequest) -> PendingTransaction {
+    var request = request
+    if request.importID == nil {
+      request.importID = self.request.importID ?? id.uuidString.lowercased()
+    }
+    return PendingTransaction(
+      id: id,
+      request: request,
+      connectionFingerprint: connectionFingerprint,
+      capturedAt: capturedAt,
+      lastSyncError: lastSyncError
+    )
+  }
 }
 
 enum OutboxStore {
@@ -2574,6 +2602,27 @@ enum OutboxBatch {
       }
     }
     return next
+  }
+}
+
+enum CaptureOutboxRevision {
+  enum Action: Equatable {
+    case replaceOutbox(index: Int)
+    case queueUntilCreateSettles
+  }
+
+  static func action(
+    importID: String,
+    pending: [PendingTransaction],
+    inFlightIDs: Set<UUID>
+  ) -> Action {
+    guard let index = pending.firstIndex(where: { $0.request.importID == importID }) else {
+      return .queueUntilCreateSettles
+    }
+    if inFlightIDs.contains(pending[index].id) {
+      return .queueUntilCreateSettles
+    }
+    return .replaceOutbox(index: index)
   }
 }
 

@@ -417,7 +417,7 @@ final class CaptureSnapshotTests: XCTestCase {
       ("sent-photo", ["Lunch with Jo", "Using Everyday"], { harness in
         AnyView(AddTransactionsView(session: harness.admitSentPhoto(), workspace: harness.workspace))
       }),
-      ("pending-photo", ["Reading image"], { harness in
+      ("pending-photo", ["Reading the photo"], { harness in
         AnyView(AddTransactionsView(session: harness.admitPendingPhoto(), workspace: harness.workspace))
       }),
       ("query", ["Recorded spending", "Inspect"], { harness in
@@ -426,7 +426,7 @@ final class CaptureSnapshotTests: XCTestCase {
       ("error", ["Couldn't finish", "Add manually"], { harness in
         AnyView(AddTransactionsView(session: harness.admitFailedReply(), workspace: harness.workspace))
       }),
-      ("generating", ["Let me take a look"], { harness in
+      ("generating", ["Working on a reply"], { harness in
         AnyView(AddTransactionsView(session: harness.admitGenerating(), workspace: harness.workspace))
       }),
       ("parsed-dark", ["Lunch", "Groceries", "Everyday", "Not saved", "Save transaction"], { harness in
@@ -450,9 +450,26 @@ final class CaptureSnapshotTests: XCTestCase {
         ObjectIdentifier(harness.workspace) == ObjectIdentifier(CaptureWorkspace.shared),
         "\(name) must use an isolated workspace"
       )
+      let root = build(harness)
+      var needles = expected
+      if name == "generating" {
+        guard let reply = harness.workspace.current?.messages.first(where: { $0.replyState == .generating }) else {
+          XCTFail("generating snapshot has no in-flight reply")
+          continue
+        }
+        let line = CaptureAssistantPresence.waitingFrame(
+          messageID: reply.id,
+          hasAttachments: false,
+          phase: nil,
+          elapsed: 12,
+          reduceMotion: false
+        ).fullLine
+        let word = line.split { !$0.isLetter }.map(String.init).first { $0.count >= 4 } ?? line
+        needles = [word]
+      }
       await assertRenderedContent(
-        build(harness).environment(harness.model),
-        expected: expected,
+        root.environment(harness.model),
+        expected: needles,
         name: "capture-\(name)",
         scanUntilExpectedTogether: name == "clarification"
       )
@@ -1426,7 +1443,7 @@ final class CaptureSnapshotTests: XCTestCase {
       surface.layoutNow()
       let labels = surface.accessibilityLabels().joined(separator: " | ")
       XCTAssertTrue(labels.contains("HowMuch server"), labels)
-      XCTAssertNotNil(labels.range(of: #"Fetching recorded transactions · [0-9]+s"#, options: .regularExpression), labels)
+      XCTAssertNotNil(labels.range(of: #"Looking up recorded spending · [0-9]+s"#, options: .regularExpression), labels)
       attachImage(surface.captureVisible(), name: "capture-pending-query-fetching-\(size)")
       guard let stop = await revealControl(on: surface, label: "Stop response") else {
         XCTFail("Stop response missing after query start in \(surface.accessibilityLabels())")
@@ -1720,10 +1737,10 @@ final class CaptureSnapshotTests: XCTestCase {
       let view = AddTransactionsView(session: session, interpreter: CaptureInterpreter(backend: .fixed { _ in
         CaptureInterpretedTurn(intent: .unsupported, feedback: "Fixture", mutations: [], query: nil, applyToAllDrafts: false)
       }), workspace: harness.workspace).environment(harness.model).environment(\.dynamicTypeSize, size)
-      await assertRenderedContent(view, expected: ["Waiting for response", "Taking longer"],
+      await assertRenderedContent(view, expected: ["Still thinking", "Taking longer"],
         name: "byok-slow-\(name)", required: ["Stop"])
       session.updateAIPhase(.fetching, generation: token.generation)
-      await assertRenderedContent(view, expected: ["HowMuch server", "Fetching recorded transactions"],
+      await assertRenderedContent(view, expected: ["HowMuch server", "Looking up recorded spending"],
         name: "byok-fetching-\(name)")
       session.timeOutTurn(generation: token.generation)
       guard let surface = SnapshotSurface(root: view, size: CGSize(width: 390, height: 844)) else {
@@ -2244,6 +2261,9 @@ final class SnapshotHarness {
     let session = admit()
     session.composerText = "Lunch $12"
     _ = session.freezeComposerTurn(accountName: "Everyday", localDate: "2026-09-06")
+    if let index = session.messages.firstIndex(where: { $0.replyState == .generating }) {
+      session.messages[index].createdAt = Date().addingTimeInterval(-12)
+    }
     return session
   }
 
