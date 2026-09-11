@@ -10,9 +10,12 @@ import officialRewardsExport from "../../../fixtures/rewards-tracker-export.json
 let db: Database;
 let handler: (request: Request) => Promise<Response>;
 
-beforeEach(() => {
+beforeEach(async () => {
   db = new Database(":memory:");
   applyMigrations(db);
+  // Production creates the default plan during `/api/auth/setup`. Reads no
+  // longer create it, so the fixture stands in for that bootstrap.
+  await new LedgerRepository(db, "plan-test").ensurePlan("plan-test");
   handler = createHandler({
     db,
     config: {
@@ -688,17 +691,31 @@ describe("YNAB-compatible API", () => {
     expect(db.query("SELECT COUNT(*) AS count FROM plan_month_category_targets").get()).toEqual({ count: 0 });
   });
 
-  test("does not create default plans on handler boot or plan list reads", async () => {
-    const before = db.query("SELECT COUNT(*) AS count FROM plans").get() as { count: number };
-    expect(before.count).toBe(0);
+  test("does not create default plans on handler boot or plan reads", async () => {
+    // The shared fixture stands in for `/api/auth/setup`, so this case needs a
+    // database where no plan has ever been created.
+    const empty = new Database(":memory:");
+    applyMigrations(empty);
+    const emptyHandler = createHandler({
+      db: empty,
+      config: { dbPath: ":memory:", port: 0, apiToken: "test-token", defaultPlanId: "plan-test", transitionReadOnly: false },
+    });
+    const read = (path: string) => emptyHandler(new Request(`http://howmuch.test${path}`, {
+      headers: { authorization: "Bearer test-token" },
+    }));
+    try {
+      expect(empty.query("SELECT COUNT(*) AS count FROM plans").get()).toEqual({ count: 0 });
 
-    const response = await request("/v1/plans");
-    expect(response.status).toBe(200);
-    const json = await response.json();
-    expect(json.data.plans).toEqual([]);
+      const response = await read("/v1/plans");
+      expect(response.status).toBe(200);
+      expect((await response.json()).data.plans).toEqual([]);
+      expect((await read("/v1/plans/plan-test")).status).toBe(404);
+      expect((await read("/v1/plans/plan-test/accounts")).status).toBe(404);
 
-    const after = db.query("SELECT COUNT(*) AS count FROM plans").get() as { count: number };
-    expect(after.count).toBe(0);
+      expect(empty.query("SELECT COUNT(*) AS count FROM plans").get()).toEqual({ count: 0 });
+    } finally {
+      empty.close();
+    }
   });
 
   test("creates and lists OpenClaw-shaped transactions", async () => {
@@ -3209,6 +3226,46 @@ describe("password authentication", () => {
     const throttled = await authRequest("/api/auth/token", { username: "missing", password: "short" });
     expect(throttled.status).toBe(429);
     expect(throttled.headers.get("retry-after")).toBe("900");
+  });
+});
+
+describe("plans that do not exist", () => {
+  // The API token can read the default plan, so authorisation passes and the
+  // repository is the thing that has to answer for a missing row.
+  const ghostConfig = {
+    dbPath: ":memory:",
+    port: 0,
+    apiToken: "test-token",
+    defaultPlanId: "plan-ghost",
+    transitionReadOnly: false,
+  };
+
+  function ghostRequest(path: string, init: { method?: string; body?: unknown } = {}): Promise<Response> {
+    return createHandler({ db, config: ghostConfig })(
+      new Request(`http://howmuch.test${path}`, {
+        method: init.method ?? "GET",
+        headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+        body: init.body ? JSON.stringify(init.body) : undefined,
+      }),
+    );
+  }
+
+  test("reads answer 404 instead of creating the plan", async () => {
+    for (const path of ["/v1/plans/plan-ghost", "/v1/plans/plan-ghost/settings", "/v1/plans/plan-ghost/accounts"]) {
+      const response = await ghostRequest(path);
+      expect(`${path} -> ${response.status}`).toBe(`${path} -> 404`);
+      expect((await response.json()).error).toMatchObject({ name: "resource_not_found" });
+      expect(db.query("SELECT id FROM plans WHERE id = 'plan-ghost'").get()).toBeNull();
+    }
+  });
+
+  test("writes still bootstrap the plan", async () => {
+    const created = await ghostRequest("/v1/plans/plan-ghost/accounts", {
+      method: "POST",
+      body: { account: { name: "Cash" } },
+    });
+    expect(created.status).toBe(201);
+    expect(db.query("SELECT id FROM plans WHERE id = 'plan-ghost'").get()).toEqual({ id: "plan-ghost" });
   });
 });
 
