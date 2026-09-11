@@ -116,6 +116,25 @@ final class CaptureRouterTests: XCTestCase {
     }
   }
 
+  func testHidesTabRowOverlayWhileCaptureOrBlockingSheetIsUp() {
+    let router = CaptureRouter.shared
+    XCTAssertFalse(router.hidesTabRowOverlay)
+
+    router.enqueue(CaptureRequest(kind: .blank, connectionFingerprint: nil))
+    XCTAssertTrue(router.hidesTabRowOverlay)
+
+    router.consume(isAuthenticated: true, currentFingerprint: "plan-a")
+    XCTAssertTrue(router.hidesTabRowOverlay)
+
+    router.dropForSignOut()
+    XCTAssertFalse(router.hidesTabRowOverlay)
+
+    router.beginBlockingSheet()
+    XCTAssertTrue(router.hidesTabRowOverlay)
+    router.endBlockingSheet()
+    XCTAssertFalse(router.hidesTabRowOverlay)
+  }
+
   func testConsumeWaitsWhileABlockingSheetIsUp() {
     let router = CaptureRouter.shared
     router.beginBlockingSheet()

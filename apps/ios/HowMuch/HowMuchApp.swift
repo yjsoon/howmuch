@@ -118,12 +118,14 @@ private struct RootView: View {
       model.activeCaptureSurface = surface
     }
     .overlay(alignment: .bottomTrailing) {
-      RootAddControl()
-        .environment(chrome)
-        .padding(RootChrome.addControlInsets(
-          idiom: UIDevice.current.userInterfaceIdiom,
-          horizontalSizeClass: horizontalSizeClass
-        ))
+      if usesSidebar {
+        RootAddControl()
+          .environment(chrome)
+          .padding(RootChrome.addControlInsets(
+            idiom: UIDevice.current.userInterfaceIdiom,
+            horizontalSizeClass: horizontalSizeClass
+          ))
+      }
     }
     .overlay(alignment: .bottom) {
       Group {
