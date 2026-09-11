@@ -92,6 +92,40 @@ final class CommitManyTests: XCTestCase {
     XCTAssertEqual(updated.request.amount, 54_530)
   }
 
+  func testOutboxRevisionQueuesWhileCreateIsInFlight() {
+    let draft = Self.draft(importID: "imp-posb", amount: 54_530)
+    let pending = OutboxBatch.appending(
+      [draft],
+      onto: [],
+      fingerprint: "fp",
+      isCurrentConnection: { $0 == "fp" }
+    )
+    XCTAssertEqual(
+      CaptureOutboxRevision.action(
+        importID: "imp-posb",
+        pending: pending,
+        inFlightIDs: [pending[0].id]
+      ),
+      .queueUntilCreateSettles
+    )
+    XCTAssertEqual(
+      CaptureOutboxRevision.action(
+        importID: "imp-posb",
+        pending: pending,
+        inFlightIDs: []
+      ),
+      .replaceOutbox(index: 0)
+    )
+    XCTAssertEqual(
+      CaptureOutboxRevision.action(
+        importID: "imp-missing",
+        pending: pending,
+        inFlightIDs: []
+      ),
+      .queueUntilCreateSettles
+    )
+  }
+
   private static func draft(importID: String, amount: Int) -> TransactionDraft {
     var draft = TransactionDraft()
     draft.importID = importID

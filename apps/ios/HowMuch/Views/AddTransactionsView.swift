@@ -399,7 +399,10 @@ struct AddTransactionsView: View {
         },
         chooseUnresolvedAccount: { resolvingAccountDraftID = $0 },
         chooseUnresolvedCategory: { resolvingCategoryDraftID = $0 },
-        chooseTarget: { session.chooseTargetDraft($0) },
+        chooseTarget: { id in
+          session.chooseTargetDraft(id)
+          persistCommittedCaptures(session.messages.last?.updatedDraftIDs ?? [])
+        },
         inspectQuery: { inspectQueryCard = $0 },
         jumpToDraft: { id in
           highlightDraftID = id

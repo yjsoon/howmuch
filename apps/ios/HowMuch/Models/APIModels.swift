@@ -2605,6 +2605,27 @@ enum OutboxBatch {
   }
 }
 
+enum CaptureOutboxRevision {
+  enum Action: Equatable {
+    case replaceOutbox(index: Int)
+    case queueUntilCreateSettles
+  }
+
+  static func action(
+    importID: String,
+    pending: [PendingTransaction],
+    inFlightIDs: Set<UUID>
+  ) -> Action {
+    guard let index = pending.firstIndex(where: { $0.request.importID == importID }) else {
+      return .queueUntilCreateSettles
+    }
+    if inFlightIDs.contains(pending[index].id) {
+      return .queueUntilCreateSettles
+    }
+    return .replaceOutbox(index: index)
+  }
+}
+
 struct SaveMessage: Equatable, Identifiable {
   enum Kind: Equatable {
     case success

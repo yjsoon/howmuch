@@ -84,6 +84,9 @@ final class AppModel {
   var activeCaptureSurface: CaptureSurface = .accounts
   private var focusedRegisters: [(surface: CaptureSurface, accountID: String)] = []
   private var pendingTransactions: [PendingTransaction] = OutboxStore.load()
+  /// Latest conversation revision for a create that is still sending.
+  /// Applied as an edit once the POST lands, or written into the outbox if it fails.
+  private var pendingCreateRevisions: [String: TransactionDraft] = [:]
   /// True while a replay pass is running, whoever started it — the outbox
   /// card drives its spinner from this rather than view-local state.
   var isSyncingOutbox = false
@@ -946,25 +949,49 @@ final class AppModel {
   }
 
   func reviseConversationCapture(_ item: CaptureDraftItem) {
-    let importID = item.id
-    if let existing = serverTransactions.first(where: { $0.importID == importID })
-      ?? serverUnapprovedTransactions.first(where: { $0.importID == importID }) {
-      var draft = item.draft
-      draft.id = existing.id
-      applyPendingEdit(draft, transactionID: existing.id)
+    if applyRevisionToExistingServerRow(item) {
       return
     }
-    replacePendingCreate(importID: importID, draft: item.draft)
+    replacePendingCreate(importID: item.id, draft: item.draft)
+    _ = applyRevisionToExistingServerRow(item)
+  }
+
+  private func matchingServerRow(importID: String, accountID: String) -> Transaction? {
+    let match: (Transaction) -> Bool = { row in
+      row.importID == importID && (accountID.isEmpty || row.accountID == accountID)
+    }
+    return serverTransactions.first(where: match)
+      ?? serverUnapprovedTransactions.first(where: match)
+  }
+
+  @discardableResult
+  private func applyRevisionToExistingServerRow(_ item: CaptureDraftItem) -> Bool {
+    guard let existing = matchingServerRow(importID: item.id, accountID: item.draft.accountID) else {
+      return false
+    }
+    pendingCreateRevisions[item.id] = nil
+    var draft = item.draft
+    draft.id = existing.id
+    applyPendingEdit(draft, transactionID: existing.id)
+    return true
   }
 
   private func replacePendingCreate(importID: String, draft: TransactionDraft) {
-    guard let index = pendingTransactions.firstIndex(where: { $0.request.importID == importID }) else {
-      return
+    switch CaptureOutboxRevision.action(
+      importID: importID,
+      pending: pendingTransactions,
+      inFlightIDs: inFlightCreates
+    ) {
+    case .queueUntilCreateSettles:
+      pendingCreateRevisions[importID] = draft
+    case .replaceOutbox(let index):
+      pendingCreateRevisions[importID] = nil
+      replaceOutboxRequest(at: index, draft: draft)
     }
+  }
+
+  private func replaceOutboxRequest(at index: Int, draft: TransactionDraft) {
     let old = pendingTransactions[index]
-    if inFlightCreates.contains(old.id) {
-      return
-    }
     var next = pendingTransactions
     next[index] = old.replacing(request: draft.writeRequest(includeCleared: draft.shouldWriteCleared))
     do {
@@ -973,6 +1000,24 @@ final class AppModel {
     } catch {
       showSaveMessage("Couldn’t save changes — \(error.localizedDescription)", kind: .failure)
     }
+  }
+
+  private func applyQueuedCreateRevision(importID: String?, transactionID: String) {
+    guard let importID, var revision = pendingCreateRevisions.removeValue(forKey: importID) else {
+      return
+    }
+    revision.id = transactionID
+    applyPendingEdit(revision, transactionID: transactionID)
+  }
+
+  private func writeQueuedRevisionIntoOutbox(_ item: PendingTransaction) {
+    guard let importID = item.request.importID,
+          let revision = pendingCreateRevisions.removeValue(forKey: importID),
+          let index = pendingTransactions.firstIndex(where: { $0.id == item.id })
+    else {
+      return
+    }
+    replaceOutboxRequest(at: index, draft: revision)
   }
 
   private func overlayingPendingEdits(on rows: [Transaction]) -> [Transaction] {
@@ -1809,6 +1854,7 @@ final class AppModel {
     editTasks.removeAll()
     editGenerations.removeAll()
     pendingEdits.removeAll()
+    pendingCreateRevisions.removeAll()
   }
 
   private func ensureNoPendingEdit(on transaction: Transaction) throws {
@@ -2010,15 +2056,22 @@ final class AppModel {
           let saved = try await client.createTransaction(planID: planID, request: request)
           removePending(item.id)
           guard connectionFingerprint == settings.connectionFingerprint else {
+            pendingCreateRevisions.removeAll()
             continue
           }
           if !serverTransactions.contains(where: { $0.id == saved.id }) {
             serverTransactions.insert(saved, at: 0)
           }
+          applyQueuedCreateRevision(
+            importID: saved.importID ?? request.importID ?? item.request.importID,
+            transactionID: saved.id
+          )
           syncedCount += 1
         } catch let error where error.isOfflineError {
+          writeQueuedRevisionIntoOutbox(item)
           break
         } catch {
+          writeQueuedRevisionIntoOutbox(item)
           markSyncError(error.localizedDescription, for: item.id)
         }
       }
