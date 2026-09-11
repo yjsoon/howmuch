@@ -8,14 +8,19 @@ export interface ViewPrefs {
   accountIds?: string[];
   interval?: Interval;
   includeQuietSpending?: boolean;
+  /**
+   * The plan opened last. A hint only: the plans list decides what is actually
+   * readable, so a stale value costs a discarded request and nothing more.
+   */
+  planId?: string;
 }
 
 const KEY = "howmuch.view-prefs.v1";
 const INTERVALS: Interval[] = ["day", "week", "month", "year"];
-const ACCOUNT_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+const ID = /^[A-Za-z0-9._:-]{1,128}$/;
 
-function isAccountId(value: unknown): value is string {
-  return typeof value === "string" && ACCOUNT_ID.test(value);
+function isId(value: unknown): value is string {
+  return typeof value === "string" && ID.test(value);
 }
 
 export function parsePrefs(raw: unknown): ViewPrefs {
@@ -23,7 +28,7 @@ export function parsePrefs(raw: unknown): ViewPrefs {
     return {};
   }
   const value = raw as Record<string, unknown>;
-  const accountIds = Array.isArray(value.accountIds) ? value.accountIds.filter(isAccountId) : undefined;
+  const accountIds = Array.isArray(value.accountIds) ? value.accountIds.filter(isId) : undefined;
   const interval = typeof value.interval === "string" && INTERVALS.includes(value.interval as Interval)
     ? (value.interval as Interval)
     : undefined;
@@ -31,6 +36,7 @@ export function parsePrefs(raw: unknown): ViewPrefs {
     accountIds,
     interval,
     includeQuietSpending: typeof value.includeQuietSpending === "boolean" ? value.includeQuietSpending : undefined,
+    planId: isId(value.planId) ? value.planId : undefined,
   };
 }
 
