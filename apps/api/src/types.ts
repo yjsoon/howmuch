@@ -94,6 +94,8 @@ export type TransactionPage = {
   transactions: any[];
   has_more: boolean;
   next_offset: number | null;
+  /** Read in the same batch as the page, so it always describes these rows. */
+  server_knowledge: number;
 };
 
 /**

@@ -124,7 +124,7 @@ export class LedgerRepository {
   }
 
   async getServerKnowledge(planId: string): Promise<number> {
-    const row = await this.db.query("SELECT server_knowledge FROM plans WHERE id = ?").get(planId) as Row | null;
+    const row = await this.db.query(SERVER_KNOWLEDGE_SQL).get(planId) as Row | null;
     if (!row) throw new PlanNotFoundError();
     return Number(row.server_knowledge);
   }
@@ -1409,13 +1409,31 @@ export class LedgerRepository {
       MAX_TRANSACTION_PAGE_SIZE,
     );
     const offset = Math.max(Math.floor(filters.offset ?? 0), 0);
-    const result = await this.queryTransactions(planId, filters, limit + 1, offset);
-    const transactions = result.transactions;
+    const built = await this.buildTransactionQuery(planId, filters, limit + 1, offset);
+    if (!built.subtransactions) throw new Error("Paged transaction query must carry its subtransaction statement");
+
+    // One round trip for the whole register page. D1 runs a batch as a single
+    // transaction, so the knowledge value, the page and its split lines all
+    // come from one snapshot: the page can never be labelled with a knowledge
+    // value from a write it does not contain.
+    const [knowledgeRows, rows, subtransactionRows] = await this.db.batchRead([
+      { sql: SERVER_KNOWLEDGE_SQL, values: [planId] },
+      { sql: built.sql, values: built.params },
+      { sql: built.subtransactions.sql, values: built.subtransactions.params },
+    ]);
+    if (!knowledgeRows?.[0]) throw new PlanNotFoundError();
+
+    const transactions = assembleTransactions(
+      rows ?? [],
+      subtransactionRows ?? [],
+      (row, subtransactions) => this.formatTransactionRow(row, subtransactions),
+    );
     const has_more = transactions.length > limit;
     return {
       transactions: has_more ? transactions.slice(0, limit) : transactions,
       has_more,
       next_offset: has_more ? offset + limit : null,
+      server_knowledge: Number(knowledgeRows[0].server_knowledge),
     };
   }
 
@@ -1425,6 +1443,24 @@ export class LedgerRepository {
     limit?: number,
     offset?: number,
   ): Promise<{ transactions: any[] }> {
+    const built = await this.buildTransactionQuery(planId, filters, limit, offset);
+    const rows = await this.db.query(built.sql).all(...built.params) as Row[];
+    return { transactions: await this.formatTransactions(rows) };
+  }
+
+  /**
+   * Builds the transaction list statement and, when the query is paged, a
+   * matching statement for the split lines of exactly that page. The second
+   * statement repeats the paged id subquery instead of binding the ids it
+   * returns, so both can travel in one batch without a round trip in between
+   * to learn the ids.
+   */
+  private async buildTransactionQuery(
+    planId: string,
+    filters: TransactionFilters,
+    limit?: number,
+    offset?: number,
+  ): Promise<{ sql: string; params: any[]; subtransactions: { sql: string; params: any[] } | null }> {
     const clauses = ["t.plan_id = ?"];
     const params: any[] = [planId];
 
@@ -1484,11 +1520,6 @@ export class LedgerRepository {
       }
     }
 
-    const pagination = limit == null ? "" : "\n         LIMIT ? OFFSET ?";
-    if (limit != null) {
-      params.push(limit, offset ?? 0);
-    }
-
     const orderBy = "t.date DESC, t.created_at DESC, t.id DESC";
     const listed = `SELECT
            t.*,
@@ -1501,24 +1532,39 @@ export class LedgerRepository {
          LEFT JOIN payees p ON p.id = t.payee_id
          LEFT JOIN categories c ON c.id = t.category_id
          LEFT JOIN subtransactions linked_sub ON linked_sub.id = t.transfer_transaction_id AND linked_sub.deleted = 0`;
-    const rows = await this.db
-      .query(
-        limit == null
-          ? `${listed}
+
+    if (limit == null) {
+      return {
+        sql: `${listed}
          WHERE ${clauses.join(" AND ")}
-         ORDER BY ${orderBy}`
-          : `${listed}
-         JOIN (
-           SELECT t.id
+         ORDER BY ${orderBy}`,
+        params,
+        subtransactions: null,
+      };
+    }
+
+    const pageIds = `SELECT t.id
            ${pageFrom}
            WHERE ${clauses.join(" AND ")}
-           ORDER BY ${orderBy}${pagination}
+           ORDER BY ${orderBy}
+         LIMIT ? OFFSET ?`;
+    const pageParams = [...params, limit, offset ?? 0];
+    return {
+      sql: `${listed}
+         JOIN (
+           ${pageIds}
          ) page ON page.id = t.id
          ORDER BY ${orderBy}`,
-      )
-      .all(...params) as Row[];
-
-    return { transactions: await this.formatTransactions(rows) };
+      params: pageParams,
+      subtransactions: {
+        sql: `${SUBTRANSACTION_SELECT_SQL}
+           WHERE st.deleted = 0 AND st.transaction_id IN (
+             ${pageIds}
+           )
+           ORDER BY st.transaction_id, st.created_at, st.id`,
+        params: [...pageParams],
+      },
+    };
   }
 
   async getTransaction(planId: string, transactionId: string, includeDeleted = false): Promise<any> {
@@ -2901,33 +2947,22 @@ export class LedgerRepository {
   /** Loads split lines in bounded batches so a full ledger list is not N+1 queries. */
   private async formatTransactions(rows: Row[]): Promise<any[]> {
     if (rows.length === 0) return [];
-    const byTransaction = new Map<string, Row[]>();
     // D1 supports at most 100 bound parameters per statement. Leave room for
     // future predicates rather than relying on the exact limit.
     const batchSize = 90;
+    const subtransactionRows: Row[] = [];
     for (let offset = 0; offset < rows.length; offset += batchSize) {
       const ids = rows.slice(offset, offset + batchSize).map((row) => row.id);
       const placeholders = ids.map(() => "?").join(", ");
-      const subtransactions = await this.db
+      subtransactionRows.push(...await this.db
         .query(
-          `SELECT
-             st.*,
-             p.name AS payee_name,
-             c.name AS category_name
-           FROM subtransactions st
-           LEFT JOIN payees p ON p.id = st.payee_id
-           LEFT JOIN categories c ON c.id = st.category_id
+          `${SUBTRANSACTION_SELECT_SQL}
            WHERE st.transaction_id IN (${placeholders}) AND st.deleted = 0
            ORDER BY st.transaction_id, st.created_at, st.id`,
         )
-        .all(...ids) as Row[];
-      for (const subtransaction of subtransactions) {
-        const existing = byTransaction.get(subtransaction.transaction_id) ?? [];
-        existing.push(subtransaction);
-        byTransaction.set(subtransaction.transaction_id, existing);
-      }
+        .all(...ids) as Row[]);
     }
-    return rows.map((row) => this.formatTransactionRow(row, byTransaction.get(row.id) ?? []));
+    return assembleTransactions(rows, subtransactionRows, (row, subtransactions) => this.formatTransactionRow(row, subtransactions));
   }
 
   private formatTransactionRow(row: Row, subtransactions: Row[]): any {
@@ -3171,6 +3206,37 @@ function formatPlan(row: Row): any {
     currency_format: JSON.parse(row.currency_format_json),
     server_knowledge: Number(row.server_knowledge),
   };
+}
+
+const SERVER_KNOWLEDGE_SQL = "SELECT server_knowledge FROM plans WHERE id = ?";
+
+/** Split lines with their payee and category names; callers add the WHERE. */
+const SUBTRANSACTION_SELECT_SQL = `SELECT
+             st.*,
+             p.name AS payee_name,
+             c.name AS category_name
+           FROM subtransactions st
+           LEFT JOIN payees p ON p.id = st.payee_id
+           LEFT JOIN categories c ON c.id = st.category_id`;
+
+/**
+ * Joins transaction rows to their split lines. Pure: both row sets are already
+ * in hand, so the same assembly serves the batched page and the chunked
+ * fetch the unpaged list still uses.
+ */
+function assembleTransactions(
+  rows: Row[],
+  subtransactionRows: Row[],
+  format: (row: Row, subtransactions: Row[]) => any,
+): any[] {
+  const byTransaction = new Map<string, Row[]>();
+  for (const subtransaction of subtransactionRows) {
+    const key = String(subtransaction.transaction_id);
+    const existing = byTransaction.get(key);
+    if (existing) existing.push(subtransaction);
+    else byTransaction.set(key, [subtransaction]);
+  }
+  return rows.map((row) => format(row, byTransaction.get(String(row.id)) ?? []));
 }
 
 const ACCOUNT_SELECT_SQL = `SELECT accounts.*, (
