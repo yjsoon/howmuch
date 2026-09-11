@@ -1,5 +1,26 @@
 import { describe, expect, test } from "bun:test";
-import { api, BulkApprovalError, shouldHandleUnauthorized } from "./client";
+import { ApiError, api, BulkApprovalError, setUnauthorizedHandler, shouldHandleUnauthorized } from "./client";
+
+describe("speculative requests", () => {
+  test("a 401 does not end the session when the caller decides for itself", async () => {
+    const originalFetch = globalThis.fetch;
+    let endedSessions = 0;
+    setUnauthorizedHandler(() => { endedSessions += 1; });
+    globalThis.fetch = (async () => new Response(
+      JSON.stringify({ error: { name: "not_authorized", detail: "Invalid credentials" } }),
+      { status: 401, headers: { "content-type": "application/json" } },
+    )) as typeof fetch;
+    try {
+      await expect(api.plans({ handleUnauthorized: false })).rejects.toBeInstanceOf(ApiError);
+      expect(endedSessions).toBe(0);
+      await expect(api.plans()).rejects.toBeInstanceOf(ApiError);
+      expect(endedSessions).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      setUnauthorizedHandler(null);
+    }
+  });
+});
 
 describe("shouldHandleUnauthorized", () => {
   test("ignores auth-route failures and stale epochs after a new session starts", () => {
