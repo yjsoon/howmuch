@@ -213,7 +213,7 @@ async function handleV1(
 
   if (resource === "accounts") {
     if (segments.length === 4 && method === "GET") {
-      return json({ data: { accounts: await repo.listAccounts(planId), server_knowledge: await repo.getServerKnowledge(planId) } });
+      return json({ data: await repo.listAccountsWithKnowledge(planId) });
     }
     if (segments.length === 4 && method === "POST") {
       const body = await readJson(request);
@@ -281,7 +281,7 @@ async function handleV1(
   }
 
   if (resource === "categories" && segments.length === 4 && method === "GET") {
-    return json({ data: { category_groups: await repo.listCategoryGroups(planId), server_knowledge: await repo.getServerKnowledge(planId) } });
+    return json({ data: await repo.listCategoryGroupsWithKnowledge(planId) });
   }
   if (resource === "categories") {
     const categoryId = segments[4];
@@ -292,7 +292,7 @@ async function handleV1(
 
   if (resource === "payees") {
     if (segments.length === 4 && method === "GET") {
-      return json({ data: { payees: await repo.listPayees(planId), server_knowledge: await repo.getServerKnowledge(planId) } });
+      return json({ data: await repo.listPayeesWithKnowledge(planId) });
     }
     if (segments.length === 4 && method === "POST") {
       const body = await readJson(request);
@@ -307,7 +307,7 @@ async function handleV1(
 
   if (resource === "scheduled_transactions") {
     if (segments.length === 4 && method === "GET") {
-      return json({ data: { scheduled_transactions: await repo.listScheduledTransactions(planId), server_knowledge: await repo.getServerKnowledge(planId) } });
+      return json({ data: await repo.listScheduledTransactionsWithKnowledge(planId) });
     }
     if (segments.length === 4 && method === "POST") {
       const body = await readJson(request);
