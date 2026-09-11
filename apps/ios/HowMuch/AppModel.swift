@@ -274,6 +274,12 @@ final class AppModel {
     APIClient(settings: settings)
   }
 
+  /// The id `HowMuchApp` keys its launch `.task(id:)` on. See
+  /// `APISettings.launchFingerprint` for why this must exclude `planID`.
+  var launchRefreshTaskID: String {
+    settings.launchFingerprint
+  }
+
   var openAccounts: [Account] {
     accounts.filter { !$0.closed }
   }
@@ -1105,13 +1111,29 @@ final class AppModel {
 
   func applySettings(_ nextSettings: APISettings) async {
     let scopeChanged = nextSettings.viewPrefsScopeKey != activeViewPrefsScope
+    // A change to the launch identity (endpoint or signed-in user) is picked
+    // up by HowMuchApp's `.task(id: model.launchRefreshTaskID)`, which
+    // restarts and calls `refreshAll()` on its own once this assignment is
+    // observed. Calling it again here would run the whole launch waterfall
+    // twice (e.g. once per sign-in), so only call it explicitly when the
+    // identity is unchanged and no task restart will happen — such as
+    // switching plans, or saving unrelated settings. A plan switch that lands
+    // while an earlier launch refresh is still in flight does not cancel
+    // that refresh either way: `launchRefreshTaskID` does not change, so
+    // there is no task restart, and each fetch's generation/planID guard
+    // (e.g. `refreshLedger`'s `planID == settings.planID` check) discards
+    // the stale run's writes once it completes. Only the wasted requests are
+    // a cost, not correctness.
+    let launchIdentityChanged = nextSettings.launchFingerprint != settings.launchFingerprint
     settings = nextSettings
     settings.save()
     if scopeChanged {
       clearConnectionOwnedState()
     }
     switchViewPrefsScope()
-    await refreshAll()
+    if !launchIdentityChanged {
+      await refreshAll()
+    }
   }
 
   func refreshAll(quiet: Bool = false) async {
