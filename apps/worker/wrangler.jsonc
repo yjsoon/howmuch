@@ -9,21 +9,17 @@
     "directory": "../web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": [
-      "/api/*",
-      "/v1/*",
-      "/health",
-      "/.well-known/apple-app-site-association",
-      "/apple-app-site-association"
-    ]
+    "run_worker_first": true
   },
   "vars": {
     "HOWMUCH_DEFAULT_PLAN_ID": "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
     "HOWMUCH_TIME_ZONE": "Asia/Singapore",
-    "HOWMUCH_TRANSITION_READ_ONLY": "false"
+    "HOWMUCH_YNAB_PLAN_ID": "",
+    "HOWMUCH_TRANSITION_READ_ONLY": "true",
+    "HOWMUCH_REDIRECT_TARGET": "https://howmuch.tk.sg"
   },
   "triggers": {
-    "crons": ["5 16 * * *"]
+    "crons": []
   },
   "routes": [
     {
@@ -57,6 +53,29 @@
         "binding": "DB",
         "database_name": "howmuch-preview",
         "database_id": "7ca818bd-7f04-4b9b-8a84-8c8f84a6a272",
+        "migrations_dir": "../api/d1-migrations"
+      }]
+    },
+    "tk": {
+      "name": "howmuch",
+      "workers_dev": true,
+      "routes": [
+        {
+          "pattern": "howmuch.tk.sg",
+          "custom_domain": true
+        }
+      ],
+      "triggers": { "crons": [] },
+      "vars": {
+        "HOWMUCH_DEFAULT_PLAN_ID": "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
+        "HOWMUCH_TIME_ZONE": "Asia/Singapore",
+        "HOWMUCH_YNAB_PLAN_ID": "",
+        "HOWMUCH_TRANSITION_READ_ONLY": "false"
+      },
+      "d1_databases": [{
+        "binding": "DB",
+        "database_name": "howmuch-production",
+        "database_id": "df039dbc-6dda-4150-9dc3-5854a8ca6818",
         "migrations_dir": "../api/d1-migrations"
       }]
     }
