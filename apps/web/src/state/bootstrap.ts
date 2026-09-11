@@ -16,6 +16,8 @@ export interface BootstrapSessionStatus {
 
 export interface PlanRef {
   id: string;
+  /** The plan's current `server_knowledge`, when the server reports it. */
+  server_knowledge?: number;
 }
 
 /** A promise outcome, flattened so decisions can be made on plain values. */
@@ -29,6 +31,13 @@ export interface BootstrapRequestPlan {
   speculativePlanId: string | null;
   /** Account preferences are only refetched when no controller is attached. */
   fetchPreferences: boolean;
+  /**
+   * Accounts are the one part of the batch `server_knowledge` validates, so a
+   * cached copy for this plan holds the request back until the plans list has
+   * said whether knowledge moved. Settings, categories and preferences are
+   * fetched regardless: no write to them bumps knowledge.
+   */
+  fetchAccounts: boolean;
 }
 
 export type SessionDecision =
@@ -45,13 +54,16 @@ export type BootstrapDecision =
  * controller's plan is authoritative, so it beats the remembered hint.
  */
 export function planBootstrapRequests(
-  input: { hint: string | null; existingPlanId: string | null },
+  input: { hint: string | null; existingPlanId: string | null; cachedPlanId?: string | null },
 ): BootstrapRequestPlan {
   const existingPlanId = input.existingPlanId;
-  if (existingPlanId) {
-    return { speculativePlanId: existingPlanId, fetchPreferences: false };
-  }
-  return { speculativePlanId: input.hint ?? null, fetchPreferences: true };
+  const speculativePlanId = existingPlanId ?? input.hint ?? null;
+  const cachedPlanId = input.cachedPlanId ?? null;
+  return {
+    speculativePlanId,
+    fetchPreferences: !existingPlanId,
+    fetchAccounts: speculativePlanId === null || cachedPlanId !== speculativePlanId,
+  };
 }
 
 /** The remembered plan if it is still readable, else the first one listed. */
@@ -121,6 +133,16 @@ export function resolveReferenceBatch<T>(
     return { kind: "refetch" };
   }
   return batch.ok ? { kind: "use", value: batch.value } : { kind: "fail", error: batch.error };
+}
+
+/**
+ * The plan's knowledge as the plans list reports it, or null when this server
+ * does not report one. Null means the cache cannot be validated, so it is not
+ * used — the plans list is the whole knowledge check.
+ */
+export function planKnowledge(plans: readonly PlanRef[], planId: string): number | null {
+  const knowledge = plans.find((plan) => plan.id === planId)?.server_knowledge;
+  return typeof knowledge === "number" && Number.isFinite(knowledge) ? knowledge : null;
 }
 
 /** Key identifying the account-preferences controller for a user and plan. */

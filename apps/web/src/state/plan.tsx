@@ -1,5 +1,12 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { ApiError, api, bumpRequestEpoch, setUnauthorizedHandler, type ApiRequestOptions } from "../api/client";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  ApiError,
+  api,
+  bumpRequestEpoch,
+  setLocalWriteHandler,
+  setUnauthorizedHandler,
+  type ApiRequestOptions,
+} from "../api/client";
 import type {
   Account,
   AccountPreferences,
@@ -20,13 +27,31 @@ import {
   decideBootstrap,
   decideSession,
   planBootstrapRequests,
+  planKnowledge,
   resolveReferenceBatch,
   type Settled,
 } from "./bootstrap";
+import { isCachedReference, type CachedReference } from "./cache-shapes";
 import { loadPrefs, savePrefs } from "./prefs";
+import {
+  clearReferenceCache,
+  decideReferenceRefresh,
+  readSlot,
+  writeSlot,
+  type CacheEnvelope,
+} from "./reference-cache";
 
 export interface PlanContextValue {
   planId: string;
+  /** The signed-in user, so routes can key their own cache slots. */
+  userId: string;
+  /**
+   * True while this value was painted from the client cache and the reads that
+   * confirm it have not all landed. Nothing shown under it may be treated as
+   * current; it clears only once settings, categories and accounts are either
+   * refetched or validated against the plan's `server_knowledge`.
+   */
+  provisional: boolean;
   accounts: Account[];
   ledgerKnowledge: number;
   accountPreferences: AccountPreferences | null;
@@ -61,7 +86,8 @@ function settle<T>(promise: Promise<T>): Promise<Settled<T>> {
 
 interface ReferenceBatch {
   settings: PlanSettings;
-  accounts: { accounts: Account[]; server_knowledge: number };
+  /** undefined when a cached copy is waiting on the knowledge check. */
+  accounts: { accounts: Account[]; server_knowledge: number } | undefined;
   /** null means the server has no account preferences; undefined, not asked. */
   accountPreferences: AccountPreferencesSnapshot | null | undefined;
   categoryGroups: CategoryGroup[];
@@ -71,15 +97,56 @@ interface ReferenceBatch {
 async function fetchReferenceBatch(
   planId: string,
   withPreferences: boolean,
+  withAccounts: boolean,
   options?: ApiRequestOptions,
 ): Promise<ReferenceBatch> {
   const [settings, accounts, accountPreferences, categoryGroups] = await Promise.all([
     api.settings(planId, options),
-    api.accounts(planId, options),
+    withAccounts ? api.accounts(planId, options) : Promise.resolve(undefined),
     withPreferences ? api.accountPreferences(planId, options) : Promise.resolve(undefined),
     api.categories(planId, options),
   ]);
   return { settings, accounts, accountPreferences, categoryGroups };
+}
+
+/**
+ * The first paint, straight from cache. It renders the shell before any
+ * response arrives and is replaced the moment the real reads land.
+ *
+ * Account preferences sit in the `saving` phase throughout: the grouping is
+ * shown, but the organisation dialog refuses edits until the real snapshot has
+ * attached a controller with a revision worth sending back.
+ */
+function provisionalPlanValue(
+  planId: string,
+  envelope: CacheEnvelope<CachedReference>,
+  actions: { reload: () => void; logout: () => Promise<void> },
+): PlanContextValue {
+  const { accounts, categoryGroups, accountPreferences } = envelope.data;
+  const categories = categoryGroups.flatMap((group) => group.categories ?? []);
+  const preferences = accountPreferences?.account_preferences ?? null;
+  return {
+    planId,
+    userId: envelope.userId,
+    provisional: true,
+    accounts: accounts.filter((account) => !account.deleted),
+    ledgerKnowledge: envelope.serverKnowledge,
+    accountPreferences: preferences,
+    accountPreferencesSync: {
+      preferences: preferences ?? emptyAccountPreferences(),
+      revision: accountPreferences?.account_preferences_revision ?? 0,
+      phase: "saving",
+      message: null,
+    },
+    updateAccountPreferences: () => {},
+    updateAccountIcon: async () => {},
+    retryAccountPreferences: () => {},
+    categoryGroups,
+    categories,
+    categoryNames: new Map(categories.map((category) => [category.id, category.name])),
+    reload: actions.reload,
+    logout: actions.logout,
+  };
 }
 
 export function PlanProvider({ children }: { children: ReactNode }) {
@@ -98,16 +165,41 @@ export function PlanProvider({ children }: { children: ReactNode }) {
     bumpRequestEpoch();
   }, [generation]);
 
+  const reload = useCallback(() => setGeneration((number) => number + 1), []);
+
+  const signOut = useCallback(async () => {
+    await api.logout();
+    accountPreferencesControllerRef.current?.controller.detach();
+    accountPreferencesControllerRef.current = null;
+    // The next person to sign in here should inherit neither this hint nor
+    // any of this user's cached ledger data.
+    savePrefs({ planId: undefined });
+    clearReferenceCache();
+    setValue(null);
+    setError(null);
+    setAuthMode("login");
+  }, []);
+
   useEffect(() => {
     setUnauthorizedHandler(() => {
       accountPreferencesControllerRef.current?.controller.detach();
       accountPreferencesControllerRef.current = null;
       savePrefs({ planId: undefined });
+      clearReferenceCache();
       setValue(null);
       setError("Your session ended. Sign in again.");
       setAuthMode("login");
     });
-    return () => setUnauthorizedHandler(null);
+    // Every write already funnels through one place in the API client, so no
+    // call site can leave a cached entry behind. A write returns the new
+    // knowledge but not everything that number covers — a transaction moves
+    // account balances the response does not carry — so the entry is dropped
+    // rather than retagged with a number that would make it look current.
+    setLocalWriteHandler(clearReferenceCache);
+    return () => {
+      setUnauthorizedHandler(null);
+      setLocalWriteHandler(null);
+    };
   }, []);
 
   useEffect(() => {
@@ -118,9 +210,23 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         // its reference data all start now, instead of one after another. The
         // pure helpers in ./bootstrap decide afterwards which answers survive.
         const attached = accountPreferencesControllerRef.current;
+        const hint = loadPrefs().planId ?? null;
+        // The cache is read before a single request is made, so the shell can
+        // be on screen before the first response. Which user this browser is
+        // signed in as is not known yet, so only the plan is matched here; the
+        // session check below discards the paint if it belongs to someone else.
+        const cached = hint && !attached
+          ? readSlot<CachedReference>("reference", isCachedReference)
+          : null;
+        const paintedCache = cached?.planId === hint ? cached : null;
+        if (paintedCache && hint && !cancelled) {
+          configureMoney(paintedCache.data.settings.currency_format);
+          setValue(provisionalPlanValue(hint, paintedCache, { reload, logout: signOut }));
+        }
         const requests = planBootstrapRequests({
-          hint: loadPrefs().planId ?? null,
+          hint,
           existingPlanId: attached?.planId ?? null,
+          cachedPlanId: paintedCache?.planId ?? null,
         });
         // Only the calls that race ahead of the session check decide their own
         // 401s; once the session is known, a 401 means the session really has
@@ -130,7 +236,12 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         const plansPromise = settle(api.plans(speculative));
         const speculativePlanId = requests.speculativePlanId;
         const speculativeBatch = speculativePlanId
-          ? settle(fetchReferenceBatch(speculativePlanId, requests.fetchPreferences, speculative))
+          ? settle(fetchReferenceBatch(
+            speculativePlanId,
+            requests.fetchPreferences,
+            requests.fetchAccounts,
+            speculative,
+          ))
           : null;
 
         const status = await statusPromise;
@@ -139,7 +250,10 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         const session = decideSession(status);
         if (session.kind === "signed-out") {
           // The sign-in form goes up now. Whatever the two speculative calls
-          // return is never awaited, never read, and never reaches state.
+          // return is never awaited, never read, and never reaches state. The
+          // cache goes with it: nobody is signed in, so there is no session
+          // against which any of it could be shown to belong to this browser.
+          clearReferenceCache();
           setValue(null);
           setError(null);
           setAuthMode(session.mode);
@@ -161,6 +275,22 @@ export function PlanProvider({ children }: { children: ReactNode }) {
           throw new Error("No plans are available yet.");
         }
         const planId = decision.planId;
+        const identity = { userId: decision.userId, planId };
+        // `GET /v1/plans` already carries the plan's `server_knowledge` and the
+        // bootstrap already fetches it, so the knowledge check costs nothing.
+        const knowledge = planKnowledge(plansResult.value, planId);
+        // A cache belonging to another user, or to a plan this load is not
+        // opening, is deleted rather than merely ignored.
+        const validCache = paintedCache
+          && paintedCache.userId === decision.userId
+          && paintedCache.planId === planId
+          ? paintedCache
+          : null;
+        if (paintedCache && !validCache) {
+          clearReferenceCache();
+          setValue(null);
+        }
+        const accountsDecision = decideReferenceRefresh(validCache, identity, knowledge);
         const controllerKey = bootstrapControllerKey(decision.userId, planId);
         const existingController = accountPreferencesControllerRef.current?.key === controllerKey
           ? accountPreferencesControllerRef.current.controller
@@ -171,11 +301,21 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         }
         const batch = outcome.kind === "use"
           ? outcome.value
-          : await fetchReferenceBatch(planId, !existingController);
+          : await fetchReferenceBatch(planId, !existingController, true);
         if (cancelled) {
           return;
         }
-        const { settings, accounts: accountsSnapshot, categoryGroups } = batch;
+        const { settings, categoryGroups } = batch;
+        // The accounts read is the one the cache can skip. When knowledge has
+        // moved — or when the batch above went out for a different plan — it
+        // is fetched now instead, one round trip later than a cold load.
+        const accountsSnapshot = batch.accounts
+          ?? (accountsDecision === "keep" && validCache
+            ? { accounts: validCache.data.accounts, server_knowledge: validCache.serverKnowledge }
+            : await api.accounts(planId));
+        if (cancelled) {
+          return;
+        }
         // The batch skips preferences when a controller is already attached.
         // If that controller turns out to belong to another user or plan, ask
         // now rather than mistaking "not asked" for "server does not support".
@@ -189,6 +329,17 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         }
         configureMoney(settings.currency_format);
         savePrefs({ planId });
+        // Tagged with the knowledge the accounts were actually read at, not
+        // the plans list's, so a write landing between the two reads leaves
+        // the entry looking advanced on the next load rather than current.
+        writeSlot("reference", identity, accountsSnapshot.server_knowledge, {
+          settings,
+          categoryGroups,
+          accounts: accountsSnapshot.accounts,
+          // Preferences are not covered by knowledge and are not always
+          // refetched, so an untouched controller keeps the cached copy.
+          accountPreferences: accountPreferencesSnapshot ?? validCache?.data.accountPreferences ?? null,
+        });
         const categories = categoryGroups.flatMap((group) => group.categories ?? []);
         let accountPreferencesSync: AccountPreferencesState;
         let accountPreferencesController = existingController;
@@ -222,6 +373,8 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         }
         setValue({
           planId,
+          userId: decision.userId,
+          provisional: false,
           accounts: accountsSnapshot.accounts.filter((account) => !account.deleted),
           ledgerKnowledge: accountsSnapshot.server_knowledge,
           accountPreferences: accountPreferencesController ? accountPreferencesSync.preferences : null,
@@ -253,17 +406,8 @@ export function PlanProvider({ children }: { children: ReactNode }) {
           categoryGroups,
           categories,
           categoryNames: new Map(categories.map((category) => [category.id, category.name])),
-          reload: () => setGeneration((n) => n + 1),
-          logout: async () => {
-            await api.logout();
-            accountPreferencesControllerRef.current?.controller.detach();
-            accountPreferencesControllerRef.current = null;
-            // The next person to sign in here should not inherit this hint.
-            savePrefs({ planId: undefined });
-            setValue(null);
-            setError(null);
-            setAuthMode("login");
-          },
+          reload,
+          logout: signOut,
         });
       } catch (cause) {
         if (!cancelled) {

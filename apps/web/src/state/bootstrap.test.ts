@@ -5,6 +5,7 @@ import {
   controllerKey,
   decideBootstrap,
   planBootstrapRequests,
+  planKnowledge,
   resolveReferenceBatch,
 } from "./bootstrap";
 
@@ -15,6 +16,7 @@ describe("planBootstrapRequests", () => {
     expect(planBootstrapRequests({ hint: "plan-b", existingPlanId: "plan-a" })).toEqual({
       speculativePlanId: "plan-a",
       fetchPreferences: false,
+      fetchAccounts: true,
     });
   });
 
@@ -22,6 +24,7 @@ describe("planBootstrapRequests", () => {
     expect(planBootstrapRequests({ hint: "plan-b", existingPlanId: null })).toEqual({
       speculativePlanId: "plan-b",
       fetchPreferences: true,
+      fetchAccounts: true,
     });
   });
 
@@ -29,7 +32,38 @@ describe("planBootstrapRequests", () => {
     expect(planBootstrapRequests({ hint: null, existingPlanId: null })).toEqual({
       speculativePlanId: null,
       fetchPreferences: true,
+      fetchAccounts: true,
     });
+  });
+
+  test("holds the accounts read back when the cache covers the plan being opened", () => {
+    expect(planBootstrapRequests({ hint: "plan-b", existingPlanId: null, cachedPlanId: "plan-b" })).toEqual({
+      speculativePlanId: "plan-b",
+      fetchPreferences: true,
+      fetchAccounts: false,
+    });
+  });
+
+  test("still fetches accounts when the cache is for another plan", () => {
+    expect(planBootstrapRequests({ hint: "plan-b", existingPlanId: null, cachedPlanId: "plan-a" })).toEqual({
+      speculativePlanId: "plan-b",
+      fetchPreferences: true,
+      fetchAccounts: true,
+    });
+  });
+});
+
+describe("planKnowledge", () => {
+  test("reads the plan's knowledge from the list the bootstrap already fetches", () => {
+    expect(planKnowledge([{ id: "plan-a", server_knowledge: 41 }], "plan-a")).toBe(41);
+  });
+
+  test("is null for a plan the list does not contain", () => {
+    expect(planKnowledge([{ id: "plan-a", server_knowledge: 41 }], "plan-b")).toBeNull();
+  });
+
+  test("is null when the server reports no knowledge, so nothing is validated", () => {
+    expect(planKnowledge([{ id: "plan-a" }], "plan-a")).toBeNull();
   });
 });
 
