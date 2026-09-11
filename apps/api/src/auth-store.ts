@@ -30,6 +30,35 @@ export interface AuthStore {
 
 const credentialSql = `SELECT user_id,username,kdf,kdf_version,cost_n,block_size,parallelization,salt_hex,hash_hex FROM password_credentials WHERE username=?`;
 
+/**
+ * Identity and plan roles in a single statement. The LEFT JOIN keeps a user
+ * with no memberships authenticated — they arrive as one row whose plan_id is
+ * NULL, which `roles()` skips — so authentication costs one D1 round trip
+ * instead of two.
+ */
+const sessionPrincipalSql = `SELECT u.id,pc.username,pm.plan_id,pm.role
+   FROM sessions s
+   JOIN users u ON u.id=s.user_id
+   JOIN password_credentials pc ON pc.user_id=u.id
+   LEFT JOIN plan_memberships pm ON pm.user_id=u.id
+   WHERE s.token_hash=? AND s.revoked_at IS NULL AND s.expires_at>?`;
+
+const tokenPrincipalSql = `SELECT u.id,pc.username,pm.plan_id,pm.role
+   FROM personal_api_tokens t
+   JOIN users u ON u.id=t.user_id
+   JOIN password_credentials pc ON pc.user_id=u.id
+   LEFT JOIN plan_memberships pm ON pm.user_id=u.id
+   WHERE t.token_hash=? AND t.revoked_at IS NULL`;
+
+/** Row shape both principal queries return, one row per membership. */
+type PrincipalRow = { id: string; username: string; plan_id: string | null; role: PlanRole | null };
+
+function principal(rows: PrincipalRow[]): AuthUser | null {
+  const first = rows[0];
+  if (!first) return null;
+  return { id: first.id, username: first.username, roles: roles(rows) };
+}
+
 export class SQLiteAuthStore implements AuthStore {
   constructor(private readonly db: Database) {}
 
@@ -70,16 +99,7 @@ export class SQLiteAuthStore implements AuthStore {
   }
 
   async authenticateSession(tokenHash: string, now: number): Promise<AuthUser | null> {
-    const user = this.db.query(
-      `SELECT u.id,pc.username
-       FROM sessions s
-       JOIN users u ON u.id=s.user_id
-       JOIN password_credentials pc ON pc.user_id=u.id
-       WHERE s.token_hash=? AND s.revoked_at IS NULL AND s.expires_at>?`,
-    ).get(tokenHash, now) as { id: string; username: string } | null;
-    if (!user) return null;
-    const memberships = this.db.query("SELECT plan_id,role FROM plan_memberships WHERE user_id=?").all(user.id);
-    return { ...user, roles: roles(memberships as Array<{ plan_id: string; role: PlanRole }>) };
+    return principal(this.db.query(sessionPrincipalSql).all(tokenHash, now) as PrincipalRow[]);
   }
 
   async revokeSession(tokenHash: string, now: number): Promise<void> {
@@ -106,16 +126,7 @@ export class SQLiteAuthStore implements AuthStore {
   }
 
   async authenticatePersonalApiToken(tokenHash: string): Promise<AuthUser | null> {
-    const user = this.db.query(
-      `SELECT u.id,pc.username
-       FROM personal_api_tokens t
-       JOIN users u ON u.id=t.user_id
-       JOIN password_credentials pc ON pc.user_id=u.id
-       WHERE t.token_hash=? AND t.revoked_at IS NULL`,
-    ).get(tokenHash) as { id: string; username: string } | null;
-    if (!user) return null;
-    const memberships = this.db.query("SELECT plan_id,role FROM plan_memberships WHERE user_id=?").all(user.id);
-    return { ...user, roles: roles(memberships as Array<{ plan_id: string; role: PlanRole }>) };
+    return principal(this.db.query(tokenPrincipalSql).all(tokenHash) as PrincipalRow[]);
   }
 
   async rateAttempt(scope: "username" | "ip", keyHash: string, windowStart: number): Promise<number> {
@@ -147,9 +158,10 @@ function insertCredential(db: Database, input: SetupInput): void {
   );
 }
 
-function roles(rows: Array<{ plan_id: string; role: PlanRole }>): Record<string, PlanRole> {
+function roles(rows: Array<{ plan_id: string | null; role: PlanRole | null }>): Record<string, PlanRole> {
   const result = Object.create(null) as Record<string, PlanRole>;
-  for (const row of rows) result[row.plan_id] = row.role;
+  // The LEFT JOIN emits one NULL-plan row for a user with no memberships.
+  for (const row of rows) if (row.plan_id != null && row.role != null) result[row.plan_id] = row.role;
   return result;
 }
 
@@ -207,20 +219,7 @@ export class D1AuthStore implements AuthStore {
   }
 
   async authenticateSession(tokenHash: string, now: number): Promise<AuthUser | null> {
-    const user = await this.db.get<{ id: string; username: string }>(
-      `SELECT u.id,pc.username
-       FROM sessions s
-       JOIN users u ON u.id=s.user_id
-       JOIN password_credentials pc ON pc.user_id=u.id
-       WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>$2`,
-      [tokenHash, now],
-    );
-    if (!user) return null;
-    const memberships = await this.db.all<{ plan_id: string; role: PlanRole }>(
-      "SELECT plan_id,role FROM plan_memberships WHERE user_id=$1",
-      [user.id],
-    );
-    return { ...user, roles: roles(memberships) };
+    return principal(await this.db.all<PrincipalRow>(sessionPrincipalSql, [tokenHash, now]));
   }
 
   async revokeSession(tokenHash: string, now: number): Promise<void> {
@@ -253,20 +252,7 @@ export class D1AuthStore implements AuthStore {
   }
 
   async authenticatePersonalApiToken(tokenHash: string): Promise<AuthUser | null> {
-    const user = await this.db.get<{ id: string; username: string }>(
-      `SELECT u.id,pc.username
-       FROM personal_api_tokens t
-       JOIN users u ON u.id=t.user_id
-       JOIN password_credentials pc ON pc.user_id=u.id
-       WHERE t.token_hash=$1 AND t.revoked_at IS NULL`,
-      [tokenHash],
-    );
-    if (!user) return null;
-    const memberships = await this.db.all<{ plan_id: string; role: PlanRole }>(
-      "SELECT plan_id,role FROM plan_memberships WHERE user_id=$1",
-      [user.id],
-    );
-    return { ...user, roles: roles(memberships) };
+    return principal(await this.db.all<PrincipalRow>(tokenPrincipalSql, [tokenHash]));
   }
 
   async rateAttempt(scope: "username" | "ip", keyHash: string, windowStart: number): Promise<number> {
