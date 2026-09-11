@@ -61,6 +61,43 @@ environment `tk` in `wrangler.jsonc`:
   --profile tinkertanker`) before tagging, following the verification order
   in this document.
 
+### Smart Placement experiment (#172)
+
+The `tk` env's `wrangler.jsonc` sets `"placement": { "mode": "smart" }` as a
+reversible experiment: the Worker runs at SIN while the D1 primary
+(`howmuch-production`) runs at KIX, so each of the several sequential D1
+calls per request pays a cross-region hop. Smart Placement lets Cloudflare
+run the fetch handler next to the database instead of next to the client.
+
+Re-measurement method, once deployed via a `v*` tag:
+
+1. Wait at least 24 h after deploy — placement analysis needs consistent
+   traffic from multiple locations to make a decision, and can take up to
+   15 minutes to update after each deploy.
+2. Record the placement status from the Cloudflare dashboard: Workers &
+   Pages → `howmuch` → Settings → Placement.
+3. Hard-reload `https://howmuch.tk.sg/transactions?range=all&accounts=all`
+   from a signed-in browser in Singapore (matching the original measurement
+   conditions).
+4. Read wall times from `performance.getEntriesByType("resource")` for
+   `GET /v1/plans`, `GET /v1/plans/:id/accounts`,
+   `GET /v1/plans/:id/categories`, and the first
+   `GET /v1/plans/:id/transactions` page. Also record the document request
+   (the `/transactions` HTML navigation) and the main `index-*.js` bundle
+   from the same read — this Worker sets `run_worker_first: true`, so
+   Cloudflare's usual "static assets are unaffected" claim does not apply
+   here and Wrangler warns the whole Worker, asset path included, may be
+   relocated by Smart Placement.
+5. Compare against the 2026-09-12 baseline: `/v1/plans` 320 ms, accounts
+   726 ms, categories 911 ms, first transactions page 1,050–1,280 ms.
+
+Smart Placement only affects fetch handlers — the daily materialisation
+cron is unaffected regardless.
+
+Revert the `placement` stanza in `env.tk` if no placement decision is made,
+or if latency does not improve, after this re-measurement. Record the
+outcome on issue #172.
+
 ## Legacy: YJ redirect (`howmuch.soon.sg`)
 
 The former production Worker in the YJ account
