@@ -44,8 +44,12 @@ environment `tk` in `wrangler.jsonc`:
 - Worker `howmuch` with D1 database `howmuch-production`
   (`df039dbc-6dda-4150-9dc3-5854a8ca6818`, APAC), custom domain
   `https://howmuch.tk.sg`, serving the web front-end and API on one hostname.
-- No YNAB plan, no cron triggers. Keep `HOWMUCH_API_TOKEN` as an encrypted
-  secret on this Worker.
+- One cron, `5 16 * * *` (00:05 Asia/Singapore), materialises due scheduled
+  transactions; it catches up overdue occurrences (25 per run, idempotent via
+  deterministic operation IDs). No YNAB configuration. Keep
+  `HOWMUCH_API_TOKEN` as an encrypted secret on this Worker.
+- Do not add `HOWMUCH_REDIRECT_TARGET` to the `tk` env; the redirect belongs to
+  the legacy YJ env only, and setting it here would loop production onto itself.
 - Deploy from `apps/worker` with `bun run deploy:tk`, which pins
   `--env tk --profile tinkertanker`. All asset requests run through the Worker
   (`run_worker_first: true`) so the redirect mode below applies to every path.
