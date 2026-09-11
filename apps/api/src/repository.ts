@@ -1895,13 +1895,13 @@ export class LedgerRepository {
       const edit = edits.get(id);
       edits.delete(id);
       if (edit) {
-        if (!Boolean(edit.deleted)) result.push(projectScheduledPayload(edit.payload_json, editedSubs.get(id) ?? []));
+        if (!Boolean(edit.deleted)) result.push(projectScheduledPayload(edit.payload_json, editedSubs.get(id) ?? [], edit.deleted));
       } else if (!Boolean(row.deleted)) {
-        result.push(projectScheduledPayload(row.payload_json, sourceSubs.get(id) ?? []));
+        result.push(projectScheduledPayload(row.payload_json, sourceSubs.get(id) ?? [], row.deleted));
       }
     }
     for (const [id, edit] of edits) {
-      if (!Boolean(edit.deleted)) result.push(projectScheduledPayload(edit.payload_json, editedSubs.get(id) ?? []));
+      if (!Boolean(edit.deleted)) result.push(projectScheduledPayload(edit.payload_json, editedSubs.get(id) ?? [], edit.deleted));
     }
     return result.sort((left, right) => String(left.date_next ?? left.date_first ?? "9999-12-31").localeCompare(String(right.date_next ?? right.date_first ?? "9999-12-31")) || String(left.id).localeCompare(String(right.id)));
   }
@@ -1915,6 +1915,7 @@ export class LedgerRepository {
     return projectScheduledPayload(
       record.payloadJson,
       record.subtransactions.filter((subtransaction) => !subtransaction.deleted),
+      record.payload.deleted,
     );
   }
 
@@ -3020,13 +3021,27 @@ function groupScheduledSubtransactions(subtransactions: any[]): Map<string, any[
   return grouped;
 }
 
-function projectScheduledPayload(payloadJson: string, subtransactions: any[]): any {
+function projectScheduledPayload(payloadJson: string, subtransactions: any[], deleted?: unknown): any {
   const payload = parseRawYnabObject(payloadJson, "scheduled transaction");
-  return { ...payload, subtransactions };
+  return {
+    ...payload,
+    deleted: Boolean(payload.deleted ?? deleted),
+    subtransactions: subtransactions.map((subtransaction) => ({
+      ...subtransaction,
+      deleted: Boolean(subtransaction.deleted),
+    })),
+  };
 }
 
 function projectScheduledRead(transaction: { payload: Record<string, any>; subtransactions: Record<string, any>[] }): any {
-  return { ...transaction.payload, deleted: Boolean(transaction.payload.deleted), subtransactions: transaction.subtransactions };
+  return {
+    ...transaction.payload,
+    deleted: Boolean(transaction.payload.deleted),
+    subtransactions: transaction.subtransactions.map((subtransaction) => ({
+      ...subtransaction,
+      deleted: Boolean(subtransaction.deleted),
+    })),
+  };
 }
 
 function scheduleMutationFingerprint(action: string, planId: string, id: string, payload: unknown): string {

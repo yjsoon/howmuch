@@ -39,10 +39,15 @@ describe("YNAB-compatible API", () => {
     await repo.upsertYnabRawObject("plan-test", "money_movement", "movement-1", { id: "movement-1", month: "2026-06-01", amount: 100 });
 
     const scheduled = await (await request("/v1/plans/plan-test/scheduled_transactions")).json();
-    expect(scheduled.data.scheduled_transactions).toEqual([{ id: "scheduled-1", date_next: "2026-07-01", subtransactions: [{ id: "sub-1", scheduled_transaction_id: "scheduled-1", amount: -100 }] }]);
+    expect(scheduled.data.scheduled_transactions).toEqual([{
+      id: "scheduled-1",
+      date_next: "2026-07-01",
+      deleted: false,
+      subtransactions: [{ id: "sub-1", scheduled_transaction_id: "scheduled-1", amount: -100, deleted: false }],
+    }]);
     const one = await (await request("/v1/plans/plan-test/scheduled_transactions/scheduled-1")).json();
     expect(one.data.scheduled_transaction).toEqual(scheduled.data.scheduled_transactions[0]);
-    expect(Object.hasOwn(one.data.scheduled_transaction, "deleted")).toBe(false);
+    expect(one.data.scheduled_transaction.deleted).toBe(false);
     const locations = await (await request("/v1/plans/plan-test/payee_locations")).json();
     expect(locations.data.payee_locations).toEqual([{ id: "location-1", payee_id: "payee-1", latitude: "1.2" }]);
     const movements = await (await request("/v1/plans/plan-test/months/2026-06/money_movements")).json();
@@ -101,7 +106,7 @@ describe("YNAB-compatible API", () => {
     expect(remaining.data.scheduled_transactions.map((transaction: any) => transaction.id)).toEqual([created.id]);
   });
 
-  test("keyed schedule reads keep stored deleted presence and drop deleted split lines", async () => {
+  test("keyed schedule reads fill deleted and drop deleted split lines", async () => {
     const repo = new LedgerRepository(db, "plan-test");
     await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
     await repo.upsertAccount("plan-test", { id: "cash", name: "Cash" });
@@ -126,7 +131,7 @@ describe("YNAB-compatible API", () => {
     const byId = Object.fromEntries(listed.map((row: { id: string }) => [row.id, row]));
     expect(Object.hasOwn(byId["explicit-false"], "deleted")).toBe(true);
     expect(byId["explicit-false"].deleted).toBe(false);
-    expect(Object.hasOwn(byId["absent-deleted"], "deleted")).toBe(false);
+    expect(byId["absent-deleted"].deleted).toBe(false);
     expect(byId["split-parent"].subtransactions).toEqual([
       expect.objectContaining({ id: "live", amount: -100 }),
     ]);
@@ -146,6 +151,35 @@ describe("YNAB-compatible API", () => {
     expect(Object.hasOwn(overlay, "deleted")).toBe(true);
     expect(overlay.deleted).toBe(false);
     expect(overlay.memo).toBe("local overlay");
+  });
+
+  test("scheduled list fills deleted so iOS can decode a stored JSON omission", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await repo.upsertAccount("plan-test", { id: "cash", name: "Cash" });
+    await repo.upsertYnabRawObject("plan-test", "scheduled_transaction", "rent", {
+      id: "rent",
+      account_id: "cash",
+      date_first: "2026-09-01",
+      date_next: "2026-10-01",
+      frequency: "monthly",
+      amount: -120_000,
+    });
+    await repo.upsertYnabRawObject("plan-test", "scheduled_subtransaction", "rent\u001fline", {
+      id: "line",
+      scheduled_transaction_id: "rent",
+      amount: -120_000,
+    });
+
+    const listed = await repo.listScheduledTransactions("plan-test");
+    expect(listed).toHaveLength(1);
+    assertIosDecodableSchedule(listed[0]);
+    const one = await repo.getScheduledTransaction("plan-test", "rent");
+    assertIosDecodableSchedule(one);
+    expect(one).toEqual(listed[0]);
+
+    const body = await (await request("/v1/plans/plan-test/scheduled_transactions")).json();
+    assertIosDecodableSchedule(body.data.scheduled_transactions[0]);
   });
 
   test("scheduled occurrence preparation reuses category lookups within one split", async () => {
@@ -3177,6 +3211,22 @@ describe("password authentication", () => {
     expect(throttled.headers.get("retry-after")).toBe("900");
   });
 });
+
+function assertIosDecodableSchedule(row: Record<string, any>): void {
+  for (const field of ["id", "date_first", "date_next", "frequency", "account_id"] as const) {
+    expect(typeof row[field]).toBe("string");
+    expect(row[field]).not.toBe("");
+  }
+  expect(Number.isSafeInteger(row.amount)).toBe(true);
+  expect(row.deleted).toBe(false);
+  expect(Array.isArray(row.subtransactions)).toBe(true);
+  for (const line of row.subtransactions) {
+    expect(typeof line.id).toBe("string");
+    expect(typeof line.scheduled_transaction_id).toBe("string");
+    expect(Number.isSafeInteger(line.amount)).toBe(true);
+    expect(line.deleted).toBe(false);
+  }
+}
 
 function request(path: string, init: { method?: string; body?: unknown; headers?: Record<string, string> } = {}): Promise<Response> {
   return handler(
