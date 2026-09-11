@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { api, useApi } from "../api/client";
+import { api } from "../api/client";
 import type { Account, CategoryGroup, Payee, ScheduledSubtransaction, ScheduledTransaction, ScheduledTransactionInput } from "../api/types";
 import { CategorySelect } from "../components/CategorySelect";
 import { FlagPicker, FlagTag } from "../components/FlagTag";
@@ -9,6 +9,8 @@ import { stableHash } from "../lib/hash";
 import { formatMilliunitsInput, formatMoney, parseMilliunits } from "../lib/money";
 import { scheduleRecurrence } from "../lib/schedules";
 import { usePlan } from "../state/plan";
+import { isCachedPayees, isCachedScheduled } from "../state/cache-shapes";
+import { useCachedApi } from "../state/use-cached-api";
 
 type ScheduleGroup = { date: string; schedules: ScheduledTransaction[] };
 type EditorState = { mode: "create" } | { mode: "edit"; schedule: ScheduledTransaction };
@@ -18,7 +20,7 @@ type SplitDraft = { key: string; sourceId?: string; amount: string; payeeId: str
 
 /** Future recurring transactions, with local overlays for imported YNAB rows. */
 export function ScheduledTransactionsPage() {
-  const { accounts, categoryGroups, categoryNames, planId, reload } = usePlan();
+  const { accounts, categoryGroups, categoryNames, planId, userId, ledgerKnowledge, provisional, reload } = usePlan();
   const [generation, setGeneration] = useState(0);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion | null>(null);
@@ -26,8 +28,26 @@ export function ScheduledTransactionsPage() {
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [mutationSuccess, setMutationSuccess] = useState<string | null>(null);
   const [mutatingId, setMutatingId] = useState<string | null>(null);
-  const schedules = useApi(`${planId}:scheduled:${generation}`, () => api.scheduledTransactions(planId));
-  const payees = useApi(`${planId}:scheduled-payees`, () => api.payees(planId));
+  const cacheIdentity = useMemo(() => ({ userId, planId }), [userId, planId]);
+  // A local mutation clears every slot, so the generation in the key re-runs
+  // the read against an empty cache and genuinely refetches.
+  const validatedKnowledge = provisional ? null : ledgerKnowledge;
+  const schedules = useCachedApi<ScheduledTransaction[]>({
+    slot: "scheduled",
+    key: `${planId}:scheduled:${generation}`,
+    identity: cacheIdentity,
+    serverKnowledge: validatedKnowledge,
+    guard: isCachedScheduled,
+    fetcher: () => api.scheduledTransactions(planId),
+  });
+  const payees = useCachedApi<Payee[]>({
+    slot: "payees",
+    key: `${planId}:scheduled-payees`,
+    identity: cacheIdentity,
+    serverKnowledge: validatedKnowledge,
+    guard: isCachedPayees,
+    fetcher: () => api.payees(planId),
+  });
   const active = useMemo(
     () => (schedules.data ?? []).filter((schedule) => !schedule.deleted).sort(compareSchedules),
     [schedules.data],
