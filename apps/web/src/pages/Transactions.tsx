@@ -50,7 +50,7 @@ import {
   type RegisterRowEditSession,
 } from "../lib/register-row-edit";
 import { dateInRegisterWindow, isUpcomingRegisterDate, registerFetchUntilDate } from "../lib/register-current";
-import { fillRegisterHorizon } from "../lib/register-horizon";
+import { fillRegisterHorizon, REGISTER_PAGE_SIZE } from "../lib/register-horizon";
 import {
   fieldsFromSchedule,
   matchesRegisterQuery,
@@ -142,7 +142,7 @@ export function TransactionsPage() {
   const today = todayIso();
   const fetchUntilDate = registerFetchUntilDate(filters.to, today);
   const pageQuery = useMemo(
-    () => ({ since_date: filters.from, until_date: fetchUntilDate, limit: 100 }),
+    () => ({ since_date: filters.from, until_date: fetchUntilDate, limit: REGISTER_PAGE_SIZE }),
     [fetchUntilDate, filters.from],
   );
   const [page, setPage] = useState({
@@ -330,7 +330,7 @@ export function TransactionsPage() {
     q: registerQuery?.raw,
     since_date: filters.from,
     until_date: fetchUntilDate,
-    limit: 100,
+    limit: REGISTER_PAGE_SIZE,
     offset,
   });
 

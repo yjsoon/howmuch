@@ -4,6 +4,7 @@ import {
   horizonStartDate,
   oldestDateForHorizonCoverage,
   REGISTER_HORIZON_MAX_ROWS,
+  REGISTER_PAGE_SIZE,
   shouldFetchMoreForHorizon,
 } from "./register-horizon";
 
@@ -179,6 +180,28 @@ describe("fillRegisterHorizon", () => {
     expect(filled?.transactions).toHaveLength(REGISTER_HORIZON_MAX_ROWS);
     expect(filled?.hasMore).toBe(true);
     expect(filled?.nextOffset).toBe(600);
+  });
+
+  test("fills the 600-row cap in at most 3 requests at the server's max page size", async () => {
+    const offsets: number[] = [];
+    const filled = await fillRegisterHorizon({
+      today: TODAY,
+      isCurrent: () => true,
+      fetchPage: async (offset) => {
+        offsets.push(offset);
+        const start = offset;
+        return page(
+          Array.from({ length: REGISTER_PAGE_SIZE }, (_, index) => row(`r${start + index}`, "2026-08-01")),
+          true,
+          offset + REGISTER_PAGE_SIZE,
+        );
+      },
+    });
+    expect(offsets.length).toBeLessThanOrEqual(3);
+    expect(offsets).toEqual([0, REGISTER_PAGE_SIZE, REGISTER_PAGE_SIZE * 2]);
+    expect(filled?.transactions.length).toBeGreaterThanOrEqual(REGISTER_HORIZON_MAX_ROWS);
+    expect(filled?.hasMore).toBe(true);
+    expect(filled?.nextOffset).toBe(REGISTER_PAGE_SIZE * 3);
   });
 
   test("returns null when a later isCurrent check fails", async () => {
