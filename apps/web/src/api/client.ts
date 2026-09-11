@@ -80,7 +80,17 @@ function requestHeaders(init?: RequestInit): Headers {
   return headers;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/** Per-call knobs that do not belong in `RequestInit`. */
+export interface ApiRequestOptions {
+  /**
+   * Whether a 401 should end the session globally. Speculative bootstrap
+   * requests set this to false: they may race ahead of the session check, so
+   * their failures are decided by the caller instead of tearing down state.
+   */
+  handleUnauthorized?: boolean;
+}
+
+async function request<T>(path: string, init?: RequestInit, options?: ApiRequestOptions): Promise<T> {
   const startedEpoch = requestEpoch;
   const response = await fetch(path, {
     ...init,
@@ -94,7 +104,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     body = undefined;
   }
   if (!response.ok) {
-    if (response.status === 401 && shouldHandleUnauthorized(path, startedEpoch)) {
+    if (response.status === 401
+      && options?.handleUnauthorized !== false
+      && shouldHandleUnauthorized(path, startedEpoch)) {
       bumpRequestEpoch();
       onUnauthorized?.();
     }
@@ -176,7 +188,7 @@ async function approveTransactionBatch(planId: string, transactionIds: readonly 
 }
 
 export const api = {
-  authStatus: () => request<AuthStatus>("/api/auth/status"),
+  authStatus: (options?: ApiRequestOptions) => request<AuthStatus>("/api/auth/status", undefined, options),
   setup: (username: string, password: string, bootstrapToken: string) =>
     request<{ user: AuthUser }>("/api/auth/setup", {
       method: "POST",
@@ -200,18 +212,19 @@ export const api = {
     request<{ token: PersonalApiToken }>(`/api/auth/personal-tokens/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }).then((data) => data.token),
-  plans: () => request<{ plans: Plan[] }>("/v1/plans").then((d) => d.plans),
-  settings: (planId: string) =>
-    request<{ settings: PlanSettings }>(planUrl(planId, "settings")).then((d) => d.settings),
-  accounts: (planId: string) =>
-    request<{ accounts: Account[]; server_knowledge: number }>(planUrl(planId, "accounts")),
+  plans: (options?: ApiRequestOptions) =>
+    request<{ plans: Plan[] }>("/v1/plans", undefined, options).then((d) => d.plans),
+  settings: (planId: string, options?: ApiRequestOptions) =>
+    request<{ settings: PlanSettings }>(planUrl(planId, "settings"), undefined, options).then((d) => d.settings),
+  accounts: (planId: string, options?: ApiRequestOptions) =>
+    request<{ accounts: Account[]; server_knowledge: number }>(planUrl(planId, "accounts"), undefined, options),
   updateAccountIcon: (planId: string, accountId: string, icon: string) =>
     request<{ account: Account; server_knowledge: number }>(planUrl(planId, "accounts", accountId), {
       method: "PATCH",
       body: JSON.stringify({ account: { icon } }),
     }).then((data) => data.account),
-  accountPreferences: (planId: string) =>
-    request<AccountPreferencesSnapshot>(planUrl(planId, "account_preferences"))
+  accountPreferences: (planId: string, options?: ApiRequestOptions) =>
+    request<AccountPreferencesSnapshot>(planUrl(planId, "account_preferences"), undefined, options)
       .catch((error) => {
         if (error instanceof ApiError && error.status === 404) return null;
         throw error;
@@ -221,8 +234,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ account_preferences: accountPreferences, expected_revision: expectedRevision }),
     }),
-  categories: (planId: string) =>
-    request<{ category_groups: CategoryGroup[] }>(planUrl(planId, "categories")).then(
+  categories: (planId: string, options?: ApiRequestOptions) =>
+    request<{ category_groups: CategoryGroup[] }>(planUrl(planId, "categories"), undefined, options).then(
       (d) => d.category_groups,
     ),
   payees: (planId: string) =>
