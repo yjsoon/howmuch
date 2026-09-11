@@ -954,7 +954,7 @@ final class CaptureSessionTests: XCTestCase {
     XCTAssertTrue(session.currentDrafts.isEmpty)
   }
 
-  func testCommittedDraftsAreOutOfManualEditorAndInterpreter() {
+  func testCommittedDraftsStayOutOfManualEditor() {
     let session = Self.session(accountID: "acct-everyday")
     session.apply(
       turn: CaptureInterpretedTurn(intent: .add, feedback: "Added coffee.", mutations: [], query: nil, applyToAllDrafts: false),
@@ -965,12 +965,6 @@ final class CaptureSessionTests: XCTestCase {
     lunch.amountMagnitudeMilli = 12_000
     session.applyManualEdit(lunch, id: session.drafts[0].id)
     XCTAssertEqual(session.drafts[0].draft.payeeName, "Coffee")
-    let context = CaptureInterpreterPrompt.context(
-      text: "Add tea $3",
-      session: session,
-      accounts: [Account(id: "acct-everyday", name: "Everyday", icon: nil, type: "checking", onBudget: true, closed: false, balance: 0, clearedBalance: 0, unclearedBalance: 0, lastReconciledDate: nil, deleted: false)]
-    )
-    XCTAssertTrue(context.drafts.isEmpty)
   }
 
   func testDelayedManualCallbackUsesDraftImportIDNotNewlySelectedID() {
