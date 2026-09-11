@@ -124,8 +124,8 @@ export class LedgerRepository {
   }
 
   async getServerKnowledge(planId: string): Promise<number> {
-    await this.ensurePlan(planId);
-    const row = await this.db.query("SELECT server_knowledge FROM plans WHERE id = ?").get(planId) as Row;
+    const row = await this.db.query("SELECT server_knowledge FROM plans WHERE id = ?").get(planId) as Row | null;
+    if (!row) throw new PlanNotFoundError();
     return Number(row.server_knowledge);
   }
 
@@ -134,8 +134,8 @@ export class LedgerRepository {
   }
 
   async getPlan(planId: string): Promise<any> {
-    await this.ensurePlan(planId);
-    const row = await this.db.query("SELECT * FROM plans WHERE id = ?").get(planId) as Row;
+    const row = await this.db.query("SELECT * FROM plans WHERE id = ?").get(planId) as Row | null;
+    if (!row) throw new PlanNotFoundError();
     return formatPlan(row);
   }
 
@@ -171,8 +171,8 @@ export class LedgerRepository {
   }
 
   async getSettings(planId: string): Promise<any> {
-    await this.ensurePlan(planId);
-    const row = await this.db.query("SELECT * FROM plans WHERE id = ?").get(planId) as Row;
+    const row = await this.db.query("SELECT * FROM plans WHERE id = ?").get(planId) as Row | null;
+    if (!row) throw new PlanNotFoundError();
     return {
       date_format: JSON.parse(row.date_format_json),
       currency_format: JSON.parse(row.currency_format_json),
@@ -419,7 +419,6 @@ export class LedgerRepository {
   }
 
   async listAccounts(planId: string): Promise<any[]> {
-    await this.ensurePlan(planId);
     return (await this.db
       .query(`${ACCOUNT_SELECT_SQL} WHERE plan_id = ? AND deleted = 0 ORDER BY closed, name`)
       .all(planId)).map(formatAccount);
@@ -613,7 +612,6 @@ export class LedgerRepository {
   }
 
   async listPayees(planId: string): Promise<any[]> {
-    await this.ensurePlan(planId);
     return (await this.db
       .query("SELECT id, name, transfer_account_id, deleted FROM payees WHERE plan_id = ? AND deleted = 0 ORDER BY name")
       .all(planId)).map(formatPayee);
@@ -697,7 +695,6 @@ export class LedgerRepository {
   }
 
   async listCategoryGroups(planId: string): Promise<any[]> {
-    await this.ensurePlan(planId);
     const groups = await this.db
       .query("SELECT * FROM category_groups WHERE plan_id = ? AND deleted = 0 ORDER BY name")
       .all(planId) as Row[];
@@ -1428,7 +1425,6 @@ export class LedgerRepository {
     limit?: number,
     offset?: number,
   ): Promise<{ transactions: any[] }> {
-    await this.ensurePlan(planId);
     const clauses = ["t.plan_id = ?"];
     const params: any[] = [planId];
 
@@ -1534,7 +1530,6 @@ export class LedgerRepository {
   }
 
   async getMonth(planId: string, month: string): Promise<any> {
-    await this.ensurePlan(planId);
     const start = month.length === 7 ? `${month}-01` : month;
     const ynabMonth = await this.db
       .query("SELECT payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month' AND object_id = ?")
@@ -1869,7 +1864,6 @@ export class LedgerRepository {
   }
 
   async listYnabRawObjects(planId: string, objectType: string): Promise<any[]> {
-    await this.ensurePlan(planId);
     const rows = await this.db
       .query("SELECT payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = ? ORDER BY object_id")
       .all(planId, objectType) as Row[];
@@ -1878,7 +1872,6 @@ export class LedgerRepository {
 
   /** Effective schedules: immutable YNAB rows plus HowMuch-owned overlays. */
   async listScheduledTransactions(planId: string): Promise<any[]> {
-    await this.ensurePlan(planId);
     const [rawParents, rawSubs, editRows, editSubRows] = await Promise.all([
       this.db.query("SELECT object_id,payload_json,deleted FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_transaction' ORDER BY object_id").all(planId),
       this.db.query("SELECT payload_json FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_subtransaction' ORDER BY object_id").all(planId),
@@ -2255,7 +2248,6 @@ export class LedgerRepository {
   }
 
   private async readScheduledTransaction(planId: string, id: string, includeDeleted = false): Promise<{ payload: Record<string, any>; subtransactions: Record<string, any>[]; origin: "howmuch-local" | "ynab-overlay" } & Record<string, any>> {
-    await this.ensurePlan(planId);
     const edit = await this.db.query("SELECT origin,payload_json,deleted FROM scheduled_transaction_edits WHERE plan_id=? AND id=?").get(planId, id) as Row | null;
     if (edit) {
       if (Boolean(edit.deleted) && !includeDeleted) throw new NotFoundError("Scheduled transaction not found");
@@ -3087,6 +3079,17 @@ function canonicalScheduleJson(value: unknown): string {
 }
 
 export class NotFoundError extends Error {}
+
+/**
+ * Reads no longer create the plan they are asked about, so a caller can name
+ * one that does not exist. This inherits the 404 `resource_not_found` mapping
+ * in `http.ts` while staying greppable.
+ */
+export class PlanNotFoundError extends NotFoundError {
+  constructor(message = "Plan not found") {
+    super(message);
+  }
+}
 
 export class ValidationError extends Error {}
 

@@ -178,7 +178,10 @@ async function handleV1(
     ? (!canRead(principal, planId, defaultPlanId) ? apiError(404, "resource_not_found", "Plan not found", "404.2") : null)
     : authorizePlan(principal, planId, defaultPlanId, method);
   if (denied) return denied;
-  await repo.ensurePlan(planId);
+  // Reads never create the plan they name: a missing plan is a 404, not an
+  // implicit INSERT on the D1 primary. Writes still bootstrap it, because an
+  // API-token client may address the default plan before setup has run.
+  if (isUnsafeMethod(method)) await repo.ensurePlan(planId);
 
   if (segments.length === 3 && method === "GET") {
     const plan = await repo.getPlan(planId);
@@ -619,7 +622,6 @@ async function handleNative(
   if (segments[1] === "reports" && method === "GET") {
     const denied = authorizePlan(principal, planId, defaultPlanId, method);
     if (denied) return denied;
-    await repo.ensurePlan(planId);
     const filters = reportFilters(url);
     if (segments[2] === "spending-breakdown") {
       return json({ data: await reports.spendingBreakdown(planId, filters) });
@@ -702,7 +704,6 @@ async function handleNative(
   if (segments[1] === "import" && segments[2] === "rewards-tracker") {
     const denied = authorizePlan(principal, planId, defaultPlanId, method);
     if (denied) return denied;
-    await repo.ensurePlan(planId);
     if (method === "GET") {
       return json({ data: await repo.getRewardsTrackerSnapshot(planId) });
     }
@@ -723,7 +724,9 @@ async function handleNative(
     const targetPlanId = body.plan_id ?? planId;
     const denied = authorizePlan(principal, targetPlanId, defaultPlanId, method);
     if (denied) return denied;
-    await repo.ensurePlan(targetPlanId);
+    // Every branch below is a write. Ensuring unconditionally meant a GET that
+    // matches no branch still created the plan on its way to a 404.
+    if (isUnsafeMethod(method)) await repo.ensurePlan(targetPlanId);
 
     if (segments[2] === "cards" && segments.length === 3 && method === "POST") {
       const card = await createRewardsCard(repo, targetPlanId, body.card);
