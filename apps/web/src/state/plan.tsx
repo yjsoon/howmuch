@@ -71,7 +71,7 @@ interface ReferenceBatch {
 async function fetchReferenceBatch(
   planId: string,
   withPreferences: boolean,
-  options: ApiRequestOptions,
+  options?: ApiRequestOptions,
 ): Promise<ReferenceBatch> {
   const [settings, accounts, accountPreferences, categoryGroups] = await Promise.all([
     api.settings(planId, options),
@@ -102,6 +102,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
     setUnauthorizedHandler(() => {
       accountPreferencesControllerRef.current?.controller.detach();
       accountPreferencesControllerRef.current = null;
+      savePrefs({ planId: undefined });
       setValue(null);
       setError("Your session ended. Sign in again.");
       setAuthMode("login");
@@ -121,12 +122,15 @@ export function PlanProvider({ children }: { children: ReactNode }) {
           hint: loadPrefs().planId ?? null,
           existingPlanId: attached?.planId ?? null,
         });
-        const quiet = { handleUnauthorized: false } as const;
-        const statusPromise = api.authStatus(quiet);
-        const plansPromise = settle(api.plans(quiet));
+        // Only the calls that race ahead of the session check decide their own
+        // 401s; once the session is known, a 401 means the session really has
+        // ended and the global handler should see it.
+        const speculative = { handleUnauthorized: false } as const;
+        const statusPromise = api.authStatus();
+        const plansPromise = settle(api.plans(speculative));
         const speculativePlanId = requests.speculativePlanId;
         const speculativeBatch = speculativePlanId
-          ? settle(fetchReferenceBatch(speculativePlanId, requests.fetchPreferences, quiet))
+          ? settle(fetchReferenceBatch(speculativePlanId, requests.fetchPreferences, speculative))
           : null;
 
         const status = await statusPromise;
@@ -167,7 +171,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         }
         const batch = outcome.kind === "use"
           ? outcome.value
-          : await fetchReferenceBatch(planId, !existingController, quiet);
+          : await fetchReferenceBatch(planId, !existingController);
         if (cancelled) {
           return;
         }
@@ -179,7 +183,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
           ? null
           : batch.accountPreferences !== undefined
             ? batch.accountPreferences
-            : await api.accountPreferences(planId, quiet);
+            : await api.accountPreferences(planId);
         if (cancelled) {
           return;
         }
@@ -254,6 +258,8 @@ export function PlanProvider({ children }: { children: ReactNode }) {
             await api.logout();
             accountPreferencesControllerRef.current?.controller.detach();
             accountPreferencesControllerRef.current = null;
+            // The next person to sign in here should not inherit this hint.
+            savePrefs({ planId: undefined });
             setValue(null);
             setError(null);
             setAuthMode("login");
@@ -264,6 +270,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
           if (cause instanceof ApiError && cause.status === 401) {
             accountPreferencesControllerRef.current?.controller.detach();
             accountPreferencesControllerRef.current = null;
+            savePrefs({ planId: undefined });
             setValue(null);
             setAuthMode("login");
           }

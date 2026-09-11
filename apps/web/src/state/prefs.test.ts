@@ -5,6 +5,10 @@ describe("parsePrefs", () => {
   test("keeps a well-formed remembered plan and rejects anything else", () => {
     expect(parsePrefs({ planId: "plan-a" }).planId).toBe("plan-a");
     expect(parsePrefs({ planId: "../../etc/passwd" }).planId).toBeUndefined();
+    expect(parsePrefs({ planId: ".." }).planId).toBeUndefined();
+    expect(parsePrefs({ planId: "." }).planId).toBeUndefined();
+    expect(parsePrefs({ planId: "..." }).planId).toBeUndefined();
+    expect(parsePrefs({ accountIds: [".", "..", "acc-1"] }).accountIds).toEqual(["acc-1"]);
     expect(parsePrefs({ planId: 42 }).planId).toBeUndefined();
   });
 
