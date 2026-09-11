@@ -107,6 +107,10 @@ export function applyMigrations(db: Database): void {
       version: "019_query_covering_indexes",
       path: join(migrationsDir, "019_query_covering_indexes.sql"),
     },
+    {
+      version: "021_account_month_balances",
+      path: join(migrationsDir, "021_account_month_balances.sql"),
+    },
   ];
 
   for (const migration of migrations) {
