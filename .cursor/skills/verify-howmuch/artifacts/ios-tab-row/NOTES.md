@@ -26,4 +26,4 @@ Compact iPhone: Accounts / Rewards / Reflect sit in the search-role tab capsule.
 
 Live physical iPhone was not driven. Simulator is the proof on this host.
 
-The Assistant overlay stays window-hosted while Add Transactions is up, so the chat circle can draw over the composer. That is overlay tightness leftover from `f735493`, not a tab-selection miss.
+The window-hosted Assistant circle is removed while capture is pending or presented, and while a blocking sheet is up, so it cannot draw over Add Transactions.
