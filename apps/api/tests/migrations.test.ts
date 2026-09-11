@@ -58,7 +58,7 @@ describe("local schema migrations", () => {
         INSERT INTO transactions(id,payee_id) VALUES ('legacy-transaction','legacy-payee');
         INSERT INTO schema_migrations(version) VALUES
           ('001_initial'),('002_transaction_server_knowledge'),('003_transfer_payees'),('004_auth_foundation'),('005_password_auth'),
-          ('019_query_covering_indexes'),('021_account_month_balances');
+          ('019_query_covering_indexes'),('020_ynab_source_month_activity'),('021_account_month_balances');
       `);
 
       applyMigrations(db);
@@ -128,7 +128,7 @@ describe("local schema migrations", () => {
           ('001_initial'),('002_transaction_server_knowledge'),('003_transfer_payees'),('004_auth_foundation'),('005_password_auth'),
           ('006_allow_duplicate_payee_names'),('007_ynab_raw_objects'),('008_plan_month_assignments'),('009_plan_month_category_targets'),
           ('010_scheduled_transaction_edits'),('011_scheduled_transaction_snapshot_assertions'),('012_account_reconciliation_assertions'),
-          ('019_query_covering_indexes'),('021_account_month_balances');
+          ('019_query_covering_indexes'),('020_ynab_source_month_activity'),('021_account_month_balances');
       `);
 
       applyMigrations(db);
@@ -192,7 +192,7 @@ describe("local schema migrations", () => {
           ('006_allow_duplicate_payee_names'),('007_ynab_raw_objects'),('008_plan_month_assignments'),('009_plan_month_category_targets'),
           ('010_scheduled_transaction_edits'),('011_scheduled_transaction_snapshot_assertions'),('012_account_reconciliation_assertions'),
           ('013_unique_live_import_id'),('014_personal_api_tokens'),('015_account_preferences'),
-          ('019_query_covering_indexes'),('021_account_month_balances');
+          ('019_query_covering_indexes'),('020_ynab_source_month_activity'),('021_account_month_balances');
       `);
 
       applyMigrations(db);
