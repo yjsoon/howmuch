@@ -22,7 +22,7 @@ Cloudflare Email Routing) stays in the YJ account — do not move it.
 - The `tk` environment has one cron, `5 16 * * *` (00:05 Asia/Singapore), which materialises due scheduled transactions. It has no YNAB configuration. `HOWMUCH_API_TOKEN` is an encrypted secret on this Worker.
 - Do not add `HOWMUCH_REDIRECT_TARGET` to the `tk` env. Wrangler warns that top-level vars are not inherited; that warning is expected, and setting the var here would make production redirect to itself.
 - Production deploys automatically when a `v*` tag is pushed (`.github/workflows/deploy.yml`), using the `CLOUDFLARE_API_TOKEN` repo secret pinned to this account. The workflow deploys only and never applies D1 migrations; migrations follow the order in `docs/deployment.md` and are run manually before tagging.
-- This is the only environment that accepts writes. All clients — including the iOS app, whose `productionBaseURL` still points at `howmuch.soon.sg` — reach it through the redirect.
+- This is the only environment that accepts writes. The iOS app's `productionBaseURL` points at `howmuch.tk.sg`; installs still carrying the former `howmuch.soon.sg` default migrate on launch, and the legacy `soon.sg` host stays reachable as a redirect.
 
 ### Legacy redirect + backup (profile `yj`, account `YJ`)
 

@@ -21,7 +21,7 @@ Preconditions:
 
 - Darwin + Xcode. Linux cannot run this recipe. Target **howmuch-mac** / `yjmbpro.local`.
 - Checkout `cursor/capture-rename-payee-a557` at `29f42e7` or this stacked branch. `CaptureAssistantPresence.swift` and `CaptureAssistantPresenceTests` must exist.
-- `control-howmuch doctor` passes against an isolated verify stack. Reuse a healthy instance; do not point the app at `howmuch.soon.sg`.
+- `control-howmuch doctor` passes against an isolated verify stack. Reuse a healthy instance; do not point the app at production (`howmuch.tk.sg` or the legacy `howmuch.soon.sg`).
 - [iOS connection](./ios-connection.md) signed in as `verifier`. Server is `{api_url}` (`http://127.0.0.1:{api_port}`). After Sign in, tap trailing **Save** on Connection (axe does not expose that toolbar button; on iPhone ~360,105).
 - Pin an explicit Simulator UDID. Never `simctl io booted`. On `yjmbpro`, use HowMuch Verification `BA2CAD1A-0977-4290-8486-760091B333AE` (iOS 26.5). Leave other xcodebuild jobs (including ICPhoto) alone. Do not set `HOWMUCH_SHUTDOWN_OTHER_SIMULATORS=1`.
 - Rebuild before test/install. `scripts/ios-xcodebuild.sh test` skips rebuild when DerivedData already has HowMuch.app + xctest, and will run **0 tests against a stale bundle**. Required:

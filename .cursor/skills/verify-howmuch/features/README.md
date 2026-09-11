@@ -8,7 +8,7 @@ Web recipes drive `{web_url}`. iOS recipes drive the Simulator against the same 
 
 - Launch with `control-howmuch launch` and require `control-howmuch doctor` to pass.
 - Drive web only at `{web_url}` from `control-howmuch state`. Refuse `http://127.0.0.1:5173` / `:8787` unless doctor says this run owns them and the database is under `/tmp/howmuch-verify/`.
-- Drive iOS in Simulator against `{api_url}` from the same state. Never `https://howmuch.soon.sg`.
+- Drive iOS in Simulator against `{api_url}` from the same state. Never production (`https://howmuch.tk.sg`, or the legacy `https://howmuch.soon.sg` that redirects to it).
 - Seed is `fixtures/demo-ledger.json`: plan `HowMuch Demo` (`local-plan`), accounts **Everyday Account**, **Rainy Day Saver**, **Travel Card**, categories including Groceries / Dining Out / Utilities / Holiday, payees including FairPrice Finest, Candlenut, Scoot.
 - Demo transactions run **2026-03-01 … 2026-05-24**. Default UI ranges follow today, so they look empty until you choose **All** or that date span.
 - First paint is **Set up HowMuch** (no user yet). Create `verifier` / `howmuch-verify-15` with setup token `howmuch-verify-bootstrap`.
