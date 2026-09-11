@@ -13,25 +13,37 @@ import XCTest
 @MainActor
 final class LaunchRefreshTests: XCTestCase {
   private var previousCredentialService = ""
+  private var previousAPISettings: Any?
+  private var previousScopedViewPrefs: Any?
 
   override func setUp() {
     super.setUp()
     previousCredentialService = APISettings.useCredentialService("HowMuch.LaunchRefreshTests.\(UUID().uuidString)")
+    // `applySettings`/`resolvePlanSelection` call through to `settings.save()`,
+    // which writes the fixture connection straight into `UserDefaults.standard`
+    // under the app's real keys. Save/restore those so this fixture host never
+    // leaks into other tests (e.g. CaptureOriginTests, IPadLayoutTests, which
+    // construct `AppModel()` from `APISettings.load()`) or the installed app.
+    previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
+    previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
   }
 
   override func tearDown() {
     APISettings.useCredentialService(previousCredentialService)
+    UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
+    UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
     super.tearDown()
   }
 
-  /// The actual fix: keying the launch task on `launchFingerprint` must not
-  /// restart when `resolvePlanSelection()` adopts the sole plan mid-refresh.
+  /// The actual fix: keying the launch task on `launchRefreshTaskID`
+  /// (`launchFingerprint`) must not restart when `resolvePlanSelection()`
+  /// adopts the sole plan mid-refresh.
   func testLaunchTaskKeyedOnLaunchFingerprintRunsPlansOnce() async {
-    let count = await runLaunchProbe { $0.settings.launchFingerprint }
+    let count = await runLaunchProbe(expectedRequestCount: 1) { $0.launchRefreshTaskID }
     XCTAssertEqual(
       count,
       1,
-      "keying the launch task on launchFingerprint must issue exactly one GET /v1/plans on first sign-in"
+      "keying the launch task on launchRefreshTaskID must issue exactly one GET /v1/plans on first sign-in"
     )
   }
 
@@ -39,7 +51,7 @@ final class LaunchRefreshTests: XCTestCase {
   /// guards against. Keying the task on the pre-fix `connectionFingerprint`
   /// (which includes `planID`) must still reproduce the double run.
   func testLaunchTaskKeyedOnConnectionFingerprintStillRunsPlansTwice() async {
-    let count = await runLaunchProbe { $0.settings.connectionFingerprint }
+    let count = await runLaunchProbe(expectedRequestCount: 2) { $0.settings.connectionFingerprint }
     XCTAssertEqual(
       count,
       2,
@@ -47,12 +59,25 @@ final class LaunchRefreshTests: XCTestCase {
     )
   }
 
+  /// True once a launch phase has reached a terminal state. Right after
+  /// `resolvePlanSelection()` adopts the sole plan, `clearConnectionOwnedState()`
+  /// resets every phase to `.idle` before the individual `refresh*()` calls
+  /// set them to `.loading`; treating `.idle` as "settled" would let the
+  /// wait below return during that brief gap, before the requests it's
+  /// supposed to count have actually happened.
+  private func isTerminal(_ phase: LoadPhase) -> Bool {
+    phase != .idle && phase != .loading
+  }
+
   /// Runs a minimal SwiftUI view that reproduces `HowMuchApp`'s
   /// `.task(id:) { await model.refreshAll() }`, keyed on whichever
   /// fingerprint `taskID` selects, against a fresh sign-in (empty `planID`,
   /// one plan available on the server). Returns how many times the stub
   /// observed `GET /v1/plans`.
-  private func runLaunchProbe(taskID: @escaping (AppModel) -> String) async -> Int {
+  private func runLaunchProbe(
+    expectedRequestCount: Int,
+    taskID: @escaping (AppModel) -> String
+  ) async -> Int {
     XCTAssertTrue(URLProtocol.registerClass(LaunchProbeProtocol.self))
     defer { URLProtocol.unregisterClass(LaunchProbeProtocol.self) }
     LaunchProbeProtocol.reset()
@@ -83,18 +108,25 @@ final class LaunchRefreshTests: XCTestCase {
     )
 
     let settled = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
-      model.referencePhase != .loading
-        && model.ledgerPhase != .loading
-        && model.scheduledTransactionsPhase != .loading
-        && model.reportsPhase != .loading
+      self.isTerminal(model.referencePhase)
+        && self.isTerminal(model.ledgerPhase)
+        && self.isTerminal(model.scheduledTransactionsPhase)
+        && self.isTerminal(model.reportsPhase)
     }
     XCTAssertTrue(settled, "the launch refresh(es) must settle before counting requests")
 
+    // Wait on the exact observable this test asserts on, not just on the
+    // model's own phases: a restarted run's `/v1/plans` fetch can still be
+    // in flight (or its response still being dispatched back to the main
+    // actor) even after the first run's phases above have gone terminal.
+    let reachedExpectedCount = await surface.waitUntil(timeoutNanoseconds: 1_000_000_000) {
+      LaunchProbeProtocol.plansRequestCount() >= expectedRequestCount
+    }
     let count = LaunchProbeProtocol.plansRequestCount()
-    XCTAssertGreaterThanOrEqual(
-      count,
-      1,
-      "GET /v1/plans must be recorded by LaunchProbeProtocol; if 0, URLSession.shared may have copied its protocol list before registerClass and this stub never ran"
+    XCTAssertTrue(
+      reachedExpectedCount,
+      "expected at least \(expectedRequestCount) GET /v1/plans requests but only saw \(count); "
+        + "if 0, URLSession.shared may have copied its protocol list before registerClass and this stub never ran"
     )
     return count
   }
@@ -208,14 +240,24 @@ private final class LaunchProbeProtocol: URLProtocol {
 @MainActor
 final class ApplySettingsRefreshTests: XCTestCase {
   private var previousCredentialService = ""
+  private var previousAPISettings: Any?
+  private var previousScopedViewPrefs: Any?
 
   override func setUp() {
     super.setUp()
     previousCredentialService = APISettings.useCredentialService("HowMuch.ApplySettingsRefreshTests.\(UUID().uuidString)")
+    // `applySettings()` calls through to `settings.save()`, which writes the
+    // fixture connection straight into `UserDefaults.standard` under the
+    // app's real key. Save/restore it so this fixture host never leaks into
+    // other tests or the installed app.
+    previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
+    previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
   }
 
   override func tearDown() {
     APISettings.useCredentialService(previousCredentialService)
+    UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
+    UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
     super.tearDown()
   }
 
