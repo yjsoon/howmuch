@@ -489,6 +489,48 @@ final class CaptureSessionTests: XCTestCase {
     XCTAssertEqual(session.drafts[0].draft.amountMagnitudeMilli, 5_000)
     XCTAssertEqual(session.drafts[1].draft.amountMagnitudeMilli, 21_000)
     XCTAssertTrue(session.pendingTargetDraftIDs.isEmpty)
+    XCTAssertEqual(session.messages.last?.updatedDraftIDs, [session.drafts[1].id])
+  }
+
+  func testChooseTargetDraftRecordsUpdatedIDsOnCommittedCard() {
+    let session = Self.session(accountID: "acct-everyday")
+    var lunch = Self.draft(payee: "Lunch", amount: 12_000)
+    lunch.accountID = "acct-everyday"
+    var coffee = Self.draft(payee: "Coffee", amount: 5_000)
+    coffee.accountID = "acct-everyday"
+    session.replaceDrafts([
+      CaptureDraftItem(draft: lunch),
+      CaptureDraftItem(draft: coffee),
+    ])
+    session.markCommittedIncluded()
+    var renamed = session.drafts[1].draft
+    renamed.payeeName = "Capture Rename Verify"
+    let mapped = SlipMappedDraft(
+      draft: renamed,
+      parsedAmount: false,
+      parsedDate: false,
+      parsedAccount: false,
+      parsedCategory: false,
+      parsedDirection: false,
+      accountCandidates: [],
+      categoryCandidates: []
+    )
+    session.apply(
+      turn: CaptureInterpretedTurn(
+        intent: .update,
+        feedback: "Which transaction?",
+        mutations: [CaptureDraftMutation(targetDraftID: nil, extraction: .init(payee: "Capture Rename Verify"))],
+        query: nil,
+        applyToAllDrafts: false
+      ),
+      mapped: [mapped]
+    )
+    XCTAssertFalse(session.pendingTargetDraftIDs.isEmpty)
+    session.chooseTargetDraft(session.drafts[1].id)
+    XCTAssertEqual(session.drafts[1].draft.payeeName, "Capture Rename Verify")
+    XCTAssertEqual(session.drafts[0].draft.payeeName, "Lunch")
+    XCTAssertEqual(session.messages.last?.updatedDraftIDs, [session.drafts[1].id])
+    XCTAssertTrue(session.drafts[1].committed)
   }
 
   func testExplicitOutflowCorrectionDoesNotStayInflow() {
