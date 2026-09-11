@@ -49,6 +49,13 @@ environment `tk` in `wrangler.jsonc`:
 - Deploy from `apps/worker` with `bun run deploy:tk`, which pins
   `--env tk --profile tinkertanker`. All asset requests run through the Worker
   (`run_worker_first: true`) so the redirect mode below applies to every path.
+- Pushing a `v*` tag (e.g. `v1.0.0`) triggers an automatic production deploy
+  via `.github/workflows/deploy.yml`, authenticated by the `CLOUDFLARE_API_TOKEN`
+  repo secret and pinned to the Tinkertanker account ID. The workflow deploys
+  only — it never applies D1 migrations. If a release includes a migration,
+  apply it manually (`wrangler d1 migrations apply DB --env tk --remote
+  --profile tinkertanker`) before tagging, following the verification order
+  in this document.
 
 ## Legacy: YJ redirect (`howmuch.soon.sg`)
 

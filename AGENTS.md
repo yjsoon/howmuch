@@ -20,6 +20,7 @@ Cloudflare Email Routing) stays in the YJ account — do not move it.
 - Wrangler profile `tinkertanker`, Cloudflare account `Tinkertanker` (`b8b1032c61d9475cd00229c74db7ec72`). Deploy with `bun run deploy:tk` from `apps/worker`, which pins `--env tk --profile tinkertanker`.
 - The expected resources are Worker `howmuch` (env `tk` in `wrangler.jsonc`) and D1 database `howmuch-production` (`df039dbc-6dda-4150-9dc3-5854a8ca6818`, APAC), serving `https://howmuch.tk.sg` (web front-end and API on one hostname).
 - The `tk` environment has no YNAB configuration and no cron triggers. `HOWMUCH_API_TOKEN` is an encrypted secret on this Worker.
+- Production deploys automatically when a `v*` tag is pushed (`.github/workflows/deploy.yml`), using the `CLOUDFLARE_API_TOKEN` repo secret pinned to this account. The workflow deploys only and never applies D1 migrations; migrations follow the order in `docs/deployment.md` and are run manually before tagging.
 - This is the only environment that accepts writes. All clients — including the iOS app, whose `productionBaseURL` still points at `howmuch.soon.sg` — reach it through the redirect.
 
 ### Legacy redirect + backup (profile `yj`, account `YJ`)
