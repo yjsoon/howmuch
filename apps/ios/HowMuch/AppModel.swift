@@ -1517,7 +1517,7 @@ final class AppModel {
       // The badge, and the rows only if the approval flow is already open. Both
       // run alongside the horizon fill below rather than in front of it.
       Task { await self.refreshUnapprovedCount(generation: generation, planID: planID) }
-      if unapprovedQueuePhase != .idle {
+      if unapprovedQueuePhase == .loaded || unapprovedQueuePhase.isLoading {
         Task { await self.loadUnapprovedQueue(generation: generation, planID: planID) }
       }
       defer {
@@ -1574,8 +1574,18 @@ final class AppModel {
   /// Loads the unapproved rows. Called when the approval flow opens, and again
   /// on later refreshes while it stays open -- never on the launch path.
   func loadUnapprovedQueueIfNeeded() async {
-    guard unapprovedQueuePhase == .idle else { return }
+    // `.failed` is retried: otherwise the flow shows its error with no way out
+    // short of a pull-to-refresh.
+    guard unapprovedQueuePhase == .idle || unapprovedQueuePhase.errorMessage != nil else { return }
     await loadUnapprovedQueue(generation: ledgerPageGeneration, planID: settings.planID)
+  }
+
+  /// Called when the approval flow closes. Later refreshes then stop paying for
+  /// the queue walk again -- without this, opening the flow once would re-arm
+  /// that walk on every refresh for the rest of the session. The rows stay put;
+  /// the badge falls back to the count.
+  func closeUnapprovedQueue() {
+    unapprovedQueuePhase = .idle
   }
 
   private func loadUnapprovedQueue(generation: Int, planID: String) async {

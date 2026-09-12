@@ -1505,7 +1505,15 @@ export class LedgerRepository {
    * them once, server-side, instead of shipping every row to the client.
    */
   async countUnapprovedTransactions(planId: string, filters: TransactionFilters = {}): Promise<UnapprovedCount> {
-    const { clauses, params } = transactionFilterClauses(planId, { ...filters, type: "unapproved", q: null });
+    // `q` needs the plan's currency format, a round trip the count will not pay,
+    // and `last_knowledge_of_server` would swap "live rows" for "rows changed
+    // since", deleted ones included. Neither applies to a badge.
+    const { clauses, params } = transactionFilterClauses(planId, {
+      ...filters,
+      type: "unapproved",
+      q: null,
+      lastKnowledgeOfServer: null,
+    });
     const [knowledgeRows, countRows] = await this.db.batchRead([
       { sql: SERVER_KNOWLEDGE_SQL, values: [planId] },
       { sql: `SELECT COUNT(*) AS count FROM transactions t WHERE ${clauses.join(" AND ")}`, values: params },

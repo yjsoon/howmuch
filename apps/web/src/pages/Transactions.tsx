@@ -223,20 +223,27 @@ export function TransactionsPage() {
     fetcher: () => api.scheduledTransactions(planId),
     cacheEpoch,
   });
+  // The count endpoint is scoped to the plan or to one account, so it can only
+  // stand in for the queue when the register is scoped the same way. A register
+  // filtered to several accounts has no matching count, and keeps counting rows.
+  const countMatchesRegisterScope = filters.accountIds.length <= 1;
   // The badge, eagerly: one bounded count, so the register never waits on the
   // queue behind it.
   const unapprovedCountQuery = useApi(
-    JSON.stringify({ planId, selectedAccountId, from: filters.from, to: filters.to, refreshGeneration, unapprovedCount: true }),
-    () => api.unapprovedCount(planId, { since_date: filters.from, until_date: fetchUntilDate }, selectedAccountId),
+    JSON.stringify({ planId, selectedAccountId, from: filters.from, to: filters.to, refreshGeneration, unapprovedCount: countMatchesRegisterScope }),
+    async () =>
+      countMatchesRegisterScope
+        ? await api.unapprovedCount(planId, { since_date: filters.from, until_date: fetchUntilDate }, selectedAccountId)
+        : null,
   );
   // The queue itself, lazily: the rows are only ever rendered inside the
   // approval flow, so they are only ever fetched once it is open. `null` means
   // "not loaded" and an empty array means "loaded, and empty" -- the badge
   // needs to tell those apart.
   const approvalQueue = useApi<Transaction[] | null>(
-    JSON.stringify({ planId, selectedAccountId, from: filters.from, to: filters.to, refreshGeneration, approvalQueue: unapprovedOnly }),
+    JSON.stringify({ planId, selectedAccountId, from: filters.from, to: filters.to, refreshGeneration, approvalQueue: unapprovedOnly || !countMatchesRegisterScope }),
     async () => {
-      if (!unapprovedOnly) return null;
+      if (!unapprovedOnly && countMatchesRegisterScope) return null;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         const transactions = new Map<string, Transaction>();
         let expectedKnowledge: number | null = null;
@@ -890,9 +897,18 @@ export function TransactionsPage() {
   // before them can know about.
   const resolvedIds = useMemo(() => {
     const ids = new Set(approvalSession.confirmed);
-    for (const id of deletedIds) ids.add(id);
+    // Rejecting a row awaiting approval takes it off the badge; deleting an
+    // already-approved transaction was never on it and must not.
+    const awaitingApproval = new Set(
+      [...page.transactions, ...(approvalQueue.data ?? [])]
+        .filter((transaction) => !transaction.approved)
+        .map((transaction) => transaction.id),
+    );
+    for (const id of deletedIds) {
+      if (awaitingApproval.has(id)) ids.add(id);
+    }
     return ids;
-  }, [approvalSession, deletedIds]);
+  }, [approvalQueue.data, approvalSession, deletedIds, page.transactions]);
   const resolvedIdsRef = useRef<ReadonlySet<string>>(resolvedIds);
   resolvedIdsRef.current = resolvedIds;
   // Re-baselined whenever a fresh count lands, because that count already

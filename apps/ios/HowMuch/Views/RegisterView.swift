@@ -281,10 +281,14 @@ struct RegisterView: View {
         break
       }
     }
-    // The rows behind the "New" badge, fetched here rather than at launch.
+    // The rows behind the "New" badge, fetched here rather than at launch, and
+    // released again when the flow closes so later refreshes stop paying for
+    // the walk.
     .task(id: showingUnapprovedQueue) {
       if showingUnapprovedQueue {
         await model.loadUnapprovedQueueIfNeeded()
+      } else {
+        model.closeUnapprovedQueue()
       }
     }
     .onAppear {
@@ -295,6 +299,9 @@ struct RegisterView: View {
     .onDisappear {
       if let accountID = scope.accountID {
         model.endFocusedRegisterAccount(accountID)
+      }
+      if showingUnapprovedQueue {
+        model.closeUnapprovedQueue()
       }
     }
   }

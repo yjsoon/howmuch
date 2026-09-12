@@ -1327,6 +1327,13 @@ describe("YNAB-compatible API", () => {
       "/v1/plans/plan-test/accounts/acct-2/transactions/unapproved_count?since_date=2026-07-01&until_date=2026-07-03",
     );
     expect(otherAccount.count).toBe(0);
+
+    // last_knowledge_of_server would turn the list into "changed since, deleted
+    // rows included". The count ignores it and stays a count of live rows.
+    const withKnowledge = await countOf(
+      "/v1/plans/plan-test/transactions/unapproved_count?last_knowledge_of_server=0",
+    );
+    expect(withKnowledge.count).toBe(after.count);
   });
 
   test("rejects invalid transaction patches without mutating the ledger", async () => {

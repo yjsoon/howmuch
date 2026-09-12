@@ -321,8 +321,8 @@ number of live, unapproved transactions in scope — the same rows
 `?type=unapproved` lists, counted rather than returned. `since_date` and
 `until_date` narrow it exactly as they narrow the list, and the account-scoped
 path narrows it to one account, so a badge drawn from this endpoint always
-agrees with the queue the user then opens. `limit`, `offset` and `q` do not
-apply.
+agrees with the queue the user then opens. `limit`, `offset`, `q` and
+`last_knowledge_of_server` do not apply — this is always a count of live rows.
 
 The count and `server_knowledge` are read in one batch, so the number is always
 labelled with the knowledge value it was counted at. Clients show the "New"
