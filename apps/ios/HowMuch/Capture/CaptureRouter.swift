@@ -10,7 +10,7 @@ final class CaptureRouter {
   var presented: CaptureRequest?
   private(set) var blockingSheetCount = 0
 
-  /// Window-hosted tab-row Assistant must not draw over capture or blocking sheets.
+  /// Floating Assistant above compact Add must not draw over capture or blocking sheets.
   var hidesTabRowOverlay: Bool {
     presented != nil || pending != nil || blockingSheetCount > 0
   }
