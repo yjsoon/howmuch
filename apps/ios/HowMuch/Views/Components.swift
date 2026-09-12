@@ -528,7 +528,7 @@ struct RootTabView: View {
     }
   }
 
-  @TabContentBuilder
+  @TabContentBuilder<CompactBarSelection>
   private func compactDestinationTab(_ tab: AppTab) -> some TabContent<CompactBarSelection> {
     Tab(tab.title, systemImage: tab.systemImage, value: tab.compactBarSelection ?? .accounts) {
       RootChromeScope(chrome: chrome) {
