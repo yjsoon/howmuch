@@ -61,7 +61,8 @@ a {
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+summary:focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
@@ -204,7 +205,8 @@ textarea {
 }
 
 .sidebar a:focus-visible,
-.sidebar button:focus-visible {
+.sidebar button:focus-visible,
+.sidebar summary:focus-visible {
   outline-color: var(--paper);
 }
 
@@ -215,6 +217,20 @@ textarea {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.12em;
+}
+
+.sidebar-reflect {
+  margin: 0;
+  padding: 0;
+}
+
+.sidebar-reflect .sidebar-report-link {
+  display: block;
+  margin-top: 2px;
+}
+
+.sidebar-reflect-summary {
+  cursor: pointer;
 }
 
 .account-list {
@@ -3517,10 +3533,16 @@ tr:hover .share-bar {
     padding: 10px 12px;
   }
 
-  .sidebar-report-link {
+  .sidebar-report-link,
+  .sidebar-reflect .sidebar-report-link {
     display: flex;
     align-items: center;
     padding: 10px 12px 10px 34px;
+  }
+
+  .sidebar-reflect-summary {
+    min-height: 44px;
+    padding: 10px 12px;
   }
 
   .sidebar-primary-link .sidebar-balance {

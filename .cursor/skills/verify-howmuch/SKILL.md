@@ -147,6 +147,7 @@ Stable web handles:
 | Auth submit | `Create account` / `Sign in` |
 | Primary nav | `nav` named `Primary navigation` |
 | Nav links | `Scheduled`, Reflect reports (`Spending breakdown`, `Income v Spending`, `Net Worth`, `Age of Money`, `Rewards`), `All Accounts`, `Organise accounts` |
+| Reflect | `Reflect` is a disclosure summary inside Primary navigation, open by default. Click Reflect only when the five report names are not visible. Do not click it when the group is already open |
 | Settings | sidebar footer link `Settings` (drawer bottom on viewport ≤720px). Hub lists `API tokens` and `Rewards import` |
 | Quick entry | sidebar `+ Add transaction` or route `/add` |
 | Register compose | account register toolbar `+ Add transaction` |

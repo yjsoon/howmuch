@@ -190,21 +190,24 @@ export function Shell() {
           >
             <span aria-hidden="true">◷</span> Scheduled
           </NavLink>
-          <div className="sidebar-section-label">Reflect</div>
-          {REPORTS.map((report) => (
-            <NavLink
-              key={report.to}
-              to={{ pathname: report.to, search: location.search }}
-              className={({ isActive }) => {
-                const active = report.to === "/rewards"
-                  ? location.pathname === "/rewards" || location.pathname.startsWith("/rewards/")
-                  : isActive;
-                return active ? "sidebar-report-link sidebar-link-active" : "sidebar-report-link";
-              }}
-            >
-              {report.label}
-            </NavLink>
-          ))}
+          {/* `open` is a literal so React writes it once at mount and does not rewrite it while unchanged. The browser owns later toggles. */}
+          <details className="sidebar-reflect" open>
+            <summary className="sidebar-section-label sidebar-reflect-summary">Reflect</summary>
+            {REPORTS.map((report) => (
+              <NavLink
+                key={report.to}
+                to={{ pathname: report.to, search: location.search }}
+                className={({ isActive }) => {
+                  const active = report.to === "/rewards"
+                    ? location.pathname === "/rewards" || location.pathname.startsWith("/rewards/")
+                    : isActive;
+                  return active ? "sidebar-report-link sidebar-link-active" : "sidebar-report-link";
+                }}
+              >
+                {report.label}
+              </NavLink>
+            ))}
+          </details>
           <NavLink
             to="/transactions?range=all&accounts=all"
             className={({ isActive }) =>
