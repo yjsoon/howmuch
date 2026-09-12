@@ -33,6 +33,7 @@ import {
   planApproval,
   rowLooksApproved,
 } from "../lib/register-approval";
+import { resolvedSinceCount, showsUnapprovedBadge, unapprovedBadgeCount } from "../lib/unapproved-badge";
 import {
   closedCompose,
   composePayload,
@@ -222,9 +223,20 @@ export function TransactionsPage() {
     fetcher: () => api.scheduledTransactions(planId),
     cacheEpoch,
   });
-  const approvalQueue = useApi(
-    JSON.stringify({ planId, selectedAccountId, from: filters.from, to: filters.to, refreshGeneration, approvalQueue: true }),
+  // The badge, eagerly: one bounded count, so the register never waits on the
+  // queue behind it.
+  const unapprovedCountQuery = useApi(
+    JSON.stringify({ planId, selectedAccountId, from: filters.from, to: filters.to, refreshGeneration, unapprovedCount: true }),
+    () => api.unapprovedCount(planId, { since_date: filters.from, until_date: fetchUntilDate }, selectedAccountId),
+  );
+  // The queue itself, lazily: the rows are only ever rendered inside the
+  // approval flow, so they are only ever fetched once it is open. `null` means
+  // "not loaded" and an empty array means "loaded, and empty" -- the badge
+  // needs to tell those apart.
+  const approvalQueue = useApi<Transaction[] | null>(
+    JSON.stringify({ planId, selectedAccountId, from: filters.from, to: filters.to, refreshGeneration, approvalQueue: unapprovedOnly }),
     async () => {
+      if (!unapprovedOnly) return null;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         const transactions = new Map<string, Transaction>();
         let expectedKnowledge: number | null = null;
@@ -874,12 +886,36 @@ export function TransactionsPage() {
   );
 
   const uncategorisedCount = useMemo(() => inScope.filter(hasUncategorisedLine).length, [inScope]);
-  const unapprovedCount = useMemo(
+  // Rows the user has already dealt with here, which no server count taken
+  // before them can know about.
+  const resolvedIds = useMemo(() => {
+    const ids = new Set(approvalSession.confirmed);
+    for (const id of deletedIds) ids.add(id);
+    return ids;
+  }, [approvalSession, deletedIds]);
+  const resolvedIdsRef = useRef<ReadonlySet<string>>(resolvedIds);
+  resolvedIdsRef.current = resolvedIds;
+  // Re-baselined whenever a fresh count lands, because that count already
+  // reflects everything resolved up to that moment.
+  const [resolvedWhenCounted, setResolvedWhenCounted] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    if (unapprovedCountQuery.data) setResolvedWhenCounted(resolvedIdsRef.current);
+  }, [unapprovedCountQuery.data]);
+
+  // Row-exact only once the approval flow has actually loaded the queue.
+  const queueRowCount = useMemo(
     () =>
-      patchedQueue.filter(
-        (transaction) => !transaction.deleted && registerAccountIds.has(transaction.account_id) && !transaction.approved,
-      ).length,
-    [patchedQueue, registerAccountIds],
+      approvalQueue.data === null
+        ? null
+        : patchedQueue.filter(
+            (transaction) => !transaction.deleted && registerAccountIds.has(transaction.account_id) && !transaction.approved,
+          ).length,
+    [approvalQueue.data, patchedQueue, registerAccountIds],
+  );
+  const unapprovedCount = unapprovedBadgeCount(
+    queueRowCount,
+    unapprovedCountQuery.data?.count ?? null,
+    resolvedSinceCount(resolvedIds, resolvedWhenCounted),
   );
 
   const scopedRows = useMemo(() => {
@@ -1169,13 +1205,13 @@ export function TransactionsPage() {
           </button>
         </div>
         <div className="headline-row">
-          {(unapprovedCount > 0 || unapprovedOnly) && (
+          {showsUnapprovedBadge(unapprovedCount, unapprovedOnly) && (
             <button
               type="button"
               className={unapprovedOnly ? "approval-pill approval-pill-active" : "approval-pill"}
               onClick={() => setUnapprovedOnly((current) => !current)}
             >
-              {unapprovedOnly ? "Showing new transactions · clear" : `${unapprovedCount} new to approve`}
+              {unapprovedOnly ? "Showing new transactions · clear" : `${unapprovedCount ?? 0} new to approve`}
             </button>
           )}
           {unapprovedOnly && eligibleIds.length > 0 && (
@@ -1454,6 +1490,13 @@ export function TransactionsPage() {
       {page.loading && !page.loaded && (
         <div className="status-panel">
           <p className="status-title">Loading transactions...</p>
+        </div>
+      )}
+      {/* The queue is fetched only when this flow opens, so it needs its own
+          waiting state -- the register itself is already up by then. */}
+      {unapprovedOnly && approvalQueue.data === null && approvalQueue.loading && !approvalQueue.error && (
+        <div className="status-panel">
+          <p className="status-title">Loading transactions awaiting approval...</p>
         </div>
       )}
 
