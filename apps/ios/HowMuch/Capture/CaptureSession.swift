@@ -353,10 +353,18 @@ final class CaptureSession: Identifiable {
 
   var canSendComposer: Bool {
     let hasText = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    let hasUnresolvedOCR = attachments.contains { attachment in
-      attachment.isReading || !(attachment.errorMessage?.isEmpty ?? true)
-    }
-    return (hasText || !attachments.isEmpty) && !isBusy && !isIngesting && !isSaving && !hasUnresolvedOCR
+    let hasSendableAttachment = attachments.contains { !$0.data.isEmpty }
+    return (hasText || hasSendableAttachment) && !isBusy && !isSaving
+  }
+
+  var canFreezeComposer: Bool {
+    let hasText = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    let hasReadyAttachment = attachments.contains { !$0.data.isEmpty && !$0.isReading }
+    return (hasText || hasReadyAttachment) && !isBusy && !isSaving
+  }
+
+  var isWaitingOnAttachmentOCR: Bool {
+    attachments.contains { $0.isReading && !$0.data.isEmpty }
   }
 
   var canSaveIncluded: Bool {
@@ -635,11 +643,15 @@ final class CaptureSession: Identifiable {
   }
 
   func updateAttachment(_ attachment: CaptureAttachment) {
-    guard let index = attachments.firstIndex(where: { $0.id == attachment.id }) else {
+    if let index = attachments.firstIndex(where: { $0.id == attachment.id }) {
+      attachments[index] = attachment
+      touch()
       return
     }
-    attachments[index] = attachment
-    touch()
+    if let index = sentAttachments.firstIndex(where: { $0.id == attachment.id }) {
+      sentAttachments[index] = attachment
+      touch()
+    }
   }
 
   func removeAttachment(_ id: UUID) {
@@ -679,9 +691,12 @@ final class CaptureSession: Identifiable {
 
   @discardableResult
   func freezeComposerTurn(accountName: String, localDate: String) -> CaptureFrozenTurn {
-    let attachmentIDs = attachments.map(\.id)
-    sentAttachments.append(contentsOf: attachments)
-    attachments.removeAll()
+    let ready = attachments.filter { !$0.data.isEmpty && !$0.isReading }
+    let attachmentIDs = ready.map(\.id)
+    sentAttachments.append(contentsOf: ready)
+    attachments.removeAll { attachment in
+      ready.contains { $0.id == attachment.id }
+    }
     let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
     let display = text.isEmpty ? "Read the attached slips." : text
     let user = CaptureMessage(

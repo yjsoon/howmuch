@@ -1,8 +1,8 @@
 # Capture AI providers
 
-In Add or an Assistant conversation, tap the **AI provider** (sparkles) toolbar button, or open **Connection → AI provider**. Choose a provider and model, enter a personal API key, acknowledge the data policy, and save. Saving settings does not make an inference request. Keys are device-only Keychain items scoped to the provider and normalized endpoint. An empty replacement field keeps a saved key; **Remove saved key → Save** deletes it.
+In Add or an Assistant conversation, tap the **AI provider** (sparkles) toolbar button, or open **Connection → AI provider**. Choose a provider and model, enter a personal API key, and save. Saving settings does not make an inference request. Keys are device-only Keychain items scoped to the provider and normalized endpoint. An empty replacement field keeps a saved key; **Remove saved key → Save** deletes it. Choosing an external provider is enough to send capture text; there is no separate consent switch.
 
-The default remains on-device Apple Intelligence. External providers do not require Apple Intelligence hardware or a PCC entitlement. A missing key, retired model, or denied consent blocks that provider; HowMuch never silently switches to another service. Changes apply to the next request, including an explicit Retry.
+The default remains on-device Apple Intelligence. External providers do not require Apple Intelligence hardware or a PCC entitlement. A missing key or retired model blocks that provider; HowMuch never silently switches to another service. Changes apply to the next request, including an explicit Retry.
 
 ## Shipped catalog
 
@@ -51,7 +51,7 @@ Preserve the existing team, bundle IDs, and tracked entitlements. Verify effecti
 
 ## Privacy and recovery boundaries
 
-- External requests contain the entered text, selected receipt transcripts, current unsaved drafts, bounded recent instructions/answers, and account/category names. They do not contain the full ledger, images, HowMuch login tokens, or provider keys inside the prompt. Prior answers can contain spending summaries; consent explicitly covers conversation context.
+- External requests contain the entered text, selected receipt transcripts, current unsaved drafts, bounded recent instructions/answers, and account/category names. They do not contain the full ledger, images, HowMuch login tokens, or provider keys inside the prompt. Prior answers can contain spending summaries.
 - The model proposes drafts or a read-only query specification. Existing mapping, ambiguity resolution, account/transfer rules, and explicit Save remain authoritative. No model tool calls are executed.
 - Responses requests set `store: false`. OpenRouter requests `provider.data_collection: deny` and `require_parameters: true`. These are not blanket zero-retention guarantees; gateway and upstream provider policies still apply.
 - Each request uses an ephemeral URLSession with no cache, cookies, credential storage, or redirects. HTTP/provider failures use app-owned messages instead of echoing provider bodies.

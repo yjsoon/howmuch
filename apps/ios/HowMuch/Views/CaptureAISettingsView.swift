@@ -65,18 +65,17 @@ struct CaptureAISettingsView: View {
         }
 
         Section {
-          Toggle("Allow sending financial text", isOn: $draft.allowsRemote)
-            .accessibilityIdentifier("ai-remote-consent")
-        } header: {
-          Text("Privacy")
-        } footer: {
-          VStack(alignment: .leading, spacing: 10) {
-            Text("Sends your message, extracted receipt text, current drafts, recent conversation context, and account/category names to this provider. Images and the full ledger are not uploaded. Nothing is saved without your review.")
-            Text(provider?.notice ?? "Your endpoint's data retention and training policies apply. This is not Apple's Private Cloud Compute. Requires JSON output support for the selected API.")
-            if let provider {
-              Link("Provider documentation", destination: provider.documentationURL)
-            }
+          Text("Your message, extracted receipt text, current drafts, recent conversation context, and account/category names are sent to this provider. Images and the full ledger are not uploaded. Nothing is saved without your review.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+          Text(provider?.notice ?? "Your endpoint's data retention and training policies apply. This is not Apple's Private Cloud Compute. Requires JSON output support for the selected API.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+          if let provider {
+            Link("Provider documentation", destination: provider.documentationURL)
           }
+        } header: {
+          Text("What is sent")
         }
       }
       if let error {
@@ -109,7 +108,6 @@ struct CaptureAISettingsView: View {
       clearEndpointEdits()
     }
     .onChange(of: draft.customBaseURL) { _, _ in clearEndpointEdits() }
-    .onChange(of: draft.modelID) { _, _ in draft.allowsRemote = false }
     .onChange(of: apiKey) { _, value in if !value.isEmpty { removeKey = false } }
   }
 
@@ -147,7 +145,6 @@ struct CaptureAISettingsView: View {
   private func clearEndpointEdits() {
     apiKey = ""
     removeKey = false
-    draft.allowsRemote = false
     error = nil
   }
 }

@@ -60,7 +60,6 @@ struct CaptureAISelection: Codable, Equatable, Sendable {
   var modelID = ""
   var customBaseURL = ""
   var customAPI: CaptureAIAPI = .chatCompletions
-  var allowsRemote = false
 
   var isOnDevice: Bool { providerID == "on-device" }
 
@@ -201,7 +200,6 @@ final class CaptureAISettings {
   func configuration() throws -> CaptureAIConfiguration? {
     _ = credentialRevision
     if selection.isOnDevice { return nil }
-    guard selection.allowsRemote else { throw CaptureAIError.consent }
     let (url, model) = try selection.resolve(in: catalog)
     let id = try selection.credentialID(in: catalog)
     guard let key = try keys.load(id), !key.isEmpty else { throw CaptureAIError.key }
@@ -221,7 +219,7 @@ final class CaptureAISettings {
 }
 
 enum CaptureAIError: Error, LocalizedError, Equatable {
-  case endpoint, configuration, key, consent, authentication, rateLimit, network
+  case endpoint, configuration, key, authentication, rateLimit, network
   case keychain(OSStatus)
   case rejected, incomplete, invalidResponse, tooLarge, timedOut
 
@@ -232,7 +230,6 @@ enum CaptureAIError: Error, LocalizedError, Equatable {
     case .key: return "Add a valid API key in AI provider settings."
     case .keychain(errSecMissingEntitlement): return "This build cannot store keys securely. Use a HowMuch build signed for Keychain access."
     case .keychain: return "The API key could not be accessed securely. Unlock this device and try again."
-    case .consent: return "Allow sending financial text to the selected provider in AI provider settings."
     case .authentication: return "The provider rejected this API key. Check AI provider settings."
     case .rateLimit: return "The provider's usage limit was reached. Check your quota or try again later."
     case .network: return "The AI provider could not be reached. Check your connection and try again."

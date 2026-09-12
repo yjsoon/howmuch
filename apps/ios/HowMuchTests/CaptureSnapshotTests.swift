@@ -149,8 +149,10 @@ final class CaptureSnapshotTests: XCTestCase {
       return
     }
     defer { surface.detach() }
-    let rendered = await surface.captureUntilOCR(contains: ["Add an expense"])
-    XCTAssertTrue(rendered.text.contains(Self.normalizedOCR("Add an expense")))
+    let rendered = await surface.captureUntilOCR(contains: ["Add Transactions"])
+    XCTAssertTrue(rendered.text.contains(Self.normalizedOCR("Add Transactions")))
+    XCTAssertFalse(rendered.text.contains(Self.normalizedOCR("Add an expense")))
+    XCTAssertFalse(rendered.text.contains(Self.normalizedOCR("Allow sending")))
     XCTAssertNil(surface.firstControl(label: "Cancel"), "a remembered mode must not route a conversation request to the form")
     XCTAssertEqual(session.entryMode, .describe)
     XCTAssertNotNil(surface.firstControl(label: "Send"))
@@ -444,7 +446,7 @@ final class CaptureSnapshotTests: XCTestCase {
 
   func testDescribeManualAndImageStatesRenderIsolatedContent() async {
     let cases: [(String, [String], (SnapshotHarness) -> AnyView)] = [
-      ("empty", ["Add an expense", "Everyday"], { harness in
+      ("empty", ["Add manually", "Everyday"], { harness in
         AnyView(AddTransactionsView(session: harness.admitEmpty(), workspace: harness.workspace))
       }),
       ("parsed", ["Lunch", "Groceries", "Everyday", "Not saved", "Save transaction"], { harness in
@@ -525,7 +527,8 @@ final class CaptureSnapshotTests: XCTestCase {
         root.environment(harness.model),
         expected: needles,
         name: "capture-\(name)",
-        scanUntilExpectedTogether: name == "clarification"
+        scanUntilExpectedTogether: name == "clarification",
+        forbidden: name == "empty" ? ["Add an expense", "Try “Lunch $12”.", "Allow sending"] : []
       )
     }
   }
@@ -742,7 +745,7 @@ final class CaptureSnapshotTests: XCTestCase {
     }
     defer { surface.detach() }
 
-    _ = await surface.captureUntilOCR(contains: ["Add an expense"])
+    _ = await surface.captureUntilOCR(contains: ["Add Transactions"])
     guard let field = surface.firstDescendant(PasteAwareTextView.self) else {
       XCTFail("production composer UITextView was not hosted")
       return
@@ -849,7 +852,7 @@ final class CaptureSnapshotTests: XCTestCase {
     }
     defer { surface.detach() }
 
-    _ = await surface.captureUntilOCR(contains: ["Add an expense"])
+    _ = await surface.captureUntilOCR(contains: ["Add Transactions"])
     guard let field = surface.firstDescendant(PasteAwareTextView.self) else {
       XCTFail("conversation dock must host the composer field")
       return
@@ -934,6 +937,58 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertEqual(session.composerText, field.text, "manual entry must keep unsent composer text")
     XCTAssertTrue(harness.model.transactions.isEmpty, "opening the form must not write the ledger")
     XCTAssertTrue(harness.model.pendingRows.isEmpty, "opening the form must not enqueue a save")
+  }
+
+  func testPendingImageAndFinancialTextKeepSendEnabled() async {
+    let harness = SnapshotHarness.make()
+    let session = harness.admitPendingPhoto()
+    XCTAssertTrue(session.canSendComposer)
+    guard let surface = SnapshotSurface(
+      root: AddTransactionsView(session: session, workspace: harness.workspace)
+        .environment(harness.model),
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("pending image send needs a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    let rendered = await surface.captureUntilOCR(contains: ["Reading the photo"])
+    XCTAssertFalse(rendered.text.contains(Self.normalizedOCR("Add an expense")))
+    XCTAssertFalse(rendered.text.contains(Self.normalizedOCR("Allow sending")))
+    let send = try XCTUnwrap(surface.firstControl(label: "Send"))
+    XCTAssertTrue(surface.isControlEnabled(send), "Send must stay pressable while a photo is reading \(surface.accessibilityLabels())")
+
+    session.composerText = "Lunch $12.50 of Groceries"
+    surface.layoutNow()
+    XCTAssertTrue(session.canSendComposer)
+    let sendWithText = try XCTUnwrap(surface.firstControl(label: "Send"))
+    XCTAssertTrue(surface.isControlEnabled(sendWithText), "financial text must stay sendable \(surface.accessibilityLabels())")
+    XCTAssertTrue(surface.activate(sendWithText), "Send must run while the photo is still reading")
+    let leftPending = await surface.waitUntil {
+      session.messages.isEmpty && session.attachments.count == 1 && session.sentAttachments.isEmpty
+    }
+    XCTAssertTrue(leftPending, "Send must wait for OCR instead of freezing a still-reading slip")
+    XCTAssertEqual(session.composerText, "Lunch $12.50 of Groceries")
+
+    var ready = try XCTUnwrap(session.attachments.first)
+    ready.isReading = false
+    ready.recognizedText = "LUNCH 12.50 GROCERIES"
+    session.updateAttachment(ready)
+    session.isTransferringImages = false
+    let froze = await surface.waitUntil {
+      session.sentAttachments.first?.recognizedText == "LUNCH 12.50 GROCERIES"
+        && session.messages.contains { $0.text == "Lunch $12.50 of Groceries" }
+    }
+    XCTAssertTrue(froze, "after OCR, Send must freeze typed text and the slip transcript")
+    XCTAssertEqual(session.attachments.count, 0)
+    let context = CaptureInterpreterPrompt.context(
+      text: "Lunch $12.50 of Groceries",
+      session: session,
+      accounts: harness.model.openAccounts,
+      attachmentIDs: session.messages.first?.attachmentIDs
+    )
+    XCTAssertEqual(context.attachmentTranscripts, ["LUNCH 12.50 GROCERIES"])
   }
 
   func testAssistantNavigationPopRestoresHome() async {
@@ -1422,7 +1477,7 @@ final class CaptureSnapshotTests: XCTestCase {
       return
     }
     defer { crowdedSurface.detach() }
-    _ = await crowdedSurface.captureUntilOCR(contains: ["Add an expense", "Remove attachment"])
+    _ = await crowdedSurface.captureUntilOCR(contains: ["Remove attachment"])
     attachImage(crowdedSurface.captureVisible(), name: "capture-interrupted-image-recovery-three-accessibility3")
     guard let firstRetry = await revealControl(on: crowdedSurface, label: "Retry reading image") else {
       XCTFail("first Retry missing in three-error AX3 \(crowdedSurface.accessibilityLabels())")
@@ -1728,7 +1783,7 @@ final class CaptureSnapshotTests: XCTestCase {
           NavigationStack { CaptureAISettingsView(settings: settings) }.environment(\.dynamicTypeSize, size),
           expected: [provider.name, provider.models[0].name],
           name: "byok-settings-\(provider.id)-\(name)",
-          forbidden: ["fixture-api-key"]
+          forbidden: ["fixture-api-key", "Allow sending"]
         )
       }
       let suite = "howmuch.byok.custom.\(UUID().uuidString)"
@@ -1749,7 +1804,7 @@ final class CaptureSnapshotTests: XCTestCase {
     let defaults = UserDefaults(suiteName: suite)!
     defer { defaults.removePersistentDomain(forName: suite) }
     let settings = CaptureAISettings(defaults: defaults, keys: CaptureAIMemoryKeys())
-    let initial = CaptureAISelection(providerID: "opencode-go", modelID: "gpt-5.6-luna", allowsRemote: true)
+    let initial = CaptureAISelection(providerID: "opencode-go", modelID: "gpt-5.6-luna")
     try settings.save(initial, keyChange: "private-fixture-value")
     guard let surface = SnapshotSurface(
       root: NavigationStack { CaptureAISettingsView(settings: settings) }, size: CGSize(width: 390, height: 844)
@@ -1776,7 +1831,7 @@ final class CaptureSnapshotTests: XCTestCase {
     guard let save = surface.firstControl(label: "Save AI settings") else { return }
     XCTAssertTrue(surface.activate(save))
     XCTAssertEqual(settings.selection.modelID, "deepseek-v4-flash-vision-exp")
-    XCTAssertFalse(settings.selection.allowsRemote, "Changing models requires acknowledging its data policy")
+    XCTAssertEqual(try settings.configuration()?.model.id, "deepseek-v4-flash-vision-exp")
     XCTAssertTrue(settings.hasKey(for: settings.selection), "Switching models must not overwrite the provider key")
   }
 

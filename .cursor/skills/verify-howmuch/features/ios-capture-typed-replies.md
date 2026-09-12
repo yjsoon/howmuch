@@ -34,7 +34,7 @@ SIMULATOR_UDID=<udid> scripts/ios-xcodebuild.sh test -- -only-testing:HowMuchTes
 Then `simctl install` that `app-path` onto the same UDID and `simctl launch … sg.soon.howmuch`.
 
 - On-device Apple Intelligence on that Verification Simulator is a **dead end** (`FoundationModels.LanguageModelSession.GenerationError error -1`). Do not retry on-device there.
-- A working **remote** capture model is required to re-drive `typed-reply-complete`. Connection stays on the verify API. In Add Transactions, open **AI provider**, pick a provider, paste an API key supplied by the operator, turn on **Allow sending financial text**, Save AI settings. There is no key in this repo. Unsigned `CODE_SIGNING_ALLOWED=NO` builds cannot store the key. The Privacy switch is often not axe-tappable; confirm **Allow sending financial text** is on before Send. Do not invent a key. Do not use production HowMuch.
+- A working **remote** capture model is required to re-drive `typed-reply-complete`. Connection stays on the verify API. In Add Transactions, open **AI provider**, pick a provider, paste an API key supplied by the operator, Save AI settings. There is no key in this repo. Unsigned `CODE_SIGNING_ALLOWED=NO` builds cannot store the key. Financial text is sendable as soon as a provider and key are saved; there is no consent switch. Do not invent a key. Do not use production HowMuch.
 
 - **Do not redo waiting.** `typed-wait` already passed. Stills: `artifacts/ios-capture-typewriter/mid-type.png`.
 - **Do not redo complete** unless the finished-reply typewriter is gone. Proven stills: `artifacts/ios-capture-typed-replies/mid-complete.png` (prefix plus cursor) and `finished-complete.png` (full reply + Lunch −$12.00 draft).
@@ -49,5 +49,5 @@ Then `simctl install` that `app-path` onto the same UDID and `simctl launch … 
 - Three simulators were booted on `yjmbpro`. `simctl io booted` captures the wrong device.
 - Last known healthy stack (reuse if doctor still says ok; otherwise `launch` a new one): session `howmuch-verify-20260908T084259-43409`, API `http://127.0.0.1:60500`, web `http://127.0.0.1:60501`, `verifier` / `howmuch-verify-15`, plan `local-plan` / HowMuch Demo.
 - Drive with axe (`describe-ui` / `tap` / `type`) and `--udid` the pinned Verification UDID. Prior helper: `/tmp/howmuch-typed-replies/axe_drive.py`.
-- Unsigned `scripts/ios-xcodebuild.sh` products cannot store AI keys. Sign a Simulator Debug build if you need a remote provider. The Privacy switch may ignore axe taps on the label; the trailing UISwitch or a prefs rewrite of `allowsRemote` is what actually enables consent.
+- Unsigned `scripts/ios-xcodebuild.sh` products cannot store AI keys. Sign a Simulator Debug build if you need a remote provider.
 - No product-code change was needed. A `.complete` UI test was not planted.

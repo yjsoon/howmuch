@@ -1093,7 +1093,7 @@ final class CaptureSessionTests: XCTestCase {
     workspace.current = session
     session.composerText = "Lunch $12"
     session.isTransferringImages = true
-    XCTAssertFalse(session.canSendComposer)
+    XCTAssertTrue(session.canSendComposer)
     XCTAssertTrue(session.isIngesting)
     let token = session.beginTurn()
     let captured = CaptureTurnScope.capture(
@@ -1120,17 +1120,120 @@ final class CaptureSessionTests: XCTestCase {
     XCTAssertTrue(session.drafts.isEmpty)
   }
 
-  func testSendIsBlockedDuringPhotoLoadAndOCR() {
+  func testSendStaysAvailableDuringPhotoLoadAndOCR() {
     let session = Self.session(accountID: "acct-everyday")
     session.composerText = "Lunch $12"
     XCTAssertTrue(session.canSendComposer)
     session.isTransferringImages = true
-    XCTAssertFalse(session.canSendComposer)
+    XCTAssertTrue(session.canSendComposer, "typed financial text must stay sendable while a photo is loading")
     XCTAssertFalse(session.canSaveIncluded)
     session.isTransferringImages = false
+    session.composerText = ""
     session.addAttachment(CaptureAttachment(filename: "slip.jpg", data: Data(), isReading: true))
-    XCTAssertFalse(session.canSendComposer)
+    XCTAssertFalse(session.canSendComposer, "an empty placeholder with no bytes is not sendable yet")
     XCTAssertTrue(session.isIngesting)
+    session.updateAttachment(
+      CaptureAttachment(
+        id: session.attachments[0].id,
+        filename: "slip.jpg",
+        data: Data([0xFF, 0xD8, 0xFF, 0xD9]),
+        isReading: true
+      )
+    )
+    XCTAssertTrue(session.canSendComposer, "a loaded image must be sendable before OCR finishes")
+    var failed = session.attachments[0]
+    failed.isReading = false
+    failed.errorMessage = "I could not read text from that image. It is still attached."
+    session.updateAttachment(failed)
+    XCTAssertTrue(session.canSendComposer, "a readable image must stay sendable after OCR fails")
+    XCTAssertTrue(session.canFreezeComposer)
+    let failedFreeze = session.freezeComposerTurn(accountName: "Everyday", localDate: "2026-09-08")
+    XCTAssertEqual(failedFreeze.attachmentIDs, [failed.id])
+    XCTAssertTrue(
+      CaptureInterpreterPrompt.context(
+        text: failedFreeze.text,
+        session: session,
+        accounts: [Self.account()],
+        attachmentIDs: failedFreeze.attachmentIDs
+      ).attachmentTranscripts.isEmpty
+    )
+  }
+
+  func testFreezeLeavesInFlightPhotosAndIncludesReadySlipText() {
+    let session = Self.session(accountID: "acct-everyday")
+    let jpeg = Data([0xFF, 0xD8, 0xFF, 0xD9])
+    let reading = CaptureAttachment(
+      filename: "slip.jpg",
+      data: jpeg,
+      recognizedText: "",
+      isReading: true
+    )
+    session.addAttachment(reading)
+    XCTAssertTrue(session.canSendComposer)
+    XCTAssertFalse(session.canFreezeComposer, "a still-reading JPEG must not be frozen yet")
+    XCTAssertTrue(session.isWaitingOnAttachmentOCR)
+
+    var completed = reading
+    completed.isReading = false
+    completed.recognizedText = "LUNCH 12.00"
+    session.updateAttachment(completed)
+    XCTAssertTrue(session.canFreezeComposer)
+    let frozen = session.freezeComposerTurn(accountName: "Everyday", localDate: "2026-09-08")
+    XCTAssertEqual(frozen.text, "Read the attached slips.")
+    XCTAssertEqual(frozen.attachmentIDs, [reading.id])
+    XCTAssertTrue(session.attachments.isEmpty)
+    XCTAssertEqual(session.sentAttachments.first?.recognizedText, "LUNCH 12.00")
+    let context = CaptureInterpreterPrompt.context(
+      text: frozen.text,
+      session: session,
+      accounts: [Self.account()],
+      attachmentIDs: frozen.attachmentIDs
+    )
+    XCTAssertEqual(context.attachmentTranscripts, ["LUNCH 12.00"])
+  }
+
+  func testFreezeKeepsEmptyPlaceholderAndSendsTypedText() {
+    let session = Self.session(accountID: "acct-everyday")
+    let placeholder = CaptureAttachment(filename: "slip.jpg", data: Data(), isReading: true)
+    session.addAttachment(placeholder)
+    session.composerText = "Lunch $12 of Groceries"
+    XCTAssertTrue(session.canSendComposer)
+    XCTAssertTrue(session.canFreezeComposer)
+    XCTAssertFalse(session.isWaitingOnAttachmentOCR)
+    let frozen = session.freezeComposerTurn(accountName: "Everyday", localDate: "2026-09-08")
+    XCTAssertEqual(frozen.text, "Lunch $12 of Groceries")
+    XCTAssertTrue(frozen.attachmentIDs.isEmpty)
+    XCTAssertEqual(session.attachments.map(\.id), [placeholder.id])
+    XCTAssertTrue(session.sentAttachments.isEmpty)
+    let context = CaptureInterpreterPrompt.context(
+      text: frozen.text,
+      session: session,
+      accounts: [Self.account()],
+      attachmentIDs: frozen.attachmentIDs
+    )
+    XCTAssertTrue(context.attachmentTranscripts.isEmpty)
+  }
+
+  func testOCRCompletionUpdatesAlreadyFrozenAttachment() {
+    let session = Self.session(accountID: "acct-everyday")
+    let attachment = CaptureAttachment(
+      filename: "slip.jpg",
+      data: Data([0xFF, 0xD8, 0xFF, 0xD9]),
+      recognizedText: "LUNCH 12.00"
+    )
+    session.addAttachment(attachment)
+    let frozen = session.freezeComposerTurn(accountName: "Everyday", localDate: "2026-09-08")
+    var late = attachment
+    late.recognizedText = "LUNCH 21.00"
+    session.updateAttachment(late)
+    XCTAssertEqual(session.sentAttachments.first?.recognizedText, "LUNCH 21.00")
+    let context = CaptureInterpreterPrompt.context(
+      text: frozen.text,
+      session: session,
+      accounts: [Self.account()],
+      attachmentIDs: frozen.attachmentIDs
+    )
+    XCTAssertEqual(context.attachmentTranscripts, ["LUNCH 21.00"])
   }
 
   func testTurnScopeRejectsInitiallyMismatchedScopeAndCurrentIdentity() {
@@ -1292,7 +1395,7 @@ final class CaptureSessionTests: XCTestCase {
     session.isTransferringImages = true
     XCTAssertTrue(CapturePasteAdmission.shouldRejectNewAttachments(session))
     XCTAssertFalse(session.canSaveIncluded)
-    XCTAssertFalse(session.canSendComposer)
+    XCTAssertTrue(session.canSendComposer)
     session.isTransferringImages = false
     session.isSaving = true
     XCTAssertTrue(CapturePasteAdmission.shouldRejectNewAttachments(session))
@@ -1311,6 +1414,22 @@ final class CaptureSessionTests: XCTestCase {
 
   private static func session(accountID: String) -> CaptureSession {
     CaptureSession(scopeKey: "scope-a", origin: .lastUsedOpen, selectedAccountID: accountID)
+  }
+
+  private static func account() -> Account {
+    Account(
+      id: "acct-everyday",
+      name: "Everyday",
+      icon: nil,
+      type: "checking",
+      onBudget: true,
+      closed: false,
+      balance: 0,
+      clearedBalance: 0,
+      unclearedBalance: 0,
+      lastReconciledDate: nil,
+      deleted: false
+    )
   }
 
   private static func draft(payee: String, amount: Int) -> TransactionDraft {
