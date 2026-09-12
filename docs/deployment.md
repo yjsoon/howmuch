@@ -1,10 +1,17 @@
 # Deployment
 
-The D1 databases, all in APAC:
+The D1 databases (placement is per-database and fixed at creation):
 
-- Production (Tinkertanker account, env `tk`): `howmuch-production` = `df039dbc-6dda-4150-9dc3-5854a8ca6818`
-- Legacy frozen backup (YJ account, top-level env): `howmuch-production` = `57dc5569-d639-44c1-bb9d-6214f43a43b8` — never migrate against or write to it
+- Production (Tinkertanker account, env `tk`): `howmuch-production` = `df039dbc-6dda-4150-9dc3-5854a8ca6818` — primary currently at KIX (Osaka); see issue #183
+- Legacy frozen backup (YJ account, top-level env): `howmuch-production` = `57dc5569-d639-44c1-bb9d-6214f43a43b8` (SIN) — never migrate against or write to it
 - Preview (YJ account, env `preview`): `howmuch-preview` = `7ca818bd-7f04-4b9b-8a84-8c8f84a6a272`
+
+Creating a D1 database that should live in Singapore: **do not pass a location
+hint**. A no-hint primary is placed near where the create request originates,
+so create from a machine in Singapore (never CI) and verify `served_by_colo` is
+`SIN` on a `SELECT 1` before importing anything; delete and re-create until it
+is. The `apac` hint is not Singapore-seeking — it resolves non-deterministically
+to Japan/Korea, which is how production landed at KIX.
 
 Environment bindings are repeated because Wrangler does not inherit them. Local work may apply the canonical migration with:
 
@@ -42,7 +49,8 @@ Production runs in the Tinkertanker Cloudflare account
 environment `tk` in `wrangler.jsonc`:
 
 - Worker `howmuch` with D1 database `howmuch-production`
-  (`df039dbc-6dda-4150-9dc3-5854a8ca6818`, APAC), custom domain
+  (`df039dbc-6dda-4150-9dc3-5854a8ca6818`; primary placed at KIX at creation,
+  see issue #183), custom domain
   `https://howmuch.tk.sg`, serving the web front-end and API on one hostname.
 - One cron, `5 16 * * *` (00:05 Asia/Singapore), materialises due scheduled
   transactions; it catches up overdue occurrences (25 per run, idempotent via

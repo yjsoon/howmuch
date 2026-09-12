@@ -18,7 +18,7 @@ Cloudflare Email Routing) stays in the YJ account — do not move it.
 ### Primary stack (profile `tinkertanker`, account `Tinkertanker`)
 
 - Wrangler profile `tinkertanker`, Cloudflare account `Tinkertanker` (`b8b1032c61d9475cd00229c74db7ec72`). Deploy with `bun run deploy:tk` from `apps/worker`, which pins `--env tk --profile tinkertanker`.
-- The expected resources are Worker `howmuch` (env `tk` in `wrangler.jsonc`) and D1 database `howmuch-production` (`df039dbc-6dda-4150-9dc3-5854a8ca6818`, APAC), serving `https://howmuch.tk.sg` (web front-end and API on one hostname).
+- The expected resources are Worker `howmuch` (env `tk` in `wrangler.jsonc`) and D1 database `howmuch-production` (`df039dbc-6dda-4150-9dc3-5854a8ca6818`; primary placed at KIX/Osaka at creation — see issue #183 and the creation rule in `docs/deployment.md`), serving `https://howmuch.tk.sg` (web front-end and API on one hostname).
 - The `tk` environment has one cron, `5 16 * * *` (00:05 Asia/Singapore), which materialises due scheduled transactions. It has no YNAB configuration. `HOWMUCH_API_TOKEN` is an encrypted secret on this Worker.
 - Do not add `HOWMUCH_REDIRECT_TARGET` to the `tk` env. Wrangler warns that top-level vars are not inherited; that warning is expected, and setting the var here would make production redirect to itself.
 - Production deploys automatically when a `v*` tag is pushed (`.github/workflows/deploy.yml`), using the `CLOUDFLARE_API_TOKEN` repo secret pinned to this account. The workflow deploys only and never applies D1 migrations; migrations follow the order in `docs/deployment.md` and are run manually before tagging.

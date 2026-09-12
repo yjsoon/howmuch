@@ -31,13 +31,10 @@ const APP_SITE_ASSOCIATION = JSON.stringify({
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (env.HOWMUCH_REDIRECT_TARGET) {
-      const url = new URL(request.url);
-      // 308 preserves method and body, so API clients (including the iOS app)
-      // follow the redirect without turning POSTs into GETs.
-      return Response.redirect(`${env.HOWMUCH_REDIRECT_TARGET}${url.pathname}${url.search}`, 308);
-    }
     const pathname = new URL(request.url).pathname;
+    // Serve the association file directly on every host, including the
+    // redirecting legacy host: Apple fetches it from the associated domain
+    // (howmuch.soon.sg), and following a redirect is not guaranteed there.
     if (pathname === "/.well-known/apple-app-site-association" || pathname === "/apple-app-site-association") {
       return new Response(APP_SITE_ASSOCIATION, {
         headers: {
@@ -45,6 +42,12 @@ export default {
           "cache-control": "public, max-age=3600",
         },
       });
+    }
+    if (env.HOWMUCH_REDIRECT_TARGET) {
+      const url = new URL(request.url);
+      // 308 preserves method and body, so API clients (including the iOS app)
+      // follow the redirect without turning POSTs into GETs.
+      return Response.redirect(`${env.HOWMUCH_REDIRECT_TARGET}${url.pathname}${url.search}`, 308);
     }
     if (!pathname.startsWith("/api/") && !pathname.startsWith("/v1/") && pathname !== "/health") {
       // SPA documents are usually served by Assets directly. `_headers` in
