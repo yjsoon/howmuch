@@ -10,9 +10,15 @@
  * The statement below is the single definition of that baseline. Migrations
  * `020_ynab_source_month_activity.sql` / `0017_ynab_source_month_activity.sql`
  * embed the unscoped form to backfill existing databases; the plan-scoped form
- * rebuilds one plan after a local YNAB import. `tests/ynab-month-activity.test.ts`
- * asserts both agree with a straight transcription of the old loop, so the two
- * cannot drift apart silently.
+ * rebuilds one plan after a local YNAB import, and `scripts/lib/ynab-d1-bootstrap.ts`
+ * appends it to the generated data statements, because a bootstrapped D1
+ * migrates an empty database and would otherwise never materialise anything.
+ *
+ * `tests/ynab-month-activity.test.ts` pins this two ways: it compares both
+ * migration files' embedded INSERT against the constant below as text, since a
+ * migration's backfill only ever runs against an empty database in the tests
+ * and behaviour alone could not catch drift; and it checks the result against
+ * a straight transcription of the old loop over a fixture of edge cases.
  *
  * Rules reproduced from the old in-Worker loop, exactly:
  *

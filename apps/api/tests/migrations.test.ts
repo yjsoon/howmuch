@@ -241,6 +241,44 @@ describe("local schema migrations", () => {
     }
   });
 
+  test("month activity is materialised from the raw mirror by 020", () => {
+    const db = new Database(":memory:");
+    try {
+      applyMigrations(db);
+      db.run("INSERT INTO plans(id,name) VALUES ('p','Plan')");
+      // A live split, whose lines replace the parent, and a deleted parent
+      // that must not contribute. Written before the rerun below, because the
+      // first applyMigrations backfilled an empty database.
+      for (const [type, id, payload] of [
+        ["transaction", "split", { id: "split", date: "2026-05-04", amount: -900, category_id: "legacy", deleted: false }],
+        ["subtransaction", "splita", { id: "a", transaction_id: "split", amount: -900, category_id: "food", deleted: false }],
+        ["transaction", "gone", { id: "gone", date: "2026-05-05", amount: -70, category_id: "food", deleted: true }],
+      ] as const) {
+        db.run(
+          "INSERT INTO ynab_raw_objects(plan_id,object_type,object_id,payload_json) VALUES ('p',?,?,?)",
+          [type, id, JSON.stringify(payload)],
+        );
+      }
+      db.run("DELETE FROM schema_migrations WHERE version='020_ynab_source_month_activity'");
+      db.run("DROP TABLE ynab_source_month_activity");
+      applyMigrations(db);
+
+      expect(db.query("SELECT month,category_id,activity FROM ynab_source_month_activity ORDER BY category_id").all()).toEqual([
+        { month: "2026-05-01", category_id: "food", activity: -900 },
+      ]);
+      expect(db.query("SELECT version FROM schema_migrations WHERE version='020_ynab_source_month_activity'").get()).toEqual({
+        version: "020_ynab_source_month_activity",
+      });
+      expect(db.query("SELECT name FROM pragma_index_info((SELECT name FROM pragma_index_list('ynab_source_month_activity') WHERE origin='pk')) ORDER BY seqno").all()).toEqual([
+        { name: "plan_id" },
+        { name: "month" },
+        { name: "category_id" },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("query indexes serve transfer-graph and live register lookups", () => {
     const db = new Database(":memory:");
     try {

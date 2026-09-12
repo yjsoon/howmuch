@@ -1,4 +1,6 @@
 import { Database } from "bun:sqlite";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { afterEach, describe, expect, test } from "bun:test";
 import { AsyncReportService } from "../src/async-reports";
 import { D1AuthStore } from "../src/auth-store";
@@ -105,6 +107,73 @@ describe("materialised YNAB month activity", () => {
     expect(counts.plans).toBe(1);
   });
 
+  test("both migration files embed exactly the constant the runtime rebuild uses", async () => {
+    const { REMATERIALISE_ALL_PLANS } = await import("../src/ynab-month-activity");
+    // The migration's INSERT only ever runs against an empty database in the
+    // tests, so behaviour alone cannot prove the two agree. Compare the text.
+    const normalise = (sql: string) => sql.trim().replace(/\s+/g, " ").replace(/;$/, "");
+    const expected = normalise(REMATERIALISE_ALL_PLANS);
+
+    for (const path of [
+      "../d1-migrations/0017_ynab_source_month_activity.sql",
+      "../migrations/020_ynab_source_month_activity.sql",
+    ]) {
+      const file = await Bun.file(new URL(path, import.meta.url).pathname).text();
+      const index = file.indexOf("INSERT OR REPLACE");
+      expect(`${path} contains an INSERT: ${index >= 0}`).toBe(`${path} contains an INSERT: true`);
+      expect(`${path}: ${normalise(file.slice(index))}`).toBe(`${path}: ${expected}`);
+    }
+  });
+
+  test("the parity comparator reports a mismatch when the table and the scan disagree", async () => {
+    const db = await migrated();
+    seedEdgeCases(db);
+    const { REMATERIALISE_ALL_PLANS } = await import("../src/ynab-month-activity");
+    db.run(REMATERIALISE_ALL_PLANS);
+    expect(compareMonthActivity(db).mismatches).toBe(0);
+
+    // Without this, every other parity assertion in this file would also pass
+    // against a comparator that always returned zero.
+    db.run("UPDATE ynab_source_month_activity SET activity = activity + 1 WHERE month = '2026-02-01'");
+    expect(compareMonthActivity(db)).toMatchObject({ mismatches: 1, different: 1, missing: 0, extra: 0 });
+
+    // A row the scan produced but the table lacks.
+    db.run("DELETE FROM ynab_source_month_activity WHERE month = '2026-02-01'");
+    expect(compareMonthActivity(db)).toMatchObject({ mismatches: 1, missing: 1, different: 0, extra: 0 });
+
+    // A row the table has but the scan never produced.
+    db.run("INSERT INTO ynab_source_month_activity (plan_id, month, category_id, activity) VALUES (?, '2099-01-01', 'ghost', -1)", [PLAN_ID]);
+    expect(compareMonthActivity(db)).toMatchObject({ mismatches: 2, missing: 1, extra: 1, different: 0 });
+  });
+
+  test("the parity script exits non-zero on a mismatch", async () => {
+    const db = await migrated();
+    seedEdgeCases(db);
+    const { REMATERIALISE_ALL_PLANS } = await import("../src/ynab-month-activity");
+    db.run(REMATERIALISE_ALL_PLANS);
+    const path = `${tmpdir()}/howmuch-parity-${crypto.randomUUID()}.sqlite`;
+    db.run("VACUUM INTO ?", [path]);
+
+    const script = new URL("../../../scripts/verify-month-activity-parity.ts", import.meta.url).pathname;
+    try {
+      const clean = Bun.spawnSync(["bun", script, "--db", path]);
+      expect(clean.exitCode).toBe(0);
+      expect(clean.stdout.toString()).toContain(`"mismatches":0`);
+
+      const corrupt = new Database(path, { strict: true });
+      corrupt.run("UPDATE ynab_source_month_activity SET activity = activity + 1 WHERE month = '2026-02-01'");
+      corrupt.close();
+
+      const failed = Bun.spawnSync(["bun", script, "--db", path]);
+      expect(failed.exitCode).toBe(1);
+      expect(failed.stdout.toString()).toContain(`"mismatches":1`);
+      // Counts only: the script must never name a category or an amount.
+      expect(failed.stdout.toString()).not.toContain("food");
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
   test("the backfill stores the amounts the old loop computed", async () => {
     const db = await migrated();
     seedEdgeCases(db);
@@ -201,17 +270,23 @@ describe("materialised YNAB month activity", () => {
     expect(source.get("uncat")).toBe(-100);
   });
 
-  test("a materialised plan reports a genuinely empty month as no activity, not as unmaterialised", async () => {
+  test("a materialised plan reports a genuinely empty month as no activity, without touching the raw mirror", async () => {
     const db = await migrated();
     seedEdgeCases(db);
     const { REMATERIALISE_ALL_PLANS } = await import("../src/ynab-month-activity");
     db.run(REMATERIALISE_ALL_PLANS);
 
-    const repo = new LedgerRepository(db as any, PLAN_ID);
+    const counting = new CountingD1Database(fakeD1Binding(db));
+    const repo = new D1LedgerRepository(counting, PLAN_ID);
+    counting.reset();
     // March has no source rows, but the plan is materialised.
     const source = await (repo as any).sourceMonthActivity(PLAN_ID, "2026-03-01", "uncat");
     expect(source).not.toBeNull();
     expect(source.size).toBe(0);
+
+    // The plan-level check settles this before any raw-mirror probe, so an
+    // empty month costs no `ynab_raw_objects` read at all.
+    expect(counting.roundTrips.map((trip) => trip.sql).filter((sql) => sql.includes("ynab_raw_objects"))).toEqual([]);
   });
 
   test("a plan with no source objects at all still reports every ledger row as local", async () => {
