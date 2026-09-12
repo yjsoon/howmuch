@@ -364,7 +364,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
   }
 
   override func tearDown() {
-    SnapshotRefreshProtocol.release()
+    SnapshotRefreshProtocol.releaseResponses()
     URLProtocol.unregisterClass(SnapshotRefreshProtocol.self)
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
@@ -374,7 +374,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     super.tearDown()
   }
 
-  private func settings() -> APISettings {
+  private func fixtureSettings() -> APISettings {
     SnapshotFixture.settings(baseURL: SnapshotRefreshProtocol.fixtureBaseURL)
   }
 
@@ -382,7 +382,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
   /// from the snapshot, and a loud refresh that is still waiting on the server
   /// must not replace it with a spinner.
   func testWarmLaunchIsLoadedBeforeAnyResponseArrives() async {
-    let settings = settings()
+    let settings = fixtureSettings()
     // A cursor behind the server's, so this launch's response is known to
     // describe different rows and must replace what the snapshot put up.
     XCTAssertTrue(
@@ -405,15 +405,36 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     XCTAssertTrue(model.isProvisional)
 
     let refresh = Task { await model.refreshAll() }
-    let asked = await waitUntil { SnapshotRefreshProtocol.requestCount() > 0 }
-    XCTAssertTrue(asked, "the launch refresh must still go to the network")
+    // `/v1/plans` answers immediately (the stub never holds it), so the three
+    // slice fetches actually start; wait until each has been issued and is
+    // sitting held, which is the only point at which the "must not blank a
+    // provisional view" guards have all run.
+    let asked = await waitUntil {
+      SnapshotRefreshProtocol.hasSeenEverySlice()
+    }
+    XCTAssertTrue(
+      asked,
+      "the launch refresh must issue the reference, ledger and schedule fetches, saw \(SnapshotRefreshProtocol.paths())"
+    )
     XCTAssertEqual(
       model.referencePhase,
       .loaded,
       "a loud refresh must not blank a snapshot the reader is already looking at"
     )
+    XCTAssertEqual(model.ledgerPhase, .loaded)
+    XCTAssertEqual(model.scheduledTransactionsPhase, .loaded)
+    XCTAssertEqual(
+      model.transactions.map(\.id),
+      ["snapshot-row"],
+      "the register must still be showing the snapshot's page while the fetch is in flight"
+    )
+    XCTAssertEqual(
+      model.hasMoreTransactions,
+      false,
+      "the loud path's cursor reset must be skipped too, or the register loses its paging state mid-refresh"
+    )
 
-    SnapshotRefreshProtocol.release()
+    SnapshotRefreshProtocol.releaseResponses()
     await refresh.value
 
     XCTAssertFalse(model.isProvisional, "the network response must take ownership of the screen")
@@ -434,7 +455,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
   /// distinct ids below cannot happen against a real server — they exist only
   /// to make the skip observable.
   func testEqualServerKnowledgeSkipsTheLedgerApply() async {
-    let settings = settings()
+    let settings = fixtureSettings()
     XCTAssertTrue(
       store.save(
         SnapshotFixture.snapshot(
@@ -458,7 +479,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
   /// A cursor that has moved is proof the rows differ, so the response always
   /// replaces the snapshot — never merges onto it (#144).
   func testAdvancedServerKnowledgeReplacesSnapshotRows() async {
-    let settings = settings()
+    let settings = fixtureSettings()
     XCTAssertTrue(
       store.save(
         SnapshotFixture.snapshot(
@@ -479,7 +500,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
   }
 
   func testSignOutDeletesTheSnapshot() async {
-    let settings = settings()
+    let settings = fixtureSettings()
     XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: settings)))
 
     let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
@@ -506,7 +527,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     )
     XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: other)))
 
-    let model = AppModel(settings: settings(), viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(settings: fixtureSettings(), viewPrefs: ViewPrefs(), snapshotStore: store)
 
     XCTAssertEqual(model.referencePhase, .idle)
     XCTAssertTrue(model.accounts.isEmpty)
@@ -534,26 +555,28 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
 private final class SnapshotRefreshLog: @unchecked Sendable {
   static let shared = SnapshotRefreshLog()
   private let lock = NSLock()
-  private var count = 0
+  private var recorded: [String] = []
   private var held = false
+  private var pending: [SnapshotRefreshProtocol] = []
 
   func reset() {
     lock.lock()
-    count = 0
+    recorded = []
     held = false
+    pending = []
     lock.unlock()
   }
 
-  func record() {
+  func record(_ path: String) {
     lock.lock()
-    count += 1
+    recorded.append(path)
     lock.unlock()
   }
 
-  func total() -> Int {
+  func paths() -> [String] {
     lock.lock()
     defer { lock.unlock() }
-    return count
+    return recorded
   }
 
   func hold() {
@@ -568,10 +591,24 @@ private final class SnapshotRefreshLog: @unchecked Sendable {
     lock.unlock()
   }
 
-  func isHeld() -> Bool {
+  /// Parks a request instead of answering it. Returns false when nothing is
+  /// being held, in which case the caller answers immediately.
+  func park(_ request: SnapshotRefreshProtocol) -> Bool {
     lock.lock()
     defer { lock.unlock() }
-    return held
+    guard held else {
+      return false
+    }
+    pending.append(request)
+    return true
+  }
+
+  func drainHeld() -> [SnapshotRefreshProtocol] {
+    lock.lock()
+    defer { lock.unlock() }
+    let parked = pending
+    pending = []
+    return parked
   }
 }
 
@@ -590,16 +627,34 @@ private final class SnapshotRefreshProtocol: URLProtocol {
     SnapshotRefreshLog.shared.reset()
   }
 
-  static func requestCount() -> Int {
-    SnapshotRefreshLog.shared.total()
+  static func paths() -> [String] {
+    SnapshotRefreshLog.shared.paths()
+  }
+
+  /// True once the launch refresh has issued all three slice fetches, which
+  /// is the point at which every "do not blank a provisional view" guard has
+  /// run. `/v1/plans` alone proves nothing: `refreshAll` awaits it before any
+  /// slice starts.
+  static func hasSeenEverySlice() -> Bool {
+    let seen = Set(paths())
+    let plan = "/v1/plans/\(planID)"
+    return seen.contains("\(plan)/settings")
+      && seen.contains("\(plan)/transactions")
+      && seen.contains("\(plan)/scheduled_transactions")
   }
 
   static func holdResponses() {
     SnapshotRefreshLog.shared.hold()
   }
 
-  static func release() {
+  /// Lets every held response finish. Called from the test's thread; the
+  /// stub never blocks a URLSession worker, so a held request cannot stop the
+  /// next one from being issued.
+  static func releaseResponses() {
     SnapshotRefreshLog.shared.release()
+    for held in SnapshotRefreshLog.shared.drainHeld() {
+      held.finish()
+    }
   }
 
   override class func canInit(with request: URLRequest) -> Bool {
@@ -622,11 +677,22 @@ private final class SnapshotRefreshProtocol: URLProtocol {
       client?.urlProtocol(self, didFailWithError: URLError(.badURL))
       return
     }
-    SnapshotRefreshLog.shared.record()
-    // Hold the response rather than the request: the app must be observed
-    // waiting on the server with the snapshot still on screen.
-    while SnapshotRefreshLog.shared.isHeld() {
-      Thread.sleep(forTimeInterval: 0.01)
+    SnapshotRefreshLog.shared.record(url.path)
+    // `/v1/plans` is never held: `refreshAll` awaits it before starting any
+    // slice, so holding it would park the launch before the code under test
+    // ever runs. Everything else is parked and returned to, rather than slept
+    // on, so no URLSession worker is blocked and later requests still issue.
+    if url.path != "/v1/plans", SnapshotRefreshLog.shared.park(self) {
+      return
+    }
+    finish()
+  }
+
+  /// Answers the request. Safe to call from the test's thread once released.
+  func finish() {
+    guard let url = request.url else {
+      client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+      return
     }
     guard let body = Self.body(forPath: url.path) else {
       client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
