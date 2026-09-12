@@ -484,15 +484,23 @@ final class UnapprovedCountLaunchTests: XCTestCase {
     }
     defer { surface.detach() }
 
+    // Wait on the model, not on the stub: the stub records a request as it
+    // starts serving it, so waiting on the request count alone would race the
+    // response back to the main actor.
     let counted = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
-      UnapprovedProbeProtocol.scopedUnapprovedCountRequests() >= 1
+      model.unapprovedBadgeCount(forAccountID: UnapprovedProbeProtocol.fixtureAccountID)
+        == UnapprovedProbeProtocol.fixtureAccountUnapprovedCount
     }
-    XCTAssertTrue(counted, "a register scoped to one account must request that account's unapproved count")
-
-    XCTAssertEqual(
-      model.unapprovedBadgeCount(forAccountID: UnapprovedProbeProtocol.fixtureAccountID),
-      UnapprovedProbeProtocol.fixtureAccountUnapprovedCount,
-      "the narrowed register must show its own account's count, not the plan-wide one"
+    XCTAssertTrue(
+      counted,
+      "the narrowed register must show its own account's count (\(UnapprovedProbeProtocol.fixtureAccountUnapprovedCount)), "
+        + "not the plan-wide one; saw \(model.unapprovedBadgeCount(forAccountID: UnapprovedProbeProtocol.fixtureAccountID)) "
+        + "after \(UnapprovedProbeProtocol.scopedUnapprovedCountRequests()) scoped count request(s)"
+    )
+    XCTAssertGreaterThanOrEqual(
+      UnapprovedProbeProtocol.scopedUnapprovedCountRequests(),
+      1,
+      "a register scoped to one account must request that account's unapproved count"
     )
     XCTAssertNotEqual(
       UnapprovedProbeProtocol.fixtureAccountUnapprovedCount,
