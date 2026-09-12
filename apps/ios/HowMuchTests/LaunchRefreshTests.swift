@@ -526,7 +526,17 @@ final class UnapprovedCountLaunchTests: XCTestCase {
   /// Two registers can show the approval flow at once on iPad. One closing must
   /// not release the rows the other is still displaying.
   func testClosingOneApprovalFlowKeepsTheQueueForItsSibling() async {
-    let model = AppModel(settings: APISettings(), viewPrefs: ViewPrefs())
+    // `APISettings()` points at production by default, so the stub must be
+    // registered and the fixture host set before anything can fetch.
+    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
+    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
+    UnapprovedProbeProtocol.reset()
+    // Each `openUnapprovedQueue` awaits the walk, so the walk has to finish:
+    // the default stub never answers, and this test would sit out URLSession's
+    // four-minute timeout instead of asserting on viewer bookkeeping.
+    UnapprovedProbeProtocol.answerUnapprovedPageSlowly()
+
+    let model = AppModel(settings: Self.fixtureSettings("queue-siblings"), viewPrefs: ViewPrefs())
     // Viewer tokens are the registers' own scope identities, not fresh UUIDs:
     // a rebuilt view must reclaim the token it had before.
     let first = "account(\"acct-1\")||"
@@ -716,21 +726,55 @@ final class UnapprovedCountLaunchTests: XCTestCase {
   /// `.loaded` with nobody showing it -- every later ledger refresh would then
   /// walk the whole queue again.
   func testClosingTheFlowMidLoadLeavesTheQueueIdle() async {
-    let model = AppModel(settings: APISettings(), viewPrefs: ViewPrefs())
+    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
+    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
+    UnapprovedProbeProtocol.reset()
+    // Let the walk finish, but slowly enough to close the flow underneath it.
+    UnapprovedProbeProtocol.answerUnapprovedPageSlowly()
+
+    let model = AppModel(settings: Self.fixtureSettings("queue-midload"), viewPrefs: ViewPrefs())
+
+    guard let surface = SnapshotSurface(
+      root: LaunchProbe(model: model, taskID: { _ in "static" }),
+      size: CGSize(width: 10, height: 10)
+    ) else {
+      XCTFail("mid-load probe requires a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
     let viewer = "unapproved||"
+    // A detached task, not `async let`: both sides hop the main actor, and
+    // `async let` would let the close run before the open had even started.
+    let opening = Task { await model.openUnapprovedQueue(viewer: viewer) }
 
-    // Start the load and close underneath it. `APISettings()` has no base URL,
-    // so the fetch fails fast; either way the phase must settle on `.idle`
-    // rather than on a terminal state with no viewer.
-    async let opening: Void = model.openUnapprovedQueue(viewer: viewer)
+    let started = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.unapprovedQueuePhase.isLoading
+    }
+    XCTAssertTrue(started, "the walk must actually be in flight before this test closes the flow")
+
     model.closeUnapprovedQueue(viewer: viewer)
-    await opening
+    XCTAssertEqual(model.unapprovedQueuePhase, .idle, "closing the last viewer releases the queue")
 
+    // Now let the late response land. It must not resurrect the phase.
+    await opening.value
     XCTAssertEqual(
       model.unapprovedQueuePhase,
       .idle,
       "a load that finishes after its flow closed must not leave the queue loaded for nobody"
     )
+  }
+
+  /// Fixture connection. `APISettings()` defaults to the production host, so
+  /// every test here must set the stub's host explicitly -- nothing in this
+  /// suite may reach the real API.
+  private static func fixtureSettings(_ label: String) -> APISettings {
+    var settings = APISettings()
+    settings.baseURLString = UnapprovedProbeProtocol.fixtureBaseURL
+    settings.authenticatedUserID = "\(label)-\(UUID().uuidString)"
+    settings.sessionToken = "token"
+    settings.planID = UnapprovedProbeProtocol.planID
+    return settings
   }
 
   private struct UnapprovedProbeResult {
@@ -804,6 +848,22 @@ private final class UnapprovedProbeRequestLog: @unchecked Sendable {
     defer { lock.unlock() }
     return counts[key] ?? 0
   }
+
+  /// When set, the unapproved page is answered after a short delay instead of
+  /// never, so a test can close the approval flow while the walk is in flight.
+  private var answersUnapprovedPageSlowly = false
+
+  func setAnswersUnapprovedPageSlowly(_ value: Bool) {
+    lock.lock()
+    answersUnapprovedPageSlowly = value
+    lock.unlock()
+  }
+
+  func answersUnapprovedPageSlowly_() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return answersUnapprovedPageSlowly
+  }
 }
 
 /// Answers the launch waterfall's plan list, its first ledger page and the
@@ -823,6 +883,13 @@ private final class UnapprovedProbeProtocol: URLProtocol {
 
   static func reset() {
     UnapprovedProbeRequestLog.shared.reset()
+    UnapprovedProbeRequestLog.shared.setAnswersUnapprovedPageSlowly(false)
+  }
+
+  /// Lets the unapproved walk finish, slowly, so a test can close the flow
+  /// underneath it and check what the late response does.
+  static func answerUnapprovedPageSlowly() {
+    UnapprovedProbeRequestLog.shared.setAnswersUnapprovedPageSlowly(true)
   }
 
   static func unapprovedCountRequests() -> Int {
@@ -872,8 +939,23 @@ private final class UnapprovedProbeProtocol: URLProtocol {
     }
     if components.path.hasSuffix("/transactions"), isUnapprovedPage {
       // Recorded and then left hanging on purpose: the register must not be
-      // waiting on this.
+      // waiting on this. A test that needs the walk to finish asks for the slow
+      // answer instead.
       UnapprovedProbeRequestLog.shared.record(Self.queueKey)
+      guard UnapprovedProbeRequestLog.shared.answersUnapprovedPageSlowly_() else { return }
+      let target = url
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        self?.send(
+          url: target,
+          body: #"{"data":{"transactions":[],"server_knowledge":1,"has_more":false,"next_offset":null}}"#
+        )
+      }
+      return
+    }
+    // Rejecting a row: answer it so `deleteTransaction` reaches its local
+    // bookkeeping instead of throwing at the network.
+    if request.httpMethod == "DELETE", components.path.contains("/transactions/") {
+      send(url: url, body: Self.deletedTransactionBody)
       return
     }
     if components.path.hasSuffix("/transactions") {
@@ -903,6 +985,11 @@ private final class UnapprovedProbeProtocol: URLProtocol {
     client?.urlProtocol(self, didLoad: Data(body.utf8))
     client?.urlProtocolDidFinishLoading(self)
   }
+
+  /// A tombstoned row, in the snake_case the shared decoder expects.
+  private static let deletedTransactionBody = #"""
+  {"data":{"transaction":{"id":"rejected-row","date":"2026-09-01","amount":-1000,"memo":null,  "cleared":"uncleared","approved":false,"flag_color":null,"flag_name":null,"account_id":"acct-1",  "account_name":"Fixture Account","payee_id":null,"payee_name":"Fixture Payee","category_id":null,  "category_name":null,"transfer_account_id":null,"transfer_transaction_id":null,  "parent_transaction_id":null,"matched_transaction_id":null,"import_id":null,  "import_payee_name":null,"import_payee_name_original":null,"deleted":true,"subtransactions":[]},  "server_knowledge":2}}
+  """#
 
   override func stopLoading() {}
 }
