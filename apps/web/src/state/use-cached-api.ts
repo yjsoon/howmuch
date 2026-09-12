@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ApiState } from "../api/client";
 import {
   currentCacheEpoch,
+  keepSettledRows,
   planCachedFetch,
   readSlot,
   writeSlot,
@@ -60,6 +61,8 @@ export function useCachedApi<T>(options: CachedApiOptions<T>): CachedApiState<T>
   });
   const optionsRef = useRef(options);
   optionsRef.current = options;
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   // `identity` is rebuilt on every render, so the effect keys on its parts.
   const userId = identity?.userId ?? null;
@@ -75,6 +78,21 @@ export function useCachedApi<T>(options: CachedApiOptions<T>): CachedApiState<T>
 
     if (decision.use === "cache") {
       setState({ data: decision.value, loading: false, error: null, provisional: false, key });
+      return;
+    }
+
+    // A local write empties the cache and moves the epoch, which brings the
+    // effect back here with nothing to read. That is not a reason to discard
+    // rows already fetched in this mount and ask for them again — the register
+    // never refetched its payees on every edit before this cache existed.
+    const held = stateRef.current;
+    if (keepSettledRows({
+      key: held.key,
+      hasData: held.data !== null,
+      provisional: held.provisional,
+      loading: held.loading,
+      hasError: held.error !== null,
+    }, key, decision)) {
       return;
     }
 

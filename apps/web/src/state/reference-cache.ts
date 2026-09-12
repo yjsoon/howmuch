@@ -167,6 +167,44 @@ export function planCachedFetch<T>(
     : { use: "network", seed: envelope.data };
 }
 
+/** What a route already has on screen, as far as this decision cares. */
+export interface SettledRows {
+  key: string;
+  hasData: boolean;
+  provisional: boolean;
+  loading: boolean;
+  hasError: boolean;
+}
+
+/**
+ * Whether a re-run may keep the rows already on screen instead of refetching.
+ *
+ * A local write empties the cache and moves the epoch, which re-runs every
+ * cached read. Without this, an edit on the register would throw away the
+ * payee list and refetch all of it — several thousand rows — for every clear,
+ * approve or delete, which the register never did before this cache existed.
+ *
+ * The rows are kept only when there is nothing better to be had: the route is
+ * still showing the same thing, what it shows came from a real fetch during
+ * this mount rather than from the cache, and the decision offers no seed and
+ * no validated entry. The rows are as current as they were a moment ago; only
+ * the cache entry behind them went away.
+ */
+export function keepSettledRows<T>(
+  held: SettledRows,
+  key: string,
+  decision: CachedFetchPlan<T>,
+): boolean {
+  if (decision.use !== "network" || decision.seed !== null) {
+    return false;
+  }
+  return held.key === key
+    && held.hasData
+    && !held.provisional
+    && !held.loading
+    && !held.hasError;
+}
+
 /**
  * Decide the bootstrap's accounts read, which is the one part of the reference
  * batch `server_knowledge` covers. Settings, categories and account

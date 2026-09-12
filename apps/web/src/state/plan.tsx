@@ -269,6 +269,10 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         // 401s; once the session is known, a 401 means the session really has
         // ended and the global handler should see it.
         const speculative = { handleUnauthorized: false } as const;
+        // Recorded before the batch goes out, for the same reason the routes
+        // record it: a write landing while these reads are in flight must not
+        // be undone by storing what they return.
+        const epochAtRequest = currentCacheEpoch();
         const statusPromise = api.authStatus();
         const plansPromise = settle(api.plans(speculative));
         const speculativePlanId = requests.speculativePlanId;
@@ -380,7 +384,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
           // Preferences are not covered by knowledge and are not always
           // refetched, so an untouched controller keeps the cached copy.
           accountPreferences: accountPreferencesSnapshot ?? validCache?.data.accountPreferences ?? null,
-        });
+        }, epochAtRequest);
         const categories = categoryGroups.flatMap((group) => group.categories ?? []);
         let accountPreferencesSync: AccountPreferencesState;
         let accountPreferencesController = existingController;

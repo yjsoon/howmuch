@@ -5,6 +5,7 @@ import {
   currentCacheEpoch,
   decideReferenceRefresh,
   deserialiseEnvelope,
+  keepSettledRows,
   makeEnvelope,
   planCachedFetch,
   readSlot,
@@ -106,6 +107,42 @@ describe("planCachedFetch", () => {
   test("another user's entry is never seeded, let alone kept", () => {
     const envelope = makeEnvelope({ userId: "user-2", planId: "plan-1" }, 41, payees);
     expect(planCachedFetch(envelope, identity, 41)).toEqual({ use: "network", seed: null });
+  });
+});
+
+describe("keepSettledRows", () => {
+  const settled = { key: "plan-1", hasData: true, provisional: false, loading: false, hasError: false };
+  const emptyNetwork = { use: "network", seed: null } as const;
+
+  test("keeps rows a local write emptied the cache under", () => {
+    // The register must not refetch every payee because someone cleared a row.
+    expect(keepSettledRows(settled, "plan-1", emptyNetwork)).toBe(true);
+  });
+
+  test("fetches when the route has never had anything", () => {
+    expect(keepSettledRows({ ...settled, hasData: false }, "plan-1", emptyNetwork)).toBe(false);
+  });
+
+  test("fetches when what is shown came from the cache, not a fetch", () => {
+    expect(keepSettledRows({ ...settled, provisional: true }, "plan-1", emptyNetwork)).toBe(false);
+  });
+
+  test("fetches when a request is already out", () => {
+    expect(keepSettledRows({ ...settled, loading: true }, "plan-1", emptyNetwork)).toBe(false);
+  });
+
+  test("fetches when the last attempt failed", () => {
+    expect(keepSettledRows({ ...settled, hasError: true }, "plan-1", emptyNetwork)).toBe(false);
+  });
+
+  test("fetches when the route is now showing something else", () => {
+    expect(keepSettledRows(settled, "plan-2", emptyNetwork)).toBe(false);
+  });
+
+  test("never overrides a validated entry or a seeded refetch", () => {
+    expect(keepSettledRows(settled, "plan-1", { use: "cache", value: payees })).toBe(false);
+    expect(keepSettledRows(settled, "plan-1", { use: "wait", seed: payees })).toBe(false);
+    expect(keepSettledRows(settled, "plan-1", { use: "network", seed: payees })).toBe(false);
   });
 });
 
