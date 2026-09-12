@@ -262,6 +262,64 @@ describe("YNAB-compatible API", () => {
     expect((await conflict.json()).error.detail).toBe("idempotency-key reuse");
   });
 
+  test("counts account usage over one inclusive window without paginating the register", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
+    await repo.upsertAccount("plan-test", { id: "bank", name: "Bank" });
+    await repo.upsertAccount("plan-test", { id: "wallet", name: "Wallet" });
+    await repo.upsertAccount("plan-test", { id: "quiet", name: "Quiet" });
+    // days=30 until 2026-08-31 is the inclusive window 2026-08-02..2026-08-31.
+    await repo.createTransaction("plan-test", { id: "before-window", account_id: "bank", date: "2026-08-01", amount: -100 });
+    await repo.createTransaction("plan-test", { id: "first-day", account_id: "bank", date: "2026-08-02", amount: -100 });
+    await repo.createTransaction("plan-test", { id: "last-day", account_id: "bank", date: "2026-08-31", amount: -100 });
+    await repo.createTransaction("plan-test", { id: "future", account_id: "bank", date: "2026-09-01", amount: -100 });
+    await repo.createTransaction("plan-test", { id: "gone", account_id: "bank", date: "2026-08-15", amount: -100 });
+    await repo.deleteTransaction("plan-test", "gone");
+    // A split parent counts once; its lines live in another table and never do.
+    await repo.createTransaction("plan-test", {
+      id: "split", account_id: "bank", date: "2026-08-10", amount: -300,
+      subtransactions: [{ amount: -100 }, { amount: -200 }],
+    });
+    // A transfer is two rows, so it counts once in each account it touches.
+    await repo.createTransaction("plan-test", { id: "transfer", account_id: "bank", date: "2026-08-20", amount: -500, transfer_account_id: "wallet" });
+
+    expect((await handler(new Request("http://howmuch.test/v1/plans/plan-test/accounts/usage"))).status).toBe(401);
+
+    const response = await request("/v1/plans/plan-test/accounts/usage?days=30&until=2026-08-31");
+    expect(response.status).toBe(200);
+    const { data } = await response.json();
+    expect(data).toMatchObject({ days: 30, since: "2026-08-02", until: "2026-08-31" });
+    expect(data.server_knowledge).toBe(await repo.getServerKnowledge("plan-test"));
+    // "quiet" has no rows in the window and is simply absent; the client reads a
+    // missing account as zero.
+    expect(data.usage).toEqual([
+      { account_id: "bank", count: 4 },
+      { account_id: "wallet", count: 1 },
+    ]);
+
+    // A one-day window keeps both ends closed on the same date.
+    const single = await request("/v1/plans/plan-test/accounts/usage?days=1&until=2026-08-31");
+    expect((await single.json()).data).toMatchObject({ days: 1, since: "2026-08-31", usage: [{ account_id: "bank", count: 1 }] });
+
+    // A window that reaches back far enough picks up the earlier row too.
+    const wide = await request("/v1/plans/plan-test/accounts/usage?days=31&until=2026-08-31");
+    expect((await wide.json()).data).toMatchObject({ since: "2026-08-01", usage: [{ account_id: "bank", count: 5 }, { account_id: "wallet", count: 1 }] });
+
+    for (const query of ["?days=0", "?days=367", "?days=abc", "?days=1.5", "?days=-1", "?until=2026-02-30", "?until=31-08-2026"]) {
+      expect(`${query} -> ${(await request(`/v1/plans/plan-test/accounts/usage${query}`)).status}`).toBe(`${query} -> 400`);
+    }
+
+    expect((await request("/v1/plans/missing-plan/accounts/usage?until=2026-08-31")).status).toBe(404);
+
+    // The grouped count is served by the partial register index rather than a
+    // scan of the live ledger.
+    const plan = db.query(
+      `EXPLAIN QUERY PLAN SELECT account_id, COUNT(*) AS usage_count FROM transactions
+         WHERE plan_id = ? AND deleted = 0 AND date >= ? AND date <= ? GROUP BY account_id ORDER BY account_id`,
+    ).all("plan-test", "2026-08-02", "2026-08-31") as Array<{ detail: string }>;
+    expect(plan.some((step) => step.detail.includes("SEARCH transactions USING INDEX idx_transactions_plan_live_register"))).toBeTrue();
+  });
+
   test("reconciles only eligible cleared account rows with exact retry receipts", async () => {
     const repo = new LedgerRepository(db, "plan-test");
     await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });

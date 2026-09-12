@@ -431,6 +431,35 @@ export class LedgerRepository {
     return { accounts: (rows ?? []).map(formatAccount), server_knowledge: knowledgeFrom(knowledgeRows) };
   }
 
+  /**
+   * Per-account transaction counts over a closed date window, in one grouped
+   * query plus the knowledge value that labels them.
+   *
+   * The counting semantics match the register list the web client used to
+   * paginate for this: live rows of this plan whose `date` falls inside the
+   * inclusive window. Each transfer leg counts in its own account, a split
+   * parent counts once (its subtransactions live in another table and are not
+   * counted), scheduled transactions are not counted, and rows dated after
+   * `until` are excluded. The window is supplied by the caller, so the client
+   * keeps ownership of what "today" means in its own time zone.
+   */
+  async accountUsage(
+    planId: string,
+    since: string,
+    until: string,
+  ): Promise<{ usage: Array<{ account_id: string; count: number }>; since: string; until: string; server_knowledge: number }> {
+    const [rows, knowledgeRows] = await this.db.batchRead([
+      { sql: ACCOUNT_USAGE_SQL, values: [planId, since, until] },
+      { sql: SERVER_KNOWLEDGE_SQL, values: [planId] },
+    ]);
+    return {
+      usage: (rows ?? []).map((row) => ({ account_id: String(row.account_id), count: Number(row.usage_count) })),
+      since,
+      until,
+      server_knowledge: knowledgeFrom(knowledgeRows),
+    };
+  }
+
   async findAccount(planId: string, accountId: string): Promise<any | null> {
     const row = await this.db.query(`${ACCOUNT_SELECT_SQL} WHERE id = ? AND plan_id = ? AND deleted = 0`).get(accountId, planId) as Row | null;
     return row ? formatAccount(row) : null;
@@ -3223,6 +3252,13 @@ function formatPlan(row: Row): any {
 }
 
 const SERVER_KNOWLEDGE_SQL = "SELECT server_knowledge FROM plans WHERE id = ?";
+// `deleted = 0` is written literally so the partial index
+// `idx_transactions_plan_live_register` stays eligible for the window scan.
+const ACCOUNT_USAGE_SQL = `SELECT account_id, COUNT(*) AS usage_count
+     FROM transactions
+     WHERE plan_id = ? AND deleted = 0 AND date >= ? AND date <= ?
+     GROUP BY account_id
+     ORDER BY account_id`;
 const LIST_PAYEES_SQL = "SELECT id, name, transfer_account_id, deleted FROM payees WHERE plan_id = ? AND deleted = 0 ORDER BY name";
 const LIST_CATEGORY_GROUPS_SQL = "SELECT * FROM category_groups WHERE plan_id = ? AND deleted = 0 ORDER BY name";
 const LIST_CATEGORIES_SQL = "SELECT * FROM categories WHERE plan_id = ? AND deleted = 0 ORDER BY name";

@@ -27,6 +27,7 @@ const BUDGET: Record<string, number> = {
   "GET /v1/plans/:id/settings": 2,
   "GET /v1/plans/:id/accounts": 2,
   "GET /v1/plans/:id/account_preferences": 2,
+  "GET /v1/plans/:id/accounts/usage": 2,
   "GET /v1/plans/:id/categories": 2,
   "GET /v1/plans/:id/payees": 2,
   "GET /v1/plans/:id/transactions?limit=10": 2,
@@ -42,6 +43,8 @@ const ROUTES: Array<{ name: string; path: string }> = [
   { name: "GET /v1/plans/:id/settings", path: `/v1/plans/${PLAN_ID}/settings` },
   { name: "GET /v1/plans/:id/accounts", path: `/v1/plans/${PLAN_ID}/accounts` },
   { name: "GET /v1/plans/:id/account_preferences", path: `/v1/plans/${PLAN_ID}/account_preferences` },
+  // The window ends on the seeded row's date so the grouped count is not empty.
+  { name: "GET /v1/plans/:id/accounts/usage", path: `/v1/plans/${PLAN_ID}/accounts/usage?days=30&until=2026-01-31` },
   { name: "GET /v1/plans/:id/categories", path: `/v1/plans/${PLAN_ID}/categories` },
   { name: "GET /v1/plans/:id/payees", path: `/v1/plans/${PLAN_ID}/payees` },
   { name: "GET /v1/plans/:id/transactions?limit=10", path: `/v1/plans/${PLAN_ID}/transactions?limit=10` },
@@ -153,6 +156,9 @@ test("GET routes issue no writes and stay within their round-trip budget", async
   // without decoding the table above.
   expect(d1Counts["GET /v1/plans/:id/transactions?limit=10"]).toBeLessThanOrEqual(3);
   expect(d1Counts["GET /v1/plans/:id/accounts"]).toBeLessThanOrEqual(2);
+  // #182: the 30-day usage sort is one grouped query plus the session lookup,
+  // where the web client used to paginate the register.
+  expect(d1Counts["GET /v1/plans/:id/accounts/usage"]).toBeLessThanOrEqual(2);
   expect(d1Counts["GET /v1/plans/:id/categories"]).toBeLessThanOrEqual(2);
 });
 
