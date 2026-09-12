@@ -224,6 +224,13 @@ async function handleV1(
       const account = await repo.createAccount(planId, payload);
       return json({ data: { account, server_knowledge: await repo.getServerKnowledge(planId) } }, 201);
     }
+    // Must precede the `/accounts/{account_id}` branch below, or "usage" would
+    // be read as an account id.
+    if (segments.length === 5 && segments[4] === "usage" && method === "GET") {
+      const window = parseAccountUsageWindow(url);
+      const usage = await repo.accountUsage(planId, window.since, window.until);
+      return json({ data: { ...usage, days: window.days } });
+    }
     const accountId = segments[4];
     if (segments.length === 6 && segments[5] === "reconciliation" && method === "GET") {
       const statementDate = url.searchParams.get("statement_date");
@@ -1231,4 +1238,30 @@ function apiError(status: number, name: string, detail: string, id = String(stat
     },
     status,
   );
+}
+
+const MAX_ACCOUNT_USAGE_DAYS = 366;
+
+/**
+ * The account-usage window is client-defined: the caller passes the last day it
+ * means by "today" in its own time zone, and the count of days to include. The
+ * server only defaults `until` to the current UTC date and arithmetic stays in
+ * UTC so a daylight-saving shift cannot move the boundary.
+ */
+function parseAccountUsageWindow(url: URL): { days: number; since: string; until: string } {
+  const rawDays = url.searchParams.get("days");
+  const days = rawDays === null ? 30 : Number(rawDays);
+  if (!/^\d+$/.test(rawDays ?? "30") || !Number.isSafeInteger(days) || days < 1 || days > MAX_ACCOUNT_USAGE_DAYS) {
+    throw new ValidationError(`days must be an integer between 1 and ${MAX_ACCOUNT_USAGE_DAYS}`);
+  }
+  const rawUntil = url.searchParams.get("until");
+  const until = rawUntil ?? new Date().toISOString().slice(0, 10);
+  if (!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(until)) {
+    throw new ValidationError("until must be an ISO date (YYYY-MM-DD)");
+  }
+  const untilMs = Date.parse(`${until}T00:00:00Z`);
+  if (!Number.isFinite(untilMs) || new Date(untilMs).toISOString().slice(0, 10) !== until) {
+    throw new ValidationError("until must be a valid calendar date");
+  }
+  return { days, since: new Date(untilMs - (days - 1) * 86_400_000).toISOString().slice(0, 10), until };
 }

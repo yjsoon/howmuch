@@ -75,6 +75,8 @@ Returns date format, currency format, and custom flag names.
 
 `GET /v1/plans/{plan_id}/accounts/{account_id}`
 
+`GET /v1/plans/{plan_id}/accounts/usage`
+
 `POST /v1/plans/{plan_id}/accounts`
 
 `PUT /v1/plans/{plan_id}/accounts/{account_id}`
@@ -104,6 +106,30 @@ The server generates an id when none is supplied and treats `balance` as the ope
 balance. Every account also owns a `Transfer : <name>` payee (created on demand
 and backfilled by migration), exposed through `transfer_payee_id`. Account
 records include `icon` alongside `name`.
+
+Count recent per-account activity with:
+
+```http
+GET /v1/plans/{plan_id}/accounts/usage?days=30&until=2026-08-31
+```
+
+This read-only route answers "most used in the last N days" with one grouped
+query instead of a paginated register scan. Response data contains `usage`
+(`{ account_id, count }` ordered by `account_id`), `days`, `since`, `until`, and
+`server_knowledge`.
+
+`days` is an integer from 1 to 366 and defaults to 30. `until` is an ISO date
+and defaults to the current UTC date; the window is the inclusive range
+`since`..`until`, where `since` is `until` minus `days - 1` days. Clients that
+mean their own local "today" should pass `until` explicitly, which is what the
+web client does — the day boundary stays client-defined.
+
+A count is one live transaction row of the plan dated inside the window. Each
+leg of a transfer therefore counts in its own account, a split parent counts
+once (its subtransactions are not separate rows and are never counted), deleted
+rows are excluded, scheduled transactions are excluded until they materialise,
+and rows dated after `until` are excluded. Accounts with no rows in the window
+are absent from `usage` rather than listed with a zero.
 
 Preview reconciliation for a statement date with:
 
