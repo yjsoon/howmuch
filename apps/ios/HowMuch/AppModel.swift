@@ -174,6 +174,11 @@ final class AppModel {
   /// `serverTransactions` is not the same thing — a quiet refresh merges, and
   /// local creates insert — so the snapshot is written from this instead.
   @ObservationIgnored private var lastLedgerFirstPage: ReferenceSnapshot.LedgerPage?
+  /// The ids the snapshot's first page put on screen, in the order they were
+  /// sorted into. They are the rows a network page must displace; anything
+  /// else in `serverTransactions` was fetched this session (an older page the
+  /// reader scrolled to) and must survive a refresh.
+  @ObservationIgnored private var provisionalLedgerRowIDs: [String] = []
   @ObservationIgnored private var lastSyncedAccountPreferences: SyncedAccountPreferences?
 
   /// Any part of what is on screen still comes from the snapshot.
@@ -246,6 +251,7 @@ final class AppModel {
     scheduledTransactionsPhase = .loaded
     if let page = snapshot.ledgerPage {
       serverTransactions = sortedUniqueTransactions(page.transactions)
+      provisionalLedgerRowIDs = serverTransactions.map(\.id)
       hasMoreTransactions = page.hasMore && page.nextOffset != nil
       nextTransactionOffset = hasMoreTransactions ? page.nextOffset : nil
       lastLedgerFirstPage = page
@@ -253,6 +259,10 @@ final class AppModel {
       ledgerPhase = .loaded
     }
     rebuildLookups()
+    // `publishIntentCatalog()` is deliberately not called: the intent catalog
+    // is its own file, written from the same data and keyed on the same
+    // fingerprint, so it already holds exactly what this restore would write.
+    // The network refresh publishes it again as soon as it lands.
   }
 
   /// Writes the current reference set, tagged with the cursor the last ledger
@@ -287,6 +297,24 @@ final class AppModel {
     )
   }
 
+  /// Reports a launch that never reached the plan-scoped requests against the
+  /// phases the snapshot had claimed were loaded. Without this an offline warm
+  /// launch would sit on restored data with all three phases `.loaded` and no
+  /// failure anywhere — the app would look freshly loaded when nothing had
+  /// been validated. The data stays on screen behind the failure UI, which is
+  /// what a failed refresh over in-memory data does today.
+  private func failProvisionalPhases(_ message: String) {
+    if referenceIsProvisional {
+      referencePhase = .failed(message)
+    }
+    if ledgerIsProvisional {
+      ledgerPhase = .failed(message)
+    }
+    if schedulesIsProvisional {
+      scheduledTransactionsPhase = .failed(message)
+    }
+  }
+
   /// Drops both the file and every provisional marker. The snapshot belongs to
   /// one endpoint, user and plan, so any change to those discards it outright.
   private func discardSnapshot() {
@@ -295,6 +323,7 @@ final class AppModel {
     ledgerIsProvisional = false
     schedulesIsProvisional = false
     snapshotKnowledge = nil
+    provisionalLedgerRowIDs = []
     lastLedgerFirstPage = nil
     lastSyncedAccountPreferences = nil
   }
@@ -1577,6 +1606,9 @@ final class AppModel {
       guard !Task.isCancelled, settings.connectionFingerprint == connectionFingerprint else {
         return false
       }
+      // #176: this returns before any slice runs, so nothing else will report
+      // the failure against the phases a restored snapshot set to `.loaded`.
+      failProvisionalPhases(error.localizedDescription)
       isShowingSettings = true
       return false
     }
@@ -1683,24 +1715,38 @@ final class AppModel {
       // cursor, the page just fetched is row-for-row what is already there, so
       // the assignment (and the re-render it triggers) is skipped. A cursor
       // that differs by even one always applies.
+      let fetchedFirstPage = sortedUniqueTransactions(page.transactions)
       let applyIsRedundant = SnapshotPolicy.ledgerApplyIsRedundant(
         isProvisional: ledgerIsProvisional,
         snapshotKnowledge: snapshotKnowledge,
-        responseKnowledge: page.serverKnowledge
+        responseKnowledge: page.serverKnowledge,
+        snapshotRowIDs: provisionalLedgerRowIDs,
+        responseRowIDs: fetchedFirstPage.map(\.id)
       )
       if !applyIsRedundant {
         // Mutation refreshes must not drop already-loaded rows; List would clamp to top.
-        // Provisional rows are the exception: merging a snapshot into the
-        // response would keep rows the server has since deleted, which is the
-        // staleness #144 forbids, so those are replaced outright.
-        serverTransactions = sortedUniqueTransactions(
-          quiet && !ledgerIsProvisional ? page.transactions + serverTransactions : page.transactions
-        )
+        // Provisional rows are the exception, in both directions: the response
+        // must displace every row the snapshot put up (merging would keep rows
+        // the server has since deleted, the staleness #144 forbids), while
+        // older pages the reader scrolled to in this session came from the
+        // network and must survive. A loud refresh replaces outright, as it
+        // always has.
+        if quiet, ledgerIsProvisional {
+          let displaced = Set(provisionalLedgerRowIDs)
+          serverTransactions = sortedUniqueTransactions(
+            page.transactions + serverTransactions.filter { !displaced.contains($0.id) }
+          )
+        } else {
+          serverTransactions = sortedUniqueTransactions(
+            quiet ? page.transactions + serverTransactions : page.transactions
+          )
+        }
       }
       reconcileClearedToggleOverlays()
       applyTransactionPageCursor(page)
       ledgerPhase = .loaded
       ledgerIsProvisional = false
+      provisionalLedgerRowIDs = []
       lastLedgerFirstPage = ReferenceSnapshot.LedgerPage(
         transactions: page.transactions,
         hasMore: page.hasMore,

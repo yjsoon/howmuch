@@ -138,16 +138,35 @@ enum SnapshotPolicy {
 
   /// Whether the ledger page the network just returned can be skipped because
   /// the rows already on screen came from a snapshot taken at the same cursor.
+  ///
+  /// Both tests are required, and each catches what the other cannot:
+  ///
+  /// - **Equal cursors** prove the plan is at the revision the snapshot was
+  ///   taken at, so the *contents* of those rows cannot have changed. Ids
+  ///   alone would not: editing a memo leaves the page's ids identical while
+  ///   the rows differ.
+  /// - **Equal ids, in order** prove the response covers the same window.
+  ///   The cursor alone would not: `APIClient.transactionPageSize` is a
+  ///   compile-time constant that is not part of the snapshot's schema
+  ///   version, so a build that widens the page returns rows at the same
+  ///   cursor that the snapshot never held. Skipping then would lose them for
+  ///   the session.
+  ///
   /// A `nil` cursor on either side proves nothing and never skips.
   static func ledgerApplyIsRedundant(
     isProvisional: Bool,
     snapshotKnowledge: Int?,
-    responseKnowledge: Int?
+    responseKnowledge: Int?,
+    snapshotRowIDs: [String],
+    responseRowIDs: [String]
   ) -> Bool {
-    guard isProvisional, let snapshotKnowledge, let responseKnowledge else {
+    guard isProvisional,
+          let snapshotKnowledge,
+          let responseKnowledge,
+          snapshotKnowledge == responseKnowledge else {
       return false
     }
-    return snapshotKnowledge == responseKnowledge
+    return snapshotRowIDs == responseRowIDs
   }
 }
 

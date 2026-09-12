@@ -56,11 +56,16 @@ private enum SnapshotFixture {
     Payee(id: id, name: "Fixture Payee", transferAccountId: nil, deleted: false)
   }
 
-  static func transaction(id: String, accountID: String = "acct-1") -> Transaction {
+  static func transaction(
+    id: String,
+    accountID: String = "acct-1",
+    date: String = "2026-01-02",
+    amount: Int = -1230
+  ) -> Transaction {
     Transaction(
       id: id,
-      date: "2026-01-02",
-      amount: -1230,
+      date: date,
+      amount: amount,
       memo: nil,
       cleared: .uncleared,
       approved: true,
@@ -107,6 +112,8 @@ private enum SnapshotFixture {
     serverKnowledge: Int? = 7,
     accounts: [Account] = [account()],
     transactions: [Transaction] = [transaction(id: "snapshot-row")],
+    hasMore: Bool = false,
+    nextOffset: Int? = nil,
     schemaVersion: Int = ReferenceSnapshot.currentSchemaVersion
   ) -> ReferenceSnapshot {
     ReferenceSnapshot(
@@ -140,8 +147,8 @@ private enum SnapshotFixture {
       scheduledTransactions: [schedule()],
       ledgerPage: ReferenceSnapshot.LedgerPage(
         transactions: transactions,
-        hasMore: false,
-        nextOffset: nil
+        hasMore: hasMore,
+        nextOffset: nextOffset
       )
     )
   }
@@ -283,23 +290,39 @@ final class ReferenceSnapshotStoreTests: XCTestCase {
   }
 
   /// The skip exists to avoid a pointless re-render, so it may only fire when
-  /// both cursors are known and equal.
-  func testLedgerApplyIsRedundantOnlyWhenBothCursorsAgree() {
-    XCTAssertTrue(
-      SnapshotPolicy.ledgerApplyIsRedundant(isProvisional: true, snapshotKnowledge: 7, responseKnowledge: 7)
-    )
+  /// the cursors agree *and* the response covers the same rows.
+  func testLedgerApplyIsRedundantOnlyWhenCursorsAndRowsAgree() {
+    func redundant(
+      provisional: Bool = true,
+      snapshot: Int? = 7,
+      response: Int? = 7,
+      snapshotRows: [String] = ["a", "b"],
+      responseRows: [String] = ["a", "b"]
+    ) -> Bool {
+      SnapshotPolicy.ledgerApplyIsRedundant(
+        isProvisional: provisional,
+        snapshotKnowledge: snapshot,
+        responseKnowledge: response,
+        snapshotRowIDs: snapshotRows,
+        responseRowIDs: responseRows
+      )
+    }
+
+    XCTAssertTrue(redundant())
+    XCTAssertFalse(redundant(response: 8), "a cursor that moved always applies")
+    XCTAssertFalse(redundant(snapshot: nil), "an unknown cursor proves nothing")
+    XCTAssertFalse(redundant(response: nil))
     XCTAssertFalse(
-      SnapshotPolicy.ledgerApplyIsRedundant(isProvisional: true, snapshotKnowledge: 7, responseKnowledge: 8)
-    )
-    XCTAssertFalse(
-      SnapshotPolicy.ledgerApplyIsRedundant(isProvisional: true, snapshotKnowledge: nil, responseKnowledge: 7)
-    )
-    XCTAssertFalse(
-      SnapshotPolicy.ledgerApplyIsRedundant(isProvisional: true, snapshotKnowledge: 7, responseKnowledge: nil)
-    )
-    XCTAssertFalse(
-      SnapshotPolicy.ledgerApplyIsRedundant(isProvisional: false, snapshotKnowledge: 7, responseKnowledge: 7),
+      redundant(provisional: false),
       "rows the network already replaced are not a snapshot and must always be applied"
+    )
+    XCTAssertFalse(
+      redundant(responseRows: ["a", "b", "c"]),
+      "a wider page at the same cursor — `transactionPageSize` is not in the schema version — must not be skipped, or its extra rows are lost for the session"
+    )
+    XCTAssertFalse(
+      redundant(responseRows: ["b", "a"]),
+      "the same ids in a different order are a different page"
     )
   }
 
@@ -455,17 +478,52 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     )
   }
 
-  /// The cursor the snapshot was written at equals the one the server returns,
-  /// so the rows are known to be the same rows and the apply is skipped. The
-  /// distinct ids below cannot happen against a real server — they exist only
-  /// to make the skip observable.
+  /// The cursor the snapshot was written at equals the one the server returns
+  /// *and* the page covers the same ids, so the rows are known to be the same
+  /// rows and the apply is skipped. The differing amount below cannot happen
+  /// against a real server — at one cursor the contents are fixed — and exists
+  /// only to make the skip observable.
   func testEqualServerKnowledgeSkipsTheLedgerApply() async {
     let settings = fixtureSettings()
     XCTAssertTrue(
       store.save(
         SnapshotFixture.snapshot(
           settings: settings,
-          serverKnowledge: SnapshotRefreshProtocol.serverKnowledge
+          serverKnowledge: SnapshotRefreshProtocol.serverKnowledge,
+          transactions: [
+            SnapshotFixture.transaction(
+              id: SnapshotRefreshProtocol.networkTransactionID,
+              date: "2026-01-03",
+              amount: -1230
+            )
+          ]
+        )
+      )
+    )
+
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    await model.refreshAll()
+
+    XCTAssertEqual(model.transactions.map(\.id), [SnapshotRefreshProtocol.networkTransactionID])
+    XCTAssertEqual(
+      model.transactions.first?.amount,
+      -1230,
+      "a response at the snapshot's own cursor, covering the same ids, must not be re-applied"
+    )
+    XCTAssertFalse(model.ledgerIsProvisional, "the rows are still validated by this refresh")
+  }
+
+  /// The page size is a compile-time constant that the schema version does not
+  /// cover, so a response carrying rows the snapshot never held must apply even
+  /// at an identical cursor.
+  func testAWiderPageAtTheSameCursorStillApplies() async {
+    let settings = fixtureSettings()
+    XCTAssertTrue(
+      store.save(
+        SnapshotFixture.snapshot(
+          settings: settings,
+          serverKnowledge: SnapshotRefreshProtocol.serverKnowledge,
+          transactions: []
         )
       )
     )
@@ -475,10 +533,9 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
 
     XCTAssertEqual(
       model.transactions.map(\.id),
-      ["snapshot-row"],
-      "a response at the snapshot's own cursor must not be re-applied over identical rows"
+      [SnapshotRefreshProtocol.networkTransactionID],
+      "a row the snapshot's page never held must not be dropped by the equal-cursor skip"
     )
-    XCTAssertFalse(model.ledgerIsProvisional, "the rows are still validated by this refresh")
   }
 
   /// A cursor that has moved is proof the rows differ, so the response always
@@ -502,6 +559,121 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
       [SnapshotRefreshProtocol.networkTransactionID],
       "a snapshot row the server no longer returns must not remain on screen"
     )
+  }
+
+  /// An offline warm launch never reaches a plan-scoped request:
+  /// `resolvePlanSelection()` fails and `refreshAll` returns. Without a report
+  /// against the restored phases the app would sit on unvalidated data with
+  /// every phase claiming `.loaded`.
+  func testOfflineWarmLaunchReportsTheFailureAndKeepsTheRows() async {
+    let settings = fixtureSettings()
+    XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: settings)))
+    SnapshotRefreshProtocol.goOffline()
+
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    await model.refreshAll()
+
+    XCTAssertNotNil(
+      model.referencePhase.errorMessage,
+      "an offline launch must not leave the reference phase claiming it loaded"
+    )
+    XCTAssertNotNil(model.ledgerPhase.errorMessage)
+    XCTAssertNotNil(model.scheduledTransactionsPhase.errorMessage)
+    XCTAssertEqual(
+      model.accounts.map(\.id),
+      ["acct-1"],
+      "the snapshot stays on screen behind the failure, as in-memory data does after a failed refresh"
+    )
+    XCTAssertEqual(model.transactions.map(\.id), ["snapshot-row"])
+    XCTAssertTrue(model.isProvisional)
+  }
+
+  /// A pull on a provisional Accounts tab must fetch the whole reference
+  /// batch. The phase alone says `.loaded` from the snapshot, so the pull
+  /// would otherwise ask for balances and leave categories, payees and plan
+  /// settings unvalidated for the rest of the launch.
+  func testPullOnAProvisionalAccountsTabFetchesTheReferenceBatch() async {
+    XCTAssertEqual(
+      TabRefresh.accounts(referencePhase: .loaded, isReferenceProvisional: true),
+      [.referenceData]
+    )
+    XCTAssertEqual(
+      TabRefresh.accounts(referencePhase: .loaded, isReferenceProvisional: false),
+      [.accounts]
+    )
+
+    let settings = fixtureSettings()
+    XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: settings)))
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    XCTAssertTrue(model.referenceIsProvisional)
+
+    await model.refresh(
+      slices: TabRefresh.accounts(
+        referencePhase: model.referencePhase,
+        isReferenceProvisional: model.referenceIsProvisional
+      ),
+      quiet: false
+    )
+
+    let plan = "/v1/plans/\(SnapshotRefreshProtocol.planID)"
+    XCTAssertTrue(
+      SnapshotRefreshProtocol.paths().contains("\(plan)/categories"),
+      "the pull must fetch the reference batch, saw \(SnapshotRefreshProtocol.paths())"
+    )
+    XCTAssertFalse(model.referenceIsProvisional)
+  }
+
+  /// After a failed launch ledger fetch the rows stay provisional. A reader
+  /// can still scroll older pages in; the next quiet refresh must displace the
+  /// snapshot's own rows (#144) without dropping the pages fetched since.
+  func testQuietRefreshDisplacesSnapshotRowsButKeepsScrolledInPages() async {
+    let settings = fixtureSettings()
+    XCTAssertTrue(
+      store.save(
+        SnapshotFixture.snapshot(
+          settings: settings,
+          serverKnowledge: SnapshotRefreshProtocol.serverKnowledge - 1,
+          hasMore: true,
+          nextOffset: SnapshotRefreshProtocol.olderPageOffset
+        )
+      )
+    )
+
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    await model.loadOlderTransactions()
+    XCTAssertEqual(
+      model.transactions.map(\.id),
+      ["snapshot-row", SnapshotRefreshProtocol.olderTransactionID],
+      "the older page must land under the provisional first page"
+    )
+
+    await model.refresh(slices: [.ledger], quiet: true)
+
+    XCTAssertEqual(
+      model.transactions.map(\.id),
+      [SnapshotRefreshProtocol.networkTransactionID, SnapshotRefreshProtocol.olderTransactionID],
+      "the response must displace the snapshot's row and leave the scrolled-in page alone"
+    )
+    XCTAssertFalse(model.ledgerIsProvisional)
+  }
+
+  /// A server-side session revocation is a sign-out the app did not initiate.
+  func testSessionRevocationDeletesTheSnapshot() async {
+    let settings = fixtureSettings()
+    XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: settings)))
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    XCTAssertTrue(model.isProvisional)
+
+    NotificationCenter.default.post(
+      name: .howMuchAuthenticationExpired,
+      object: settings.sessionToken
+    )
+    let cleared = await waitUntil { !model.settings.isAuthenticated }
+    XCTAssertTrue(cleared, "the revocation must sign the session out")
+
+    store.waitForPendingWrites()
+    XCTAssertNil(store.load(), "a revoked session must leave no cached plan data on the device")
+    XCTAssertFalse(model.isProvisional)
   }
 
   func testSignOutDeletesTheSnapshot() async {
@@ -562,14 +734,28 @@ private final class SnapshotRefreshLog: @unchecked Sendable {
   private let lock = NSLock()
   private var recorded: [String] = []
   private var held = false
+  private var offline = false
   private var pending: [SnapshotRefreshProtocol] = []
 
   func reset() {
     lock.lock()
     recorded = []
     held = false
+    offline = false
     pending = []
     lock.unlock()
+  }
+
+  func goOffline() {
+    lock.lock()
+    offline = true
+    lock.unlock()
+  }
+
+  func isOffline() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return offline
   }
 
   func record(_ path: String) {
@@ -626,6 +812,8 @@ private final class SnapshotRefreshProtocol: URLProtocol {
   static let planID = SnapshotFixture.planID
   static let networkAccountID = "acct-from-network"
   static let networkTransactionID = "txn-from-network"
+  static let olderTransactionID = "txn-older"
+  static let olderPageOffset = 100
   static let serverKnowledge = 7
 
   static func reset() {
@@ -650,6 +838,12 @@ private final class SnapshotRefreshProtocol: URLProtocol {
 
   static func holdResponses() {
     SnapshotRefreshLog.shared.hold()
+  }
+
+  /// Fails every request, including `/v1/plans`, the way a launch with no
+  /// network does.
+  static func goOffline() {
+    SnapshotRefreshLog.shared.goOffline()
   }
 
   /// Lets every held response finish. Called from the test's thread; the
@@ -683,6 +877,10 @@ private final class SnapshotRefreshProtocol: URLProtocol {
       return
     }
     SnapshotRefreshLog.shared.record(url.path)
+    if SnapshotRefreshLog.shared.isOffline() {
+      client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+      return
+    }
     // `/v1/plans` is never held: `refreshAll` awaits it before starting any
     // slice, so holding it would park the launch before the code under test
     // ever runs. Everything else is parked and returned to, rather than slept
@@ -699,7 +897,7 @@ private final class SnapshotRefreshProtocol: URLProtocol {
       client?.urlProtocol(self, didFailWithError: URLError(.badURL))
       return
     }
-    guard let body = Self.body(forPath: url.path) else {
+    guard let body = Self.body(for: url) else {
       client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
       return
     }
@@ -763,8 +961,43 @@ private final class SnapshotRefreshProtocol: URLProtocol {
   }
   """
 
-  private static func body(forPath path: String) -> String? {
+  private static let olderTransactionJSON = """
+  {
+    "id": "\(olderTransactionID)",
+    "date": "2025-12-01",
+    "amount": -700,
+    "memo": null,
+    "cleared": "cleared",
+    "approved": true,
+    "flag_color": null,
+    "flag_name": null,
+    "account_id": "acct-1",
+    "account_name": "Fixture Account",
+    "payee_id": null,
+    "payee_name": "Older Payee",
+    "category_id": null,
+    "category_name": null,
+    "transfer_account_id": null,
+    "transfer_transaction_id": null,
+    "parent_transaction_id": null,
+    "matched_transaction_id": null,
+    "import_id": null,
+    "import_payee_name": null,
+    "import_payee_name_original": null,
+    "deleted": false,
+    "subtransactions": []
+  }
+  """
+
+  private static func body(for url: URL) -> String? {
+    let path = url.path
     let plan = "/v1/plans/\(planID)"
+    // The second page the reader scrolls to. Routing on the query keeps the
+    // first page and the older page distinguishable on one path.
+    if path == "\(plan)/transactions",
+       url.query?.contains("offset=\(olderPageOffset)") == true {
+      return #"{"data":{"transactions":[\#(olderTransactionJSON)],"has_more":false,"server_knowledge":\#(serverKnowledge)}}"#
+    }
     switch path {
     case "/v1/plans":
       return #"{"data":{"plans":[{"id":"\#(planID)","name":"Fixture Plan"}]}}"#
