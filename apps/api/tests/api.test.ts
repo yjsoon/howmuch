@@ -1277,6 +1277,83 @@ describe("YNAB-compatible API", () => {
     });
   });
 
+  test("counts only live unapproved rows, and scopes the count like the register filter", async () => {
+    const countOf = async (path: string) => {
+      const response = await request(path);
+      expect(response.status).toBe(200);
+      return (await response.json()).data;
+    };
+    const create = async (date: string, amount: number, accountId = "acct-1") =>
+      (await (await request("/v1/plans/plan-test/transactions", {
+        method: "POST",
+        body: { transaction: { account_id: accountId, date, amount } },
+      })).json()).data.transaction.id;
+
+    const before = await countOf("/v1/plans/plan-test/transactions/unapproved_count");
+    expect(typeof before.count).toBe("number");
+    expect(typeof before.server_knowledge).toBe("number");
+
+    // Three new rows land unapproved. One is then approved, one soft-deleted;
+    // only the untouched row should still be counted.
+    const stillNew = await create("2026-07-01", -1100);
+    const approved = await create("2026-07-02", -1200);
+    const removed = await create("2026-07-03", -1300);
+    expect((await countOf("/v1/plans/plan-test/transactions/unapproved_count")).count).toBe(before.count + 3);
+
+    await request(`/v1/plans/plan-test/transactions/${approved}`, {
+      method: "PATCH",
+      body: { transaction: { approved: true } },
+    });
+    await request(`/v1/plans/plan-test/transactions/${removed}`, { method: "DELETE" });
+
+    const after = await countOf("/v1/plans/plan-test/transactions/unapproved_count");
+    expect(after.count).toBe(before.count + 1);
+    // A write moved the plan on, and the count is labelled with the new value.
+    expect(after.server_knowledge).toBeGreaterThan(before.server_knowledge);
+
+    // The same rows through the register filter, as a cross-check that the count
+    // and the queue agree.
+    const queue = await (await request("/v1/plans/plan-test/transactions?type=unapproved&limit=250")).json();
+    expect(queue.data.transactions.filter((row: any) => !row.deleted).length).toBe(after.count);
+    expect(queue.data.transactions.some((row: any) => row.id === stillNew)).toBe(true);
+    expect(queue.data.transactions.some((row: any) => row.id === approved)).toBe(false);
+
+    // Date and account scoping narrow the count the same way they narrow the queue.
+    const windowed = await countOf(
+      "/v1/plans/plan-test/transactions/unapproved_count?since_date=2026-07-01&until_date=2026-07-01",
+    );
+    expect(windowed.count).toBe(1);
+    const otherAccount = await countOf(
+      "/v1/plans/plan-test/accounts/acct-2/transactions/unapproved_count?since_date=2026-07-01&until_date=2026-07-03",
+    );
+    expect(otherAccount.count).toBe(0);
+
+    // last_knowledge_of_server would turn the list into "changed since, deleted
+    // rows included". The count ignores it and stays a count of live rows.
+    const withKnowledge = await countOf(
+      "/v1/plans/plan-test/transactions/unapproved_count?last_knowledge_of_server=0",
+    );
+    expect(withKnowledge.count).toBe(after.count);
+
+    // limit/offset page a list; there is nothing to page here, so they are
+    // ignored rather than validated -- a stray limit=0 must not 400.
+    for (const query of ["?limit=0", "?offset=-1", "?limit=abc", "?limit=9999"]) {
+      const response = await request(`/v1/plans/plan-test/transactions/unapproved_count${query}`);
+      expect(`${query} -> ${response.status}`).toBe(`${query} -> 200`);
+      expect((await response.json()).data.count).toBe(after.count);
+    }
+
+    expect((await request("/v1/plans/missing-plan/transactions/unapproved_count")).status).toBe(404);
+
+    // The count is served by the partial register index, not a scan of the
+    // whole ledger.
+    const plan = db.query(
+      `EXPLAIN QUERY PLAN SELECT COUNT(*) AS count FROM transactions t
+         WHERE t.plan_id = ? AND t.deleted = 0 AND t.approved = 0`,
+    ).all("plan-test") as Array<{ detail: string }>;
+    expect(plan.some((step) => step.detail.includes("idx_transactions_plan_live_register"))).toBeTrue();
+  });
+
   test("rejects invalid transaction patches without mutating the ledger", async () => {
     const created = await (await request("/v1/plans/plan-test/transactions", {
       method: "POST",

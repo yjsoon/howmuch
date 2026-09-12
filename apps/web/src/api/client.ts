@@ -215,6 +215,11 @@ export interface CreatedPersonalApiToken {
   value: string;
 }
 
+export interface UnapprovedCount {
+  count: number;
+  server_knowledge: number;
+}
+
 export interface TransactionPage {
   transactions: Transaction[];
   has_more: boolean;
@@ -340,6 +345,14 @@ export const api = {
   accountTransactions: (planId: string, accountId: string, params: { since_date?: string; until_date?: string; type?: "unapproved"; limit?: number; offset?: number; q?: string }) =>
     request<TransactionPage>(
       `${planUrl(planId, "accounts", accountId, "transactions")}${query(params)}`,
+    ),
+  // The "New" badge without its rows. Costs one bounded query server-side, where
+  // the queue itself costs a page walk, so the register never waits on it.
+  unapprovedCount: (planId: string, params: { since_date?: string; until_date?: string }, accountId?: string | null) =>
+    request<UnapprovedCount>(
+      `${accountId
+        ? planUrl(planId, "accounts", accountId, "transactions", "unapproved_count")
+        : planUrl(planId, "transactions", "unapproved_count")}${query(params)}`,
     ),
   updateTransaction: (planId: string, transactionId: string, transaction: TransactionUpdateInput) =>
     request<{ transaction: Transaction }>(

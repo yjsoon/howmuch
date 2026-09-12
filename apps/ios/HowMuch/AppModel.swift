@@ -38,6 +38,31 @@ final class AppModel {
   var payees: [Payee] = []
   private var serverTransactions: [Transaction] = []
   private var serverUnapprovedTransactions: [Transaction] = []
+  /// Size of the unapproved queue as the server last reported it, without any
+  /// of its rows. The badge is drawn from this so launch never waits on a walk
+  /// of the whole queue.
+  private(set) var serverUnapprovedCount = 0
+  /// Unapproved rows rejected here, mapped to the account they were in. A
+  /// rejection removes a row from the queue exactly as an approval does, but no
+  /// server count taken before it knows that, so it has to be subtracted the
+  /// same way. The account is captured at deletion time, while the row is still
+  /// in hand.
+  private var rejectedUnapprovedAccounts: [String: String] = [:]
+  /// Locally resolved ids as they stood when each scope's count arrived, so a
+  /// refetched count is never decremented twice for the same approval -- and so
+  /// refreshing one scope cannot rebaseline another and make its badge jump
+  /// back up. Keyed by `countScopeKey`.
+  private var confirmedWhenCounted: [String: Set<String>] = [:]
+  /// Per-account unapproved counts, for registers narrowed to one account. The
+  /// plan-wide number would overstate those.
+  private var serverUnapprovedCountsByAccount: [String: Int] = [:]
+  /// The queue rows themselves, loaded only when the approval flow opens.
+  private(set) var unapprovedQueuePhase: LoadPhase = .idle
+  /// Which views currently have the approval flow open. The queue is released
+  /// only when the last of them goes away -- on iPad two registers can be on
+  /// screen at once, and one closing must not pull the rows out from under the
+  /// other.
+  private var unapprovedQueueViewers: Set<String> = []
   private var approvalSession = RegisterApproval.Session.empty
   /// Imported YNAB schedules remain an immutable source mirror; local edits
   /// and entered occurrences are reflected through HowMuch overlays.
@@ -109,7 +134,7 @@ final class AppModel {
   private var activeViewPrefsScope: String?
   private var saveMessageToken = 0
   /// Invalidates an in-flight older-page response when the first page reloads.
-  private var ledgerPageGeneration = 0
+  private(set) var ledgerPageGeneration = 0
   private var referenceGeneration = 0
   private var accountsGeneration = 0
   private var payeesGeneration = 0
@@ -179,6 +204,12 @@ final class AppModel {
     payees = []
     serverTransactions = []
     serverUnapprovedTransactions = []
+    serverUnapprovedCount = 0
+    serverUnapprovedCountsByAccount = [:]
+    confirmedWhenCounted = [:]
+    rejectedUnapprovedAccounts = [:]
+    unapprovedQueuePhase = .idle
+    unapprovedQueueViewers = []
     approvalSession = .empty
     clearedToggleOverlays.removeAll()
     clearedTogglesInFlight.removeAll()
@@ -932,6 +963,42 @@ final class AppModel {
     overlaying(serverTransactions)
   }
 
+  /// The number on the "New" tile, for the whole plan.
+  var unapprovedBadgeCount: Int {
+    unapprovedBadgeCount(forAccountID: nil)
+  }
+
+  /// The "New" count for a register scoped to `accountID` (`nil` = whole plan).
+  /// Once the queue is loaded it is row-exact and wins outright; before that the
+  /// matching server count stands in, less whatever has been approved here since
+  /// it was taken.
+  func unapprovedBadgeCount(forAccountID accountID: String?) -> Int {
+    if unapprovedQueuePhase == .loaded {
+      guard let accountID else { return unapprovedTransactions.count }
+      return unapprovedTransactions.count { $0.accountID == accountID }
+    }
+    let counted = accountID.map { serverUnapprovedCountsByAccount[$0] ?? 0 } ?? serverUnapprovedCount
+    return max(0, counted - resolvedSinceCount(forAccountID: accountID))
+  }
+
+  /// Rows approved here since the matching count was taken. Scoped counts only
+  /// move for rows in their own account.
+  private func resolvedSinceCount(forAccountID accountID: String?) -> Int {
+    // A row approved and then dropped from both arrays is not subtracted here;
+    // the next count of this scope reconciles it.
+    let since = locallyResolvedUnapprovedIDs.subtracting(confirmedWhenCounted[countScopeKey(accountID)] ?? [])
+    guard let accountID else { return since.count }
+    return since.count { id in
+      // A rejected row is gone from both arrays, so its account was recorded.
+      if let rejectedFrom = rejectedUnapprovedAccounts[id] {
+        return rejectedFrom == accountID
+      }
+      let row = serverTransactions.first { $0.id == id }
+        ?? serverUnapprovedTransactions.first { $0.id == id }
+      return row?.accountID == accountID
+    }
+  }
+
   var unapprovedTransactions: [Transaction] {
     overlaying(serverUnapprovedTransactions).filter { row in
       !row.deleted && !row.approved && !approvalSession.confirmed.contains(row.id)
@@ -1472,9 +1539,10 @@ final class AppModel {
       ledgerPhase = .loading
     }
     do {
-      async let firstPage = apiClient.fetchTransactions(planID: planID)
-      async let approvalQueue = apiClient.fetchAllUnapprovedTransactions(planID: planID)
-      let (page, unapproved) = try await (firstPage, approvalQueue)
+      // The register is ready when its first page lands. The unapproved queue
+      // used to be awaited here too, which made launch cost a full serial walk
+      // of that queue before a single row could be shown.
+      let page = try await apiClient.fetchTransactions(planID: planID)
       guard generation == ledgerPageGeneration, planID == settings.planID else {
         return
       }
@@ -1487,10 +1555,15 @@ final class AppModel {
       serverTransactions = sortedUniqueTransactions(
         quiet ? page.transactions + serverTransactions : page.transactions
       )
-      replaceUnapprovedQueue(with: unapproved)
       reconcileClearedToggleOverlays()
       applyTransactionPageCursor(page)
       ledgerPhase = .loaded
+      // The badge, and the rows only if the approval flow is already open. Both
+      // run alongside the horizon fill below rather than in front of it.
+      Task { await self.refreshUnapprovedCount(generation: generation, planID: planID) }
+      if unapprovedQueuePhase == .loaded || unapprovedQueuePhase.isLoading {
+        Task { await self.loadUnapprovedQueue(generation: generation, planID: planID) }
+      }
       defer {
         if generation == ledgerPageGeneration, planID == settings.planID {
           popHorizonFill()
@@ -1533,6 +1606,87 @@ final class AppModel {
     }
   }
 
+  /// Refreshes the "New" badge. One bounded request; failure leaves the previous
+  /// number in place rather than blanking the tile.
+  private func refreshUnapprovedCount(generation: Int, planID: String) async {
+    await refreshUnapprovedCount(generation: generation, planID: planID, accountID: nil)
+  }
+
+  /// Refreshes a register's "New" count. A narrowed register asks for its own
+  /// account, since the plan-wide number would overstate it. Failure leaves the
+  /// previous number in place rather than blanking the badge.
+  func refreshUnapprovedCount(forAccountID accountID: String?) async {
+    await refreshUnapprovedCount(generation: ledgerPageGeneration, planID: settings.planID, accountID: accountID)
+  }
+
+  private func refreshUnapprovedCount(generation: Int, planID: String, accountID: String?) async {
+    guard let count = try? await apiClient.fetchUnapprovedCount(planID: planID, accountID: accountID) else { return }
+    guard generation == ledgerPageGeneration, planID == settings.planID else { return }
+    if let accountID {
+      serverUnapprovedCountsByAccount[accountID] = count
+    } else {
+      serverUnapprovedCount = count
+    }
+    confirmedWhenCounted[countScopeKey(accountID)] = locallyResolvedUnapprovedIDs
+  }
+
+  /// Rows this session has taken off the queue: approved, or rejected.
+  private var locallyResolvedUnapprovedIDs: Set<String> {
+    approvalSession.confirmed.union(rejectedUnapprovedAccounts.keys)
+  }
+
+  /// One key per counted scope: the plan, or a single account.
+  private func countScopeKey(_ accountID: String?) -> String {
+    accountID.map { "account:\($0)" } ?? "plan"
+  }
+
+  /// Loads the unapproved rows. Called when the approval flow opens, and again
+  /// on later refreshes while it stays open -- never on the launch path.
+  /// Called by a view opening the approval flow. `viewer` identifies that view
+  /// so a sibling register closing cannot release rows this one is showing.
+  func openUnapprovedQueue(viewer: String) async {
+    unapprovedQueueViewers.insert(viewer)
+    // `.failed` is retried: otherwise the flow shows its error with no way out
+    // short of a pull-to-refresh.
+    guard unapprovedQueuePhase == .idle || unapprovedQueuePhase.errorMessage != nil else { return }
+    await loadUnapprovedQueue(generation: ledgerPageGeneration, planID: settings.planID)
+  }
+
+  /// Called when a view closes the approval flow. The queue is released only
+  /// once no view is showing it, so later refreshes stop paying for the walk --
+  /// without that, opening the flow once would re-arm it for the session.
+  func closeUnapprovedQueue(viewer: String) {
+    unapprovedQueueViewers.remove(viewer)
+    guard unapprovedQueueViewers.isEmpty else { return }
+    unapprovedQueuePhase = .idle
+  }
+
+  private func loadUnapprovedQueue(generation: Int, planID: String) async {
+    unapprovedQueuePhase = .loading
+    do {
+      let unapproved = try await apiClient.fetchAllUnapprovedTransactions(planID: planID)
+      guard generation == ledgerPageGeneration, planID == settings.planID else { return }
+      guard stillWantsUnapprovedQueue() else { return }
+      replaceUnapprovedQueue(with: unapproved)
+      unapprovedQueuePhase = .loaded
+    } catch {
+      guard generation == ledgerPageGeneration, planID == settings.planID else { return }
+      guard stillWantsUnapprovedQueue() else { return }
+      unapprovedQueuePhase = .failed(error.localizedDescription)
+    }
+  }
+
+  /// The flow can close while a load is in flight. Landing `.loaded` behind it
+  /// would leave the queue loaded with nobody showing it, and every later ledger
+  /// refresh would walk it again.
+  private func stillWantsUnapprovedQueue() -> Bool {
+    if unapprovedQueueViewers.isEmpty {
+      unapprovedQueuePhase = .idle
+      return false
+    }
+    return true
+  }
+
   private func invalidateAccountUsage() {
     guard accountUsagePhase != .idle || !accountUsageLast30Days.isEmpty else {
       return
@@ -1551,6 +1705,12 @@ final class AppModel {
     payees = []
     serverTransactions = []
     serverUnapprovedTransactions = []
+    serverUnapprovedCount = 0
+    serverUnapprovedCountsByAccount = [:]
+    confirmedWhenCounted = [:]
+    rejectedUnapprovedAccounts = [:]
+    unapprovedQueuePhase = .idle
+    unapprovedQueueViewers = []
     approvalSession = .empty
     clearedToggleOverlays.removeAll()
     clearedTogglesInFlight.removeAll()
@@ -2453,6 +2613,15 @@ final class AppModel {
       if let linkedID = subtransaction.transferTransactionID {
         removedIDs.insert(linkedID)
       }
+    }
+    // Rejecting a row awaiting approval takes it off the "New" badge, the same
+    // as approving it would. Recorded before the arrays are cleared, and also
+    // from the row in hand -- with the queue lazy it is usually not in them.
+    for row in serverUnapprovedTransactions where removedIDs.contains(row.id) {
+      rejectedUnapprovedAccounts[row.id] = row.accountID
+    }
+    if !transaction.approved {
+      rejectedUnapprovedAccounts[transaction.id] = transaction.accountID
     }
     serverTransactions.removeAll { removedIDs.contains($0.id) }
     serverUnapprovedTransactions.removeAll { removedIDs.contains($0.id) }

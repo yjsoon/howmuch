@@ -99,6 +99,17 @@ export type TransactionPage = {
 };
 
 /**
+ * The size of the unapproved queue, without any of its rows. Clients show the
+ * "New" badge from this and only load the queue itself when the user opens the
+ * approval flow.
+ */
+export type UnapprovedCount = {
+  count: number;
+  /** Read in the same batch as the count, so it always describes this number. */
+  server_knowledge: number;
+};
+
+/**
  * A HowMuch-owned monthly target. `null` removes the imported target from the
  * response projection; omitting a row restores the exact imported target.
  */

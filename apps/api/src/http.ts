@@ -285,6 +285,9 @@ async function handleV1(
     if (segments.length === 6 && segments[5] === "transactions" && method === "GET") {
       return transactionListResponse(repo, planId, queryFilters(url, { accountId }));
     }
+    if (segments.length === 7 && segments[5] === "transactions" && segments[6] === "unapproved_count" && method === "GET") {
+      return unapprovedCountResponse(repo, planId, countFilters(url, { accountId }));
+    }
   }
 
   if (resource === "categories" && segments.length === 4 && method === "GET") {
@@ -486,6 +489,12 @@ async function handleV1(
         (body.transactions ?? []).map((transaction: any) => transaction.transaction ?? transaction),
       );
       return json({ data: result }, 201);
+    }
+
+    // Must precede the item route below: "unapproved_count" is a path segment,
+    // not a transaction id.
+    if (segments.length === 5 && segments[4] === "unapproved_count" && method === "GET") {
+      return unapprovedCountResponse(repo, planId, countFilters(url));
     }
 
     const { transactionId, expectedApprovedParameter } = transactionItemRef(segments[4], url);
@@ -786,6 +795,28 @@ async function transactionListResponse(repo: LedgerStore, planId: string, filter
       next_offset: page.next_offset,
     },
   });
+}
+
+/**
+ * Filters a count understands. Deliberately not `queryFilters`: `limit` and
+ * `offset` page a list and have nothing to page here, so rejecting a caller's
+ * stray `limit=0` would be a 400 about a parameter the route ignores.
+ */
+function countFilters(url: URL, overrides: Record<string, string | null> = {}): TransactionFilters {
+  return {
+    sinceDate: url.searchParams.get("since_date"),
+    untilDate: url.searchParams.get("until_date"),
+    accountId: overrides.accountId ?? null,
+  };
+}
+
+/**
+ * The "New" badge without the queue behind it. Clients used to page the entire
+ * unapproved queue to render a number; this answers the number in one D1 round
+ * trip and lets them fetch the rows only when the approval flow is opened.
+ */
+async function unapprovedCountResponse(repo: LedgerStore, planId: string, filters: TransactionFilters): Promise<Response> {
+  return json({ data: await repo.countUnapprovedTransactions(planId, filters) });
 }
 
 function parseRegisterQueryParam(value: string | null): string | null {

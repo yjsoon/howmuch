@@ -34,6 +34,7 @@ const BUDGET: Record<string, number> = {
   "GET /v1/plans/:id/payees": 2,
   "GET /v1/plans/:id/transactions?limit=10": 2,
   "GET /v1/plans/:id/transactions?q=": 3,
+  "GET /v1/plans/:id/transactions/unapproved_count": 2,
   "GET /v1/plans/:id/scheduled_transactions": 2,
   // #174 replaced the whole-plan raw-object scan with one read of
   // `ynab_source_month_activity`, and enriched the fixture below with a source
@@ -60,6 +61,8 @@ const ROUTES: Array<{ name: string; path: string }> = [
   // A searched register reads the plan's currency format before it can build
   // the SQL, so it costs one trip more than the plain page.
   { name: "GET /v1/plans/:id/transactions?q=", path: `/v1/plans/${PLAN_ID}/transactions?limit=10&q=Shop` },
+  // The "New" badge: one batch of [knowledge, COUNT], no rows.
+  { name: "GET /v1/plans/:id/transactions/unapproved_count", path: `/v1/plans/${PLAN_ID}/transactions/unapproved_count` },
   { name: "GET /v1/plans/:id/scheduled_transactions", path: `/v1/plans/${PLAN_ID}/scheduled_transactions` },
   { name: "GET /v1/plans/:id/months/:month", path: `/v1/plans/${PLAN_ID}/months/2026-01` },
   { name: "GET /api/reports/spending-breakdown", path: `/api/reports/spending-breakdown?plan_id=${PLAN_ID}` },

@@ -322,7 +322,7 @@ struct AccountsView: View {
     let newTransactions = LedgerShortcutTile(
       icon: "tray",
       title: "New",
-      status: LedgerShortcutStatus.newQueue(count: model.unapprovedTransactions.count),
+      status: LedgerShortcutStatus.newQueue(count: model.unapprovedBadgeCount),
       isSelected: isShowing(.inbox)
     ) {
       pane = .inbox

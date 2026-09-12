@@ -15,6 +15,7 @@ final class LaunchRefreshTests: XCTestCase {
   private var previousCredentialService = ""
   private var previousAPISettings: Any?
   private var previousScopedViewPrefs: Any?
+  private var previousOutbox: Any?
 
   override func setUp() {
     super.setUp()
@@ -26,12 +27,14 @@ final class LaunchRefreshTests: XCTestCase {
     // construct `AppModel()` from `APISettings.load()`) or the installed app.
     previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
     previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
   }
 
   override func tearDown() {
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
     UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
     super.tearDown()
   }
 
@@ -244,6 +247,7 @@ final class ApplySettingsRefreshTests: XCTestCase {
   private var previousCredentialService = ""
   private var previousAPISettings: Any?
   private var previousScopedViewPrefs: Any?
+  private var previousOutbox: Any?
 
   override func setUp() {
     super.setUp()
@@ -254,12 +258,14 @@ final class ApplySettingsRefreshTests: XCTestCase {
     // other tests or the installed app.
     previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
     previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
   }
 
   override func tearDown() {
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
     UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
     super.tearDown()
   }
 
@@ -396,4 +402,626 @@ private final class ApplySettingsProbeProtocol: URLProtocol {
   }
 
   override func stopLoading() {}
+}
+
+/// Regression tests for #181: launch used to await a full serial walk of the
+/// unapproved queue before `ledgerPhase` became `.loaded`, so a large backlog
+/// turned launch into N seconds of an unusable register. The register must now
+/// be ready when its first ledger page lands, the badge must come from the
+/// cheap `unapproved_count` endpoint, and the queue rows must be fetched only
+/// when the approval flow is opened.
+@MainActor
+final class UnapprovedCountLaunchTests: XCTestCase {
+  private var previousCredentialService = ""
+  private var previousAPISettings: Any?
+  private var previousScopedViewPrefs: Any?
+  private var previousOutbox: Any?
+
+  override func setUp() {
+    super.setUp()
+    previousCredentialService = APISettings.useCredentialService("HowMuch.UnapprovedCountLaunchTests.\(UUID().uuidString)")
+    previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
+    previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
+  }
+
+  override func tearDown() {
+    APISettings.useCredentialService(previousCredentialService)
+    UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
+    UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
+    super.tearDown()
+  }
+
+  /// The fix itself. The stub never answers a `type=unapproved` page, so if the
+  /// launch path still awaited that walk, `ledgerPhase` could never reach
+  /// `.loaded` and this test would time out.
+  func testRegisterLoadsOnFirstLedgerPageWhileTheUnapprovedScanIsPending() async {
+    let probe = await runUnapprovedProbe()
+    XCTAssertEqual(
+      probe.ledgerPhase,
+      .loaded,
+      "the register must be loaded once its first ledger page lands, even with the unapproved queue unanswered"
+    )
+    XCTAssertEqual(
+      probe.unapprovedQueueRequests,
+      0,
+      "launch must not walk the unapproved queue; its rows are for the approval flow to fetch"
+    )
+  }
+
+  /// The badge's new source: one bounded count request, not a page walk.
+  func testLaunchIssuesExactlyOneUnapprovedCountRequest() async {
+    let probe = await runUnapprovedProbe()
+    XCTAssertEqual(
+      probe.unapprovedCountRequests,
+      1,
+      "launch must ask for the unapproved count exactly once"
+    )
+    XCTAssertEqual(
+      probe.badgeCount,
+      UnapprovedProbeProtocol.fixtureUnapprovedCount,
+      "the New badge must show the number the count endpoint reported"
+    )
+  }
+
+  /// A register narrowed to one account must show that account's own number.
+  /// Before the queue is loaded it has no rows to count, so it has to ask the
+  /// account-scoped count endpoint -- otherwise a focused register reads zero
+  /// and `showsRegisterFilterMenu` hides the way into the approval flow.
+  func testNarrowedRegisterCountsItsOwnAccountFromTheScopedEndpoint() async {
+    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
+    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
+    UnapprovedProbeProtocol.reset()
+
+    var settings = APISettings()
+    settings.baseURLString = UnapprovedProbeProtocol.fixtureBaseURL
+    settings.authenticatedUserID = "unapproved-scope-\(UUID().uuidString)"
+    settings.sessionToken = "token"
+    settings.planID = UnapprovedProbeProtocol.planID
+
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+
+    guard let surface = SnapshotSurface(
+      root: RegisterView(scope: .account(UnapprovedProbeProtocol.fixtureAccountID))
+        .environment(model)
+        .environment(RootChromeState()),
+      size: CGSize(width: 390, height: 700)
+    ) else {
+      XCTFail("scoped register probe requires a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    // Wait on the model, not on the stub: the stub records a request as it
+    // starts serving it, so waiting on the request count alone would race the
+    // response back to the main actor.
+    let counted = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.unapprovedBadgeCount(forAccountID: UnapprovedProbeProtocol.fixtureAccountID)
+        == UnapprovedProbeProtocol.fixtureAccountUnapprovedCount
+    }
+    XCTAssertTrue(
+      counted,
+      "the narrowed register must show its own account's count (\(UnapprovedProbeProtocol.fixtureAccountUnapprovedCount)), "
+        + "not the plan-wide one; saw \(model.unapprovedBadgeCount(forAccountID: UnapprovedProbeProtocol.fixtureAccountID)) "
+        + "after \(UnapprovedProbeProtocol.scopedUnapprovedCountRequests()) scoped count request(s)"
+    )
+    XCTAssertGreaterThanOrEqual(
+      UnapprovedProbeProtocol.scopedUnapprovedCountRequests(),
+      1,
+      "a register scoped to one account must request that account's unapproved count"
+    )
+    XCTAssertNotEqual(
+      UnapprovedProbeProtocol.fixtureAccountUnapprovedCount,
+      UnapprovedProbeProtocol.fixtureUnapprovedCount,
+      "the fixture must use different plan and account counts, or this test cannot tell them apart"
+    )
+    XCTAssertEqual(
+      UnapprovedProbeProtocol.unapprovedQueueRequests(),
+      0,
+      "a narrowed register must get its number from the count endpoint, not by walking the queue"
+    )
+  }
+
+  /// Two registers can show the approval flow at once on iPad. One closing must
+  /// not release the rows the other is still displaying.
+  func testClosingOneApprovalFlowKeepsTheQueueForItsSibling() async {
+    // `APISettings()` points at production by default, so the stub must be
+    // registered and the fixture host set before anything can fetch.
+    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
+    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
+    UnapprovedProbeProtocol.reset()
+    // Each `openUnapprovedQueue` awaits the walk, so the walk has to finish:
+    // the default stub never answers, and this test would sit out URLSession's
+    // four-minute timeout instead of asserting on viewer bookkeeping.
+    UnapprovedProbeProtocol.answerUnapprovedPageSlowly()
+
+    let model = AppModel(settings: Self.fixtureSettings("queue-siblings"), viewPrefs: ViewPrefs())
+    // Viewer tokens are the registers' own scope identities, not fresh UUIDs:
+    // a rebuilt view must reclaim the token it had before.
+    let first = "account(\"acct-1\")||"
+    let second = "unapproved||"
+
+    await model.openUnapprovedQueue(viewer: first)
+    await model.openUnapprovedQueue(viewer: second)
+
+    model.closeUnapprovedQueue(viewer: first)
+    XCTAssertNotEqual(
+      model.unapprovedQueuePhase,
+      .idle,
+      "one pane closing must not reset the queue while a sibling still shows it"
+    )
+
+    model.closeUnapprovedQueue(viewer: second)
+    XCTAssertEqual(
+      model.unapprovedQueuePhase,
+      .idle,
+      "the queue is released once no register is showing it"
+    )
+
+    // A rebuilt view reclaims its own token rather than leaking a new one, so
+    // one close still empties the set. A fresh UUID per rebuild would strand
+    // the old token and re-walk the queue on every later refresh.
+    await model.openUnapprovedQueue(viewer: first)
+    await model.openUnapprovedQueue(viewer: first)
+    model.closeUnapprovedQueue(viewer: first)
+    XCTAssertEqual(
+      model.unapprovedQueuePhase,
+      .idle,
+      "reopening under the same identity must not strand a viewer in the set"
+    )
+  }
+
+  /// One baseline shared by the plan-wide and per-account counters let a scoped
+  /// refresh rebaseline the plan-wide one: approve rows in the inbox, open an
+  /// account register, and the Accounts "New" tile jumped back up by what had
+  /// just been approved. Each scope keeps its own baseline.
+  ///
+  /// This drives the model mechanism directly -- approve, then refresh the other
+  /// scope -- rather than the inbox-open/close UI sequence that surfaces it.
+  func testScopedCountRefreshDoesNotRebaselineThePlanWideBadge() async {
+    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
+    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
+    UnapprovedProbeProtocol.reset()
+
+    var settings = APISettings()
+    settings.baseURLString = UnapprovedProbeProtocol.fixtureBaseURL
+    settings.authenticatedUserID = "unapproved-baseline-\(UUID().uuidString)"
+    settings.sessionToken = "token"
+    settings.planID = UnapprovedProbeProtocol.planID
+
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+
+    guard let surface = SnapshotSurface(
+      root: LaunchProbe(model: model, taskID: { $0.launchRefreshTaskID }),
+      size: CGSize(width: 10, height: 10)
+    ) else {
+      XCTFail("baseline probe requires a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    let counted = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.unapprovedBadgeCount == UnapprovedProbeProtocol.fixtureUnapprovedCount
+    }
+    XCTAssertTrue(counted, "the plan-wide count must land before this test can move it")
+
+    // Approve three rows. The badge drops optimistically, because the count
+    // predates them.
+    let rows = (1...3).map { index in
+      HowMuch.Transaction.approvalFixture(id: "row-\(index)", accountID: UnapprovedProbeProtocol.fixtureAccountID)
+    }
+    await model.approveEligible(from: rows)
+
+    let expected = UnapprovedProbeProtocol.fixtureUnapprovedCount - rows.count
+    let dropped = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.unapprovedBadgeCount == expected
+    }
+    XCTAssertTrue(dropped, "approving three rows must take three off the plan-wide badge, saw \(model.unapprovedBadgeCount)")
+
+    // Now refresh a *different* scope. This must not touch the plan-wide
+    // baseline.
+    await model.refreshUnapprovedCount(forAccountID: UnapprovedProbeProtocol.fixtureAccountID)
+
+    XCTAssertEqual(
+      model.unapprovedBadgeCount,
+      expected,
+      "an account-scoped count refresh must not rebaseline the plan-wide badge and undo its local decrement"
+    )
+  }
+
+  /// A category drill-down narrows the register by something the count endpoint
+  /// cannot express, so it must walk the queue rather than stand the plan-wide
+  /// number in -- otherwise "Review N new transactions" overstates what is
+  /// actually in view.
+  func testCategoryNarrowedRegisterLoadsTheQueueInsteadOfThePlanWideCount() async {
+    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
+    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
+    UnapprovedProbeProtocol.reset()
+
+    var settings = APISettings()
+    settings.baseURLString = UnapprovedProbeProtocol.fixtureBaseURL
+    settings.authenticatedUserID = "unapproved-category-\(UUID().uuidString)"
+    settings.sessionToken = "token"
+    settings.planID = UnapprovedProbeProtocol.planID
+
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+
+    guard let surface = SnapshotSurface(
+      root: RegisterView(scope: .all, categoryID: "cat-1")
+        .environment(model)
+        .environment(RootChromeState()),
+      size: CGSize(width: 390, height: 700)
+    ) else {
+      XCTFail("category register probe requires a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    let walked = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      UnapprovedProbeProtocol.unapprovedQueueRequests() >= 1
+    }
+    XCTAssertTrue(walked, "a category-narrowed register must load the queue, since no count matches its scope")
+    XCTAssertEqual(
+      UnapprovedProbeProtocol.scopedUnapprovedCountRequests(),
+      0,
+      "a category-narrowed register has no account scope to count"
+    )
+  }
+
+  /// Rejecting a row awaiting approval takes it off the queue exactly as
+  /// approving it does, so it must come off the badge too. It used to be removed
+  /// from the rows but not from the counters, so the badge climbed back by the
+  /// number of rejections until the next ledger pull.
+  func testRejectingAnUnapprovedRowTakesItOffTheBadge() async {
+    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
+    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
+    UnapprovedProbeProtocol.reset()
+
+    var settings = APISettings()
+    settings.baseURLString = UnapprovedProbeProtocol.fixtureBaseURL
+    settings.authenticatedUserID = "unapproved-reject-\(UUID().uuidString)"
+    settings.sessionToken = "token"
+    settings.planID = UnapprovedProbeProtocol.planID
+
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+
+    guard let surface = SnapshotSurface(
+      root: LaunchProbe(model: model, taskID: { $0.launchRefreshTaskID }),
+      size: CGSize(width: 10, height: 10)
+    ) else {
+      XCTFail("reject probe requires a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    let counted = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.unapprovedBadgeCount == UnapprovedProbeProtocol.fixtureUnapprovedCount
+    }
+    XCTAssertTrue(counted, "the plan-wide count must land before this test can move it")
+
+    let row = HowMuch.Transaction.approvalFixture(
+      id: "rejected-row",
+      accountID: UnapprovedProbeProtocol.fixtureAccountID
+    )
+    try? await model.deleteTransaction(row)
+
+    let expected = UnapprovedProbeProtocol.fixtureUnapprovedCount - 1
+    let dropped = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.unapprovedBadgeCount == expected
+    }
+    XCTAssertTrue(dropped, "rejecting an unapproved row must take one off the badge, saw \(model.unapprovedBadgeCount)")
+
+    // And a refresh of a different scope must not undo that, exactly as for
+    // approvals.
+    await model.refreshUnapprovedCount(forAccountID: UnapprovedProbeProtocol.fixtureAccountID)
+    XCTAssertEqual(
+      model.unapprovedBadgeCount,
+      expected,
+      "a scoped count refresh must not resurrect a rejected row on the plan-wide badge"
+    )
+  }
+
+  /// Closing the flow while its load is in flight must not leave the queue
+  /// `.loaded` with nobody showing it -- every later ledger refresh would then
+  /// walk the whole queue again.
+  func testClosingTheFlowMidLoadLeavesTheQueueIdle() async {
+    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
+    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
+    UnapprovedProbeProtocol.reset()
+    // Let the walk finish, but slowly enough to close the flow underneath it.
+    UnapprovedProbeProtocol.answerUnapprovedPageSlowly()
+
+    let model = AppModel(settings: Self.fixtureSettings("queue-midload"), viewPrefs: ViewPrefs())
+
+    guard let surface = SnapshotSurface(
+      root: LaunchProbe(model: model, taskID: { _ in "static" }),
+      size: CGSize(width: 10, height: 10)
+    ) else {
+      XCTFail("mid-load probe requires a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    let viewer = "unapproved||"
+    // A detached task, not `async let`: both sides hop the main actor, and
+    // `async let` would let the close run before the open had even started.
+    let opening = Task { await model.openUnapprovedQueue(viewer: viewer) }
+
+    let started = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.unapprovedQueuePhase.isLoading
+    }
+    XCTAssertTrue(started, "the walk must actually be in flight before this test closes the flow")
+
+    model.closeUnapprovedQueue(viewer: viewer)
+    XCTAssertEqual(model.unapprovedQueuePhase, .idle, "closing the last viewer releases the queue")
+
+    // Now let the late response land. It must not resurrect the phase.
+    await opening.value
+    XCTAssertEqual(
+      model.unapprovedQueuePhase,
+      .idle,
+      "a load that finishes after its flow closed must not leave the queue loaded for nobody"
+    )
+  }
+
+  /// Fixture connection. `APISettings()` defaults to the production host, so
+  /// every test here must set the stub's host explicitly -- nothing in this
+  /// suite may reach the real API.
+  private static func fixtureSettings(_ label: String) -> APISettings {
+    var settings = APISettings()
+    settings.baseURLString = UnapprovedProbeProtocol.fixtureBaseURL
+    settings.authenticatedUserID = "\(label)-\(UUID().uuidString)"
+    settings.sessionToken = "token"
+    settings.planID = UnapprovedProbeProtocol.planID
+    return settings
+  }
+
+  private struct UnapprovedProbeResult {
+    let ledgerPhase: LoadPhase
+    let badgeCount: Int
+    let unapprovedCountRequests: Int
+    let unapprovedQueueRequests: Int
+  }
+
+  private func runUnapprovedProbe() async -> UnapprovedProbeResult {
+    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
+    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
+    UnapprovedProbeProtocol.reset()
+
+    var settings = APISettings()
+    settings.baseURLString = UnapprovedProbeProtocol.fixtureBaseURL
+    settings.authenticatedUserID = "unapproved-probe-\(UUID().uuidString)"
+    settings.sessionToken = "token"
+    settings.planID = UnapprovedProbeProtocol.planID
+
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+
+    guard let surface = SnapshotSurface(
+      root: LaunchProbe(model: model, taskID: { $0.launchRefreshTaskID }),
+      size: CGSize(width: 10, height: 10)
+    ) else {
+      XCTFail("unapproved probe requires a connected UIWindowScene")
+      return UnapprovedProbeResult(ledgerPhase: .idle, badgeCount: -1, unapprovedCountRequests: -1, unapprovedQueueRequests: -1)
+    }
+    defer { surface.detach() }
+
+    let loaded = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.ledgerPhase == .loaded
+    }
+    XCTAssertTrue(loaded, "the register must reach .loaded without the unapproved queue ever being answered")
+
+    // The count is fired alongside the horizon fill, so wait on the observable
+    // itself rather than assuming it has landed by the time the page has.
+    _ = await surface.waitUntil(timeoutNanoseconds: 2_000_000_000) {
+      UnapprovedProbeProtocol.unapprovedCountRequests() >= 1 && model.unapprovedBadgeCount > 0
+    }
+
+    return UnapprovedProbeResult(
+      ledgerPhase: model.ledgerPhase,
+      badgeCount: model.unapprovedBadgeCount,
+      unapprovedCountRequests: UnapprovedProbeProtocol.unapprovedCountRequests(),
+      unapprovedQueueRequests: UnapprovedProbeProtocol.unapprovedQueueRequests()
+    )
+  }
+}
+
+private final class UnapprovedProbeRequestLog: @unchecked Sendable {
+  static let shared = UnapprovedProbeRequestLog()
+  private let lock = NSLock()
+  private var counts: [String: Int] = [:]
+
+  func reset() {
+    lock.lock()
+    counts = [:]
+    lock.unlock()
+  }
+
+  func record(_ key: String) {
+    lock.lock()
+    counts[key, default: 0] += 1
+    lock.unlock()
+  }
+
+  func count(_ key: String) -> Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return counts[key] ?? 0
+  }
+
+  /// When set, the unapproved page is answered after a short delay instead of
+  /// never, so a test can close the approval flow while the walk is in flight.
+  private var answersUnapprovedPageSlowly = false
+
+  func setAnswersUnapprovedPageSlowly(_ value: Bool) {
+    lock.lock()
+    answersUnapprovedPageSlowly = value
+    lock.unlock()
+  }
+
+  func answersUnapprovedPageSlowly_() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return answersUnapprovedPageSlowly
+  }
+}
+
+/// Answers the launch waterfall's plan list, its first ledger page and the
+/// unapproved count, and deliberately *never* answers a `type=unapproved`
+/// page. A launch that still gated the register on that walk would hang here.
+private final class UnapprovedProbeProtocol: URLProtocol {
+  static let fixtureHost = "howmuch-unapproved-probe.test"
+  static let fixtureBaseURL = "https://howmuch-unapproved-probe.test"
+  static let planID = "plan-1"
+  static let fixtureUnapprovedCount = 7
+  static let fixtureAccountID = "acct-1"
+  static let fixtureAccountUnapprovedCount = 3
+
+  private static let countKey = "count"
+  private static let scopedCountKey = "scopedCount"
+  private static let queueKey = "queue"
+
+  static func reset() {
+    UnapprovedProbeRequestLog.shared.reset()
+    UnapprovedProbeRequestLog.shared.setAnswersUnapprovedPageSlowly(false)
+  }
+
+  /// Lets the unapproved walk finish, slowly, so a test can close the flow
+  /// underneath it and check what the late response does.
+  static func answerUnapprovedPageSlowly() {
+    UnapprovedProbeRequestLog.shared.setAnswersUnapprovedPageSlowly(true)
+  }
+
+  static func unapprovedCountRequests() -> Int {
+    UnapprovedProbeRequestLog.shared.count(countKey)
+  }
+
+  static func unapprovedQueueRequests() -> Int {
+    UnapprovedProbeRequestLog.shared.count(queueKey)
+  }
+
+  static func scopedUnapprovedCountRequests() -> Int {
+    UnapprovedProbeRequestLog.shared.count(scopedCountKey)
+  }
+
+  override class func canInit(with request: URLRequest) -> Bool {
+    request.url?.host?.lowercased() == fixtureHost
+  }
+
+  override class func canInit(with task: URLSessionTask) -> Bool {
+    guard let request = task.currentRequest ?? task.originalRequest else { return false }
+    return canInit(with: request)
+  }
+
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+    request
+  }
+
+  override func startLoading() {
+    guard let url = request.url, let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+      client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+      return
+    }
+    let isUnapprovedPage = (components.queryItems ?? []).contains { $0.name == "type" && $0.value == "unapproved" }
+
+    if components.path.hasSuffix("/transactions/unapproved_count") {
+      // The account-scoped path reports only that account's rows, so a narrowed
+      // register can be checked against a different number from the plan's.
+      let scoped = components.path.contains("/accounts/\(Self.fixtureAccountID)/")
+      UnapprovedProbeRequestLog.shared.record(scoped ? Self.scopedCountKey : Self.countKey)
+      let count = scoped ? Self.fixtureAccountUnapprovedCount : Self.fixtureUnapprovedCount
+      send(url: url, body: #"{"data":{"count":\#(count),"server_knowledge":1}}"#)
+      return
+    }
+    if components.path.hasSuffix("/transactions"), request.httpMethod == "PATCH" {
+      send(url: url, body: #"{"data":{"transactions":[],"server_knowledge":2}}"#)
+      return
+    }
+    if components.path.hasSuffix("/transactions"), isUnapprovedPage {
+      // Recorded and then left hanging on purpose: the register must not be
+      // waiting on this. A test that needs the walk to finish asks for the slow
+      // answer instead.
+      UnapprovedProbeRequestLog.shared.record(Self.queueKey)
+      guard UnapprovedProbeRequestLog.shared.answersUnapprovedPageSlowly_() else { return }
+      let target = url
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        self?.send(
+          url: target,
+          body: #"{"data":{"transactions":[],"server_knowledge":1,"has_more":false,"next_offset":null}}"#
+        )
+      }
+      return
+    }
+    // Rejecting a row: answer it so `deleteTransaction` reaches its local
+    // bookkeeping instead of throwing at the network.
+    if request.httpMethod == "DELETE", components.path.contains("/transactions/") {
+      send(url: url, body: Self.deletedTransactionBody)
+      return
+    }
+    if components.path.hasSuffix("/transactions") {
+      send(url: url, body: #"{"data":{"transactions":[],"server_knowledge":1,"has_more":false,"next_offset":null}}"#)
+      return
+    }
+    if components.path.hasSuffix("/v1/plans") {
+      send(url: url, body: #"{"data":{"plans":[{"id":"\#(Self.planID)","name":"Only Plan"}]}}"#)
+      return
+    }
+    // Everything else settles fast so the rest of the waterfall cannot stall
+    // the wait above.
+    client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
+  }
+
+  private func send(url: URL, body: String) {
+    guard let response = HTTPURLResponse(
+      url: url,
+      statusCode: 200,
+      httpVersion: "HTTP/1.1",
+      headerFields: ["Content-Type": "application/json"]
+    ) else {
+      client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+      return
+    }
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: Data(body.utf8))
+    client?.urlProtocolDidFinishLoading(self)
+  }
+
+  /// A tombstoned row, in the snake_case the shared decoder expects.
+  private static let deletedTransactionBody = #"""
+  {"data":{"transaction":{"id":"rejected-row","date":"2026-09-01","amount":-1000,"memo":null,  "cleared":"uncleared","approved":false,"flag_color":null,"flag_name":null,"account_id":"acct-1",  "account_name":"Fixture Account","payee_id":null,"payee_name":"Fixture Payee","category_id":null,  "category_name":null,"transfer_account_id":null,"transfer_transaction_id":null,  "parent_transaction_id":null,"matched_transaction_id":null,"import_id":null,  "import_payee_name":null,"import_payee_name_original":null,"deleted":true,"subtransactions":[]},  "server_knowledge":2}}
+  """#
+
+  override func stopLoading() {}
+}
+
+private extension HowMuch.Transaction {
+  /// Minimal unapproved row for approval-path tests. Synthetic values only.
+  /// Qualified: this file imports SwiftUI, which has its own `Transaction`.
+  static func approvalFixture(id: String, accountID: String) -> HowMuch.Transaction {
+    HowMuch.Transaction(
+      id: id,
+      date: "2026-09-01",
+      amount: -1_000,
+      memo: nil,
+      cleared: .uncleared,
+      approved: false,
+      flagColor: nil,
+      flagName: nil,
+      accountID: accountID,
+      accountName: "Fixture Account",
+      payeeID: nil,
+      payeeName: "Fixture Payee",
+      categoryID: nil,
+      categoryName: nil,
+      transferAccountID: nil,
+      transferTransactionID: nil,
+      parentTransactionID: nil,
+      matchedTransactionID: nil,
+      importID: nil,
+      importPayeeName: nil,
+      importPayeeNameOriginal: nil,
+      deleted: false,
+      subtransactions: []
+    )
+  }
 }
