@@ -134,7 +134,7 @@ Risks:
 - The current static bearer token is acceptable for local development but not for external users.
 - `server_knowledge` and account-balance recalculation are currently plan-scoped assumptions inside one trusted process; multi-process or multi-user hosting needs careful transaction boundaries and tests.
 - `import_id` is indexed but not unique, so idempotency is implemented in application logic rather than enforced by the database.
-- Net worth and age-of-money reports can become slower as history grows because they recompute over transaction history instead of using materialised monthly/account aggregates.
+- Reports that replay history get slower as the ledger grows. Net worth and age of money no longer do: migration `021_account_month_balances.sql` (D1 `0018`) adds `account_month_balances`, a per-account, per-month aggregate maintained by triggers on `transactions`, and `report_cache`, a `server_knowledge`-keyed cache for age of money. Any further report that replays full history has the same risk.
 - The synchronous repository API makes D1, remote libSQL, and most hosted database clients a refactor rather than a configuration change.
 
 ## Cost-Aware Migration Path
@@ -178,7 +178,7 @@ Risks:
 - Add audit logs for all financial-data mutations and support/admin access.
 - Add user data export, account deletion, and retention flows.
 - Add secrets management for YNAB tokens, mobile tokens, and import credentials.
-- Add monthly/account aggregate tables if report latency becomes noticeable on large ledgers.
+- Monthly/account aggregate tables now exist (`account_month_balances`, plus `report_cache`); extend the same pattern to any further report whose latency grows with history.
 - Add zero-downtime migration and rollback procedures.
 
 ## Decision Points

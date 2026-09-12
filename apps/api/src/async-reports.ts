@@ -1,3 +1,8 @@
+import {
+  boundaryWindow,
+  foldNetWorthPeriods,
+  monthOf,
+} from "./account-month-balances";
 import type { AsyncSqlDatabase } from "./async-sql";
 import { buildRewardsReport } from "./rewards/build";
 import { parseAppSettings, parseCreditCards, parseRewardGroupBy } from "./rewards/parse";
@@ -108,48 +113,106 @@ export class AsyncReportService {
        ORDER BY name,id`,
       [planId, filters.includeClosedAccounts === true ? 1 : 0],
     )).filter((account) => !requestedAccounts || requestedAccounts.has(account.id));
-    const selectedIds = new Set(accounts.map((account) => account.id));
-    const movements = await this.db.all<Row>(
-      `SELECT account_id,date,amount_milli FROM transactions
-       WHERE plan_id=$1 AND deleted=0 AND date<=$2
-       ORDER BY account_id,date,ledger_sequence,id`,
-      [planId, to],
+
+    // Whole months come from the aggregate, so the report reads months x
+    // accounts instead of replaying the ledger.  The trigger-maintained table
+    // is authoritative; see `account-month-balances.ts`.
+    const monthly = await this.db.all<Row>(
+      `SELECT account_id,month,net_change_milli FROM account_month_balances
+       WHERE plan_id=$1 AND month<=$2`,
+      [planId, monthOf(periods.at(-1)!.end)],
     );
-    const byAccount = new Map<string, Row[]>();
-    for (const movement of movements) {
-      if (!selectedIds.has(movement.account_id)) continue;
-      const existing = byAccount.get(movement.account_id);
-      if (existing) existing.push(movement);
-      else byAccount.set(movement.account_id, [movement]);
-    }
-    const balances = new Map(accounts.map((account) => [account.id, Number(account.opening_balance_milli)]));
-    const positions = new Map(accounts.map((account) => [account.id, 0]));
-    let previousNetWorth: number | null = null;
+
+    // Only period ends that fall mid-month need day-level detail, and then only
+    // for the months they land in.  For monthly and yearly intervals that is at
+    // most the trailing month; for daily and weekly intervals it is the
+    // requested window, never the history before it.
+    const window = boundaryWindow(periods);
+    const boundary = window
+      ? (await this.db.all<Row>(
+          `SELECT account_id,date,amount_milli FROM transactions
+           WHERE plan_id=$1 AND deleted=0 AND date>=$2 AND date<=$3`,
+          [planId, window.from, window.to],
+        )).filter((row) => window.months.includes(monthOf(String(row.date))))
+      : [];
+
     return {
-      periods: periods.map((period) => {
-        const accountRows = accounts.map((account) => {
-          const accountMovements = byAccount.get(account.id) ?? [];
-          let position = positions.get(account.id) ?? 0;
-          let balance = balances.get(account.id) ?? 0;
-          while (position < accountMovements.length && accountMovements[position]!.date <= period.end) {
-            balance += Number(accountMovements[position]!.amount_milli);
-            position++;
-          }
-          positions.set(account.id, position);
-          balances.set(account.id, balance);
-          return { account_id: account.id, account_name: account.name, closed: Number(account.closed) === 1, balance };
-        });
-        const netWorth = accountRows.reduce((sum, account) => sum + account.balance, 0);
-        const delta = previousNetWorth == null ? null : netWorth - previousNetWorth;
-        previousNetWorth = netWorth;
-        return { period: period.label, end_date: period.end, net_worth: netWorth, delta, accounts: accountRows };
-      }),
+      periods: foldNetWorthPeriods(
+        accounts.map((account) => ({
+          id: String(account.id),
+          name: String(account.name),
+          closed: Number(account.closed) === 1,
+          opening_balance_milli: Number(account.opening_balance_milli),
+        })),
+        periods,
+        monthly.map((row) => ({
+          account_id: String(row.account_id),
+          month: String(row.month),
+          net_change_milli: Number(row.net_change_milli),
+        })),
+        boundary.map((row) => ({
+          account_id: String(row.account_id),
+          date: String(row.date),
+          amount_milli: Number(row.amount_milli),
+        })),
+      ),
     };
   }
 
+  /**
+   * Age of money replays every income lot over the whole ledger, so the result
+   * is cached against the plan's `server_knowledge` rather than recomputed on
+   * each call.  The cache is validated, not stale: the knowledge counter is
+   * read *before* the ledger, and a hit is served only when it still matches,
+   * so a write that lands mid-flight invalidates the entry it raced rather than
+   * being papered over.  This satisfies the no-stale-cache constraint in #144.
+   */
   async ageOfMoney(planId: string, filters: ReportFilters = {}): Promise<any> {
+    // `categoryGroupIds` resolves through a join on `categories`, and category
+    // upserts do not bump the plan's knowledge counter, so a cached answer for
+    // that filter could outlive a category being moved between groups.  Every
+    // other filter reads columns that live on the transaction lines
+    // themselves.  Recompute rather than risk a stale answer (#144).
+    const cacheable = !filters.categoryGroupIds?.length;
+    const knowledge = cacheable ? await planKnowledge(this.db, planId) : null;
     const from = filters.from ?? (await earliestDate(this.db, planId)) ?? todayIso();
     const to = filters.to ?? todayIso();
+    const key = reportCacheKey("age-of-money", { ...filters, from, to, interval: filters.interval ?? "month" });
+
+    if (knowledge != null) {
+      const cached = await this.db.get<Row>(
+        "SELECT payload_json FROM report_cache WHERE plan_id = $1 AND cache_key = $2 AND server_knowledge = $3",
+        [planId, key, knowledge],
+      );
+      if (cached) return JSON.parse(String(cached.payload_json));
+    }
+
+    const payload = await this.computeAgeOfMoney(planId, filters, from, to);
+    if (knowledge != null) await this.storeReportCache(planId, key, knowledge, payload);
+    return payload;
+  }
+
+  private async storeReportCache(planId: string, key: string, knowledge: number, payload: unknown): Promise<void> {
+    // Best effort: a read-only transition deployment, or a database that has
+    // not yet applied the aggregate migration, must still serve the report.
+    try {
+      await this.db.run("DELETE FROM report_cache WHERE plan_id = $1 AND server_knowledge < $2", [planId, knowledge]);
+      await this.db.run(
+        `INSERT INTO report_cache (plan_id, cache_key, server_knowledge, payload_json, computed_at)
+         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+         ON CONFLICT(plan_id, cache_key) DO UPDATE SET
+           server_knowledge = excluded.server_knowledge,
+           payload_json = excluded.payload_json,
+           computed_at = CURRENT_TIMESTAMP
+         WHERE excluded.server_knowledge >= report_cache.server_knowledge`,
+        [planId, key, knowledge, JSON.stringify(payload)],
+      );
+    } catch {
+      // Ignore: the cache is an optimisation, never a correctness requirement.
+    }
+  }
+
+  private async computeAgeOfMoney(planId: string, filters: ReportFilters, from: string, to: string): Promise<any> {
     const { linesSql, where, params } = this.lineFilters(planId, filters, true);
     const rows = await this.db.all<Row>(
       `WITH lines AS (${linesSql})
@@ -329,6 +392,25 @@ function periodLabel(date: string, interval: string): string {
     return `${d.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
   }
   return date.slice(0, 7);
+}
+
+/** The plan's current `server_knowledge`, or null when the plan is unknown. */
+async function planKnowledge(db: AsyncSqlDatabase, planId: string): Promise<number | null> {
+  const row = await db.get<Row>("SELECT server_knowledge FROM plans WHERE id = $1", [planId]);
+  if (!row || row.server_knowledge == null) return null;
+  return Number(row.server_knowledge);
+}
+
+/**
+ * A stable key for one report request.  Filter keys are sorted so that two
+ * requests differing only in property order share a cache entry, and the
+ * resolved `from`/`to` are part of the key because both default to today.
+ */
+function reportCacheKey(report: string, filters: Record<string, unknown>): string {
+  const entries = Object.entries(filters)
+    .filter(([, value]) => value !== undefined)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  return `${report}:${JSON.stringify(entries)}`;
 }
 
 async function earliestDate(db: AsyncSqlDatabase, planId: string): Promise<string | null> {
