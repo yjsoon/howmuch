@@ -375,6 +375,10 @@ export class LedgerRepository {
         bool(account.deleted),
       );
     await this.ensureTransferPayee(planId, account.id);
+    // An importer renaming, closing or deleting an account changes what every
+    // client shows. Clients validate cached accounts against `server_knowledge`
+    // (#175), so a delta import carrying only account changes has to move it.
+    await this.touchPlan(planId);
   }
 
   async updateAccount(planId: string, accountId: string, patch: AccountUpdatePatch): Promise<any> {
@@ -646,6 +650,9 @@ export class LedgerRepository {
         payee.external_ynab_id ?? payee.id,
         bool(payee.deleted),
       );
+    // Same reason as `upsertAccount`: a renamed or deleted payee must not be
+    // servable from a client cache that thinks knowledge has not moved.
+    await this.touchPlan(planId);
   }
 
   async listPayees(planId: string): Promise<any[]> {

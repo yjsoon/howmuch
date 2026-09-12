@@ -62,7 +62,15 @@ export class D1MetadataRepository {
     return this.upsertAccount(planId, { id: accountId, name: name ?? `Imported account ${accountId.slice(0, 8)}` }, context, true);
   }
 
-  async upsertAccount(planId: string, account: any, context?: D1WriteContext, ensureOnly = false, incrementKnowledge = false): Promise<void> {
+  /**
+   * The upsert branch always moves `server_knowledge`. Clients validate cached
+   * accounts against it (#175), so an import carrying only account changes —
+   * a rename, a close, a delete — has to be visible as a knowledge change or
+   * those clients would keep serving the old list. The ensure branch inserts
+   * only what is missing and is reached from transaction writes, which move
+   * knowledge themselves.
+   */
+  async upsertAccount(planId: string, account: any, context?: D1WriteContext, ensureOnly = false): Promise<void> {
     const existing = ensureOnly ? null : await this.db.get<{ icon: string }>("SELECT icon FROM accounts WHERE id=?", [account.id]);
     const presentation = resolveAccountPresentation({
       name: account.name ?? `Account ${account.id}`,
@@ -74,7 +82,7 @@ export class D1MetadataRepository {
     const payeeName = `Transfer : ${presentation.name}`;
     const commandId = this.id(context);
     if (ensureOnly) {
-      await this.run("metadata.account.ensure", planId, account.id, { account, ensureOnly, incrementKnowledge }, context, [
+      await this.run("metadata.account.ensure", planId, account.id, { account, ensureOnly }, context, [
         assertion(commandId, "metadata_plan_exists", planId, planId),
         assertion(commandId, "metadata_account", account.id, planId),
         assertion(commandId, "metadata_payee", payeeId, planId),
@@ -88,7 +96,7 @@ export class D1MetadataRepository {
       return;
     }
     const conflict = `DO UPDATE SET name=excluded.name,icon=excluded.icon,type=excluded.type,on_budget=excluded.on_budget,closed=excluded.closed,opening_balance_milli=excluded.opening_balance_milli,balance_milli=excluded.balance_milli,cleared_balance_milli=excluded.cleared_balance_milli,uncleared_balance_milli=excluded.uncleared_balance_milli,transfer_payee_id=excluded.transfer_payee_id,direct_import_linked=excluded.direct_import_linked,direct_import_in_error=excluded.direct_import_in_error,external_ynab_id=excluded.external_ynab_id,deleted=excluded.deleted,updated_at=CURRENT_TIMESTAMP`;
-    await this.run("metadata.account.upsert", planId, account.id, { account, ensureOnly, incrementKnowledge }, context, [
+    await this.run("metadata.account.upsert", planId, account.id, { account, ensureOnly }, context, [
       assertion(commandId, "metadata_plan_exists", planId, planId), assertion(commandId, "metadata_account", account.id, planId), assertion(commandId, "metadata_payee", payeeId, planId),
       // Imported transfer payees arrive before their accounts.  Keep their
       // source name when present; only provision this synthetic record if the
@@ -102,7 +110,7 @@ export class D1MetadataRepository {
         [payeeName, planId, account.id, payeeName],
       ),
       statement("UPDATE accounts SET transfer_payee_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND plan_id=?", [payeeId, account.id, planId]),
-      ...(incrementKnowledge ? [statement("UPDATE plans SET server_knowledge=server_knowledge+1,updated_at=CURRENT_TIMESTAMP WHERE id=?", [planId])] : []),
+      statement("UPDATE plans SET server_knowledge=server_knowledge+1,updated_at=CURRENT_TIMESTAMP WHERE id=?", [planId]),
     ]);
   }
 
@@ -145,7 +153,10 @@ export class D1MetadataRepository {
   async upsertPayee(planId: string, payee: any, context?: D1WriteContext): Promise<void> {
     const commandId = this.id(context);
     await this.run("metadata.payee.upsert", planId, payee.id, { payee }, context, [assertion(commandId,"metadata_plan_exists",planId,planId), assertion(commandId,"metadata_payee",payee.id,planId),
-      statement("INSERT INTO payees(id,plan_id,name,transfer_account_id,external_ynab_id,deleted,updated_at) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET name=excluded.name,transfer_account_id=excluded.transfer_account_id,external_ynab_id=excluded.external_ynab_id,deleted=excluded.deleted,updated_at=CURRENT_TIMESTAMP", [payee.id,planId,payee.name??`Payee ${payee.id}`,payee.transfer_account_id??null,payee.external_ynab_id??payee.id,bool(payee.deleted)])]);
+      statement("INSERT INTO payees(id,plan_id,name,transfer_account_id,external_ynab_id,deleted,updated_at) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET name=excluded.name,transfer_account_id=excluded.transfer_account_id,external_ynab_id=excluded.external_ynab_id,deleted=excluded.deleted,updated_at=CURRENT_TIMESTAMP", [payee.id,planId,payee.name??`Payee ${payee.id}`,payee.transfer_account_id??null,payee.external_ynab_id??payee.id,bool(payee.deleted)]),
+      // Payees are validated against `server_knowledge` by clients (#175), so
+      // a rename or a delete arriving by import must move it.
+      statement("UPDATE plans SET server_knowledge=server_knowledge+1,updated_at=CURRENT_TIMESTAMP WHERE id=?", [planId])]);
   }
 
   async upsertYnabRawObject(planId:string,objectType:string,objectId:string,payload:unknown,serverKnowledge?:number,context?:D1WriteContext):Promise<void>{

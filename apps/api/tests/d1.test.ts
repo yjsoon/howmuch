@@ -1559,6 +1559,14 @@ describe("D1 foundation", () => {
     await metadata.updateAccount("p", "a", { name: "Daily", icon: "🐷" }, { operationId: "account-identity" });
     expect(db.query("SELECT name, icon FROM accounts WHERE id = 'a'").get()).toEqual({ name: "Daily", icon: "🐷" });
     expect(db.query("SELECT name FROM payees WHERE id = ?").get(account.transfer_payee_id)).toEqual({ name: "Transfer : Daily" });
+    // Clients revalidate cached accounts and payees against `server_knowledge`
+    // (#175), so an import touching only those has to move it.
+    const knowledgeBeforePayee = (db.query("SELECT server_knowledge FROM plans WHERE id='p'").get() as { server_knowledge: number }).server_knowledge;
+    await metadata.upsertPayee("p", { id: "payee-import", name: "Imported Shop" }, { operationId: "payee-import" });
+    expect((db.query("SELECT server_knowledge FROM plans WHERE id='p'").get() as { server_knowledge: number }).server_knowledge).toBeGreaterThan(knowledgeBeforePayee);
+    const knowledgeBeforeAccountUpsert = (db.query("SELECT server_knowledge FROM plans WHERE id='p'").get() as { server_knowledge: number }).server_knowledge;
+    await metadata.upsertAccount("p", { id: "a", name: "Daily", type: "checking", balance: 100 }, { operationId: "account-a-reimport" });
+    expect((db.query("SELECT server_knowledge FROM plans WHERE id='p'").get() as { server_knowledge: number }).server_knowledge).toBeGreaterThan(knowledgeBeforeAccountUpsert);
     await metadata.upsertYnabRawObject("p", "month", "2026-06-01", { month: "2026-06-01", budgeted: 42, deleted: false }, 9, { operationId: "raw-month" });
     await metadata.upsertYnabRawObject("p", "month", "2026-06-01", { month: "2026-06-01", budgeted: 43, deleted: true }, 10, { operationId: "raw-month-update" });
     expect(db.query("SELECT payload_json,deleted,server_knowledge FROM ynab_raw_objects").get()).toEqual({ payload_json: '{"month":"2026-06-01","budgeted":43,"deleted":true}', deleted: 1, server_knowledge: 10 });
