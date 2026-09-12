@@ -66,18 +66,15 @@ final class CaptureAITests: XCTestCase {
     }
   }
 
-  func testSettingsRequireConsentKeepKeysOutOfPreferencesAndScopeKeysToEndpoint() throws {
+  func testSettingsKeepKeysOutOfPreferencesAndScopeKeysToEndpoint() throws {
     let suite = "howmuch.byok.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suite)!
     defer { defaults.removePersistentDomain(forName: suite) }
     let keys = CaptureAIMemoryKeys()
     let settings = CaptureAISettings(defaults: defaults, keys: keys)
     XCTAssertNil(try settings.configuration())
-    var selection = CaptureAISelection(providerID: "opencode-go", modelID: "gpt-5.6-luna")
+    let selection = CaptureAISelection(providerID: "opencode-go", modelID: "gpt-5.6-luna")
     try settings.save(selection, keyChange: "first-fixture-key")
-    XCTAssertThrowsError(try settings.configuration()) { XCTAssertEqual($0 as? CaptureAIError, .consent) }
-    selection.allowsRemote = true
-    try settings.save(selection)
     XCTAssertEqual(try settings.configuration()?.apiKey, "first-fixture-key")
     XCTAssertFalse(String(decoding: defaults.data(forKey: CaptureAISettings.defaultsKey)!, as: UTF8.self).contains("fixture-key"))
     try settings.save(selection, keyChange: "replacement-fixture-key")
@@ -89,7 +86,7 @@ final class CaptureAITests: XCTestCase {
     XCTAssertThrowsError(try settings.configuration()) { XCTAssertEqual($0 as? CaptureAIError, .key) }
     XCTAssertFalse(settings.hasKey(for: selection))
 
-    let custom = CaptureAISelection(providerID: "custom", modelID: "model", customBaseURL: "https://one.example/v1/", allowsRemote: true)
+    let custom = CaptureAISelection(providerID: "custom", modelID: "model", customBaseURL: "https://one.example/v1/")
     try settings.save(custom, keyChange: "custom-fixture-key")
     var changed = custom
     changed.customBaseURL = "https://two.example/v1"
@@ -100,6 +97,20 @@ final class CaptureAITests: XCTestCase {
     XCTAssertThrowsError(try settings.save(custom, keyChange: "should-not-save"))
     XCTAssertEqual(settings.selection, changed)
     XCTAssertEqual(CaptureAISettings(defaults: defaults, keys: keys).selection, changed)
+  }
+
+  func testLegacyDeniedConsentStillAllowsRemoteConfiguration() throws {
+    let suite = "howmuch.byok.legacy-consent.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let legacy = Data(#"{"providerID":"opencode-go","modelID":"gpt-5.6-luna","customBaseURL":"","customAPI":"chatCompletions","allowsRemote":false}"#.utf8)
+    defaults.set(legacy, forKey: CaptureAISettings.defaultsKey)
+    let keys = CaptureAIMemoryKeys()
+    let settings = CaptureAISettings(defaults: defaults, keys: keys)
+    XCTAssertEqual(settings.selection.providerID, "opencode-go")
+    XCTAssertEqual(settings.selection.modelID, "gpt-5.6-luna")
+    try settings.save(settings.selection, keyChange: "legacy-fixture-key")
+    XCTAssertEqual(try settings.configuration()?.apiKey, "legacy-fixture-key")
   }
 
   func testKeychainCanReplaceAndDeleteOnlyItsOwnCredential() throws {

@@ -508,7 +508,7 @@ final class CaptureWorkspaceTests: XCTestCase {
       )
     )
     XCTAssertTrue(session.attachments[0].isReading)
-    XCTAssertFalse(session.canSendComposer)
+    XCTAssertTrue(session.canSendComposer)
     workspace.persistCurrentIfNeeded()
 
     let fresh = CaptureWorkspace(store: store)
@@ -523,7 +523,7 @@ final class CaptureWorkspaceTests: XCTestCase {
     XCTAssertEqual(restored?.attachments.first?.isReading, false)
     XCTAssertFalse(restored?.attachments.first?.errorMessage?.isEmpty ?? true, "pending empty transcript needs an explicit recoverable error")
     restored?.composerText = "Lunch $12"
-    XCTAssertEqual(restored?.canSendComposer, false, "Send must stay blocked for pending recovery, including typed text")
+    XCTAssertEqual(restored?.canSendComposer, true, "typed text and retained image bytes stay sendable during recovery")
   }
 
   func testFreshWorkspaceRoundtripKeepsRecognizedImageReadyToSend() {
@@ -596,7 +596,7 @@ final class CaptureWorkspaceTests: XCTestCase {
       "I could not read text from that image. It is still attached."
     )
     XCTAssertEqual(restored?.attachments.first?.isReading, false)
-    XCTAssertEqual(restored?.canSendComposer, false)
+    XCTAssertEqual(restored?.canSendComposer, true)
   }
 
   func testLegacyAttachmentJSONWithoutReadingOrErrorFieldsStaysCompatible() throws {
@@ -696,10 +696,12 @@ final class CaptureWorkspaceTests: XCTestCase {
     )
     XCTAssertTrue(restored?.sentAttachments.isEmpty == true)
     restored?.composerText = "Lunch $12"
-    XCTAssertEqual(restored?.canSendComposer, false, "missing bytes must block Send until the attachment is removed")
+    XCTAssertEqual(restored?.canSendComposer, true, "typed text must stay sendable even if a broken attachment remains")
+    restored?.composerText = ""
+    XCTAssertEqual(restored?.canSendComposer, false, "missing bytes must not count as a sendable image")
     restored?.removeAttachment(attachmentID)
     XCTAssertTrue(restored?.attachments.isEmpty == true)
-    XCTAssertEqual(restored?.canSendComposer, true)
+    XCTAssertEqual(restored?.canSendComposer, false)
   }
 
   private static func removingAttachmentStatusKeys(_ data: Data) throws -> Data {

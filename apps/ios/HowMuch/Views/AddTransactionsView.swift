@@ -102,7 +102,7 @@ struct AddTransactionsView: View {
             accountLabel: currentAccountName,
             isBusy: session.isBusy,
             isIngesting: session.isIngesting,
-            canSend: session.canSendComposer && intelligence.allowsDescribe,
+            canSend: session.canSendComposer,
             canChangeAccount: !session.isBusy && !session.isSaving,
             canOpenPlus: !session.isSaving,
             pending: session.attachments,
@@ -274,17 +274,6 @@ struct AddTransactionsView: View {
     ScrollViewReader { proxy in
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 20) {
-          if session.messages.isEmpty && session.drafts.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-              Text("Add an expense or ask about recorded spending.")
-                .font(.body)
-                .foregroundStyle(Theme.textPrimary)
-              Text("Try “Lunch $12”.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-          }
           if let banner = intelligence.banner {
             Text(banner)
               .font(.footnote)
@@ -606,7 +595,7 @@ struct AddTransactionsView: View {
   }
 
   private func send() {
-    guard session.canSendComposer, intelligence.allowsDescribe, isCurrent(capturedTurnScope()) else {
+    guard session.canSendComposer, isCurrent(capturedTurnScope()) else {
       return
     }
     errorMessage = nil

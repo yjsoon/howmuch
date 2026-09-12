@@ -353,10 +353,8 @@ final class CaptureSession: Identifiable {
 
   var canSendComposer: Bool {
     let hasText = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    let hasUnresolvedOCR = attachments.contains { attachment in
-      attachment.isReading || !(attachment.errorMessage?.isEmpty ?? true)
-    }
-    return (hasText || !attachments.isEmpty) && !isBusy && !isIngesting && !isSaving && !hasUnresolvedOCR
+    let hasSendableAttachment = attachments.contains { !$0.data.isEmpty }
+    return (hasText || hasSendableAttachment) && !isBusy && !isSaving
   }
 
   var canSaveIncluded: Bool {

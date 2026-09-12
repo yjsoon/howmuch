@@ -1093,7 +1093,7 @@ final class CaptureSessionTests: XCTestCase {
     workspace.current = session
     session.composerText = "Lunch $12"
     session.isTransferringImages = true
-    XCTAssertFalse(session.canSendComposer)
+    XCTAssertTrue(session.canSendComposer)
     XCTAssertTrue(session.isIngesting)
     let token = session.beginTurn()
     let captured = CaptureTurnScope.capture(
@@ -1120,17 +1120,32 @@ final class CaptureSessionTests: XCTestCase {
     XCTAssertTrue(session.drafts.isEmpty)
   }
 
-  func testSendIsBlockedDuringPhotoLoadAndOCR() {
+  func testSendStaysAvailableDuringPhotoLoadAndOCR() {
     let session = Self.session(accountID: "acct-everyday")
     session.composerText = "Lunch $12"
     XCTAssertTrue(session.canSendComposer)
     session.isTransferringImages = true
-    XCTAssertFalse(session.canSendComposer)
+    XCTAssertTrue(session.canSendComposer, "typed financial text must stay sendable while a photo is loading")
     XCTAssertFalse(session.canSaveIncluded)
     session.isTransferringImages = false
+    session.composerText = ""
     session.addAttachment(CaptureAttachment(filename: "slip.jpg", data: Data(), isReading: true))
-    XCTAssertFalse(session.canSendComposer)
+    XCTAssertFalse(session.canSendComposer, "an empty placeholder with no bytes is not sendable yet")
     XCTAssertTrue(session.isIngesting)
+    session.updateAttachment(
+      CaptureAttachment(
+        id: session.attachments[0].id,
+        filename: "slip.jpg",
+        data: Data([0xFF, 0xD8, 0xFF, 0xD9]),
+        isReading: true
+      )
+    )
+    XCTAssertTrue(session.canSendComposer, "a loaded image must be sendable before OCR finishes")
+    var failed = session.attachments[0]
+    failed.isReading = false
+    failed.errorMessage = "I could not read text from that image. It is still attached."
+    session.updateAttachment(failed)
+    XCTAssertTrue(session.canSendComposer, "a readable image must stay sendable after OCR fails")
   }
 
   func testTurnScopeRejectsInitiallyMismatchedScopeAndCurrentIdentity() {
@@ -1292,7 +1307,7 @@ final class CaptureSessionTests: XCTestCase {
     session.isTransferringImages = true
     XCTAssertTrue(CapturePasteAdmission.shouldRejectNewAttachments(session))
     XCTAssertFalse(session.canSaveIncluded)
-    XCTAssertFalse(session.canSendComposer)
+    XCTAssertTrue(session.canSendComposer)
     session.isTransferringImages = false
     session.isSaving = true
     XCTAssertTrue(CapturePasteAdmission.shouldRejectNewAttachments(session))
