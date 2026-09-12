@@ -115,6 +115,11 @@ private enum SnapshotFixture {
       authenticatedUserID: settings.authenticatedUserID,
       planID: settings.planID,
       serverKnowledge: serverKnowledge,
+      // A whole second: the file stores ISO-8601, which carries no fractional
+      // part, so a `Date()` would not survive the round trip exactly and the
+      // whole-snapshot comparison below would be about clock precision rather
+      // than about the encoding.
+      capturedAt: Date(timeIntervalSince1970: 1_770_000_000),
       planSettings: PlanSettings(
         dateFormat: DateFormat(format: "YYYY-MM-DD"),
         currencyFormat: CurrencyFormat(
