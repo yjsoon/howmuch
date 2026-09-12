@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   REFERENCE_CACHE_VERSION,
   clearReferenceCache,
+  currentCacheEpoch,
   decideReferenceRefresh,
   deserialiseEnvelope,
   makeEnvelope,
@@ -217,6 +218,34 @@ describe("the storage shell", () => {
     expect(reread?.serverKnowledge).toBe(42);
     expect(reread?.data.accounts[0]?.balance).toBe(2000);
     expect(decideReferenceRefresh(reread, identity, 42)).toBe("keep");
+  });
+
+  test("a read that started before a local write cannot refill the cache", () => {
+    // The GET went out at this epoch and resolves after the write below.
+    const epochAtRequest = currentCacheEpoch();
+    writeSlot("payees", identity, 41, payees);
+    expect(readSlot("payees", isPayeeList)).not.toBeNull();
+
+    clearReferenceCache();
+    expect(readSlot("payees", isPayeeList)).toBeNull();
+
+    // Its rows predate the write, so storing them would resurrect exactly what
+    // the invalidation existed to remove.
+    writeSlot("payees", identity, 41, payees, epochAtRequest);
+    expect(readSlot("payees", isPayeeList)).toBeNull();
+
+    // A read started after the invalidation stores normally.
+    writeSlot("payees", identity, 42, payees, currentCacheEpoch());
+    expect(readSlot("payees", isPayeeList)?.serverKnowledge).toBe(42);
+  });
+
+  test("every invalidation moves the epoch", () => {
+    const before = currentCacheEpoch();
+    clearReferenceCache();
+    const once = currentCacheEpoch();
+    expect(once).toBeGreaterThan(before);
+    clearReferenceCache();
+    expect(currentCacheEpoch()).toBeGreaterThan(once);
   });
 
   test("unusable storage is survivable: reads return nothing, writes do not throw", () => {

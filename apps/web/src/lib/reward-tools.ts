@@ -1,5 +1,16 @@
 import type { TermsPatch } from "../../../api/src/reward-tools-contract";
+import { notifyLocalWrite } from "../api/client";
 
+/**
+ * These calls bypass `request` in `api/client.ts` because they need their own
+ * abort signal and timeout, so they must invalidate the client cache
+ * themselves. Every call here is a POST or PATCH; `patchRewardCard` really
+ * does write the ledger, and the two `/api/tools/` analysers do not, so this
+ * invalidates a little more often than it strictly must. That is the safe
+ * direction, and it keeps the rule here to one line instead of a list of
+ * exceptions to maintain. Like `request`, it invalidates however the call
+ * ends: a write that times out may still have been applied.
+ */
 export async function toolRequest<T>(path: string, body: unknown, signal?: AbortSignal, method = "POST"): Promise<T> {
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), 75_000);
@@ -13,7 +24,7 @@ export async function toolRequest<T>(path: string, body: unknown, signal?: Abort
   } catch (error) {
     if (timeout.signal.aborted) throw new Error("Request timed out. No further data will be sent.");
     throw error;
-  } finally { clearTimeout(timer); }
+  } finally { clearTimeout(timer); notifyLocalWrite(); }
 }
 export function patchRewardCard(planId: string, cardId: string, card: TermsPatch) {
   return toolRequest(`/api/rewards/cards/${encodeURIComponent(cardId)}`, { plan_id: planId, card }, undefined, "PATCH");

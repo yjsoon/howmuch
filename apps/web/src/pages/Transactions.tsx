@@ -72,7 +72,7 @@ import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
 import { isCachedPayees, isCachedRegisterPage, isCachedScheduled } from "../state/cache-shapes";
 import type { CachedRegisterPage } from "../state/cache-shapes";
-import { readSlot, shouldUseCache, writeSlot } from "../state/reference-cache";
+import { currentCacheEpoch, readSlot, shouldUseCache, writeSlot } from "../state/reference-cache";
 import { useCachedApi } from "../state/use-cached-api";
 
 function hasUncategorisedLine(txn: Transaction): boolean {
@@ -94,12 +94,13 @@ type ReconcileDraft = {
 
 export function TransactionsPage() {
   const { filters, setFilters } = useFilters({ defaultRange: () => trailingMonthsRange(2) });
-  const { accounts, categoryGroups, planId, userId, ledgerKnowledge, provisional, reload } = usePlan();
-  // Until the bootstrap's knowledge check lands, `provisional` says the plan
-  // knowledge on hand came from cache and proves nothing, so these slots are
-  // painted but not yet trusted.
+  const { accounts, categoryGroups, planId, userId, ledgerKnowledge, knowledgeTrusted, cacheEpoch, reload } = usePlan();
+  // `knowledgeTrusted` is false in two cases: before the bootstrap's check has
+  // landed, where the number on hand came from the cache itself, and after a
+  // local write, where the server has already moved past it. In both, these
+  // slots may be painted but neither validated nor written.
   const cacheIdentity = useMemo(() => ({ userId, planId }), [userId, planId]);
-  const validatedKnowledge = provisional ? null : ledgerKnowledge;
+  const validatedKnowledge = knowledgeTrusted ? ledgerKnowledge : null;
   const payees = useCachedApi<Payee[]>({
     slot: "payees",
     key: planId,
@@ -107,6 +108,7 @@ export function TransactionsPage() {
     serverKnowledge: validatedKnowledge,
     guard: isCachedPayees,
     fetcher: () => api.payees(planId),
+    cacheEpoch,
   });
   const rewardsSnapshot = useApi(`${planId}:reward-flag-names`, () => api.rewardsTrackerSnapshot(planId));
   const colourNamesByAccountId = useMemo(
@@ -218,6 +220,7 @@ export function TransactionsPage() {
     serverKnowledge: validatedKnowledge,
     guard: isCachedScheduled,
     fetcher: () => api.scheduledTransactions(planId),
+    cacheEpoch,
   });
   const approvalQueue = useApi(
     JSON.stringify({ planId, selectedAccountId, from: filters.from, to: filters.to, refreshGeneration, approvalQueue: true }),
@@ -265,8 +268,6 @@ export function TransactionsPage() {
   // The register stays network-first. A cached first page is only ever a seed
   // under a fetch that is already running, never kept on a knowledge match, so
   // what is on screen is replaced as soon as the first rows report.
-  const knowledgeRef = useRef(validatedKnowledge);
-  knowledgeRef.current = validatedKnowledge;
   const seedRegisterRows = (): Transaction[] => {
     const cached = readSlot<CachedRegisterPage>("register", isCachedRegisterPage);
     return cached && shouldUseCache(cached, cacheIdentity) && cached.data.listKey === listKey
@@ -283,6 +284,15 @@ export function TransactionsPage() {
   useEffect(() => {
     let cancelled = false;
     const requestVersion = ++requestVersionRef.current;
+    // Both captured before the first page is requested, never read again when
+    // it resolves. Knowledge read afterwards could be higher than the rows
+    // being stored are entitled to — a reload between the two would raise it —
+    // and tagging rows with knowledge they predate is exactly what makes a
+    // cache stale. Taken here, the tag is at or below the rows' true knowledge,
+    // so a later equality check can only be conservative. The epoch makes the
+    // same guarantee against a local write landing mid-fill.
+    const knowledgeAtRequest = ledgerKnowledge;
+    const epochAtRequest = currentCacheEpoch();
     // Seeded rows render straight away: `loaded` is what puts the register on
     // screen instead of the loading panel. `filling` stays true, so the horizon
     // fill still owns the footer and "Load older" stays out of reach until the
@@ -320,18 +330,15 @@ export function TransactionsPage() {
         if (!filled) {
           return;
         }
-        const knowledge = knowledgeRef.current;
-        if (knowledge !== null) {
-          // Only the first page. The horizon fill can run to several, and the
-          // point of the seed is the first frame, not the whole register.
-          const firstPage = filled.transactions.slice(0, REGISTER_PAGE_SIZE);
-          writeSlot("register", cacheIdentity, knowledge, {
-            listKey,
-            transactions: firstPage,
-            hasMore: filled.hasMore || filled.transactions.length > firstPage.length,
-            nextOffset: filled.nextOffset,
-          });
-        }
+        // Only the first page. The horizon fill can run to several, and the
+        // point of the seed is the first frame, not the whole register.
+        const firstPage = filled.transactions.slice(0, REGISTER_PAGE_SIZE);
+        writeSlot("register", cacheIdentity, knowledgeAtRequest, {
+          listKey,
+          transactions: firstPage,
+          hasMore: filled.hasMore || filled.transactions.length > firstPage.length,
+          nextOffset: filled.nextOffset,
+        }, epochAtRequest);
         setPage({
           transactions: filled.transactions,
           hasMore: filled.hasMore,

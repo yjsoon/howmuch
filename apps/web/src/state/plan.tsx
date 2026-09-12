@@ -32,9 +32,10 @@ import {
   type Settled,
 } from "./bootstrap";
 import { isCachedReference, type CachedReference } from "./cache-shapes";
-import { loadPrefs, savePrefs } from "./prefs";
+import { loadPrefs, savePrefs, sessionLooksLive } from "./prefs";
 import {
   clearReferenceCache,
+  currentCacheEpoch,
   decideReferenceRefresh,
   readSlot,
   writeSlot,
@@ -52,6 +53,22 @@ export interface PlanContextValue {
    * refetched or validated against the plan's `server_knowledge`.
    */
   provisional: boolean;
+  /**
+   * Whether `ledgerKnowledge` may be used to validate a cached slot.
+   *
+   * It is false during a provisional paint, where the number itself came from
+   * the cache, and false again after any local write, where the server has
+   * moved past the number this value still holds. Routes that see it false
+   * fetch and decline to store the result, rather than tagging fresh rows with
+   * knowledge that has already been superseded.
+   */
+  knowledgeTrusted: boolean;
+  /**
+   * Increments whenever the client cache is invalidated. Routes key their
+   * cached reads on it so a local write makes them re-read an empty cache
+   * instead of resolving against a slot that no longer exists.
+   */
+  cacheEpoch: number;
   accounts: Account[];
   ledgerKnowledge: number;
   accountPreferences: AccountPreferences | null;
@@ -129,6 +146,8 @@ function provisionalPlanValue(
     planId,
     userId: envelope.userId,
     provisional: true,
+    knowledgeTrusted: false,
+    cacheEpoch: currentCacheEpoch(),
     accounts: accounts.filter((account) => !account.deleted),
     ledgerKnowledge: envelope.serverKnowledge,
     accountPreferences: preferences,
@@ -173,7 +192,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
     accountPreferencesControllerRef.current = null;
     // The next person to sign in here should inherit neither this hint nor
     // any of this user's cached ledger data.
-    savePrefs({ planId: undefined });
+    savePrefs({ planId: undefined, sessionExpiresAt: undefined });
     clearReferenceCache();
     setValue(null);
     setError(null);
@@ -184,7 +203,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
     setUnauthorizedHandler(() => {
       accountPreferencesControllerRef.current?.controller.detach();
       accountPreferencesControllerRef.current = null;
-      savePrefs({ planId: undefined });
+      savePrefs({ planId: undefined, sessionExpiresAt: undefined });
       clearReferenceCache();
       setValue(null);
       setError("Your session ended. Sign in again.");
@@ -195,7 +214,15 @@ export function PlanProvider({ children }: { children: ReactNode }) {
     // knowledge but not everything that number covers — a transaction moves
     // account balances the response does not carry — so the entry is dropped
     // rather than retagged with a number that would make it look current.
-    setLocalWriteHandler(clearReferenceCache);
+    setLocalWriteHandler(() => {
+      clearReferenceCache();
+      // The value on screen keeps its rows, but its knowledge is now one
+      // behind the server, so nothing may be validated or stored against it
+      // until the next bootstrap supplies a number the server has confirmed.
+      setValue((current) => current
+        ? { ...current, knowledgeTrusted: false, cacheEpoch: currentCacheEpoch() }
+        : current);
+    });
     return () => {
       setUnauthorizedHandler(null);
       setLocalWriteHandler(null);
@@ -210,12 +237,22 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         // its reference data all start now, instead of one after another. The
         // pure helpers in ./bootstrap decide afterwards which answers survive.
         const attached = accountPreferencesControllerRef.current;
-        const hint = loadPrefs().planId ?? null;
+        const prefs = loadPrefs();
+        const hint = prefs.planId ?? null;
         // The cache is read before a single request is made, so the shell can
-        // be on screen before the first response. Which user this browser is
-        // signed in as is not known yet, so only the plan is matched here; the
-        // session check below discards the paint if it belongs to someone else.
-        const cached = hint && !attached
+        // be on screen before the first response.
+        //
+        // Painting it early means painting before the server has confirmed who
+        // is here, so it is gated on the session expiry this browser recorded
+        // at its last sign-in. Without that gate, a cookie that expired while
+        // the tab was closed would still show the previous person's accounts,
+        // categories, payees and register rows to whoever opens the browser
+        // next, for as long as the session check takes to answer. Past the
+        // expiry the paint is skipped and the shell waits, which costs one
+        // round trip. The session check below is still the authority; this
+        // only decides whether anything may be shown ahead of it.
+        const sessionLive = sessionLooksLive(prefs.sessionExpiresAt, Date.now());
+        const cached = hint && !attached && sessionLive
           ? readSlot<CachedReference>("reference", isCachedReference)
           : null;
         const paintedCache = cached?.planId === hint ? cached : null;
@@ -247,6 +284,10 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         const status = await statusPromise;
         if (cancelled) return;
         setBootstrapRequired(status.bootstrap_required);
+        // Kept current from every bootstrap, so a session renewed or revoked
+        // elsewhere is reflected the next time this browser decides whether it
+        // may paint from cache.
+        savePrefs({ sessionExpiresAt: status.session_expires_at ?? undefined });
         const session = decideSession(status);
         if (session.kind === "signed-out") {
           // The sign-in form goes up now. Whatever the two speculative calls
@@ -375,6 +416,8 @@ export function PlanProvider({ children }: { children: ReactNode }) {
           planId,
           userId: decision.userId,
           provisional: false,
+          knowledgeTrusted: true,
+          cacheEpoch: currentCacheEpoch(),
           accounts: accountsSnapshot.accounts.filter((account) => !account.deleted),
           ledgerKnowledge: accountsSnapshot.server_knowledge,
           accountPreferences: accountPreferencesController ? accountPreferencesSync.preferences : null,
@@ -412,9 +455,14 @@ export function PlanProvider({ children }: { children: ReactNode }) {
       } catch (cause) {
         if (!cancelled) {
           if (cause instanceof ApiError && cause.status === 401) {
+            // The same teardown as `onUnauthorized` and `signOut`. A 401
+            // raised here — a speculative call deciding its own, or a read
+            // after the session went — ends the session just as surely, so it
+            // must not leave this user's ledger data behind in the browser.
             accountPreferencesControllerRef.current?.controller.detach();
             accountPreferencesControllerRef.current = null;
-            savePrefs({ planId: undefined });
+            savePrefs({ planId: undefined, sessionExpiresAt: undefined });
+            clearReferenceCache();
             setValue(null);
             setAuthMode("login");
           }
@@ -491,8 +539,12 @@ function AuthForm({
         event.preventDefault();
         setSubmitting(true);
         try {
-          if (setup) await api.setup(username, password, bootstrapToken);
-          else await api.login(username, password);
+          const session = setup
+            ? await api.setup(username, password, bootstrapToken)
+            : await api.login(username, password);
+          // Recorded now so the next load can tell, without asking, whether
+          // this browser still holds a live session before it paints anything.
+          savePrefs({ sessionExpiresAt: session.session_expires_at ?? undefined });
           setPassword("");
           setBootstrapToken("");
           onSuccess();

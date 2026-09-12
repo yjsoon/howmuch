@@ -2,17 +2,20 @@
  * The effect wiring for a validated cache slot. Every decision it makes comes
  * from `./reference-cache`; this file only runs them.
  *
- * Two outcomes, and the difference is the whole point of #175:
+ * Three outcomes, and the first is the whole point of #175:
  *
  * - Cached knowledge equals the plan's current `server_knowledge`, so the
  *   entry is provably current and no request is made at all.
- * - Anything else: the entry paints immediately as a seed, `provisional` says
- *   so, and the fetch that is already running replaces it.
+ * - The plan's knowledge is not known yet but an entry exists: paint it, mark
+ *   it provisional, and wait for the check rather than fetching blind.
+ * - Anything else: fetch, showing the entry as a seed if there is one until
+ *   the response replaces it.
  */
 
 import { useEffect, useRef, useState } from "react";
 import type { ApiState } from "../api/client";
 import {
+  currentCacheEpoch,
   planCachedFetch,
   readSlot,
   writeSlot,
@@ -34,6 +37,12 @@ export interface CachedApiOptions<T> {
   serverKnowledge: number | null;
   guard: (value: unknown) => value is T;
   fetcher: () => Promise<T>;
+  /**
+   * The cache epoch this route last saw. Passing it makes a local write re-run
+   * the read: the slot has just been emptied, so the branch that would have
+   * skipped the request on a knowledge match now goes to the network instead.
+   */
+  cacheEpoch: number;
 }
 
 interface InternalState<T> extends CachedApiState<T> {
@@ -41,7 +50,7 @@ interface InternalState<T> extends CachedApiState<T> {
 }
 
 export function useCachedApi<T>(options: CachedApiOptions<T>): CachedApiState<T> {
-  const { slot, key, identity, serverKnowledge, guard } = options;
+  const { slot, key, identity, serverKnowledge, guard, cacheEpoch } = options;
   const [state, setState] = useState<InternalState<T>>({
     data: null,
     loading: true,
@@ -83,12 +92,17 @@ export function useCachedApi<T>(options: CachedApiOptions<T>): CachedApiState<T>
       provisional: decision.seed !== null,
       key,
     });
+    // Recorded before the request goes out. If a local write empties the cache
+    // while this is in flight, the result predates that write and `writeSlot`
+    // refuses to store it, so an invalidated slot cannot be refilled with rows
+    // the write has already superseded.
+    const startedEpoch = currentCacheEpoch();
     current
       .fetcher()
       .then((data) => {
         if (cancelled) return;
         if (resolved && serverKnowledge !== null) {
-          writeSlot(slot, resolved, serverKnowledge, data);
+          writeSlot(slot, resolved, serverKnowledge, data, startedEpoch);
         }
         setState({ data, loading: false, error: null, provisional: false, key });
       })
@@ -101,7 +115,7 @@ export function useCachedApi<T>(options: CachedApiOptions<T>): CachedApiState<T>
     return () => {
       cancelled = true;
     };
-  }, [slot, key, userId, planId, serverKnowledge, guard]);
+  }, [slot, key, userId, planId, serverKnowledge, guard, cacheEpoch]);
 
   const matched = state.key === key;
   return {

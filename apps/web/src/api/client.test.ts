@@ -4,6 +4,7 @@ import {
   api,
   BulkApprovalError,
   isWriteRequest,
+  notifyLocalWrite,
   setLocalWriteHandler,
   setUnauthorizedHandler,
   shouldHandleUnauthorized,
@@ -347,7 +348,9 @@ describe("write invalidation", () => {
     }
   });
 
-  test("a failed write leaves the cache alone", async () => {
+  test("a write rejected by the server still invalidates", async () => {
+    // The server can commit and then fail to answer, so a non-2xx write is not
+    // proof that nothing changed. Only one of the two possible answers is safe.
     const originalFetch = globalThis.fetch;
     let writes = 0;
     setLocalWriteHandler(() => { writes += 1; });
@@ -357,9 +360,48 @@ describe("write invalidation", () => {
     )) as typeof fetch;
     try {
       await expect(api.updateAccountIcon("plan-1", "account-1", "bank")).rejects.toThrow();
+      expect(writes).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      setLocalWriteHandler(null);
+    }
+  });
+
+  test("a write whose request never completes still invalidates", async () => {
+    const originalFetch = globalThis.fetch;
+    let writes = 0;
+    setLocalWriteHandler(() => { writes += 1; });
+    globalThis.fetch = (async () => { throw new TypeError("Failed to fetch"); }) as typeof fetch;
+    try {
+      await expect(api.updateAccountIcon("plan-1", "account-1", "bank")).rejects.toThrow("Failed to fetch");
+      expect(writes).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      setLocalWriteHandler(null);
+    }
+  });
+
+  test("a failed read never invalidates", async () => {
+    const originalFetch = globalThis.fetch;
+    let writes = 0;
+    setLocalWriteHandler(() => { writes += 1; });
+    globalThis.fetch = (async () => { throw new TypeError("Failed to fetch"); }) as typeof fetch;
+    try {
+      await expect(api.settings("plan-1")).rejects.toThrow("Failed to fetch");
       expect(writes).toBe(0);
     } finally {
       globalThis.fetch = originalFetch;
+      setLocalWriteHandler(null);
+    }
+  });
+
+  test("notifyLocalWrite covers writes that bypass the shared request path", async () => {
+    let writes = 0;
+    setLocalWriteHandler(() => { writes += 1; });
+    try {
+      notifyLocalWrite();
+      expect(writes).toBe(1);
+    } finally {
       setLocalWriteHandler(null);
     }
   });

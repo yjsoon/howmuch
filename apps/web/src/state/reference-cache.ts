@@ -11,10 +11,12 @@
  * Coverage is not uniform, and the distinction matters:
  *
  * - Validated. Accounts, payees, scheduled transactions and the register all
- *   sit behind writes that bump `server_knowledge` (`touchPlan`,
- *   `persistScheduledTransaction`, `executeMutationPlan` in the repository).
- *   Equal knowledge therefore proves the entry is current, so the refetch is
- *   skipped.
+ *   sit behind writes that bump `server_knowledge` — `touchPlan`,
+ *   `persistScheduledTransaction` and `executeMutationPlan` in the repository,
+ *   and, since this cache exists to rely on it, `upsertAccount` and
+ *   `upsertPayee`, which importers use and which previously changed those
+ *   lists silently. Equal knowledge therefore proves the entry is current, so
+ *   the refetch is skipped.
  * - Provisional only. Plan settings (`upsertPlan`), categories
  *   (`upsertCategory`) and account preferences (its own `revision`) change
  *   without touching `server_knowledge`. They are painted from cache for the
@@ -189,6 +191,21 @@ export function decideReferenceRefresh<T>(
 /** Slots are separate keys so each carries the knowledge it was fetched at. */
 export type CacheSlot = "reference" | "payees" | "scheduled" | "register";
 
+/**
+ * Counts how many times the cache has been invalidated in this tab.
+ *
+ * A read that started before a local write can resolve after it, carrying
+ * pre-write rows. Writing those to a slot would repopulate a cache that had
+ * just been emptied on purpose. Every fetch records the epoch it started at
+ * and refuses to store its result if the epoch has moved since, so a write
+ * cannot be overtaken by a read it already invalidated.
+ */
+let cacheEpoch = 0;
+
+export function currentCacheEpoch(): number {
+  return cacheEpoch;
+}
+
 const SLOTS: readonly CacheSlot[] = ["reference", "payees", "scheduled", "register"];
 
 export function slotKey(slot: CacheSlot): string {
@@ -206,12 +223,23 @@ export function readSlot<T>(
   }
 }
 
+/**
+ * Store a slot, unless the cache was invalidated while the read was in flight.
+ *
+ * `startedEpoch` is the value `currentCacheEpoch()` returned before the request
+ * went out. If it no longer matches, a write happened in between and this
+ * result predates it, so it is dropped rather than stored.
+ */
 export function writeSlot<T>(
   slot: CacheSlot,
   identity: CacheIdentity,
   serverKnowledge: number,
   data: T,
+  startedEpoch?: number,
 ): void {
+  if (startedEpoch !== undefined && startedEpoch !== cacheEpoch) {
+    return;
+  }
   try {
     localStorage.setItem(slotKey(slot), serialiseEnvelope(makeEnvelope(identity, serverKnowledge, data)));
   } catch {
@@ -226,6 +254,9 @@ export function writeSlot<T>(
  * fresh.
  */
 export function clearReferenceCache(): void {
+  // Bumped first, and outside the try: a read already in flight must be
+  // refused its write even if the removals below cannot run.
+  cacheEpoch += 1;
   try {
     for (const slot of SLOTS) {
       localStorage.removeItem(slotKey(slot));
