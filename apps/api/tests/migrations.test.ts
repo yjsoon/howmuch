@@ -58,7 +58,7 @@ describe("local schema migrations", () => {
         INSERT INTO transactions(id,payee_id) VALUES ('legacy-transaction','legacy-payee');
         INSERT INTO schema_migrations(version) VALUES
           ('001_initial'),('002_transaction_server_knowledge'),('003_transfer_payees'),('004_auth_foundation'),('005_password_auth'),
-          ('019_query_covering_indexes'),('021_account_month_balances');
+          ('019_query_covering_indexes'),('020_ynab_source_month_activity'),('021_account_month_balances');
       `);
 
       applyMigrations(db);
@@ -128,7 +128,7 @@ describe("local schema migrations", () => {
           ('001_initial'),('002_transaction_server_knowledge'),('003_transfer_payees'),('004_auth_foundation'),('005_password_auth'),
           ('006_allow_duplicate_payee_names'),('007_ynab_raw_objects'),('008_plan_month_assignments'),('009_plan_month_category_targets'),
           ('010_scheduled_transaction_edits'),('011_scheduled_transaction_snapshot_assertions'),('012_account_reconciliation_assertions'),
-          ('019_query_covering_indexes'),('021_account_month_balances');
+          ('019_query_covering_indexes'),('020_ynab_source_month_activity'),('021_account_month_balances');
       `);
 
       applyMigrations(db);
@@ -192,7 +192,7 @@ describe("local schema migrations", () => {
           ('006_allow_duplicate_payee_names'),('007_ynab_raw_objects'),('008_plan_month_assignments'),('009_plan_month_category_targets'),
           ('010_scheduled_transaction_edits'),('011_scheduled_transaction_snapshot_assertions'),('012_account_reconciliation_assertions'),
           ('013_unique_live_import_id'),('014_personal_api_tokens'),('015_account_preferences'),
-          ('019_query_covering_indexes'),('021_account_month_balances');
+          ('019_query_covering_indexes'),('020_ynab_source_month_activity'),('021_account_month_balances');
       `);
 
       applyMigrations(db);
@@ -236,6 +236,44 @@ describe("local schema migrations", () => {
       db.run("DELETE FROM users WHERE id='owner'");
       expect(db.query("SELECT id FROM personal_api_tokens").get()).toBeNull();
       expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("month activity is materialised from the raw mirror by 020", () => {
+    const db = new Database(":memory:");
+    try {
+      applyMigrations(db);
+      db.run("INSERT INTO plans(id,name) VALUES ('p','Plan')");
+      // A live split, whose lines replace the parent, and a deleted parent
+      // that must not contribute. Written before the rerun below, because the
+      // first applyMigrations backfilled an empty database.
+      for (const [type, id, payload] of [
+        ["transaction", "split", { id: "split", date: "2026-05-04", amount: -900, category_id: "legacy", deleted: false }],
+        ["subtransaction", "splita", { id: "a", transaction_id: "split", amount: -900, category_id: "food", deleted: false }],
+        ["transaction", "gone", { id: "gone", date: "2026-05-05", amount: -70, category_id: "food", deleted: true }],
+      ] as const) {
+        db.run(
+          "INSERT INTO ynab_raw_objects(plan_id,object_type,object_id,payload_json) VALUES ('p',?,?,?)",
+          [type, id, JSON.stringify(payload)],
+        );
+      }
+      db.run("DELETE FROM schema_migrations WHERE version='020_ynab_source_month_activity'");
+      db.run("DROP TABLE ynab_source_month_activity");
+      applyMigrations(db);
+
+      expect(db.query("SELECT month,category_id,activity FROM ynab_source_month_activity ORDER BY category_id").all()).toEqual([
+        { month: "2026-05-01", category_id: "food", activity: -900 },
+      ]);
+      expect(db.query("SELECT version FROM schema_migrations WHERE version='020_ynab_source_month_activity'").get()).toEqual({
+        version: "020_ynab_source_month_activity",
+      });
+      expect(db.query("SELECT name FROM pragma_index_info((SELECT name FROM pragma_index_list('ynab_source_month_activity') WHERE origin='pk')) ORDER BY seqno").all()).toEqual([
+        { name: "plan_id" },
+        { name: "month" },
+        { name: "category_id" },
+      ]);
     } finally {
       db.close();
     }

@@ -693,6 +693,13 @@ describe("YNAB-compatible API", () => {
       expect.objectContaining({ id: "ynab-uncategorized", activity: -1000 }),
     ]));
 
+    // The raw objects above were written without materialising, so that read
+    // took the unmaterialised fallback. Materialising must not change a digit:
+    // the uncategorised source line is stored under the `''` sentinel and
+    // resolved back to the imported Uncategorized category on read.
+    await repo.rematerialiseYnabMonthActivity("plan-test");
+    expect(await repo.getMonth("plan-test", "2026-08")).toEqual(baseline);
+
     await repo.createTransaction("plan-test", { id: "local-uncategorized", account_id: "cash", date: "2026-08-10", amount: -200 });
     const afterLocalEntry = await repo.getMonth("plan-test", "2026-08");
     expect(afterLocalEntry).toMatchObject({ activity: -2204 });

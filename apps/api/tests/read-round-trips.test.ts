@@ -8,6 +8,7 @@ import { newSession, passwordCredential } from "../src/password-auth";
 import { LedgerRepository } from "../src/repository";
 import type { RepositoryDatabase } from "../src/repository-db";
 import type { LedgerStore } from "../src/storage";
+import { REMATERIALISE_ALL_PLANS } from "../src/ynab-month-activity";
 import { CountingD1Database, fakeD1Binding } from "./helpers/counting-d1";
 
 const PLAN_ID = "p";
@@ -18,8 +19,9 @@ const PLAN_ID = "p";
  * all authenticated requests; #170 batched each route's remaining statements
  * into one more.
  *
- * The two routes still above two trips are owned by work in flight elsewhere:
- * `months/:month` by #174 and the report service by #180.
+ * The two routes still above two trips are owned by work elsewhere:
+ * `months/:month` by #174, which has now removed its raw-object scan but not
+ * batched what remains, and the report service by #180.
  */
 const BUDGET: Record<string, number> = {
   "GET /v1/plans": 2,
@@ -33,6 +35,13 @@ const BUDGET: Record<string, number> = {
   "GET /v1/plans/:id/transactions?limit=10": 2,
   "GET /v1/plans/:id/transactions?q=": 3,
   "GET /v1/plans/:id/scheduled_transactions": 2,
+  // #174 replaced the whole-plan raw-object scan with one read of
+  // `ynab_source_month_activity`, and enriched the fixture below with a source
+  // transaction so this route measures the production shape rather than the
+  // "no source objects at all" branch. On that fixture the old scan costs 11
+  // (it also read every subtransaction) and the materialised read costs 10.
+  // What #174 bought is the 29 MB of JSON that no longer crosses the wire, not
+  // the trip count; the remaining trips are unbatched reads, not scans.
   "GET /v1/plans/:id/months/:month": 10,
   "GET /api/reports/spending-breakdown": 3,
 };
@@ -114,12 +123,20 @@ function seedLedger(db: Database): void {
   for (const [type, id, payload] of [
     ["scheduled_transaction", "sched", { id: "sched", date_next: "2026-02-01" }],
     ["month", "2026-01-01", { month: "2026-01-01", categories: [] }],
+    // A source transaction mirroring the ledger row above, so the month route
+    // exercises the production shape: an imported plan whose month activity
+    // has a source baseline to compare against. Without it the route takes the
+    // "no source objects at all" branch and measures nothing useful.
+    ["transaction", "txn", { id: "txn", date: "2026-01-05", amount: -1000, category_id: "cat", deleted: false }],
   ] as const) {
     db.run(
       "INSERT INTO ynab_raw_objects (plan_id, object_type, object_id, payload_json) VALUES (?, ?, ?, ?)",
       [PLAN_ID, type, id, JSON.stringify(payload)],
     );
   }
+  // Migration 0017 ran against an empty database above, so materialise what
+  // the seed just wrote. Production is materialised once by the migration.
+  db.run(REMATERIALISE_ALL_PLANS);
 }
 
 async function measure(variant: string, makeRepo: (db: CountingD1Database) => LedgerStore) {

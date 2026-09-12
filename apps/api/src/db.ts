@@ -108,6 +108,10 @@ export function applyMigrations(db: Database): void {
       path: join(migrationsDir, "019_query_covering_indexes.sql"),
     },
     {
+      version: "020_ynab_source_month_activity",
+      path: join(migrationsDir, "020_ynab_source_month_activity.sql"),
+    },
+    {
       version: "021_account_month_balances",
       path: join(migrationsDir, "021_account_month_balances.sql"),
     },
