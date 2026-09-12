@@ -217,6 +217,20 @@ textarea {
   letter-spacing: 0.12em;
 }
 
+.sidebar-reflect {
+  margin: 0;
+  padding: 0;
+}
+
+.sidebar-reflect .sidebar-report-link {
+  display: block;
+  margin-top: 2px;
+}
+
+.sidebar-reflect-summary {
+  cursor: pointer;
+}
+
 .account-list {
   flex: 1;
   min-height: 0;
@@ -3521,6 +3535,11 @@ tr:hover .share-bar {
     display: flex;
     align-items: center;
     padding: 10px 12px 10px 34px;
+  }
+
+  .sidebar-reflect-summary {
+    min-height: 44px;
+    padding: 10px 12px;
   }
 
   .sidebar-primary-link .sidebar-balance {
