@@ -281,6 +281,12 @@ struct RegisterView: View {
         break
       }
     }
+    // The rows behind the "New" badge, fetched here rather than at launch.
+    .task(id: showingUnapprovedQueue) {
+      if showingUnapprovedQueue {
+        await model.loadUnapprovedQueueIfNeeded()
+      }
+    }
     .onAppear {
       if let accountID = scope.accountID {
         model.beginFocusedRegisterAccount(accountID)
@@ -643,6 +649,20 @@ struct RegisterView: View {
                   ? "Clear the filter, or load older transactions."
                   : "Clear the filter to see transactions again."
               )
+            )
+          } else if showingUnapprovedQueue, model.unapprovedQueuePhase.isLoading {
+            // The queue is loaded on demand now, so this flow has a moment of
+            // waiting that must not read as "nothing to approve".
+            ContentUnavailableView {
+              ProgressView()
+            } description: {
+              Text("Loading new transactions...")
+            }
+          } else if showingUnapprovedQueue, let message = model.unapprovedQueuePhase.errorMessage {
+            ContentUnavailableView(
+              "Could not load new transactions",
+              systemImage: "exclamationmark.triangle",
+              description: Text(message)
             )
           } else if scope == .unapproved {
             ContentUnavailableView("No new transactions", systemImage: "tray")
@@ -1167,7 +1187,15 @@ struct RegisterView: View {
   }
 
   private var unapprovedCount: Int {
-    approvalScopedTransactions.count
+    // The queue is fetched only when this flow opens, so until then the plain
+    // register has no rows to count and stands the server count in instead --
+    // otherwise the way into the flow would be hidden behind a count of zero.
+    // A register narrowed to particular accounts keeps counting its own rows,
+    // since the plan-wide number would overstate them.
+    if model.unapprovedQueuePhase != .loaded, scope.accountID == nil, accountIDs == nil {
+      return model.unapprovedBadgeCount
+    }
+    return approvalScopedTransactions.count
   }
 
   private var visibleTransactions: [Transaction] {

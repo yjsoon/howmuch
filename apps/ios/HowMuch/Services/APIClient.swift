@@ -314,6 +314,16 @@ struct APIClient {
     throw APIClientError.server("Transactions changed while the approval queue was loading. Try again.")
   }
 
+  /// How many live unapproved rows the plan has, without fetching any of them.
+  /// One bounded server-side count, so launch no longer waits on a full walk of
+  /// the queue just to label the inbox.
+  func fetchUnapprovedCount(planID: String) async throws -> Int {
+    let response: APIEnvelope<UnapprovedCountPayload> = try await request(
+      path: "/v1/plans/\(planID)/transactions/unapproved_count"
+    )
+    return response.data.count
+  }
+
   func fetchScheduledTransactions(planID: String) async throws -> [ScheduledTransaction] {
     let response: APIEnvelope<ScheduledTransactionsPayload> = try await request(
       path: "/v1/plans/\(planID)/scheduled_transactions"

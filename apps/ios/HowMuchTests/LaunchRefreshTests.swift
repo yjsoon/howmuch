@@ -397,3 +397,220 @@ private final class ApplySettingsProbeProtocol: URLProtocol {
 
   override func stopLoading() {}
 }
+
+/// Regression tests for #181: launch used to await a full serial walk of the
+/// unapproved queue before `ledgerPhase` became `.loaded`, so a large backlog
+/// turned launch into N seconds of an unusable register. The register must now
+/// be ready when its first ledger page lands, the badge must come from the
+/// cheap `unapproved_count` endpoint, and the queue rows must be fetched only
+/// when the approval flow is opened.
+@MainActor
+final class UnapprovedCountLaunchTests: XCTestCase {
+  private var previousCredentialService = ""
+  private var previousAPISettings: Any?
+  private var previousScopedViewPrefs: Any?
+
+  override func setUp() {
+    super.setUp()
+    previousCredentialService = APISettings.useCredentialService("HowMuch.UnapprovedCountLaunchTests.\(UUID().uuidString)")
+    previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
+    previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
+  }
+
+  override func tearDown() {
+    APISettings.useCredentialService(previousCredentialService)
+    UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
+    UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
+    super.tearDown()
+  }
+
+  /// The fix itself. The stub never answers a `type=unapproved` page, so if the
+  /// launch path still awaited that walk, `ledgerPhase` could never reach
+  /// `.loaded` and this test would time out.
+  func testRegisterLoadsOnFirstLedgerPageWhileTheUnapprovedScanIsPending() async {
+    let probe = await runUnapprovedProbe()
+    XCTAssertEqual(
+      probe.ledgerPhase,
+      .loaded,
+      "the register must be loaded once its first ledger page lands, even with the unapproved queue unanswered"
+    )
+    XCTAssertEqual(
+      probe.unapprovedQueueRequests,
+      0,
+      "launch must not walk the unapproved queue; its rows are for the approval flow to fetch"
+    )
+  }
+
+  /// The badge's new source: one bounded count request, not a page walk.
+  func testLaunchIssuesExactlyOneUnapprovedCountRequest() async {
+    let probe = await runUnapprovedProbe()
+    XCTAssertEqual(
+      probe.unapprovedCountRequests,
+      1,
+      "launch must ask for the unapproved count exactly once"
+    )
+    XCTAssertEqual(
+      probe.badgeCount,
+      UnapprovedProbeProtocol.fixtureUnapprovedCount,
+      "the New badge must show the number the count endpoint reported"
+    )
+  }
+
+  private struct UnapprovedProbeResult {
+    let ledgerPhase: LoadPhase
+    let badgeCount: Int
+    let unapprovedCountRequests: Int
+    let unapprovedQueueRequests: Int
+  }
+
+  private func runUnapprovedProbe() async -> UnapprovedProbeResult {
+    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
+    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
+    UnapprovedProbeProtocol.reset()
+
+    var settings = APISettings()
+    settings.baseURLString = UnapprovedProbeProtocol.fixtureBaseURL
+    settings.authenticatedUserID = "unapproved-probe-\(UUID().uuidString)"
+    settings.sessionToken = "token"
+    settings.planID = UnapprovedProbeProtocol.planID
+
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+
+    guard let surface = SnapshotSurface(
+      root: LaunchProbe(model: model, taskID: { $0.launchRefreshTaskID }),
+      size: CGSize(width: 10, height: 10)
+    ) else {
+      XCTFail("unapproved probe requires a connected UIWindowScene")
+      return UnapprovedProbeResult(ledgerPhase: .idle, badgeCount: -1, unapprovedCountRequests: -1, unapprovedQueueRequests: -1)
+    }
+    defer { surface.detach() }
+
+    let loaded = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.ledgerPhase == .loaded
+    }
+    XCTAssertTrue(loaded, "the register must reach .loaded without the unapproved queue ever being answered")
+
+    // The count is fired alongside the horizon fill, so wait on the observable
+    // itself rather than assuming it has landed by the time the page has.
+    _ = await surface.waitUntil(timeoutNanoseconds: 2_000_000_000) {
+      UnapprovedProbeProtocol.unapprovedCountRequests() >= 1 && model.unapprovedBadgeCount > 0
+    }
+
+    return UnapprovedProbeResult(
+      ledgerPhase: model.ledgerPhase,
+      badgeCount: model.unapprovedBadgeCount,
+      unapprovedCountRequests: UnapprovedProbeProtocol.unapprovedCountRequests(),
+      unapprovedQueueRequests: UnapprovedProbeProtocol.unapprovedQueueRequests()
+    )
+  }
+}
+
+private final class UnapprovedProbeRequestLog: @unchecked Sendable {
+  static let shared = UnapprovedProbeRequestLog()
+  private let lock = NSLock()
+  private var counts: [String: Int] = [:]
+
+  func reset() {
+    lock.lock()
+    counts = [:]
+    lock.unlock()
+  }
+
+  func record(_ key: String) {
+    lock.lock()
+    counts[key, default: 0] += 1
+    lock.unlock()
+  }
+
+  func count(_ key: String) -> Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return counts[key] ?? 0
+  }
+}
+
+/// Answers the launch waterfall's plan list, its first ledger page and the
+/// unapproved count, and deliberately *never* answers a `type=unapproved`
+/// page. A launch that still gated the register on that walk would hang here.
+private final class UnapprovedProbeProtocol: URLProtocol {
+  static let fixtureHost = "howmuch-unapproved-probe.test"
+  static let fixtureBaseURL = "https://howmuch-unapproved-probe.test"
+  static let planID = "plan-1"
+  static let fixtureUnapprovedCount = 7
+
+  private static let countKey = "count"
+  private static let queueKey = "queue"
+
+  static func reset() {
+    UnapprovedProbeRequestLog.shared.reset()
+  }
+
+  static func unapprovedCountRequests() -> Int {
+    UnapprovedProbeRequestLog.shared.count(countKey)
+  }
+
+  static func unapprovedQueueRequests() -> Int {
+    UnapprovedProbeRequestLog.shared.count(queueKey)
+  }
+
+  override class func canInit(with request: URLRequest) -> Bool {
+    request.url?.host?.lowercased() == fixtureHost
+  }
+
+  override class func canInit(with task: URLSessionTask) -> Bool {
+    guard let request = task.currentRequest ?? task.originalRequest else { return false }
+    return canInit(with: request)
+  }
+
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+    request
+  }
+
+  override func startLoading() {
+    guard let url = request.url, let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+      client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+      return
+    }
+    let isUnapprovedPage = (components.queryItems ?? []).contains { $0.name == "type" && $0.value == "unapproved" }
+
+    if components.path.hasSuffix("/transactions/unapproved_count") {
+      UnapprovedProbeRequestLog.shared.record(Self.countKey)
+      send(url: url, body: #"{"data":{"count":\#(Self.fixtureUnapprovedCount),"server_knowledge":1}}"#)
+      return
+    }
+    if components.path.hasSuffix("/transactions"), isUnapprovedPage {
+      // Recorded and then left hanging on purpose: the register must not be
+      // waiting on this.
+      UnapprovedProbeRequestLog.shared.record(Self.queueKey)
+      return
+    }
+    if components.path.hasSuffix("/transactions") {
+      send(url: url, body: #"{"data":{"transactions":[],"server_knowledge":1,"has_more":false,"next_offset":null}}"#)
+      return
+    }
+    if components.path.hasSuffix("/v1/plans") {
+      send(url: url, body: #"{"data":{"plans":[{"id":"\#(Self.planID)","name":"Only Plan"}]}}"#)
+      return
+    }
+    // Everything else settles fast so the rest of the waterfall cannot stall
+    // the wait above.
+    client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
+  }
+
+  private func send(url: URL, body: String) {
+    guard let response = HTTPURLResponse(
+      url: url,
+      statusCode: 200,
+      httpVersion: "HTTP/1.1",
+      headerFields: ["Content-Type": "application/json"]
+    ) else {
+      client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+      return
+    }
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: Data(body.utf8))
+    client?.urlProtocolDidFinishLoading(self)
+  }
+
+  override func stopLoading() {}
+}
