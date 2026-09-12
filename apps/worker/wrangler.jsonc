@@ -91,8 +91,8 @@
       },
       "d1_databases": [{
         "binding": "DB",
-        "database_name": "howmuch-production",
-        "database_id": "df039dbc-6dda-4150-9dc3-5854a8ca6818",
+        "database_name": "howmuch-production-sg",
+        "database_id": "d13295f9-10d4-4ac0-bf62-b3e8c78cbf29",
         "migrations_dir": "../api/d1-migrations"
       }]
     }

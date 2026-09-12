@@ -31,8 +31,11 @@ WORKER_DIR="$ROOT_DIR/apps/worker"
 
 PROFILE="tinkertanker"
 ENV_NAME="tk"
-DB_NAME="howmuch-production"
-DB_ID="df039dbc-6dda-4150-9dc3-5854a8ca6818"
+# Primary since the 2026-09-12 SIN cutover (#183). The pre-cutover KIX database
+# howmuch-production (df039dbc-6dda-4150-9dc3-5854a8ca6818) is kept frozen as a
+# rollback snapshot; never back up or write to it.
+DB_NAME="howmuch-production-sg"
+DB_ID="d13295f9-10d4-4ac0-bf62-b3e8c78cbf29"
 
 BACKUP_DIR="${HOWMUCH_BACKUP_DIR:-$ROOT_DIR/data/backups}"
 RETENTION_MONTHS="${HOWMUCH_BACKUP_RETENTION_MONTHS:-6}"
