@@ -953,7 +953,7 @@ final class CaptureSnapshotTests: XCTestCase {
     }
     defer { surface.detach() }
 
-    let rendered = await surface.captureUntilOCR(contains: ["Reading the photo", "Send"])
+    let rendered = await surface.captureUntilOCR(contains: ["Reading the photo"])
     XCTAssertFalse(rendered.text.contains(Self.normalizedOCR("Add an expense")))
     XCTAssertFalse(rendered.text.contains(Self.normalizedOCR("Allow sending")))
     let send = try XCTUnwrap(surface.firstControl(label: "Send"))
