@@ -43,6 +43,6 @@ Cloudflare Email Routing) stays in the YJ account — do not move it.
 ## iOS validation and publication
 
 - Safe local builds/tests use `scripts/ios-xcodebuild.sh` and the [iOS validation contract](apps/ios/AGENTS.md). They do not require a clean/pushed HEAD, signing secrets, or an update to `main`. Unsigned compilation is not physical-device installation evidence.
-- Speedflight is signed archive, export, and external publication in one command, not a validation step. Run it only for an explicitly authorized publication, following [the Speedflight runbook](docs/speedflight.md). iOS work alone does not authorize it.
+- Speedflight is signed archive, export, and external publication in one command, not a validation step. Run it only for an explicitly authorized publication, following [the Speedflight runbook](docs/speedflight.md) and the repo skill [.agents/skills/howmuch-speedflight](.agents/skills/howmuch-speedflight/SKILL.md). iOS work alone does not authorize it.
 - Preserve Apple team **Tinkertanker `PQ6U5ESLN2`**, bundle **`sg.soon.howmuch`**, and registered-device/signing blockers. Never substitute unsigned archives or change teams to bypass a blocker.
 - Install-page links are private bearer credentials: share only in the authorized private chat, never PRs/issues/public logs. Do not install an external skill or trigger CI as a fallback without an explicit request.

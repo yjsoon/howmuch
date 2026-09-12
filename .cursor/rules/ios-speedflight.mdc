@@ -5,10 +5,9 @@ alwaysApply: false
 ---
 # iOS Speedflight
 
-On a Mac with Xcode, after HowMuch iOS work the user would want on a physical iPhone that is not plugged in, share a Speedflight build. Do not wait to be asked if that is clearly the handoff.
+Follow the repo skill at `.agents/skills/howmuch-speedflight/SKILL.md` and the runbook at `docs/speedflight.md`. In short:
 
-Every time they ask for a build, `git fetch origin` and archive from up-to-date remote code first (`git pull` of `main`, or the branch they named). Do not cut an IPA from a stale local feature branch that is behind `origin/main`.
-
-Read the **iOS Speedflight** section in `AGENTS.md` before running `scripts/speedflight.sh`. Preflight the gitignored `.env.speedflight` and Tinkertanker (`PQ6U5ESLN2`) `.p8`; do not switch `DEVELOPMENT_TEAM` to T Krobot. If this session is not a signed-in Mac, stop and give the setup table from `AGENTS.md`.
-
-Post the Speedflight page URL only in chat, never in the PR.
+- Publication requires explicit user authorization — completed iOS work alone does not authorize it. Offer the build when the handoff is obvious; wait for the yes.
+- `git fetch origin` and build the exact requested revision (default fetched `origin/main`), never a stale local branch. Set `SPEEDFLIGHT_SOURCE_REF` to the full containing ref.
+- Preflight gitignored `.env.speedflight` and the Tinkertanker (`PQ6U5ESLN2`) `.p8`; never switch `DEVELOPMENT_TEAM` to T Krobot. On any failed check, stop and report the remedy from the runbook's blocker table.
+- Post the Speedflight page URL only in the private chat, never in PRs, issues, or public logs.
