@@ -1334,6 +1334,24 @@ describe("YNAB-compatible API", () => {
       "/v1/plans/plan-test/transactions/unapproved_count?last_knowledge_of_server=0",
     );
     expect(withKnowledge.count).toBe(after.count);
+
+    // limit/offset page a list; there is nothing to page here, so they are
+    // ignored rather than validated -- a stray limit=0 must not 400.
+    for (const query of ["?limit=0", "?offset=-1", "?limit=abc", "?limit=9999"]) {
+      const response = await request(`/v1/plans/plan-test/transactions/unapproved_count${query}`);
+      expect(`${query} -> ${response.status}`).toBe(`${query} -> 200`);
+      expect((await response.json()).data.count).toBe(after.count);
+    }
+
+    expect((await request("/v1/plans/missing-plan/transactions/unapproved_count")).status).toBe(404);
+
+    // The count is served by the partial register index, not a scan of the
+    // whole ledger.
+    const plan = db.query(
+      `EXPLAIN QUERY PLAN SELECT COUNT(*) AS count FROM transactions t
+         WHERE t.plan_id = ? AND t.deleted = 0 AND t.approved = 0`,
+    ).all("plan-test") as Array<{ detail: string }>;
+    expect(plan.some((step) => step.detail.includes("idx_transactions_plan_live_register"))).toBeTrue();
   });
 
   test("rejects invalid transaction patches without mutating the ledger", async () => {

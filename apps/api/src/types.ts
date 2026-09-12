@@ -90,6 +90,14 @@ export type TransactionBatchResult = {
   server_knowledge: number;
 };
 
+export type TransactionPage = {
+  transactions: any[];
+  has_more: boolean;
+  next_offset: number | null;
+  /** Read in the same batch as the page, so it always describes these rows. */
+  server_knowledge: number;
+};
+
 /**
  * The size of the unapproved queue, without any of its rows. Clients show the
  * "New" badge from this and only load the queue itself when the user opens the
@@ -98,14 +106,6 @@ export type TransactionBatchResult = {
 export type UnapprovedCount = {
   count: number;
   /** Read in the same batch as the count, so it always describes this number. */
-  server_knowledge: number;
-};
-
-export type TransactionPage = {
-  transactions: any[];
-  has_more: boolean;
-  next_offset: number | null;
-  /** Read in the same batch as the page, so it always describes these rows. */
   server_knowledge: number;
 };
 
