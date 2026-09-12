@@ -114,6 +114,7 @@ private enum SnapshotFixture {
     transactions: [Transaction] = [transaction(id: "snapshot-row")],
     hasMore: Bool = false,
     nextOffset: Int? = nil,
+    unapprovedCount: Int? = nil,
     schemaVersion: Int = ReferenceSnapshot.currentSchemaVersion
   ) -> ReferenceSnapshot {
     ReferenceSnapshot(
@@ -149,7 +150,8 @@ private enum SnapshotFixture {
         transactions: transactions,
         hasMore: hasMore,
         nextOffset: nextOffset
-      )
+      ),
+      unapprovedCount: unapprovedCount
     )
   }
 
@@ -676,6 +678,43 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     XCTAssertFalse(model.isProvisional)
   }
 
+  /// #181's "New" tile is drawn from a count, and since #197 that count is a
+  /// request of its own. A warm launch shows the number the snapshot carries
+  /// rather than flashing 0 while the request is in flight, and the server's
+  /// answer replaces it.
+  func testWarmLaunchShowsTheStoredUnapprovedCountUntilTheServerAnswers() async {
+    let settings = fixtureSettings()
+    XCTAssertTrue(
+      store.save(
+        SnapshotFixture.snapshot(
+          settings: settings,
+          serverKnowledge: SnapshotRefreshProtocol.serverKnowledge - 1,
+          unapprovedCount: 9
+        )
+      )
+    )
+
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    XCTAssertEqual(
+      model.unapprovedBadgeCount,
+      9,
+      "the tile must not flash 0 while the count request is in flight"
+    )
+
+    await model.refreshAll()
+    let counted = await waitUntil {
+      model.unapprovedBadgeCount == SnapshotRefreshProtocol.networkUnapprovedCount
+    }
+    XCTAssertTrue(
+      counted,
+      "the server's count must replace the stored one, saw \(model.unapprovedBadgeCount)"
+    )
+
+    // …and the fresh number is what the next launch would restore.
+    store.waitForPendingWrites()
+    XCTAssertEqual(store.load()?.unapprovedCount, SnapshotRefreshProtocol.networkUnapprovedCount)
+  }
+
   func testSignOutDeletesTheSnapshot() async {
     let settings = fixtureSettings()
     XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: settings)))
@@ -814,6 +853,7 @@ private final class SnapshotRefreshProtocol: URLProtocol {
   static let networkTransactionID = "txn-from-network"
   static let olderTransactionID = "txn-older"
   static let olderPageOffset = 100
+  static let networkUnapprovedCount = 4
   static let serverKnowledge = 7
 
   static func reset() {
@@ -1013,6 +1053,8 @@ private final class SnapshotRefreshProtocol: URLProtocol {
       return #"{"data":{"account_preferences":null,"account_preferences_revision":0}}"#
     case "\(plan)/transactions":
       return #"{"data":{"transactions":[\#(transactionJSON)],"has_more":false,"server_knowledge":\#(serverKnowledge)}}"#
+    case "\(plan)/transactions/unapproved_count":
+      return #"{"data":{"count":\#(networkUnapprovedCount),"server_knowledge":\#(serverKnowledge)}}"#
     case "\(plan)/scheduled_transactions":
       return #"{"data":{"scheduled_transactions":[],"server_knowledge":\#(serverKnowledge)}}"#
     default:

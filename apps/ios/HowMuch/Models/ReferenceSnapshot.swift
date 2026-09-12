@@ -14,7 +14,9 @@ import Foundation
 struct ReferenceSnapshot: Codable, Equatable {
   /// Bumped whenever the stored shape changes. A snapshot written by an older
   /// build is deleted rather than migrated: it can always be refetched.
-  static let currentSchemaVersion = 1
+  ///
+  /// 2: carries the plan-wide unapproved count (#181's badge).
+  static let currentSchemaVersion = 2
 
   /// One bounded ledger page, stored exactly as the network returned it.
   /// `TransactionPage` itself is not `Codable` and carries no identity, so the
@@ -47,6 +49,11 @@ struct ReferenceSnapshot: Codable, Equatable {
   var accountPreferences: SyncedAccountPreferences?
   var scheduledTransactions: [ScheduledTransaction]
   var ledgerPage: LedgerPage?
+  /// The plan-wide "New" count as the server last reported it (#181). The
+  /// queue's rows are deliberately not stored: since #197 they are loaded only
+  /// when the approval flow opens, and a count is one small number that keeps
+  /// the tile from flashing 0 on a warm launch.
+  var unapprovedCount: Int?
 
   init(
     schemaVersion: Int = ReferenceSnapshot.currentSchemaVersion,
@@ -61,7 +68,8 @@ struct ReferenceSnapshot: Codable, Equatable {
     payees: [Payee],
     accountPreferences: SyncedAccountPreferences?,
     scheduledTransactions: [ScheduledTransaction],
-    ledgerPage: LedgerPage?
+    ledgerPage: LedgerPage?,
+    unapprovedCount: Int? = nil
   ) {
     self.schemaVersion = schemaVersion
     self.connectionFingerprint = connectionFingerprint
@@ -76,6 +84,7 @@ struct ReferenceSnapshot: Codable, Equatable {
     self.accountPreferences = accountPreferences
     self.scheduledTransactions = scheduledTransactions
     self.ledgerPage = ledgerPage
+    self.unapprovedCount = unapprovedCount
   }
 }
 

@@ -245,6 +245,15 @@ final class AppModel {
     lastSyncedAccountPreferences = snapshot.accountPreferences
     serverKnowledge = snapshot.serverKnowledge
     snapshotKnowledge = snapshot.serverKnowledge
+    // #181's badge: the tile shows the last count the server gave rather than
+    // flashing 0 while `refreshUnapprovedCount` is in flight. It is a plain
+    // number with no rows behind it, and `unapprovedBadgeCount` already
+    // subtracts anything approved since — which, on a launch, is nothing.
+    // Per-account counts are not restored: a narrowed register fetches its own
+    // when it opens, and a stale per-account number has no tile to sit on.
+    if let unapprovedCount = snapshot.unapprovedCount {
+      serverUnapprovedCount = unapprovedCount
+    }
     referenceIsProvisional = true
     schedulesIsProvisional = true
     referencePhase = .loaded
@@ -292,7 +301,8 @@ final class AppModel {
         payees: payees,
         accountPreferences: lastSyncedAccountPreferences,
         scheduledTransactions: scheduledTransactions,
-        ledgerPage: lastLedgerFirstPage
+        ledgerPage: lastLedgerFirstPage,
+        unapprovedCount: serverUnapprovedCount
       )
     )
   }
@@ -1821,6 +1831,9 @@ final class AppModel {
       serverUnapprovedCountsByAccount[accountID] = count
     } else {
       serverUnapprovedCount = count
+      // The count lands after the ledger page that spawned it, so the snapshot
+      // written there carries the previous number. Rewrite it with this one.
+      persistSnapshot()
     }
     confirmedWhenCounted[countScopeKey(accountID)] = locallyResolvedUnapprovedIDs
   }
