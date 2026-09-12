@@ -156,6 +156,21 @@ final class RefreshPlanTests: XCTestCase {
     XCTAssertEqual(TabRefresh.reflect, [.reports])
   }
 
+  func testAccountsPullRetriesTheWholeBatchWhenReferenceDataIsNotLoaded() {
+    XCTAssertEqual(
+      TabRefresh.accounts(referencePhase: .loaded),
+      [.accounts],
+      "the ordinary pull stays one GET"
+    )
+    for phase in [LoadPhase.idle, .failed("offline")] {
+      XCTAssertEqual(
+        TabRefresh.accounts(referencePhase: phase),
+        [.referenceData],
+        "the Accounts placeholder sits inside the pull, so \(phase) makes the pull its retry"
+      )
+    }
+  }
+
   // MARK: - Debounce / coalescing
 
   func testMergingKeepsTheUnionAndTheLoudestIntent() {

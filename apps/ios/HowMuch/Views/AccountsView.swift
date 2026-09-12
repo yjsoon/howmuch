@@ -305,7 +305,10 @@ struct AccountsView: View {
       }
     }
     .refreshable {
-      await model.refresh(slices: TabRefresh.accounts, quiet: false)
+      await model.refresh(
+        slices: TabRefresh.accounts(referencePhase: model.referencePhase),
+        quiet: false
+      )
     }
     .task(id: accountUsageTaskID) {
       guard usesMostUsedSort, model.accountUsagePhase != .loaded else {

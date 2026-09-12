@@ -10,6 +10,7 @@ final class NarrowRefreshTests: XCTestCase {
   private var previousCredentialService = ""
   private var previousAPISettings: Any?
   private var previousScopedViewPrefs: Any?
+  private var previousOutbox: Any?
 
   override func setUp() {
     super.setUp()
@@ -23,6 +24,8 @@ final class NarrowRefreshTests: XCTestCase {
     previousScopedViewPrefs = UserDefaults.standard.object(
       forKey: ScopedViewPrefsStore.userDefaultsKey
     )
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
+    UserDefaults.standard.removeObject(forKey: OutboxStore.userDefaultsKey)
     XCTAssertTrue(URLProtocol.registerClass(NarrowRefreshProtocol.self))
     NarrowRefreshProtocol.reset()
   }
@@ -32,6 +35,7 @@ final class NarrowRefreshTests: XCTestCase {
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
     UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
     super.tearDown()
   }
 
@@ -175,7 +179,90 @@ final class NarrowRefreshTests: XCTestCase {
     )
   }
 
+  // MARK: - The refresh queue
+
+  func testAnOutboxSyncDuringAPullStillRefreshesBalances() async {
+    // A pull replays the outbox. The rows it creates move balances, and the
+    // drain runs inside the pull, so its follow-up must join that same pass.
+    let model = makeModelWithOnePendingCapture()
+
+    await model.refresh(slices: TabRefresh.register, quiet: false)
+    _ = await waitUntil { model.pendingRows.isEmpty }
+
+    let requests = NarrowRefreshProtocol.log()
+    XCTAssertTrue(
+      requests.contains { $0.method == "POST" && $0.path.hasSuffix("/transactions") },
+      "the pull must replay the queued capture, saw \(requests)"
+    )
+    XCTAssertTrue(
+      requests.contains {
+        $0.isRead && $0.path == "/v1/plans/\(NarrowRefreshProtocol.planID)/accounts"
+      },
+      "a synced capture moves balances, so the pull must also read them, saw \(requests)"
+    )
+    XCTAssertGreaterThan(
+      model.reportsRefreshGeneration,
+      0,
+      "a synced capture changes the reports, which must be marked stale"
+    )
+  }
+
+  func testAccountsSliceNeverClaimsTheReferenceBatchIsLoaded() async {
+    let model = makeModel()
+    XCTAssertEqual(model.referencePhase, .idle)
+
+    await model.refresh(slices: TabRefresh.accounts, quiet: false)
+
+    XCTAssertNotEqual(
+      model.referencePhase,
+      .loaded,
+      "one GET of balances must not claim that categories, payees and plan settings loaded"
+    )
+  }
+
+  func testSwitchingPlanRestartsReflect() async {
+    let model = makeModel()
+    let generationBefore = model.reportsRefreshGeneration
+
+    var switched = model.settings
+    switched.planID = "plan-2"
+    await model.applySettings(switched)
+
+    XCTAssertGreaterThan(
+      model.reportsRefreshGeneration,
+      generationBefore,
+      "ReflectView's only trigger is this generation; a plan switch must restart it"
+    )
+  }
+
   // MARK: - Helpers
+
+  private func makeModelWithOnePendingCapture() -> AppModel {
+    var settings = APISettings()
+    settings.baseURLString = NarrowRefreshProtocol.fixtureBaseURL
+    settings.authenticatedUserID = "narrow-refresh-\(UUID().uuidString)"
+    settings.sessionToken = "token"
+    settings.planID = NarrowRefreshProtocol.planID
+    let request = TransactionWriteRequest(
+      accountID: NarrowRefreshProtocol.accountID,
+      date: "2026-01-02",
+      amount: -1230,
+      payeeID: nil,
+      payeeName: "Fixture Payee",
+      categoryID: nil,
+      memo: nil,
+      cleared: .uncleared,
+      approved: true,
+      flagColor: nil,
+      subtransactions: []
+    )
+    let pending = PendingTransaction(
+      request: request,
+      connectionFingerprint: settings.connectionFingerprint
+    )
+    try? OutboxStore.save([pending])
+    return AppModel(settings: settings, viewPrefs: ViewPrefs())
+  }
 
   private func makeModel() -> AppModel {
     var settings = APISettings()
@@ -348,7 +435,9 @@ private final class NarrowRefreshProtocol: URLProtocol {
     case "\(plan)/payees":
       return #"{"data":{"payees":[],"server_knowledge":7}}"#
     case "\(plan)/transactions":
-      return #"{"data":{"transactions":[],"has_more":false,"server_knowledge":7}}"#
+      return method == "POST"
+        ? #"{"data":{"transaction":\#(transactionJSON),"server_knowledge":8}}"#
+        : #"{"data":{"transactions":[],"has_more":false,"server_knowledge":7}}"#
     case "\(plan)/scheduled_transactions":
       return #"{"data":{"scheduled_transactions":[],"server_knowledge":7}}"#
     case "\(plan)/transactions/\(transactionID)/cleared",

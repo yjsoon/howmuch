@@ -383,6 +383,7 @@ final class AppModel {
         rebuildLookups()
       }
       publishIntentCatalog()
+      scheduleRefresh(after: .accountUpdated)
     } catch {
       if let current = accounts.firstIndex(where: { $0.id == accountID }) {
         accounts[current] = previous
@@ -1174,11 +1175,20 @@ final class AppModel {
   /// Refreshes only the slices a write could not reproduce locally, and marks
   /// the plan and reports stale when the write can have changed them.
   func refresh(after mutation: MutationKind) async {
+    await scheduleRefresh(after: mutation)?.value
+  }
+
+  /// The same decision without waiting for it. Callers that are themselves
+  /// inside a refresh — the outbox drain during a pull — must use this: it
+  /// merges into the queue the running pass will drain, rather than awaiting
+  /// the pass it is running inside.
+  @discardableResult
+  func scheduleRefresh(after mutation: MutationKind) -> Task<Void, Never>? {
     if RefreshPlanner.invalidatesPlanAndReports(after: mutation) {
       planRefreshGeneration &+= 1
       reportsRefreshGeneration &+= 1
     }
-    await refresh(RefreshRequest(slices: RefreshPlanner.slices(after: mutation)))
+    return enqueue(RefreshRequest(slices: RefreshPlanner.slices(after: mutation)))
   }
 
   func refresh(slices: Set<RefreshSlice>, quiet: Bool = true, force: Bool = false) async {
@@ -1193,16 +1203,25 @@ final class AppModel {
     guard !request.isEmpty else {
       return
     }
+    await enqueue(request)?.value
+  }
+
+  /// Merges the request into the queue and returns the pass that will run it:
+  /// the one already in flight, or a new one.
+  @discardableResult
+  private func enqueue(_ request: RefreshRequest) -> Task<Void, Never>? {
+    guard !request.isEmpty else {
+      return inFlightRefresh
+    }
     queuedRefresh = queuedRefresh.merging(request)
     if let inFlight = inFlightRefresh {
-      await inFlight.value
-      return
+      return inFlight
     }
     let task = Task { @MainActor [weak self] () -> Void in
       await self?.drainRefreshQueue()
     }
     inFlightRefresh = task
-    await task.value
+    return task
   }
 
   private func drainRefreshQueue() async {
@@ -1262,9 +1281,11 @@ final class AppModel {
     let generation = accountsGeneration
     let planID = settings.planID
     let scope = activeViewPrefsScope
-    if !quiet {
-      referencePhase = .loading
-    }
+    // This slice fetches accounts alone, so it must never move
+    // `referencePhase` to `.loaded`: categories, payees and plan settings
+    // would still be missing behind that claim. A pull that arrives while the
+    // reference batch is unloaded asks for the batch instead — see
+    // `TabRefresh.accounts(referencePhase:)`.
     do {
       let fetched = try await apiClient.fetchAccounts(planID: planID)
       guard generation == accountsGeneration, planID == settings.planID, scope == activeViewPrefsScope
@@ -1277,16 +1298,16 @@ final class AppModel {
       }
       accounts = fetched
       rebuildLookups()
-      if !quiet {
-        referencePhase = .loaded
-      }
       publishIntentCatalog()
     } catch {
       guard generation == accountsGeneration, planID == settings.planID, scope == activeViewPrefsScope
       else {
         return
       }
-      if !quiet {
+      // Only a phase that was claiming loaded data can honestly be turned
+      // into a failure by this fetch; an idle or already-failed reference
+      // phase says more than "the balances did not come back".
+      if !quiet, referencePhase == .loaded {
         referencePhase = .failed(error.localizedDescription)
       }
     }
@@ -1563,6 +1584,10 @@ final class AppModel {
     reportsGenerationAtLastFetch = nil
     queuedRefresh = .none
     planRefreshGeneration &+= 1
+    // ReflectView's only trigger is `.task(id: reportsRefreshGeneration)`, so
+    // without this a plan switch made while Reflect is visible leaves it
+    // sitting on an empty placeholder.
+    reportsRefreshGeneration &+= 1
     rewardsRefreshGeneration &+= 1
     invalidateAccountUsage()
     wipeIntentCatalog()
@@ -1641,6 +1666,7 @@ final class AppModel {
       scheduledTransactions.sort { ($0.dateNext, $0.id) < ($1.dateNext, $1.id) }
     }
     scheduledTransactionsPhase = .loaded
+    scheduleRefresh(after: .scheduleSaved)
     showSaveMessage(draft.id == nil ? "Added scheduled transaction" : "Saved scheduled transaction")
   }
 
@@ -1651,6 +1677,7 @@ final class AppModel {
     _ = try await apiClient.deleteScheduledTransaction(planID: settings.planID, scheduleID: id, idempotencyKey: idempotencyKey)
     scheduledTransactions.removeAll { $0.id == id }
     scheduledTransactionsPhase = .loaded
+    scheduleRefresh(after: .scheduleDeleted)
     showSaveMessage("Deleted scheduled transaction")
   }
 
@@ -2076,7 +2103,7 @@ final class AppModel {
         touchesTransfer: touchesTransfer,
         hasNewPayee: isUnknownPayee(saved)
       )
-      Task { await refresh(after: mutation) }
+      scheduleRefresh(after: mutation)
     } catch {
       guard isCurrentEdit(transactionID, generation: generation, destination: destination) else {
         return
@@ -2150,7 +2177,7 @@ final class AppModel {
       )
       applySavedTransaction(saved, replacing: transaction)
       showSaveMessage(cleared == .cleared ? "Marked transaction cleared" : "Marked transaction uncleared")
-      Task { await refresh(after: .clearedToggled) }
+      scheduleRefresh(after: .clearedToggled)
     } catch {
       if clearedToggleOverlays[transaction.id] == cleared {
         clearedToggleOverlays[transaction.id] = nil
@@ -2357,21 +2384,16 @@ final class AppModel {
     if syncedCount > 0 {
       serverTransactions = sortedUniqueTransactions(serverTransactions)
       invalidateAccountUsage()
-      planRefreshGeneration &+= 1
-      reportsRefreshGeneration &+= 1
+      // Balances moved whichever trigger got here, including a drain running
+      // inside a pull: `scheduleRefresh` merges into that pass's queue rather
+      // than awaiting the pass it is running inside.
+      scheduleRefresh(
+        after: .transactionsCreated(hasTransfer: syncedTransfer, hasNewPayee: syncedNewPayee)
+      )
       if effectiveTrigger != .commit {
         showSaveMessage(
           syncedCount == 1 ? "Synced 1 pending transaction" : "Synced \(syncedCount) pending transactions"
         )
-      }
-      if effectiveTrigger != .refresh {
-        // `.refresh` already runs inside a full refresh, which fetches these
-        // slices anyway; `.commit` and `.manual` stand alone.
-        let mutation = MutationKind.transactionsCreated(
-          hasTransfer: syncedTransfer,
-          hasNewPayee: syncedNewPayee
-        )
-        Task { await refresh(after: mutation) }
       }
     } else if effectiveTrigger == .manual, !pendingRows.isEmpty {
       showSaveMessage("Couldn’t sync — will retry on the next refresh", kind: .failure)
@@ -2435,7 +2457,7 @@ final class AppModel {
     serverTransactions.removeAll { removedIDs.contains($0.id) }
     serverUnapprovedTransactions.removeAll { removedIDs.contains($0.id) }
     showSaveMessage("Deleted \(transaction.payeeName ?? "transaction")")
-    Task { await refresh(after: .transactionDeleted) }
+    scheduleRefresh(after: .transactionDeleted)
   }
 
   func approveEligible(from rows: [Transaction]) async {

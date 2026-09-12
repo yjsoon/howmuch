@@ -30,6 +30,15 @@ enum TabRefresh {
   /// deliberately left to their own panes rather than dragging the ledger
   /// scan onto every pull here.
   static let accounts: Set<RefreshSlice> = [.accounts]
+
+  /// The Accounts placeholder for a failed or missing reference load lives
+  /// inside the same scrollable view as the pull, so the pull is also the
+  /// reader's retry for it. One GET of balances would leave categories,
+  /// payees and plan settings missing, so an unloaded reference batch makes
+  /// this pull fetch the batch instead.
+  static func accounts(referencePhase: LoadPhase) -> Set<RefreshSlice> {
+    referencePhase == .loaded ? accounts : [.referenceData]
+  }
   /// The register shows the ledger page and, in the inbox scope, the
   /// unapproved queue — both come from the one `.ledger` slice.
   static let register: Set<RefreshSlice> = [.ledger]
