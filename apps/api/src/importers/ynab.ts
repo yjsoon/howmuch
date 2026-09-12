@@ -248,6 +248,17 @@ export async function importYnabFromApi(
     await repo.finishImportSession(sessionId, "completed", { imported_transactions: imported, raw_objects: rawCounts, server_knowledge: serverKnowledge });
     return { import_session_id: sessionId, imported_transactions: imported, raw_objects: rawCounts, server_knowledge: serverKnowledge };
   } catch (error) {
+    // A part-finished import has already written raw objects, so the
+    // materialised baseline is now stale against them. Rebuild it from
+    // whatever did land rather than leaving month views reading numbers for a
+    // mirror that has moved on. A failure here must not replace the real
+    // error: without the rebuild the read path still falls back to the raw
+    // scan, which is correct, only slow.
+    try {
+      await repo.rematerialiseYnabMonthActivity(options.planId);
+    } catch {
+      // Deliberately swallowed; the original import error is what matters.
+    }
     await repo.finishImportSession(sessionId, "failed", { error: error instanceof Error ? error.message : String(error) });
     throw error;
   }

@@ -1696,6 +1696,8 @@ export class LedgerRepository {
    *     materialised and this month genuinely has no source activity. A month
    *     the user has not spent in yet must not be mistaken for a missing
    *     backfill.
+   *     Deciding this before probing the raw mirror is what keeps an empty
+   *     month off `ynab_raw_objects` entirely.
    *  3. No rows for the plan — either there is no source mirror (null, the
    *     pre-existing fallback) or the mirror was never materialised. The
    *     latter happens if a deploy lands before the migration, which
@@ -1714,16 +1716,20 @@ export class LedgerRepository {
       .all(planId, start) as Row[];
     if (rows.length > 0) return materialisedActivityMap(rows, uncategorisedCategoryID);
 
-    // One round trip answers both "is the plan materialised?" and "is there a
-    // source mirror at all?". Both are indexed existence probes, not scans.
-    const probe = await this.db
-      .query(
-        `SELECT EXISTS(SELECT 1 FROM ynab_source_month_activity WHERE plan_id = ?) AS materialised,
-                EXISTS(SELECT 1 FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'transaction') AS has_source`,
-      )
-      .get(planId, planId) as Row | null;
-    if (Number(probe?.materialised ?? 0) === 1) return new Map();
-    if (Number(probe?.has_source ?? 0) === 0) return null;
+    // Is the plan materialised at all? An empty month on a materialised plan
+    // settles here, so viewing a month the user has not spent in never touches
+    // `ynab_raw_objects`.
+    const materialised = await this.db
+      .query("SELECT 1 AS present FROM ynab_source_month_activity WHERE plan_id = ? LIMIT 1")
+      .get(planId) as Row | null;
+    if (materialised) return new Map();
+
+    // Only once the plan has no materialised rows at all is it worth asking
+    // whether a source mirror exists. Indexed existence probe, not a scan.
+    const source = await this.db
+      .query("SELECT 1 AS present FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'transaction' LIMIT 1")
+      .get(planId) as Row | null;
+    if (!source) return null;
 
     console.warn(JSON.stringify({
       event: "month_activity_unmaterialised",
