@@ -26,52 +26,51 @@ CREATE TABLE IF NOT EXISTS ynab_source_month_activity (
 );
 
 INSERT OR REPLACE INTO ynab_source_month_activity (plan_id, month, category_id, activity)
-SELECT plan_id, month, category_id, SUM(amount) FROM (
-  SELECT
-    sub.plan_id AS plan_id,
-    substr(json_extract(parent.payload_json, '$.date'), 1, 7) || '-01' AS month,
-    CASE WHEN json_extract(sub.payload_json, '$.category_id') IS NULL THEN ''
-         ELSE CAST(json_extract(sub.payload_json, '$.category_id') AS TEXT) END AS category_id,
-    CAST(COALESCE(json_extract(sub.payload_json, '$.amount'), 0) AS INTEGER) AS amount
-  FROM ynab_raw_objects sub
-  JOIN ynab_raw_objects parent
-    ON parent.plan_id = sub.plan_id
-   AND parent.object_type = 'transaction'
-   AND COALESCE(json_extract(parent.payload_json, '$.deleted'), 0) = 0
-   AND json_type(parent.payload_json, '$.date') = 'text'
-   AND CAST(COALESCE(json_extract(parent.payload_json, '$.id'), parent.object_id) AS TEXT)
-       = CAST(json_extract(sub.payload_json, '$.transaction_id') AS TEXT)
-  WHERE sub.object_type = 'subtransaction'
-    AND 1 = 1
-    AND COALESCE(json_extract(sub.payload_json, '$.deleted'), 0) = 0
-    AND json_extract(sub.payload_json, '$.transaction_id') IS NOT NULL
-    AND CAST(json_extract(sub.payload_json, '$.transaction_id') AS TEXT) <> ''
-    AND NOT (json_extract(sub.payload_json, '$.category_id') IS NOT NULL
-             AND CAST(json_extract(sub.payload_json, '$.category_id') AS TEXT) = '')
-
-  UNION ALL
-
+WITH parents AS MATERIALIZED (
   SELECT
     parent.plan_id AS plan_id,
+    CAST(COALESCE(json_extract(parent.payload_json, '$.id'), parent.object_id) AS TEXT) AS transaction_key,
     substr(json_extract(parent.payload_json, '$.date'), 1, 7) || '-01' AS month,
     CASE WHEN json_extract(parent.payload_json, '$.category_id') IS NULL THEN ''
          ELSE CAST(json_extract(parent.payload_json, '$.category_id') AS TEXT) END AS category_id,
+    CASE WHEN json_extract(parent.payload_json, '$.category_id') IS NULL THEN 0 ELSE 1 END AS has_category,
     CAST(COALESCE(json_extract(parent.payload_json, '$.amount'), 0) AS INTEGER) AS amount
   FROM ynab_raw_objects parent
   WHERE parent.object_type = 'transaction'
     AND 1 = 1
     AND COALESCE(json_extract(parent.payload_json, '$.deleted'), 0) = 0
     AND json_type(parent.payload_json, '$.date') = 'text'
-    AND NOT (json_extract(parent.payload_json, '$.category_id') IS NOT NULL
-             AND CAST(json_extract(parent.payload_json, '$.category_id') AS TEXT) = '')
-    AND NOT EXISTS (
-      SELECT 1 FROM ynab_raw_objects sub
-      WHERE sub.plan_id = parent.plan_id
-        AND sub.object_type = 'subtransaction'
-        AND COALESCE(json_extract(sub.payload_json, '$.deleted'), 0) = 0
-        AND json_extract(sub.payload_json, '$.transaction_id') IS NOT NULL
-        AND CAST(json_extract(sub.payload_json, '$.transaction_id') AS TEXT)
-            = CAST(COALESCE(json_extract(parent.payload_json, '$.id'), parent.object_id) AS TEXT)
-    )
+),
+subs AS MATERIALIZED (
+  SELECT
+    sub.plan_id AS plan_id,
+    CAST(json_extract(sub.payload_json, '$.transaction_id') AS TEXT) AS transaction_key,
+    CASE WHEN json_extract(sub.payload_json, '$.category_id') IS NULL THEN ''
+         ELSE CAST(json_extract(sub.payload_json, '$.category_id') AS TEXT) END AS category_id,
+    CASE WHEN json_extract(sub.payload_json, '$.category_id') IS NULL THEN 0 ELSE 1 END AS has_category,
+    CAST(COALESCE(json_extract(sub.payload_json, '$.amount'), 0) AS INTEGER) AS amount
+  FROM ynab_raw_objects sub
+  WHERE sub.object_type = 'subtransaction'
+    AND 1 = 1
+    AND COALESCE(json_extract(sub.payload_json, '$.deleted'), 0) = 0
+    AND json_extract(sub.payload_json, '$.transaction_id') IS NOT NULL
+    AND CAST(json_extract(sub.payload_json, '$.transaction_id') AS TEXT) <> ''
+),
+split_keys AS (SELECT DISTINCT plan_id, transaction_key FROM subs),
+lines AS (
+  SELECT parents.plan_id, parents.month, subs.category_id, subs.has_category, subs.amount
+  FROM subs
+  JOIN parents ON parents.plan_id = subs.plan_id AND parents.transaction_key = subs.transaction_key
+
+  UNION ALL
+
+  SELECT parents.plan_id, parents.month, parents.category_id, parents.has_category, parents.amount
+  FROM parents
+  LEFT JOIN split_keys
+    ON split_keys.plan_id = parents.plan_id AND split_keys.transaction_key = parents.transaction_key
+  WHERE split_keys.transaction_key IS NULL
 )
+SELECT plan_id, month, category_id, SUM(amount) AS activity
+FROM lines
+WHERE NOT (has_category = 1 AND category_id = '')
 GROUP BY plan_id, month, category_id;
