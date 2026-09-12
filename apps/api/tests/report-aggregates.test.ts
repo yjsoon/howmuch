@@ -184,6 +184,14 @@ describe("report aggregates", () => {
     expect(second).not.toEqual(first);
     // The superseded entry is pruned rather than accumulating per knowledge.
     expect(db.query("SELECT COUNT(*) AS rows FROM report_cache").get()).toEqual({ rows: 1 });
+
+    // A category-group filter resolves through a join on `categories`, which
+    // category upserts change without bumping the plan's knowledge counter, so
+    // it is never cached.
+    const grouped = { ...filters, categoryGroupIds: ["g"] } as const;
+    expect(await actual.ageOfMoney(PLAN, grouped)).toEqual(expected.ageOfMoney(PLAN, grouped));
+    await actual.ageOfMoney(PLAN, grouped);
+    expect(db.query("SELECT COUNT(*) AS rows FROM report_cache").get()).toEqual({ rows: 1 });
   });
 
   test("net worth and age of money issue no unbounded transactions scan", async () => {

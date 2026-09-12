@@ -168,7 +168,13 @@ export class AsyncReportService {
    * being papered over.  This satisfies the no-stale-cache constraint in #144.
    */
   async ageOfMoney(planId: string, filters: ReportFilters = {}): Promise<any> {
-    const knowledge = await planKnowledge(this.db, planId);
+    // `categoryGroupIds` resolves through a join on `categories`, and category
+    // upserts do not bump the plan's knowledge counter, so a cached answer for
+    // that filter could outlive a category being moved between groups.  Every
+    // other filter reads columns that live on the transaction lines
+    // themselves.  Recompute rather than risk a stale answer (#144).
+    const cacheable = !filters.categoryGroupIds?.length;
+    const knowledge = cacheable ? await planKnowledge(this.db, planId) : null;
     const from = filters.from ?? (await earliestDate(this.db, planId)) ?? todayIso();
     const to = filters.to ?? todayIso();
     const key = reportCacheKey("age-of-money", { ...filters, from, to, interval: filters.interval ?? "month" });
