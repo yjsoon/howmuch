@@ -21,6 +21,7 @@ import {
   type AccountPreferencesSnapshot,
   type ScheduledWriteOptions,
   type TransactionPage,
+  type UnapprovedCount,
   type TransactionBatchResult,
   type TransactionBatchUpdate,
   type TransactionLookup,
@@ -1492,6 +1493,30 @@ export class LedgerRepository {
     };
   }
 
+  /**
+   * Size of the unapproved queue, without its rows. The WHERE clause comes from
+   * the same `transactionFilterClauses` the register page uses, so the badge can
+   * never disagree with the queue the user then opens. Clients used to page the
+   * whole queue just to render the "New" badge; this is the badge on its own.
+   *
+   * Counted in the same batch as the knowledge value, so the number and its
+   * label come from one snapshot and one round trip. No covering index carries
+   * `approved` today, so this still walks the plan's live rows -- but it walks
+   * them once, server-side, instead of shipping every row to the client.
+   */
+  async countUnapprovedTransactions(planId: string, filters: TransactionFilters = {}): Promise<UnapprovedCount> {
+    const { clauses, params } = transactionFilterClauses(planId, { ...filters, type: "unapproved", q: null });
+    const [knowledgeRows, countRows] = await this.db.batchRead([
+      { sql: SERVER_KNOWLEDGE_SQL, values: [planId] },
+      { sql: `SELECT COUNT(*) AS count FROM transactions t WHERE ${clauses.join(" AND ")}`, values: params },
+    ]);
+    if (!knowledgeRows?.[0]) throw new PlanNotFoundError();
+    return {
+      count: Number(countRows?.[0]?.count ?? 0),
+      server_knowledge: Number(knowledgeRows[0].server_knowledge),
+    };
+  }
+
   private async queryTransactions(
     planId: string,
     filters: TransactionFilters,
@@ -1516,50 +1541,7 @@ export class LedgerRepository {
     limit?: number,
     offset?: number,
   ): Promise<{ sql: string; params: any[]; subtransactions: { sql: string; params: any[] } | null }> {
-    const clauses = ["t.plan_id = ?"];
-    const params: any[] = [planId];
-
-    if (!filters.includeDeleted && filters.lastKnowledgeOfServer == null) {
-      clauses.push("t.deleted = 0");
-    }
-    if (filters.sinceDate) {
-      clauses.push("t.date >= ?");
-      params.push(filters.sinceDate);
-    }
-    if (filters.untilDate) {
-      clauses.push("t.date <= ?");
-      params.push(filters.untilDate);
-    }
-    if (filters.accountId) {
-      clauses.push("t.account_id = ?");
-      params.push(filters.accountId);
-    }
-    if (filters.payeeId) {
-      clauses.push("t.payee_id = ?");
-      params.push(filters.payeeId);
-    }
-    if (filters.categoryId) {
-      clauses.push("t.category_id = ?");
-      params.push(filters.categoryId);
-    }
-    if (filters.month) {
-      const monthStart = normaliseMonthStart(filters.month);
-      clauses.push("t.date >= ? AND t.date < date(?, '+1 month')");
-      params.push(monthStart, monthStart);
-    }
-    if (filters.type === "uncategorized") {
-      clauses.push("t.category_id IS NULL");
-    }
-    if (filters.type === "unapproved") {
-      clauses.push("t.approved = 0");
-    }
-    if (filters.type === "approved") {
-      clauses.push("t.approved = 1");
-    }
-    if (filters.lastKnowledgeOfServer != null) {
-      clauses.push("t.server_knowledge > ?");
-      params.push(filters.lastKnowledgeOfServer);
-    }
+    const { clauses, params } = transactionFilterClauses(planId, filters);
     let pageFrom = "FROM transactions t";
     if (filters.q) {
       const plan = await this.getPlan(planId);
@@ -3342,6 +3324,60 @@ function formatPlan(row: Row): any {
     currency_format: JSON.parse(row.currency_format_json),
     server_knowledge: Number(row.server_knowledge),
   };
+}
+
+/**
+ * Every non-search WHERE clause a transaction query applies, in one place, so
+ * the register page and the unapproved count can never drift apart. `q` is
+ * deliberately excluded: it needs the plan's currency format, which costs a
+ * round trip the count does not want to pay.
+ */
+function transactionFilterClauses(planId: string, filters: TransactionFilters): { clauses: string[]; params: any[] } {
+    const clauses = ["t.plan_id = ?"];
+    const params: any[] = [planId];
+
+    if (!filters.includeDeleted && filters.lastKnowledgeOfServer == null) {
+      clauses.push("t.deleted = 0");
+    }
+    if (filters.sinceDate) {
+      clauses.push("t.date >= ?");
+      params.push(filters.sinceDate);
+    }
+    if (filters.untilDate) {
+      clauses.push("t.date <= ?");
+      params.push(filters.untilDate);
+    }
+    if (filters.accountId) {
+      clauses.push("t.account_id = ?");
+      params.push(filters.accountId);
+    }
+    if (filters.payeeId) {
+      clauses.push("t.payee_id = ?");
+      params.push(filters.payeeId);
+    }
+    if (filters.categoryId) {
+      clauses.push("t.category_id = ?");
+      params.push(filters.categoryId);
+    }
+    if (filters.month) {
+      const monthStart = normaliseMonthStart(filters.month);
+      clauses.push("t.date >= ? AND t.date < date(?, '+1 month')");
+      params.push(monthStart, monthStart);
+    }
+    if (filters.type === "uncategorized") {
+      clauses.push("t.category_id IS NULL");
+    }
+    if (filters.type === "unapproved") {
+      clauses.push("t.approved = 0");
+    }
+    if (filters.type === "approved") {
+      clauses.push("t.approved = 1");
+    }
+    if (filters.lastKnowledgeOfServer != null) {
+      clauses.push("t.server_knowledge > ?");
+      params.push(filters.lastKnowledgeOfServer);
+    }
+  return { clauses, params };
 }
 
 const SERVER_KNOWLEDGE_SQL = "SELECT server_knowledge FROM plans WHERE id = ?";

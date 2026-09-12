@@ -310,6 +310,25 @@ Scoped lists:
 - `GET /v1/plans/{plan_id}/categories/{category_id}/transactions`
 - `GET /v1/plans/{plan_id}/months/{month}/transactions`
 
+Unapproved count:
+
+`GET /v1/plans/{plan_id}/transactions/unapproved_count`
+
+`GET /v1/plans/{plan_id}/accounts/{account_id}/transactions/unapproved_count`
+
+Returns `{ "data": { "count": 12, "server_knowledge": 4821 } }`. `count` is the
+number of live, unapproved transactions in scope — the same rows
+`?type=unapproved` lists, counted rather than returned. `since_date` and
+`until_date` narrow it exactly as they narrow the list, and the account-scoped
+path narrows it to one account, so a badge drawn from this endpoint always
+agrees with the queue the user then opens. `limit`, `offset` and `q` do not
+apply.
+
+The count and `server_knowledge` are read in one batch, so the number is always
+labelled with the knowledge value it was counted at. Clients show the "New"
+badge from this and load the queue rows only when the approval flow is opened,
+instead of paging the whole queue before the register is usable.
+
 Bulk import:
 
 `POST /v1/plans/{plan_id}/transactions/import`
