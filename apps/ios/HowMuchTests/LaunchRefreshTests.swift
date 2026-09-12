@@ -107,11 +107,13 @@ final class LaunchRefreshTests: XCTestCase {
       "resolvePlanSelection() must adopt the sole plan mid-refresh, or this test isn't exercising the fingerprint-mutation bug"
     )
 
+    // `reportsPhase` is deliberately absent: since #180 the launch refresh
+    // does not fetch the four reports, so that phase stays `.idle` for the
+    // whole of this probe and would never settle.
     let settled = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
       self.isTerminal(model.referencePhase)
         && self.isTerminal(model.ledgerPhase)
         && self.isTerminal(model.scheduledTransactionsPhase)
-        && self.isTerminal(model.reportsPhase)
     }
     XCTAssertTrue(settled, "the launch refresh(es) must settle before counting requests")
 
