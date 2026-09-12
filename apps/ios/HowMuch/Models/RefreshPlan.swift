@@ -39,8 +39,18 @@ enum TabRefresh {
   /// reader's retry for it. One GET of balances would leave categories,
   /// payees and plan settings missing, so an unloaded reference batch makes
   /// this pull fetch the batch instead.
-  static func accounts(referencePhase: LoadPhase) -> Set<RefreshSlice> {
-    referencePhase == .loaded ? accounts : [.referenceData]
+  ///
+  /// #176: a snapshot restores `referencePhase` to `.loaded` before any
+  /// request is made, so the phase alone would claim the batch had been
+  /// fetched this launch when it had not. While the reference set is still
+  /// provisional — an offline launch leaves it that way indefinitely — the
+  /// pull must fetch the batch, which is the reader's only route back to
+  /// validated categories, payees and plan settings.
+  static func accounts(
+    referencePhase: LoadPhase,
+    isReferenceProvisional: Bool = false
+  ) -> Set<RefreshSlice> {
+    referencePhase == .loaded && !isReferenceProvisional ? accounts : [.referenceData]
   }
   /// The register shows the ledger page; `.ledger` also refreshes the count and,
   /// while the approval flow is open, the queue rows behind it.

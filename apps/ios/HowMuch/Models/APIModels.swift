@@ -1120,7 +1120,7 @@ struct PlanMonthCategory: Decodable, Identifiable, Hashable {
   }
 }
 
-struct Payee: Decodable, Identifiable, Hashable {
+struct Payee: Codable, Identifiable, Hashable {
   let id: String
   let name: String
   let transferAccountId: String?
@@ -1168,17 +1168,17 @@ struct ScheduledTransactionsPayload: Decodable {
   let serverKnowledge: Int?
 }
 
-struct PlanSettings: Decodable {
+struct PlanSettings: Codable, Equatable {
   let dateFormat: DateFormat?
   let currencyFormat: CurrencyFormat?
   let display: DisplaySettings?
 }
 
-struct DateFormat: Decodable {
+struct DateFormat: Codable, Equatable {
   let format: String?
 }
 
-struct CurrencyFormat: Decodable {
+struct CurrencyFormat: Codable, Equatable {
   let isoCode: String?
   let exampleFormat: String?
   let decimalDigits: Int?
@@ -1188,7 +1188,7 @@ struct CurrencyFormat: Decodable {
   let currencySymbol: String?
 }
 
-struct DisplaySettings: Decodable {
+struct DisplaySettings: Codable, Equatable {
   let flagNames: [String]?
 
   private enum CodingKeys: String, CodingKey {
@@ -1223,7 +1223,7 @@ struct DisplaySettings: Decodable {
   }
 }
 
-struct Account: Decodable, Identifiable, Hashable {
+struct Account: Codable, Identifiable, Hashable {
   let id: String
   let name: String
   let icon: String?
@@ -1266,7 +1266,7 @@ struct Account: Decodable, Identifiable, Hashable {
   }
 }
 
-struct CategoryGroup: Decodable, Identifiable, Hashable {
+struct CategoryGroup: Codable, Identifiable, Hashable {
   /// Matches the API's COALESCE id for transactions without a category, so it
   /// can be used as a pseudo-category in report filters (as on the web).
   static let uncategorisedCategoryID = "uncategorised"
@@ -1294,7 +1294,7 @@ struct CategoryGroup: Decodable, Identifiable, Hashable {
   }
 }
 
-struct Category: Decodable, Identifiable, Hashable {
+struct Category: Codable, Identifiable, Hashable {
   let id: String
   let categoryGroupID: String
   let name: String
@@ -1343,7 +1343,7 @@ enum FlagColour: String, Codable, CaseIterable, Identifiable {
   }
 }
 
-struct Transaction: Decodable, Identifiable, Hashable {
+struct Transaction: Codable, Identifiable, Hashable {
   let id: String
   let date: String
   let amount: Int
@@ -1521,7 +1521,7 @@ extension Transaction {
   }
 }
 
-struct Subtransaction: Decodable, Hashable {
+struct Subtransaction: Codable, Hashable {
   let id: String
   let transactionID: String
   let amount: Int
@@ -1549,7 +1549,7 @@ struct Subtransaction: Decodable, Hashable {
   }
 }
 
-struct ScheduledTransaction: Decodable, Identifiable, Hashable {
+struct ScheduledTransaction: Codable, Identifiable, Hashable {
   let id: String
   let dateFirst: String
   let dateNext: String
@@ -1612,7 +1612,7 @@ struct ScheduledTransaction: Decodable, Identifiable, Hashable {
   }
 }
 
-struct ScheduledSubtransaction: Decodable, Hashable {
+struct ScheduledSubtransaction: Codable, Hashable {
   let id: String
   let scheduledTransactionID: String
   let amount: Int

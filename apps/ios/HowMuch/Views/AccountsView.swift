@@ -306,7 +306,10 @@ struct AccountsView: View {
     }
     .refreshable {
       await model.refresh(
-        slices: TabRefresh.accounts(referencePhase: model.referencePhase),
+        slices: TabRefresh.accounts(
+          referencePhase: model.referencePhase,
+          isReferenceProvisional: model.referenceIsProvisional
+        ),
         quiet: false
       )
     }

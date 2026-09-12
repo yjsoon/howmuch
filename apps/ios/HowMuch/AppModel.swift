@@ -157,7 +157,42 @@ final class AppModel {
   @ObservationIgnored private var accountPreferenceMutationGenerations: [String: Int] = [:]
   @ObservationIgnored private var accountPreferenceSyncedGenerations: [String: Int] = [:]
 
-  init(settings: APISettings = .load(), viewPrefs: ViewPrefs = .load(), captureAI: CaptureAISettings? = nil) {
+  // MARK: - #176: the on-device reference snapshot
+
+  @ObservationIgnored private let snapshotStore: SnapshotStore
+  /// True while the reference set on screen came from the snapshot rather than
+  /// from this launch's network refresh. Each area clears its own flag the
+  /// moment the network replaces it.
+  private(set) var referenceIsProvisional = false
+  private(set) var ledgerIsProvisional = false
+  private(set) var schedulesIsProvisional = false
+  /// The cursor the restored snapshot was tagged with, kept separately from
+  /// `serverKnowledge` so a later fetch can ask "is this the same plan state
+  /// the provisional rows came from?" without the answer drifting.
+  @ObservationIgnored private var snapshotKnowledge: Int?
+  /// The first ledger page exactly as the network returned it. The in-memory
+  /// `serverTransactions` is not the same thing — a quiet refresh merges, and
+  /// local creates insert — so the snapshot is written from this instead.
+  @ObservationIgnored private var lastLedgerFirstPage: ReferenceSnapshot.LedgerPage?
+  /// The ids the snapshot's first page put on screen, in the order they were
+  /// sorted into. They are the rows a network page must displace; anything
+  /// else in `serverTransactions` was fetched this session (an older page the
+  /// reader scrolled to) and must survive a refresh.
+  @ObservationIgnored private var provisionalLedgerRowIDs: [String] = []
+  @ObservationIgnored private var lastSyncedAccountPreferences: SyncedAccountPreferences?
+
+  /// Any part of what is on screen still comes from the snapshot.
+  var isProvisional: Bool {
+    referenceIsProvisional || ledgerIsProvisional || schedulesIsProvisional
+  }
+
+  init(
+    settings: APISettings = .load(),
+    viewPrefs: ViewPrefs = .load(),
+    captureAI: CaptureAISettings? = nil,
+    snapshotStore: SnapshotStore = .shared
+  ) {
+    self.snapshotStore = snapshotStore
     var scopedStore = ScopedViewPrefsStore.load()
     let scope = settings.viewPrefsScopeKey
     if scope == nil {
@@ -183,6 +218,124 @@ final class AppModel {
         self?.handleAuthenticationExpiry(expiredSessionToken: expiredSessionToken)
       }
     }
+    // #176: before the first frame, and off the network. A snapshot that does
+    // not belong to this connection is deleted rather than shown.
+    restoreSnapshot()
+  }
+
+  /// Puts the last written reference set on screen so a warm launch renders
+  /// the Accounts tab and the register's first page immediately. Everything it
+  /// sets is replaced by the network refresh `HowMuchApp`'s launch task starts
+  /// moments later; nothing here is treated as authoritative.
+  private func restoreSnapshot() {
+    guard let snapshot = snapshotStore.load() else {
+      return
+    }
+    guard SnapshotPolicy.shouldApply(snapshot: snapshot, settings: settings) else {
+      // Wrong user, wrong plan, wrong endpoint or an older schema: it can
+      // never be applied, so there is no reason to keep reading it.
+      snapshotStore.delete()
+      return
+    }
+    planSettings = snapshot.planSettings
+    accounts = snapshot.accounts
+    categoryGroups = snapshot.categoryGroups
+    payees = snapshot.payees
+    scheduledTransactions = snapshot.scheduledTransactions
+    lastSyncedAccountPreferences = snapshot.accountPreferences
+    serverKnowledge = snapshot.serverKnowledge
+    snapshotKnowledge = snapshot.serverKnowledge
+    // #181's badge: the tile shows the last count the server gave rather than
+    // flashing 0 while `refreshUnapprovedCount` is in flight. It is a plain
+    // number with no rows behind it, and `unapprovedBadgeCount` already
+    // subtracts anything approved since — which, on a launch, is nothing.
+    // Per-account counts are not restored: a narrowed register fetches its own
+    // when it opens, and a stale per-account number has no tile to sit on.
+    if let unapprovedCount = snapshot.unapprovedCount {
+      serverUnapprovedCount = unapprovedCount
+    }
+    referenceIsProvisional = true
+    schedulesIsProvisional = true
+    referencePhase = .loaded
+    scheduledTransactionsPhase = .loaded
+    if let page = snapshot.ledgerPage {
+      serverTransactions = sortedUniqueTransactions(page.transactions)
+      provisionalLedgerRowIDs = serverTransactions.map(\.id)
+      hasMoreTransactions = page.hasMore && page.nextOffset != nil
+      nextTransactionOffset = hasMoreTransactions ? page.nextOffset : nil
+      lastLedgerFirstPage = page
+      ledgerIsProvisional = true
+      ledgerPhase = .loaded
+    }
+    rebuildLookups()
+    // `publishIntentCatalog()` is deliberately not called: the intent catalog
+    // is its own file, written from the same data and keyed on the same
+    // fingerprint, so it already holds exactly what this restore would write.
+    // The network refresh publishes it again as soon as it lands.
+  }
+
+  /// Writes the current reference set, tagged with the cursor the last ledger
+  /// fetch observed. Called from every slice's success path; the store
+  /// coalesces and encodes off the main actor.
+  private func persistSnapshot() {
+    guard settings.isAuthenticated,
+          !settings.planID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+          !settings.authenticatedUserID.isEmpty,
+          !accounts.isEmpty,
+          // Never write a mixture of this launch's data and the last one's:
+          // the file is tagged with a single cursor, so every part of it must
+          // have come from the network at that cursor. The slice that clears
+          // the final provisional flag is the one that writes.
+          !isProvisional else {
+      return
+    }
+    snapshotStore.scheduleWrite(
+      ReferenceSnapshot(
+        connectionFingerprint: settings.connectionFingerprint,
+        authenticatedUserID: settings.authenticatedUserID,
+        planID: settings.planID,
+        serverKnowledge: serverKnowledge,
+        planSettings: planSettings,
+        accounts: accounts,
+        categoryGroups: categoryGroups,
+        payees: payees,
+        accountPreferences: lastSyncedAccountPreferences,
+        scheduledTransactions: scheduledTransactions,
+        ledgerPage: lastLedgerFirstPage,
+        unapprovedCount: serverUnapprovedCount
+      )
+    )
+  }
+
+  /// Reports a launch that never reached the plan-scoped requests against the
+  /// phases the snapshot had claimed were loaded. Without this an offline warm
+  /// launch would sit on restored data with all three phases `.loaded` and no
+  /// failure anywhere — the app would look freshly loaded when nothing had
+  /// been validated. The data stays on screen behind the failure UI, which is
+  /// what a failed refresh over in-memory data does today.
+  private func failProvisionalPhases(_ message: String) {
+    if referenceIsProvisional {
+      referencePhase = .failed(message)
+    }
+    if ledgerIsProvisional {
+      ledgerPhase = .failed(message)
+    }
+    if schedulesIsProvisional {
+      scheduledTransactionsPhase = .failed(message)
+    }
+  }
+
+  /// Drops both the file and every provisional marker. The snapshot belongs to
+  /// one endpoint, user and plan, so any change to those discards it outright.
+  private func discardSnapshot() {
+    snapshotStore.delete()
+    referenceIsProvisional = false
+    ledgerIsProvisional = false
+    schedulesIsProvisional = false
+    snapshotKnowledge = nil
+    provisionalLedgerRowIDs = []
+    lastLedgerFirstPage = nil
+    lastSyncedAccountPreferences = nil
   }
 
   /// Clears all authenticated and cached state after a server-side session
@@ -198,6 +351,8 @@ final class AppModel {
     settings.authenticatedUserID = ""
     settings.save()
     switchViewPrefsScope()
+    // #176: a revoked session is a sign-out. The snapshot belongs to it.
+    discardSnapshot()
     planSettings = nil
     accounts = []
     categoryGroups = []
@@ -1365,6 +1520,7 @@ final class AppModel {
       }
       accounts = fetched
       rebuildLookups()
+      persistSnapshot()
       publishIntentCatalog()
     } catch {
       guard generation == accountsGeneration, planID == settings.planID, scope == activeViewPrefsScope
@@ -1396,6 +1552,7 @@ final class AppModel {
     }
     payees = fetched
     rebuildLookups()
+    persistSnapshot()
     publishIntentCatalog()
   }
 
@@ -1459,6 +1616,9 @@ final class AppModel {
       guard !Task.isCancelled, settings.connectionFingerprint == connectionFingerprint else {
         return false
       }
+      // #176: this returns before any slice runs, so nothing else will report
+      // the failure against the phases a restored snapshot set to `.loaded`.
+      failProvisionalPhases(error.localizedDescription)
       isShowingSettings = true
       return false
     }
@@ -1470,7 +1630,10 @@ final class AppModel {
     let planID = settings.planID
     let scope = activeViewPrefsScope
     let accountPreferencesAtStart = AccountPresentationPreferences(viewPrefs)
-    if !quiet {
+    // #176: a launch refresh is loud, but blanking a snapshot the reader is
+    // already looking at would undo the whole point of having one. The rows
+    // stay until this fetch replaces them.
+    if !quiet, !referenceIsProvisional {
       referencePhase = .loading
     }
     do {
@@ -1515,6 +1678,11 @@ final class AppModel {
       }
       pruneViewPrefs(using: reference.accounts)
       referencePhase = .loaded
+      // The network has replaced every reference row, so nothing older than
+      // this response is on screen any more (#144).
+      referenceIsProvisional = false
+      lastSyncedAccountPreferences = reference.accountPreferences
+      persistSnapshot()
       publishIntentCatalog()
     } catch {
       guard generation == referenceGeneration, planID == settings.planID, scope == activeViewPrefsScope else {
@@ -1529,7 +1697,9 @@ final class AppModel {
     ledgerPageGeneration += 1
     let generation = ledgerPageGeneration
     let planID = settings.planID
-    if !quiet {
+    // #176: provisional rows are already on screen; a loud refresh must not
+    // replace them with a spinner. They are replaced, not merged, below.
+    if !quiet, !ledgerIsProvisional {
       hasMoreTransactions = false
       nextTransactionOffset = nil
       isLoadingOlderTransactions = false
@@ -1551,13 +1721,48 @@ final class AppModel {
       if let knowledge = page.serverKnowledge {
         serverKnowledge = knowledge
       }
-      // Mutation refreshes must not drop already-loaded rows; List would clamp to top.
-      serverTransactions = sortedUniqueTransactions(
-        quiet ? page.transactions + serverTransactions : page.transactions
+      // #176: when the rows on screen came from a snapshot taken at this very
+      // cursor, the page just fetched is row-for-row what is already there, so
+      // the assignment (and the re-render it triggers) is skipped. A cursor
+      // that differs by even one always applies.
+      let fetchedFirstPage = sortedUniqueTransactions(page.transactions)
+      let applyIsRedundant = SnapshotPolicy.ledgerApplyIsRedundant(
+        isProvisional: ledgerIsProvisional,
+        snapshotKnowledge: snapshotKnowledge,
+        responseKnowledge: page.serverKnowledge,
+        snapshotRowIDs: provisionalLedgerRowIDs,
+        responseRowIDs: fetchedFirstPage.map(\.id)
       )
+      if !applyIsRedundant {
+        // Mutation refreshes must not drop already-loaded rows; List would clamp to top.
+        // Provisional rows are the exception, in both directions: the response
+        // must displace every row the snapshot put up (merging would keep rows
+        // the server has since deleted, the staleness #144 forbids), while
+        // older pages the reader scrolled to in this session came from the
+        // network and must survive. A loud refresh replaces outright, as it
+        // always has.
+        if quiet, ledgerIsProvisional {
+          let displaced = Set(provisionalLedgerRowIDs)
+          serverTransactions = sortedUniqueTransactions(
+            page.transactions + serverTransactions.filter { !displaced.contains($0.id) }
+          )
+        } else {
+          serverTransactions = sortedUniqueTransactions(
+            quiet ? page.transactions + serverTransactions : page.transactions
+          )
+        }
+      }
       reconcileClearedToggleOverlays()
       applyTransactionPageCursor(page)
       ledgerPhase = .loaded
+      ledgerIsProvisional = false
+      provisionalLedgerRowIDs = []
+      lastLedgerFirstPage = ReferenceSnapshot.LedgerPage(
+        transactions: page.transactions,
+        hasMore: page.hasMore,
+        nextOffset: page.nextOffset
+      )
+      persistSnapshot()
       // The badge, and the rows only if the approval flow is already open. Both
       // run alongside the horizon fill below rather than in front of it.
       Task { await self.refreshUnapprovedCount(generation: generation, planID: planID) }
@@ -1626,6 +1831,9 @@ final class AppModel {
       serverUnapprovedCountsByAccount[accountID] = count
     } else {
       serverUnapprovedCount = count
+      // The count lands after the ledger page that spawned it, so the snapshot
+      // written there carries the previous number. Rewrite it with this one.
+      persistSnapshot()
     }
     confirmedWhenCounted[countScopeKey(accountID)] = locallyResolvedUnapprovedIDs
   }
@@ -1699,6 +1907,9 @@ final class AppModel {
   /// Prevents one server, user, or plan from remaining visible while a newly
   /// selected connection is loading or has failed to load.
   private func clearConnectionOwnedState() {
+    // #176: every caller of this is a change of endpoint, user or plan, which
+    // is exactly when a snapshot may no longer be shown.
+    discardSnapshot()
     planSettings = nil
     accounts = []
     categoryGroups = []
@@ -1782,7 +1993,9 @@ final class AppModel {
     let planID = settings.planID
     let scope = activeViewPrefsScope
     let client = apiClient
-    if !quiet {
+    // #176: as with the ledger, a snapshot already on screen is replaced by
+    // this fetch rather than blanked while it runs.
+    if !quiet, !schedulesIsProvisional {
       scheduledTransactionsPhase = .loading
     }
     do {
@@ -1795,6 +2008,8 @@ final class AppModel {
       }
       scheduledTransactions = schedules.sorted { ($0.dateNext, $0.id) < ($1.dateNext, $1.id) }
       scheduledTransactionsPhase = .loaded
+      schedulesIsProvisional = false
+      persistSnapshot()
     } catch {
       guard generation == scheduledTransactionsGeneration,
             planID == settings.planID,

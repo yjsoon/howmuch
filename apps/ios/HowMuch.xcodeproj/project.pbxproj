@@ -16,6 +16,7 @@
 		A10000000000000000000021 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* AppModel.swift */; };
 		A10000000000000000000022 /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* APIModels.swift */; };
 		A100000000000000000000A1 /* RefreshPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000A0 /* RefreshPlan.swift */; };
+		A100000000000000000000B1 /* ReferenceSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000B0 /* ReferenceSnapshot.swift */; };
 		A10000000000000000000025 /* AccountGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* AccountGroups.swift */; };
 		A10000000000000000000026 /* AccountIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* AccountIcon.swift */; };
 		A10000000000000000000023 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* APIClient.swift */; };
@@ -96,6 +97,7 @@
 		A200000000000000000000D1 /* LaunchRefreshTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000D0 /* LaunchRefreshTests.swift */; };
 		A200000000000000000000E1 /* NarrowRefreshTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000E0 /* NarrowRefreshTests.swift */; };
 		A200000000000000000000E3 /* RefreshPlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000E2 /* RefreshPlanTests.swift */; };
+		A200000000000000000000F1 /* ReferenceSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000F0 /* ReferenceSnapshotTests.swift */; };
 		A30000000000000000000003 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000002 /* ShareViewController.swift */; };
 		A30000000000000000000006 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
 		A3000000000000000000000B /* HowMuchShare.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* HowMuchShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -157,6 +159,7 @@
 		A200000000000000000000D0 /* LaunchRefreshTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchRefreshTests.swift; sourceTree = "<group>"; };
 		A200000000000000000000E0 /* NarrowRefreshTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NarrowRefreshTests.swift; sourceTree = "<group>"; };
 		A200000000000000000000E2 /* RefreshPlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefreshPlanTests.swift; sourceTree = "<group>"; };
+		A200000000000000000000F0 /* ReferenceSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReferenceSnapshotTests.swift; sourceTree = "<group>"; };
 		A50000000000000000000020 /* RewardsReportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardsReportTests.swift; sourceTree = "<group>"; };
 		A50000000000000000000022 /* RewardCardEditorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardCardEditorTests.swift; sourceTree = "<group>"; };
 		A60000000000000000000010 /* IPadLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPadLayoutTests.swift; sourceTree = "<group>"; };
@@ -168,6 +171,7 @@
 		A10000000000000000000011 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		A10000000000000000000012 /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
 		A100000000000000000000A0 /* RefreshPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefreshPlan.swift; sourceTree = "<group>"; };
+		A100000000000000000000B0 /* ReferenceSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReferenceSnapshot.swift; sourceTree = "<group>"; };
 		A10000000000000000000015 /* AccountGroups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountGroups.swift; sourceTree = "<group>"; };
 		A10000000000000000000016 /* AccountIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountIcon.swift; sourceTree = "<group>"; };
 		A10000000000000000000013 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
@@ -298,6 +302,7 @@
 			children = (
 				A10000000000000000000012 /* APIModels.swift */,
 				A100000000000000000000A0 /* RefreshPlan.swift */,
+				A100000000000000000000B0 /* ReferenceSnapshot.swift */,
 				A10000000000000000000015 /* AccountGroups.swift */,
 				A10000000000000000000016 /* AccountIcon.swift */,
 			);
@@ -423,6 +428,7 @@
 				A200000000000000000000D0 /* LaunchRefreshTests.swift */,
 				A200000000000000000000E0 /* NarrowRefreshTests.swift */,
 				A200000000000000000000E2 /* RefreshPlanTests.swift */,
+				A200000000000000000000F0 /* ReferenceSnapshotTests.swift */,
 			);
 			path = HowMuchTests;
 			sourceTree = "<group>";
@@ -568,6 +574,7 @@
 				A10000000000000000000021 /* AppModel.swift in Sources */,
 				A10000000000000000000022 /* APIModels.swift in Sources */,
 				A100000000000000000000A1 /* RefreshPlan.swift in Sources */,
+				A100000000000000000000B1 /* ReferenceSnapshot.swift in Sources */,
 				A10000000000000000000025 /* AccountGroups.swift in Sources */,
 				A10000000000000000000026 /* AccountIcon.swift in Sources */,
 				A10000000000000000000023 /* APIClient.swift in Sources */,
@@ -658,6 +665,7 @@
 				A200000000000000000000D1 /* LaunchRefreshTests.swift in Sources */,
 				A200000000000000000000E1 /* NarrowRefreshTests.swift in Sources */,
 				A200000000000000000000E3 /* RefreshPlanTests.swift in Sources */,
+				A200000000000000000000F1 /* ReferenceSnapshotTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

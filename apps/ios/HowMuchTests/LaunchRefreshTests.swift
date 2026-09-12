@@ -91,7 +91,7 @@ final class LaunchRefreshTests: XCTestCase {
     settings.sessionToken = "token"
     settings.planID = "" // fresh sign-in: no saved plan yet
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
 
     guard let surface = SnapshotSurface(
       root: LaunchProbe(model: model, taskID: taskID),
@@ -135,6 +135,16 @@ final class LaunchRefreshTests: XCTestCase {
     )
     return count
   }
+}
+
+/// #176: every model built here gets a snapshot store rooted in a fresh
+/// temporary directory, so no test reads or writes the real Application
+/// Support container (or another test's cache).
+private func temporarySnapshotStore() -> SnapshotStore {
+  SnapshotStore(
+    directory: FileManager.default.temporaryDirectory
+      .appendingPathComponent("HowMuchSnapshotTests/\(UUID().uuidString)", isDirectory: true)
+  )
 }
 
 private struct LaunchProbe: View {
@@ -274,7 +284,7 @@ final class ApplySettingsRefreshTests: XCTestCase {
     defer { URLProtocol.unregisterClass(ApplySettingsProbeProtocol.self) }
     ApplySettingsProbeProtocol.reset()
 
-    let model = AppModel(settings: APISettings(), viewPrefs: ViewPrefs())
+    let model = AppModel(settings: APISettings(), viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
     XCTAssertNotEqual(model.settings.launchFingerprint, "")
 
     var signedIn = APISettings()
@@ -306,7 +316,7 @@ final class ApplySettingsRefreshTests: XCTestCase {
     initial.sessionToken = "token"
     initial.planID = ApplySettingsProbeProtocol.planA
 
-    let model = AppModel(settings: initial, viewPrefs: ViewPrefs())
+    let model = AppModel(settings: initial, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
 
     var switched = initial
     switched.planID = ApplySettingsProbeProtocol.planB

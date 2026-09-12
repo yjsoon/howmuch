@@ -261,7 +261,7 @@ final class NarrowRefreshTests: XCTestCase {
       connectionFingerprint: settings.connectionFingerprint
     )
     try? OutboxStore.save([pending])
-    return AppModel(settings: settings, viewPrefs: ViewPrefs())
+    return AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
   }
 
   private func makeModel() -> AppModel {
@@ -270,7 +270,7 @@ final class NarrowRefreshTests: XCTestCase {
     settings.authenticatedUserID = "narrow-refresh-\(UUID().uuidString)"
     settings.sessionToken = "token"
     settings.planID = NarrowRefreshProtocol.planID
-    return AppModel(settings: settings, viewPrefs: ViewPrefs())
+    return AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
   }
 
   /// Polls a main-actor condition; the follow-up refresh after a write is
@@ -290,6 +290,16 @@ final class NarrowRefreshTests: XCTestCase {
     }
     return condition()
   }
+}
+
+/// #176: every model built here gets a snapshot store rooted in a fresh
+/// temporary directory, so no test reads or writes the real Application
+/// Support container (or another test's cache).
+private func temporarySnapshotStore() -> SnapshotStore {
+  SnapshotStore(
+    directory: FileManager.default.temporaryDirectory
+      .appendingPathComponent("HowMuchSnapshotTests/\(UUID().uuidString)", isDirectory: true)
+  )
 }
 
 private struct RecordedRequest: CustomStringConvertible {
