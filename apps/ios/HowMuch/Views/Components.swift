@@ -183,7 +183,8 @@ enum AppTab: Hashable, CaseIterable {
   case plan
   case assistant
 
-  static let compactDestinations: [AppTab] = [.accounts, .rewards, .reflect]
+  /// Compact destinations are the `CompactRootBar` triple — not an open-ended list.
+  static var compactDestinations: [AppTab] { CompactRootBar.destinationTabs }
 
   var isCompactDestination: Bool {
     Self.compactDestinations.contains(self)
@@ -237,37 +238,64 @@ enum AppTab: Hashable, CaseIterable {
   }
 }
 
-enum CompactBarSelection: Hashable {
+enum CompactBarSelection: Hashable, CaseIterable {
   case accounts
   case rewards
   case reflect
-  case addTransactions
+  /// The one compact action. Not a destination tab.
+  case addTransaction
 
   var tab: AppTab? {
     switch self {
     case .accounts: return .accounts
     case .rewards: return .rewards
     case .reflect: return .reflect
-    case .addTransactions: return nil
+    case .addTransaction: return nil
     }
+  }
+
+  var isDestination: Bool { tab != nil }
+  var isAction: Bool { self == .addTransaction }
+}
+
+/// Compact iPhone chrome is structurally three destinations and one action button.
+/// The destination triple is the capacity: a fourth tab is a type change, not an append.
+enum CompactRootBar {
+  static let destinationCapacity = 3
+  static let actionCapacity = 1
+  static let destinations: (AppTab, AppTab, AppTab) = (.accounts, .rewards, .reflect)
+  static let action = RootTrailingAction.addTransaction
+  static let actionSelection = CompactBarSelection.addTransaction
+
+  static var destinationTabs: [AppTab] {
+    let (first, second, third) = destinations
+    return [first, second, third]
+  }
+
+  static var destinationSelections: [CompactBarSelection] {
+    CompactBarSelection.allCases.filter(\.isDestination)
+  }
+
+  static var actionSelections: [CompactBarSelection] {
+    CompactBarSelection.allCases.filter(\.isAction)
   }
 }
 
-enum RootTrailingAction {
-  case addTransactions
+enum RootTrailingAction: Equatable {
+  case addTransaction
   case assistant
 
   var title: String {
     switch self {
-    case .addTransactions: return "Add Transactions"
+    case .addTransaction: return "Add Transaction"
     case .assistant: return "Assistant"
     }
   }
 
   var systemImage: String {
     switch self {
-    case .addTransactions: return "plus.bubble"
-    case .assistant: return "bubble.left.and.bubble.right"
+    case .addTransaction: return "plus"
+    case .assistant: return "plus.bubble"
     }
   }
 }
@@ -339,6 +367,9 @@ enum RootChrome {
     return EdgeInsets(top: 0, leading: 0, bottom: 90, trailing: 16)
   }
 
+  /// Space above the compact tab bar reserved for the floating Assistant.
+  static let compactFloatingAssistantClearance = RootAddControl.diameter + 10
+
   static func toastBottomPadding(
     idiom: UIUserInterfaceIdiom,
     horizontalSizeClass: UserInterfaceSizeClass?
@@ -346,7 +377,7 @@ enum RootChrome {
     if usesSidebar(idiom: idiom, horizontalSizeClass: horizontalSizeClass) {
       return 28 + RootAddControl.diameter + 8
     }
-    return 90
+    return 90 + compactFloatingAssistantClearance
   }
 }
 
@@ -431,7 +462,6 @@ struct RootTabView: View {
   @Bindable var chrome: RootChromeState
   var usesSidebar: Bool
   var workspace: CaptureWorkspace = .shared
-  var presenting: (() -> Void)?
   var presentingManually: (() -> Void)?
 
   var body: some View {
@@ -439,14 +469,14 @@ struct RootTabView: View {
       TabView(selection: $chrome.tab) {
         Tab(AppTab.accounts.title, systemImage: AppTab.accounts.systemImage, value: AppTab.accounts) {
           RootChromeScope(chrome: chrome) {
-            RootTabHost(for: .accounts) {
+            RootTabHost(for: .accounts, workspace: workspace) {
               AccountsView()
             }
           }
         }
         Tab(AppTab.rewards.title, systemImage: AppTab.rewards.systemImage, value: AppTab.rewards) {
           RootChromeScope(chrome: chrome) {
-            RootTabHost(for: .rewards) {
+            RootTabHost(for: .rewards, workspace: workspace) {
               NavigationStack {
                 RewardsView()
               }
@@ -455,7 +485,7 @@ struct RootTabView: View {
         }
         Tab(AppTab.reflect.title, systemImage: AppTab.reflect.systemImage, value: AppTab.reflect) {
           RootChromeScope(chrome: chrome) {
-            RootTabHost(for: .reflect) {
+            RootTabHost(for: .reflect, workspace: workspace) {
               NavigationStack {
                 ReflectView()
               }
@@ -481,40 +511,16 @@ struct RootTabView: View {
       .defaultAdaptableTabBarPlacement(.sidebar)
     } else {
       TabView(selection: compactBarSelection) {
-        Tab(AppTab.accounts.title, systemImage: AppTab.accounts.systemImage, value: CompactBarSelection.accounts) {
-          RootChromeScope(chrome: chrome) {
-            RootTabHost(for: .accounts) {
-              AccountsView()
-            }
-          }
-        }
-        Tab(AppTab.rewards.title, systemImage: AppTab.rewards.systemImage, value: CompactBarSelection.rewards) {
-          RootChromeScope(chrome: chrome) {
-            RootTabHost(for: .rewards) {
-              NavigationStack {
-                RewardsView()
-              }
-            }
-          }
-        }
-        Tab(AppTab.reflect.title, systemImage: AppTab.reflect.systemImage, value: CompactBarSelection.reflect) {
-          RootChromeScope(chrome: chrome) {
-            RootTabHost(for: .reflect) {
-              NavigationStack {
-                ReflectView()
-              }
-            }
-          }
-        }
-        RootCaptureTab(addManually: presentManual)
+        compactDestinationTab(CompactRootBar.destinations.0)
+        compactDestinationTab(CompactRootBar.destinations.1)
+        compactDestinationTab(CompactRootBar.destinations.2)
+        RootCaptureTab()
       }
       .tabViewStyle(.tabBarOnly)
       .tabBarMinimizeBehavior(.onScrollDown)
       .background {
-        RootTabBarTrailingActions(
-          addManually: presentManual,
-          openAssistant: { chrome.openMore(.assistant) },
-          hidesAssistant: CaptureRouter.shared.hidesTabRowOverlay
+        RootTabBarFloatingAssistant(
+          openAssistant: { chrome.openMore(.assistant) }
         )
         .frame(width: 0, height: 0)
         .accessibilityHidden(true)
@@ -522,12 +528,41 @@ struct RootTabView: View {
     }
   }
 
+  @TabContentBuilder
+  private func compactDestinationTab(_ tab: AppTab) -> some TabContent<CompactBarSelection> {
+    Tab(tab.title, systemImage: tab.systemImage, value: tab.compactBarSelection ?? .accounts) {
+      RootChromeScope(chrome: chrome) {
+        RootTabHost(for: tab, workspace: workspace) {
+          compactDestinationRoot(tab)
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func compactDestinationRoot(_ tab: AppTab) -> some View {
+    switch tab {
+    case .accounts:
+      AccountsView()
+    case .rewards:
+      NavigationStack {
+        RewardsView()
+      }
+    case .reflect:
+      NavigationStack {
+        ReflectView()
+      }
+    case .plan, .assistant:
+      EmptyView()
+    }
+  }
+
   private var compactBarSelection: Binding<CompactBarSelection> {
     Binding(
       get: { chrome.compactBarTab.compactBarSelection ?? .accounts },
       set: { selection in
-        if selection == .addTransactions {
-          presentCapture()
+        if selection == CompactRootBar.actionSelection {
+          presentManual()
           return
         }
         if let tab = selection.tab {
@@ -535,14 +570,6 @@ struct RootTabView: View {
         }
       }
     )
-  }
-
-  private func presentCapture() {
-    if let presenting {
-      presenting()
-      return
-    }
-    model.presentAddTransactions(origin: model.addTransactionsOrigin())
   }
 
   private func presentManual() {
@@ -554,63 +581,45 @@ struct RootTabView: View {
   }
 }
 
+/// The one compact action. Search role keeps it a trailing button, not a fourth tab.
 struct RootCaptureTab: TabContent {
-  let addManually: () -> Void
-
   var body: some TabContent<CompactBarSelection> {
     Tab(
-      RootTrailingAction.addTransactions.title,
-      systemImage: RootTrailingAction.addTransactions.systemImage,
-      value: CompactBarSelection.addTransactions,
+      CompactRootBar.action.title,
+      systemImage: CompactRootBar.action.systemImage,
+      value: CompactRootBar.actionSelection,
       role: .search
     ) {
       Color.clear
     }
-    .contextMenu {
-      Button("Add manually", systemImage: "square.and.pencil", action: addManually)
-    }
   }
 }
 
-/// SwiftUI's TabContent menu serves the sidebar, not the iPhone tab bar.
-struct RootTabBarTrailingActions: UIViewControllerRepresentable {
-  var addManually: () -> Void
+/// Pins the floating Assistant above the compact Add button. It is not a tab
+/// and must not sit in the destination row.
+struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
   var openAssistant: () -> Void
-  var hidesAssistant = false
 
   func makeUIViewController(context: Context) -> Controller {
     let controller = Controller()
-    controller.addManually = addManually
     controller.openAssistant = openAssistant
     return controller
   }
 
   func updateUIViewController(_ controller: Controller, context: Context) {
-    controller.addManually = addManually
     controller.openAssistant = openAssistant
     controller.install()
   }
 
-    static func dismantleUIViewController(_ controller: Controller, coordinator: ()) {
-      controller.stopTracking()
-      controller.uninstall()
-    }
+  static func dismantleUIViewController(_ controller: Controller, coordinator: ()) {
+    controller.stopTracking()
+    controller.uninstall()
+  }
 
-  final class Controller: UIViewController, UIContextMenuInteractionDelegate {
-    var addManually: () -> Void = {}
+  final class Controller: UIViewController {
     var openAssistant: () -> Void = {}
-    private weak var target: UIView?
-    private var menuInteraction: UIContextMenuInteraction?
-    private var manualAction: UIAccessibilityCustomAction?
     private var assistantButton: UIButton?
-    private var attachedManualTargets: [NSObject] = []
     private var displayLink: CADisplayLink?
-    private weak var hostedBar: UITabBar?
-    private weak var reservedCluster: UIView?
-    private weak var destinationPlatter: UIView?
-    private var originalClusterMargins: NSDirectionalEdgeInsets?
-    private var reservedWidth: CGFloat = 0
-    private var destinationShift: CGFloat = 0
 
     override func loadView() {
       view = UIView()
@@ -635,108 +644,72 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
 
     func install() {
       if CaptureRouter.shared.hidesTabRowOverlay {
-        assistantButton?.isHidden = true
-        assistantButton?.removeFromSuperview()
+        hideAssistant()
         return
       }
       guard let window = view.window else {
         return
       }
+      guard let tabBar = hostedTabBar(), isVisibleInWindow(tabBar, in: window) else {
+        hideAssistant()
+        return
+      }
       let accounts = tabRowView(AppTab.accounts.title, in: window)
-      let addView = accounts.flatMap { searchRoleAdd(in: window, alignedWith: $0) }
-        ?? rightmostCompactView(inBottomBandOf: window)
-      guard let addView else {
+      guard let accounts,
+            isVisibleInWindow(accounts, in: window),
+            let addView = searchRoleAdd(in: window, alignedWith: accounts),
+            isVisibleInWindow(addView, in: window)
+      else {
+        hideAssistant()
         return
       }
       startTracking()
-      let tabBar = hostedTabBar()
-      if addView !== target {
-        uninstall()
-        target = addView
-        hostedBar = tabBar
-        if addView.accessibilityLabel == nil || addView.accessibilityLabel?.isEmpty == true {
-          addView.accessibilityLabel = RootTrailingAction.addTransactions.title
-        }
-        let interaction = UIContextMenuInteraction(delegate: self)
-        menuInteraction = interaction
-        addView.addInteraction(interaction)
-      }
-      attachManualEntryAction(in: window, preferring: addView)
-      hostedBar = tabBar
-      layoutAssistant(
-        relativeTo: addView,
-        alignedWith: accounts ?? addView,
-        tabBar: tabBar,
-        in: window
-      )
+      layoutAssistant(relativeTo: addView, in: window)
     }
 
     func uninstall() {
-      if let menuInteraction { target?.removeInteraction(menuInteraction) }
-      if let manualAction {
-        for object in attachedManualTargets {
-          object.accessibilityCustomActions = object.accessibilityCustomActions?.filter { $0 !== manualAction }
-        }
-      }
-      attachedManualTargets = []
-      assistantButton?.removeFromSuperview()
-      restoreReservation()
-      target = nil
-      menuInteraction = nil
-      manualAction = nil
+      hideAssistant()
       assistantButton = nil
-      hostedBar = nil
     }
 
-    func contextMenuInteraction(
-      _ interaction: UIContextMenuInteraction,
-      configurationForMenuAtLocation location: CGPoint
-    ) -> UIContextMenuConfiguration? {
-      UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
-        UIMenu(children: [
-          UIAction(title: "Add manually", image: UIImage(systemName: "square.and.pencil")) { [weak self] _ in
-            self?.addManually()
-          },
-        ])
-      }
+    private func hideAssistant() {
+      assistantButton?.isHidden = true
+      assistantButton?.removeFromSuperview()
     }
 
-    private func layoutAssistant(
-      relativeTo add: UIView,
-      alignedWith _: UIView,
-      tabBar: UITabBar?,
-      in window: UIWindow
-    ) {
+    private func layoutAssistant(relativeTo add: UIView, in window: UIWindow) {
       let button = assistantButton ?? makeAssistantButton()
       assistantButton = button
-      if CaptureRouter.shared.hidesTabRowOverlay {
-        button.isHidden = true
-        button.removeFromSuperview()
+      if CaptureRouter.shared.hidesTabRowOverlay
+          || hostedTabBar().map({ isVisibleInWindow($0, in: window) }) != true {
+        hideAssistant()
         return
       }
-      let host = hostForAssistant(add: add, window: window)
+      let host = window
       let pin = circularPin(from: add, in: window)
       if button.superview !== host {
         button.removeFromSuperview()
         host.addSubview(button)
       }
-      button.tintColor = tabBar?.tintColor ?? window.tintColor
+      button.tintColor = hostedTabBar()?.tintColor ?? window.tintColor
 
-      let gap: CGFloat = 8
+      let gap: CGFloat = 10
       let pinInHost = pin.convert(pin.bounds, to: host)
-      let side = max(44, min(pinInHost.width, pinInHost.height))
+      let side = max(44, min(max(pinInHost.width, pinInHost.height), 56))
       let size = CGSize(width: side, height: side)
-      let needed = size.width + gap
-      shiftDestinationCapsule(in: window, excluding: pin, width: needed)
       let frame = CGRect(
-        x: pinInHost.minX - gap - size.width,
-        y: pinInHost.midY - size.height / 2,
+        x: pinInHost.midX - size.width / 2,
+        y: pinInHost.minY - gap - size.height,
         width: size.width,
         height: size.height
       )
       button.isHidden = false
       button.layer.cornerRadius = size.height / 2
-      button.clipsToBounds = true
+      button.clipsToBounds = false
+      button.layer.shadowColor = UIColor.black.cgColor
+      button.layer.shadowOpacity = 0.18
+      button.layer.shadowRadius = 8
+      button.layer.shadowOffset = CGSize(width: 0, height: 4)
       button.frame = frame
       host.bringSubviewToFront(button)
     }
@@ -745,8 +718,9 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
       let button = UIButton(type: .system)
       var configuration = UIButton.Configuration.plain()
       configuration.image = UIImage(systemName: RootTrailingAction.assistant.systemImage)
+      configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
       configuration.baseForegroundColor = .label
-      configuration.background.backgroundColor = .white.withAlphaComponent(0.92)
+      configuration.background.backgroundColor = .white.withAlphaComponent(0.96)
       configuration.cornerStyle = .capsule
       button.configuration = configuration
       button.accessibilityLabel = RootTrailingAction.assistant.title
@@ -759,169 +733,6 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
         self?.openAssistant()
       }, for: .primaryActionTriggered)
       return button
-    }
-
-    private func restoreReservation() {
-      if let reservedCluster, let originalClusterMargins {
-        reservedCluster.directionalLayoutMargins = originalClusterMargins
-      }
-      if let hostedBar {
-        for title in AppTab.compactDestinations.map(\.title) {
-          labelledControl(title, in: hostedBar)?.transform = .identity
-        }
-        hostedBar.transform = .identity
-      }
-      destinationPlatter?.transform = .identity
-      reservedCluster = nil
-      originalClusterMargins = nil
-      destinationPlatter = nil
-      reservedWidth = 0
-      destinationShift = 0
-    }
-
-    private func reserveLane(add: UIView, reflect: UIView, width: CGFloat) {
-      guard let tabBar = hostedBar,
-            let cluster = destinationCluster(reflect: reflect, add: add, tabBar: tabBar) else {
-        return
-      }
-      if reservedCluster == nil {
-        reservedCluster = cluster
-        originalClusterMargins = cluster.directionalLayoutMargins
-      }
-      reservedWidth = max(reservedWidth, width)
-      var margins = originalClusterMargins ?? cluster.directionalLayoutMargins
-      margins.trailing = (originalClusterMargins?.trailing ?? margins.trailing) + reservedWidth
-      cluster.directionalLayoutMargins = margins
-      (cluster as? UIStackView)?.isLayoutMarginsRelativeArrangement = true
-    }
-
-    private func shiftDestinations(in tabBar: UITabBar, excluding add: UIView, width: CGFloat) {
-      destinationShift = max(destinationShift, width)
-      for title in AppTab.compactDestinations.map(\.title) {
-        guard let control = labelledControl(title, in: tabBar), control !== add else {
-          continue
-        }
-        control.transform = CGAffineTransform(translationX: -destinationShift, y: 0)
-      }
-    }
-
-    private func hostedTabBar() -> UITabBar? {
-      if let root = view.window?.rootViewController, let tab = tabController(in: root) {
-        return tab.tabBar
-      }
-      guard let window = view.window else {
-        return nil
-      }
-      return firstTabBar(in: window)
-    }
-
-    private func firstTabBar(in view: UIView) -> UITabBar? {
-      if let bar = view as? UITabBar {
-        return bar
-      }
-      return view.subviews.lazy.compactMap { self.firstTabBar(in: $0) }.first
-    }
-
-    private func destinationCluster(reflect: UIView, add: UIView, tabBar: UITabBar) -> UIView? {
-      var cluster: UIView?
-      var current: UIView? = reflect.superview
-      while let view = current, view !== tabBar {
-        if add.isDescendant(of: view) {
-          break
-        }
-        cluster = view
-        current = view.superview
-      }
-      return cluster
-    }
-
-    private func tabController(in controller: UIViewController) -> UITabBarController? {
-      if let tab = controller as? UITabBarController { return tab }
-      return controller.children.lazy.compactMap { self.tabController(in: $0) }.first
-    }
-
-    private func shiftDestinationCapsule(in window: UIWindow, excluding add: UIView, width: CGFloat) {
-      destinationShift = max(destinationShift, width)
-      let bandMinY = window.bounds.maxY - 160
-      var capsule: UIView?
-      var capsuleWidth: CGFloat = 0
-      func walk(_ view: UIView) {
-        if view !== add, !add.isDescendant(of: view) {
-          let frame = view.convert(view.bounds, to: window)
-          let inBand = frame.midY >= bandMinY
-          let shape = frame.width >= 180 && frame.width <= 360 && frame.height >= 48 && frame.height <= 88
-          if inBand, shape, frame.width > capsuleWidth {
-            capsule = view
-            capsuleWidth = frame.width
-          }
-        }
-        for subview in view.subviews {
-          walk(subview)
-        }
-      }
-      walk(window)
-      guard let capsule else {
-        return
-      }
-      destinationPlatter = capsule
-      capsule.transform = CGAffineTransform(translationX: -destinationShift, y: 0)
-    }
-
-    private func destinationCluster(reflect: UIView, add: UIView, stopAt ancestor: UIView?) -> UIView? {
-      var cluster: UIView?
-      var current: UIView? = reflect.superview
-      while let view = current, view !== ancestor, view !== add.window {
-        if add.isDescendant(of: view) {
-          break
-        }
-        cluster = view
-        current = view.superview
-      }
-      return cluster
-    }
-
-    private func attachManualEntryAction(in window: UIWindow, preferring view: UIView) {
-      let title = RootTrailingAction.addTransactions.title
-      if view.accessibilityLabel == nil || view.accessibilityLabel?.isEmpty == true {
-        view.accessibilityLabel = title
-      }
-      let action = manualAction ?? UIAccessibilityCustomAction(name: "Add manually") { [weak self] _ in
-        guard let self else { return false }
-        self.addManually()
-        return true
-      }
-      manualAction = action
-      applyManualEntry(action, to: view)
-      applyManualEntry(action, to: circularPin(from: view, in: window))
-      var seen = Set<ObjectIdentifier>()
-      func walk(_ object: NSObject) {
-        let identity = ObjectIdentifier(object)
-        guard !seen.contains(identity) else { return }
-        seen.insert(identity)
-        if object.accessibilityLabel == title {
-          applyManualEntry(action, to: object)
-        }
-        let count = object.accessibilityElementCount()
-        if count != NSNotFound, count > 0 {
-          for index in 0..<count {
-            if let element = object.accessibilityElement(at: index) as? NSObject {
-              walk(element)
-            }
-          }
-        } else if let elements = object.accessibilityElements {
-          for element in elements {
-            if let child = element as? NSObject {
-              walk(child)
-            }
-          }
-        }
-        if let host = object as? UIView {
-          for subview in host.subviews {
-            walk(subview)
-          }
-        }
-      }
-      walk(window)
     }
 
     private func startTracking() {
@@ -941,20 +752,26 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
       install()
     }
 
-    private func applyManualEntry(_ action: UIAccessibilityCustomAction, to object: NSObject) {
-      let existing = object.accessibilityCustomActions ?? []
-      if existing.contains(where: { $0 === action || $0.name == "Add manually" }) {
-        if !attachedManualTargets.contains(where: { $0 === object }) {
-          attachedManualTargets.append(object)
-        }
-        return
+    private func hostedTabBar() -> UITabBar? {
+      if let root = view.window?.rootViewController, let tab = tabController(in: root) {
+        return tab.tabBar
       }
-      object.accessibilityCustomActions = existing + [action]
-      attachedManualTargets.append(object)
+      guard let window = view.window else {
+        return nil
+      }
+      return firstTabBar(in: window)
     }
 
-    private func hostForAssistant(add: UIView, window: UIWindow) -> UIView {
-      window
+    private func firstTabBar(in view: UIView) -> UITabBar? {
+      if let bar = view as? UITabBar {
+        return bar
+      }
+      return view.subviews.lazy.compactMap { self.firstTabBar(in: $0) }.first
+    }
+
+    private func tabController(in controller: UIViewController) -> UITabBarController? {
+      if let tab = controller as? UITabBarController { return tab }
+      return controller.children.lazy.compactMap { self.tabController(in: $0) }.first
     }
 
     /// iOS 26's search-role pin is often an inner image; walk up to the visible circle.
@@ -976,7 +793,7 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
     }
 
     private func searchRoleAdd(in window: UIWindow, alignedWith accounts: UIView) -> UIView? {
-      let title = RootTrailingAction.addTransactions.title
+      let title = CompactRootBar.action.title
       let rowY = accounts.convert(accounts.bounds, to: window).midY
       let labelled = labelledViews(title, in: window).filter { view in
         abs(view.convert(view.bounds, to: window).midY - rowY) <= 28
@@ -1011,28 +828,19 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
       return roots.max { $0.convert($0.bounds, to: window).minX < $1.convert($1.bounds, to: window).minX }
     }
 
-    private func rightmostCompactView(inBottomBandOf window: UIWindow) -> UIView? {
-      let bandMinY = window.bounds.maxY - 160
-      var candidates: [UIView] = []
-      func walk(_ view: UIView) {
-        guard view !== assistantButton else { return }
-        let frame = view.convert(view.bounds, to: window)
-        let inBand = frame.midY >= bandMinY && frame.maxY <= window.bounds.maxY - 8
-        let compact = abs(frame.width - frame.height) <= 14 && frame.width >= 40 && frame.width <= 76
-        if inBand, compact {
-          candidates.append(view)
-        }
-        for subview in view.subviews {
-          walk(subview)
-        }
+    private func isVisibleInWindow(_ view: UIView, in window: UIWindow) -> Bool {
+      guard view.window === window, !view.isHidden, view.alpha > 0.01 else {
+        return false
       }
-      walk(window)
-      let controls = candidates.compactMap { $0 as? UIControl }
-      let pool = controls.isEmpty ? candidates : controls
-      let roots = pool.filter { candidate in
-        !pool.contains { $0 !== candidate && candidate.isDescendant(of: $0) }
+      var current: UIView? = view
+      while let node = current {
+        if node.isHidden || node.alpha <= 0.01 {
+          return false
+        }
+        current = node.superview
       }
-      return roots.max { $0.convert($0.bounds, to: window).minX < $1.convert($1.bounds, to: window).minX }
+      let frame = view.convert(view.bounds, to: window)
+      return window.bounds.intersects(frame)
     }
 
     private func tabRowView(_ label: String, in window: UIWindow) -> UIView? {
@@ -1051,18 +859,6 @@ struct RootTabBarTrailingActions: UIViewControllerRepresentable {
       }
       return matches
     }
-
-    private func tabRowControl(_ label: String, in window: UIWindow) -> UIControl? {
-      tabRowView(label, in: window) as? UIControl
-    }
-
-    private func labelledControl(_ label: String, in view: UIView) -> UIControl? {
-      labelledControls(label, in: view).first
-    }
-
-    private func labelledControls(_ label: String, in view: UIView) -> [UIControl] {
-      labelledViews(label, in: view).compactMap { $0 as? UIControl }
-    }
   }
 }
 
@@ -1070,10 +866,16 @@ struct RootTabHost<Content: View>: View {
   @Environment(RootChromeState.self) private var chrome
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   let hostedTab: AppTab
+  var workspace: CaptureWorkspace = .shared
   var content: Content
 
-  init(for hostedTab: AppTab, @ViewBuilder content: () -> Content) {
+  init(
+    for hostedTab: AppTab,
+    workspace: CaptureWorkspace = .shared,
+    @ViewBuilder content: () -> Content
+  ) {
     self.hostedTab = hostedTab
+    self.workspace = workspace
     self.content = content()
   }
 
@@ -1083,22 +885,34 @@ struct RootTabHost<Content: View>: View {
       horizontalSizeClass: horizontalSizeClass
     )
     let overflow = usesSidebar ? nil : chrome.overflow(on: hostedTab)
+    let router = CaptureRouter.shared
     ZStack {
       content
         .allowsHitTesting(overflow == nil)
         .accessibilityHidden(overflow != nil)
       if let overflow {
-        RootMoreHost(destination: overflow)
+        RootMoreHost(destination: overflow, workspace: workspace)
           .transition(.move(edge: .trailing))
       }
     }
     .animation(.snappy, value: overflow)
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      if !usesSidebar,
+         !router.hidesTabRowOverlay,
+         workspace.pendingAssistantSessionID == nil
+      {
+        Color.clear
+          .frame(height: RootChrome.compactFloatingAssistantClearance)
+          .accessibilityHidden(true)
+      }
+    }
   }
 }
 
 struct RootMoreHost: View {
   @Environment(RootChromeState.self) private var chrome
   let destination: MoreDestination
+  var workspace: CaptureWorkspace = .shared
 
   var body: some View {
     NavigationStack {
@@ -1123,7 +937,7 @@ struct RootMoreHost: View {
     case .plan:
       CategoriesView()
     case .assistant:
-      AssistantView(workspace: CaptureWorkspace.shared)
+      AssistantView(workspace: workspace)
     }
   }
 }

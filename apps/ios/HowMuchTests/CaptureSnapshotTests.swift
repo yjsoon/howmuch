@@ -158,7 +158,7 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertNotNil(surface.firstControl(label: "Send"))
   }
 
-  func testTabRowAddTapAndAccessibilityActionUseDistinctRoutes() async {
+  func testTabRowAddTapOpensManualFormAndAssistantFloatsAbove() async {
     let router = CaptureRouter.shared
     let previous = router.pending
     defer { router.pending = previous }
@@ -170,7 +170,6 @@ final class CaptureSnapshotTests: XCTestCase {
         root: RootTabView(
           chrome: chrome,
           usesSidebar: false,
-          presenting: { harness.model.presentAddTransactions(origin: origin) },
           presentingManually: { harness.model.presentManualTransaction(origin: origin) }
         )
         .environment(chrome)
@@ -184,65 +183,64 @@ final class CaptureSnapshotTests: XCTestCase {
       }
       defer { surface.detach() }
       let appeared = await surface.waitUntil {
-        surface.firstControl(label: "Add Transactions") != nil
-          && surface.tabRowControl(label: "Assistant") != nil
+        surface.firstControl(label: CompactRootBar.action.title) != nil
+          && surface.tabRowOverlayButton(label: "Assistant") != nil
       }
-      XCTAssertTrue(appeared, "compact tab row must host Add and Assistant: \(surface.accessibilityLabels())")
-      guard let button = surface.firstControl(label: "Add Transactions") else { continue }
-      guard let assistant = surface.tabRowControl(label: "Assistant") else {
-        XCTFail("tab-row Assistant missing")
+      XCTAssertTrue(appeared, "compact chrome must host Add and a floating Assistant: \(surface.accessibilityLabels())")
+      guard let button = surface.firstControl(label: CompactRootBar.action.title) else { continue }
+      guard let assistant = surface.tabRowOverlayButton(label: "Assistant") else {
+        XCTFail("floating Assistant missing")
         continue
       }
       surface.assertMinimumHitTarget(button)
       surface.assertMinimumHitTarget(assistant)
       XCTAssertTrue(surface.windowBounds.contains(button.frame))
       XCTAssertTrue(surface.windowBounds.contains(assistant.frame))
-      XCTAssertEqual(
-        button.frame.midY,
-        assistant.frame.midY,
-        accuracy: 24,
-        "Add and Assistant must share the destination row"
+      XCTAssertLessThan(
+        assistant.frame.maxY,
+        button.frame.minY - 4,
+        "Assistant must float above Add, not sit in the tab row"
       )
+      XCTAssertEqual(
+        assistant.frame.midX,
+        button.frame.midX,
+        accuracy: 18,
+        "Assistant must pin above Add"
+      )
+      XCTAssertNil(
+        surface.tabRowControl(label: "Assistant"),
+        "the old in-row chat bubble must be gone"
+      )
+      XCTAssertNil(surface.addTransactionsManualAction(), "Add has no tap-and-hold or extra VoiceOver action")
       for label in ["Accounts", "Rewards", "Reflect"] {
         guard let destination = surface.firstControl(label: label) else {
           XCTFail("root tab missing \(label)")
           continue
         }
+        XCTAssertTrue(surface.windowBounds.contains(destination.frame), "\(label) must stay on-screen")
         XCTAssertEqual(
           button.frame.midY,
           destination.frame.midY,
           accuracy: 24,
           "Add must share the tab row, not a separate accessory"
         )
-        XCTAssertEqual(
-          assistant.frame.midY,
-          destination.frame.midY,
-          accuracy: 24,
-          "Assistant must share the tab row, not a separate accessory"
+        XCTAssertGreaterThan(
+          abs(assistant.frame.midY - destination.frame.midY),
+          24,
+          "Assistant must not share the tab row with \(label)"
         )
         XCTAssertFalse(destination.object.accessibilityCustomActions?.contains { $0.name == "Add manually" } == true)
         XCTAssertFalse(assistant.object.accessibilityCustomActions?.contains { $0.name == "Add manually" } == true)
       }
       attachImage(surface.captureVisible(), name: "manual-entry-tab-row-\(size)")
       XCTAssertTrue(surface.activate(button))
-      XCTAssertEqual(router.pending?.kind, .blank, "ordinary tap must remain conversational")
-      XCTAssertEqual(router.pending?.origin, origin)
-      XCTAssertEqual(chrome.tab, .accounts, "Add must not replace the selected destination")
-      _ = await surface.waitUntil {
-        surface.addTransactionsManualAction() != nil
-      }
-      guard let manual = surface.addTransactionsManualAction(),
-            let handler = manual.actionHandler else {
-        XCTFail("Add Transactions must expose an actionable Add manually VoiceOver action")
-        continue
-      }
-      XCTAssertTrue(handler(manual))
       guard let request = router.pending, case .manual(let draft) = request.kind else {
-        XCTFail("manual accessibility action must enqueue the form, not conversation")
+        XCTFail("Add tap must open the manual form, not conversation")
         continue
       }
       XCTAssertTrue(draft.accountID.isEmpty, "resolve the frozen origin only after references load")
       XCTAssertEqual(router.pending?.origin, origin)
+      XCTAssertEqual(chrome.tab, .accounts, "Add must not replace the selected destination")
       XCTAssertTrue(harness.model.pendingRows.isEmpty)
     }
   }
@@ -263,7 +261,6 @@ final class CaptureSnapshotTests: XCTestCase {
       root: RootTabView(
         chrome: chrome,
         usesSidebar: false,
-        presenting: { harness.model.presentAddTransactions(origin: .lastUsedOpen) },
         presentingManually: {}
       )
       .environment(chrome)
@@ -292,6 +289,89 @@ final class CaptureSnapshotTests: XCTestCase {
       surface.tabRowOverlayButton(label: "Assistant") != nil
     }
     XCTAssertTrue(restored, "Assistant overlay must return after capture dismisses")
+  }
+
+  func testTabRowAssistantHidesWhenTabBarHides() async {
+    let harness = SnapshotHarness.make()
+    let chrome = RootChromeState()
+    guard let surface = SnapshotSurface(
+      root: RootTabView(
+        chrome: chrome,
+        usesSidebar: false,
+        workspace: harness.workspace,
+        presentingManually: {}
+      )
+      .environment(chrome)
+      .environment(harness.model)
+      .environment(\.horizontalSizeClass, .compact),
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("root tab row needs a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+    let appeared = await surface.waitUntil {
+      surface.tabRowOverlayButton(label: "Assistant") != nil
+    }
+    XCTAssertTrue(appeared, "compact chrome must host floating Assistant: \(surface.accessibilityLabels())")
+    guard let tabBar = surface.firstDescendant(UITabBar.self) else {
+      XCTFail("compact root must host a UITabBar")
+      return
+    }
+    tabBar.isHidden = true
+    surface.layoutNow()
+    let hidden = await surface.waitUntil {
+      surface.tabRowOverlayButton(label: "Assistant") == nil
+    }
+    XCTAssertTrue(hidden, "floating Assistant must unparent when the tab bar is hidden")
+    tabBar.isHidden = false
+    surface.layoutNow()
+    let restored = await surface.waitUntil {
+      surface.tabRowOverlayButton(label: "Assistant") != nil
+    }
+    XCTAssertTrue(restored, "floating Assistant must return when the tab bar is shown")
+  }
+
+  func testTabRowAssistantHidesWhileAssistantConversationIsPushed() async {
+    let harness = SnapshotHarness.make()
+    let session = harness.admitConversation()
+    let chrome = RootChromeState()
+    guard let surface = SnapshotSurface(
+      root: RootTabView(
+        chrome: chrome,
+        usesSidebar: false,
+        workspace: harness.workspace,
+        presentingManually: {}
+      )
+      .environment(chrome)
+      .environment(harness.model)
+      .environment(\.horizontalSizeClass, .compact),
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("root tab row needs a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+    let appeared = await surface.waitUntil {
+      surface.tabRowOverlayButton(label: "Assistant") != nil
+    }
+    XCTAssertTrue(appeared, "compact chrome must host floating Assistant: \(surface.accessibilityLabels())")
+    chrome.openMore(.assistant)
+    harness.workspace.pendingAssistantSessionID = session.id
+    surface.layoutNow()
+    let hidden = await surface.waitUntil {
+      surface.tabRowOverlayButton(label: "Assistant") == nil
+    }
+    XCTAssertTrue(
+      hidden,
+      "floating Assistant must hide with the tab bar on a pushed conversation: \(surface.accessibilityLabels())"
+    )
+    harness.workspace.pendingAssistantSessionID = nil
+    surface.layoutNow()
+    let restored = await surface.waitUntil {
+      surface.tabRowOverlayButton(label: "Assistant") != nil
+    }
+    XCTAssertTrue(restored, "floating Assistant must return on Assistant home")
   }
 
   func testManualIntakeHostPreservesConversationAndAccountIntent() async {
@@ -2682,7 +2762,9 @@ final class SnapshotSurface {
 
   func addTransactionsManualAction() -> UIAccessibilityCustomAction? {
     accessibilityNodes().lazy.compactMap { node in
-      guard node.label == "Add Transactions" else { return nil }
+      guard node.label == CompactRootBar.action.title || node.label == "Add Transactions" else {
+        return nil
+      }
       return node.object.accessibilityCustomActions?.first { $0.name == "Add manually" }
     }.first
   }

@@ -11,7 +11,7 @@ Conversational **Add Transactions** types a short British waiting line while a r
 
 ## How to get to it (user POV)
 
-- Tap the floating **Add Transactions** plus.
+- Tap the floating **Assistant** (speech bubble with a plus) above Add, then start a conversation.
 - Type a spend in the composer and choose **Send**.
 - Trailing sparkles **AI provider** on the Add Transactions toolbar (not Connection) chooses on-device vs a remote model.
 

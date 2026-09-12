@@ -253,6 +253,12 @@ final class IPadLayoutTests: XCTestCase {
 
   func testAppTabMapsCompactAndSidebarDestinations() {
     XCTAssertEqual(AppTab.compactDestinations, [.accounts, .rewards, .reflect])
+    XCTAssertEqual(CompactRootBar.destinationTabs, [.accounts, .rewards, .reflect])
+    XCTAssertEqual(CompactRootBar.destinationTabs.count, CompactRootBar.destinationCapacity)
+    XCTAssertEqual(CompactRootBar.destinationSelections.count, CompactRootBar.destinationCapacity)
+    XCTAssertEqual(CompactRootBar.actionSelections.count, CompactRootBar.actionCapacity)
+    XCTAssertEqual(CompactRootBar.action, .addTransaction)
+    XCTAssertEqual(CompactRootBar.actionSelection, .addTransaction)
     XCTAssertEqual(AppTab.accounts.captureSurface, .accounts)
     XCTAssertEqual(AppTab.rewards.captureSurface, .rewards)
     XCTAssertEqual(AppTab.reflect.captureSurface, .reflect)
@@ -264,7 +270,14 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertNil(AppTab.plan.compactBarSelection)
     XCTAssertNil(AppTab.assistant.compactBarSelection)
     XCTAssertEqual(CompactBarSelection.accounts.tab, .accounts)
-    XCTAssertNil(CompactBarSelection.addTransactions.tab)
+    XCTAssertNil(CompactBarSelection.addTransaction.tab)
+    XCTAssertTrue(CompactBarSelection.addTransaction.isAction)
+    XCTAssertFalse(CompactBarSelection.addTransaction.isDestination)
+    XCTAssertEqual(RootChrome.compactFloatingAssistantClearance, RootAddControl.diameter + 10)
+    XCTAssertEqual(
+      RootChrome.toastBottomPadding(idiom: .phone, horizontalSizeClass: .compact),
+      90 + RootChrome.compactFloatingAssistantClearance
+    )
   }
 
   func testOpenMorePlanFromAccountsDoesNotLeakFocusedRegister() {
@@ -377,27 +390,52 @@ final class IPadLayoutTests: XCTestCase {
       surface.firstControl(label: "Accounts") != nil
         && surface.firstControl(label: "Rewards") != nil
         && surface.firstControl(label: "Reflect") != nil
-        && surface.firstControl(label: "Add Transactions") != nil
-        && surface.tabRowControl(label: "Assistant") != nil
+        && surface.firstControl(label: CompactRootBar.action.title) != nil
+        && surface.tabRowOverlayButton(label: "Assistant") != nil
     }
     XCTAssertTrue(
       appeared,
-      "compact root must show three tabs plus Add and Assistant: \(surface.accessibilityLabels())"
+      "compact root must show three tabs plus Add and a floating Assistant: \(surface.accessibilityLabels())"
     )
     XCTAssertNotNil(surface.firstControl(label: "More"), "Accounts must still host DestinationsMenu")
     XCTAssertEqual(chrome.compactBarTab, .accounts)
     XCTAssertNil(chrome.overflow(on: .accounts))
+    XCTAssertNil(
+      surface.tabRowControl(label: "Assistant"),
+      "Assistant must float above Add, not sit in the tab row"
+    )
 
-    guard let assistant = surface.tabRowControl(label: "Assistant") else {
-      XCTFail("compact root must host a tab-row Assistant")
+    guard let assistant = surface.tabRowOverlayButton(label: "Assistant") else {
+      XCTFail("compact root must host a floating Assistant")
       return
     }
-    if let accounts = surface.tabRowControl(label: "Accounts") {
+    guard let add = surface.tabRowControl(label: CompactRootBar.action.title)
+            ?? surface.firstControl(label: CompactRootBar.action.title) else {
+      XCTFail("compact root must host the Add button")
+      return
+    }
+    XCTAssertLessThan(
+      assistant.frame.maxY,
+      add.frame.minY - 4,
+      "Assistant must sit above Add, not beside it"
+    )
+    XCTAssertEqual(
+      assistant.frame.midX,
+      add.frame.midX,
+      accuracy: 18,
+      "Assistant must pin above Add"
+    )
+    for label in ["Accounts", "Rewards", "Reflect"] {
+      guard let destination = surface.tabRowControl(label: label) ?? surface.firstControl(label: label) else {
+        XCTFail("compact root missing \(label)")
+        continue
+      }
+      XCTAssertTrue(surface.windowBounds.contains(destination.frame), "\(label) must stay on-screen")
       XCTAssertEqual(
-        assistant.frame.midY,
-        accounts.frame.midY,
+        add.frame.midY,
+        destination.frame.midY,
         accuracy: 24,
-        "Assistant must sit in the destination row"
+        "Add must share the tab row with \(label)"
       )
     }
     XCTAssertTrue(surface.activate(assistant))
@@ -425,7 +463,7 @@ final class IPadLayoutTests: XCTestCase {
       surface.firstControl(label: "Assistant") != nil
     }
     XCTAssertTrue(appeared, "sidebar root must keep Assistant as a destination: \(surface.accessibilityLabels())")
-    XCTAssertNil(surface.firstControl(label: "Add Transactions"), "sidebar must not host a search-role Add")
+    XCTAssertNil(surface.firstControl(label: CompactRootBar.action.title), "sidebar must not host a search-role Add")
     XCTAssertNil(
       surface.tabRowOverlayButton(label: "Assistant"),
       "sidebar must not install a compact tab-row Assistant overlay"
