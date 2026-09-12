@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolvedSinceCount, showsUnapprovedBadge, unapprovedBadgeCount } from "./unapproved-badge";
+import { resolvedSinceCount, showsUnapprovedBadge, unapprovedBadgeCount, unapprovedBadgeLabel } from "./unapproved-badge";
 
 describe("resolvedSinceCount", () => {
   test("counts only what was resolved after the count was taken", () => {
@@ -63,5 +63,20 @@ describe("showsUnapprovedBadge", () => {
   test("keeps the pill visible while the approval flow is open, as the way out", () => {
     expect(showsUnapprovedBadge(0, true)).toBe(true);
     expect(showsUnapprovedBadge(null, true)).toBe(true);
+  });
+});
+
+describe("a failed count", () => {
+  test("keeps the pill visible, since it is the only way into the approval flow", () => {
+    expect(showsUnapprovedBadge(null, false, true)).toBe(true);
+  });
+
+  test("labels the pill without claiming a number it does not have", () => {
+    expect(unapprovedBadgeLabel(null, true)).toBe("New to approve");
+  });
+
+  test("still names the number once one is known", () => {
+    expect(unapprovedBadgeLabel(5, false)).toBe("5 new to approve");
+    expect(unapprovedBadgeLabel(1, true)).toBe("1 new to approve");
   });
 });

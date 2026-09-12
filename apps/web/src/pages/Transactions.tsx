@@ -33,7 +33,7 @@ import {
   planApproval,
   rowLooksApproved,
 } from "../lib/register-approval";
-import { resolvedSinceCount, showsUnapprovedBadge, unapprovedBadgeCount } from "../lib/unapproved-badge";
+import { resolvedSinceCount, showsUnapprovedBadge, unapprovedBadgeCount, unapprovedBadgeLabel } from "../lib/unapproved-badge";
 import {
   closedCompose,
   composePayload,
@@ -230,7 +230,19 @@ export function TransactionsPage() {
   // The badge, eagerly: one bounded count, so the register never waits on the
   // queue behind it.
   const unapprovedCountQuery = useApi(
-    JSON.stringify({ planId, selectedAccountId, from: filters.from, to: filters.to, refreshGeneration, unapprovedCount: countMatchesRegisterScope }),
+    // Keyed on the validated knowledge and cache epoch as well as the filters:
+    // a local write moves the ledger on, and a badge that outlived it would be
+    // exactly the stale count #144 forbids.
+    JSON.stringify({
+      planId,
+      selectedAccountId,
+      from: filters.from,
+      to: filters.to,
+      refreshGeneration,
+      validatedKnowledge,
+      cacheEpoch,
+      unapprovedCount: countMatchesRegisterScope,
+    }),
     async () =>
       countMatchesRegisterScope
         ? await api.unapprovedCount(planId, { since_date: filters.from, until_date: fetchUntilDate }, selectedAccountId)
@@ -1221,13 +1233,15 @@ export function TransactionsPage() {
           </button>
         </div>
         <div className="headline-row">
-          {showsUnapprovedBadge(unapprovedCount, unapprovedOnly) && (
+          {showsUnapprovedBadge(unapprovedCount, unapprovedOnly, Boolean(unapprovedCountQuery.error)) && (
             <button
               type="button"
               className={unapprovedOnly ? "approval-pill approval-pill-active" : "approval-pill"}
               onClick={() => setUnapprovedOnly((current) => !current)}
             >
-              {unapprovedOnly ? "Showing new transactions · clear" : `${unapprovedCount ?? 0} new to approve`}
+              {unapprovedOnly
+                ? "Showing new transactions · clear"
+                : unapprovedBadgeLabel(unapprovedCount, Boolean(unapprovedCountQuery.error))}
             </button>
           )}
           {unapprovedOnly && eligibleIds.length > 0 && (
@@ -1311,6 +1325,12 @@ export function TransactionsPage() {
         <div className="status-panel status-panel-error">
           <p className="status-title">Could not load {page.loaded ? "older " : ""}transactions.</p>
           <p className="status-detail">{page.error}</p>
+        </div>
+      )}
+      {unapprovedCountQuery.error && !unapprovedOnly && (
+        <div className="status-panel status-panel-error" role="alert">
+          <p className="status-title">Could not count transactions awaiting approval.</p>
+          <p className="status-detail">{unapprovedCountQuery.error} Open “New to approve” to load them anyway.</p>
         </div>
       )}
       {approvalQueue.error && (

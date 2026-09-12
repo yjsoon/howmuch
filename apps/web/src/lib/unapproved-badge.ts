@@ -52,6 +52,22 @@ export function unapprovedBadgeCount(
  * pill doubles as the way out of the approval flow, so it stays visible while
  * that flow is open.
  */
-export function showsUnapprovedBadge(count: number | null, approvalFlowOpen: boolean): boolean {
-  return approvalFlowOpen || (count !== null && count > 0);
+export function showsUnapprovedBadge(
+  count: number | null,
+  approvalFlowOpen: boolean,
+  countFailed = false,
+): boolean {
+  // A failed count must not hide the pill: it is the only way into the approval
+  // flow, and the flow can still load its rows (and report its own errors).
+  return approvalFlowOpen || countFailed || (count !== null && count > 0);
+}
+
+/**
+ * The pill's label. With the count unavailable the number is simply unknown --
+ * say so rather than claiming zero, since opening the flow will load the real
+ * rows anyway.
+ */
+export function unapprovedBadgeLabel(count: number | null, countFailed: boolean): string {
+  if (count === null) return countFailed ? "New to approve" : "";
+  return `${count} new to approve`;
 }
