@@ -15,6 +15,7 @@ final class LaunchRefreshTests: XCTestCase {
   private var previousCredentialService = ""
   private var previousAPISettings: Any?
   private var previousScopedViewPrefs: Any?
+  private var previousOutbox: Any?
 
   override func setUp() {
     super.setUp()
@@ -26,12 +27,14 @@ final class LaunchRefreshTests: XCTestCase {
     // construct `AppModel()` from `APISettings.load()`) or the installed app.
     previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
     previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
   }
 
   override func tearDown() {
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
     UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
     super.tearDown()
   }
 
@@ -244,6 +247,7 @@ final class ApplySettingsRefreshTests: XCTestCase {
   private var previousCredentialService = ""
   private var previousAPISettings: Any?
   private var previousScopedViewPrefs: Any?
+  private var previousOutbox: Any?
 
   override func setUp() {
     super.setUp()
@@ -254,12 +258,14 @@ final class ApplySettingsRefreshTests: XCTestCase {
     // other tests or the installed app.
     previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
     previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
   }
 
   override func tearDown() {
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
     UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
     super.tearDown()
   }
 
@@ -409,18 +415,21 @@ final class UnapprovedCountLaunchTests: XCTestCase {
   private var previousCredentialService = ""
   private var previousAPISettings: Any?
   private var previousScopedViewPrefs: Any?
+  private var previousOutbox: Any?
 
   override func setUp() {
     super.setUp()
     previousCredentialService = APISettings.useCredentialService("HowMuch.UnapprovedCountLaunchTests.\(UUID().uuidString)")
     previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
     previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
   }
 
   override func tearDown() {
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
     UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
     super.tearDown()
   }
 
@@ -557,6 +566,9 @@ final class UnapprovedCountLaunchTests: XCTestCase {
   /// refresh rebaseline the plan-wide one: approve rows in the inbox, open an
   /// account register, and the Accounts "New" tile jumped back up by what had
   /// just been approved. Each scope keeps its own baseline.
+  ///
+  /// This drives the model mechanism directly -- approve, then refresh the other
+  /// scope -- rather than the inbox-open/close UI sequence that surfaces it.
   func testScopedCountRefreshDoesNotRebaselineThePlanWideBadge() async {
     XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
     defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
@@ -605,6 +617,119 @@ final class UnapprovedCountLaunchTests: XCTestCase {
       model.unapprovedBadgeCount,
       expected,
       "an account-scoped count refresh must not rebaseline the plan-wide badge and undo its local decrement"
+    )
+  }
+
+  /// A category drill-down narrows the register by something the count endpoint
+  /// cannot express, so it must walk the queue rather than stand the plan-wide
+  /// number in -- otherwise "Review N new transactions" overstates what is
+  /// actually in view.
+  func testCategoryNarrowedRegisterLoadsTheQueueInsteadOfThePlanWideCount() async {
+    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
+    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
+    UnapprovedProbeProtocol.reset()
+
+    var settings = APISettings()
+    settings.baseURLString = UnapprovedProbeProtocol.fixtureBaseURL
+    settings.authenticatedUserID = "unapproved-category-\(UUID().uuidString)"
+    settings.sessionToken = "token"
+    settings.planID = UnapprovedProbeProtocol.planID
+
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+
+    guard let surface = SnapshotSurface(
+      root: RegisterView(scope: .all, categoryID: "cat-1")
+        .environment(model)
+        .environment(RootChromeState()),
+      size: CGSize(width: 390, height: 700)
+    ) else {
+      XCTFail("category register probe requires a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    let walked = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      UnapprovedProbeProtocol.unapprovedQueueRequests() >= 1
+    }
+    XCTAssertTrue(walked, "a category-narrowed register must load the queue, since no count matches its scope")
+    XCTAssertEqual(
+      UnapprovedProbeProtocol.scopedUnapprovedCountRequests(),
+      0,
+      "a category-narrowed register has no account scope to count"
+    )
+  }
+
+  /// Rejecting a row awaiting approval takes it off the queue exactly as
+  /// approving it does, so it must come off the badge too. It used to be removed
+  /// from the rows but not from the counters, so the badge climbed back by the
+  /// number of rejections until the next ledger pull.
+  func testRejectingAnUnapprovedRowTakesItOffTheBadge() async {
+    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
+    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
+    UnapprovedProbeProtocol.reset()
+
+    var settings = APISettings()
+    settings.baseURLString = UnapprovedProbeProtocol.fixtureBaseURL
+    settings.authenticatedUserID = "unapproved-reject-\(UUID().uuidString)"
+    settings.sessionToken = "token"
+    settings.planID = UnapprovedProbeProtocol.planID
+
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+
+    guard let surface = SnapshotSurface(
+      root: LaunchProbe(model: model, taskID: { $0.launchRefreshTaskID }),
+      size: CGSize(width: 10, height: 10)
+    ) else {
+      XCTFail("reject probe requires a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    let counted = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.unapprovedBadgeCount == UnapprovedProbeProtocol.fixtureUnapprovedCount
+    }
+    XCTAssertTrue(counted, "the plan-wide count must land before this test can move it")
+
+    let row = HowMuch.Transaction.approvalFixture(
+      id: "rejected-row",
+      accountID: UnapprovedProbeProtocol.fixtureAccountID
+    )
+    try? await model.deleteTransaction(row)
+
+    let expected = UnapprovedProbeProtocol.fixtureUnapprovedCount - 1
+    let dropped = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.unapprovedBadgeCount == expected
+    }
+    XCTAssertTrue(dropped, "rejecting an unapproved row must take one off the badge, saw \(model.unapprovedBadgeCount)")
+
+    // And a refresh of a different scope must not undo that, exactly as for
+    // approvals.
+    await model.refreshUnapprovedCount(forAccountID: UnapprovedProbeProtocol.fixtureAccountID)
+    XCTAssertEqual(
+      model.unapprovedBadgeCount,
+      expected,
+      "a scoped count refresh must not resurrect a rejected row on the plan-wide badge"
+    )
+  }
+
+  /// Closing the flow while its load is in flight must not leave the queue
+  /// `.loaded` with nobody showing it -- every later ledger refresh would then
+  /// walk the whole queue again.
+  func testClosingTheFlowMidLoadLeavesTheQueueIdle() async {
+    let model = AppModel(settings: APISettings(), viewPrefs: ViewPrefs())
+    let viewer = "unapproved||"
+
+    // Start the load and close underneath it. `APISettings()` has no base URL,
+    // so the fetch fails fast; either way the phase must settle on `.idle`
+    // rather than on a terminal state with no viewer.
+    async let opening: Void = model.openUnapprovedQueue(viewer: viewer)
+    model.closeUnapprovedQueue(viewer: viewer)
+    await opening
+
+    XCTAssertEqual(
+      model.unapprovedQueuePhase,
+      .idle,
+      "a load that finishes after its flow closed must not leave the queue loaded for nobody"
     )
   }
 
@@ -741,6 +866,10 @@ private final class UnapprovedProbeProtocol: URLProtocol {
       send(url: url, body: #"{"data":{"count":\#(count),"server_knowledge":1}}"#)
       return
     }
+    if components.path.hasSuffix("/transactions"), request.httpMethod == "PATCH" {
+      send(url: url, body: #"{"data":{"transactions":[],"server_knowledge":2}}"#)
+      return
+    }
     if components.path.hasSuffix("/transactions"), isUnapprovedPage {
       // Recorded and then left hanging on purpose: the register must not be
       // waiting on this.
@@ -749,10 +878,6 @@ private final class UnapprovedProbeProtocol: URLProtocol {
     }
     if components.path.hasSuffix("/transactions") {
       send(url: url, body: #"{"data":{"transactions":[],"server_knowledge":1,"has_more":false,"next_offset":null}}"#)
-      return
-    }
-    if components.path.hasSuffix("/transactions"), request.httpMethod == "PATCH" {
-      send(url: url, body: #"{"data":{"transactions":[],"server_knowledge":2}}"#)
       return
     }
     if components.path.hasSuffix("/v1/plans") {

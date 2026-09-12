@@ -286,7 +286,7 @@ struct RegisterView: View {
     // register needs its own request: the plan-wide count is already fetched
     // with the ledger, and asking again here would double every refresh.
     .task(id: unapprovedCountScopeKey) {
-      if let accountID = scope.accountID, !loadsQueueEagerly {
+      if let accountID = countableAccountID, !loadsQueueEagerly {
         await model.refreshUnapprovedCount(forAccountID: accountID)
       }
     }
@@ -1213,7 +1213,7 @@ struct RegisterView: View {
     // a multi-account selection has no matching count, and that case loads the
     // queue (see `loadsQueueEagerly`).
     if model.unapprovedQueuePhase != .loaded, !loadsQueueEagerly {
-      return model.unapprovedBadgeCount(forAccountID: scope.accountID)
+      return model.unapprovedBadgeCount(forAccountID: countableAccountID)
     }
     return approvalScopedTransactions.count
   }
@@ -1230,14 +1230,28 @@ struct RegisterView: View {
   /// Refetches the scoped count whenever the register's scope or the ledger
   /// itself moves, so a local write cannot leave a stale badge behind.
   private var unapprovedCountScopeKey: String {
-    "\(scope.accountID ?? "all")|\(model.ledgerPageGeneration)"
+    "\(countableAccountID ?? "all")|\(model.ledgerPageGeneration)"
   }
 
-  /// A register filtered to several accounts has no single count that matches
-  /// it, so it keeps loading the queue exactly as it did before.
+  /// A register narrowed by anything the count endpoint cannot express keeps
+  /// loading the queue, exactly as it did before. The endpoint scopes by plan,
+  /// by one account, and by date; a category drill-down (CategoriesView) or a
+  /// date-ranged drill-down (Reflect) has no matching count, and neither does a
+  /// multi-account selection -- showing the plan-wide number in any of those
+  /// would overstate "Review N new transactions".
   private var loadsQueueEagerly: Bool {
-    guard let accountIDs else { return false }
-    return !accountIDs.isEmpty
+    if categoryID != nil || dateRange != nil { return true }
+    // An empty selection is "no account filter"; exactly one is countable.
+    guard let accountIDs, !accountIDs.isEmpty else { return false }
+    return accountIDs.count > 1
+  }
+
+  /// The single account this register is narrowed to, if any -- from the scope
+  /// or from a one-account selection. Both can be counted by the endpoint.
+  private var countableAccountID: String? {
+    if let id = scope.accountID { return id }
+    guard let accountIDs, accountIDs.count == 1 else { return nil }
+    return accountIDs.first
   }
 
   private var visibleTransactions: [Transaction] {

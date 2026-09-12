@@ -42,7 +42,13 @@ final class AppModel {
   /// of its rows. The badge is drawn from this so launch never waits on a walk
   /// of the whole queue.
   private(set) var serverUnapprovedCount = 0
-  /// Locally approved ids as they stood when each scope's count arrived, so a
+  /// Unapproved rows rejected here, mapped to the account they were in. A
+  /// rejection removes a row from the queue exactly as an approval does, but no
+  /// server count taken before it knows that, so it has to be subtracted the
+  /// same way. The account is captured at deletion time, while the row is still
+  /// in hand.
+  private var rejectedUnapprovedAccounts: [String: String] = [:]
+  /// Locally resolved ids as they stood when each scope's count arrived, so a
   /// refetched count is never decremented twice for the same approval -- and so
   /// refreshing one scope cannot rebaseline another and make its badge jump
   /// back up. Keyed by `countScopeKey`.
@@ -201,6 +207,7 @@ final class AppModel {
     serverUnapprovedCount = 0
     serverUnapprovedCountsByAccount = [:]
     confirmedWhenCounted = [:]
+    rejectedUnapprovedAccounts = [:]
     unapprovedQueuePhase = .idle
     unapprovedQueueViewers = []
     approvalSession = .empty
@@ -979,9 +986,13 @@ final class AppModel {
   private func resolvedSinceCount(forAccountID accountID: String?) -> Int {
     // A row approved and then dropped from both arrays is not subtracted here;
     // the next count of this scope reconciles it.
-    let since = approvalSession.confirmed.subtracting(confirmedWhenCounted[countScopeKey(accountID)] ?? [])
+    let since = locallyResolvedUnapprovedIDs.subtracting(confirmedWhenCounted[countScopeKey(accountID)] ?? [])
     guard let accountID else { return since.count }
     return since.count { id in
+      // A rejected row is gone from both arrays, so its account was recorded.
+      if let rejectedFrom = rejectedUnapprovedAccounts[id] {
+        return rejectedFrom == accountID
+      }
       let row = serverTransactions.first { $0.id == id }
         ?? serverUnapprovedTransactions.first { $0.id == id }
       return row?.accountID == accountID
@@ -1616,7 +1627,12 @@ final class AppModel {
     } else {
       serverUnapprovedCount = count
     }
-    confirmedWhenCounted[countScopeKey(accountID)] = approvalSession.confirmed
+    confirmedWhenCounted[countScopeKey(accountID)] = locallyResolvedUnapprovedIDs
+  }
+
+  /// Rows this session has taken off the queue: approved, or rejected.
+  private var locallyResolvedUnapprovedIDs: Set<String> {
+    approvalSession.confirmed.union(rejectedUnapprovedAccounts.keys)
   }
 
   /// One key per counted scope: the plan, or a single account.
@@ -1650,12 +1666,25 @@ final class AppModel {
     do {
       let unapproved = try await apiClient.fetchAllUnapprovedTransactions(planID: planID)
       guard generation == ledgerPageGeneration, planID == settings.planID else { return }
+      guard stillWantsUnapprovedQueue() else { return }
       replaceUnapprovedQueue(with: unapproved)
       unapprovedQueuePhase = .loaded
     } catch {
       guard generation == ledgerPageGeneration, planID == settings.planID else { return }
+      guard stillWantsUnapprovedQueue() else { return }
       unapprovedQueuePhase = .failed(error.localizedDescription)
     }
+  }
+
+  /// The flow can close while a load is in flight. Landing `.loaded` behind it
+  /// would leave the queue loaded with nobody showing it, and every later ledger
+  /// refresh would walk it again.
+  private func stillWantsUnapprovedQueue() -> Bool {
+    if unapprovedQueueViewers.isEmpty {
+      unapprovedQueuePhase = .idle
+      return false
+    }
+    return true
   }
 
   private func invalidateAccountUsage() {
@@ -1679,6 +1708,7 @@ final class AppModel {
     serverUnapprovedCount = 0
     serverUnapprovedCountsByAccount = [:]
     confirmedWhenCounted = [:]
+    rejectedUnapprovedAccounts = [:]
     unapprovedQueuePhase = .idle
     unapprovedQueueViewers = []
     approvalSession = .empty
@@ -2583,6 +2613,15 @@ final class AppModel {
       if let linkedID = subtransaction.transferTransactionID {
         removedIDs.insert(linkedID)
       }
+    }
+    // Rejecting a row awaiting approval takes it off the "New" badge, the same
+    // as approving it would. Recorded before the arrays are cleared, and also
+    // from the row in hand -- with the queue lazy it is usually not in them.
+    for row in serverUnapprovedTransactions where removedIDs.contains(row.id) {
+      rejectedUnapprovedAccounts[row.id] = row.accountID
+    }
+    if !transaction.approved {
+      rejectedUnapprovedAccounts[transaction.id] = transaction.accountID
     }
     serverTransactions.removeAll { removedIDs.contains($0.id) }
     serverUnapprovedTransactions.removeAll { removedIDs.contains($0.id) }
