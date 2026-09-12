@@ -105,6 +105,8 @@ struct RegisterView: View {
   @State private var unclearedOnly = false
   @State private var uncategorisedOnly = false
   @State private var unapprovedOnly = false
+  /// Identifies this register to the model's queue ownership set.
+  @State private var queueViewerID = UUID()
   @State private var editingTransaction: Transaction?
   @State private var isShowingReconciliation = false
   @State private var editingAccount: Account?
@@ -281,14 +283,22 @@ struct RegisterView: View {
         break
       }
     }
+    // The "New" count for exactly this register's scope. Only a narrowed
+    // register needs its own request: the plan-wide count is already fetched
+    // with the ledger, and asking again here would double every refresh.
+    .task(id: unapprovedCountScopeKey) {
+      if let accountID = scope.accountID, !loadsQueueEagerly {
+        await model.refreshUnapprovedCount(forAccountID: accountID)
+      }
+    }
     // The rows behind the "New" badge, fetched here rather than at launch, and
-    // released again when the flow closes so later refreshes stop paying for
-    // the walk.
-    .task(id: showingUnapprovedQueue) {
-      if showingUnapprovedQueue {
-        await model.loadUnapprovedQueueIfNeeded()
+    // released again once no register is showing them. `queueViewerID` keeps
+    // one pane's close from pulling the rows out from under a sibling on iPad.
+    .task(id: showingUnapprovedQueue || loadsQueueEagerly) {
+      if showingUnapprovedQueue || loadsQueueEagerly {
+        await model.openUnapprovedQueue(viewer: queueViewerID)
       } else {
-        model.closeUnapprovedQueue()
+        model.closeUnapprovedQueue(viewer: queueViewerID)
       }
     }
     .onAppear {
@@ -300,9 +310,7 @@ struct RegisterView: View {
       if let accountID = scope.accountID {
         model.endFocusedRegisterAccount(accountID)
       }
-      if showingUnapprovedQueue {
-        model.closeUnapprovedQueue()
-      }
+      model.closeUnapprovedQueue(viewer: queueViewerID)
     }
   }
 
@@ -1194,15 +1202,29 @@ struct RegisterView: View {
   }
 
   private var unapprovedCount: Int {
-    // The queue is fetched only when this flow opens, so until then the plain
-    // register has no rows to count and stands the server count in instead --
+    // The queue is fetched only when this flow opens, so until then the register
+    // has no rows to count and stands the matching server count in instead --
     // otherwise the way into the flow would be hidden behind a count of zero.
-    // A register narrowed to particular accounts keeps counting its own rows,
-    // since the plan-wide number would overstate them.
-    if model.unapprovedQueuePhase != .loaded, scope.accountID == nil, accountIDs == nil {
-      return model.unapprovedBadgeCount
+    // A register narrowed to one account asks for that account's own count; only
+    // a multi-account selection has no matching count, and that case loads the
+    // queue (see `loadsQueueEagerly`).
+    if model.unapprovedQueuePhase != .loaded, !loadsQueueEagerly {
+      return model.unapprovedBadgeCount(forAccountID: scope.accountID)
     }
     return approvalScopedTransactions.count
+  }
+
+  /// Refetches the scoped count whenever the register's scope or the ledger
+  /// itself moves, so a local write cannot leave a stale badge behind.
+  private var unapprovedCountScopeKey: String {
+    "\(scope.accountID ?? "all")|\(model.ledgerPageGeneration)"
+  }
+
+  /// A register filtered to several accounts has no single count that matches
+  /// it, so it keeps loading the queue exactly as it did before.
+  private var loadsQueueEagerly: Bool {
+    guard let accountIDs else { return false }
+    return !accountIDs.isEmpty
   }
 
   private var visibleTransactions: [Transaction] {

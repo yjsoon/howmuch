@@ -456,6 +456,81 @@ final class UnapprovedCountLaunchTests: XCTestCase {
     )
   }
 
+  /// A register narrowed to one account must show that account's own number.
+  /// Before the queue is loaded it has no rows to count, so it has to ask the
+  /// account-scoped count endpoint -- otherwise a focused register reads zero
+  /// and `showsRegisterFilterMenu` hides the way into the approval flow.
+  func testNarrowedRegisterCountsItsOwnAccountFromTheScopedEndpoint() async {
+    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
+    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
+    UnapprovedProbeProtocol.reset()
+
+    var settings = APISettings()
+    settings.baseURLString = UnapprovedProbeProtocol.fixtureBaseURL
+    settings.authenticatedUserID = "unapproved-scope-\(UUID().uuidString)"
+    settings.sessionToken = "token"
+    settings.planID = UnapprovedProbeProtocol.planID
+
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+
+    guard let surface = SnapshotSurface(
+      root: RegisterView(scope: .account(UnapprovedProbeProtocol.fixtureAccountID))
+        .environment(model)
+        .environment(RootChromeState()),
+      size: CGSize(width: 390, height: 700)
+    ) else {
+      XCTFail("scoped register probe requires a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    let counted = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      UnapprovedProbeProtocol.scopedUnapprovedCountRequests() >= 1
+    }
+    XCTAssertTrue(counted, "a register scoped to one account must request that account's unapproved count")
+
+    XCTAssertEqual(
+      model.unapprovedBadgeCount(forAccountID: UnapprovedProbeProtocol.fixtureAccountID),
+      UnapprovedProbeProtocol.fixtureAccountUnapprovedCount,
+      "the narrowed register must show its own account's count, not the plan-wide one"
+    )
+    XCTAssertNotEqual(
+      UnapprovedProbeProtocol.fixtureAccountUnapprovedCount,
+      UnapprovedProbeProtocol.fixtureUnapprovedCount,
+      "the fixture must use different plan and account counts, or this test cannot tell them apart"
+    )
+    XCTAssertEqual(
+      UnapprovedProbeProtocol.unapprovedQueueRequests(),
+      0,
+      "a narrowed register must get its number from the count endpoint, not by walking the queue"
+    )
+  }
+
+  /// Two registers can show the approval flow at once on iPad. One closing must
+  /// not release the rows the other is still displaying.
+  func testClosingOneApprovalFlowKeepsTheQueueForItsSibling() async {
+    let model = AppModel(settings: APISettings(), viewPrefs: ViewPrefs())
+    let first = UUID()
+    let second = UUID()
+
+    await model.openUnapprovedQueue(viewer: first)
+    await model.openUnapprovedQueue(viewer: second)
+
+    model.closeUnapprovedQueue(viewer: first)
+    XCTAssertNotEqual(
+      model.unapprovedQueuePhase,
+      .idle,
+      "one pane closing must not reset the queue while a sibling still shows it"
+    )
+
+    model.closeUnapprovedQueue(viewer: second)
+    XCTAssertEqual(
+      model.unapprovedQueuePhase,
+      .idle,
+      "the queue is released once no register is showing it"
+    )
+  }
+
   private struct UnapprovedProbeResult {
     let ledgerPhase: LoadPhase
     let badgeCount: Int
@@ -537,8 +612,11 @@ private final class UnapprovedProbeProtocol: URLProtocol {
   static let fixtureBaseURL = "https://howmuch-unapproved-probe.test"
   static let planID = "plan-1"
   static let fixtureUnapprovedCount = 7
+  static let fixtureAccountID = "acct-1"
+  static let fixtureAccountUnapprovedCount = 3
 
   private static let countKey = "count"
+  private static let scopedCountKey = "scopedCount"
   private static let queueKey = "queue"
 
   static func reset() {
@@ -551,6 +629,10 @@ private final class UnapprovedProbeProtocol: URLProtocol {
 
   static func unapprovedQueueRequests() -> Int {
     UnapprovedProbeRequestLog.shared.count(queueKey)
+  }
+
+  static func scopedUnapprovedCountRequests() -> Int {
+    UnapprovedProbeRequestLog.shared.count(scopedCountKey)
   }
 
   override class func canInit(with request: URLRequest) -> Bool {
@@ -574,8 +656,12 @@ private final class UnapprovedProbeProtocol: URLProtocol {
     let isUnapprovedPage = (components.queryItems ?? []).contains { $0.name == "type" && $0.value == "unapproved" }
 
     if components.path.hasSuffix("/transactions/unapproved_count") {
-      UnapprovedProbeRequestLog.shared.record(Self.countKey)
-      send(url: url, body: #"{"data":{"count":\#(Self.fixtureUnapprovedCount),"server_knowledge":1}}"#)
+      // The account-scoped path reports only that account's rows, so a narrowed
+      // register can be checked against a different number from the plan's.
+      let scoped = components.path.contains("/accounts/\(Self.fixtureAccountID)/")
+      UnapprovedProbeRequestLog.shared.record(scoped ? Self.scopedCountKey : Self.countKey)
+      let count = scoped ? Self.fixtureAccountUnapprovedCount : Self.fixtureUnapprovedCount
+      send(url: url, body: #"{"data":{"count":\#(count),"server_knowledge":1}}"#)
       return
     }
     if components.path.hasSuffix("/transactions"), isUnapprovedPage {
