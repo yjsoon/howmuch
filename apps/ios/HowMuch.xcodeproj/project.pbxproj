@@ -97,6 +97,7 @@
 		A200000000000000000000D1 /* LaunchRefreshTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000D0 /* LaunchRefreshTests.swift */; };
 		A200000000000000000000E1 /* NarrowRefreshTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000E0 /* NarrowRefreshTests.swift */; };
 		A200000000000000000000E3 /* RefreshPlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000E2 /* RefreshPlanTests.swift */; };
+		A200000000000000000000F1 /* ReferenceSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000F0 /* ReferenceSnapshotTests.swift */; };
 		A30000000000000000000003 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000002 /* ShareViewController.swift */; };
 		A30000000000000000000006 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
 		A3000000000000000000000B /* HowMuchShare.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* HowMuchShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -158,6 +159,7 @@
 		A200000000000000000000D0 /* LaunchRefreshTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchRefreshTests.swift; sourceTree = "<group>"; };
 		A200000000000000000000E0 /* NarrowRefreshTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NarrowRefreshTests.swift; sourceTree = "<group>"; };
 		A200000000000000000000E2 /* RefreshPlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefreshPlanTests.swift; sourceTree = "<group>"; };
+		A200000000000000000000F0 /* ReferenceSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReferenceSnapshotTests.swift; sourceTree = "<group>"; };
 		A50000000000000000000020 /* RewardsReportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardsReportTests.swift; sourceTree = "<group>"; };
 		A50000000000000000000022 /* RewardCardEditorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardCardEditorTests.swift; sourceTree = "<group>"; };
 		A60000000000000000000010 /* IPadLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPadLayoutTests.swift; sourceTree = "<group>"; };
@@ -426,6 +428,7 @@
 				A200000000000000000000D0 /* LaunchRefreshTests.swift */,
 				A200000000000000000000E0 /* NarrowRefreshTests.swift */,
 				A200000000000000000000E2 /* RefreshPlanTests.swift */,
+				A200000000000000000000F0 /* ReferenceSnapshotTests.swift */,
 			);
 			path = HowMuchTests;
 			sourceTree = "<group>";
@@ -662,6 +665,7 @@
 				A200000000000000000000D1 /* LaunchRefreshTests.swift in Sources */,
 				A200000000000000000000E1 /* NarrowRefreshTests.swift in Sources */,
 				A200000000000000000000E3 /* RefreshPlanTests.swift in Sources */,
+				A200000000000000000000F1 /* ReferenceSnapshotTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
