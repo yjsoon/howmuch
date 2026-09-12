@@ -5,6 +5,7 @@ import type {
   AccountPreferencesSnapshot,
   AccountReconciliationPreview,
   AccountReconciliationResult,
+  AccountUsageSnapshot,
   AgeOfMoneyReport,
   CategoryGroup,
   CreditCard,
@@ -223,6 +224,12 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ account: { icon } }),
     }).then((data) => data.account),
+  accountUsage: (planId: string, params: { days: number; until: string }, options?: ApiRequestOptions) =>
+    request<AccountUsageSnapshot>(
+      `${planUrl(planId, "accounts", "usage")}${query(params)}`,
+      undefined,
+      options,
+    ),
   accountPreferences: (planId: string, options?: ApiRequestOptions) =>
     request<AccountPreferencesSnapshot>(planUrl(planId, "account_preferences"), undefined, options)
       .catch((error) => {

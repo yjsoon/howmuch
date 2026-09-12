@@ -428,3 +428,12 @@ export interface QuickEntryInput {
   flag_color: string | null;
   subtransactions?: QuickEntrySplitLine[];
 }
+
+/** Per-account transaction counts over one inclusive date window. */
+export interface AccountUsageSnapshot {
+  usage: Array<{ account_id: string; count: number }>;
+  days: number;
+  since: string;
+  until: string;
+  server_knowledge: number;
+}

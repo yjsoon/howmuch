@@ -1,9 +1,10 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { ApiError, api, type TransactionPage } from "../api/client";
+import { api } from "../api/client";
 import type { AccountPreferences } from "../api/types";
 import { formatMoney } from "../lib/money";
 import { addEntryHref } from "../lib/register-compose";
+import { ACCOUNT_USAGE_DAYS, accountUsageCounts, localIsoDate } from "../lib/account-usage";
 import {
   accountGroups as buildAccountGroups,
   partitionAccountGroups,
@@ -117,10 +118,16 @@ export function Shell() {
     }
     let cancelled = false;
     setAccountUsage((current) => ({ ...current, state: { phase: "loading", message: null } }));
-    loadAccountUsageLast30Days(planId, usageDate, () => cancelled)
-      .then((counts) => {
+    // One grouped query per knowledge change, and only while a group is
+    // actually sorted by usage. The window ends on the viewer's local today, so
+    // the day boundary stays where the register scan used to put it.
+    api.accountUsage(planId, { days: ACCOUNT_USAGE_DAYS, until: usageDate })
+      .then((snapshot) => {
         if (cancelled) return;
-        setAccountUsage({ counts, state: { phase: "loaded", message: null } });
+        setAccountUsage({
+          counts: accountUsageCounts(snapshot.usage),
+          state: { phase: "loaded", message: null },
+        });
       })
       .catch((cause) => {
         if (!cancelled) {
@@ -379,69 +386,3 @@ function snapshotMostUsedOrders(preferences: AccountPreferences, groups: Account
   return changed ? { ...preferences, account_order_by_group: accountOrderByGroup } : preferences;
 }
 
-async function loadAccountUsageLast30Days(
-  planId: string,
-  untilDate: string,
-  isCancelled: () => boolean,
-): Promise<Record<string, number>> {
-  const [year, month, day] = untilDate.split("-").map(Number);
-  const start = new Date(year!, month! - 1, day!);
-  start.setDate(start.getDate() - 29);
-  const sinceDate = localIsoDate(start);
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    if (isCancelled()) throw new Error("The account usage scan was superseded.");
-    const counts: Record<string, number> = {};
-    const transactionIds = new Set<string>();
-    const requestedOffsets = new Set<number>();
-    let offset = 0;
-    let expectedKnowledge: number | undefined;
-    let ledgerChanged = false;
-    try {
-      while (requestedOffsets.size < 250) {
-        if (isCancelled()) throw new Error("The account usage scan was superseded.");
-        if (requestedOffsets.has(offset)) throw new Error("The transaction usage cursor repeated.");
-        requestedOffsets.add(offset);
-        const page: TransactionPage = await api.transactions(planId, {
-          since_date: sinceDate,
-          until_date: untilDate,
-          limit: 250,
-          offset,
-        });
-        if (isCancelled()) throw new Error("The account usage scan was superseded.");
-        if (expectedKnowledge !== undefined && page.server_knowledge !== expectedKnowledge) {
-          ledgerChanged = true;
-          break;
-        }
-        expectedKnowledge = page.server_knowledge;
-        for (const transaction of page.transactions) {
-          if (transaction.date >= sinceDate && transaction.date <= untilDate && !transactionIds.has(transaction.id)) {
-            transactionIds.add(transaction.id);
-            counts[transaction.account_id] = (counts[transaction.account_id] ?? 0) + 1;
-          }
-        }
-        if (!page.has_more) return counts;
-        if (page.transactions.length === 0) throw new Error("The transaction usage page was empty before the final page.");
-        if (page.next_offset === null || page.next_offset <= offset) {
-          throw new Error("The transaction usage cursor did not advance.");
-        }
-        offset = page.next_offset;
-      }
-    } catch (cause) {
-      if (!isCancelled() && attempt === 0 && cause instanceof ApiError && cause.status === 409 && cause.code === "ledger_changed") {
-        continue;
-      }
-      throw cause;
-    }
-    if (!ledgerChanged && requestedOffsets.size >= 250) {
-      throw new Error("The transaction usage scan exceeded its safe page limit.");
-    }
-  }
-  throw new Error("Transactions changed while usage was loading. Try again.");
-}
-
-function localIsoDate(date: Date): string {
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}`;
-}
