@@ -197,7 +197,7 @@ struct RegisterView: View {
       await runRegisterSearch()
     }
     .refreshable {
-      await model.refreshAll()
+      await model.refresh(slices: TabRefresh.register, quiet: false)
     }
     .sheet(isPresented: $isShowingReconciliation) {
       AccountReconciliationSheet(preferredAccountID: scope.accountID)

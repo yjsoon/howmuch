@@ -111,8 +111,21 @@ final class AppModel {
   /// Invalidates an in-flight older-page response when the first page reloads.
   private var ledgerPageGeneration = 0
   private var referenceGeneration = 0
+  private var accountsGeneration = 0
+  private var payeesGeneration = 0
   private var scheduledTransactionsGeneration = 0
   private var reportsGeneration = 0
+  /// Latest plan cursor seen on a ledger fetch. Changes made on another
+  /// device advance it, which is how the reports cache (#180) notices them.
+  private(set) var serverKnowledge: Int?
+  /// The cursor and local mutation generation in force when the reports last
+  /// loaded. Matching values mean a refetch would return what is on screen.
+  private var reportsKnowledge: Int?
+  private var reportsGenerationAtLastFetch: Int?
+  /// Refresh debouncing: one run at a time, with later requests merged into a
+  /// single queued request that runs once the in-flight one finishes.
+  @ObservationIgnored private var inFlightRefresh: Task<Void, Never>?
+  @ObservationIgnored private var queuedRefresh = RefreshRequest.none
   /// Serialises preference writes so a slower earlier request cannot overwrite
   /// a newer reorder on the server.
   @ObservationIgnored private var accountPreferencesSyncTask: Task<Void, Never>?
@@ -323,7 +336,7 @@ final class AppModel {
       accounts.append(created)
       rebuildLookups()
     }
-    await refreshLedgerAndInvalidatePlan()
+    await refresh(after: .accountCreated)
     showSaveMessage("Added \(created.name)")
     return created
   }
@@ -370,6 +383,7 @@ final class AppModel {
         rebuildLookups()
       }
       publishIntentCatalog()
+      scheduleRefresh(after: .accountUpdated)
     } catch {
       if let current = accounts.firstIndex(where: { $0.id == accountID }) {
         accounts[current] = previous
@@ -1145,12 +1159,201 @@ final class AppModel {
     // an unreachable server must not stall the refresh for a full request
     // timeout. Inserts dedupe by id, so a capture the ledger fetch already
     // returned is never doubled.
+    // The four Reflect reports are deliberately absent (#180): they are the
+    // most expensive requests the app makes and nothing on launch shows them.
+    // ReflectView fetches them when it appears, through
+    // `refreshReportsIfNeeded()`.
     async let outbox: Int = drainOutbox(trigger: .refresh)
     async let reference: Void = refreshReferenceData(quiet: quiet)
     async let ledger: Void = refreshLedger(quiet: quiet)
     async let schedules: Void = refreshScheduledTransactions(quiet: quiet)
-    async let reports = refreshReflectOverview(quiet: quiet)
-    _ = await (outbox, reference, ledger, schedules, reports)
+    _ = await (outbox, reference, ledger, schedules)
+  }
+
+  // MARK: - Narrow refreshes (#179)
+
+  /// Refreshes only the slices a write could not reproduce locally, and marks
+  /// the plan and reports stale when the write can have changed them.
+  func refresh(after mutation: MutationKind) async {
+    await scheduleRefresh(after: mutation)?.value
+  }
+
+  /// The same decision without waiting for it. Callers that are themselves
+  /// inside a refresh — the outbox drain during a pull — must use this: it
+  /// merges into the queue the running pass will drain, rather than awaiting
+  /// the pass it is running inside.
+  @discardableResult
+  func scheduleRefresh(after mutation: MutationKind) -> Task<Void, Never>? {
+    if RefreshPlanner.invalidatesPlanAndReports(after: mutation) {
+      planRefreshGeneration &+= 1
+      reportsRefreshGeneration &+= 1
+    }
+    return enqueue(RefreshRequest(slices: RefreshPlanner.slices(after: mutation)))
+  }
+
+  func refresh(slices: Set<RefreshSlice>, quiet: Bool = true, force: Bool = false) async {
+    await refresh(RefreshRequest(slices: slices, quiet: quiet, force: force))
+  }
+
+  /// Debounce: a request that arrives while another refresh is running is
+  /// merged into one queued request (union of slices, loudest intent) which
+  /// runs exactly once after the current one finishes, so back-to-back
+  /// mutations and repeated pulls collapse into a single extra pass.
+  func refresh(_ request: RefreshRequest) async {
+    guard !request.isEmpty else {
+      return
+    }
+    await enqueue(request)?.value
+  }
+
+  /// Merges the request into the queue and returns the pass that will run it:
+  /// the one already in flight, or a new one.
+  @discardableResult
+  private func enqueue(_ request: RefreshRequest) -> Task<Void, Never>? {
+    guard !request.isEmpty else {
+      return inFlightRefresh
+    }
+    queuedRefresh = queuedRefresh.merging(request)
+    if let inFlight = inFlightRefresh {
+      return inFlight
+    }
+    let task = Task { @MainActor [weak self] () -> Void in
+      await self?.drainRefreshQueue()
+    }
+    inFlightRefresh = task
+    return task
+  }
+
+  private func drainRefreshQueue() async {
+    defer { inFlightRefresh = nil }
+    // No suspension between emptying the queue and the loop's next test, so
+    // a request enqueued by another caller is always either picked up here or
+    // starts its own run against a cleared `inFlightRefresh`.
+    while !queuedRefresh.isEmpty {
+      let request = queuedRefresh
+      queuedRefresh = .none
+      await perform(request)
+    }
+  }
+
+  private func perform(_ request: RefreshRequest) async {
+    // A pull-to-refresh must still replay offline captures, as the launch
+    // refresh does. Quiet passes are the ones that follow a write, which
+    // already had its chance to send. An empty outbox issues no request.
+    async let outbox: Int = request.quiet ? 0 : drainOutbox(trigger: .refresh)
+    async let accountsSlice: Void = run(.accounts, in: request)
+    async let payeesSlice: Void = run(.payees, in: request)
+    async let referenceSlice: Void = run(.referenceData, in: request)
+    async let ledgerSlice: Void = run(.ledger, in: request)
+    async let schedulesSlice: Void = run(.schedules, in: request)
+    async let reportsSlice: Void = run(.reports, in: request)
+    _ = await (
+      outbox, accountsSlice, payeesSlice, referenceSlice, ledgerSlice, schedulesSlice, reportsSlice
+    )
+  }
+
+  private func run(_ slice: RefreshSlice, in request: RefreshRequest) async {
+    guard request.slices.contains(slice) else {
+      return
+    }
+    switch slice {
+    case .accounts:
+      await refreshAccounts(quiet: request.quiet)
+    case .payees:
+      await refreshPayees()
+    case .referenceData:
+      await refreshReferenceData(quiet: request.quiet)
+    case .ledger:
+      await refreshLedger(quiet: request.quiet)
+    case .schedules:
+      await refreshScheduledTransactions(quiet: request.quiet)
+    case .reports:
+      await refreshReportsIfNeeded(force: request.force)
+    }
+  }
+
+  /// One GET for every balance. Deliberately narrower than
+  /// `refreshReferenceData`: it does not touch categories, payees, plan
+  /// settings, or the account-preferences sync, none of which a balance
+  /// change can affect.
+  func refreshAccounts(quiet: Bool = true) async {
+    accountsGeneration &+= 1
+    let generation = accountsGeneration
+    let planID = settings.planID
+    let scope = activeViewPrefsScope
+    // This slice fetches accounts alone, so it must never move
+    // `referencePhase` to `.loaded`: categories, payees and plan settings
+    // would still be missing behind that claim. A pull that arrives while the
+    // reference batch is unloaded asks for the batch instead — see
+    // `TabRefresh.accounts(referencePhase:)`.
+    do {
+      let fetched = try await apiClient.fetchAccounts(planID: planID)
+      guard generation == accountsGeneration, planID == settings.planID, scope == activeViewPrefsScope
+      else {
+        return
+      }
+      if Set(accounts.map(\.id)) != Set(fetched.map(\.id)) {
+        invalidateAccountUsage()
+        pruneViewPrefs(using: fetched)
+      }
+      accounts = fetched
+      rebuildLookups()
+      publishIntentCatalog()
+    } catch {
+      guard generation == accountsGeneration, planID == settings.planID, scope == activeViewPrefsScope
+      else {
+        return
+      }
+      // Only a phase that was claiming loaded data can honestly be turned
+      // into a failure by this fetch; an idle or already-failed reference
+      // phase says more than "the balances did not come back".
+      if !quiet, referencePhase == .loaded {
+        referencePhase = .failed(error.localizedDescription)
+      }
+    }
+  }
+
+  /// One GET for the payee list, for writes that provision a payee server-side
+  /// (a new account's transfer payee, a transaction saved with a new name).
+  func refreshPayees() async {
+    payeesGeneration &+= 1
+    let generation = payeesGeneration
+    let planID = settings.planID
+    let scope = activeViewPrefsScope
+    guard let fetched = try? await apiClient.fetchPayees(planID: planID) else {
+      return
+    }
+    guard generation == payeesGeneration, planID == settings.planID, scope == activeViewPrefsScope
+    else {
+      return
+    }
+    payees = fetched
+    rebuildLookups()
+    publishIntentCatalog()
+  }
+
+  /// #180 (iOS half): fetch the reports when Reflect appears, and skip the
+  /// refetch when neither the plan cursor nor this device's own writes have
+  /// moved since the last successful fetch.
+  func refreshReportsIfNeeded(force: Bool = false) async {
+    guard ReportsRefreshPolicy.shouldFetch(
+      phase: reportsPhase,
+      force: force,
+      lastKnowledge: reportsKnowledge,
+      currentKnowledge: serverKnowledge,
+      lastMutationGeneration: reportsGenerationAtLastFetch,
+      currentMutationGeneration: reportsRefreshGeneration
+    ) else {
+      return
+    }
+    // Stamp what was true when the fetch started: a write that lands while it
+    // is in flight must leave the cached reports looking stale.
+    let knowledgeAtStart = serverKnowledge
+    let generationAtStart = reportsRefreshGeneration
+    if await refreshReflectOverview(quiet: reportsPhase == .loaded) {
+      reportsKnowledge = knowledgeAtStart
+      reportsGenerationAtLastFetch = generationAtStart
+    }
   }
 
   /// Validates the saved plan against the authenticated plan list before any
@@ -1276,6 +1479,10 @@ final class AppModel {
         return
       }
       pushHorizonFill()
+      // The plan cursor the reports cache is keyed on (#180).
+      if let knowledge = page.serverKnowledge {
+        serverKnowledge = knowledge
+      }
       // Mutation refreshes must not drop already-loaded rows; List would clamp to top.
       serverTransactions = sortedUniqueTransactions(
         quiet ? page.transactions + serverTransactions : page.transactions
@@ -1366,9 +1573,21 @@ final class AppModel {
     rebuildLookups()
     ledgerPageGeneration &+= 1
     referenceGeneration &+= 1
+    accountsGeneration &+= 1
+    payeesGeneration &+= 1
     scheduledTransactionsGeneration &+= 1
     reportsGeneration &+= 1
+    // A cursor and a reports cache belong to one plan; carrying them across a
+    // connection change would serve the previous plan's reports.
+    serverKnowledge = nil
+    reportsKnowledge = nil
+    reportsGenerationAtLastFetch = nil
+    queuedRefresh = .none
     planRefreshGeneration &+= 1
+    // ReflectView's only trigger is `.task(id: reportsRefreshGeneration)`, so
+    // without this a plan switch made while Reflect is visible leaves it
+    // sitting on an empty placeholder.
+    reportsRefreshGeneration &+= 1
     rewardsRefreshGeneration &+= 1
     invalidateAccountUsage()
     wipeIntentCatalog()
@@ -1447,6 +1666,7 @@ final class AppModel {
       scheduledTransactions.sort { ($0.dateNext, $0.id) < ($1.dateNext, $1.id) }
     }
     scheduledTransactionsPhase = .loaded
+    scheduleRefresh(after: .scheduleSaved)
     showSaveMessage(draft.id == nil ? "Added scheduled transaction" : "Saved scheduled transaction")
   }
 
@@ -1457,6 +1677,7 @@ final class AppModel {
     _ = try await apiClient.deleteScheduledTransaction(planID: settings.planID, scheduleID: id, idempotencyKey: idempotencyKey)
     scheduledTransactions.removeAll { $0.id == id }
     scheduledTransactionsPhase = .loaded
+    scheduleRefresh(after: .scheduleDeleted)
     showSaveMessage("Deleted scheduled transaction")
   }
 
@@ -1477,7 +1698,20 @@ final class AppModel {
       enteredDate: enteredDate
     )
 
-    await refreshLedgerAndInvalidatePlan()
+    // The response carries both halves of the write, so apply them rather
+    // than re-reading the ledger and the schedule list to find them.
+    serverTransactions = sortedUniqueTransactions([result.transaction] + serverTransactions)
+    if !result.transaction.approved {
+      serverUnapprovedTransactions = sortedUniqueTransactions(
+        [result.transaction] + serverUnapprovedTransactions
+      )
+    }
+    scheduledTransactions.removeAll { $0.id == result.scheduledTransaction.id }
+    if !result.scheduledTransaction.deleted {
+      scheduledTransactions.append(result.scheduledTransaction)
+      scheduledTransactions.sort { ($0.dateNext, $0.id) < ($1.dateNext, $1.id) }
+    }
+    await refresh(after: .scheduledOccurrenceEntered(isTransfer: isTransfer(result.transaction)))
     showSaveMessage(result.completed ? "Entered final scheduled transaction" : "Entered scheduled transaction")
     return result
   }
@@ -1499,7 +1733,12 @@ final class AppModel {
       statementBalance: statementBalance
     )
 
-    await refreshLedgerAndInvalidatePlan()
+    // The response already carries the account with its new balances.
+    if let index = accounts.firstIndex(where: { $0.id == result.account.id }) {
+      accounts[index] = result.account
+      rebuildLookups()
+    }
+    await refresh(after: .accountReconciled)
 
     let accountName = result.account.name
     let count = result.reconciledTransactionCount
@@ -1709,6 +1948,16 @@ final class AppModel {
       else {
         return false
       }
+      // The first fetch now runs from ReflectView's own task, so leaving the
+      // tab cancels it. That is not a failure the reader should be shown, and
+      // leaving the phase at `.loading` would lock the gate against ever
+      // retrying: return it to `.idle` so the next appearance fetches again.
+      if Task.isCancelled {
+        if reportsPhase == .loading {
+          reportsPhase = .idle
+        }
+        return false
+      }
       reportsPhase = .failed(error.localizedDescription)
       return false
     }
@@ -1839,14 +2088,22 @@ final class AppModel {
       guard isCurrentEdit(transactionID, generation: generation, destination: destination) else {
         return
       }
-      if let existing = serverTransactions.first(where: { $0.id == transactionID })
-        ?? serverUnapprovedTransactions.first(where: { $0.id == transactionID }) {
-        applySavedTransaction(saved, replacing: existing)
+      let existingRow = serverTransactions.first(where: { $0.id == transactionID })
+        ?? serverUnapprovedTransactions.first(where: { $0.id == transactionID })
+      if let existingRow {
+        applySavedTransaction(saved, replacing: existingRow)
       }
       pendingEdits[transactionID] = nil
       editTasks[transactionID] = nil
       showSaveMessage(savedMessage(for: [draft]))
-      Task { await refreshLedgerAndInvalidatePlan() }
+      let movedAccount = existingRow.map { $0.accountID != saved.accountID } ?? true
+      let touchesTransfer = isTransfer(saved) || (existingRow.map(isTransfer) ?? false)
+      let mutation = MutationKind.transactionEdited(
+        changesAccount: movedAccount,
+        touchesTransfer: touchesTransfer,
+        hasNewPayee: isUnknownPayee(saved)
+      )
+      scheduleRefresh(after: mutation)
     } catch {
       guard isCurrentEdit(transactionID, generation: generation, destination: destination) else {
         return
@@ -1920,7 +2177,7 @@ final class AppModel {
       )
       applySavedTransaction(saved, replacing: transaction)
       showSaveMessage(cleared == .cleared ? "Marked transaction cleared" : "Marked transaction uncleared")
-      Task { await refreshLedgerAndInvalidatePlan() }
+      scheduleRefresh(after: .clearedToggled)
     } catch {
       if clearedToggleOverlays[transaction.id] == cleared {
         clearedToggleOverlays[transaction.id] = nil
@@ -1928,6 +2185,27 @@ final class AppModel {
       await refreshLedger(quiet: true)
       throw error
     }
+  }
+
+  /// True when the row is, or has become, one half of a transfer pair. The
+  /// mirror row lives on another account and no single-transaction response
+  /// returns it, so these writes need the ledger slice.
+  private func isTransfer(_ transaction: Transaction) -> Bool {
+    if transaction.transferAccountID != nil || transaction.transferTransactionID != nil {
+      return true
+    }
+    return transaction.subtransactions.contains {
+      $0.transferAccountID != nil || $0.transferTransactionID != nil
+    }
+  }
+
+  /// True when the saved row names a payee the local list has never seen,
+  /// which means the server provisioned it during this write.
+  private func isUnknownPayee(_ transaction: Transaction) -> Bool {
+    guard let payeeID = transaction.payeeID else {
+      return false
+    }
+    return payee(withID: payeeID) == nil
   }
 
   private func applySavedTransaction(_ saved: Transaction, replacing existing: Transaction) {
@@ -2006,7 +2284,10 @@ final class AppModel {
       case .single(let row):
         showSaveMessage("Approved \(row.payeeName ?? "transaction")")
       }
-      await refreshLedger(quiet: true)
+      // Approval moves no money and the approved ids are applied locally, so
+      // this plans no fetch; the failure path below still re-reads the ledger
+      // because a partial batch leaves the queue uncertain.
+      await refresh(after: .transactionsApproved)
     } catch let error as BulkApprovalError {
       approvalSession = RegisterApproval.fail(
         approvalSession,
@@ -2027,15 +2308,6 @@ final class AppModel {
     }
   }
 
-  func refreshLedgerAndInvalidatePlan() async {
-    async let reference: Void = refreshReferenceData(quiet: true)
-    async let ledger: Void = refreshLedger(quiet: true)
-    async let schedules: Void = refreshScheduledTransactions(quiet: true)
-    _ = await (reference, ledger, schedules)
-    planRefreshGeneration &+= 1
-    reportsRefreshGeneration &+= 1
-  }
-
   @discardableResult
   func drainOutbox(trigger: OutboxDrainTrigger) async -> Int {
     guard !pendingTransactions.isEmpty else {
@@ -2054,6 +2326,10 @@ final class AppModel {
     }
 
     var syncedCount = 0
+    // A transfer's mirror row and a payee created by name are the only parts
+    // of a create the POST response cannot hand back.
+    var syncedTransfer = false
+    var syncedNewPayee = false
     var effectiveTrigger = trigger
     repeat {
       needsAnotherDrain = false
@@ -2084,6 +2360,8 @@ final class AppModel {
           if !serverTransactions.contains(where: { $0.id == saved.id }) {
             serverTransactions.insert(saved, at: 0)
           }
+          syncedTransfer = syncedTransfer || isTransfer(saved)
+          syncedNewPayee = syncedNewPayee || isUnknownPayee(saved)
           applyQueuedCreateRevision(
             importID: saved.importID ?? request.importID ?? item.request.importID,
             transactionID: saved.id
@@ -2106,15 +2384,16 @@ final class AppModel {
     if syncedCount > 0 {
       serverTransactions = sortedUniqueTransactions(serverTransactions)
       invalidateAccountUsage()
-      planRefreshGeneration &+= 1
-      reportsRefreshGeneration &+= 1
+      // Balances moved whichever trigger got here, including a drain running
+      // inside a pull: `scheduleRefresh` merges into that pass's queue rather
+      // than awaiting the pass it is running inside.
+      scheduleRefresh(
+        after: .transactionsCreated(hasTransfer: syncedTransfer, hasNewPayee: syncedNewPayee)
+      )
       if effectiveTrigger != .commit {
         showSaveMessage(
           syncedCount == 1 ? "Synced 1 pending transaction" : "Synced \(syncedCount) pending transactions"
         )
-      }
-      if effectiveTrigger == .commit {
-        Task { await refreshLedgerAndInvalidatePlan() }
       }
     } else if effectiveTrigger == .manual, !pendingRows.isEmpty {
       showSaveMessage("Couldn’t sync — will retry on the next refresh", kind: .failure)
@@ -2178,7 +2457,7 @@ final class AppModel {
     serverTransactions.removeAll { removedIDs.contains($0.id) }
     serverUnapprovedTransactions.removeAll { removedIDs.contains($0.id) }
     showSaveMessage("Deleted \(transaction.payeeName ?? "transaction")")
-    Task { await refreshLedgerAndInvalidatePlan() }
+    scheduleRefresh(after: .transactionDeleted)
   }
 
   func approveEligible(from rows: [Transaction]) async {
