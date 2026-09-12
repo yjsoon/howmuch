@@ -126,10 +126,9 @@ describe("report aggregates", () => {
   test("triggers keep account_month_balances identical to a rebuild from history", async () => {
     const { db } = await syntheticLedger();
     const maintained = db
-      .query("SELECT plan_id,account_id,month,net_change_milli FROM account_month_balances WHERE net_change_milli <> 0 ORDER BY 1,2,3")
+      .query("SELECT plan_id,account_id,month,net_change_milli FROM account_month_balances ORDER BY 1,2,3")
       .all();
-    const fresh = (rebuilt(db) as any[]).filter((row) => row.net_change_milli !== 0);
-    expect(maintained).toEqual(fresh);
+    expect(maintained).toEqual(rebuilt(db) as any[]);
     expect(maintained.length).toBeGreaterThan(5);
   });
 

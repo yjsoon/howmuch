@@ -37,14 +37,19 @@ export type NetWorthPeriod = {
   accounts: NetWorthAccountBalance[];
 };
 
-/** Statements that rebuild the whole aggregate from live transaction history. */
+/**
+ * Statements that rebuild the whole aggregate from live transaction history.
+ * The `HAVING` matches the triggers, which drop a pair once its net change
+ * reaches zero, so a rebuild reproduces the maintained row set exactly.
+ */
 export const REBUILD_ACCOUNT_MONTH_BALANCES_SQL = [
   "DELETE FROM account_month_balances",
   `INSERT INTO account_month_balances (plan_id, account_id, month, net_change_milli, updated_at)
    SELECT t.plan_id, t.account_id, substr(t.date, 1, 7), SUM(t.amount_milli), CURRENT_TIMESTAMP
    FROM transactions t
    WHERE t.deleted = 0
-   GROUP BY t.plan_id, t.account_id, substr(t.date, 1, 7)`,
+   GROUP BY t.plan_id, t.account_id, substr(t.date, 1, 7)
+   HAVING SUM(t.amount_milli) <> 0`,
 ] as const;
 
 /** The `YYYY-MM` bucket an ISO date belongs to. */

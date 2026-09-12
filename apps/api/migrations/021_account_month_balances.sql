@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS report_cache (
 -- and bulk imports too.  Each trigger recomputes the affected (account, month)
 -- from scratch, so it is idempotent and self-healing: an account, date, amount
 -- or deleted-flag edit simply recomputes the pair it left and the pair it
--- joined.  A pair that has been vacated is written back as an explicit zero.
+-- joined.  A pair whose net change falls to zero is dropped, so a rebuild from
+-- history reproduces the maintained row set exactly.
 --
 -- Any future migration that rebuilds the transactions table must recreate
 -- these triggers.
@@ -57,6 +58,11 @@ BEGIN
   ON CONFLICT(plan_id, account_id, month) DO UPDATE SET
     net_change_milli = excluded.net_change_milli,
     updated_at = CURRENT_TIMESTAMP;
+
+  DELETE FROM account_month_balances
+  WHERE plan_id = NEW.plan_id AND account_id = NEW.account_id AND month = substr(NEW.date, 1, 7)
+    AND net_change_milli = 0;
+
 END;
 
 CREATE TRIGGER IF NOT EXISTS account_month_balances_after_delete
@@ -78,6 +84,11 @@ BEGIN
   ON CONFLICT(plan_id, account_id, month) DO UPDATE SET
     net_change_milli = excluded.net_change_milli,
     updated_at = CURRENT_TIMESTAMP;
+
+  DELETE FROM account_month_balances
+  WHERE plan_id = OLD.plan_id AND account_id = OLD.account_id AND month = substr(OLD.date, 1, 7)
+    AND net_change_milli = 0;
+
 END;
 
 -- The WHEN gate keeps balance-neutral writes -- cleared toggles, approvals,
@@ -108,6 +119,10 @@ BEGIN
     net_change_milli = excluded.net_change_milli,
     updated_at = CURRENT_TIMESTAMP;
 
+  DELETE FROM account_month_balances
+  WHERE plan_id = OLD.plan_id AND account_id = OLD.account_id AND month = substr(OLD.date, 1, 7)
+    AND net_change_milli = 0;
+
   INSERT INTO account_month_balances (plan_id, account_id, month, net_change_milli, updated_at)
   VALUES (
     NEW.plan_id,
@@ -124,6 +139,11 @@ BEGIN
   ON CONFLICT(plan_id, account_id, month) DO UPDATE SET
     net_change_milli = excluded.net_change_milli,
     updated_at = CURRENT_TIMESTAMP;
+
+  DELETE FROM account_month_balances
+  WHERE plan_id = NEW.plan_id AND account_id = NEW.account_id AND month = substr(NEW.date, 1, 7)
+    AND net_change_milli = 0;
+
 END;
 
 -- Rebuild from history.  Idempotent, and the same statement the parity script
@@ -134,4 +154,5 @@ INSERT INTO account_month_balances (plan_id, account_id, month, net_change_milli
 SELECT t.plan_id, t.account_id, substr(t.date, 1, 7), SUM(t.amount_milli), CURRENT_TIMESTAMP
 FROM transactions t
 WHERE t.deleted = 0
-GROUP BY t.plan_id, t.account_id, substr(t.date, 1, 7);
+GROUP BY t.plan_id, t.account_id, substr(t.date, 1, 7)
+HAVING SUM(t.amount_milli) <> 0;

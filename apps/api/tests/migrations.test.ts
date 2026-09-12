@@ -256,6 +256,19 @@ describe("local schema migrations", () => {
       expect(db.query("SELECT version FROM schema_migrations WHERE version='019_query_covering_indexes'").get()).toEqual({
         version: "019_query_covering_indexes",
       });
+      // The aggregate triggers recompute one account-month on every ledger
+      // write, so that lookup must be a seek, never a scan.
+      expect(detail(`SELECT SUM(t.amount_milli) FROM transactions t
+        WHERE t.plan_id = 'p' AND t.account_id = 'a' AND t.deleted = 0
+          AND t.date >= '2026-01-01' AND t.date < '2026-02-01'`)).toContain("idx_transactions_account_live_register");
+      expect(db.query("SELECT version FROM schema_migrations WHERE version='021_account_month_balances'").get()).toEqual({
+        version: "021_account_month_balances",
+      });
+      expect(db.query("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'account_month_balances%' ORDER BY name").all()).toEqual([
+        { name: "account_month_balances_after_delete" },
+        { name: "account_month_balances_after_insert" },
+        { name: "account_month_balances_after_update" },
+      ]);
     } finally {
       db.close();
     }

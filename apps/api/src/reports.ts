@@ -6,6 +6,13 @@ import type { ReportFilters } from "./types";
 
 type Row = Record<string, any>;
 
+/**
+ * The synchronous, full-history report implementation, used by the bun:sqlite
+ * server.  `netWorth` and `ageOfMoney` here are the reference implementation
+ * that `apps/api/tests/report-aggregates.test.ts` compares the aggregate-backed
+ * D1 reports against: do not optimise them without first making that test
+ * compute its expected values independently, or the parity check goes vacuous.
+ */
 export class ReportService {
   constructor(private readonly db: Database) {}
 

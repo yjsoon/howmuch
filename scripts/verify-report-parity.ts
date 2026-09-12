@@ -81,11 +81,12 @@ for (const plan of plans) {
       .query(
         `WITH held AS (
            SELECT plan_id, account_id, month, net_change_milli FROM account_month_balances
-           WHERE plan_id = ? AND net_change_milli <> 0
+           WHERE plan_id = ?
          ), fresh AS (
            SELECT plan_id, account_id, substr(date,1,7) AS month, SUM(amount_milli) AS net_change_milli
            FROM transactions WHERE plan_id = ? AND deleted = 0
            GROUP BY plan_id, account_id, substr(date,1,7)
+           HAVING SUM(amount_milli) <> 0
          )
          SELECT (SELECT COUNT(*) FROM (SELECT * FROM held EXCEPT SELECT * FROM fresh))
               + (SELECT COUNT(*) FROM (SELECT * FROM fresh EXCEPT SELECT * FROM held)) AS n`,
