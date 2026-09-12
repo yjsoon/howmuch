@@ -16,7 +16,8 @@ enum RefreshSlice: String, CaseIterable, Hashable, Sendable {
   /// The five-request reference batch. Reserved for changes a local apply
   /// plus the two slices above cannot reproduce.
   case referenceData
-  /// First transaction page plus the unapproved queue scan.
+  /// First transaction page. Since #181 this no longer drags the unapproved
+  /// queue scan along with it.
   case ledger
   case schedules
   /// The four Reflect reports, gated by `ReportsRefreshPolicy`.
@@ -26,9 +27,11 @@ enum RefreshSlice: String, CaseIterable, Hashable, Sendable {
 /// Which slices each tab's pull-to-refresh owns. A tab refreshes what it
 /// shows and nothing else, so pulling on Accounts never touches reports.
 enum TabRefresh {
-  /// Accounts shows balances and groupings. The New/Scheduled tile counts are
-  /// deliberately left to their own panes rather than dragging the ledger
-  /// scan onto every pull here.
+  /// Accounts shows balances and groupings. The New tile's count is left to its
+  /// own pane, keeping this pull to the single GET `RefreshPlanTests` pins it
+  /// to. Since #181 that count is one cheap request rather than a queue walk,
+  /// so folding it in here is now affordable -- but it would relax #196's
+  /// tested "one GET" contract, so it belongs in its own change.
   static let accounts: Set<RefreshSlice> = [.accounts]
 
   /// The Accounts placeholder for a failed or missing reference load lives
@@ -39,8 +42,8 @@ enum TabRefresh {
   static func accounts(referencePhase: LoadPhase) -> Set<RefreshSlice> {
     referencePhase == .loaded ? accounts : [.referenceData]
   }
-  /// The register shows the ledger page and, in the inbox scope, the
-  /// unapproved queue — both come from the one `.ledger` slice.
+  /// The register shows the ledger page; `.ledger` also refreshes the count and,
+  /// while the approval flow is open, the queue rows behind it.
   static let register: Set<RefreshSlice> = [.ledger]
   static let reflect: Set<RefreshSlice> = [.reports]
 }

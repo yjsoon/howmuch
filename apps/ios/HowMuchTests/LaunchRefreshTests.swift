@@ -518,8 +518,10 @@ final class UnapprovedCountLaunchTests: XCTestCase {
   /// not release the rows the other is still displaying.
   func testClosingOneApprovalFlowKeepsTheQueueForItsSibling() async {
     let model = AppModel(settings: APISettings(), viewPrefs: ViewPrefs())
-    let first = UUID()
-    let second = UUID()
+    // Viewer tokens are the registers' own scope identities, not fresh UUIDs:
+    // a rebuilt view must reclaim the token it had before.
+    let first = "account(\"acct-1\")||"
+    let second = "unapproved||"
 
     await model.openUnapprovedQueue(viewer: first)
     await model.openUnapprovedQueue(viewer: second)
@@ -536,6 +538,73 @@ final class UnapprovedCountLaunchTests: XCTestCase {
       model.unapprovedQueuePhase,
       .idle,
       "the queue is released once no register is showing it"
+    )
+
+    // A rebuilt view reclaims its own token rather than leaking a new one, so
+    // one close still empties the set. A fresh UUID per rebuild would strand
+    // the old token and re-walk the queue on every later refresh.
+    await model.openUnapprovedQueue(viewer: first)
+    await model.openUnapprovedQueue(viewer: first)
+    model.closeUnapprovedQueue(viewer: first)
+    XCTAssertEqual(
+      model.unapprovedQueuePhase,
+      .idle,
+      "reopening under the same identity must not strand a viewer in the set"
+    )
+  }
+
+  /// One baseline shared by the plan-wide and per-account counters let a scoped
+  /// refresh rebaseline the plan-wide one: approve rows in the inbox, open an
+  /// account register, and the Accounts "New" tile jumped back up by what had
+  /// just been approved. Each scope keeps its own baseline.
+  func testScopedCountRefreshDoesNotRebaselineThePlanWideBadge() async {
+    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
+    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
+    UnapprovedProbeProtocol.reset()
+
+    var settings = APISettings()
+    settings.baseURLString = UnapprovedProbeProtocol.fixtureBaseURL
+    settings.authenticatedUserID = "unapproved-baseline-\(UUID().uuidString)"
+    settings.sessionToken = "token"
+    settings.planID = UnapprovedProbeProtocol.planID
+
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+
+    guard let surface = SnapshotSurface(
+      root: LaunchProbe(model: model, taskID: { $0.launchRefreshTaskID }),
+      size: CGSize(width: 10, height: 10)
+    ) else {
+      XCTFail("baseline probe requires a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    let counted = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.unapprovedBadgeCount == UnapprovedProbeProtocol.fixtureUnapprovedCount
+    }
+    XCTAssertTrue(counted, "the plan-wide count must land before this test can move it")
+
+    // Approve three rows. The badge drops optimistically, because the count
+    // predates them.
+    let rows = (1...3).map { index in
+      HowMuch.Transaction.approvalFixture(id: "row-\(index)", accountID: UnapprovedProbeProtocol.fixtureAccountID)
+    }
+    await model.approveEligible(from: rows)
+
+    let expected = UnapprovedProbeProtocol.fixtureUnapprovedCount - rows.count
+    let dropped = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.unapprovedBadgeCount == expected
+    }
+    XCTAssertTrue(dropped, "approving three rows must take three off the plan-wide badge, saw \(model.unapprovedBadgeCount)")
+
+    // Now refresh a *different* scope. This must not touch the plan-wide
+    // baseline.
+    await model.refreshUnapprovedCount(forAccountID: UnapprovedProbeProtocol.fixtureAccountID)
+
+    XCTAssertEqual(
+      model.unapprovedBadgeCount,
+      expected,
+      "an account-scoped count refresh must not rebaseline the plan-wide badge and undo its local decrement"
     )
   }
 
@@ -682,6 +751,10 @@ private final class UnapprovedProbeProtocol: URLProtocol {
       send(url: url, body: #"{"data":{"transactions":[],"server_knowledge":1,"has_more":false,"next_offset":null}}"#)
       return
     }
+    if components.path.hasSuffix("/transactions"), request.httpMethod == "PATCH" {
+      send(url: url, body: #"{"data":{"transactions":[],"server_knowledge":2}}"#)
+      return
+    }
     if components.path.hasSuffix("/v1/plans") {
       send(url: url, body: #"{"data":{"plans":[{"id":"\#(Self.planID)","name":"Only Plan"}]}}"#)
       return
@@ -707,4 +780,36 @@ private final class UnapprovedProbeProtocol: URLProtocol {
   }
 
   override func stopLoading() {}
+}
+
+private extension HowMuch.Transaction {
+  /// Minimal unapproved row for approval-path tests. Synthetic values only.
+  /// Qualified: this file imports SwiftUI, which has its own `Transaction`.
+  static func approvalFixture(id: String, accountID: String) -> HowMuch.Transaction {
+    HowMuch.Transaction(
+      id: id,
+      date: "2026-09-01",
+      amount: -1_000,
+      memo: nil,
+      cleared: .uncleared,
+      approved: false,
+      flagColor: nil,
+      flagName: nil,
+      accountID: accountID,
+      accountName: "Fixture Account",
+      payeeID: nil,
+      payeeName: "Fixture Payee",
+      categoryID: nil,
+      categoryName: nil,
+      transferAccountID: nil,
+      transferTransactionID: nil,
+      parentTransactionID: nil,
+      matchedTransactionID: nil,
+      importID: nil,
+      importPayeeName: nil,
+      importPayeeNameOriginal: nil,
+      deleted: false,
+      subtransactions: []
+    )
+  }
 }

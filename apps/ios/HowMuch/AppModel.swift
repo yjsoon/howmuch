@@ -42,9 +42,11 @@ final class AppModel {
   /// of its rows. The badge is drawn from this so launch never waits on a walk
   /// of the whole queue.
   private(set) var serverUnapprovedCount = 0
-  /// Locally approved ids as they stood when that count arrived, so a refetched
-  /// count is never decremented twice for the same approval.
-  private var confirmedWhenCounted: Set<String> = []
+  /// Locally approved ids as they stood when each scope's count arrived, so a
+  /// refetched count is never decremented twice for the same approval -- and so
+  /// refreshing one scope cannot rebaseline another and make its badge jump
+  /// back up. Keyed by `countScopeKey`.
+  private var confirmedWhenCounted: [String: Set<String>] = [:]
   /// Per-account unapproved counts, for registers narrowed to one account. The
   /// plan-wide number would overstate those.
   private var serverUnapprovedCountsByAccount: [String: Int] = [:]
@@ -54,7 +56,7 @@ final class AppModel {
   /// only when the last of them goes away -- on iPad two registers can be on
   /// screen at once, and one closing must not pull the rows out from under the
   /// other.
-  private var unapprovedQueueViewers: Set<UUID> = []
+  private var unapprovedQueueViewers: Set<String> = []
   private var approvalSession = RegisterApproval.Session.empty
   /// Imported YNAB schedules remain an immutable source mirror; local edits
   /// and entered occurrences are reflected through HowMuch overlays.
@@ -198,7 +200,7 @@ final class AppModel {
     serverUnapprovedTransactions = []
     serverUnapprovedCount = 0
     serverUnapprovedCountsByAccount = [:]
-    confirmedWhenCounted = []
+    confirmedWhenCounted = [:]
     unapprovedQueuePhase = .idle
     unapprovedQueueViewers = []
     approvalSession = .empty
@@ -975,7 +977,9 @@ final class AppModel {
   /// Rows approved here since the matching count was taken. Scoped counts only
   /// move for rows in their own account.
   private func resolvedSinceCount(forAccountID accountID: String?) -> Int {
-    let since = approvalSession.confirmed.subtracting(confirmedWhenCounted)
+    // A row approved and then dropped from both arrays is not subtracted here;
+    // the next count of this scope reconciles it.
+    let since = approvalSession.confirmed.subtracting(confirmedWhenCounted[countScopeKey(accountID)] ?? [])
     guard let accountID else { return since.count }
     return since.count { id in
       let row = serverTransactions.first { $0.id == id }
@@ -1612,14 +1616,19 @@ final class AppModel {
     } else {
       serverUnapprovedCount = count
     }
-    confirmedWhenCounted = approvalSession.confirmed
+    confirmedWhenCounted[countScopeKey(accountID)] = approvalSession.confirmed
+  }
+
+  /// One key per counted scope: the plan, or a single account.
+  private func countScopeKey(_ accountID: String?) -> String {
+    accountID.map { "account:\($0)" } ?? "plan"
   }
 
   /// Loads the unapproved rows. Called when the approval flow opens, and again
   /// on later refreshes while it stays open -- never on the launch path.
   /// Called by a view opening the approval flow. `viewer` identifies that view
   /// so a sibling register closing cannot release rows this one is showing.
-  func openUnapprovedQueue(viewer: UUID) async {
+  func openUnapprovedQueue(viewer: String) async {
     unapprovedQueueViewers.insert(viewer)
     // `.failed` is retried: otherwise the flow shows its error with no way out
     // short of a pull-to-refresh.
@@ -1630,7 +1639,7 @@ final class AppModel {
   /// Called when a view closes the approval flow. The queue is released only
   /// once no view is showing it, so later refreshes stop paying for the walk --
   /// without that, opening the flow once would re-arm it for the session.
-  func closeUnapprovedQueue(viewer: UUID) {
+  func closeUnapprovedQueue(viewer: String) {
     unapprovedQueueViewers.remove(viewer)
     guard unapprovedQueueViewers.isEmpty else { return }
     unapprovedQueuePhase = .idle
@@ -1669,7 +1678,7 @@ final class AppModel {
     serverUnapprovedTransactions = []
     serverUnapprovedCount = 0
     serverUnapprovedCountsByAccount = [:]
-    confirmedWhenCounted = []
+    confirmedWhenCounted = [:]
     unapprovedQueuePhase = .idle
     unapprovedQueueViewers = []
     approvalSession = .empty

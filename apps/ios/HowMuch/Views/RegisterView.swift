@@ -105,8 +105,7 @@ struct RegisterView: View {
   @State private var unclearedOnly = false
   @State private var uncategorisedOnly = false
   @State private var unapprovedOnly = false
-  /// Identifies this register to the model's queue ownership set.
-  @State private var queueViewerID = UUID()
+
   @State private var editingTransaction: Transaction?
   @State private var isShowingReconciliation = false
   @State private var editingAccount: Account?
@@ -305,6 +304,11 @@ struct RegisterView: View {
       if let accountID = scope.accountID {
         model.beginFocusedRegisterAccount(accountID)
       }
+    }
+    // A scope change rebuilds this view in place, so `onDisappear` never fires
+    // for the identity it used to have. Release that one explicitly.
+    .onChange(of: queueViewerID) { previous, _ in
+      model.closeUnapprovedQueue(viewer: previous)
     }
     .onDisappear {
       if let accountID = scope.accountID {
@@ -1212,6 +1216,15 @@ struct RegisterView: View {
       return model.unapprovedBadgeCount(forAccountID: scope.accountID)
     }
     return approvalScopedTransactions.count
+  }
+
+  /// Identifies this register to the model's queue ownership set. Derived from
+  /// the register's own scope rather than a fresh UUID: SwiftUI may rebuild a
+  /// view's state without `onDisappear` firing, and a stale token would keep the
+  /// viewer set non-empty forever, re-walking the queue on every later refresh.
+  private var queueViewerID: String {
+    let accounts = accountIDs.map { $0.sorted().joined(separator: ",") } ?? ""
+    return "\(scope)|\(accounts)|\(categoryID ?? "")"
   }
 
   /// Refetches the scoped count whenever the register's scope or the ledger

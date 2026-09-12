@@ -1142,8 +1142,6 @@ struct TransactionsPayload: Decodable {
   let nextOffset: Int?
 }
 
-/// One bounded, newest-first ledger page from the HowMuch transaction API.
-/// Deleted rows are removed by `APIClient` before the page reaches the UI.
 /// The "New" badge without the queue behind it: `{ count, server_knowledge }`.
 /// The shared decoder converts snake_case, so no CodingKeys are needed.
 struct UnapprovedCountPayload: Decodable {
@@ -1151,6 +1149,8 @@ struct UnapprovedCountPayload: Decodable {
   let serverKnowledge: Int?
 }
 
+/// One bounded, newest-first ledger page from the HowMuch transaction API.
+/// Deleted rows are removed by `APIClient` before the page reaches the UI.
 struct TransactionPage {
   let transactions: [Transaction]
   let hasMore: Bool
