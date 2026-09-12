@@ -289,6 +289,89 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertTrue(restored, "Assistant overlay must return after capture dismisses")
   }
 
+  func testTabRowAssistantHidesWhenTabBarHides() async {
+    let harness = SnapshotHarness.make()
+    let chrome = RootChromeState()
+    guard let surface = SnapshotSurface(
+      root: RootTabView(
+        chrome: chrome,
+        usesSidebar: false,
+        workspace: harness.workspace,
+        presentingManually: {}
+      )
+      .environment(chrome)
+      .environment(harness.model)
+      .environment(\.horizontalSizeClass, .compact),
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("root tab row needs a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+    let appeared = await surface.waitUntil {
+      surface.tabRowOverlayButton(label: "Assistant") != nil
+    }
+    XCTAssertTrue(appeared, "compact chrome must host floating Assistant: \(surface.accessibilityLabels())")
+    guard let tabBar = surface.firstDescendant(UITabBar.self) else {
+      XCTFail("compact root must host a UITabBar")
+      return
+    }
+    tabBar.isHidden = true
+    surface.layoutNow()
+    let hidden = await surface.waitUntil {
+      surface.tabRowOverlayButton(label: "Assistant") == nil
+    }
+    XCTAssertTrue(hidden, "floating Assistant must unparent when the tab bar is hidden")
+    tabBar.isHidden = false
+    surface.layoutNow()
+    let restored = await surface.waitUntil {
+      surface.tabRowOverlayButton(label: "Assistant") != nil
+    }
+    XCTAssertTrue(restored, "floating Assistant must return when the tab bar is shown")
+  }
+
+  func testTabRowAssistantHidesWhileAssistantConversationIsPushed() async {
+    let harness = SnapshotHarness.make()
+    let session = harness.admitConversation()
+    let chrome = RootChromeState()
+    guard let surface = SnapshotSurface(
+      root: RootTabView(
+        chrome: chrome,
+        usesSidebar: false,
+        workspace: harness.workspace,
+        presentingManually: {}
+      )
+      .environment(chrome)
+      .environment(harness.model)
+      .environment(\.horizontalSizeClass, .compact),
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("root tab row needs a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+    let appeared = await surface.waitUntil {
+      surface.tabRowOverlayButton(label: "Assistant") != nil
+    }
+    XCTAssertTrue(appeared, "compact chrome must host floating Assistant: \(surface.accessibilityLabels())")
+    chrome.openMore(.assistant)
+    harness.workspace.pendingAssistantSessionID = session.id
+    surface.layoutNow()
+    let hidden = await surface.waitUntil {
+      surface.tabRowOverlayButton(label: "Assistant") == nil
+    }
+    XCTAssertTrue(
+      hidden,
+      "floating Assistant must hide with the tab bar on a pushed conversation: \(surface.accessibilityLabels())"
+    )
+    harness.workspace.pendingAssistantSessionID = nil
+    surface.layoutNow()
+    let restored = await surface.waitUntil {
+      surface.tabRowOverlayButton(label: "Assistant") != nil
+    }
+    XCTAssertTrue(restored, "floating Assistant must return on Assistant home")
+  }
+
   func testManualIntakeHostPreservesConversationAndAccountIntent() async {
     let router = CaptureRouter.shared
     let previous = router.presented

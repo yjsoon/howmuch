@@ -367,6 +367,9 @@ enum RootChrome {
     return EdgeInsets(top: 0, leading: 0, bottom: 90, trailing: 16)
   }
 
+  /// Space above the compact tab bar reserved for the floating Assistant.
+  static let compactFloatingAssistantClearance = RootAddControl.diameter + 10
+
   static func toastBottomPadding(
     idiom: UIUserInterfaceIdiom,
     horizontalSizeClass: UserInterfaceSizeClass?
@@ -374,7 +377,7 @@ enum RootChrome {
     if usesSidebar(idiom: idiom, horizontalSizeClass: horizontalSizeClass) {
       return 28 + RootAddControl.diameter + 8
     }
-    return 90 + RootAddControl.diameter + 10
+    return 90 + compactFloatingAssistantClearance
   }
 }
 
@@ -466,14 +469,14 @@ struct RootTabView: View {
       TabView(selection: $chrome.tab) {
         Tab(AppTab.accounts.title, systemImage: AppTab.accounts.systemImage, value: AppTab.accounts) {
           RootChromeScope(chrome: chrome) {
-            RootTabHost(for: .accounts) {
+            RootTabHost(for: .accounts, workspace: workspace) {
               AccountsView()
             }
           }
         }
         Tab(AppTab.rewards.title, systemImage: AppTab.rewards.systemImage, value: AppTab.rewards) {
           RootChromeScope(chrome: chrome) {
-            RootTabHost(for: .rewards) {
+            RootTabHost(for: .rewards, workspace: workspace) {
               NavigationStack {
                 RewardsView()
               }
@@ -482,7 +485,7 @@ struct RootTabView: View {
         }
         Tab(AppTab.reflect.title, systemImage: AppTab.reflect.systemImage, value: AppTab.reflect) {
           RootChromeScope(chrome: chrome) {
-            RootTabHost(for: .reflect) {
+            RootTabHost(for: .reflect, workspace: workspace) {
               NavigationStack {
                 ReflectView()
               }
@@ -529,7 +532,7 @@ struct RootTabView: View {
   private func compactDestinationTab(_ tab: AppTab) -> some TabContent<CompactBarSelection> {
     Tab(tab.title, systemImage: tab.systemImage, value: tab.compactBarSelection ?? .accounts) {
       RootChromeScope(chrome: chrome) {
-        RootTabHost(for: tab) {
+        RootTabHost(for: tab, workspace: workspace) {
           compactDestinationRoot(tab)
         }
       }
@@ -647,10 +650,16 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
       guard let window = view.window else {
         return
       }
+      guard let tabBar = hostedTabBar(), isVisibleInWindow(tabBar, in: window) else {
+        hideAssistant()
+        return
+      }
       let accounts = tabRowView(AppTab.accounts.title, in: window)
-      let addView = accounts.flatMap { searchRoleAdd(in: window, alignedWith: $0) }
-        ?? rightmostCompactView(inBottomBandOf: window)
-      guard let addView else {
+      guard let accounts,
+            isVisibleInWindow(accounts, in: window),
+            let addView = searchRoleAdd(in: window, alignedWith: accounts),
+            isVisibleInWindow(addView, in: window)
+      else {
         hideAssistant()
         return
       }
@@ -671,7 +680,8 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
     private func layoutAssistant(relativeTo add: UIView, in window: UIWindow) {
       let button = assistantButton ?? makeAssistantButton()
       assistantButton = button
-      if CaptureRouter.shared.hidesTabRowOverlay {
+      if CaptureRouter.shared.hidesTabRowOverlay
+          || hostedTabBar().map({ isVisibleInWindow($0, in: window) }) != true {
         hideAssistant()
         return
       }
@@ -818,28 +828,19 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
       return roots.max { $0.convert($0.bounds, to: window).minX < $1.convert($1.bounds, to: window).minX }
     }
 
-    private func rightmostCompactView(inBottomBandOf window: UIWindow) -> UIView? {
-      let bandMinY = window.bounds.maxY - 160
-      var candidates: [UIView] = []
-      func walk(_ view: UIView) {
-        guard view !== assistantButton else { return }
-        let frame = view.convert(view.bounds, to: window)
-        let inBand = frame.midY >= bandMinY && frame.maxY <= window.bounds.maxY - 8
-        let compact = abs(frame.width - frame.height) <= 14 && frame.width >= 40 && frame.width <= 76
-        if inBand, compact {
-          candidates.append(view)
-        }
-        for subview in view.subviews {
-          walk(subview)
-        }
+    private func isVisibleInWindow(_ view: UIView, in window: UIWindow) -> Bool {
+      guard view.window === window, !view.isHidden, view.alpha > 0.01 else {
+        return false
       }
-      walk(window)
-      let controls = candidates.compactMap { $0 as? UIControl }
-      let pool = controls.isEmpty ? candidates : controls
-      let roots = pool.filter { candidate in
-        !pool.contains { $0 !== candidate && candidate.isDescendant(of: $0) }
+      var current: UIView? = view
+      while let node = current {
+        if node.isHidden || node.alpha <= 0.01 {
+          return false
+        }
+        current = node.superview
       }
-      return roots.max { $0.convert($0.bounds, to: window).minX < $1.convert($1.bounds, to: window).minX }
+      let frame = view.convert(view.bounds, to: window)
+      return window.bounds.intersects(frame)
     }
 
     private func tabRowView(_ label: String, in window: UIWindow) -> UIView? {
@@ -865,10 +866,16 @@ struct RootTabHost<Content: View>: View {
   @Environment(RootChromeState.self) private var chrome
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   let hostedTab: AppTab
+  var workspace: CaptureWorkspace = .shared
   var content: Content
 
-  init(for hostedTab: AppTab, @ViewBuilder content: () -> Content) {
+  init(
+    for hostedTab: AppTab,
+    workspace: CaptureWorkspace = .shared,
+    @ViewBuilder content: () -> Content
+  ) {
     self.hostedTab = hostedTab
+    self.workspace = workspace
     self.content = content()
   }
 
@@ -878,22 +885,34 @@ struct RootTabHost<Content: View>: View {
       horizontalSizeClass: horizontalSizeClass
     )
     let overflow = usesSidebar ? nil : chrome.overflow(on: hostedTab)
+    let router = CaptureRouter.shared
     ZStack {
       content
         .allowsHitTesting(overflow == nil)
         .accessibilityHidden(overflow != nil)
       if let overflow {
-        RootMoreHost(destination: overflow)
+        RootMoreHost(destination: overflow, workspace: workspace)
           .transition(.move(edge: .trailing))
       }
     }
     .animation(.snappy, value: overflow)
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      if !usesSidebar,
+         !router.hidesTabRowOverlay,
+         workspace.pendingAssistantSessionID == nil
+      {
+        Color.clear
+          .frame(height: RootChrome.compactFloatingAssistantClearance)
+          .accessibilityHidden(true)
+      }
+    }
   }
 }
 
 struct RootMoreHost: View {
   @Environment(RootChromeState.self) private var chrome
   let destination: MoreDestination
+  var workspace: CaptureWorkspace = .shared
 
   var body: some View {
     NavigationStack {
@@ -918,7 +937,7 @@ struct RootMoreHost: View {
     case .plan:
       CategoriesView()
     case .assistant:
-      AssistantView(workspace: CaptureWorkspace.shared)
+      AssistantView(workspace: workspace)
     }
   }
 }
@@ -928,6 +947,7 @@ struct RootAddControl: View {
   @Environment(RootChromeState.self) private var chrome
   var workspace: CaptureWorkspace = .shared
   var presenting: (() -> Void)?
+  var presentingManually: (() -> Void)?
 
   static let diameter: CGFloat = 56
 
@@ -954,6 +974,10 @@ struct RootAddControl: View {
     .buttonStyle(.plain)
     .accessibilityLabel("Add Transactions")
     .accessibilityAddTraits(.isButton)
+    .accessibilityAction(named: "Add manually", addManually)
+    .contextMenu {
+      Button("Add manually", systemImage: "square.and.pencil", action: addManually)
+    }
     .frame(minWidth: 44, minHeight: 44)
   }
 
@@ -963,6 +987,14 @@ struct RootAddControl: View {
       return
     }
     model.presentAddTransactions(origin: model.addTransactionsOrigin())
+  }
+
+  private func addManually() {
+    if let presentingManually {
+      presentingManually()
+      return
+    }
+    model.presentManualTransaction(origin: model.addTransactionsOrigin())
   }
 }
 

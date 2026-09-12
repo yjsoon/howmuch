@@ -273,6 +273,11 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertNil(CompactBarSelection.addTransaction.tab)
     XCTAssertTrue(CompactBarSelection.addTransaction.isAction)
     XCTAssertFalse(CompactBarSelection.addTransaction.isDestination)
+    XCTAssertEqual(RootChrome.compactFloatingAssistantClearance, RootAddControl.diameter + 10)
+    XCTAssertEqual(
+      RootChrome.toastBottomPadding(idiom: .phone, horizontalSizeClass: .compact),
+      90 + RootChrome.compactFloatingAssistantClearance
+    )
   }
 
   func testOpenMorePlanFromAccountsDoesNotLeakFocusedRegister() {
