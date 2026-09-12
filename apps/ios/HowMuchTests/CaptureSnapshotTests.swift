@@ -964,6 +964,31 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertTrue(session.canSendComposer)
     let sendWithText = try XCTUnwrap(surface.firstControl(label: "Send"))
     XCTAssertTrue(surface.isControlEnabled(sendWithText), "financial text must stay sendable \(surface.accessibilityLabels())")
+    XCTAssertTrue(surface.activate(sendWithText), "Send must run while the photo is still reading")
+    let leftPending = await surface.waitUntil {
+      session.messages.isEmpty && session.attachments.count == 1 && session.sentAttachments.isEmpty
+    }
+    XCTAssertTrue(leftPending, "Send must wait for OCR instead of freezing a still-reading slip")
+    XCTAssertEqual(session.composerText, "Lunch $12.50 of Groceries")
+
+    var ready = try XCTUnwrap(session.attachments.first)
+    ready.isReading = false
+    ready.recognizedText = "LUNCH 12.50 GROCERIES"
+    session.updateAttachment(ready)
+    session.isTransferringImages = false
+    let froze = await surface.waitUntil {
+      session.sentAttachments.first?.recognizedText == "LUNCH 12.50 GROCERIES"
+        && session.messages.contains { $0.text == "Lunch $12.50 of Groceries" }
+    }
+    XCTAssertTrue(froze, "after OCR, Send must freeze typed text and the slip transcript")
+    XCTAssertEqual(session.attachments.count, 0)
+    let context = CaptureInterpreterPrompt.context(
+      text: "Lunch $12.50 of Groceries",
+      session: session,
+      accounts: harness.model.openAccounts,
+      attachmentIDs: session.messages.first?.attachmentIDs
+    )
+    XCTAssertEqual(context.attachmentTranscripts, ["LUNCH 12.50 GROCERIES"])
   }
 
   func testAssistantNavigationPopRestoresHome() async {

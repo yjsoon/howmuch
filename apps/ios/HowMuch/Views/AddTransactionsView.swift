@@ -38,6 +38,7 @@ struct AddTransactionsView: View {
   @State private var resolvingCategoryDraftID: String?
   @State private var inspectQueryCard: LedgerQueryResult?
   @State private var groupSaveErrors: [UUID: String] = [:]
+  @State private var isWaitingToSend = false
   private let workspace: CaptureWorkspace
 
   init(
@@ -102,7 +103,7 @@ struct AddTransactionsView: View {
             accountLabel: currentAccountName,
             isBusy: session.isBusy,
             isIngesting: session.isIngesting,
-            canSend: session.canSendComposer,
+            canSend: session.canSendComposer && !isWaitingToSend,
             canChangeAccount: !session.isBusy && !session.isSaving,
             canOpenPlus: !session.isSaving,
             pending: session.attachments,
@@ -595,10 +596,36 @@ struct AddTransactionsView: View {
   }
 
   private func send() {
-    guard session.canSendComposer, isCurrent(capturedTurnScope()) else {
+    guard session.canSendComposer, !isWaitingToSend, isCurrent(capturedTurnScope()) else {
       return
     }
     errorMessage = nil
+    if session.isWaitingOnAttachmentOCR {
+      waitForReadableAttachmentsThenSend()
+      return
+    }
+    commitComposerTurn()
+  }
+
+  private func waitForReadableAttachmentsThenSend() {
+    isWaitingToSend = true
+    let turnScope = capturedTurnScope()
+    Task { @MainActor in
+      defer { isWaitingToSend = false }
+      while self.isCurrent(turnScope), self.session.isWaitingOnAttachmentOCR {
+        try? await Task.sleep(for: .milliseconds(50))
+      }
+      guard self.isCurrent(turnScope), self.session.canFreezeComposer else {
+        return
+      }
+      self.commitComposerTurn()
+    }
+  }
+
+  private func commitComposerTurn() {
+    guard session.canFreezeComposer, isCurrent(capturedTurnScope()) else {
+      return
+    }
     let frozen = session.freezeComposerTurn(accountName: currentAccountName, localDate: frozenLocalDate)
     jumpToMessage = frozen.userMessageID
     runFrozenTurn(frozen)
@@ -1352,7 +1379,7 @@ struct AddTransactionsView: View {
     guard session.id == turnScope.sessionID else {
       return
     }
-    guard var attachment = session.attachments.first(where: { $0.id == attachmentID }) else {
+    guard var attachment = session.persistableAttachments.first(where: { $0.id == attachmentID }) else {
       return
     }
     attachment.isReading = false
