@@ -6,6 +6,7 @@ import { D1LedgerRepository } from "../src/d1-ledger-repository";
 import { createHandler } from "../src/http";
 import { newSession, passwordCredential } from "../src/password-auth";
 import { LedgerRepository } from "../src/repository";
+import type { RepositoryDatabase } from "../src/repository-db";
 import type { LedgerStore } from "../src/storage";
 import { CountingD1Database, fakeD1Binding } from "./helpers/counting-d1";
 
@@ -13,27 +14,26 @@ const PLAN_ID = "p";
 
 /**
  * Round trips a GET route is allowed to make. These are ceilings, not exact
- * values: #170 batches the remaining statements and should only lower them.
- * Two of every count are the session lookup shared by all authenticated
- * requests.
+ * values. One of every count is the single-statement session lookup shared by
+ * all authenticated requests; #170 batched each route's remaining statements
+ * into one more.
  *
- * The transactions route is one trip cheaper here than in production:
- * `formatTransactions` fetches subtransactions 90 transactions at a time, so a
- * full `limit=100` register page costs two of those batches where this
- * single-transaction fixture costs one.
+ * The two routes still above two trips are owned by work in flight elsewhere:
+ * `months/:month` by #174 and the report service by #180.
  */
 const BUDGET: Record<string, number> = {
-  "GET /v1/plans": 3,
-  "GET /v1/plans/:id": 3,
-  "GET /v1/plans/:id/settings": 3,
-  "GET /v1/plans/:id/accounts": 4,
-  "GET /v1/plans/:id/account_preferences": 3,
-  "GET /v1/plans/:id/categories": 5,
-  "GET /v1/plans/:id/payees": 4,
-  "GET /v1/plans/:id/transactions?limit=10": 6,
-  "GET /v1/plans/:id/scheduled_transactions": 7,
-  "GET /v1/plans/:id/months/:month": 11,
-  "GET /api/reports/spending-breakdown": 4,
+  "GET /v1/plans": 2,
+  "GET /v1/plans/:id": 2,
+  "GET /v1/plans/:id/settings": 2,
+  "GET /v1/plans/:id/accounts": 2,
+  "GET /v1/plans/:id/account_preferences": 2,
+  "GET /v1/plans/:id/categories": 2,
+  "GET /v1/plans/:id/payees": 2,
+  "GET /v1/plans/:id/transactions?limit=10": 2,
+  "GET /v1/plans/:id/transactions?q=": 3,
+  "GET /v1/plans/:id/scheduled_transactions": 2,
+  "GET /v1/plans/:id/months/:month": 10,
+  "GET /api/reports/spending-breakdown": 3,
 };
 
 const ROUTES: Array<{ name: string; path: string }> = [
@@ -45,6 +45,9 @@ const ROUTES: Array<{ name: string; path: string }> = [
   { name: "GET /v1/plans/:id/categories", path: `/v1/plans/${PLAN_ID}/categories` },
   { name: "GET /v1/plans/:id/payees", path: `/v1/plans/${PLAN_ID}/payees` },
   { name: "GET /v1/plans/:id/transactions?limit=10", path: `/v1/plans/${PLAN_ID}/transactions?limit=10` },
+  // A searched register reads the plan's currency format before it can build
+  // the SQL, so it costs one trip more than the plain page.
+  { name: "GET /v1/plans/:id/transactions?q=", path: `/v1/plans/${PLAN_ID}/transactions?limit=10&q=Shop` },
   { name: "GET /v1/plans/:id/scheduled_transactions", path: `/v1/plans/${PLAN_ID}/scheduled_transactions` },
   { name: "GET /v1/plans/:id/months/:month", path: `/v1/plans/${PLAN_ID}/months/2026-01` },
   { name: "GET /api/reports/spending-breakdown", path: `/api/reports/spending-breakdown?plan_id=${PLAN_ID}` },
@@ -53,7 +56,7 @@ const ROUTES: Array<{ name: string; path: string }> = [
 const databases: Database[] = [];
 afterEach(() => { for (const db of databases.splice(0)) db.close(); });
 
-async function harness(makeRepo: (db: CountingD1Database) => LedgerStore) {
+async function ledgerSqlite(): Promise<Database> {
   const sqlite = new Database(":memory:", { strict: true });
   databases.push(sqlite);
   const migrations = new Bun.Glob("*.sql");
@@ -61,6 +64,11 @@ async function harness(makeRepo: (db: CountingD1Database) => LedgerStore) {
   for (const file of [...migrations.scanSync(directory)].sort()) {
     sqlite.exec(await Bun.file(`${directory}${file}`).text());
   }
+  return sqlite;
+}
+
+async function harness(makeRepo: (db: CountingD1Database) => LedgerStore) {
+  const sqlite = await ledgerSqlite();
 
   const counting = new CountingD1Database(fakeD1Binding(sqlite));
   const session = newSession();
@@ -134,10 +142,87 @@ test("GET routes issue no writes and stay within their round-trip budget", async
   console.log(JSON.stringify({ event: "read_round_trips", d1: d1Counts, base: baseCounts }));
 
   for (const route of ROUTES) {
-    // The two repositories share their read paths today. If #170 batches only
-    // the D1 side, drop this equality and keep the per-route ceilings.
+    // Both repositories share their read paths, so a regression on either shows
+    // up here rather than only in the D1 numbers.
     expect(`${route.name} d1=${d1Counts[route.name]} base=${baseCounts[route.name]}`)
       .toBe(`${route.name} d1=${baseCounts[route.name]} base=${baseCounts[route.name]}`);
     expect(d1Counts[route.name]).toBeLessThanOrEqual(BUDGET[route.name]!);
   }
+
+  // The headline numbers from #170, asserted by name so a regression is legible
+  // without decoding the table above.
+  expect(d1Counts["GET /v1/plans/:id/transactions?limit=10"]).toBeLessThanOrEqual(3);
+  expect(d1Counts["GET /v1/plans/:id/accounts"]).toBeLessThanOrEqual(2);
+  expect(d1Counts["GET /v1/plans/:id/categories"]).toBeLessThanOrEqual(2);
+});
+
+test("the D1 register page reads knowledge, rows and split lines in one batch", async () => {
+  const { counting, handler, token } = await harness((db) => new D1LedgerRepository(db, PLAN_ID));
+  counting.reset();
+
+  const response = await handler(new Request(`https://howmuch.test/v1/plans/${PLAN_ID}/transactions?limit=10`, {
+    headers: { authorization: `Bearer ${token}` },
+  }));
+  expect(response.status).toBe(200);
+
+  const batches = counting.roundTrips.filter((trip) => trip.kind === "batch");
+  expect(batches).toHaveLength(1);
+  // One batch is one D1 transaction, so these three statements share a
+  // snapshot. That is what replaced reading server_knowledge either side of the
+  // page and retrying when the two disagreed.
+  expect(batches[0]!.sql).toContain("SELECT server_knowledge FROM plans");
+  expect(batches[0]!.sql).toContain("FROM transactions t");
+  expect(batches[0]!.sql).toContain("FROM subtransactions st");
+  // No knowledge read survives outside the batch, so nothing can observe a
+  // different snapshot from the rows it labels.
+  expect(counting.roundTrips.filter((trip) => trip.kind !== "batch" && /server_knowledge FROM plans/.test(trip.sql)))
+    .toBeEmpty();
+});
+
+test("the SQLite register page comes from one batch, which nests without deadlocking", async () => {
+  const sqlite = await ledgerSqlite();
+  // No auth setup here, so stand up the plan and user seedLedger references.
+  sqlite.run("INSERT INTO plans (id, name) VALUES (?, 'Plan')", [PLAN_ID]);
+  sqlite.run("INSERT INTO users (id, display_name) VALUES ('user-1', 'reader')");
+  seedLedger(sqlite);
+
+  // A raw Database makes LedgerRepository wrap it in SqliteRepositoryDatabase,
+  // the only path where batchRead's own BEGIN runs. The round-trip test above
+  // only ever sees the D1 implementation.
+  const repo = new LedgerRepository(sqlite, PLAN_ID);
+  const expectedKnowledge = await repo.getServerKnowledge(PLAN_ID);
+  const db = (repo as unknown as { db: RepositoryDatabase }).db;
+
+  const batched: string[][] = [];
+  const singles: string[] = [];
+  const runBatch = db.batchRead.bind(db);
+  const runQuery = db.query.bind(db);
+  db.batchRead = (statements) => {
+    batched.push(statements.map((statement) => statement.sql));
+    return runBatch(statements);
+  };
+  db.query = (sql) => {
+    singles.push(sql);
+    return runQuery(sql);
+  };
+
+  const page = await repo.listTransactionsPage(PLAN_ID, { limit: 10 });
+
+  expect(page.transactions).toHaveLength(1);
+  expect(page.server_knowledge).toBe(expectedKnowledge);
+  // The page and the knowledge value labelling it came from one batch call, so
+  // no write could have landed between them.
+  expect(batched).toHaveLength(1);
+  expect(batched[0]!.filter((sql) => /server_knowledge FROM plans/.test(sql))).toHaveLength(1);
+  expect(batched[0]!.filter((sql) => /FROM subtransactions st/.test(sql))).toHaveLength(1);
+  expect(batched[0]).toHaveLength(3);
+  expect(singles.filter((sql) => /server_knowledge FROM plans/.test(sql))).toBeEmpty();
+
+  // Inside an open transaction the helper runs its statements inline. Queueing
+  // behind transaction()'s serialiser instead would deadlock on the caller.
+  const nested = await db.transaction(() => runBatch([
+    { sql: "SELECT server_knowledge FROM plans WHERE id = ?", values: [PLAN_ID] },
+  ]))();
+  expect(Number(nested[0]![0]!.server_knowledge)).toBe(expectedKnowledge);
+  expect(sqlite.inTransaction).toBeFalse();
 });

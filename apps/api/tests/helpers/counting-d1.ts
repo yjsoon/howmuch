@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { D1Database, type D1Binding, type D1Result, type D1Statement } from "../../src/d1";
 import type { SqlValues } from "../../src/async-sql";
-import type { RepositoryStatement } from "../../src/repository-db";
+import type { BatchStatement, RepositoryStatement } from "../../src/repository-db";
 
 /**
  * One recorded Worker-to-D1 round trip. Only the statement text is kept, so
@@ -61,6 +61,16 @@ export class CountingD1Database extends D1Database {
 
   override run(sql: string, values: SqlValues = []): Promise<{ rowCount: number }> {
     return this.record("run", sql, super.run(sql, values));
+  }
+
+  /** A batched read is one round trip, like the atomic batch it delegates to. */
+  override batchRead(statements: BatchStatement[]): Promise<Record<string, any>[][]> {
+    if (statements.length === 0) return super.batchRead(statements);
+    return this.record(
+      "batch",
+      statements.map((statement) => statement.sql).join(";\n"),
+      super.batchRead(statements),
+    );
   }
 
   override atomicBatch<Row = Record<string, unknown>>(

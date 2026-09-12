@@ -213,7 +213,7 @@ async function handleV1(
 
   if (resource === "accounts") {
     if (segments.length === 4 && method === "GET") {
-      return json({ data: { accounts: await repo.listAccounts(planId), server_knowledge: await repo.getServerKnowledge(planId) } });
+      return json({ data: await repo.listAccountsWithKnowledge(planId) });
     }
     if (segments.length === 4 && method === "POST") {
       const body = await readJson(request);
@@ -281,7 +281,7 @@ async function handleV1(
   }
 
   if (resource === "categories" && segments.length === 4 && method === "GET") {
-    return json({ data: { category_groups: await repo.listCategoryGroups(planId), server_knowledge: await repo.getServerKnowledge(planId) } });
+    return json({ data: await repo.listCategoryGroupsWithKnowledge(planId) });
   }
   if (resource === "categories") {
     const categoryId = segments[4];
@@ -292,7 +292,7 @@ async function handleV1(
 
   if (resource === "payees") {
     if (segments.length === 4 && method === "GET") {
-      return json({ data: { payees: await repo.listPayees(planId), server_knowledge: await repo.getServerKnowledge(planId) } });
+      return json({ data: await repo.listPayeesWithKnowledge(planId) });
     }
     if (segments.length === 4 && method === "POST") {
       const body = await readJson(request);
@@ -307,7 +307,7 @@ async function handleV1(
 
   if (resource === "scheduled_transactions") {
     if (segments.length === 4 && method === "GET") {
-      return json({ data: { scheduled_transactions: await repo.listScheduledTransactions(planId), server_knowledge: await repo.getServerKnowledge(planId) } });
+      return json({ data: await repo.listScheduledTransactionsWithKnowledge(planId) });
     }
     if (segments.length === 4 && method === "POST") {
       const body = await readJson(request);
@@ -767,24 +767,18 @@ function queryFilters(url: URL, overrides: Record<string, string | null> = {}): 
 
 async function transactionListResponse(repo: LedgerStore, planId: string, filters: TransactionFilters): Promise<Response> {
   // The client uses server_knowledge to detect offset shifts while walking
-  // pages. Read it on both sides of the page query so rows are never labelled
-  // with a knowledge value from a concurrent write they do not contain.
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const before = await repo.getServerKnowledge(planId);
-    const page = await repo.listTransactionsPage(planId, filters);
-    const after = await repo.getServerKnowledge(planId);
-    if (before === after) {
-      return json({
-        data: {
-          transactions: page.transactions,
-          server_knowledge: after,
-          has_more: page.has_more,
-          next_offset: page.next_offset,
-        },
-      });
-    }
-  }
-  return apiError(409, "ledger_changed", "Transactions changed while this page was loading. Try again.");
+  // pages. listTransactionsPage reads the knowledge value in the same batch as
+  // the rows, and a batch is one transaction, so the label already describes
+  // exactly these rows. That replaces the old read-either-side-and-retry loop.
+  const page = await repo.listTransactionsPage(planId, filters);
+  return json({
+    data: {
+      transactions: page.transactions,
+      server_knowledge: page.server_knowledge,
+      has_more: page.has_more,
+      next_offset: page.next_offset,
+    },
+  });
 }
 
 function parseRegisterQueryParam(value: string | null): string | null {

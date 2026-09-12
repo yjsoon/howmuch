@@ -1,5 +1,5 @@
 import type { AsyncSqlDatabase, SqlValues } from "./async-sql";
-import type { RepositoryDatabase, RepositoryStatement } from "./repository-db";
+import type { BatchStatement, RepositoryDatabase, RepositoryStatement } from "./repository-db";
 
 export type D1Result<Row = Record<string, unknown>> = {
   results?: Row[];
@@ -51,12 +51,31 @@ export class D1Database implements AsyncSqlDatabase, RepositoryDatabase {
     return { rowCount: Number((await this.statement(prepared.sql, prepared.values).run()).meta?.changes ?? 0) };
   }
 
+  /**
+   * Batched reads: one Worker-to-D1 round trip for the whole list. D1 runs a
+   * batch as a single transaction, so every statement observes one snapshot.
+   */
+  async batchRead(statements: BatchStatement[]): Promise<Record<string, any>[][]> {
+    if (statements.length === 0) return [];
+    // Deliberately not via atomicBatch(): the two are separate entry points so
+    // a wrapper can instrument either without the other counting twice.
+    const results = await this.sendBatch(statements);
+    return results.map((result) => (result.results ?? []) as Record<string, any>[]);
+  }
+
   transaction<Result>(_callback: ((db: AsyncSqlDatabase) => Promise<Result>) | (() => Promise<Result>)): never {
     throw new Error("D1 does not support interactive transactions; use D1Database.atomicBatch() with a complete, preplanned statement list");
   }
 
   atomicBatch<Row = Record<string, unknown>>(statements: Array<{ sql: string; values?: SqlValues }>): Promise<D1Result<Row>[]> {
     if (statements.length === 0) return Promise.resolve([]);
+    return this.sendBatch<Row>(statements);
+  }
+
+  /** One binding.batch call: one round trip, run as a single transaction. */
+  private sendBatch<Row = Record<string, unknown>>(
+    statements: Array<{ sql: string; values?: SqlValues }>,
+  ): Promise<D1Result<Row>[]> {
     return this.binding.batch<Row>(statements.map(({ sql, values = [] }) => {
       const prepared = prepareNumberedSql(sql, values);
       return this.statement(prepared.sql, prepared.values);

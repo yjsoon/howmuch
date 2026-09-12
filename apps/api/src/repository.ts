@@ -124,7 +124,7 @@ export class LedgerRepository {
   }
 
   async getServerKnowledge(planId: string): Promise<number> {
-    const row = await this.db.query("SELECT server_knowledge FROM plans WHERE id = ?").get(planId) as Row | null;
+    const row = await this.db.query(SERVER_KNOWLEDGE_SQL).get(planId) as Row | null;
     if (!row) throw new PlanNotFoundError();
     return Number(row.server_knowledge);
   }
@@ -419,9 +419,16 @@ export class LedgerRepository {
   }
 
   async listAccounts(planId: string): Promise<any[]> {
-    return (await this.db
-      .query(`${ACCOUNT_SELECT_SQL} WHERE plan_id = ? AND deleted = 0 ORDER BY closed, name`)
-      .all(planId)).map(formatAccount);
+    return (await this.db.query(LIST_ACCOUNTS_SQL).all(planId)).map(formatAccount);
+  }
+
+  /** Accounts and the knowledge value that labels them, in one round trip. */
+  async listAccountsWithKnowledge(planId: string): Promise<{ accounts: any[]; server_knowledge: number }> {
+    const [rows, knowledgeRows] = await this.db.batchRead([
+      { sql: LIST_ACCOUNTS_SQL, values: [planId] },
+      { sql: SERVER_KNOWLEDGE_SQL, values: [planId] },
+    ]);
+    return { accounts: (rows ?? []).map(formatAccount), server_knowledge: knowledgeFrom(knowledgeRows) };
   }
 
   async findAccount(planId: string, accountId: string): Promise<any | null> {
@@ -612,9 +619,16 @@ export class LedgerRepository {
   }
 
   async listPayees(planId: string): Promise<any[]> {
-    return (await this.db
-      .query("SELECT id, name, transfer_account_id, deleted FROM payees WHERE plan_id = ? AND deleted = 0 ORDER BY name")
-      .all(planId)).map(formatPayee);
+    return (await this.db.query(LIST_PAYEES_SQL).all(planId)).map(formatPayee);
+  }
+
+  /** Payees and the knowledge value that labels them, in one round trip. */
+  async listPayeesWithKnowledge(planId: string): Promise<{ payees: any[]; server_knowledge: number }> {
+    const [rows, knowledgeRows] = await this.db.batchRead([
+      { sql: LIST_PAYEES_SQL, values: [planId] },
+      { sql: SERVER_KNOWLEDGE_SQL, values: [planId] },
+    ]);
+    return { payees: (rows ?? []).map(formatPayee), server_knowledge: knowledgeFrom(knowledgeRows) };
   }
 
   async ensureCategory(planId: string, categoryId: string, name?: string, groupId?: string | null): Promise<void> {
@@ -695,20 +709,24 @@ export class LedgerRepository {
   }
 
   async listCategoryGroups(planId: string): Promise<any[]> {
-    const groups = await this.db
-      .query("SELECT * FROM category_groups WHERE plan_id = ? AND deleted = 0 ORDER BY name")
-      .all(planId) as Row[];
-    const categories = await this.db
-      .query("SELECT * FROM categories WHERE plan_id = ? AND deleted = 0 ORDER BY name")
-      .all(planId) as Row[];
+    const [groups, categories] = await Promise.all([
+      this.db.query(LIST_CATEGORY_GROUPS_SQL).all(planId) as Promise<Row[]>,
+      this.db.query(LIST_CATEGORIES_SQL).all(planId) as Promise<Row[]>,
+    ]);
+    return assembleCategoryGroups(groups, categories);
+  }
 
-    return groups.map((group) => ({
-      id: group.id,
-      name: group.name,
-      hidden: toBoolean(group.hidden),
-      deleted: toBoolean(group.deleted),
-      categories: categories.filter((category) => category.category_group_id === group.id).map(formatCategory),
-    }));
+  /** Groups, their categories and the knowledge value, in one round trip. */
+  async listCategoryGroupsWithKnowledge(planId: string): Promise<{ category_groups: any[]; server_knowledge: number }> {
+    const [groups, categories, knowledgeRows] = await this.db.batchRead([
+      { sql: LIST_CATEGORY_GROUPS_SQL, values: [planId] },
+      { sql: LIST_CATEGORIES_SQL, values: [planId] },
+      { sql: SERVER_KNOWLEDGE_SQL, values: [planId] },
+    ]);
+    return {
+      category_groups: assembleCategoryGroups(groups ?? [], categories ?? []),
+      server_knowledge: knowledgeFrom(knowledgeRows),
+    };
   }
 
   async createTransaction(planId: string, input: TransactionInput, options: TransactionWriteOptions = {}): Promise<any> {
@@ -1409,13 +1427,31 @@ export class LedgerRepository {
       MAX_TRANSACTION_PAGE_SIZE,
     );
     const offset = Math.max(Math.floor(filters.offset ?? 0), 0);
-    const result = await this.queryTransactions(planId, filters, limit + 1, offset);
-    const transactions = result.transactions;
+    const built = await this.buildTransactionQuery(planId, filters, limit + 1, offset);
+    if (!built.subtransactions) throw new Error("Paged transaction query must carry its subtransaction statement");
+
+    // One round trip for the whole register page. D1 runs a batch as a single
+    // transaction, so the knowledge value, the page and its split lines all
+    // come from one snapshot: the page can never be labelled with a knowledge
+    // value from a write it does not contain.
+    const [knowledgeRows, rows, subtransactionRows] = await this.db.batchRead([
+      { sql: SERVER_KNOWLEDGE_SQL, values: [planId] },
+      { sql: built.sql, values: built.params },
+      { sql: built.subtransactions.sql, values: built.subtransactions.params },
+    ]);
+    if (!knowledgeRows?.[0]) throw new PlanNotFoundError();
+
+    const transactions = assembleTransactions(
+      rows ?? [],
+      subtransactionRows ?? [],
+      (row, subtransactions) => this.formatTransactionRow(row, subtransactions),
+    );
     const has_more = transactions.length > limit;
     return {
       transactions: has_more ? transactions.slice(0, limit) : transactions,
       has_more,
       next_offset: has_more ? offset + limit : null,
+      server_knowledge: Number(knowledgeRows[0].server_knowledge),
     };
   }
 
@@ -1425,6 +1461,24 @@ export class LedgerRepository {
     limit?: number,
     offset?: number,
   ): Promise<{ transactions: any[] }> {
+    const built = await this.buildTransactionQuery(planId, filters, limit, offset);
+    const rows = await this.db.query(built.sql).all(...built.params) as Row[];
+    return { transactions: await this.formatTransactions(rows) };
+  }
+
+  /**
+   * Builds the transaction list statement and, when the query is paged, a
+   * matching statement for the split lines of exactly that page. The second
+   * statement repeats the paged id subquery instead of binding the ids it
+   * returns, so both can travel in one batch without a round trip in between
+   * to learn the ids.
+   */
+  private async buildTransactionQuery(
+    planId: string,
+    filters: TransactionFilters,
+    limit?: number,
+    offset?: number,
+  ): Promise<{ sql: string; params: any[]; subtransactions: { sql: string; params: any[] } | null }> {
     const clauses = ["t.plan_id = ?"];
     const params: any[] = [planId];
 
@@ -1484,11 +1538,6 @@ export class LedgerRepository {
       }
     }
 
-    const pagination = limit == null ? "" : "\n         LIMIT ? OFFSET ?";
-    if (limit != null) {
-      params.push(limit, offset ?? 0);
-    }
-
     const orderBy = "t.date DESC, t.created_at DESC, t.id DESC";
     const listed = `SELECT
            t.*,
@@ -1501,24 +1550,39 @@ export class LedgerRepository {
          LEFT JOIN payees p ON p.id = t.payee_id
          LEFT JOIN categories c ON c.id = t.category_id
          LEFT JOIN subtransactions linked_sub ON linked_sub.id = t.transfer_transaction_id AND linked_sub.deleted = 0`;
-    const rows = await this.db
-      .query(
-        limit == null
-          ? `${listed}
+
+    if (limit == null) {
+      return {
+        sql: `${listed}
          WHERE ${clauses.join(" AND ")}
-         ORDER BY ${orderBy}`
-          : `${listed}
-         JOIN (
-           SELECT t.id
+         ORDER BY ${orderBy}`,
+        params,
+        subtransactions: null,
+      };
+    }
+
+    const pageIds = `SELECT t.id
            ${pageFrom}
            WHERE ${clauses.join(" AND ")}
-           ORDER BY ${orderBy}${pagination}
+           ORDER BY ${orderBy}
+         LIMIT ? OFFSET ?`;
+    const pageParams = [...params, limit, offset ?? 0];
+    return {
+      sql: `${listed}
+         JOIN (
+           ${pageIds}
          ) page ON page.id = t.id
          ORDER BY ${orderBy}`,
-      )
-      .all(...params) as Row[];
-
-    return { transactions: await this.formatTransactions(rows) };
+      params: pageParams,
+      subtransactions: {
+        sql: `${SUBTRANSACTION_SELECT_SQL}
+           WHERE st.deleted = 0 AND st.transaction_id IN (
+             ${pageIds}
+           )
+           ORDER BY st.transaction_id, st.created_at, st.id`,
+        params: [...pageParams],
+      },
+    };
   }
 
   async getTransaction(planId: string, transactionId: string, includeDeleted = false): Promise<any> {
@@ -1872,31 +1936,27 @@ export class LedgerRepository {
 
   /** Effective schedules: immutable YNAB rows plus HowMuch-owned overlays. */
   async listScheduledTransactions(planId: string): Promise<any[]> {
-    const [rawParents, rawSubs, editRows, editSubRows] = await Promise.all([
-      this.db.query("SELECT object_id,payload_json,deleted FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_transaction' ORDER BY object_id").all(planId),
-      this.db.query("SELECT payload_json FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_subtransaction' ORDER BY object_id").all(planId),
-      this.db.query("SELECT id,payload_json,deleted FROM scheduled_transaction_edits WHERE plan_id=? ORDER BY id").all(planId),
-      this.db.query("SELECT scheduled_transaction_id,payload_json FROM scheduled_subtransaction_edits WHERE plan_id=? ORDER BY scheduled_transaction_id,id").all(planId),
-    ]);
-    const sourceSubs = groupScheduledSubtransactions(rawSubs.map((row) => parseRawYnabObject(row.payload_json, "scheduled subtransaction")));
-    const editedSubs = groupScheduledSubtransactions(editSubRows.map((row) => parseRawYnabObject(row.payload_json, "scheduled subtransaction")));
-    const edits = new Map(editRows.map((row) => [String(row.id), row]));
-    const result: any[] = [];
+    const rows = await Promise.all(SCHEDULED_SQL.map((sql) => this.db.query(sql).all(planId) as Promise<Row[]>));
+    return assembleScheduledTransactions(rows[0]!, rows[1]!, rows[2]!, rows[3]!);
+  }
 
-    for (const row of rawParents) {
-      const id = String(row.object_id);
-      const edit = edits.get(id);
-      edits.delete(id);
-      if (edit) {
-        if (!Boolean(edit.deleted)) result.push(projectScheduledPayload(edit.payload_json, editedSubs.get(id) ?? [], edit.deleted));
-      } else if (!Boolean(row.deleted)) {
-        result.push(projectScheduledPayload(row.payload_json, sourceSubs.get(id) ?? [], row.deleted));
-      }
-    }
-    for (const [id, edit] of edits) {
-      if (!Boolean(edit.deleted)) result.push(projectScheduledPayload(edit.payload_json, editedSubs.get(id) ?? [], edit.deleted));
-    }
-    return result.sort((left, right) => String(left.date_next ?? left.date_first ?? "9999-12-31").localeCompare(String(right.date_next ?? right.date_first ?? "9999-12-31")) || String(left.id).localeCompare(String(right.id)));
+  /**
+   * Schedules and the knowledge value in one round trip, for the HTTP route.
+   * The method above keeps its four separate statements because write paths
+   * call it from inside an open transaction, where a batch cannot nest.
+   */
+  async listScheduledTransactionsWithKnowledge(
+    planId: string,
+  ): Promise<{ scheduled_transactions: any[]; server_knowledge: number }> {
+    const values = [planId];
+    const [rawParents, rawSubs, editRows, editSubRows, knowledgeRows] = await this.db.batchRead([
+      ...SCHEDULED_SQL.map((sql) => ({ sql, values })),
+      { sql: SERVER_KNOWLEDGE_SQL, values },
+    ]);
+    return {
+      scheduled_transactions: assembleScheduledTransactions(rawParents ?? [], rawSubs ?? [], editRows ?? [], editSubRows ?? []),
+      server_knowledge: knowledgeFrom(knowledgeRows),
+    };
   }
 
   async listScheduledSubtransactions(planId: string): Promise<any[]> {
@@ -2901,33 +2961,22 @@ export class LedgerRepository {
   /** Loads split lines in bounded batches so a full ledger list is not N+1 queries. */
   private async formatTransactions(rows: Row[]): Promise<any[]> {
     if (rows.length === 0) return [];
-    const byTransaction = new Map<string, Row[]>();
     // D1 supports at most 100 bound parameters per statement. Leave room for
     // future predicates rather than relying on the exact limit.
     const batchSize = 90;
+    const subtransactionRows: Row[] = [];
     for (let offset = 0; offset < rows.length; offset += batchSize) {
       const ids = rows.slice(offset, offset + batchSize).map((row) => row.id);
       const placeholders = ids.map(() => "?").join(", ");
-      const subtransactions = await this.db
+      subtransactionRows.push(...await this.db
         .query(
-          `SELECT
-             st.*,
-             p.name AS payee_name,
-             c.name AS category_name
-           FROM subtransactions st
-           LEFT JOIN payees p ON p.id = st.payee_id
-           LEFT JOIN categories c ON c.id = st.category_id
+          `${SUBTRANSACTION_SELECT_SQL}
            WHERE st.transaction_id IN (${placeholders}) AND st.deleted = 0
            ORDER BY st.transaction_id, st.created_at, st.id`,
         )
-        .all(...ids) as Row[];
-      for (const subtransaction of subtransactions) {
-        const existing = byTransaction.get(subtransaction.transaction_id) ?? [];
-        existing.push(subtransaction);
-        byTransaction.set(subtransaction.transaction_id, existing);
-      }
+        .all(...ids) as Row[]);
     }
-    return rows.map((row) => this.formatTransactionRow(row, byTransaction.get(row.id) ?? []));
+    return assembleTransactions(rows, subtransactionRows, (row, subtransactions) => this.formatTransactionRow(row, subtransactions));
   }
 
   private formatTransactionRow(row: Row, subtransactions: Row[]): any {
@@ -3173,6 +3222,97 @@ function formatPlan(row: Row): any {
   };
 }
 
+const SERVER_KNOWLEDGE_SQL = "SELECT server_knowledge FROM plans WHERE id = ?";
+const LIST_PAYEES_SQL = "SELECT id, name, transfer_account_id, deleted FROM payees WHERE plan_id = ? AND deleted = 0 ORDER BY name";
+const LIST_CATEGORY_GROUPS_SQL = "SELECT * FROM category_groups WHERE plan_id = ? AND deleted = 0 ORDER BY name";
+const LIST_CATEGORIES_SQL = "SELECT * FROM categories WHERE plan_id = ? AND deleted = 0 ORDER BY name";
+
+/** The four row sets an effective schedule list is projected from, in order. */
+const SCHEDULED_SQL = [
+  "SELECT object_id,payload_json,deleted FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_transaction' ORDER BY object_id",
+  "SELECT payload_json FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_subtransaction' ORDER BY object_id",
+  "SELECT id,payload_json,deleted FROM scheduled_transaction_edits WHERE plan_id=? ORDER BY id",
+  "SELECT scheduled_transaction_id,payload_json FROM scheduled_subtransaction_edits WHERE plan_id=? ORDER BY scheduled_transaction_id,id",
+];
+
+/** Reads the knowledge value out of a batched SELECT; a missing plan is a 404. */
+function knowledgeFrom(rows: Row[] | undefined): number {
+  const row = rows?.[0];
+  if (!row) throw new PlanNotFoundError();
+  return Number(row.server_knowledge);
+}
+
+/** Nests categories under their groups by a single pass over each list. */
+function assembleCategoryGroups(groups: Row[], categories: Row[]): any[] {
+  const byGroup = new Map<string, Row[]>();
+  for (const category of categories) {
+    const key = String(category.category_group_id);
+    const existing = byGroup.get(key);
+    if (existing) existing.push(category);
+    else byGroup.set(key, [category]);
+  }
+  return groups.map((group) => ({
+    id: group.id,
+    name: group.name,
+    hidden: toBoolean(group.hidden),
+    deleted: toBoolean(group.deleted),
+    categories: (byGroup.get(String(group.id)) ?? []).map(formatCategory),
+  }));
+}
+
+/** Pure projection of the four schedule row sets into effective schedules. */
+function assembleScheduledTransactions(rawParents: Row[], rawSubs: Row[], editRows: Row[], editSubRows: Row[]): any[] {
+    const sourceSubs = groupScheduledSubtransactions(rawSubs.map((row) => parseRawYnabObject(row.payload_json, "scheduled subtransaction")));
+    const editedSubs = groupScheduledSubtransactions(editSubRows.map((row) => parseRawYnabObject(row.payload_json, "scheduled subtransaction")));
+    const edits = new Map(editRows.map((row) => [String(row.id), row]));
+    const result: any[] = [];
+
+    for (const row of rawParents) {
+      const id = String(row.object_id);
+      const edit = edits.get(id);
+      edits.delete(id);
+      if (edit) {
+        if (!Boolean(edit.deleted)) result.push(projectScheduledPayload(edit.payload_json, editedSubs.get(id) ?? [], edit.deleted));
+      } else if (!Boolean(row.deleted)) {
+        result.push(projectScheduledPayload(row.payload_json, sourceSubs.get(id) ?? [], row.deleted));
+      }
+    }
+    for (const [id, edit] of edits) {
+      if (!Boolean(edit.deleted)) result.push(projectScheduledPayload(edit.payload_json, editedSubs.get(id) ?? [], edit.deleted));
+    }
+    return result.sort((left, right) => String(left.date_next ?? left.date_first ?? "9999-12-31").localeCompare(String(right.date_next ?? right.date_first ?? "9999-12-31")) || String(left.id).localeCompare(String(right.id)));
+}
+
+
+/** Split lines with their payee and category names; callers add the WHERE. */
+const SUBTRANSACTION_SELECT_SQL = `SELECT
+             st.*,
+             p.name AS payee_name,
+             c.name AS category_name
+           FROM subtransactions st
+           LEFT JOIN payees p ON p.id = st.payee_id
+           LEFT JOIN categories c ON c.id = st.category_id`;
+
+/**
+ * Joins transaction rows to their split lines. Pure: both row sets are already
+ * in hand, so the same assembly serves the batched page and the chunked
+ * fetch the unpaged list still uses.
+ */
+function assembleTransactions(
+  rows: Row[],
+  subtransactionRows: Row[],
+  format: (row: Row, subtransactions: Row[]) => any,
+): any[] {
+  const byTransaction = new Map<string, Row[]>();
+  for (const subtransaction of subtransactionRows) {
+    const key = String(subtransaction.transaction_id);
+    const existing = byTransaction.get(key);
+    if (existing) existing.push(subtransaction);
+    else byTransaction.set(key, [subtransaction]);
+  }
+  return rows.map((row) => format(row, byTransaction.get(String(row.id)) ?? []));
+}
+
 const ACCOUNT_SELECT_SQL = `SELECT accounts.*, (
   SELECT COALESCE(
     (SELECT MAX(statement_date) FROM account_reconciliation_assertions
@@ -3183,6 +3323,8 @@ const ACCOUNT_SELECT_SQL = `SELECT accounts.*, (
   )
 ) AS last_reconciled_date
 FROM accounts`;
+
+const LIST_ACCOUNTS_SQL = `${ACCOUNT_SELECT_SQL} WHERE plan_id = ? AND deleted = 0 ORDER BY closed, name`;
 
 function formatAccount(row: Row): any {
   const presentation = resolveAccountPresentation({
