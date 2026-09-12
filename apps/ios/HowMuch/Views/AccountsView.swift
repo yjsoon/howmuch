@@ -305,7 +305,7 @@ struct AccountsView: View {
       }
     }
     .refreshable {
-      await model.refreshAll()
+      await model.refresh(slices: TabRefresh.accounts, quiet: false)
     }
     .task(id: accountUsageTaskID) {
       guard usesMostUsedSort, model.accountUsagePhase != .loaded else {
@@ -691,9 +691,8 @@ struct AccountsView: View {
           Spacer()
           Button {
             Task {
-              if await model.drainOutbox(trigger: .manual) > 0 {
-                await model.refreshLedgerAndInvalidatePlan()
-              }
+              // A successful drain schedules its own narrow refresh.
+              await model.drainOutbox(trigger: .manual)
             }
           } label: {
             if model.isSyncingOutbox {

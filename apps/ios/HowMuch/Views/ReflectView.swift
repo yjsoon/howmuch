@@ -2,14 +2,13 @@ import SwiftUI
 
 struct ReflectView: View {
   @Environment(AppModel.self) private var model
-  @State private var appliedReportsGeneration = 0
 
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
         if model.spendingBreakdown == nil, model.reportsPhase != .loaded {
           PhasePlaceholder(phase: model.reportsPhase) {
-            await model.refreshReflectOverview()
+            await model.refreshReportsIfNeeded(force: true)
           }
         } else {
           LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)], spacing: 12) {
@@ -50,17 +49,14 @@ struct ReflectView: View {
         DestinationsMenu()
       }
     }
+    // Reports are not fetched on launch (#180). This runs when Reflect
+    // appears and whenever a local write marks them stale; the model skips the
+    // fetch when neither the plan cursor nor this device's writes have moved.
     .task(id: model.reportsRefreshGeneration) {
-      let generation = model.reportsRefreshGeneration
-      guard generation > appliedReportsGeneration else {
-        return
-      }
-      if await model.refreshReflectOverview(quiet: true) {
-        appliedReportsGeneration = generation
-      }
+      await model.refreshReportsIfNeeded()
     }
     .refreshable {
-      await model.refreshAll()
+      await model.refresh(slices: TabRefresh.reflect, quiet: false, force: true)
     }
   }
 
