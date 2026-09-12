@@ -43,8 +43,9 @@ enum TabRefresh {
 enum MutationKind: Equatable, Sendable {
   case clearedToggled
   /// `changesAccount`: the row moved to a different account. `touchesTransfer`:
-  /// the row is, was, or became one half of a transfer pair.
-  case transactionEdited(changesAccount: Bool, touchesTransfer: Bool)
+  /// the row is, was, or became one half of a transfer pair. `hasNewPayee`:
+  /// the save named a payee the server had to provision.
+  case transactionEdited(changesAccount: Bool, touchesTransfer: Bool, hasNewPayee: Bool)
   case transactionsCreated(hasTransfer: Bool, hasNewPayee: Bool)
   case transactionDeleted
   case transactionsApproved
@@ -71,8 +72,15 @@ enum RefreshPlanner {
     // The PATCH returns the edited row. Balances move, so accounts must be
     // refetched; a transfer's mirror row and a row that changed account both
     // leave ledger state the response cannot describe.
-    case .transactionEdited(let changesAccount, let touchesTransfer):
-      return changesAccount || touchesTransfer ? [.accounts, .ledger] : [.accounts]
+    case .transactionEdited(let changesAccount, let touchesTransfer, let hasNewPayee):
+      var slices: Set<RefreshSlice> = [.accounts]
+      if changesAccount || touchesTransfer {
+        slices.insert(.ledger)
+      }
+      if hasNewPayee {
+        slices.insert(.payees)
+      }
+      return slices
 
     // Created rows are inserted from their POST responses. A transfer's
     // mirror row is not returned, and a payee created by name is not in the

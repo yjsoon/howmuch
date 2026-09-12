@@ -21,7 +21,7 @@ final class RefreshPlanTests: XCTestCase {
 
   func testOrdinaryEditRefreshesBalancesOnly() {
     let slices = RefreshPlanner.slices(
-      after: .transactionEdited(changesAccount: false, touchesTransfer: false)
+      after: .transactionEdited(changesAccount: false, touchesTransfer: false, hasNewPayee: false)
     )
     XCTAssertEqual(slices, [.accounts])
     XCTAssertFalse(slices.contains(.referenceData))
@@ -30,13 +30,27 @@ final class RefreshPlanTests: XCTestCase {
 
   func testEditThatMovesAccountOrTouchesATransferAlsoRefreshesTheLedger() {
     XCTAssertEqual(
-      RefreshPlanner.slices(after: .transactionEdited(changesAccount: true, touchesTransfer: false)),
+      RefreshPlanner.slices(
+        after: .transactionEdited(changesAccount: true, touchesTransfer: false, hasNewPayee: false)
+      ),
       [.accounts, .ledger]
     )
     XCTAssertEqual(
-      RefreshPlanner.slices(after: .transactionEdited(changesAccount: false, touchesTransfer: true)),
+      RefreshPlanner.slices(
+        after: .transactionEdited(changesAccount: false, touchesTransfer: true, hasNewPayee: false)
+      ),
       [.accounts, .ledger],
       "a transfer's mirror row lives on another account and is not returned by the write"
+    )
+  }
+
+  func testEditThatNamesANewPayeeAlsoRefreshesThePayeeList() {
+    XCTAssertEqual(
+      RefreshPlanner.slices(
+        after: .transactionEdited(changesAccount: false, touchesTransfer: false, hasNewPayee: true)
+      ),
+      [.accounts, .payees],
+      "a payee the server provisioned during the save is absent from the local pickers until it is read"
     )
   }
 
@@ -108,7 +122,7 @@ final class RefreshPlanTests: XCTestCase {
   func testNoMutationEverRefetchesReferenceDataOrReports() {
     let mutations: [MutationKind] = [
       .clearedToggled,
-      .transactionEdited(changesAccount: true, touchesTransfer: true),
+      .transactionEdited(changesAccount: true, touchesTransfer: true, hasNewPayee: true),
       .transactionsCreated(hasTransfer: true, hasNewPayee: true),
       .transactionDeleted,
       .transactionsApproved,
@@ -247,6 +261,21 @@ final class RefreshPlanTests: XCTestCase {
         currentMutationGeneration: 0
       ),
       "a fetch already in flight must not be started twice"
+    )
+  }
+
+  /// Leaving Reflect cancels its fetch, which returns the phase to `.idle`
+  /// rather than to `.failed` or a stuck `.loading`. Coming back must fetch.
+  func testACancelledFetchIsRetriedOnTheNextAppearance() {
+    XCTAssertTrue(
+      ReportsRefreshPolicy.shouldFetch(
+        phase: .idle,
+        force: false,
+        lastKnowledge: 7,
+        currentKnowledge: 7,
+        lastMutationGeneration: 3,
+        currentMutationGeneration: 3
+      )
     )
   }
 

@@ -1218,6 +1218,10 @@ final class AppModel {
   }
 
   private func perform(_ request: RefreshRequest) async {
+    // A pull-to-refresh must still replay offline captures, as the launch
+    // refresh does. Quiet passes are the ones that follow a write, which
+    // already had its chance to send. An empty outbox issues no request.
+    async let outbox: Int = request.quiet ? 0 : drainOutbox(trigger: .refresh)
     async let accountsSlice: Void = run(.accounts, in: request)
     async let payeesSlice: Void = run(.payees, in: request)
     async let referenceSlice: Void = run(.referenceData, in: request)
@@ -1225,7 +1229,7 @@ final class AppModel {
     async let schedulesSlice: Void = run(.schedules, in: request)
     async let reportsSlice: Void = run(.reports, in: request)
     _ = await (
-      accountsSlice, payeesSlice, referenceSlice, ledgerSlice, schedulesSlice, reportsSlice
+      outbox, accountsSlice, payeesSlice, referenceSlice, ledgerSlice, schedulesSlice, reportsSlice
     )
   }
 
@@ -1917,6 +1921,16 @@ final class AppModel {
       else {
         return false
       }
+      // The first fetch now runs from ReflectView's own task, so leaving the
+      // tab cancels it. That is not a failure the reader should be shown, and
+      // leaving the phase at `.loading` would lock the gate against ever
+      // retrying: return it to `.idle` so the next appearance fetches again.
+      if Task.isCancelled {
+        if reportsPhase == .loading {
+          reportsPhase = .idle
+        }
+        return false
+      }
       reportsPhase = .failed(error.localizedDescription)
       return false
     }
@@ -2057,11 +2071,12 @@ final class AppModel {
       showSaveMessage(savedMessage(for: [draft]))
       let movedAccount = existingRow.map { $0.accountID != saved.accountID } ?? true
       let touchesTransfer = isTransfer(saved) || (existingRow.map(isTransfer) ?? false)
-      Task {
-        await refresh(
-          after: .transactionEdited(changesAccount: movedAccount, touchesTransfer: touchesTransfer)
-        )
-      }
+      let mutation = MutationKind.transactionEdited(
+        changesAccount: movedAccount,
+        touchesTransfer: touchesTransfer,
+        hasNewPayee: isUnknownPayee(saved)
+      )
+      Task { await refresh(after: mutation) }
     } catch {
       guard isCurrentEdit(transactionID, generation: generation, destination: destination) else {
         return
