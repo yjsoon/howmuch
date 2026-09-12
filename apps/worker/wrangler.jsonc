@@ -67,18 +67,6 @@
       ],
       // Daily HowMuch scheduled-transaction materialisation, 00:05 Asia/Singapore.
       "triggers": { "crons": ["5 16 * * *"] },
-      // Reversible experiment (#172): the Worker runs at SIN while the D1
-      // primary is at KIX, so every request pays cross-region hops on each
-      // sequential D1 call. Smart Placement lets Cloudflare run the fetch
-      // handler next to the database instead. Caveats: placement analysis
-      // takes up to 15 minutes after deploy and needs consistent traffic from
-      // multiple locations to decide; only fetch handlers are affected, so
-      // the materialisation cron is unaffected. Cloudflare's usual "static
-      // assets are unaffected" claim does NOT apply here: run_worker_first
-      // (below) sends every request through the Worker first, so Wrangler
-      // warns the whole Worker — asset path included — may be relocated.
-      // Re-measurement method and revert criteria: docs/deployment.md.
-      "placement": { "mode": "smart" },
       // Do NOT add HOWMUCH_REDIRECT_TARGET here. Wrangler warns that top-level
       // vars are not inherited by environments; that warning is expected. The
       // redirect belongs to the legacy YJ env only — setting it here would make
