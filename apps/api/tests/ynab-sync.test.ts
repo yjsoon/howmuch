@@ -535,6 +535,43 @@ describe("YNAB similarity guard", () => {
   });
 });
 
+describe("imported metadata moves server_knowledge", () => {
+  // Clients cache accounts and payees and revalidate them against
+  // `server_knowledge` (#175). An import that changes only those — no
+  // transaction anywhere in the delta — must therefore move it, or those
+  // clients would go on serving a renamed or deleted row indefinitely.
+  test("a delta carrying only account and payee changes advances knowledge", async () => {
+    stubYnabApi([], {
+      accounts: [{ id: "acct-1", name: "Checking", type: "checking", on_budget: true }],
+      payees: [{ id: "payee-1", name: "Original Name", deleted: false }],
+    });
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test" });
+    const before = await repo.getServerKnowledge("plan-test");
+
+    stubYnabApi([], {
+      accounts: [{ id: "acct-1", name: "Renamed Checking", type: "checking", on_budget: true }],
+      payees: [{ id: "payee-1", name: "Renamed Payee", deleted: false }],
+    });
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test" });
+
+    expect(await repo.getServerKnowledge("plan-test")).toBeGreaterThan(before);
+    expect(db.query("SELECT name FROM accounts WHERE id='acct-1'").get()).toEqual({ name: "Renamed Checking" });
+    expect(db.query("SELECT name FROM payees WHERE id='payee-1'").get()).toEqual({ name: "Renamed Payee" });
+  });
+
+  test("a payee deleted by import advances knowledge", async () => {
+    stubYnabApi([], { payees: [{ id: "payee-1", name: "Original Name", deleted: false }] });
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test" });
+    const before = await repo.getServerKnowledge("plan-test");
+
+    stubYnabApi([], { payees: [{ id: "payee-1", name: "Original Name", deleted: true }] });
+    await importYnabFromApi(repo, { token: "ynab-token", planId: "plan-test" });
+
+    expect(await repo.getServerKnowledge("plan-test")).toBeGreaterThan(before);
+    expect(db.query("SELECT deleted FROM payees WHERE id='payee-1'").get()).toEqual({ deleted: 1 });
+  });
+});
+
 describe("YNAB hourly sync", () => {
   test("does not start when no token is configured", async () => {
     let fetchCalls = 0;

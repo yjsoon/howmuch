@@ -906,6 +906,10 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
         setup_required: await store.setupRequired(),
         bootstrap_required: !!config.apiToken,
         user,
+        // Unix seconds. The web client stores this and refuses to paint cached
+        // ledger data once it has passed, so an expired cookie cannot show the
+        // previous user's plan to whoever opens the browser next (#175, #177).
+        session_expires_at: principal?.kind === "session" ? principal.sessionExpiresAt ?? null : null,
       },
     });
   }
@@ -997,7 +1001,7 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
     if (!created) {
       return authError(409, "setup_complete", "Setup has already completed");
     }
-    return sessionResponse({ data: { user: { id: userId, username } } }, session.token, session.expiresAt);
+    return sessionResponse({ data: { user: { id: userId, username }, session_expires_at: session.expiresAt } }, session.token, session.expiresAt);
   }
 
   if ((path === "/api/auth/login" || path === "/api/auth/token") && method === "POST") {
@@ -1027,7 +1031,7 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
     await store.createSession(credential.user_id, session);
     const user = { id: credential.user_id, username: credential.username };
     return browserLogin
-      ? sessionResponse({ data: { user } }, session.token, session.expiresAt)
+      ? sessionResponse({ data: { user, session_expires_at: session.expiresAt } }, session.token, session.expiresAt)
       : authJson({ data: { token: session.token, expires_at: session.expiresAt, user } });
   }
 

@@ -50,11 +50,31 @@ export class BulkApprovalError extends Error {
 }
 
 let onUnauthorized: (() => void) | null = null;
+let onLocalWrite: (() => void) | null = null;
 let requestEpoch = 0;
 
 /** Register a handler for expired sessions on authenticated endpoints. */
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
   onUnauthorized = handler;
+}
+
+/**
+ * Register a handler called after any write from this client, however it ends.
+ *
+ * It lives here rather than at the twenty-odd call sites so no write, present
+ * or future, can slip past the client cache's invalidation. A write returns
+ * the new `server_knowledge` but not everything that number now covers — a
+ * transaction changes account balances the response does not carry — so the
+ * cache is dropped rather than retagged.
+ */
+export function setLocalWriteHandler(handler: (() => void) | null): void {
+  onLocalWrite = handler;
+}
+
+/** Whether a completed request should be treated as a write by the cache. */
+export function isWriteRequest(method: string | undefined): boolean {
+  const verb = (method ?? "GET").toUpperCase();
+  return verb !== "GET" && verb !== "HEAD";
 }
 
 /** Invalidate in-flight 401s from a previous session after login or reload. */
@@ -93,32 +113,53 @@ export interface ApiRequestOptions {
 
 async function request<T>(path: string, init?: RequestInit, options?: ApiRequestOptions): Promise<T> {
   const startedEpoch = requestEpoch;
-  const response = await fetch(path, {
-    ...init,
-    credentials: "same-origin",
-    headers: requestHeaders(init),
-  });
-  let body: unknown;
+  // A write that does not return 2xx may still have been applied: the server
+  // can commit and then fail to answer, a proxy can drop the response, the
+  // network can go away mid-flight. The cache cannot tell those apart from a
+  // write that never landed, and only one of the two answers is safe, so every
+  // completed write invalidates regardless of how it ended.
+  const write = isWriteRequest(init?.method);
   try {
-    body = await response.json();
-  } catch {
-    body = undefined;
-  }
-  if (!response.ok) {
-    if (response.status === 401
-      && options?.handleUnauthorized !== false
-      && shouldHandleUnauthorized(path, startedEpoch)) {
-      bumpRequestEpoch();
-      onUnauthorized?.();
+    const response = await fetch(path, {
+      ...init,
+      credentials: "same-origin",
+      headers: requestHeaders(init),
+    });
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      body = undefined;
     }
-    const detail = (body && typeof body === "object" && "error" in body ? (body as { error?: Record<string, unknown> }).error : undefined) as (ReconciliationMismatchDetail & { detail?: string }) | undefined;
-    const message = detail?.detail ?? `${response.status} ${response.statusText}`;
-    throw new ApiError(message, response.status, typeof detail?.name === "string" ? detail.name : undefined, detail);
+    if (!response.ok) {
+      if (response.status === 401
+        && options?.handleUnauthorized !== false
+        && shouldHandleUnauthorized(path, startedEpoch)) {
+        bumpRequestEpoch();
+        onUnauthorized?.();
+      }
+      const detail = (body && typeof body === "object" && "error" in body ? (body as { error?: Record<string, unknown> }).error : undefined) as (ReconciliationMismatchDetail & { detail?: string }) | undefined;
+      const message = detail?.detail ?? `${response.status} ${response.statusText}`;
+      throw new ApiError(message, response.status, typeof detail?.name === "string" ? detail.name : undefined, detail);
+    }
+    if (!body || typeof body !== "object" || !("data" in body)) {
+      throw new ApiError("Unexpected response from HowMuch", response.status);
+    }
+    return (body as { data: T }).data;
+  } finally {
+    if (write) {
+      onLocalWrite?.();
+    }
   }
-  if (!body || typeof body !== "object" || !("data" in body)) {
-    throw new ApiError("Unexpected response from HowMuch", response.status);
-  }
-  return (body as { data: T }).data;
+}
+
+/**
+ * Announce a write made outside `request` — see `lib/reward-tools.ts`, which
+ * calls `fetch` directly so it can carry its own abort and timeout handling.
+ * Anything bypassing `request` must invalidate the cache through here.
+ */
+export function notifyLocalWrite(): void {
+  onLocalWrite?.();
 }
 
 function query(params: Record<string, string | number | undefined>): string {
@@ -152,6 +193,14 @@ export interface AuthStatus {
   setup_required: boolean;
   bootstrap_required: boolean;
   user: AuthUser | null;
+  /** Unix seconds; null when nothing here holds a browser session. */
+  session_expires_at?: number | null;
+}
+
+/** What the setup and login endpoints return for a cookie session. */
+export interface AuthSession {
+  user: AuthUser;
+  session_expires_at?: number | null;
 }
 
 export interface PersonalApiToken {
@@ -191,16 +240,16 @@ async function approveTransactionBatch(planId: string, transactionIds: readonly 
 export const api = {
   authStatus: (options?: ApiRequestOptions) => request<AuthStatus>("/api/auth/status", undefined, options),
   setup: (username: string, password: string, bootstrapToken: string) =>
-    request<{ user: AuthUser }>("/api/auth/setup", {
+    request<AuthSession>("/api/auth/setup", {
       method: "POST",
       headers: bootstrapToken ? { authorization: `Bearer ${bootstrapToken}` } : undefined,
       body: JSON.stringify({ username, password }),
-    }).then((data) => data.user),
+    }),
   login: (username: string, password: string) =>
-    request<{ user: AuthUser }>("/api/auth/login", {
+    request<AuthSession>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
-    }).then((data) => data.user),
+    }),
   logout: () => request<{ ok: true }>("/api/auth/logout", { method: "POST", body: "{}" }),
   personalApiTokens: () =>
     request<{ tokens: PersonalApiToken[] }>("/api/auth/personal-tokens").then((data) => data.tokens),

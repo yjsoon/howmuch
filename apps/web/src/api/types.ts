@@ -3,6 +3,13 @@ export type Interval = "day" | "week" | "month" | "year";
 export interface Plan {
   id: string;
   name: string;
+  /**
+   * The plan's current `server_knowledge`. The plans list is the cheapest
+   * response that carries it, and the bootstrap already fetches it, so this is
+   * what validates the client cache. Optional because a server older than this
+   * field would omit it; the cache then simply refetches.
+   */
+  server_knowledge?: number;
 }
 
 export interface CurrencyFormat {

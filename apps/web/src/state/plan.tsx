@@ -1,5 +1,12 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { ApiError, api, bumpRequestEpoch, setUnauthorizedHandler, type ApiRequestOptions } from "../api/client";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  ApiError,
+  api,
+  bumpRequestEpoch,
+  setLocalWriteHandler,
+  setUnauthorizedHandler,
+  type ApiRequestOptions,
+} from "../api/client";
 import type {
   Account,
   AccountPreferences,
@@ -20,13 +27,48 @@ import {
   decideBootstrap,
   decideSession,
   planBootstrapRequests,
+  planKnowledge,
   resolveReferenceBatch,
   type Settled,
 } from "./bootstrap";
-import { loadPrefs, savePrefs } from "./prefs";
+import { isCachedReference, type CachedReference } from "./cache-shapes";
+import { loadPrefs, savePrefs, sessionLooksLive } from "./prefs";
+import {
+  clearReferenceCache,
+  currentCacheEpoch,
+  decideReferenceRefresh,
+  readSlot,
+  writeSlot,
+  type CacheEnvelope,
+} from "./reference-cache";
 
 export interface PlanContextValue {
   planId: string;
+  /** The signed-in user, so routes can key their own cache slots. */
+  userId: string;
+  /**
+   * True while this value was painted from the client cache and the reads that
+   * confirm it have not all landed. Nothing shown under it may be treated as
+   * current; it clears only once settings, categories and accounts are either
+   * refetched or validated against the plan's `server_knowledge`.
+   */
+  provisional: boolean;
+  /**
+   * Whether `ledgerKnowledge` may be used to validate a cached slot.
+   *
+   * It is false during a provisional paint, where the number itself came from
+   * the cache, and false again after any local write, where the server has
+   * moved past the number this value still holds. Routes that see it false
+   * fetch and decline to store the result, rather than tagging fresh rows with
+   * knowledge that has already been superseded.
+   */
+  knowledgeTrusted: boolean;
+  /**
+   * Increments whenever the client cache is invalidated. Routes key their
+   * cached reads on it so a local write makes them re-read an empty cache
+   * instead of resolving against a slot that no longer exists.
+   */
+  cacheEpoch: number;
   accounts: Account[];
   ledgerKnowledge: number;
   accountPreferences: AccountPreferences | null;
@@ -61,7 +103,8 @@ function settle<T>(promise: Promise<T>): Promise<Settled<T>> {
 
 interface ReferenceBatch {
   settings: PlanSettings;
-  accounts: { accounts: Account[]; server_knowledge: number };
+  /** undefined when a cached copy is waiting on the knowledge check. */
+  accounts: { accounts: Account[]; server_knowledge: number } | undefined;
   /** null means the server has no account preferences; undefined, not asked. */
   accountPreferences: AccountPreferencesSnapshot | null | undefined;
   categoryGroups: CategoryGroup[];
@@ -71,15 +114,58 @@ interface ReferenceBatch {
 async function fetchReferenceBatch(
   planId: string,
   withPreferences: boolean,
+  withAccounts: boolean,
   options?: ApiRequestOptions,
 ): Promise<ReferenceBatch> {
   const [settings, accounts, accountPreferences, categoryGroups] = await Promise.all([
     api.settings(planId, options),
-    api.accounts(planId, options),
+    withAccounts ? api.accounts(planId, options) : Promise.resolve(undefined),
     withPreferences ? api.accountPreferences(planId, options) : Promise.resolve(undefined),
     api.categories(planId, options),
   ]);
   return { settings, accounts, accountPreferences, categoryGroups };
+}
+
+/**
+ * The first paint, straight from cache. It renders the shell before any
+ * response arrives and is replaced the moment the real reads land.
+ *
+ * Account preferences sit in the `saving` phase throughout: the grouping is
+ * shown, but the organisation dialog refuses edits until the real snapshot has
+ * attached a controller with a revision worth sending back.
+ */
+function provisionalPlanValue(
+  planId: string,
+  envelope: CacheEnvelope<CachedReference>,
+  actions: { reload: () => void; logout: () => Promise<void> },
+): PlanContextValue {
+  const { accounts, categoryGroups, accountPreferences } = envelope.data;
+  const categories = categoryGroups.flatMap((group) => group.categories ?? []);
+  const preferences = accountPreferences?.account_preferences ?? null;
+  return {
+    planId,
+    userId: envelope.userId,
+    provisional: true,
+    knowledgeTrusted: false,
+    cacheEpoch: currentCacheEpoch(),
+    accounts: accounts.filter((account) => !account.deleted),
+    ledgerKnowledge: envelope.serverKnowledge,
+    accountPreferences: preferences,
+    accountPreferencesSync: {
+      preferences: preferences ?? emptyAccountPreferences(),
+      revision: accountPreferences?.account_preferences_revision ?? 0,
+      phase: "saving",
+      message: null,
+    },
+    updateAccountPreferences: () => {},
+    updateAccountIcon: async () => {},
+    retryAccountPreferences: () => {},
+    categoryGroups,
+    categories,
+    categoryNames: new Map(categories.map((category) => [category.id, category.name])),
+    reload: actions.reload,
+    logout: actions.logout,
+  };
 }
 
 export function PlanProvider({ children }: { children: ReactNode }) {
@@ -98,16 +184,49 @@ export function PlanProvider({ children }: { children: ReactNode }) {
     bumpRequestEpoch();
   }, [generation]);
 
+  const reload = useCallback(() => setGeneration((number) => number + 1), []);
+
+  const signOut = useCallback(async () => {
+    await api.logout();
+    accountPreferencesControllerRef.current?.controller.detach();
+    accountPreferencesControllerRef.current = null;
+    // The next person to sign in here should inherit neither this hint nor
+    // any of this user's cached ledger data.
+    savePrefs({ planId: undefined, sessionExpiresAt: undefined });
+    clearReferenceCache();
+    setValue(null);
+    setError(null);
+    setAuthMode("login");
+  }, []);
+
   useEffect(() => {
     setUnauthorizedHandler(() => {
       accountPreferencesControllerRef.current?.controller.detach();
       accountPreferencesControllerRef.current = null;
-      savePrefs({ planId: undefined });
+      savePrefs({ planId: undefined, sessionExpiresAt: undefined });
+      clearReferenceCache();
       setValue(null);
       setError("Your session ended. Sign in again.");
       setAuthMode("login");
     });
-    return () => setUnauthorizedHandler(null);
+    // Every write already funnels through one place in the API client, so no
+    // call site can leave a cached entry behind. A write returns the new
+    // knowledge but not everything that number covers — a transaction moves
+    // account balances the response does not carry — so the entry is dropped
+    // rather than retagged with a number that would make it look current.
+    setLocalWriteHandler(() => {
+      clearReferenceCache();
+      // The value on screen keeps its rows, but its knowledge is now one
+      // behind the server, so nothing may be validated or stored against it
+      // until the next bootstrap supplies a number the server has confirmed.
+      setValue((current) => current
+        ? { ...current, knowledgeTrusted: false, cacheEpoch: currentCacheEpoch() }
+        : current);
+    });
+    return () => {
+      setUnauthorizedHandler(null);
+      setLocalWriteHandler(null);
+    };
   }, []);
 
   useEffect(() => {
@@ -118,28 +237,68 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         // its reference data all start now, instead of one after another. The
         // pure helpers in ./bootstrap decide afterwards which answers survive.
         const attached = accountPreferencesControllerRef.current;
+        const prefs = loadPrefs();
+        const hint = prefs.planId ?? null;
+        // The cache is read before a single request is made, so the shell can
+        // be on screen before the first response.
+        //
+        // Painting it early means painting before the server has confirmed who
+        // is here, so it is gated on the session expiry this browser recorded
+        // at its last sign-in. Without that gate, a cookie that expired while
+        // the tab was closed would still show the previous person's accounts,
+        // categories, payees and register rows to whoever opens the browser
+        // next, for as long as the session check takes to answer. Past the
+        // expiry the paint is skipped and the shell waits, which costs one
+        // round trip. The session check below is still the authority; this
+        // only decides whether anything may be shown ahead of it.
+        const sessionLive = sessionLooksLive(prefs.sessionExpiresAt, Date.now());
+        const cached = hint && !attached && sessionLive
+          ? readSlot<CachedReference>("reference", isCachedReference)
+          : null;
+        const paintedCache = cached?.planId === hint ? cached : null;
+        if (paintedCache && hint && !cancelled) {
+          configureMoney(paintedCache.data.settings.currency_format);
+          setValue(provisionalPlanValue(hint, paintedCache, { reload, logout: signOut }));
+        }
         const requests = planBootstrapRequests({
-          hint: loadPrefs().planId ?? null,
+          hint,
           existingPlanId: attached?.planId ?? null,
+          cachedPlanId: paintedCache?.planId ?? null,
         });
         // Only the calls that race ahead of the session check decide their own
         // 401s; once the session is known, a 401 means the session really has
         // ended and the global handler should see it.
         const speculative = { handleUnauthorized: false } as const;
+        // Recorded before the batch goes out, for the same reason the routes
+        // record it: a write landing while these reads are in flight must not
+        // be undone by storing what they return.
+        const epochAtRequest = currentCacheEpoch();
         const statusPromise = api.authStatus();
         const plansPromise = settle(api.plans(speculative));
         const speculativePlanId = requests.speculativePlanId;
         const speculativeBatch = speculativePlanId
-          ? settle(fetchReferenceBatch(speculativePlanId, requests.fetchPreferences, speculative))
+          ? settle(fetchReferenceBatch(
+            speculativePlanId,
+            requests.fetchPreferences,
+            requests.fetchAccounts,
+            speculative,
+          ))
           : null;
 
         const status = await statusPromise;
         if (cancelled) return;
         setBootstrapRequired(status.bootstrap_required);
+        // Kept current from every bootstrap, so a session renewed or revoked
+        // elsewhere is reflected the next time this browser decides whether it
+        // may paint from cache.
+        savePrefs({ sessionExpiresAt: status.session_expires_at ?? undefined });
         const session = decideSession(status);
         if (session.kind === "signed-out") {
           // The sign-in form goes up now. Whatever the two speculative calls
-          // return is never awaited, never read, and never reaches state.
+          // return is never awaited, never read, and never reaches state. The
+          // cache goes with it: nobody is signed in, so there is no session
+          // against which any of it could be shown to belong to this browser.
+          clearReferenceCache();
           setValue(null);
           setError(null);
           setAuthMode(session.mode);
@@ -161,6 +320,22 @@ export function PlanProvider({ children }: { children: ReactNode }) {
           throw new Error("No plans are available yet.");
         }
         const planId = decision.planId;
+        const identity = { userId: decision.userId, planId };
+        // `GET /v1/plans` already carries the plan's `server_knowledge` and the
+        // bootstrap already fetches it, so the knowledge check costs nothing.
+        const knowledge = planKnowledge(plansResult.value, planId);
+        // A cache belonging to another user, or to a plan this load is not
+        // opening, is deleted rather than merely ignored.
+        const validCache = paintedCache
+          && paintedCache.userId === decision.userId
+          && paintedCache.planId === planId
+          ? paintedCache
+          : null;
+        if (paintedCache && !validCache) {
+          clearReferenceCache();
+          setValue(null);
+        }
+        const accountsDecision = decideReferenceRefresh(validCache, identity, knowledge);
         const controllerKey = bootstrapControllerKey(decision.userId, planId);
         const existingController = accountPreferencesControllerRef.current?.key === controllerKey
           ? accountPreferencesControllerRef.current.controller
@@ -171,11 +346,21 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         }
         const batch = outcome.kind === "use"
           ? outcome.value
-          : await fetchReferenceBatch(planId, !existingController);
+          : await fetchReferenceBatch(planId, !existingController, true);
         if (cancelled) {
           return;
         }
-        const { settings, accounts: accountsSnapshot, categoryGroups } = batch;
+        const { settings, categoryGroups } = batch;
+        // The accounts read is the one the cache can skip. When knowledge has
+        // moved — or when the batch above went out for a different plan — it
+        // is fetched now instead, one round trip later than a cold load.
+        const accountsSnapshot = batch.accounts
+          ?? (accountsDecision === "keep" && validCache
+            ? { accounts: validCache.data.accounts, server_knowledge: validCache.serverKnowledge }
+            : await api.accounts(planId));
+        if (cancelled) {
+          return;
+        }
         // The batch skips preferences when a controller is already attached.
         // If that controller turns out to belong to another user or plan, ask
         // now rather than mistaking "not asked" for "server does not support".
@@ -189,6 +374,17 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         }
         configureMoney(settings.currency_format);
         savePrefs({ planId });
+        // Tagged with the knowledge the accounts were actually read at, not
+        // the plans list's, so a write landing between the two reads leaves
+        // the entry looking advanced on the next load rather than current.
+        writeSlot("reference", identity, accountsSnapshot.server_knowledge, {
+          settings,
+          categoryGroups,
+          accounts: accountsSnapshot.accounts,
+          // Preferences are not covered by knowledge and are not always
+          // refetched, so an untouched controller keeps the cached copy.
+          accountPreferences: accountPreferencesSnapshot ?? validCache?.data.accountPreferences ?? null,
+        }, epochAtRequest);
         const categories = categoryGroups.flatMap((group) => group.categories ?? []);
         let accountPreferencesSync: AccountPreferencesState;
         let accountPreferencesController = existingController;
@@ -222,6 +418,10 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         }
         setValue({
           planId,
+          userId: decision.userId,
+          provisional: false,
+          knowledgeTrusted: true,
+          cacheEpoch: currentCacheEpoch(),
           accounts: accountsSnapshot.accounts.filter((account) => !account.deleted),
           ledgerKnowledge: accountsSnapshot.server_knowledge,
           accountPreferences: accountPreferencesController ? accountPreferencesSync.preferences : null,
@@ -253,24 +453,20 @@ export function PlanProvider({ children }: { children: ReactNode }) {
           categoryGroups,
           categories,
           categoryNames: new Map(categories.map((category) => [category.id, category.name])),
-          reload: () => setGeneration((n) => n + 1),
-          logout: async () => {
-            await api.logout();
-            accountPreferencesControllerRef.current?.controller.detach();
-            accountPreferencesControllerRef.current = null;
-            // The next person to sign in here should not inherit this hint.
-            savePrefs({ planId: undefined });
-            setValue(null);
-            setError(null);
-            setAuthMode("login");
-          },
+          reload,
+          logout: signOut,
         });
       } catch (cause) {
         if (!cancelled) {
           if (cause instanceof ApiError && cause.status === 401) {
+            // The same teardown as `onUnauthorized` and `signOut`. A 401
+            // raised here — a speculative call deciding its own, or a read
+            // after the session went — ends the session just as surely, so it
+            // must not leave this user's ledger data behind in the browser.
             accountPreferencesControllerRef.current?.controller.detach();
             accountPreferencesControllerRef.current = null;
-            savePrefs({ planId: undefined });
+            savePrefs({ planId: undefined, sessionExpiresAt: undefined });
+            clearReferenceCache();
             setValue(null);
             setAuthMode("login");
           }
@@ -347,8 +543,12 @@ function AuthForm({
         event.preventDefault();
         setSubmitting(true);
         try {
-          if (setup) await api.setup(username, password, bootstrapToken);
-          else await api.login(username, password);
+          const session = setup
+            ? await api.setup(username, password, bootstrapToken)
+            : await api.login(username, password);
+          // Recorded now so the next load can tell, without asking, whether
+          // this browser still holds a live session before it paints anything.
+          savePrefs({ sessionExpiresAt: session.session_expires_at ?? undefined });
           setPassword("");
           setBootstrapToken("");
           onSuccess();

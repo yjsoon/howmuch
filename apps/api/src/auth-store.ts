@@ -3,7 +3,18 @@ import type { D1Database } from "./d1";
 import type { NewSession, StoredCredential } from "./password-auth";
 
 export type PlanRole = "owner" | "editor" | "viewer";
-export type AuthUser = { id: string; username: string; roles: Record<string, PlanRole> };
+export type AuthUser = {
+  id: string;
+  username: string;
+  roles: Record<string, PlanRole>;
+  /**
+   * Unix seconds at which this session stops being accepted, for session
+   * principals only. The web client keeps it so it can tell, without asking
+   * the server, whether the credential in this browser is still live — it
+   * refuses to paint cached ledger data once it is not (#175, #177).
+   */
+  sessionExpiresAt?: number;
+};
 export type PersonalApiToken = { id: string; name: string; created_at: number; revoked_at: number | null };
 export type NewPersonalApiToken = PersonalApiToken & { userId: string; tokenHash: string };
 export type SetupInput = {
@@ -36,7 +47,7 @@ const credentialSql = `SELECT user_id,username,kdf,kdf_version,cost_n,block_size
  * NULL, which `roles()` skips — so authentication costs one D1 round trip
  * instead of two.
  */
-const sessionPrincipalSql = `SELECT u.id,pc.username,pm.plan_id,pm.role
+const sessionPrincipalSql = `SELECT u.id,pc.username,pm.plan_id,pm.role,s.expires_at
    FROM sessions s
    JOIN users u ON u.id=s.user_id
    JOIN password_credentials pc ON pc.user_id=u.id
@@ -51,12 +62,17 @@ const tokenPrincipalSql = `SELECT u.id,pc.username,pm.plan_id,pm.role
    WHERE t.token_hash=? AND t.revoked_at IS NULL`;
 
 /** Row shape both principal queries return, one row per membership. */
-type PrincipalRow = { id: string; username: string; plan_id: string | null; role: PlanRole | null };
+type PrincipalRow = { id: string; username: string; plan_id: string | null; role: PlanRole | null; expires_at?: number | null };
 
 function principal(rows: PrincipalRow[]): AuthUser | null {
   const first = rows[0];
   if (!first) return null;
-  return { id: first.id, username: first.username, roles: roles(rows) };
+  const user: AuthUser = { id: first.id, username: first.username, roles: roles(rows) };
+  // Only the session query selects an expiry; personal API tokens have none.
+  if (typeof first.expires_at === "number") {
+    user.sessionExpiresAt = Number(first.expires_at);
+  }
+  return user;
 }
 
 export class SQLiteAuthStore implements AuthStore {

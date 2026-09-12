@@ -2936,6 +2936,8 @@ describe("password authentication", () => {
       setup_required: true,
       bootstrap_required: true,
       user: null,
+      // No session, so nothing for a client to gate a cached paint on.
+      session_expires_at: null,
     });
 
     const setup = await authRequest(
@@ -2944,6 +2946,10 @@ describe("password authentication", () => {
       { authorization: "Bearer test-token" },
     );
     expect(setup.status).toBe(200);
+    const setupBody = await setup.clone().json();
+    // The client stores this and refuses to paint cached ledger data once it
+    // has passed, so an expired cookie cannot leak the last user's plan.
+    expect(setupBody.data.session_expires_at).toBeGreaterThan(Math.floor(Date.now() / 1_000));
     expect(setup.headers.get("set-cookie")).toContain("__Host-howmuch_session=");
     expect(setup.headers.get("set-cookie")).toContain("HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=");
     expect(JSON.stringify(db.query("SELECT * FROM password_credentials").get())).not.toContain(password);
@@ -3012,6 +3018,30 @@ describe("password authentication", () => {
     expect((await handler(new Request("https://howmuch.test/v1/user", {
       headers: { authorization: `Bearer ${token}` },
     }))).status).toBe(401);
+  });
+
+  test("reports the live session's expiry so a client can gate a cached paint", async () => {
+    const setup = await authRequest(
+      "/api/auth/setup",
+      { username: "Owner.Name", password },
+      { authorization: "Bearer test-token" },
+    );
+    const cookie = setup.headers.get("set-cookie")!.split(";", 1)[0];
+
+    const signedIn = await handler(new Request("https://howmuch.test/api/auth/status", { headers: { cookie } }));
+    const body = (await signedIn.json()).data;
+    expect(body.user).not.toBeNull();
+    const stored = db.query("SELECT expires_at FROM sessions").get() as { expires_at: number };
+    expect(body.session_expires_at).toBe(stored.expires_at);
+
+    // A bearer session reports its own expiry too; only non-session
+    // principals, which cannot reach the web client's cache, report none.
+    const tokenResponse = await authRequest("/api/auth/token", { username: "owner.name", password });
+    const token = (await tokenResponse.json()).data.token;
+    const bearer = await handler(new Request("https://howmuch.test/api/auth/status", {
+      headers: { authorization: `Bearer ${token}` },
+    }));
+    expect((await bearer.json()).data.session_expires_at).toBeGreaterThan(Math.floor(Date.now() / 1_000));
   });
 
   test("syncs ordered account presentation preferences per user and plan", async () => {
