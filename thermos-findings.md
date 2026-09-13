@@ -36,6 +36,38 @@ Waiting on completion notifications. Do not poll. Next step is synthesis into th
 
 *(empty until synthesis)*
 
+## Parent draft (logged in case credits die before subagents return)
+
+Independent of the background reviewers. Confirm or kill against their reports.
+
+### Already handled on tip `860f213` (do not re-report as open)
+
+Author review on `0534109` found two real bugs; follow-up commit claims both fixed; author LGTM on tip.
+
+1. **Rotation pop (was high).** `onChange(of: horizontalSizeClass)` + `afterSizeClassChange` nils `pane` whenever the new width is not regular. iPhone Plus/Max landscape is regular width but `isSplit` stays false, so rotation popped a user-pushed register. Tip watches `onChange(of: isSplit)` instead. Phone rotation does not flip `isSplit`, so `afterSplitChange` does not run. **Fixed.**
+2. **Snapshot did not lock production wiring (was medium).** Early snapshot injected `usesSplit: false` on `AccountsView()`, so a revert of `isSplit` to `horizontalSizeClass == .regular` would still pass. Tip hosts `RootTabView(usesSidebar: false)` at 844×390 regular. Everyday + empty loaded ledger is on the harness, so a missing `usesSplit:` pass from `RootTabView` would show `No Transactions` again. **Fixed.**
+
+No BugBot findings (disabled). CI check_runs empty on this query.
+
+### Still open — correctness (parent)
+
+None at medium/high if the tip wiring is taken as written.
+
+Low / residual:
+
+- `testCompactAccountsStillPushesSingleColumn` still constructs `AccountsView()` with no override (`IPadLayoutTests.swift` ~94). Fallback is `RootChrome.usesSidebar(idiom: UIDevice.current, sizeClass: .compact)` which is false on phone *and* on iPad compact. Not a product bug. It does not cover the production compact `RootTabView` path the new test now covers for regular-phone.
+- `afterSplitChange` is live only if the **same** `AccountsView` identity sees `isSplit` flip. Production `RootTabView` is `if usesSidebar { … } else { … }`, so slide-over **destroys** the view and `@State pane` resets. Outcomes still match (compact starts nil; split `onAppear` + `reconcilePane` pins default). Not a behaviour bug. The helper still matters for the `usesSplit == nil` fallback on iPad.
+
+### Still open — quality (parent)
+
+- `usesSplit: Bool? = nil` is a second API next to `RootChrome.usesSidebar`. Code judo: make `usesSplit` required (no default). Compact test would have to pass `false`; you cannot silently fall back to `UIDevice`.
+- `AccountsView.swift` was already 1242 lines, now 1253. The diff did not create the 1k problem; it also did not extract the pane machine.
+- `CaptureSnapshotTests.swift` (3300 lines) drive-by compile fixes are justified (`forbidden` arg order + `throws` for `XCTUnwrap`) but are unrelated to the layout bug.
+
+### Intended behaviour to keep
+
+Phone (any size class) = stacked overview, no auto register. iPad regular = split + default pane. Connection settings sheet unchanged. Web untouched.
+
 ---
 
 ## Notes as I go
