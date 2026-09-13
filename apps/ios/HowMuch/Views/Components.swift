@@ -782,7 +782,11 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
           return
         }
         let label = object.accessibilityLabel ?? ""
-        if !label.isEmpty, let frame = accessibilityFrame(of: object, in: window), frame.width > 1 || frame.height > 1 {
+        if !label.isEmpty,
+           isExposed(object),
+           let frame = accessibilityFrame(of: object, in: window),
+           frame.width > 1 || frame.height > 1
+        {
           pins.append(AccessibilityPin(label: label, frame: frame))
         }
         let count = object.accessibilityElementCount()
@@ -807,6 +811,29 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
       }
       collect(window)
       return pins
+    }
+
+    /// Window-level AX elements can still name a hidden tab row. Follow the
+    /// container / superview chain so a hidden UITabBar drops the Add pin.
+    private func isExposed(_ object: NSObject) -> Bool {
+      var current: NSObject? = object
+      var seen = Set<ObjectIdentifier>()
+      while let node = current, !seen.contains(ObjectIdentifier(node)) {
+        seen.insert(ObjectIdentifier(node))
+        if let view = node as? UIView {
+          if view.isHidden || view.alpha <= 0.01 {
+            return false
+          }
+          current = view.superview
+          continue
+        }
+        if let element = node as? UIAccessibilityElement {
+          current = element.accessibilityContainer as? NSObject
+          continue
+        }
+        break
+      }
+      return true
     }
 
     private func accessibilityFrame(of object: NSObject, in window: UIWindow) -> CGRect? {

@@ -8,6 +8,16 @@ import Vision
 
 @MainActor
 final class CaptureSnapshotTests: XCTestCase {
+  override func setUp() async throws {
+    try await super.setUp()
+    resetSharedCaptureChrome()
+  }
+
+  override func tearDown() async throws {
+    resetSharedCaptureChrome()
+    try await super.tearDown()
+  }
+
   func testAddManuallySavesOnceAndCancelPreservesConversation() async {
     // Reuse the immediate offline transport so Save exercises the real outbox
     // without an unpredictable socket timeout or any real ledger request.
@@ -301,8 +311,8 @@ final class CaptureSnapshotTests: XCTestCase {
         workspace: harness.workspace,
         presentingManually: {}
       )
-      .environment(chrome)
       .environment(harness.model)
+      .environment(chrome)
       .environment(\.horizontalSizeClass, .compact),
       size: CGSize(width: 390, height: 844)
     ) else {
@@ -311,7 +321,9 @@ final class CaptureSnapshotTests: XCTestCase {
     }
     defer { surface.detach() }
     let appeared = await surface.waitUntil {
-      surface.tabRowOverlayButton(label: "Assistant") != nil
+      surface.firstControl(label: "Accounts") != nil
+        && surface.firstControl(label: CompactRootBar.action.title) != nil
+        && surface.tabRowOverlayButton(label: "Assistant") != nil
     }
     XCTAssertTrue(appeared, "compact chrome must host floating Assistant: \(surface.accessibilityLabels())")
     guard let tabBar = surface.firstDescendant(UITabBar.self) else {
@@ -2017,6 +2029,14 @@ final class CaptureSnapshotTests: XCTestCase {
     attachment.name = name
     attachment.lifetime = .keepAlways
     add(attachment)
+  }
+
+  private func resetSharedCaptureChrome() {
+    CaptureRouter.shared.dropForSignOut()
+    while CaptureRouter.shared.blockingSheetCount > 0 {
+      CaptureRouter.shared.endBlockingSheet()
+    }
+    CaptureWorkspace.shared.pendingAssistantSessionID = nil
   }
 
   private func assertRenderedContent<V: View>(
