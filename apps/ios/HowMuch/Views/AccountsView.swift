@@ -74,16 +74,24 @@ struct AccountsView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+  var usesSplit: Bool? = nil
   @State private var collapsedGroups: Set<String> = ["closed"]
   @State private var presentedSheet: AccountsSheet?
   @State private var groupPendingDeletion: CustomAccountGroup?
   @State private var pane: AccountsPane?
   @State private var columnVisibility = NavigationSplitViewVisibility.all
 
+  private var isSplit: Bool {
+    usesSplit ?? RootChrome.usesSidebar(
+      idiom: UIDevice.current.userInterfaceIdiom,
+      horizontalSizeClass: horizontalSizeClass
+    )
+  }
+
   var body: some View {
     @Bindable var screenshots = ScreenshotOfferController.shared
     Group {
-      if horizontalSizeClass == .regular {
+      if isSplit {
         NavigationSplitView(columnVisibility: $columnVisibility) {
           overview(screenshots: screenshots)
             .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
@@ -116,7 +124,7 @@ struct AccountsView: View {
     .onChange(of: horizontalSizeClass) { _, _ in
       pane = AccountsPaneSelection.afterSizeClassChange(
         current: pane,
-        isRegularWidth: horizontalSizeClass == .regular,
+        isRegularWidth: isSplit,
         knownAccountIDs: knownAccountIDs,
         canChooseDefault: canChooseDefaultPane,
         defaultPane: defaultPane
@@ -188,7 +196,7 @@ struct AccountsView: View {
   private func reconcilePane() {
     pane = AccountsPaneSelection.reconciled(
       current: pane,
-      isRegularWidth: horizontalSizeClass == .regular,
+      isRegularWidth: isSplit,
       knownAccountIDs: knownAccountIDs,
       canChooseDefault: canChooseDefaultPane,
       defaultPane: defaultPane

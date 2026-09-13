@@ -470,7 +470,7 @@ struct RootTabView: View {
         Tab(AppTab.accounts.title, systemImage: AppTab.accounts.systemImage, value: AppTab.accounts) {
           RootChromeScope(chrome: chrome) {
             RootTabHost(for: .accounts, workspace: workspace) {
-              AccountsView()
+              AccountsView(usesSplit: usesSidebar)
             }
           }
         }
@@ -543,7 +543,7 @@ struct RootTabView: View {
   private func compactDestinationRoot(_ tab: AppTab) -> some View {
     switch tab {
     case .accounts:
-      AccountsView()
+      AccountsView(usesSplit: usesSidebar)
     case .rewards:
       NavigationStack {
         RewardsView()

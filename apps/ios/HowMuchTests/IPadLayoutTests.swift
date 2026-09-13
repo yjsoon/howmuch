@@ -9,7 +9,7 @@ final class IPadLayoutTests: XCTestCase {
     let harness = SnapshotHarness.make()
     harness.model.ledgerPhase = .loaded
     guard let surface = SnapshotSurface(
-      root: AccountsView()
+      root: AccountsView(usesSplit: true)
         .environment(harness.model)
         .environment(RootChromeState())
         .environment(\.horizontalSizeClass, .regular),
@@ -53,7 +53,7 @@ final class IPadLayoutTests: XCTestCase {
     let harness = SnapshotHarness.make()
     harness.model.ledgerPhase = .loaded
     guard let surface = SnapshotSurface(
-      root: AccountsView()
+      root: AccountsView(usesSplit: false)
         .environment(harness.model)
         .environment(RootChromeState())
         .environment(\.horizontalSizeClass, .regular),
@@ -278,6 +278,19 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertFalse(
       RootChrome.usesSidebar(idiom: .phone, horizontalSizeClass: .regular)
     )
+  }
+
+  func testPhoneRegularWidthDoesNotAutoSelectRegisterPane() {
+    let usesSplit = RootChrome.usesSidebar(idiom: .phone, horizontalSizeClass: .regular)
+    XCTAssertFalse(usesSplit)
+    let pane = AccountsPaneSelection.reconciled(
+      current: nil,
+      isRegularWidth: usesSplit,
+      knownAccountIDs: ["acct-everyday"],
+      canChooseDefault: true,
+      defaultPane: .account("acct-everyday")
+    )
+    XCTAssertNil(pane, "iPhone must not auto-present a register on first launch")
   }
 
   func testPadRegularUsesSidebar() {
