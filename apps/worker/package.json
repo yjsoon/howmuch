@@ -5,9 +5,10 @@
   "scripts": {
     "build:web": "bun run --cwd ../web build",
     "build": "bun run build:web && wrangler deploy --dry-run --outdir dist",
-    "deploy": "bun run build:web && wrangler deploy",
+    "deploy": "echo 'Refusing unqualified deploy. Use deploy:tk or deploy:yj-redirect.' >&2; exit 1",
     "deploy:preview": "bun run build:web && wrangler deploy --env preview --profile yj",
     "deploy:tk": "bun run build:web && wrangler deploy --env tk --profile tinkertanker",
+    "deploy:yj-redirect": "bun run build:web && wrangler deploy --profile yj",
     "dev": "wrangler dev --test-scheduled",
     "typecheck": "tsc --noEmit"
   }

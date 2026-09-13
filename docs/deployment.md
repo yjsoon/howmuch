@@ -98,10 +98,17 @@ and the frozen database remain on that Worker. Its D1 database
 2026-09-11 cutover snapshot, kept as a cold backup; never write to it. The
 `soon.sg` zone and its Email Routing stay in the YJ account.
 
-Rollback to the legacy stack: remove `HOWMUCH_REDIRECT_TARGET` from the
-top-level vars in `wrangler.jsonc`, set `HOWMUCH_TRANSITION_READ_ONLY=false`,
-deploy with `--profile yj`, and point clients back. Any writes made on the
-Tinkertanker stack after cutover live only in its database.
+From `apps/worker`, deploy this top-level Worker with
+`bun run deploy:yj-redirect`. That script pins `--profile yj` and does not
+take an `--env`, so Wrangler uses the top-level redirect configuration.
+`bun run deploy` exits with an error and does not upload.
+
+To roll the live hostname back to this Worker, remove
+`HOWMUCH_REDIRECT_TARGET` from the top-level vars in `wrangler.jsonc`.
+Set `HOWMUCH_TRANSITION_READ_ONLY=false`.
+From `apps/worker`, run `bun run deploy:yj-redirect`.
+Then point clients back. Any writes made on the Tinkertanker stack after
+cutover live only in its database.
 
 ## Backing up production D1
 

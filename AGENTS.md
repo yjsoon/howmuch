@@ -28,7 +28,7 @@ Cloudflare Email Routing) stays in the YJ account — do not move it.
 ### Legacy redirect + backup (profile `yj`, account `YJ`)
 
 - Wrangler profile `yj`, Cloudflare account `YJ` (`810a0c404daff0737f4a2a97a7aab092`). This is the owner's personal Cloudflare account, referred to by the owner as `yjsoon@gmail.com`; Cloudflare currently reports its accepted Super Administrator member as `cloudflare@yjsoon.com`.
-- Worker `howmuch` (top-level env in `wrangler.jsonc`) redirects every request to `https://howmuch.tk.sg` via `HOWMUCH_REDIRECT_TARGET` (308, path and query preserved). It has no cron and serves no data.
+- Worker `howmuch` (top-level env in `wrangler.jsonc`) redirects every request to `https://howmuch.tk.sg` via `HOWMUCH_REDIRECT_TARGET` (308, path and query preserved). It has no cron and serves no data. Deploy it from `apps/worker` with `bun run deploy:yj-redirect`, which pins `--profile yj`.
 - D1 database `howmuch-production` (`57dc5569-d639-44c1-bb9d-6214f43a43b8`) holds the final production snapshot taken at the 2026-09-11 cutover, frozen read-only. Treat it as a cold backup: never write to it. Restoring from it means re-importing into the Tinkertanker database using the chunked procedure in `docs/deployment.md`.
 - The preview environment still lives here: Worker `howmuch-preview` and D1 `howmuch-preview` (`7ca818bd-7f04-4b9b-8a84-8c8f84a6a272`), deployed with `bun run deploy:preview`.
 - The `soon.sg` zone, its DNS, and its Email Routing live here and must stay here.
