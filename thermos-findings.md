@@ -399,7 +399,7 @@ Production trees still land on the right pane even though `onChange(of: isSplit)
 
 Tests: phone-regular snapshot hosts production `RootTabView(usesSidebar: false)` at 844×390 regular. Compact `AccountsView()` at `.compact` is safe (fallback false on phone and iPad compact).
 
-Low/nit: belt-and-suspenders observer; compact snapshot omits `usesSplit`; optional duplicates `RootChrome.usesSidebar`. No security, feature-leak, or destex issues. CaptureSnapshotTests labeled-arg reorder is a no-op; `async throws` is the real Mac compile fix.
+Low/nit: belt-and-suspenders observer; compact snapshot omits `usesSplit`; optional duplicates `RootChrome.usesSidebar`. No security, feature-leak, or devex issues. CaptureSnapshotTests labeled-arg reorder is a no-op; `async throws` is the real Mac compile fix.
 
 ### thermo-nuclear-code-quality-review-subagent
 
