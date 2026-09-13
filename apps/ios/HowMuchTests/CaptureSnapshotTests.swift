@@ -8,6 +8,16 @@ import Vision
 
 @MainActor
 final class CaptureSnapshotTests: XCTestCase {
+  override func setUp() async throws {
+    try await super.setUp()
+    resetSharedCaptureChrome()
+  }
+
+  override func tearDown() async throws {
+    resetSharedCaptureChrome()
+    try await super.tearDown()
+  }
+
   func testAddManuallySavesOnceAndCancelPreservesConversation() async {
     // Reuse the immediate offline transport so Save exercises the real outbox
     // without an unpredictable socket timeout or any real ledger request.
@@ -301,8 +311,8 @@ final class CaptureSnapshotTests: XCTestCase {
         workspace: harness.workspace,
         presentingManually: {}
       )
-      .environment(chrome)
       .environment(harness.model)
+      .environment(chrome)
       .environment(\.horizontalSizeClass, .compact),
       size: CGSize(width: 390, height: 844)
     ) else {
@@ -311,11 +321,13 @@ final class CaptureSnapshotTests: XCTestCase {
     }
     defer { surface.detach() }
     let appeared = await surface.waitUntil {
-      surface.tabRowOverlayButton(label: "Assistant") != nil
+      surface.firstControl(label: "Accounts") != nil
+        && surface.firstControl(label: CompactRootBar.action.title) != nil
+        && surface.tabRowOverlayButton(label: "Assistant") != nil
     }
     XCTAssertTrue(appeared, "compact chrome must host floating Assistant: \(surface.accessibilityLabels())")
-    guard let tabBar = surface.firstDescendant(UITabBar.self) else {
-      XCTFail("compact root must host a UITabBar")
+    guard let tabBar = surface.tabBarOwningRow() else {
+      XCTFail("compact root must host the UITabBar that owns Add")
       return
     }
     tabBar.isHidden = true
@@ -607,8 +619,8 @@ final class CaptureSnapshotTests: XCTestCase {
         root.environment(harness.model),
         expected: needles,
         name: "capture-\(name)",
-        scanUntilExpectedTogether: name == "clarification",
-        forbidden: name == "empty" ? ["Add an expense", "Try “Lunch $12”.", "Allow sending"] : []
+        forbidden: name == "empty" ? ["Add an expense", "Try “Lunch $12”.", "Allow sending"] : [],
+        scanUntilExpectedTogether: name == "clarification"
       )
     }
   }
@@ -1019,7 +1031,7 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertTrue(harness.model.pendingRows.isEmpty, "opening the form must not enqueue a save")
   }
 
-  func testPendingImageAndFinancialTextKeepSendEnabled() async {
+  func testPendingImageAndFinancialTextKeepSendEnabled() async throws {
     let harness = SnapshotHarness.make()
     let session = harness.admitPendingPhoto()
     XCTAssertTrue(session.canSendComposer)
@@ -2019,6 +2031,14 @@ final class CaptureSnapshotTests: XCTestCase {
     add(attachment)
   }
 
+  private func resetSharedCaptureChrome() {
+    CaptureRouter.shared.dropForSignOut()
+    while CaptureRouter.shared.blockingSheetCount > 0 {
+      CaptureRouter.shared.endBlockingSheet()
+    }
+    CaptureWorkspace.shared.pendingAssistantSessionID = nil
+  }
+
   private func assertRenderedContent<V: View>(
     _ root: V,
     expected: [String],
@@ -2708,6 +2728,29 @@ final class SnapshotSurface {
 
   func firstDescendant<T: UIView>(_ type: T.Type) -> T? {
     Self.search(host.view, type)
+  }
+
+  /// The visible (or last remaining) tab bar that hosts the compact Add row.
+  /// `firstDescendant(UITabBar.self)` can hit a leftover already-hidden system bar.
+  func tabBarOwningRow() -> UITabBar? {
+    var found: [UITabBar] = []
+    func walk(_ node: UIView) {
+      if let bar = node as? UITabBar {
+        found.append(bar)
+      }
+      for subview in node.subviews {
+        walk(subview)
+      }
+    }
+    walk(window)
+    let sized = found.filter { $0.bounds.width > 1 && $0.bounds.height > 1 }
+    if let add = firstControl(label: CompactRootBar.action.title) {
+      let hitting = sized.filter { $0.convert($0.bounds, to: window).intersects(add.frame) }
+      if let shown = hitting.first(where: { !$0.isHidden && $0.alpha > 0.01 }) {
+        return shown
+      }
+    }
+    return sized.first { !$0.isHidden && $0.alpha > 0.01 } ?? sized.first
   }
 
   var windowBounds: CGRect { window.bounds }

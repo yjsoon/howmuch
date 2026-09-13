@@ -36,7 +36,7 @@ enum AccountsPane: Hashable, Identifiable {
 enum AccountsPaneSelection {
   static func reconciled(
     current: AccountsPane?,
-    isRegularWidth: Bool,
+    usesSplit: Bool,
     knownAccountIDs: Set<String>,
     canChooseDefault: Bool,
     defaultPane: AccountsPane
@@ -45,24 +45,27 @@ enum AccountsPaneSelection {
     if case .account(let id) = pane, !knownAccountIDs.contains(id) {
       pane = nil
     }
-    guard isRegularWidth else { return pane }
+    guard usesSplit else { return pane }
     if pane == nil, canChooseDefault {
       return defaultPane
     }
     return pane
   }
 
-  static func afterSizeClassChange(
+  /// Called when `AccountsView.isSplit` flips, not on every size-class change.
+  /// Phone Plus/Max rotation stays stacked (`usesSplit` false) and must keep a
+  /// user-pushed register; leaving split (iPad slide-over) clears the pane.
+  static func afterSplitChange(
     current: AccountsPane?,
-    isRegularWidth: Bool,
+    usesSplit: Bool,
     knownAccountIDs: Set<String>,
     canChooseDefault: Bool,
     defaultPane: AccountsPane
   ) -> AccountsPane? {
-    guard isRegularWidth else { return nil }
+    guard usesSplit else { return nil }
     return reconciled(
       current: current,
-      isRegularWidth: true,
+      usesSplit: true,
       knownAccountIDs: knownAccountIDs,
       canChooseDefault: canChooseDefault,
       defaultPane: defaultPane
@@ -74,16 +77,24 @@ struct AccountsView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+  var usesSplit: Bool? = nil
   @State private var collapsedGroups: Set<String> = ["closed"]
   @State private var presentedSheet: AccountsSheet?
   @State private var groupPendingDeletion: CustomAccountGroup?
   @State private var pane: AccountsPane?
   @State private var columnVisibility = NavigationSplitViewVisibility.all
 
+  private var isSplit: Bool {
+    usesSplit ?? RootChrome.usesSidebar(
+      idiom: UIDevice.current.userInterfaceIdiom,
+      horizontalSizeClass: horizontalSizeClass
+    )
+  }
+
   var body: some View {
     @Bindable var screenshots = ScreenshotOfferController.shared
     Group {
-      if horizontalSizeClass == .regular {
+      if isSplit {
         NavigationSplitView(columnVisibility: $columnVisibility) {
           overview(screenshots: screenshots)
             .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
@@ -113,10 +124,10 @@ struct AccountsView: View {
     .onAppear {
       reconcilePane()
     }
-    .onChange(of: horizontalSizeClass) { _, _ in
-      pane = AccountsPaneSelection.afterSizeClassChange(
+    .onChange(of: isSplit) { _, _ in
+      pane = AccountsPaneSelection.afterSplitChange(
         current: pane,
-        isRegularWidth: horizontalSizeClass == .regular,
+        usesSplit: isSplit,
         knownAccountIDs: knownAccountIDs,
         canChooseDefault: canChooseDefaultPane,
         defaultPane: defaultPane
@@ -188,7 +199,7 @@ struct AccountsView: View {
   private func reconcilePane() {
     pane = AccountsPaneSelection.reconciled(
       current: pane,
-      isRegularWidth: horizontalSizeClass == .regular,
+      usesSplit: isSplit,
       knownAccountIDs: knownAccountIDs,
       canChooseDefault: canChooseDefaultPane,
       defaultPane: defaultPane

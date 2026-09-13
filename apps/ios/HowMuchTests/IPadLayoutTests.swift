@@ -5,11 +5,21 @@ import XCTest
 
 @MainActor
 final class IPadLayoutTests: XCTestCase {
+  override func setUp() async throws {
+    try await super.setUp()
+    resetSharedCaptureChrome()
+  }
+
+  override func tearDown() async throws {
+    resetSharedCaptureChrome()
+    try await super.tearDown()
+  }
+
   func testRegularAccountsShowsListAndRegisterTogether() async {
     let harness = SnapshotHarness.make()
     harness.model.ledgerPhase = .loaded
     guard let surface = SnapshotSurface(
-      root: AccountsView()
+      root: AccountsView(usesSplit: true)
         .environment(harness.model)
         .environment(RootChromeState())
         .environment(\.horizontalSizeClass, .regular),
@@ -46,6 +56,45 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertTrue(
       hasRegisterChrome,
       "regular split must show register chrome beside the list. OCR: [\(captured.text)] AX: \(surface.accessibilityLabels())"
+    )
+  }
+
+  func testPhoneRegularAccountsDoesNotPresentEmptyTransactionsSheet() async {
+    let harness = SnapshotHarness.make()
+    harness.model.ledgerPhase = .loaded
+    let chrome = RootChromeState()
+    guard let surface = SnapshotSurface(
+      root: RootTabView(chrome: chrome, usesSidebar: false, workspace: harness.workspace)
+        .environment(harness.model)
+        .environment(chrome)
+        .environment(\.horizontalSizeClass, .regular),
+      size: CGSize(width: 844, height: 390)
+    ) else {
+      XCTFail("phone regular root tabs need a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    let appeared = await surface.waitUntil {
+      surface.firstControl(labelContains: "Everyday") != nil
+    }
+    XCTAssertTrue(appeared, "phone regular accounts must show Everyday: \(surface.accessibilityLabels())")
+
+    let captured = await surface.captureUntilOCR(
+      contains: ["Everyday"],
+      timeoutNanoseconds: 1_500_000_000
+    )
+    attachImage(captured.image, name: "phone-regular-accounts-overview")
+    XCTAssertFalse(
+      captured.isBlank,
+      "phone regular accounts rendered a blank surface. OCR: [\(captured.text)]"
+    )
+
+    let showsEmptyTransactions = captured.text.localizedStandardContains("No Transactions")
+      || surface.firstControl(labelContains: "No Transactions") != nil
+    XCTAssertFalse(
+      showsEmptyTransactions,
+      "phone regular width must not auto-present the empty register. OCR: [\(captured.text)] AX: \(surface.accessibilityLabels())"
     )
   }
 
@@ -120,7 +169,7 @@ final class IPadLayoutTests: XCTestCase {
     var pane: AccountsPane?
     pane = AccountsPaneSelection.reconciled(
       current: pane,
-      isRegularWidth: true,
+      usesSplit: true,
       knownAccountIDs: [],
       canChooseDefault: false,
       defaultPane: .all
@@ -129,7 +178,7 @@ final class IPadLayoutTests: XCTestCase {
 
     pane = AccountsPaneSelection.reconciled(
       current: pane,
-      isRegularWidth: true,
+      usesSplit: true,
       knownAccountIDs: ["acct-rainy", "acct-everyday"],
       canChooseDefault: true,
       defaultPane: .account("acct-everyday")
@@ -140,7 +189,7 @@ final class IPadLayoutTests: XCTestCase {
   func testRegularPaneReplacesDeletedAccount() {
     let pane = AccountsPaneSelection.reconciled(
       current: .account("acct-gone"),
-      isRegularWidth: true,
+      usesSplit: true,
       knownAccountIDs: ["acct-everyday"],
       canChooseDefault: true,
       defaultPane: .account("acct-everyday")
@@ -151,7 +200,7 @@ final class IPadLayoutTests: XCTestCase {
   func testCompactRefreshKeepsPushedRegister() {
     let pane = AccountsPaneSelection.reconciled(
       current: .account("acct-everyday"),
-      isRegularWidth: false,
+      usesSplit: false,
       knownAccountIDs: ["acct-everyday"],
       canChooseDefault: false,
       defaultPane: .all
@@ -162,7 +211,7 @@ final class IPadLayoutTests: XCTestCase {
   func testCompactPrunesDeletedAccount() {
     let pane = AccountsPaneSelection.reconciled(
       current: .account("acct-gone"),
-      isRegularWidth: false,
+      usesSplit: false,
       knownAccountIDs: ["acct-everyday"],
       canChooseDefault: true,
       defaultPane: .account("acct-everyday")
@@ -170,10 +219,10 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertNil(pane)
   }
 
-  func testLeavingRegularWidthClearsPaneSoCompactDoesNotAutoPush() {
-    let pane = AccountsPaneSelection.afterSizeClassChange(
+  func testLeavingSplitClearsPaneSoCompactDoesNotAutoPush() {
+    let pane = AccountsPaneSelection.afterSplitChange(
       current: .account("acct-everyday"),
-      isRegularWidth: false,
+      usesSplit: false,
       knownAccountIDs: ["acct-everyday"],
       canChooseDefault: true,
       defaultPane: .account("acct-everyday")
@@ -184,7 +233,7 @@ final class IPadLayoutTests: XCTestCase {
   func testRegularKeepsExplicitAllWhenAccountsArrive() {
     let pane = AccountsPaneSelection.reconciled(
       current: .all,
-      isRegularWidth: true,
+      usesSplit: true,
       knownAccountIDs: ["acct-everyday"],
       canChooseDefault: true,
       defaultPane: .account("acct-everyday")
@@ -240,6 +289,19 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertFalse(
       RootChrome.usesSidebar(idiom: .phone, horizontalSizeClass: .regular)
     )
+  }
+
+  func testPhoneRegularWidthDoesNotAutoSelectRegisterPane() {
+    let usesSplit = RootChrome.usesSidebar(idiom: .phone, horizontalSizeClass: .regular)
+    XCTAssertFalse(usesSplit)
+    let pane = AccountsPaneSelection.reconciled(
+      current: nil,
+      usesSplit: usesSplit,
+      knownAccountIDs: ["acct-everyday"],
+      canChooseDefault: true,
+      defaultPane: .account("acct-everyday")
+    )
+    XCTAssertNil(pane, "iPhone must not auto-present a register on first launch")
   }
 
   func testPadRegularUsesSidebar() {
@@ -375,7 +437,7 @@ final class IPadLayoutTests: XCTestCase {
     let harness = SnapshotHarness.make()
     let chrome = RootChromeState()
     guard let surface = SnapshotSurface(
-      root: RootTabView(chrome: chrome, usesSidebar: false)
+      root: RootTabView(chrome: chrome, usesSidebar: false, workspace: harness.workspace)
         .environment(harness.model)
         .environment(chrome)
         .environment(\.horizontalSizeClass, .compact),
@@ -448,7 +510,7 @@ final class IPadLayoutTests: XCTestCase {
     let harness = SnapshotHarness.make()
     let chrome = RootChromeState()
     guard let surface = SnapshotSurface(
-      root: RootTabView(chrome: chrome, usesSidebar: true)
+      root: RootTabView(chrome: chrome, usesSidebar: true, workspace: harness.workspace)
         .environment(harness.model)
         .environment(chrome)
         .environment(\.horizontalSizeClass, .regular),
@@ -475,7 +537,7 @@ final class IPadLayoutTests: XCTestCase {
     let chrome = RootChromeState()
     chrome.tab = .plan
     guard let surface = SnapshotSurface(
-      root: RootTabView(chrome: chrome, usesSidebar: false)
+      root: RootTabView(chrome: chrome, usesSidebar: false, workspace: harness.workspace)
         .environment(harness.model)
         .environment(chrome)
         .environment(\.horizontalSizeClass, .compact),
@@ -501,5 +563,13 @@ final class IPadLayoutTests: XCTestCase {
     attachment.name = name
     attachment.lifetime = .keepAlways
     add(attachment)
+  }
+
+  private func resetSharedCaptureChrome() {
+    CaptureRouter.shared.dropForSignOut()
+    while CaptureRouter.shared.blockingSheetCount > 0 {
+      CaptureRouter.shared.endBlockingSheet()
+    }
+    CaptureWorkspace.shared.pendingAssistantSessionID = nil
   }
 }
