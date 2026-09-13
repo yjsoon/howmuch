@@ -74,11 +74,11 @@ final class ScreenshotOfferTests: XCTestCase {
 
   func testCaptionUsesLineCount() {
     XCTAssertEqual(
-      ScreenshotOffer(id: "a", lineCount: 1, imageData: Data(), filename: "payload.png").caption,
+      ScreenshotOffer(id: "a", fingerprint: "fp", lineCount: 1, imageData: Data(), filename: "payload.png").caption,
       "Looks like a screenshot · 1 line"
     )
     XCTAssertEqual(
-      ScreenshotOffer(id: "a", lineCount: 3, imageData: Data(), filename: "payload.png").caption,
+      ScreenshotOffer(id: "a", fingerprint: "fp", lineCount: 3, imageData: Data(), filename: "payload.png").caption,
       "Looks like a screenshot · 3 lines"
     )
   }
@@ -164,6 +164,78 @@ final class ScreenshotOfferTests: XCTestCase {
     XCTAssertNil(reloaded.offer)
   }
 
+  func testDismissStillHidesWhenAssetIDChangesButBytesMatch() async {
+    await controller.setEnabled(true)
+    let original = candidate(id: "shot-1", createdAt: Date.distantFuture)
+    library.next = original
+    await controller.refresh()
+    XCTAssertEqual(controller.offer?.id, "shot-1")
+
+    controller.dismiss()
+    XCTAssertNil(controller.offer)
+
+    library.next = candidate(
+      id: "shot-1-rewritten",
+      createdAt: original.createdAt,
+      data: original.data
+    )
+    await controller.refresh()
+    XCTAssertNil(controller.offer)
+  }
+
+  func testDismissedFingerprintSurvivesReloadWhenAssetIDChanges() async {
+    await controller.setEnabled(true)
+    let original = candidate(id: "shot-1", createdAt: Date.distantFuture)
+    library.next = original
+    await controller.refresh()
+    controller.dismiss()
+
+    library.next = candidate(
+      id: "shot-1-rewritten",
+      createdAt: original.createdAt,
+      data: original.data
+    )
+    let reloaded = ScreenshotOfferController(
+      defaults: defaults,
+      library: library,
+      lineCounter: { _ in 3 }
+    )
+    await reloaded.refresh()
+    XCTAssertNil(reloaded.offer)
+  }
+
+  func testDifferentScreenshotStillOffersAfterDismiss() async {
+    await controller.setEnabled(true)
+    library.next = candidate(id: "shot-1", createdAt: Date.distantFuture)
+    await controller.refresh()
+    controller.dismiss()
+
+    library.next = candidate(
+      id: "shot-2",
+      createdAt: Date.distantFuture,
+      data: Data([0xFF, 0xD8, 0xFF, 0xD9])
+    )
+    await controller.refresh()
+    XCTAssertEqual(controller.offer?.id, "shot-2")
+  }
+
+  func testLaterScreenshotWithTheSameBytesStillOffers() async {
+    await controller.setEnabled(true)
+    let bytes = Data([0x89, 0x50, 0x4E, 0x47])
+    let firstTaken = Date(timeIntervalSince1970: 1_789_000_000)
+    library.next = candidate(id: "shot-1", createdAt: firstTaken, data: bytes)
+    await controller.refresh()
+    controller.dismiss()
+
+    library.next = candidate(
+      id: "shot-2",
+      createdAt: firstTaken.addingTimeInterval(1),
+      data: bytes
+    )
+    await controller.refresh()
+    XCTAssertEqual(controller.offer?.id, "shot-2")
+  }
+
   func testRefreshClearsOfferWhenScreenshotIsGone() async {
     await controller.setEnabled(true)
     library.next = candidate(createdAt: Date.distantFuture)
@@ -232,10 +304,14 @@ final class ScreenshotOfferTests: XCTestCase {
     XCTAssertNil(controller.offer)
   }
 
-  private func candidate(createdAt: Date = Date.distantFuture) -> ScreenshotCandidate {
+  private func candidate(
+    id: String = "shot-1",
+    createdAt: Date = Date.distantFuture,
+    data: Data = Data([0x89, 0x50, 0x4E, 0x47])
+  ) -> ScreenshotCandidate {
     ScreenshotCandidate(
-      id: "shot-1",
-      data: Data([0x89, 0x50, 0x4E, 0x47]),
+      id: id,
+      data: data,
       filename: "payload.png",
       createdAt: createdAt
     )

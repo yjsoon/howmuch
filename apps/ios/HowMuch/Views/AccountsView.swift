@@ -56,6 +56,7 @@ enum AccountsPaneSelection {
 struct AccountsView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   var usesSplit: Bool
   @State private var collapsedGroups: Set<String> = ["closed"]
   @State private var presentedSheet: AccountsSheet?
@@ -68,7 +69,7 @@ struct AccountsView: View {
     Group {
       if usesSplit {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-          overview(screenshots: screenshots)
+          overview()
             .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
         } detail: {
           NavigationStack {
@@ -85,7 +86,7 @@ struct AccountsView: View {
         .navigationSplitViewStyle(.balanced)
       } else {
         NavigationStack {
-          overview(screenshots: screenshots)
+          overview()
             .navigationDestination(item: $pane) { selected in
               detail(selected)
                 .id(selected)
@@ -93,6 +94,29 @@ struct AccountsView: View {
         }
       }
     }
+    .overlay(alignment: .bottom) {
+      if let offer = screenshots.offer, screenshots.isEnabled {
+        ScreenshotOfferToast(
+          offer: offer,
+          onAdd: {
+            try? screenshots.review()
+          },
+          onDismiss: {
+            screenshots.dismiss()
+          }
+        )
+        .padding(.horizontal, 16)
+        .padding(
+          .bottom,
+          RootChrome.inTabToastBottomPadding(
+            idiom: UIDevice.current.userInterfaceIdiom,
+            horizontalSizeClass: horizontalSizeClass
+          )
+        )
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+      }
+    }
+    .animation(.snappy, value: screenshots.offer?.id)
     .onAppear {
       reconcilePane()
     }
@@ -187,20 +211,9 @@ struct AccountsView: View {
     }
   }
 
-  private func overview(screenshots: ScreenshotOfferController) -> some View {
+  private func overview() -> some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
-        if let offer = screenshots.offer, screenshots.isEnabled {
-          ScreenshotOfferCard(
-            offer: offer,
-            onReview: {
-              try? screenshots.review()
-            },
-            onDismiss: {
-              screenshots.dismiss()
-            }
-          )
-        }
         if !model.pendingRows.isEmpty {
           OutboxCard()
         }

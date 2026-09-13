@@ -1,3 +1,4 @@
+import CryptoKit
 import Observation
 import Photos
 import SwiftUI
@@ -15,6 +16,7 @@ struct ScreenshotCandidate: Equatable, Sendable {
 
 struct ScreenshotOffer: Equatable, Identifiable, Sendable {
   var id: String
+  var fingerprint: String
   var lineCount: Int
   var imageData: Data
   var filename: String
@@ -40,12 +42,15 @@ final class ScreenshotOfferController {
   static let enabledKey = "HowMuch.screenshotOffer.enabled"
   static let enabledAtKey = "HowMuch.screenshotOffer.enabledAt"
   static let dismissedKey = "HowMuch.screenshotOffer.dismissedIDs"
+  static let dismissedFingerprintsKey = "HowMuch.screenshotOffer.dismissedFingerprints"
+  static let dismissedLimit = 64
 
   private(set) var isEnabled: Bool
   private(set) var offer: ScreenshotOffer?
 
   private var enabledAt: Date?
-  private var dismissedIDs: Set<String>
+  private var dismissedIDs: [String]
+  private var dismissedFingerprints: [String]
   private let defaults: UserDefaults
   private let library: ScreenshotLibrary
   private let lineCounter: @Sendable (Data) -> Int
@@ -65,7 +70,8 @@ final class ScreenshotOfferController {
     if defaults.object(forKey: Self.enabledAtKey) != nil {
       enabledAt = Date(timeIntervalSince1970: defaults.double(forKey: Self.enabledAtKey))
     }
-    dismissedIDs = Set(defaults.stringArray(forKey: Self.dismissedKey) ?? [])
+    dismissedIDs = defaults.stringArray(forKey: Self.dismissedKey) ?? []
+    dismissedFingerprints = defaults.stringArray(forKey: Self.dismissedFingerprintsKey) ?? []
   }
 
   func applyEnabledPreference(_ enabled: Bool) {
@@ -119,8 +125,13 @@ final class ScreenshotOfferController {
     }
     guard let candidate = await library.latestScreenshot(
       createdAfter: enabledAt,
-      excluding: dismissedIDs
+      excluding: Set(dismissedIDs)
     ) else {
+      offer = nil
+      return
+    }
+    guard shouldOffer(candidate) else {
+      rememberAliasIfDismissed(candidate)
       offer = nil
       return
     }
@@ -129,6 +140,7 @@ final class ScreenshotOfferController {
 
   func consider(_ candidate: ScreenshotCandidate) async {
     guard shouldOffer(candidate) else {
+      rememberAliasIfDismissed(candidate)
       return
     }
     considerGeneration += 1
@@ -141,6 +153,7 @@ final class ScreenshotOfferController {
     }
     offer = ScreenshotOffer(
       id: candidate.id,
+      fingerprint: Self.fingerprint(of: candidate.data, createdAt: candidate.createdAt),
       lineCount: lines,
       imageData: candidate.data,
       filename: candidate.filename
@@ -148,7 +161,12 @@ final class ScreenshotOfferController {
   }
 
   private func shouldOffer(_ candidate: ScreenshotCandidate) -> Bool {
-    guard isEnabled, !dismissedIDs.contains(candidate.id) else {
+    guard isEnabled else {
+      return false
+    }
+    if dismissedIDs.contains(candidate.id)
+      || dismissedFingerprints.contains(Self.fingerprint(of: candidate.data, createdAt: candidate.createdAt))
+    {
       return false
     }
     if let enabledAt, candidate.createdAt < enabledAt {
@@ -161,7 +179,7 @@ final class ScreenshotOfferController {
     guard let offer else {
       return
     }
-    rememberDismissed(offer.id)
+    rememberDismissed(offer)
   }
 
   func review() throws {
@@ -174,7 +192,7 @@ final class ScreenshotOfferController {
       source: .detectedScreenshot
     )
     try InboxIntentHandoff.enqueue(write)
-    rememberDismissed(offer.id)
+    rememberDismissed(offer)
   }
 
   static func countLines(in data: Data) -> Int {
@@ -197,13 +215,39 @@ final class ScreenshotOfferController {
     #endif
   }
 
-  private func rememberDismissed(_ id: String) {
+  private func rememberDismissed(_ offer: ScreenshotOffer) {
     considerGeneration += 1
-    dismissedIDs.insert(id)
-    defaults.set(Array(dismissedIDs), forKey: Self.dismissedKey)
-    if offer?.id == id {
-      offer = nil
+    dismissedIDs = Self.inserting(offer.id, into: dismissedIDs)
+    dismissedFingerprints = Self.inserting(offer.fingerprint, into: dismissedFingerprints)
+    defaults.set(dismissedIDs, forKey: Self.dismissedKey)
+    defaults.set(dismissedFingerprints, forKey: Self.dismissedFingerprintsKey)
+    if self.offer?.id == offer.id {
+      self.offer = nil
     }
+  }
+
+  private func rememberAliasIfDismissed(_ candidate: ScreenshotCandidate) {
+    let fingerprint = Self.fingerprint(of: candidate.data, createdAt: candidate.createdAt)
+    guard dismissedFingerprints.contains(fingerprint) else {
+      return
+    }
+    dismissedIDs = Self.inserting(candidate.id, into: dismissedIDs)
+    defaults.set(dismissedIDs, forKey: Self.dismissedKey)
+  }
+
+  static func fingerprint(of data: Data, createdAt: Date) -> String {
+    let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    let millis = Int64((createdAt.timeIntervalSince1970 * 1000).rounded(.towardZero))
+    return "\(digest).\(millis)"
+  }
+
+  private static func inserting(_ value: String, into values: [String]) -> [String] {
+    var next = values.filter { $0 != value }
+    next.append(value)
+    if next.count > dismissedLimit {
+      next.removeFirst(next.count - dismissedLimit)
+    }
+    return next
   }
 
   private func persistEnabled(_ enabled: Bool, at date: Date?) {
@@ -368,42 +412,77 @@ private final class PhotoLibraryChangeProbe: NSObject, PHPhotoLibraryChangeObser
   }
 }
 
-struct ScreenshotOfferCard: View {
+struct ScreenshotOfferToast: View {
   let offer: ScreenshotOffer
-  var onReview: () -> Void
+  var onAdd: () -> Void
   var onDismiss: () -> Void
+  @State private var dragOffset = CGSize.zero
+
+  private let dismissDistance: CGFloat = 72
 
   var body: some View {
-    HStack(alignment: .top, spacing: 12) {
-      thumbnail
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Add these transactions?")
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(Theme.textPrimary)
-        Text(offer.caption)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-        Button("Review", action: onReview)
-          .font(.subheadline.weight(.semibold))
-          .tint(Theme.accent)
-          .padding(.top, 4)
+    HStack(alignment: .center, spacing: 12) {
+      Button(action: onAdd) {
+        HStack(alignment: .center, spacing: 12) {
+          thumbnail
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Add these transactions?")
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(Theme.textPrimary)
+              .multilineTextAlignment(.leading)
+            Text(offer.caption)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .multilineTextAlignment(.leading)
+          }
+          Spacer(minLength: 8)
+        }
+        .contentShape(Rectangle())
       }
-      Spacer(minLength: 8)
+      .buttonStyle(.plain)
+      .accessibilityLabel("Add these transactions?")
+      .accessibilityHint(offer.caption)
+
       Button(action: onDismiss) {
-        Image(systemName: "xmark")
-          .font(.footnote.weight(.semibold))
-          .foregroundStyle(Theme.accent)
-          .frame(width: 44, height: 44)
+        Image(systemName: "xmark.circle.fill")
+          .font(.title)
+          .symbolRenderingMode(.hierarchical)
+          .foregroundStyle(.secondary)
+          .frame(width: 56, height: 56)
           .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
       .accessibilityLabel("Dismiss")
     }
     .padding(.leading, 16)
-    .padding(.vertical, 12)
-    .padding(.trailing, 4)
+    .padding(.vertical, 10)
+    .padding(.trailing, 6)
     .ynabCard()
+    .offset(x: dragOffset.width, y: max(0, dragOffset.height))
+    .opacity(swipeOpacity)
+    .simultaneousGesture(swipeToDismiss)
     .accessibilityElement(children: .contain)
+  }
+
+  private var swipeOpacity: Double {
+    let distance = hypot(dragOffset.width, max(0, dragOffset.height))
+    return max(0.35, 1 - Double(distance) / 220)
+  }
+
+  private var swipeToDismiss: some Gesture {
+    DragGesture(minimumDistance: 16)
+      .onChanged { value in
+        dragOffset = value.translation
+      }
+      .onEnded { value in
+        let away = abs(value.translation.width) > dismissDistance
+          || value.translation.height > dismissDistance
+        if away {
+          onDismiss()
+        } else {
+          dragOffset = .zero
+        }
+      }
   }
 
   @ViewBuilder

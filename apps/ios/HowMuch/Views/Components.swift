@@ -379,6 +379,17 @@ enum RootChrome {
     }
     return 90 + compactFloatingAssistantClearance
   }
+
+  /// Toast drawn inside tab content already clears the compact tab bar.
+  static func inTabToastBottomPadding(
+    idiom: UIUserInterfaceIdiom,
+    horizontalSizeClass: UserInterfaceSizeClass?
+  ) -> CGFloat {
+    if usesSidebar(idiom: idiom, horizontalSizeClass: horizontalSizeClass) {
+      return toastBottomPadding(idiom: idiom, horizontalSizeClass: horizontalSizeClass)
+    }
+    return compactFloatingAssistantClearance
+  }
 }
 
 @MainActor
