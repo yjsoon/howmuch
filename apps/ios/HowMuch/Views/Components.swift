@@ -778,6 +778,9 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
         if object === assistantButton {
           return
         }
+        if let view = object as? UIView, view.isHidden || view.alpha <= 0.01 {
+          return
+        }
         let label = object.accessibilityLabel ?? ""
         if !label.isEmpty, let frame = accessibilityFrame(of: object, in: window), frame.width > 1 || frame.height > 1 {
           pins.append(AccessibilityPin(label: label, frame: frame))
