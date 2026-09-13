@@ -42,6 +42,12 @@ enum QuickAction {
       CaptureRequest(kind: .inbox, connectionFingerprint: nil, origin: .inbox)
     )
   }
+
+  static func handleOpenURL(_ url: URL) {
+    if HowMuchDeepLink.parse(url) == .inbox {
+      enqueueInboxCapture()
+    }
+  }
 }
 
 enum HowMuchDeepLink: Equatable {
@@ -52,7 +58,15 @@ enum HowMuchDeepLink: Equatable {
     guard url.scheme?.lowercased() == "howmuch" else {
       return nil
     }
-    return .inbox
+    let host = (url.host ?? "").lowercased()
+    if host == "inbox" {
+      return .inbox
+    }
+    let path = url.path.lowercased().split(separator: "/").map(String.init)
+    if path.first == "inbox" {
+      return .inbox
+    }
+    return .launch
   }
 }
 
@@ -81,14 +95,14 @@ final class QuickActionSceneDelegate: NSObject, UIWindowSceneDelegate {
     if connectionOptions.shortcutItem?.type == QuickAction.addExpenseType {
       QuickAction.enqueueBlankCapture()
     }
-    if connectionOptions.urlContexts.contains(where: { $0.url.scheme == "howmuch" }) {
-      QuickAction.enqueueInboxCapture()
+    for context in connectionOptions.urlContexts {
+      QuickAction.handleOpenURL(context.url)
     }
   }
 
   func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
-    if URLContexts.contains(where: { $0.url.scheme == "howmuch" }) {
-      QuickAction.enqueueInboxCapture()
+    for context in URLContexts {
+      QuickAction.handleOpenURL(context.url)
     }
   }
 
@@ -214,7 +228,7 @@ private struct RootView: View {
       }
     }
     .onOpenURL { url in
-      guard url.scheme == "howmuch" else {
+      guard HowMuchDeepLink.parse(url) == .inbox else {
         return
       }
       enqueueInboxIfNeeded(force: true)

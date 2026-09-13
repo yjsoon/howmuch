@@ -18,6 +18,14 @@ final class CaptureRouter {
   private init() {}
 
   func enqueue(_ request: CaptureRequest) {
+    if case .inbox = request.kind {
+      if case .inbox = pending?.kind {
+        return
+      }
+      if case .inbox = presented?.kind {
+        return
+      }
+    }
     pending = request
   }
 
