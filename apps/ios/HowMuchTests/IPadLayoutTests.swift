@@ -49,6 +49,44 @@ final class IPadLayoutTests: XCTestCase {
     )
   }
 
+  func testPhoneRegularAccountsDoesNotPresentEmptyTransactionsSheet() async {
+    let harness = SnapshotHarness.make()
+    harness.model.ledgerPhase = .loaded
+    guard let surface = SnapshotSurface(
+      root: AccountsView()
+        .environment(harness.model)
+        .environment(RootChromeState())
+        .environment(\.horizontalSizeClass, .regular),
+      size: CGSize(width: 844, height: 390)
+    ) else {
+      XCTFail("phone regular accounts needs a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    let appeared = await surface.waitUntil {
+      surface.firstControl(labelContains: "Everyday") != nil
+    }
+    XCTAssertTrue(appeared, "phone regular accounts must show Everyday: \(surface.accessibilityLabels())")
+
+    let captured = await surface.captureUntilOCR(
+      contains: ["Everyday"],
+      timeoutNanoseconds: 1_500_000_000
+    )
+    attachImage(captured.image, name: "phone-regular-accounts-overview")
+    XCTAssertFalse(
+      captured.isBlank,
+      "phone regular accounts rendered a blank surface. OCR: [\(captured.text)]"
+    )
+
+    let showsEmptyTransactions = captured.text.localizedStandardContains("No Transactions")
+      || surface.firstControl(labelContains: "No Transactions") != nil
+    XCTAssertFalse(
+      showsEmptyTransactions,
+      "phone regular width must not auto-present the empty register. OCR: [\(captured.text)] AX: \(surface.accessibilityLabels())"
+    )
+  }
+
   func testCompactAccountsStillPushesSingleColumn() async {
     let harness = SnapshotHarness.make()
     guard let surface = SnapshotSurface(
