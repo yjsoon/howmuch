@@ -814,8 +814,10 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
     }
 
     /// Window-level AX objects are often neither `UIView` nor
-    /// `UIAccessibilityElement`. Follow `accessibilityContainer` on `NSObject`,
-    /// and drop a pin whose frame sits in a hidden tab bar that owns the row.
+    /// `UIAccessibilityElement`. The iOS SDK exposes `accessibilityContainer`
+    /// on `UIAccessibilityElement`, not `NSObject`, so non-view nodes use a
+    /// responds-to lookup. Drop a pin whose frame sits in a hidden tab bar
+    /// that owns the row.
     private func isExposed(_ object: NSObject, frame: CGRect, in window: UIWindow) -> Bool {
       if !isExposedInContainerChain(object) {
         return false
@@ -838,9 +840,20 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
           current = superview
           continue
         }
-        current = node.accessibilityContainer as? NSObject
+        current = accessibilityContainer(of: node)
       }
       return true
+    }
+
+    private func accessibilityContainer(of object: NSObject) -> NSObject? {
+      if let element = object as? UIAccessibilityElement {
+        return element.accessibilityContainer as? NSObject
+      }
+      let selector = NSSelectorFromString("accessibilityContainer")
+      guard object.responds(to: selector) else {
+        return nil
+      }
+      return object.perform(selector)?.takeUnretainedValue() as? NSObject
     }
 
     private func rowOwningTabBar(containing frame: CGRect, in window: UIWindow) -> UITabBar? {
