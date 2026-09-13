@@ -2842,35 +2842,32 @@ final class AppModel {
     var approvedCount = 0
     do {
       for chunk in plan.chunks {
-        do {
-          try await destination.client.approveTransactionBatch(
-            planID: destination.planID,
-            transactionIDs: chunk.ids
-          )
-          guard isCurrentApproval(destination) else {
-            return
-          }
-          approvedCount += chunk.count
-          applyApprovedIDs(Set(chunk.ids))
-        } catch {
-          throw BulkApprovalError(approvedCount: approvedCount, underlying: error)
+        try await destination.client.approveTransactionBatch(
+          planID: destination.planID,
+          transactionIDs: chunk.ids
+        )
+        guard isCurrentApproval(destination) else {
+          return
         }
+        approvedCount += chunk.count
+        applyApprovedIDs(Set(chunk.ids))
       }
       guard isCurrentApproval(destination) else {
         return
       }
       approvalSession = RegisterApproval.finish(approvalSession, ids: plan.ids)
       await refresh(after: .transactionsApproved)
-    } catch let error as BulkApprovalError {
+    } catch {
       guard isCurrentApproval(destination) else {
         return
       }
+      let bulkError = BulkApprovalError(approvedCount: approvedCount, underlying: error)
       approvalSession = RegisterApproval.fail(
         approvalSession,
         ids: plan.ids,
-        approvedCount: error.approvedCount
+        approvedCount: bulkError.approvedCount
       )
-      showSaveMessage(Self.failureToast(error, plannedCount: plan.ids.count), kind: .failure)
+      showSaveMessage(Self.failureToast(bulkError, plannedCount: plan.ids.count), kind: .failure)
       await refreshLedger(quiet: true)
     }
   }
