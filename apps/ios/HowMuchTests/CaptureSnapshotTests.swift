@@ -607,8 +607,8 @@ final class CaptureSnapshotTests: XCTestCase {
         root.environment(harness.model),
         expected: needles,
         name: "capture-\(name)",
-        scanUntilExpectedTogether: name == "clarification",
-        forbidden: name == "empty" ? ["Add an expense", "Try “Lunch $12”.", "Allow sending"] : []
+        forbidden: name == "empty" ? ["Add an expense", "Try “Lunch $12”.", "Allow sending"] : [],
+        scanUntilExpectedTogether: name == "clarification"
       )
     }
   }
@@ -1019,7 +1019,7 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertTrue(harness.model.pendingRows.isEmpty, "opening the form must not enqueue a save")
   }
 
-  func testPendingImageAndFinancialTextKeepSendEnabled() async {
+  func testPendingImageAndFinancialTextKeepSendEnabled() async throws {
     let harness = SnapshotHarness.make()
     let session = harness.admitPendingPhoto()
     XCTAssertTrue(session.canSendComposer)
