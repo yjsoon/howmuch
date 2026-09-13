@@ -949,18 +949,18 @@ private final class UnapprovedProbeRequestLog: @unchecked Sendable {
   private let lock = NSLock()
   private var counts: [String: Int] = [:]
   private var answersUnapprovedPageSlowly = false
-  private var hangApprovePatch = false
-  private var failApprovePatch = false
+  private var hangsApprovePatch = false
+  private var failsApprovePatch = false
   private var approvePatchGate: DispatchSemaphore?
-  private var unapprovedPageBody: String?
+  private var unapprovedPageJSON: String?
 
   func reset() {
     lock.lock()
     counts = [:]
     answersUnapprovedPageSlowly = false
-    hangApprovePatch = false
-    failApprovePatch = false
-    unapprovedPageBody = nil
+    hangsApprovePatch = false
+    failsApprovePatch = false
+    unapprovedPageJSON = nil
     let gate = approvePatchGate
     approvePatchGate = nil
     lock.unlock()
@@ -993,14 +993,14 @@ private final class UnapprovedProbeRequestLog: @unchecked Sendable {
 
   func hangApprovePatch() {
     lock.lock()
-    hangApprovePatch = true
+    hangsApprovePatch = true
     approvePatchGate = DispatchSemaphore(value: 0)
     lock.unlock()
   }
 
   func failApprovePatch() {
     lock.lock()
-    failApprovePatch = true
+    failsApprovePatch = true
     lock.unlock()
   }
 
@@ -1014,7 +1014,7 @@ private final class UnapprovedProbeRequestLog: @unchecked Sendable {
   func approvePatchShouldHang() -> Bool {
     lock.lock()
     defer { lock.unlock() }
-    return hangApprovePatch
+    return hangsApprovePatch
   }
 
   func waitForApprovePatchRelease() {
@@ -1027,19 +1027,19 @@ private final class UnapprovedProbeRequestLog: @unchecked Sendable {
   func approvePatchShouldFail() -> Bool {
     lock.lock()
     defer { lock.unlock() }
-    return failApprovePatch
+    return failsApprovePatch
   }
 
   func setUnapprovedPageBody(_ body: String?) {
     lock.lock()
-    unapprovedPageBody = body
+    unapprovedPageJSON = body
     lock.unlock()
   }
 
   func unapprovedPageBody() -> String? {
     lock.lock()
     defer { lock.unlock() }
-    return unapprovedPageBody
+    return unapprovedPageJSON
   }
 }
 
