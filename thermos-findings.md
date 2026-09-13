@@ -23,20 +23,63 @@ This file: persist review progress if credits die. Single source of truth for th
 - [x] Launch thermo-nuclear-review-subagent (`bc-d995e3fd-96b2-52cf-84bc-0a58086ed49b`)
 - [x] Launch thermo-nuclear-code-quality-review-subagent (`bc-bd5a061c-a9a4-5d07-a669-c0933a81dabf`)
 - [x] Code-quality report landed (2026-09-13 00:46)
-- [ ] Correctness report (still in flight)
-- [ ] Synthesize unified verdict
+- [x] Correctness report landed (2026-09-13 00:47)
+- [x] Synthesize unified verdict
 
-### 2026-09-13 00:45 — both thermos subagents launched in background
+### 2026-09-13 00:47 — both passes in; synthesis written
 
-Waiting on completion notifications. Do not poll. Next step is synthesis into this file.
+Correctness: no medium/high. Quality: request changes on dual API + dead observer. Unified: merge-ok for the bug; follow-up the structural leftovers if they touch the file again.
 
 ## Unified verdict
 
-*(empty until both subagents return)*
+**No correctness blockers on [#203](https://github.com/yjsoon/howmuch/pull/203) tip `860f213`.** The split gate matches root chrome. Phone regular width no longer auto-presents `No Transactions`. The rotation follow-up is necessary and correct.
+
+**Quality still wants a follow-up before treating the shape as done.** Three reviewers (parent, correctness, quality) all saw the same structural leftover: optional `usesSplit` plus a dead `onChange(of: isSplit)` / `afterSplitChange` layer. That is not a behaviour bug. Quality would request changes anyway; correctness would not block.
+
+**Resolve the disagreement toward correctness for merge, quality for the follow-up.** The PR’s job is the first-launch empty-register bug. Author LGTM’d `860f213`. Do not reopen the rotation/snapshot issues from `0534109`. If they iterate, make `usesSplit` a required `Bool` and delete the observer/helper. That shrinks `AccountsView.swift` instead of growing it 1242 → 1253.
 
 ## Findings (deduped)
 
-*(empty until synthesis)*
+Weighted by overlap. All three of parent + [Thermo nuclear review](bc-d995e3fd-96b2-52cf-84bc-0a58086ed49b) + [Thermo code quality review](bc-bd5a061c-a9a4-5d07-a669-c0933a81dabf) agree on 1–2. Quality treats them as merge-blocking; correctness and parent do not.
+
+### 1. Dual contract: optional `usesSplit` + `UIDevice` fallback — quality high, correctness low
+
+`AccountsView.swift:80-92`. Production always injects (`Components.swift:473`, `:546`). The nil path exists so `AccountsView()` still compiles (`IPadLayoutTests.swift:94`). Three ways to answer `pad && regular`.
+
+**Fix if iterating:** `usesSplit: Bool` required. No default. No `UIDevice`. Compact test passes `false`. Drop `@Environment(\.horizontalSizeClass)` from this view.
+
+Correctness note: forgetting the argument on phone is still safe because the fallback includes idiom. The old bug was size class alone. So this is not a regression hole for the stated bug; it is a second API.
+
+### 2. `onChange(of: isSplit)` / `afterSplitChange` do not fire in production — quality high, correctness low/nit
+
+`AccountsView.swift:55-73`, `127-134`. `RootTabView` is `if usesSidebar { … } else { … }` (`Components.swift:468-528`). Different TabViews; SwiftUI will not keep `AccountsView` identity. `isSplit` is constant per instance.
+
+Outcomes still match via recreation:
+- Leave split → new compact view, `pane == nil`, no auto-push
+- Enter split → `onAppear` + `reconcilePane(usesSplit: true)` pins default
+- Plus/Max rotation stays stacked because `usesSplit` stays false (the `0534109` bug was watching size class)
+
+Quality: delete `afterSplitChange`, the observer, `isSplit`. Keep `reconciled(usesSplit:)`. `testLeavingSplitClearsPaneSoCompactDoesNotAutoPush` then has no production caller.
+
+Correctness: belt-and-suspenders for the nil fallback / a future host that does not rebuild. Comment slightly oversells it as the slide-over mechanism.
+
+**Judgment:** the quality judo is right if they touch the file again. Not a reason to reject the bugfix.
+
+### 3. File size 1242 → 1253 (pre-existing over 1k)
+
+Quality only, and they say do not extract a module — delete the extra policy instead. Parent agrees. Not a correctness issue.
+
+### 4. `CaptureSnapshotTests` compile churn
+
+Labeled-arg reorder is a no-op. `async throws` is the real Mac compile fix for `try XCTUnwrap` (latent on main). Quality wants it in a separate commit; correctness says not blocking. Do not treat as a layout defect.
+
+### Already closed on this tip (do not re-report)
+
+Author review on `0534109`: rotation pop; snapshot injecting `usesSplit: false` instead of the production tree. Both fixed in `860f213`. Author LGTM. BugBot disabled. No other modules consume this pane machine. No secrets, feature-flags, or devex breaks.
+
+### Intended behaviour
+
+Phone (any size class) = stacked overview, no auto register. iPad regular = split + default pane (empty register chrome is intended). Connection settings sheet unchanged. Web untouched.
 
 ## Parent draft (logged in case credits die before subagents return)
 
@@ -344,7 +387,19 @@ Production always injects `usesSplit: usesSidebar`. Compact and sidebar trees ar
 
 ### thermo-nuclear-review-subagent
 
-*(pending)*
+Returned 2026-09-13 00:47. Agent: [Thermo nuclear review](bc-d995e3fd-96b2-52cf-84bc-0a58086ed49b)
+
+**No medium or high findings.** Tip `860f213` is correct for the stated bug. Would not block on nits. PR discussion not checked (skill: only after medium+).
+
+Gate matches root chrome. Phone regular width no longer installs `NavigationSplitView` or auto-pins a register. iPad regular split still does.
+
+Production trees still land on the right pane even though `onChange(of: isSplit)` does not fire there: `RootTabView` if/else tears identity down. `afterSplitChange` is live only on the nil-fallback / a host that does not rebuild.
+
+`0534109` still watched `horizontalSizeClass` and cleared a pushed register on Plus/Max rotate. `860f213` is that fix.
+
+Tests: phone-regular snapshot hosts production `RootTabView(usesSidebar: false)` at 844×390 regular. Compact `AccountsView()` at `.compact` is safe (fallback false on phone and iPad compact).
+
+Low/nit: belt-and-suspenders observer; compact snapshot omits `usesSplit`; optional duplicates `RootChrome.usesSidebar`. No security, feature-leak, or destex issues. CaptureSnapshotTests labeled-arg reorder is a no-op; `async throws` is the real Mac compile fix.
 
 ### thermo-nuclear-code-quality-review-subagent
 
