@@ -329,14 +329,6 @@ final class IPadLayoutTests: XCTestCase {
       RootChrome.toastBottomPadding(idiom: .phone, horizontalSizeClass: .compact),
       90 + RootChrome.compactFloatingAssistantClearance
     )
-    XCTAssertEqual(
-      RootChrome.inTabToastBottomPadding(idiom: .phone, horizontalSizeClass: .compact),
-      RootChrome.compactFloatingAssistantClearance
-    )
-    XCTAssertEqual(
-      RootChrome.inTabToastBottomPadding(idiom: .pad, horizontalSizeClass: .regular),
-      RootChrome.toastBottomPadding(idiom: .pad, horizontalSizeClass: .regular)
-    )
   }
 
   func testOpenMorePlanFromAccountsDoesNotLeakFocusedRegister() {

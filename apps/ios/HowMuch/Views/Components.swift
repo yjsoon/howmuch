@@ -379,16 +379,6 @@ enum RootChrome {
     }
     return 90 + compactFloatingAssistantClearance
   }
-
-  static func inTabToastBottomPadding(
-    idiom: UIUserInterfaceIdiom,
-    horizontalSizeClass: UserInterfaceSizeClass?
-  ) -> CGFloat {
-    if usesSidebar(idiom: idiom, horizontalSizeClass: horizontalSizeClass) {
-      return toastBottomPadding(idiom: idiom, horizontalSizeClass: horizontalSizeClass)
-    }
-    return compactFloatingAssistantClearance
-  }
 }
 
 @MainActor

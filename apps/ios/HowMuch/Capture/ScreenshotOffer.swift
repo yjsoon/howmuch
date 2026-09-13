@@ -20,6 +20,7 @@ struct ScreenshotOffer: Equatable, Identifiable, Sendable {
   var lineCount: Int
   var imageData: Data
   var filename: String
+  var createdAt: Date
 
   var caption: String {
     let noun = lineCount == 1 ? "line" : "lines"
@@ -156,7 +157,8 @@ final class ScreenshotOfferController {
       fingerprint: Self.fingerprint(of: candidate.data, createdAt: candidate.createdAt),
       lineCount: lines,
       imageData: candidate.data,
-      filename: candidate.filename
+      filename: candidate.filename,
+      createdAt: candidate.createdAt
     )
   }
 
@@ -169,7 +171,7 @@ final class ScreenshotOfferController {
     {
       return false
     }
-    if let enabledAt, candidate.createdAt < enabledAt {
+    if let enabledAt, candidate.createdAt <= enabledAt {
       return false
     }
     return !candidate.data.isEmpty && candidate.data.count <= InboxStore.maxPayloadBytes
@@ -221,6 +223,9 @@ final class ScreenshotOfferController {
     dismissedFingerprints = Self.inserting(offer.fingerprint, into: dismissedFingerprints)
     defaults.set(dismissedIDs, forKey: Self.dismissedKey)
     defaults.set(dismissedFingerprints, forKey: Self.dismissedFingerprintsKey)
+    if let enabledAt {
+      persistEnabled(true, at: max(enabledAt, offer.createdAt))
+    }
     if self.offer?.id == offer.id {
       self.offer = nil
     }
@@ -347,7 +352,7 @@ final class PhotosScreenshotLibrary: ScreenshotLibrary {
     let assets = PHAsset.fetchAssets(in: album, options: options)
     var match: PHAsset?
     assets.enumerateObjects { asset, _, stop in
-      guard let created = asset.creationDate, created >= createdAfter else {
+      guard let created = asset.creationDate, created > createdAfter else {
         return
       }
       guard !excluding.contains(asset.localIdentifier) else {

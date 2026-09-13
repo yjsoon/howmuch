@@ -74,11 +74,25 @@ final class ScreenshotOfferTests: XCTestCase {
 
   func testCaptionUsesLineCount() {
     XCTAssertEqual(
-      ScreenshotOffer(id: "a", fingerprint: "fp", lineCount: 1, imageData: Data(), filename: "payload.png").caption,
+      ScreenshotOffer(
+        id: "a",
+        fingerprint: "fp",
+        lineCount: 1,
+        imageData: Data(),
+        filename: "payload.png",
+        createdAt: Date.distantFuture
+      ).caption,
       "Looks like a screenshot · 1 line"
     )
     XCTAssertEqual(
-      ScreenshotOffer(id: "a", fingerprint: "fp", lineCount: 3, imageData: Data(), filename: "payload.png").caption,
+      ScreenshotOffer(
+        id: "a",
+        fingerprint: "fp",
+        lineCount: 3,
+        imageData: Data(),
+        filename: "payload.png",
+        createdAt: Date.distantFuture
+      ).caption,
       "Looks like a screenshot · 3 lines"
     )
   }
@@ -206,17 +220,36 @@ final class ScreenshotOfferTests: XCTestCase {
 
   func testDifferentScreenshotStillOffersAfterDismiss() async {
     await controller.setEnabled(true)
-    library.next = candidate(id: "shot-1", createdAt: Date.distantFuture)
+    let firstTaken = Date(timeIntervalSince1970: 1_789_000_000)
+    library.next = candidate(id: "shot-1", createdAt: firstTaken)
     await controller.refresh()
     controller.dismiss()
 
     library.next = candidate(
       id: "shot-2",
-      createdAt: Date.distantFuture,
+      createdAt: firstTaken.addingTimeInterval(1),
       data: Data([0xFF, 0xD8, 0xFF, 0xD9])
     )
     await controller.refresh()
     XCTAssertEqual(controller.offer?.id, "shot-2")
+  }
+
+  func testDismissDoesNotOfferAnOlderScreenshot() async {
+    await controller.setEnabled(true)
+    let newer = Date(timeIntervalSince1970: 1_789_000_100)
+    let older = Date(timeIntervalSince1970: 1_789_000_000)
+    library.next = candidate(id: "shot-new", createdAt: newer)
+    await controller.refresh()
+    XCTAssertEqual(controller.offer?.id, "shot-new")
+    controller.dismiss()
+
+    library.next = candidate(
+      id: "shot-old",
+      createdAt: older,
+      data: Data([0xFF, 0xD8, 0xFF, 0xD9])
+    )
+    await controller.refresh()
+    XCTAssertNil(controller.offer)
   }
 
   func testLaterScreenshotWithTheSameBytesStillOffers() async {
@@ -331,7 +364,7 @@ final class FakeScreenshotLibrary: ScreenshotLibrary {
   }
 
   func latestScreenshot(createdAfter: Date, excluding: Set<String>) async -> ScreenshotCandidate? {
-    guard let next, next.createdAt >= createdAfter, !excluding.contains(next.id) else {
+    guard let next, next.createdAt > createdAfter, !excluding.contains(next.id) else {
       return nil
     }
     return next

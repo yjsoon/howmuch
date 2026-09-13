@@ -108,10 +108,15 @@ struct AccountsView: View {
         .padding(.horizontal, 16)
         .padding(
           .bottom,
-          RootChrome.inTabToastBottomPadding(
+          RootChrome.usesSidebar(
             idiom: UIDevice.current.userInterfaceIdiom,
             horizontalSizeClass: horizontalSizeClass
           )
+            ? RootChrome.toastBottomPadding(
+              idiom: UIDevice.current.userInterfaceIdiom,
+              horizontalSizeClass: horizontalSizeClass
+            )
+            : 12
         )
         .transition(.move(edge: .bottom).combined(with: .opacity))
       }
