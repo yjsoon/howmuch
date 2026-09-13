@@ -52,14 +52,15 @@ final class IPadLayoutTests: XCTestCase {
   func testPhoneRegularAccountsDoesNotPresentEmptyTransactionsSheet() async {
     let harness = SnapshotHarness.make()
     harness.model.ledgerPhase = .loaded
+    let chrome = RootChromeState()
     guard let surface = SnapshotSurface(
-      root: AccountsView(usesSplit: false)
+      root: RootTabView(chrome: chrome, usesSidebar: false)
         .environment(harness.model)
-        .environment(RootChromeState())
+        .environment(chrome)
         .environment(\.horizontalSizeClass, .regular),
       size: CGSize(width: 844, height: 390)
     ) else {
-      XCTFail("phone regular accounts needs a connected UIWindowScene")
+      XCTFail("phone regular root tabs need a connected UIWindowScene")
       return
     }
     defer { surface.detach() }
@@ -158,7 +159,7 @@ final class IPadLayoutTests: XCTestCase {
     var pane: AccountsPane?
     pane = AccountsPaneSelection.reconciled(
       current: pane,
-      isRegularWidth: true,
+      usesSplit: true,
       knownAccountIDs: [],
       canChooseDefault: false,
       defaultPane: .all
@@ -167,7 +168,7 @@ final class IPadLayoutTests: XCTestCase {
 
     pane = AccountsPaneSelection.reconciled(
       current: pane,
-      isRegularWidth: true,
+      usesSplit: true,
       knownAccountIDs: ["acct-rainy", "acct-everyday"],
       canChooseDefault: true,
       defaultPane: .account("acct-everyday")
@@ -178,7 +179,7 @@ final class IPadLayoutTests: XCTestCase {
   func testRegularPaneReplacesDeletedAccount() {
     let pane = AccountsPaneSelection.reconciled(
       current: .account("acct-gone"),
-      isRegularWidth: true,
+      usesSplit: true,
       knownAccountIDs: ["acct-everyday"],
       canChooseDefault: true,
       defaultPane: .account("acct-everyday")
@@ -189,7 +190,7 @@ final class IPadLayoutTests: XCTestCase {
   func testCompactRefreshKeepsPushedRegister() {
     let pane = AccountsPaneSelection.reconciled(
       current: .account("acct-everyday"),
-      isRegularWidth: false,
+      usesSplit: false,
       knownAccountIDs: ["acct-everyday"],
       canChooseDefault: false,
       defaultPane: .all
@@ -200,7 +201,7 @@ final class IPadLayoutTests: XCTestCase {
   func testCompactPrunesDeletedAccount() {
     let pane = AccountsPaneSelection.reconciled(
       current: .account("acct-gone"),
-      isRegularWidth: false,
+      usesSplit: false,
       knownAccountIDs: ["acct-everyday"],
       canChooseDefault: true,
       defaultPane: .account("acct-everyday")
@@ -208,10 +209,10 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertNil(pane)
   }
 
-  func testLeavingRegularWidthClearsPaneSoCompactDoesNotAutoPush() {
-    let pane = AccountsPaneSelection.afterSizeClassChange(
+  func testLeavingSplitClearsPaneSoCompactDoesNotAutoPush() {
+    let pane = AccountsPaneSelection.afterSplitChange(
       current: .account("acct-everyday"),
-      isRegularWidth: false,
+      usesSplit: false,
       knownAccountIDs: ["acct-everyday"],
       canChooseDefault: true,
       defaultPane: .account("acct-everyday")
@@ -222,7 +223,7 @@ final class IPadLayoutTests: XCTestCase {
   func testRegularKeepsExplicitAllWhenAccountsArrive() {
     let pane = AccountsPaneSelection.reconciled(
       current: .all,
-      isRegularWidth: true,
+      usesSplit: true,
       knownAccountIDs: ["acct-everyday"],
       canChooseDefault: true,
       defaultPane: .account("acct-everyday")
@@ -285,7 +286,7 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertFalse(usesSplit)
     let pane = AccountsPaneSelection.reconciled(
       current: nil,
-      isRegularWidth: usesSplit,
+      usesSplit: usesSplit,
       knownAccountIDs: ["acct-everyday"],
       canChooseDefault: true,
       defaultPane: .account("acct-everyday")
