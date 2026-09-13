@@ -639,98 +639,6 @@ final class UnapprovedCountLaunchTests: XCTestCase {
     )
   }
 
-  func testApproveToastsAndDropsTheBadgeBeforeTheBatchReturns() async {
-    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
-    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
-    UnapprovedProbeProtocol.reset()
-    UnapprovedProbeProtocol.holdApprovalPatches()
-
-    var settings = APISettings()
-    settings.baseURLString = UnapprovedProbeProtocol.fixtureBaseURL
-    settings.authenticatedUserID = "unapproved-instant-\(UUID().uuidString)"
-    settings.sessionToken = "token"
-    settings.planID = UnapprovedProbeProtocol.planID
-
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
-
-    guard let surface = SnapshotSurface(
-      root: LaunchProbe(model: model, taskID: { $0.launchRefreshTaskID }),
-      size: CGSize(width: 10, height: 10)
-    ) else {
-      XCTFail("instant approve probe requires a connected UIWindowScene")
-      UnapprovedProbeProtocol.releaseApprovalPatches()
-      return
-    }
-    defer {
-      UnapprovedProbeProtocol.releaseApprovalPatches()
-      surface.detach()
-    }
-
-    let counted = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
-      model.unapprovedBadgeCount == UnapprovedProbeProtocol.fixtureUnapprovedCount
-    }
-    XCTAssertTrue(counted, "the plan-wide count must land before this test can move it")
-
-    let rows = (1...2).map { index in
-      HowMuch.Transaction.approvalFixture(id: "held-\(index)", accountID: UnapprovedProbeProtocol.fixtureAccountID)
-    }
-    model.approveEligible(from: rows)
-
-    XCTAssertEqual(model.lastSaveMessage?.kind, .success)
-    XCTAssertEqual(model.lastSaveMessage?.text, RegisterApproval.approvedToast(2))
-    XCTAssertTrue(model.isApprovalInFlight)
-    XCTAssertEqual(
-      model.unapprovedBadgeCount,
-      UnapprovedProbeProtocol.fixtureUnapprovedCount - rows.count
-    )
-
-    UnapprovedProbeProtocol.releaseApprovalPatches()
-    let settled = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
-      !model.isApprovalInFlight
-    }
-    XCTAssertTrue(settled, "releasing the PATCH must finish the in-flight approval")
-  }
-
-  func testApproveFailureRestoresTheBadgeAndReplacesTheSuccessToast() async {
-    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
-    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
-    UnapprovedProbeProtocol.reset()
-    UnapprovedProbeProtocol.failApprovalPatches()
-
-    var settings = APISettings()
-    settings.baseURLString = UnapprovedProbeProtocol.fixtureBaseURL
-    settings.authenticatedUserID = "unapproved-fail-\(UUID().uuidString)"
-    settings.sessionToken = "token"
-    settings.planID = UnapprovedProbeProtocol.planID
-
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
-
-    guard let surface = SnapshotSurface(
-      root: LaunchProbe(model: model, taskID: { $0.launchRefreshTaskID }),
-      size: CGSize(width: 10, height: 10)
-    ) else {
-      XCTFail("failed approve probe requires a connected UIWindowScene")
-      return
-    }
-    defer { surface.detach() }
-
-    let counted = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
-      model.unapprovedBadgeCount == UnapprovedProbeProtocol.fixtureUnapprovedCount
-    }
-    XCTAssertTrue(counted, "the plan-wide count must land before this test can move it")
-
-    let rows = [
-      HowMuch.Transaction.approvalFixture(id: "fail-1", accountID: UnapprovedProbeProtocol.fixtureAccountID)
-    ]
-    model.approveEligible(from: rows)
-
-    let failed = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
-      model.lastSaveMessage?.kind == .failure && !model.isApprovalInFlight
-    }
-    XCTAssertTrue(failed, "a rejected PATCH must replace the success toast and clear in-flight state")
-    XCTAssertEqual(model.unapprovedBadgeCount, UnapprovedProbeProtocol.fixtureUnapprovedCount)
-  }
-
   /// A category drill-down narrows the register by something the count endpoint
   /// cannot express, so it must walk the queue rather than stand the plan-wide
   /// number in -- otherwise "Review N new transactions" overstates what is
@@ -838,10 +746,14 @@ final class UnapprovedCountLaunchTests: XCTestCase {
       root: LaunchProbe(model: model, taskID: { _ in "static" }),
       size: CGSize(width: 10, height: 10)
     ) else {
+      UnapprovedProbeProtocol.releaseApprovePatch()
       XCTFail("hang-approve probe requires a connected UIWindowScene")
       return
     }
-    defer { surface.detach() }
+    defer {
+      UnapprovedProbeProtocol.releaseApprovePatch()
+      surface.detach()
+    }
 
     await model.openUnapprovedQueue(viewer: "hang-success")
     let loaded = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
@@ -890,10 +802,14 @@ final class UnapprovedCountLaunchTests: XCTestCase {
       root: LaunchProbe(model: model, taskID: { _ in "static" }),
       size: CGSize(width: 10, height: 10)
     ) else {
+      UnapprovedProbeProtocol.releaseApprovePatch()
       XCTFail("hang-approve failure probe requires a connected UIWindowScene")
       return
     }
-    defer { surface.detach() }
+    defer {
+      UnapprovedProbeProtocol.releaseApprovePatch()
+      surface.detach()
+    }
 
     await model.openUnapprovedQueue(viewer: "hang-fail")
     let loaded = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {

@@ -183,7 +183,9 @@ struct RegisterView: View {
       if showingUnapprovedQueue, let approveAllTitle = model.approveAllTitle(for: transactions) {
         ToolbarItem(placement: .topBarTrailing) {
           Button(approveAllTitle) {
-            model.approveEligible(from: transactions)
+            withAnimation(.snappy) {
+              model.approveEligible(from: transactions)
+            }
           }
           .disabled(model.isApprovalInFlight)
         }
@@ -777,7 +779,9 @@ struct RegisterView: View {
   }
 
   private func approve(_ transaction: Transaction) {
-    model.approveTransaction(transaction)
+    withAnimation(.snappy) {
+      model.approveTransaction(transaction)
+    }
   }
 
   private func delete(_ transaction: Transaction) {

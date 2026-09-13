@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import SwiftUI
 
 enum LoadPhase: Equatable {
   case idle
@@ -2800,9 +2799,7 @@ final class AppModel {
   }
 
   func approveEligible(from rows: [Transaction]) {
-    Task {
-      try? await runApproval(from: rows, success: .bulk)
-    }
+    startApproval(from: rows, success: .bulk)
   }
 
   func approveTransaction(_ transaction: Transaction) {
@@ -2815,12 +2812,10 @@ final class AppModel {
     guard !transaction.approved else {
       return
     }
-    Task {
-      try? await runApproval(from: [transaction], success: .single(transaction))
-    }
+    startApproval(from: [transaction], success: .single(transaction))
   }
 
-  private func runApproval(from rows: [Transaction], success: ApprovalSuccessCopy) async throws {
+  private func startApproval(from rows: [Transaction], success: ApprovalSuccessCopy) {
     let candidates = rows.filter { pendingEdits[$0.id] == nil && editTasks[$0.id] == nil }
     guard let plan = RegisterApproval.plan(
       submitted: candidates.map(\.approvalRow),
@@ -2831,30 +2826,45 @@ final class AppModel {
     guard let started = RegisterApproval.begin(approvalSession, ids: plan.ids) else {
       return
     }
-    withAnimation(.snappy) {
-      approvalSession = started
-      showSaveMessage(Self.successToast(success, plannedCount: plan.ids.count))
+    let destination = EditDestination(
+      planID: settings.planID,
+      connectionFingerprint: settings.connectionFingerprint,
+      client: apiClient
+    )
+    approvalSession = started
+    showSaveMessage(Self.successToast(success, plannedCount: plan.ids.count))
+    Task {
+      await settleApproval(plan: plan, destination: destination)
     }
+  }
+
+  private func settleApproval(plan: RegisterApproval.Plan, destination: EditDestination) async {
     var approvedCount = 0
     do {
       for chunk in plan.chunks {
         do {
-          try await apiClient.approveTransactionBatch(
-            planID: settings.planID,
+          try await destination.client.approveTransactionBatch(
+            planID: destination.planID,
             transactionIDs: chunk.ids
           )
+          guard isCurrentApproval(destination) else {
+            return
+          }
           approvedCount += chunk.count
           applyApprovedIDs(Set(chunk.ids))
         } catch {
           throw BulkApprovalError(approvedCount: approvedCount, underlying: error)
         }
       }
+      guard isCurrentApproval(destination) else {
+        return
+      }
       approvalSession = RegisterApproval.finish(approvalSession, ids: plan.ids)
-      // Approval moves no money and the approved ids are applied locally, so
-      // this plans no fetch; the failure path below still re-reads the ledger
-      // because a partial batch leaves the queue uncertain.
       await refresh(after: .transactionsApproved)
     } catch let error as BulkApprovalError {
+      guard isCurrentApproval(destination) else {
+        return
+      }
       approvalSession = RegisterApproval.fail(
         approvalSession,
         ids: plan.ids,
@@ -2862,8 +2872,12 @@ final class AppModel {
       )
       showSaveMessage(Self.failureToast(error, plannedCount: plan.ids.count), kind: .failure)
       await refreshLedger(quiet: true)
-      throw error
     }
+  }
+
+  private func isCurrentApproval(_ destination: EditDestination) -> Bool {
+    destination.planID == settings.planID
+      && destination.connectionFingerprint == settings.connectionFingerprint
   }
 
   private static func successToast(_ success: ApprovalSuccessCopy, plannedCount: Int) -> String {
