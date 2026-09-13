@@ -783,9 +783,9 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
         }
         let label = object.accessibilityLabel ?? ""
         if !label.isEmpty,
-           isExposed(object),
            let frame = accessibilityFrame(of: object, in: window),
-           frame.width > 1 || frame.height > 1
+           frame.width > 1 || frame.height > 1,
+           isExposed(object, frame: frame, in: window)
         {
           pins.append(AccessibilityPin(label: label, frame: frame))
         }
@@ -813,25 +813,104 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
       return pins
     }
 
-    /// Window-level AX elements can still name a hidden tab row. Follow the
-    /// container / superview chain so a hidden UITabBar drops the Add pin.
-    private func isExposed(_ object: NSObject) -> Bool {
+    /// Window-level AX objects are often neither `UIView` nor
+    /// `UIAccessibilityElement`. Follow `accessibilityContainer` on `NSObject`,
+    /// and drop a pin whose frame sits in a hidden tab bar that owns the row.
+    private func isExposed(_ object: NSObject, frame: CGRect, in window: UIWindow) -> Bool {
+      if !isExposedInContainerChain(object) {
+        return false
+      }
+      if let owner = rowOwningTabBar(containing: frame, in: window), !isShownInHierarchy(owner) {
+        return false
+      }
+      return true
+    }
+
+    private func isExposedInContainerChain(_ object: NSObject) -> Bool {
       var current: NSObject? = object
       var seen = Set<ObjectIdentifier>()
       while let node = current, !seen.contains(ObjectIdentifier(node)) {
         seen.insert(ObjectIdentifier(node))
-        if let view = node as? UIView {
-          if view.isHidden || view.alpha <= 0.01 {
-            return false
+        if let view = node as? UIView, view.isHidden || view.alpha <= 0.01 {
+          return false
+        }
+        if let view = node as? UIView, let superview = view.superview {
+          current = superview
+          continue
+        }
+        current = node.accessibilityContainer as? NSObject
+      }
+      return true
+    }
+
+    private func rowOwningTabBar(containing frame: CGRect, in window: UIWindow) -> UITabBar? {
+      let owners = tabBars(in: window).filter { bar in
+        bar.bounds.width > 1
+          && bar.bounds.height > 1
+          && bar.convert(bar.bounds, to: window).intersects(frame)
+          && tabBarHostsRowLabels(bar)
+      }
+      return owners.first { isShownInHierarchy($0) } ?? owners.first
+    }
+
+    private func tabBars(in view: UIView) -> [UITabBar] {
+      var found: [UITabBar] = []
+      func walk(_ node: UIView) {
+        if let bar = node as? UITabBar {
+          found.append(bar)
+        }
+        for subview in node.subviews {
+          walk(subview)
+        }
+      }
+      walk(view)
+      return found
+    }
+
+    /// Ownership walk — includes hidden bars so we can tell which one hosts Add.
+    private func tabBarHostsRowLabels(_ bar: UITabBar) -> Bool {
+      var labels: Set<String> = []
+      var seen = Set<ObjectIdentifier>()
+      func collect(_ object: NSObject) {
+        let identity = ObjectIdentifier(object)
+        guard !seen.contains(identity) else {
+          return
+        }
+        seen.insert(identity)
+        if let label = object.accessibilityLabel, !label.isEmpty {
+          labels.insert(label)
+        }
+        let count = object.accessibilityElementCount()
+        if count != NSNotFound, count > 0 {
+          for index in 0..<count {
+            if let element = object.accessibilityElement(at: index) as? NSObject {
+              collect(element)
+            }
           }
-          current = view.superview
-          continue
+        } else if let elements = object.accessibilityElements {
+          for element in elements {
+            if let child = element as? NSObject {
+              collect(child)
+            }
+          }
         }
-        if let element = node as? UIAccessibilityElement {
-          current = element.accessibilityContainer as? NSObject
-          continue
+        if let view = object as? UIView {
+          for subview in view.subviews {
+            collect(subview)
+          }
         }
-        break
+      }
+      collect(bar)
+      return labels.contains(CompactRootBar.action.title) || labels.contains(AppTab.accounts.title)
+    }
+
+    private func isShownInHierarchy(_ view: UIView) -> Bool {
+      var current: UIView? = view
+      while let node = current {
+        if node.isHidden || node.alpha <= 0.01 {
+          return false
+        }
+        current = node.superview
       }
       return true
     }

@@ -326,8 +326,8 @@ final class CaptureSnapshotTests: XCTestCase {
         && surface.tabRowOverlayButton(label: "Assistant") != nil
     }
     XCTAssertTrue(appeared, "compact chrome must host floating Assistant: \(surface.accessibilityLabels())")
-    guard let tabBar = surface.firstDescendant(UITabBar.self) else {
-      XCTFail("compact root must host a UITabBar")
+    guard let tabBar = surface.tabBarOwningRow() else {
+      XCTFail("compact root must host the UITabBar that owns Add")
       return
     }
     tabBar.isHidden = true
@@ -2728,6 +2728,29 @@ final class SnapshotSurface {
 
   func firstDescendant<T: UIView>(_ type: T.Type) -> T? {
     Self.search(host.view, type)
+  }
+
+  /// The visible (or last remaining) tab bar that hosts the compact Add row.
+  /// `firstDescendant(UITabBar.self)` can hit a leftover already-hidden system bar.
+  func tabBarOwningRow() -> UITabBar? {
+    var found: [UITabBar] = []
+    func walk(_ node: UIView) {
+      if let bar = node as? UITabBar {
+        found.append(bar)
+      }
+      for subview in node.subviews {
+        walk(subview)
+      }
+    }
+    walk(window)
+    let sized = found.filter { $0.bounds.width > 1 && $0.bounds.height > 1 }
+    if let add = firstControl(label: CompactRootBar.action.title) {
+      let hitting = sized.filter { $0.convert($0.bounds, to: window).intersects(add.frame) }
+      if let shown = hitting.first(where: { !$0.isHidden && $0.alpha > 0.01 }) {
+        return shown
+      }
+    }
+    return sized.first { !$0.isHidden && $0.alpha > 0.01 } ?? sized.first
   }
 
   var windowBounds: CGRect { window.bounds }
