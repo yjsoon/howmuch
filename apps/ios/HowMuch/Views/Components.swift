@@ -518,11 +518,11 @@ struct RootTabView: View {
       }
       .tabViewStyle(.tabBarOnly)
       .tabBarMinimizeBehavior(.onScrollDown)
-      .background {
+      .overlay {
         RootTabBarFloatingAssistant(
           openAssistant: { chrome.openMore(.assistant) }
         )
-        .frame(width: 0, height: 0)
+        .allowsHitTesting(false)
         .accessibilityHidden(true)
       }
     }
@@ -608,6 +608,7 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
 
   func updateUIViewController(_ controller: Controller, context: Context) {
     controller.openAssistant = openAssistant
+    controller.startTracking()
     controller.install()
   }
 
@@ -647,24 +648,25 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
         hideAssistant()
         return
       }
-      guard let window = view.window else {
+      guard let window = hostWindow() else {
         return
       }
-      guard let tabBar = hostedTabBar(), isVisibleInWindow(tabBar, in: window) else {
+      // A leftover zero-size UITabBar must not suppress the overlay. A real
+      // bar that is hidden (tabBar.isHidden = true) still should.
+      if let bar = rawTabBar(in: window),
+         bar.bounds.width > 1,
+         bar.bounds.height > 1,
+         !isShownInHierarchy(bar)
+      {
         hideAssistant()
         return
       }
-      let accounts = tabRowView(AppTab.accounts.title, in: window)
-      guard let accounts,
-            isVisibleInWindow(accounts, in: window),
-            let addView = searchRoleAdd(in: window, alignedWith: accounts),
-            isVisibleInWindow(addView, in: window)
-      else {
+      guard let addFrame = addPinFrame(in: window) else {
         hideAssistant()
         return
       }
       startTracking()
-      layoutAssistant(relativeTo: addView, in: window)
+      layoutAssistant(relativeTo: addFrame, in: window)
     }
 
     func uninstall() {
@@ -677,32 +679,22 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
       assistantButton?.removeFromSuperview()
     }
 
-    private func layoutAssistant(relativeTo add: UIView, in window: UIWindow) {
+    private func layoutAssistant(relativeTo pin: CGRect, in window: UIWindow) {
       let button = assistantButton ?? makeAssistantButton()
       assistantButton = button
-      if CaptureRouter.shared.hidesTabRowOverlay
-          || hostedTabBar().map({ isUsableTabBar($0, in: window) }) != true {
+      if CaptureRouter.shared.hidesTabRowOverlay {
         hideAssistant()
         return
       }
-      let host = window
-      let pin = circularPin(from: add, in: window)
-      if button.superview !== host {
+      if button.superview !== window {
         button.removeFromSuperview()
-        host.addSubview(button)
+        window.addSubview(button)
       }
-      button.tintColor = hostedTabBar()?.tintColor ?? window.tintColor
+      button.tintColor = rawTabBar(in: window)?.tintColor ?? window.tintColor
 
       let gap: CGFloat = 10
-      let pinInHost = pin.convert(pin.bounds, to: host)
-      let side = max(44, min(max(pinInHost.width, pinInHost.height), 56))
+      let side = max(44, min(max(pin.width, pin.height), 56))
       let size = CGSize(width: side, height: side)
-      let frame = CGRect(
-        x: pinInHost.midX - size.width / 2,
-        y: pinInHost.minY - gap - size.height,
-        width: size.width,
-        height: size.height
-      )
       button.isHidden = false
       button.layer.cornerRadius = size.height / 2
       button.clipsToBounds = false
@@ -710,8 +702,13 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
       button.layer.shadowOpacity = 0.18
       button.layer.shadowRadius = 8
       button.layer.shadowOffset = CGSize(width: 0, height: 4)
-      button.frame = frame
-      host.bringSubviewToFront(button)
+      button.frame = CGRect(
+        x: pin.midX - size.width / 2,
+        y: pin.minY - gap - size.height,
+        width: size.width,
+        height: size.height
+      )
+      window.bringSubviewToFront(button)
     }
 
     private func makeAssistantButton() -> UIButton {
@@ -735,7 +732,7 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
       return button
     }
 
-    private func startTracking() {
+    func startTracking() {
       guard displayLink == nil else { return }
       let link = CADisplayLink(target: self, selector: #selector(onDisplayTick))
       link.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 10)
@@ -752,20 +749,23 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
       install()
     }
 
-    private func hostedTabBar() -> UITabBar? {
-      guard let window = view.window else {
+    private func hostWindow() -> UIWindow? {
+      if let window = view.window {
+        return window
+      }
+      let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+      let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+      guard let scene else {
         return nil
       }
-      if let root = window.rootViewController,
-         let tab = tabController(in: root),
-         isUsableTabBar(tab.tabBar, in: window)
-      {
-        return tab.tabBar
-      }
-      return firstTabBar(in: window)
+      return scene.windows.first { $0.isKeyWindow && !$0.isHidden }
+        ?? scene.windows.first { !$0.isHidden }
     }
 
-    private func firstTabBar(in view: UIView) -> UITabBar? {
+    private func rawTabBar(in window: UIWindow) -> UITabBar? {
+      if let root = window.rootViewController, let tab = tabController(in: root) {
+        return tab.tabBar
+      }
       var found: [UITabBar] = []
       func walk(_ node: UIView) {
         if let bar = node as? UITabBar {
@@ -775,15 +775,8 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
           walk(subview)
         }
       }
-      walk(view)
-      guard let window = view.window ?? self.view.window else {
-        return found.first
-      }
-      return found.first { isUsableTabBar($0, in: window) } ?? found.first
-    }
-
-    private func isUsableTabBar(_ bar: UITabBar, in window: UIWindow) -> Bool {
-      isVisibleInWindow(bar, in: window) && bar.bounds.width > 1 && bar.bounds.height > 1
+      walk(window)
+      return found.first
     }
 
     private func tabController(in controller: UIViewController) -> UITabBarController? {
@@ -791,67 +784,7 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
       return controller.children.lazy.compactMap { self.tabController(in: $0) }.first
     }
 
-    /// iOS 26's search-role pin is often an inner image; walk up to the visible circle.
-    private func circularPin(from view: UIView, in window: UIWindow) -> UIView {
-      var pin = view
-      var current = view.superview
-      while let parent = current {
-        if parent === assistantButton { break }
-        let frame = parent.convert(parent.bounds, to: window)
-        let compact = abs(frame.width - frame.height) <= 14 && frame.width >= 40 && frame.width <= 80
-        if compact {
-          pin = parent
-          current = parent.superview
-        } else {
-          break
-        }
-      }
-      return pin
-    }
-
-    private func searchRoleAdd(in window: UIWindow, alignedWith accounts: UIView) -> UIView? {
-      let title = CompactRootBar.action.title
-      let rowY = accounts.convert(accounts.bounds, to: window).midY
-      let labelled = labelledViews(title, in: window).filter { view in
-        abs(view.convert(view.bounds, to: window).midY - rowY) <= 40
-      }
-      if let add = labelled.max(by: { $0.convert($0.bounds, to: window).minX < $1.convert($1.bounds, to: window).minX }) {
-        return add
-      }
-      let accountsFrame = accounts.convert(accounts.bounds, to: window)
-      let destinations = Set(AppTab.compactDestinations.map(\.title) + [RootTrailingAction.assistant.title])
-      let roots: [UIView] = [hostedTabBar(), window].compactMap { $0 }
-      var candidates: [UIView] = []
-      func walk(_ view: UIView) {
-        if view !== accounts, view !== assistantButton {
-          let frame = view.convert(view.bounds, to: window)
-          let aligned = abs(frame.midY - rowY) <= 40
-          let trailing = frame.minX > accountsFrame.maxX + 8
-          let compact = abs(frame.width - frame.height) <= 18 && frame.width >= 32 && frame.width <= 88
-          let label = accessibilityTitle(of: view)
-          if aligned, trailing, compact, !destinations.contains(label) {
-            candidates.append(view)
-          }
-        }
-        for subview in view.subviews {
-          walk(subview)
-        }
-      }
-      for root in roots {
-        walk(root)
-      }
-      let controls = candidates.compactMap { $0 as? UIControl }
-      let pool = controls.isEmpty ? candidates : controls
-      let unique = pool.filter { candidate in
-        !pool.contains { $0 !== candidate && candidate.isDescendant(of: $0) }
-      }
-      return unique.max { $0.convert($0.bounds, to: window).minX < $1.convert($1.bounds, to: window).minX }
-    }
-
-    private func isVisibleInWindow(_ view: UIView, in window: UIWindow) -> Bool {
-      guard view.window === window, !view.isHidden, view.alpha > 0.01 else {
-        return false
-      }
+    private func isShownInHierarchy(_ view: UIView) -> Bool {
       var current: UIView? = view
       while let node = current {
         if node.isHidden || node.alpha <= 0.01 {
@@ -859,45 +792,80 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
         }
         current = node.superview
       }
-      let frame = view.convert(view.bounds, to: window)
-      return window.bounds.intersects(frame)
+      return true
     }
 
-    private func tabRowView(_ label: String, in window: UIWindow) -> UIView? {
-      labelledViews(label, in: window)
-        .filter { $0.convert($0.bounds, to: window).midY > window.bounds.midY }
-        .max { $0.convert($0.bounds, to: window).midY < $1.convert($1.bounds, to: window).midY }
+    /// Same AX walk the snapshot tests use. iOS 26 tab buttons often exist only
+    /// as accessibility elements, not as labelled UIView / UITabBar children.
+    private func addPinFrame(in window: UIWindow) -> CGRect? {
+      let pins = accessibilityPins(in: window)
+      let accounts = pins.last { $0.label == AppTab.accounts.title && $0.frame.midY > window.bounds.midY }
+        ?? pins.last { $0.label == AppTab.accounts.title }
+      let addTitle = CompactRootBar.action.title
+      let aligned = pins.filter { pin in
+        pin.label == addTitle
+          && (accounts.map { abs(pin.frame.midY - $0.frame.midY) <= 40 } ?? (pin.frame.midY > window.bounds.midY))
+      }
+      if let add = aligned.max(by: { $0.frame.minX < $1.frame.minX }) {
+        return add.frame
+      }
+      return pins.last { $0.label == addTitle && $0.frame.midY > window.bounds.midY }?.frame
     }
 
-    private func labelledViews(_ label: String, in view: UIView) -> [UIView] {
-      var matches: [UIView] = []
-      if accessibilityTitle(of: view) == label {
-        matches.append(view)
-      }
-      for subview in view.subviews {
-        matches.append(contentsOf: labelledViews(label, in: subview))
-      }
-      return matches
+    private struct AccessibilityPin {
+      let label: String
+      let frame: CGRect
     }
 
-    /// iOS 26 tab buttons often put the title on a child `UILabel` and leave
-    /// `accessibilityLabel` nil on the container the overlay can pin to.
-    private func accessibilityTitle(of view: UIView) -> String {
-      if let label = view.accessibilityLabel, !label.isEmpty {
-        return label
-      }
-      if let button = view as? UIButton {
-        if let title = button.configuration?.title, !title.isEmpty {
-          return title
+    private func accessibilityPins(in window: UIWindow) -> [AccessibilityPin] {
+      var pins: [AccessibilityPin] = []
+      var seen = Set<ObjectIdentifier>()
+      func collect(_ object: NSObject) {
+        let identity = ObjectIdentifier(object)
+        guard !seen.contains(identity) else {
+          return
         }
-        if let title = button.currentTitle, !title.isEmpty {
-          return title
+        seen.insert(identity)
+        if object === assistantButton {
+          return
+        }
+        let label = object.accessibilityLabel ?? ""
+        if !label.isEmpty, let frame = accessibilityFrame(of: object, in: window), frame.width > 1 || frame.height > 1 {
+          pins.append(AccessibilityPin(label: label, frame: frame))
+        }
+        let count = object.accessibilityElementCount()
+        if count != NSNotFound, count > 0 {
+          for index in 0..<count {
+            if let element = object.accessibilityElement(at: index) as? NSObject {
+              collect(element)
+            }
+          }
+        } else if let elements = object.accessibilityElements {
+          for element in elements {
+            if let child = element as? NSObject {
+              collect(child)
+            }
+          }
+        }
+        if let view = object as? UIView {
+          for subview in view.subviews {
+            collect(subview)
+          }
         }
       }
-      if let text = (view as? UILabel)?.text, !text.isEmpty {
-        return text
+      collect(window)
+      return pins
+    }
+
+    private func accessibilityFrame(of object: NSObject, in window: UIWindow) -> CGRect? {
+      if let view = object as? UIView, view.bounds.width > 0 || view.bounds.height > 0 {
+        return view.convert(view.bounds, to: window)
       }
-      return ""
+      let screen = object.accessibilityFrame
+      guard screen.width > 0 || screen.height > 0 else {
+        return nil
+      }
+      return window.convert(screen, from: nil)
     }
   }
 }
