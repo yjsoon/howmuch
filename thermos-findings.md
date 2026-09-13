@@ -20,9 +20,13 @@ This file: persist review progress if credits die. Single source of truth for th
 - [x] Identify run as "Thermos functionality"
 - [x] Confirm review target: open PR #203
 - [x] Gather full diff + changed file contents
-- [ ] Launch thermo-nuclear-review-subagent
-- [ ] Launch thermo-nuclear-code-quality-review-subagent
+- [x] Launch thermo-nuclear-review-subagent (`bc-d995e3fd-96b2-52cf-84bc-0a58086ed49b`)
+- [x] Launch thermo-nuclear-code-quality-review-subagent (`bc-bd5a061c-a9a4-5d07-a669-c0933a81dabf`)
 - [ ] Synthesize unified verdict
+
+### 2026-09-13 00:45 — both thermos subagents launched in background
+
+Waiting on completion notifications. Do not poll. Next step is synthesis into this file.
 
 ## Unified verdict
 
