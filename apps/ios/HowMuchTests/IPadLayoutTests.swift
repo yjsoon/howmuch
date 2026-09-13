@@ -5,6 +5,16 @@ import XCTest
 
 @MainActor
 final class IPadLayoutTests: XCTestCase {
+  override func setUp() async throws {
+    try await super.setUp()
+    resetSharedCaptureChrome()
+  }
+
+  override func tearDown() async throws {
+    resetSharedCaptureChrome()
+    try await super.tearDown()
+  }
+
   func testRegularAccountsShowsListAndRegisterTogether() async {
     let harness = SnapshotHarness.make()
     harness.model.ledgerPhase = .loaded
@@ -54,7 +64,7 @@ final class IPadLayoutTests: XCTestCase {
     harness.model.ledgerPhase = .loaded
     let chrome = RootChromeState()
     guard let surface = SnapshotSurface(
-      root: RootTabView(chrome: chrome, usesSidebar: false)
+      root: RootTabView(chrome: chrome, usesSidebar: false, workspace: harness.workspace)
         .environment(harness.model)
         .environment(chrome)
         .environment(\.horizontalSizeClass, .regular),
@@ -427,7 +437,7 @@ final class IPadLayoutTests: XCTestCase {
     let harness = SnapshotHarness.make()
     let chrome = RootChromeState()
     guard let surface = SnapshotSurface(
-      root: RootTabView(chrome: chrome, usesSidebar: false)
+      root: RootTabView(chrome: chrome, usesSidebar: false, workspace: harness.workspace)
         .environment(harness.model)
         .environment(chrome)
         .environment(\.horizontalSizeClass, .compact),
@@ -500,7 +510,7 @@ final class IPadLayoutTests: XCTestCase {
     let harness = SnapshotHarness.make()
     let chrome = RootChromeState()
     guard let surface = SnapshotSurface(
-      root: RootTabView(chrome: chrome, usesSidebar: true)
+      root: RootTabView(chrome: chrome, usesSidebar: true, workspace: harness.workspace)
         .environment(harness.model)
         .environment(chrome)
         .environment(\.horizontalSizeClass, .regular),
@@ -527,7 +537,7 @@ final class IPadLayoutTests: XCTestCase {
     let chrome = RootChromeState()
     chrome.tab = .plan
     guard let surface = SnapshotSurface(
-      root: RootTabView(chrome: chrome, usesSidebar: false)
+      root: RootTabView(chrome: chrome, usesSidebar: false, workspace: harness.workspace)
         .environment(harness.model)
         .environment(chrome)
         .environment(\.horizontalSizeClass, .compact),
@@ -553,5 +563,13 @@ final class IPadLayoutTests: XCTestCase {
     attachment.name = name
     attachment.lifetime = .keepAlways
     add(attachment)
+  }
+
+  private func resetSharedCaptureChrome() {
+    CaptureRouter.shared.dropForSignOut()
+    while CaptureRouter.shared.blockingSheetCount > 0 {
+      CaptureRouter.shared.endBlockingSheet()
+    }
+    CaptureWorkspace.shared.pendingAssistantSessionID = nil
   }
 }

@@ -681,7 +681,7 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
       let button = assistantButton ?? makeAssistantButton()
       assistantButton = button
       if CaptureRouter.shared.hidesTabRowOverlay
-          || hostedTabBar().map({ isVisibleInWindow($0, in: window) }) != true {
+          || hostedTabBar().map({ isUsableTabBar($0, in: window) }) != true {
         hideAssistant()
         return
       }
@@ -753,20 +753,37 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
     }
 
     private func hostedTabBar() -> UITabBar? {
-      if let root = view.window?.rootViewController, let tab = tabController(in: root) {
-        return tab.tabBar
-      }
       guard let window = view.window else {
         return nil
+      }
+      if let root = window.rootViewController,
+         let tab = tabController(in: root),
+         isUsableTabBar(tab.tabBar, in: window)
+      {
+        return tab.tabBar
       }
       return firstTabBar(in: window)
     }
 
     private func firstTabBar(in view: UIView) -> UITabBar? {
-      if let bar = view as? UITabBar {
-        return bar
+      var found: [UITabBar] = []
+      func walk(_ node: UIView) {
+        if let bar = node as? UITabBar {
+          found.append(bar)
+        }
+        for subview in node.subviews {
+          walk(subview)
+        }
       }
-      return view.subviews.lazy.compactMap { self.firstTabBar(in: $0) }.first
+      walk(view)
+      guard let window = view.window ?? self.view.window else {
+        return found.first
+      }
+      return found.first { isUsableTabBar($0, in: window) } ?? found.first
+    }
+
+    private func isUsableTabBar(_ bar: UITabBar, in window: UIWindow) -> Bool {
+      isVisibleInWindow(bar, in: window) && bar.bounds.width > 1 && bar.bounds.height > 1
     }
 
     private func tabController(in controller: UIViewController) -> UITabBarController? {
@@ -796,21 +813,22 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
       let title = CompactRootBar.action.title
       let rowY = accounts.convert(accounts.bounds, to: window).midY
       let labelled = labelledViews(title, in: window).filter { view in
-        abs(view.convert(view.bounds, to: window).midY - rowY) <= 28
+        abs(view.convert(view.bounds, to: window).midY - rowY) <= 40
       }
       if let add = labelled.max(by: { $0.convert($0.bounds, to: window).minX < $1.convert($1.bounds, to: window).minX }) {
         return add
       }
       let accountsFrame = accounts.convert(accounts.bounds, to: window)
       let destinations = Set(AppTab.compactDestinations.map(\.title) + [RootTrailingAction.assistant.title])
+      let roots: [UIView] = [hostedTabBar(), window].compactMap { $0 }
       var candidates: [UIView] = []
       func walk(_ view: UIView) {
         if view !== accounts, view !== assistantButton {
           let frame = view.convert(view.bounds, to: window)
-          let aligned = abs(frame.midY - rowY) <= 28
+          let aligned = abs(frame.midY - rowY) <= 40
           let trailing = frame.minX > accountsFrame.maxX + 8
-          let compact = abs(frame.width - frame.height) <= 14 && frame.width >= 40 && frame.width <= 76
-          let label = view.accessibilityLabel ?? ""
+          let compact = abs(frame.width - frame.height) <= 18 && frame.width >= 32 && frame.width <= 88
+          let label = accessibilityTitle(of: view)
           if aligned, trailing, compact, !destinations.contains(label) {
             candidates.append(view)
           }
@@ -819,13 +837,15 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
           walk(subview)
         }
       }
-      walk(window)
+      for root in roots {
+        walk(root)
+      }
       let controls = candidates.compactMap { $0 as? UIControl }
       let pool = controls.isEmpty ? candidates : controls
-      let roots = pool.filter { candidate in
+      let unique = pool.filter { candidate in
         !pool.contains { $0 !== candidate && candidate.isDescendant(of: $0) }
       }
-      return roots.max { $0.convert($0.bounds, to: window).minX < $1.convert($1.bounds, to: window).minX }
+      return unique.max { $0.convert($0.bounds, to: window).minX < $1.convert($1.bounds, to: window).minX }
     }
 
     private func isVisibleInWindow(_ view: UIView, in window: UIWindow) -> Bool {
@@ -851,13 +871,33 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
 
     private func labelledViews(_ label: String, in view: UIView) -> [UIView] {
       var matches: [UIView] = []
-      if view.accessibilityLabel == label {
+      if accessibilityTitle(of: view) == label {
         matches.append(view)
       }
       for subview in view.subviews {
         matches.append(contentsOf: labelledViews(label, in: subview))
       }
       return matches
+    }
+
+    /// iOS 26 tab buttons often put the title on a child `UILabel` and leave
+    /// `accessibilityLabel` nil on the container the overlay can pin to.
+    private func accessibilityTitle(of view: UIView) -> String {
+      if let label = view.accessibilityLabel, !label.isEmpty {
+        return label
+      }
+      if let button = view as? UIButton {
+        if let title = button.configuration?.title, !title.isEmpty {
+          return title
+        }
+        if let title = button.currentTitle, !title.isEmpty {
+          return title
+        }
+      }
+      if let text = (view as? UILabel)?.text, !text.isEmpty {
+        return text
+      }
+      return ""
     }
   }
 }
