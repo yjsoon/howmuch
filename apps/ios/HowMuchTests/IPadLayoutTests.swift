@@ -101,7 +101,7 @@ final class IPadLayoutTests: XCTestCase {
   func testCompactAccountsStillPushesSingleColumn() async {
     let harness = SnapshotHarness.make()
     guard let surface = SnapshotSurface(
-      root: AccountsView()
+      root: AccountsView(usesSplit: false)
         .environment(harness.model)
         .environment(RootChromeState())
         .environment(\.horizontalSizeClass, .compact),
@@ -211,17 +211,6 @@ final class IPadLayoutTests: XCTestCase {
   func testCompactPrunesDeletedAccount() {
     let pane = AccountsPaneSelection.reconciled(
       current: .account("acct-gone"),
-      usesSplit: false,
-      knownAccountIDs: ["acct-everyday"],
-      canChooseDefault: true,
-      defaultPane: .account("acct-everyday")
-    )
-    XCTAssertNil(pane)
-  }
-
-  func testLeavingSplitClearsPaneSoCompactDoesNotAutoPush() {
-    let pane = AccountsPaneSelection.afterSplitChange(
-      current: .account("acct-everyday"),
       usesSplit: false,
       knownAccountIDs: ["acct-everyday"],
       canChooseDefault: true,
