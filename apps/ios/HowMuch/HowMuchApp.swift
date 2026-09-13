@@ -44,6 +44,18 @@ enum QuickAction {
   }
 }
 
+enum HowMuchDeepLink: Equatable {
+  case launch
+  case inbox
+
+  static func parse(_ url: URL) -> HowMuchDeepLink? {
+    guard url.scheme?.lowercased() == "howmuch" else {
+      return nil
+    }
+    return .inbox
+  }
+}
+
 final class AppDelegate: NSObject, UIApplicationDelegate {
   func application(
     _ application: UIApplication,
