@@ -1111,7 +1111,7 @@ final class AppModel {
   }
 
   func overlaying(_ rows: [Transaction]) -> [Transaction] {
-    overlayingClearedToggles(on: overlayingPendingEdits(on: rows))
+    overlayingApproval(on: overlayingClearedToggles(on: overlayingPendingEdits(on: rows)))
   }
 
   var transactions: [Transaction] {
@@ -1156,12 +1156,16 @@ final class AppModel {
 
   var unapprovedTransactions: [Transaction] {
     overlaying(serverUnapprovedTransactions).filter { row in
-      !row.deleted && !row.approved && !approvalSession.confirmed.contains(row.id)
+      !row.deleted && !row.approved
     }
   }
 
   var isApprovalInFlight: Bool {
     !approvalSession.pending.isEmpty
+  }
+
+  func isApprovalPending(_ transactionID: String) -> Bool {
+    approvalSession.pending.contains(transactionID)
   }
 
   func approveAllTitle(for rows: [Transaction]) -> String? {
@@ -1282,6 +1286,13 @@ final class AppModel {
       }
       return row.withCleared(cleared)
     }
+  }
+
+  private func overlayingApproval(on rows: [Transaction]) -> [Transaction] {
+    guard !RegisterApproval.resolvedIDs(approvalSession).isEmpty else {
+      return rows
+    }
+    return rows.map { $0.applyingApproval(session: approvalSession) }
   }
 
   /// Keep an in-flight (or just-acked) flip when a fetch still has the old
@@ -1840,7 +1851,7 @@ final class AppModel {
 
   /// Rows this session has taken off the queue: approved, or rejected.
   private var locallyResolvedUnapprovedIDs: Set<String> {
-    approvalSession.confirmed.union(rejectedUnapprovedAccounts.keys)
+    RegisterApproval.resolvedIDs(approvalSession).union(rejectedUnapprovedAccounts.keys)
   }
 
   /// One key per counted scope: the plan, or a single account.
@@ -2626,63 +2637,6 @@ final class AppModel {
     case single(Transaction)
   }
 
-  private func runApproval(from rows: [Transaction], success: ApprovalSuccessCopy) async throws {
-    let candidates = rows.filter { pendingEdits[$0.id] == nil && editTasks[$0.id] == nil }
-    guard let plan = RegisterApproval.plan(
-      submitted: candidates.map(\.approvalRow),
-      session: approvalSession
-    ) else {
-      return
-    }
-    guard let started = RegisterApproval.begin(approvalSession, ids: plan.ids) else {
-      return
-    }
-    approvalSession = started
-    var approvedCount = 0
-    do {
-      for chunk in plan.chunks {
-        do {
-          try await apiClient.approveTransactionBatch(
-            planID: settings.planID,
-            transactionIDs: chunk.ids
-          )
-          approvedCount += chunk.count
-          applyApprovedIDs(Set(chunk.ids))
-        } catch {
-          throw BulkApprovalError(approvedCount: approvedCount, underlying: error)
-        }
-      }
-      approvalSession = RegisterApproval.finish(approvalSession, ids: plan.ids)
-      switch success {
-      case .bulk:
-        showSaveMessage(RegisterApproval.approvedToast(approvedCount))
-      case .single(let row):
-        showSaveMessage("Approved \(row.payeeName ?? "transaction")")
-      }
-      // Approval moves no money and the approved ids are applied locally, so
-      // this plans no fetch; the failure path below still re-reads the ledger
-      // because a partial batch leaves the queue uncertain.
-      await refresh(after: .transactionsApproved)
-    } catch let error as BulkApprovalError {
-      approvalSession = RegisterApproval.fail(
-        approvalSession,
-        ids: plan.ids,
-        approvedCount: error.approvedCount
-      )
-      if error.approvedCount > 0 {
-        showSaveMessage(
-          RegisterApproval.interruptedToast(
-            approvedCount: error.approvedCount,
-            uncertainCount: max(0, plan.ids.count - error.approvedCount)
-          ),
-          kind: .failure
-        )
-      }
-      await refreshLedger(quiet: true)
-      throw error
-    }
-  }
-
   @discardableResult
   func drainOutbox(trigger: OutboxDrainTrigger) async -> Int {
     guard !pendingTransactions.isEmpty else {
@@ -2844,24 +2798,102 @@ final class AppModel {
     scheduleRefresh(after: .transactionDeleted)
   }
 
-  func approveEligible(from rows: [Transaction]) async {
-    do {
-      try await runApproval(from: rows, success: .bulk)
-    } catch let error as BulkApprovalError {
-      if error.approvedCount == 0 {
-        showSaveMessage(error.localizedDescription, kind: .failure)
-      }
-    } catch {
-      showSaveMessage(error.localizedDescription, kind: .failure)
-    }
+  func approveEligible(from rows: [Transaction]) {
+    startApproval(from: rows, success: .bulk)
   }
 
-  func approveTransaction(_ transaction: Transaction) async throws {
-    try ensureNoPendingEdit(on: transaction)
+  func approveTransaction(_ transaction: Transaction) {
+    do {
+      try ensureNoPendingEdit(on: transaction)
+    } catch {
+      showSaveMessage(error.localizedDescription, kind: .failure)
+      return
+    }
     guard !transaction.approved else {
       return
     }
-    try await runApproval(from: [transaction], success: .single(transaction))
+    startApproval(from: [transaction], success: .single(transaction))
+  }
+
+  private func startApproval(from rows: [Transaction], success: ApprovalSuccessCopy) {
+    let candidates = rows.filter { pendingEdits[$0.id] == nil && editTasks[$0.id] == nil }
+    guard let plan = RegisterApproval.plan(
+      submitted: candidates.map(\.approvalRow),
+      session: approvalSession
+    ) else {
+      return
+    }
+    guard let started = RegisterApproval.begin(approvalSession, ids: plan.ids) else {
+      return
+    }
+    let destination = EditDestination(
+      planID: settings.planID,
+      connectionFingerprint: settings.connectionFingerprint,
+      client: apiClient
+    )
+    approvalSession = started
+    showSaveMessage(Self.successToast(success, plannedCount: plan.ids.count))
+    Task {
+      await settleApproval(plan: plan, destination: destination)
+    }
+  }
+
+  private func settleApproval(plan: RegisterApproval.Plan, destination: EditDestination) async {
+    var approvedCount = 0
+    do {
+      for chunk in plan.chunks {
+        try await destination.client.approveTransactionBatch(
+          planID: destination.planID,
+          transactionIDs: chunk.ids
+        )
+        guard isCurrentApproval(destination) else {
+          return
+        }
+        approvedCount += chunk.count
+        applyApprovedIDs(Set(chunk.ids))
+      }
+      guard isCurrentApproval(destination) else {
+        return
+      }
+      approvalSession = RegisterApproval.finish(approvalSession, ids: plan.ids)
+      await refresh(after: .transactionsApproved)
+    } catch {
+      guard isCurrentApproval(destination) else {
+        return
+      }
+      let bulkError = BulkApprovalError(approvedCount: approvedCount, underlying: error)
+      approvalSession = RegisterApproval.fail(
+        approvalSession,
+        ids: plan.ids,
+        approvedCount: bulkError.approvedCount
+      )
+      showSaveMessage(Self.failureToast(bulkError, plannedCount: plan.ids.count), kind: .failure)
+      await refreshLedger(quiet: true)
+    }
+  }
+
+  private func isCurrentApproval(_ destination: EditDestination) -> Bool {
+    destination.planID == settings.planID
+      && destination.connectionFingerprint == settings.connectionFingerprint
+  }
+
+  private static func successToast(_ success: ApprovalSuccessCopy, plannedCount: Int) -> String {
+    switch success {
+    case .bulk:
+      return RegisterApproval.approvedToast(plannedCount)
+    case .single(let row):
+      return "Approved \(row.payeeName ?? "transaction")"
+    }
+  }
+
+  private static func failureToast(_ error: BulkApprovalError, plannedCount: Int) -> String {
+    if error.approvedCount > 0 {
+      return RegisterApproval.interruptedToast(
+        approvedCount: error.approvedCount,
+        uncertainCount: max(0, plannedCount - error.approvedCount)
+      )
+    }
+    return error.localizedDescription
   }
 
   private func showSaveMessage(_ text: String, kind: SaveMessage.Kind = .success) {

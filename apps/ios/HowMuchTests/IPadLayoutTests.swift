@@ -325,9 +325,17 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertTrue(CompactBarSelection.addTransaction.isAction)
     XCTAssertFalse(CompactBarSelection.addTransaction.isDestination)
     XCTAssertEqual(RootChrome.compactFloatingAssistantClearance, RootAddControl.diameter + 10)
+    XCTAssertEqual(RootChrome.compactToastGap, 12)
+    XCTAssertEqual(RootChrome.compactTabRowClearance, 90)
     XCTAssertEqual(
       RootChrome.toastBottomPadding(idiom: .phone, horizontalSizeClass: .compact),
-      90 + RootChrome.compactFloatingAssistantClearance
+      RootChrome.compactTabRowClearance
+        + RootChrome.compactFloatingAssistantClearance
+        + RootChrome.compactToastGap
+    )
+    XCTAssertEqual(
+      RootChrome.toastBottomPadding(idiom: .pad, horizontalSizeClass: .regular),
+      28 + RootAddControl.diameter + 8
     )
   }
 

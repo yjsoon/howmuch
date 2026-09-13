@@ -36,8 +36,12 @@ enum RegisterApproval {
     }
   }
 
+  static func resolvedIDs(_ session: Session) -> Set<String> {
+    session.pending.union(session.confirmed)
+  }
+
   static func looksApproved(_ row: Row, session: Session) -> Bool {
-    row.approved || session.confirmed.contains(row.id)
+    row.approved || resolvedIDs(session).contains(row.id)
   }
 
   static func eligibleIDs(in rows: [Row], session: Session = .empty) -> [String] {
@@ -124,5 +128,11 @@ enum RegisterApproval {
 extension Transaction {
   var approvalRow: RegisterApproval.Row {
     RegisterApproval.Row(id: id, approved: approved, deleted: deleted)
+  }
+
+  func applyingApproval(session: RegisterApproval.Session) -> Transaction {
+    RegisterApproval.looksApproved(approvalRow, session: session)
+      ? (approved ? self : withApproved(true))
+      : self
   }
 }

@@ -116,7 +116,7 @@ struct AccountsView: View {
               idiom: UIDevice.current.userInterfaceIdiom,
               horizontalSizeClass: horizontalSizeClass
             )
-            : 12
+            : RootChrome.compactToastGap
         )
         .transition(.move(edge: .bottom).combined(with: .opacity))
       }

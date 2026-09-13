@@ -616,12 +616,10 @@ final class UnapprovedCountLaunchTests: XCTestCase {
     }
     XCTAssertTrue(counted, "the plan-wide count must land before this test can move it")
 
-    // Approve three rows. The badge drops optimistically, because the count
-    // predates them.
     let rows = (1...3).map { index in
       HowMuch.Transaction.approvalFixture(id: "row-\(index)", accountID: UnapprovedProbeProtocol.fixtureAccountID)
     }
-    await model.approveEligible(from: rows)
+    model.approveEligible(from: rows)
 
     let expected = UnapprovedProbeProtocol.fixtureUnapprovedCount - rows.count
     let dropped = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
@@ -729,6 +727,116 @@ final class UnapprovedCountLaunchTests: XCTestCase {
       model.unapprovedBadgeCount,
       expected,
       "a scoped count refresh must not resurrect a rejected row on the plan-wide badge"
+    )
+  }
+
+  func testApproveToastsAndHidesInboxRowsBeforeBatchReturns() async {
+    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
+    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
+    UnapprovedProbeProtocol.reset()
+    UnapprovedProbeProtocol.hangApprovePatch()
+    let rows = (1...2).map { index in
+      HowMuch.Transaction.approvalFixture(id: "hang-\(index)", accountID: UnapprovedProbeProtocol.fixtureAccountID)
+    }
+    UnapprovedProbeProtocol.serveUnapprovedFixtures(rows.map(\.id))
+
+    let model = AppModel(settings: Self.fixtureSettings("approve-hang-success"), viewPrefs: ViewPrefs())
+    guard let surface = SnapshotSurface(
+      root: LaunchProbe(model: model, taskID: { _ in "static" }),
+      size: CGSize(width: 10, height: 10)
+    ) else {
+      UnapprovedProbeProtocol.releaseApprovePatch()
+      XCTFail("hang-approve probe requires a connected UIWindowScene")
+      return
+    }
+    defer {
+      UnapprovedProbeProtocol.releaseApprovePatch()
+      surface.detach()
+    }
+
+    await model.openUnapprovedQueue(viewer: "hang-success")
+    let loaded = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.unapprovedQueuePhase == .loaded
+        && model.unapprovedTransactions.map(\.id).sorted() == rows.map(\.id).sorted()
+    }
+    XCTAssertTrue(loaded, "the fixture inbox rows must land before approve can hide them")
+
+    model.approveEligible(from: rows)
+    let optimistic = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.lastSaveMessage?.kind == .success
+        && model.unapprovedTransactions.isEmpty
+        && model.unapprovedBadgeCount == 0
+        && model.isApprovalInFlight
+    }
+    XCTAssertTrue(
+      optimistic,
+      "approve must toast and drop the inbox before PATCH returns; saw toast \(String(describing: model.lastSaveMessage)), "
+        + "rows \(model.unapprovedTransactions.map(\.id)), badge \(model.unapprovedBadgeCount), "
+        + "inFlight \(model.isApprovalInFlight)"
+    )
+    XCTAssertEqual(model.lastSaveMessage?.text, RegisterApproval.approvedToast(rows.count))
+
+    UnapprovedProbeProtocol.releaseApprovePatch()
+    let settled = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      !model.isApprovalInFlight
+    }
+    XCTAssertTrue(settled, "pending must clear after the hung PATCH succeeds")
+    XCTAssertEqual(model.unapprovedBadgeCount, 0)
+    XCTAssertTrue(model.unapprovedTransactions.isEmpty)
+  }
+
+  func testApproveFailureRestoresRowsAndReplacesSuccessToast() async {
+    XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
+    defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
+    UnapprovedProbeProtocol.reset()
+    UnapprovedProbeProtocol.hangApprovePatch()
+    UnapprovedProbeProtocol.failApprovePatch()
+    let rows = (1...2).map { index in
+      HowMuch.Transaction.approvalFixture(id: "fail-\(index)", accountID: UnapprovedProbeProtocol.fixtureAccountID)
+    }
+    UnapprovedProbeProtocol.serveUnapprovedFixtures(rows.map(\.id))
+
+    let model = AppModel(settings: Self.fixtureSettings("approve-hang-fail"), viewPrefs: ViewPrefs())
+    guard let surface = SnapshotSurface(
+      root: LaunchProbe(model: model, taskID: { _ in "static" }),
+      size: CGSize(width: 10, height: 10)
+    ) else {
+      UnapprovedProbeProtocol.releaseApprovePatch()
+      XCTFail("hang-approve failure probe requires a connected UIWindowScene")
+      return
+    }
+    defer {
+      UnapprovedProbeProtocol.releaseApprovePatch()
+      surface.detach()
+    }
+
+    await model.openUnapprovedQueue(viewer: "hang-fail")
+    let loaded = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.unapprovedQueuePhase == .loaded
+        && model.unapprovedTransactions.count == rows.count
+    }
+    XCTAssertTrue(loaded, "the fixture inbox rows must land before approve can hide them")
+
+    model.approveEligible(from: rows)
+    let optimistic = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.lastSaveMessage?.kind == .success
+        && model.unapprovedTransactions.isEmpty
+        && model.unapprovedBadgeCount == 0
+        && model.isApprovalInFlight
+    }
+    XCTAssertTrue(optimistic, "the success toast and badge drop must land before the hung PATCH fails")
+
+    UnapprovedProbeProtocol.releaseApprovePatch()
+    let restored = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      model.lastSaveMessage?.kind == .failure
+        && model.unapprovedTransactions.map(\.id).sorted() == rows.map(\.id).sorted()
+        && model.unapprovedBadgeCount == rows.count
+        && !model.isApprovalInFlight
+    }
+    XCTAssertTrue(
+      restored,
+      "a 0-count PATCH error must restore rows and replace the success toast; saw toast \(String(describing: model.lastSaveMessage)), "
+        + "rows \(model.unapprovedTransactions.map(\.id)), badge \(model.unapprovedBadgeCount)"
     )
   }
 
@@ -840,11 +948,23 @@ private final class UnapprovedProbeRequestLog: @unchecked Sendable {
   static let shared = UnapprovedProbeRequestLog()
   private let lock = NSLock()
   private var counts: [String: Int] = [:]
+  private var answersUnapprovedPageSlowly = false
+  private var hangsApprovePatch = false
+  private var failsApprovePatch = false
+  private var approvePatchGate: DispatchSemaphore?
+  private var unapprovedPageJSON: String?
 
   func reset() {
     lock.lock()
     counts = [:]
+    answersUnapprovedPageSlowly = false
+    hangsApprovePatch = false
+    failsApprovePatch = false
+    unapprovedPageJSON = nil
+    let gate = approvePatchGate
+    approvePatchGate = nil
     lock.unlock()
+    gate?.signal()
   }
 
   func record(_ key: String) {
@@ -859,10 +979,6 @@ private final class UnapprovedProbeRequestLog: @unchecked Sendable {
     return counts[key] ?? 0
   }
 
-  /// When set, the unapproved page is answered after a short delay instead of
-  /// never, so a test can close the approval flow while the walk is in flight.
-  private var answersUnapprovedPageSlowly = false
-
   func setAnswersUnapprovedPageSlowly(_ value: Bool) {
     lock.lock()
     answersUnapprovedPageSlowly = value
@@ -874,11 +990,62 @@ private final class UnapprovedProbeRequestLog: @unchecked Sendable {
     defer { lock.unlock() }
     return answersUnapprovedPageSlowly
   }
+
+  func hangApprovePatch() {
+    lock.lock()
+    hangsApprovePatch = true
+    approvePatchGate = DispatchSemaphore(value: 0)
+    lock.unlock()
+  }
+
+  func failApprovePatch() {
+    lock.lock()
+    failsApprovePatch = true
+    lock.unlock()
+  }
+
+  func releaseApprovePatch() {
+    lock.lock()
+    let gate = approvePatchGate
+    lock.unlock()
+    gate?.signal()
+  }
+
+  func approvePatchShouldHang() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return hangsApprovePatch
+  }
+
+  func waitForApprovePatchRelease() {
+    lock.lock()
+    let gate = approvePatchGate
+    lock.unlock()
+    gate?.wait()
+  }
+
+  func approvePatchShouldFail() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return failsApprovePatch
+  }
+
+  func setUnapprovedPageBody(_ body: String?) {
+    lock.lock()
+    unapprovedPageJSON = body
+    lock.unlock()
+  }
+
+  func unapprovedPageBody() -> String? {
+    lock.lock()
+    defer { lock.unlock() }
+    return unapprovedPageJSON
+  }
 }
 
-/// Answers the launch waterfall's plan list, its first ledger page and the
-/// unapproved count, and deliberately *never* answers a `type=unapproved`
-/// page. A launch that still gated the register on that walk would hang here.
+/// Answers the launch waterfall's plan list, its first ledger page, and the
+/// unapproved count. The unapproved page hangs unless a test serves a fixture
+/// body or asks for the slow answer.
 private final class UnapprovedProbeProtocol: URLProtocol {
   static let fixtureHost = "howmuch-unapproved-probe.test"
   static let fixtureBaseURL = "https://howmuch-unapproved-probe.test"
@@ -893,13 +1060,35 @@ private final class UnapprovedProbeProtocol: URLProtocol {
 
   static func reset() {
     UnapprovedProbeRequestLog.shared.reset()
-    UnapprovedProbeRequestLog.shared.setAnswersUnapprovedPageSlowly(false)
   }
 
   /// Lets the unapproved walk finish, slowly, so a test can close the flow
   /// underneath it and check what the late response does.
   static func answerUnapprovedPageSlowly() {
     UnapprovedProbeRequestLog.shared.setAnswersUnapprovedPageSlowly(true)
+  }
+
+  static func hangApprovePatch() {
+    UnapprovedProbeRequestLog.shared.hangApprovePatch()
+  }
+
+  static func failApprovePatch() {
+    UnapprovedProbeRequestLog.shared.failApprovePatch()
+  }
+
+  static func releaseApprovePatch() {
+    UnapprovedProbeRequestLog.shared.releaseApprovePatch()
+  }
+
+  static func serveUnapprovedFixtures(_ ids: [String]) {
+    let transactions = ids.map { unapprovedFixtureJSON(id: $0) }.joined(separator: ",")
+    UnapprovedProbeRequestLog.shared.setUnapprovedPageBody(
+      #"{"data":{"transactions":[\#(transactions)],"server_knowledge":1,"has_more":false,"next_offset":null}}"#
+    )
+  }
+
+  private static func unapprovedFixtureJSON(id: String) -> String {
+    #"{"id":"\#(id)","date":"2026-09-01","amount":-1000,"memo":null,"cleared":"uncleared","approved":false,"flag_color":null,"flag_name":null,"account_id":"\#(fixtureAccountID)","account_name":"Fixture Account","payee_id":null,"payee_name":"Fixture Payee","category_id":null,"category_name":null,"transfer_account_id":null,"transfer_transaction_id":null,"parent_transaction_id":null,"matched_transaction_id":null,"import_id":null,"import_payee_name":null,"import_payee_name_original":null,"deleted":false,"subtransactions":[]}"#
   }
 
   static func unapprovedCountRequests() -> Int {
@@ -944,14 +1133,22 @@ private final class UnapprovedProbeProtocol: URLProtocol {
       return
     }
     if components.path.hasSuffix("/transactions"), request.httpMethod == "PATCH" {
-      send(url: url, body: #"{"data":{"transactions":[],"server_knowledge":2}}"#)
+      if UnapprovedProbeRequestLog.shared.approvePatchShouldHang() {
+        DispatchQueue.global().async { [weak self] in
+          UnapprovedProbeRequestLog.shared.waitForApprovePatchRelease()
+          self?.finishApprovePatch(url: url)
+        }
+        return
+      }
+      finishApprovePatch(url: url)
       return
     }
     if components.path.hasSuffix("/transactions"), isUnapprovedPage {
-      // Recorded and then left hanging on purpose: the register must not be
-      // waiting on this. A test that needs the walk to finish asks for the slow
-      // answer instead.
       UnapprovedProbeRequestLog.shared.record(Self.queueKey)
+      if let body = UnapprovedProbeRequestLog.shared.unapprovedPageBody() {
+        send(url: url, body: body)
+        return
+      }
       guard UnapprovedProbeRequestLog.shared.answersUnapprovedPageSlowly_() else { return }
       let target = url
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
@@ -979,6 +1176,14 @@ private final class UnapprovedProbeProtocol: URLProtocol {
     // Everything else settles fast so the rest of the waterfall cannot stall
     // the wait above.
     client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
+  }
+
+  private func finishApprovePatch(url: URL) {
+    if UnapprovedProbeRequestLog.shared.approvePatchShouldFail() {
+      client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
+      return
+    }
+    send(url: url, body: #"{"data":{"transactions":[],"server_knowledge":2}}"#)
   }
 
   private func send(url: URL, body: String) {
