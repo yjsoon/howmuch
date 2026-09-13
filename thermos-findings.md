@@ -2,6 +2,8 @@
 
 Logged on [PR #204](https://github.com/yjsoon/howmuch/pull/204). Tip at review time: `860f213` on `cursor/first-launch-empty-sheet-8bbc`. This document does not re-review later commits.
 
+**Status:** #203 merged as `d926a41`. Quality leftover (required `usesSplit`, drop dead observer) is [PR #205](https://github.com/yjsoon/howmuch/pull/205).
+
 ## Verdict
 
 No correctness blockers on `860f213`. The split gate matches root chrome; phone regular width no longer auto-presents `No Transactions`; the rotation follow-up is necessary and correct. Quality still wants a follow-up: optional `usesSplit` plus a dead `onChange(of: isSplit)` / `afterSplitChange` layer. That is not a behaviour bug. Merge the bugfix; if the file is touched again, make `usesSplit` a required `Bool` and delete the observer/helper so `AccountsView.swift` shrinks instead of growing 1242 → 1253.
