@@ -98,6 +98,24 @@ final class CaptureRequestTests: XCTestCase {
   }
 }
 
+final class HowMuchDeepLinkTests: XCTestCase {
+  func testSpeedflightLaunchURLIsNotInbox() {
+    XCTAssertEqual(HowMuchDeepLink.parse(URL(string: "howmuch://")!), .launch)
+  }
+
+  func testShareInboxURLIsInbox() {
+    XCTAssertEqual(HowMuchDeepLink.parse(URL(string: "howmuch://inbox")!), .inbox)
+  }
+
+  func testInboxPathURLIsInbox() {
+    XCTAssertEqual(HowMuchDeepLink.parse(URL(string: "howmuch:///inbox")!), .inbox)
+  }
+
+  func testOtherSchemesAreIgnored() {
+    XCTAssertNil(HowMuchDeepLink.parse(URL(string: "https://howmuch.tk.sg")!))
+  }
+}
+
 @MainActor
 final class CaptureRouterTests: XCTestCase {
   override func setUp() async throws {
@@ -181,6 +199,18 @@ final class CaptureRouterTests: XCTestCase {
     router.consume(isAuthenticated: true, currentFingerprint: "plan-a")
     XCTAssertEqual(router.presented?.id, second.id)
     XCTAssertNotEqual(first.id, second.id)
+  }
+
+  func testSecondInboxEnqueueDoesNotReplacePresentedInbox() {
+    let router = CaptureRouter.shared
+    let first = CaptureRequest(kind: .inbox, connectionFingerprint: "plan-a")
+    let second = CaptureRequest(kind: .inbox, connectionFingerprint: "plan-a")
+    router.enqueue(first)
+    router.consume(isAuthenticated: true, currentFingerprint: "plan-a")
+    router.enqueue(second)
+    router.consume(isAuthenticated: true, currentFingerprint: "plan-a")
+    XCTAssertEqual(router.presented?.id, first.id)
+    XCTAssertNil(router.pending)
   }
 
   func testDropForSignOutClearsPendingAndPresented() {
