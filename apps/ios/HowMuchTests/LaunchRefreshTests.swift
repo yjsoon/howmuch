@@ -616,7 +616,6 @@ final class UnapprovedCountLaunchTests: XCTestCase {
     }
     XCTAssertTrue(counted, "the plan-wide count must land before this test can move it")
 
-    // Approve three rows. The badge drops before the PATCH returns.
     let rows = (1...3).map { index in
       HowMuch.Transaction.approvalFixture(id: "row-\(index)", accountID: UnapprovedProbeProtocol.fixtureAccountID)
     }
@@ -1044,9 +1043,9 @@ private final class UnapprovedProbeRequestLog: @unchecked Sendable {
   }
 }
 
-/// Answers the launch waterfall's plan list, its first ledger page and the
-/// unapproved count, and deliberately *never* answers a `type=unapproved`
-/// page. A launch that still gated the register on that walk would hang here.
+/// Answers the launch waterfall's plan list, its first ledger page, and the
+/// unapproved count. The unapproved page hangs unless a test serves a fixture
+/// body or asks for the slow answer.
 private final class UnapprovedProbeProtocol: URLProtocol {
   static let fixtureHost = "howmuch-unapproved-probe.test"
   static let fixtureBaseURL = "https://howmuch-unapproved-probe.test"
@@ -1145,9 +1144,6 @@ private final class UnapprovedProbeProtocol: URLProtocol {
       return
     }
     if components.path.hasSuffix("/transactions"), isUnapprovedPage {
-      // Recorded and then left hanging on purpose: the register must not be
-      // waiting on this. A test that needs the walk to finish asks for the slow
-      // answer instead.
       UnapprovedProbeRequestLog.shared.record(Self.queueKey)
       if let body = UnapprovedProbeRequestLog.shared.unapprovedPageBody() {
         send(url: url, body: body)

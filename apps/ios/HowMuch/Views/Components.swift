@@ -369,9 +369,6 @@ enum RootChrome {
 
   /// Space above the compact tab bar reserved for the floating Assistant.
   static let compactFloatingAssistantClearance = RootAddControl.diameter + 10
-
-  /// Gap above floating chrome. Screenshot-offer uses this inside RootTabHost.
-  /// The root save toast adds Assistant clearance, because it sits outside the host.
   static let compactToastGap: CGFloat = 12
 
   static func toastBottomPadding(
