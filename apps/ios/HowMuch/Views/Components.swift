@@ -625,6 +625,9 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
     override func loadView() {
       view = UIView()
       view.isUserInteractionEnabled = false
+      view.backgroundColor = .clear
+      view.isAccessibilityElement = false
+      view.accessibilityElementsHidden = true
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -648,19 +651,11 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
         hideAssistant()
         return
       }
-      guard let window = hostWindow() else {
+      guard let window = view.window else {
         return
       }
-      // A leftover zero-size UITabBar must not suppress the overlay. A real
-      // bar that is hidden (tabBar.isHidden = true) still should.
-      if let bar = rawTabBar(in: window),
-         bar.bounds.width > 1,
-         bar.bounds.height > 1,
-         !isShownInHierarchy(bar)
-      {
-        hideAssistant()
-        return
-      }
+      // Hide when the tab-row Add pin is gone, not when a leftover system
+      // UITabBarController.tabBar happens to be hidden.
       guard let addFrame = addPinFrame(in: window) else {
         hideAssistant()
         return
@@ -690,7 +685,7 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
         button.removeFromSuperview()
         window.addSubview(button)
       }
-      button.tintColor = rawTabBar(in: window)?.tintColor ?? window.tintColor
+      button.tintColor = window.tintColor
 
       let gap: CGFloat = 10
       let side = max(44, min(max(pin.width, pin.height), 56))
@@ -747,52 +742,6 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
 
     @objc private func onDisplayTick() {
       install()
-    }
-
-    private func hostWindow() -> UIWindow? {
-      if let window = view.window {
-        return window
-      }
-      let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-      let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
-      guard let scene else {
-        return nil
-      }
-      return scene.windows.first { $0.isKeyWindow && !$0.isHidden }
-        ?? scene.windows.first { !$0.isHidden }
-    }
-
-    private func rawTabBar(in window: UIWindow) -> UITabBar? {
-      if let root = window.rootViewController, let tab = tabController(in: root) {
-        return tab.tabBar
-      }
-      var found: [UITabBar] = []
-      func walk(_ node: UIView) {
-        if let bar = node as? UITabBar {
-          found.append(bar)
-        }
-        for subview in node.subviews {
-          walk(subview)
-        }
-      }
-      walk(window)
-      return found.first
-    }
-
-    private func tabController(in controller: UIViewController) -> UITabBarController? {
-      if let tab = controller as? UITabBarController { return tab }
-      return controller.children.lazy.compactMap { self.tabController(in: $0) }.first
-    }
-
-    private func isShownInHierarchy(_ view: UIView) -> Bool {
-      var current: UIView? = view
-      while let node = current {
-        if node.isHidden || node.alpha <= 0.01 {
-          return false
-        }
-        current = node.superview
-      }
-      return true
     }
 
     /// Same AX walk the snapshot tests use. iOS 26 tab buttons often exist only
