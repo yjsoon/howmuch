@@ -220,7 +220,7 @@ final class ScreenshotOfferTests: XCTestCase {
 
   func testDifferentScreenshotStillOffersAfterDismiss() async {
     await controller.setEnabled(true)
-    let firstTaken = Date(timeIntervalSince1970: 1_789_000_000)
+    let firstTaken = Date().addingTimeInterval(60)
     library.next = candidate(id: "shot-1", createdAt: firstTaken)
     await controller.refresh()
     controller.dismiss()
@@ -236,8 +236,8 @@ final class ScreenshotOfferTests: XCTestCase {
 
   func testDismissDoesNotOfferAnOlderScreenshot() async {
     await controller.setEnabled(true)
-    let newer = Date(timeIntervalSince1970: 1_789_000_100)
-    let older = Date(timeIntervalSince1970: 1_789_000_000)
+    let older = Date().addingTimeInterval(60)
+    let newer = older.addingTimeInterval(40)
     library.next = candidate(id: "shot-new", createdAt: newer)
     await controller.refresh()
     XCTAssertEqual(controller.offer?.id, "shot-new")
@@ -255,7 +255,7 @@ final class ScreenshotOfferTests: XCTestCase {
   func testLaterScreenshotWithTheSameBytesStillOffers() async {
     await controller.setEnabled(true)
     let bytes = Data([0x89, 0x50, 0x4E, 0x47])
-    let firstTaken = Date(timeIntervalSince1970: 1_789_000_000)
+    let firstTaken = Date().addingTimeInterval(60)
     library.next = candidate(id: "shot-1", createdAt: firstTaken, data: bytes)
     await controller.refresh()
     controller.dismiss()
