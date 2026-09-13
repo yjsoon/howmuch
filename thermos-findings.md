@@ -22,6 +22,8 @@ This file: persist review progress if credits die. Single source of truth for th
 - [x] Gather full diff + changed file contents
 - [x] Launch thermo-nuclear-review-subagent (`bc-d995e3fd-96b2-52cf-84bc-0a58086ed49b`)
 - [x] Launch thermo-nuclear-code-quality-review-subagent (`bc-bd5a061c-a9a4-5d07-a669-c0933a81dabf`)
+- [x] Code-quality report landed (2026-09-13 00:46)
+- [ ] Correctness report (still in flight)
 - [ ] Synthesize unified verdict
 
 ### 2026-09-13 00:45 — both thermos subagents launched in background
@@ -346,4 +348,20 @@ Production always injects `usesSplit: usesSidebar`. Compact and sidebar trees ar
 
 ### thermo-nuclear-code-quality-review-subagent
 
-*(pending)*
+Returned 2026-09-13 00:46. Agent: [Thermo code quality review](bc-bd5a061c-a9a4-5d07-a669-c0933a81dabf)
+
+**Verdict: request changes.** Bug gate is right. Implementation adds a second chrome API, keeps a change observer that cannot fire in production, and grows an already-1.2k-line view instead of deleting the size-class machinery.
+
+1. **Structural regression: optional `usesSplit` plus `RootChrome` fallback is a second source of truth.** Production `RootTabView` always passes the flag (`Components.swift:473`, `:546`). The nil path exists so `AccountsView()` still compiles (`IPadLayoutTests.swift:94`). Required `usesSplit: Bool`. No default. No `UIDevice`. Drop `@Environment(\.horizontalSizeClass)` from this view.
+
+2. **Code judo: `afterSplitChange` + `onChange(of: isSplit)` should disappear.** With the injected flag, `isSplit` is constant for the life of the view. `RootTabView`'s if/else tears the tree down when `usesSidebar` flips. `onChange` cannot fire in production. Delete `afterSplitChange`, the observer, `isSplit`, and `horizontalSizeClass`. Keep `reconciled(usesSplit:)`. `testLeavingSplitClearsPaneSoCompactDoesNotAutoPush` tests a function the view tree no longer needs.
+
+3. **Spaghetti: a chrome flag with three names, still branched locally.** `RootChrome.usesSidebar` → `RootTabView.usesSidebar` → `AccountsView.usesSplit` → `isSplit`. Same predicate, new vocabulary.
+
+4. **Type / boundary: `Bool? = nil` papers over the invariant.** Real invariant: accounts surface is the sidebar split iff chrome is. Leftover `AccountsView()` compact host is the same hole.
+
+5. **File size: 1242 → 1253, still over 1k.** Delta is extra policy. Delete the second API rather than extract a module.
+
+6. **Tests:** `testPhoneRegularAccountsDoesNotPresentEmptyTransactionsSheet` is the right proof. `CaptureSnapshotTests.swift` argument reorder + `async throws` is compile noise on a 3300-line file; land separately. The `throws` fix is real; the argument swap is not.
+
+**Bar:** behavior can be correct and this still should not land as-is. Make `usesSplit` required, stop re-deriving chrome, delete the observer/`afterSplitChange` layer.
