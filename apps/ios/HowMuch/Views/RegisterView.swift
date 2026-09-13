@@ -110,7 +110,6 @@ struct RegisterView: View {
   @State private var isShowingReconciliation = false
   @State private var editingAccount: Account?
   @State private var membershipsAccount: Account?
-  @State private var approvalError: String?
   @State private var statusError: String?
   @State private var transactionPendingDeletion: Transaction?
   @State private var deleteError: String?
@@ -184,7 +183,7 @@ struct RegisterView: View {
       if showingUnapprovedQueue, let approveAllTitle = model.approveAllTitle(for: transactions) {
         ToolbarItem(placement: .topBarTrailing) {
           Button(approveAllTitle) {
-            Task { await model.approveEligible(from: transactions) }
+            model.approveEligible(from: transactions)
           }
           .disabled(model.isApprovalInFlight)
         }
@@ -219,14 +218,6 @@ struct RegisterView: View {
     .sheet(item: $editingSchedule) { schedule in
       ScheduledTransactionEditorView(schedule: schedule)
         .blocksCapturePresentation()
-    }
-    .alert("Couldn’t approve transaction", isPresented: Binding(
-      get: { approvalError != nil },
-      set: { if !$0 { approvalError = nil } }
-    )) {
-      Button("OK", role: .cancel) { approvalError = nil }
-    } message: {
-      Text(approvalError ?? "Please try again.")
     }
     .alert("Couldn’t update status", isPresented: Binding(
       get: { statusError != nil },
@@ -558,7 +549,7 @@ struct RegisterView: View {
       transaction: transaction,
       showsAccount: showsAccount,
       currencyFormat: model.currencyFormat,
-      isBusy: model.isSubmitting || model.isApprovalInFlight,
+      isBusy: model.isSubmitting || model.isApprovalPending(transaction.id),
       onOpen: { editingTransaction = transaction },
       onChangeStatus: { changeStatus(transaction) }
     )
@@ -786,13 +777,7 @@ struct RegisterView: View {
   }
 
   private func approve(_ transaction: Transaction) {
-    Task {
-      do {
-        try await model.approveTransaction(transaction)
-      } catch {
-        approvalError = error.localizedDescription
-      }
-    }
+    model.approveTransaction(transaction)
   }
 
   private func delete(_ transaction: Transaction) {

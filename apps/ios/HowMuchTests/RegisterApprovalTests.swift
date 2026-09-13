@@ -76,6 +76,30 @@ final class RegisterApprovalTests: XCTestCase {
     XCTAssertEqual(RegisterApproval.fail(started!, ids: ["a", "b", "c"], approvedCount: 0).confirmed, [])
   }
 
+  func testLooksApprovedIncludesPending() {
+    let started = RegisterApproval.begin(.empty, ids: ["a"])
+    XCTAssertNotNil(started)
+    XCTAssertTrue(RegisterApproval.looksApproved(row("a"), session: started!))
+    XCTAssertFalse(RegisterApproval.looksApproved(row("b"), session: started!))
+    XCTAssertEqual(RegisterApproval.resolvedIDs(started!), Set(["a"]))
+  }
+
+  func testFailWithoutPrefixStopsLookingApproved() {
+    let started = RegisterApproval.begin(.empty, ids: ["a"])
+    XCTAssertNotNil(started)
+    let failed = RegisterApproval.fail(started!, ids: ["a"], approvedCount: 0)
+    XCTAssertFalse(RegisterApproval.looksApproved(row("a"), session: failed))
+    XCTAssertTrue(RegisterApproval.resolvedIDs(failed).isEmpty)
+  }
+
+  func testEligibleIDsSkipPending() {
+    let started = RegisterApproval.begin(.empty, ids: ["a"])
+    XCTAssertNotNil(started)
+    XCTAssertEqual(RegisterApproval.eligibleIDs(in: [row("a"), row("d")], session: started!), ["d"])
+    XCTAssertNil(RegisterApproval.plan(submitted: [row("a")], session: started!))
+    XCTAssertEqual(RegisterApproval.plan(ids: ["a", "d"], rows: [row("a"), row("d")], session: started!)?.ids, ["d"])
+  }
+
   func testLooksApprovedUsesTheConfirmedOverlay() {
     let session = RegisterApproval.finish(RegisterApproval.begin(.empty, ids: ["a"])!, ids: ["a"])
     XCTAssertTrue(RegisterApproval.looksApproved(row("a"), session: session))
