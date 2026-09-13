@@ -350,6 +350,11 @@ enum MoreDestination: Hashable, CaseIterable, Identifiable {
 }
 
 enum RootChrome {
+  static let compactTabRowClearance: CGFloat = 90
+  /// Space above the compact tab bar reserved for the floating Assistant.
+  static let compactFloatingAssistantClearance = RootAddControl.diameter + 10
+  static let compactToastGap: CGFloat = 12
+
   static func usesSidebar(
     idiom: UIUserInterfaceIdiom,
     horizontalSizeClass: UserInterfaceSizeClass?
@@ -364,12 +369,8 @@ enum RootChrome {
     if usesSidebar(idiom: idiom, horizontalSizeClass: horizontalSizeClass) {
       return EdgeInsets(top: 0, leading: 0, bottom: 28, trailing: 20)
     }
-    return EdgeInsets(top: 0, leading: 0, bottom: 90, trailing: 16)
+    return EdgeInsets(top: 0, leading: 0, bottom: compactTabRowClearance, trailing: 16)
   }
-
-  /// Space above the compact tab bar reserved for the floating Assistant.
-  static let compactFloatingAssistantClearance = RootAddControl.diameter + 10
-  static let compactToastGap: CGFloat = 12
 
   static func toastBottomPadding(
     idiom: UIUserInterfaceIdiom,
@@ -378,7 +379,7 @@ enum RootChrome {
     if usesSidebar(idiom: idiom, horizontalSizeClass: horizontalSizeClass) {
       return 28 + RootAddControl.diameter + 8
     }
-    return compactFloatingAssistantClearance + compactToastGap
+    return compactTabRowClearance + compactFloatingAssistantClearance + compactToastGap
   }
 }
 
