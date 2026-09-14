@@ -344,7 +344,7 @@ function AccountGroupSections({
   onToggle: (groupId: string) => void;
 }) {
   return groups.map((group) => {
-    const open = !collapsed.has(group.id) || group.accounts.some((account) => account.id === selectedAccountId);
+    const open = !collapsed.has(group.id);
     return (
       <section key={group.id} className={tone === "index" ? "account-group account-group-index" : "account-group"}>
         <button
