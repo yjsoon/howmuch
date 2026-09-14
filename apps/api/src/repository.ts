@@ -32,11 +32,16 @@ import {
   nextScheduledOccurrence,
   type EffectiveScheduledTransaction,
 } from "./scheduled-transactions";
-import { parseAccountIcon, resolveAccountPresentation } from "./account-icon";
+import { parseAccountIcon, resolveAccountPresentation, splitLegacyAccountName } from "./account-icon";
 import { applyAccountUpdate, type AccountUpdatePatch } from "./account-kind";
 import { parseRegisterQuery, transactionSearchSql } from "@howmuch/register-query";
 
 type Row = Record<string, any>;
+
+function displayAccountName(value: unknown): string | null {
+  if (value == null) return null;
+  return splitLegacyAccountName(String(value)).name;
+}
 
 type AccountReconciliationSnapshot = {
   account: Row;
@@ -3102,7 +3107,7 @@ export class LedgerRepository {
       flag_color: row.flag_color,
       flag_name: row.flag_name,
       account_id: row.account_id,
-      account_name: row.account_name,
+      account_name: displayAccountName(row.account_name),
       payee_id: row.payee_id,
       payee_name: row.payee_name ?? row.payee_name_snapshot,
       category_id: row.category_id,
