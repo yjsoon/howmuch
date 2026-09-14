@@ -14,6 +14,7 @@ import type {
 import { colourNamesByAccount, ledgerFlagNames, namedFlagLabel } from "../lib/reward-flag-names";
 import { FilterRail } from "../components/FilterRail";
 import { FlagTag } from "../components/FlagTag";
+import { CategorySelect } from "../components/CategorySelect";
 import { RegisterComposeRow } from "../components/RegisterComposeRow";
 import { RegisterEditableRow, type RowEditSurface } from "../components/RegisterEditableRow";
 import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
@@ -22,7 +23,6 @@ import { stableHash } from "../lib/hash";
 import { formatAmount, formatMoney, parseMilliunits } from "../lib/money";
 import {
   approveAllLabel,
-  approveSelectedLabel,
   approvedToast,
   beginApproval,
   eligibleApprovalIds,
@@ -185,6 +185,7 @@ export function TransactionsPage() {
   const registerQuery = useMemo(() => parseRegisterQuery(deferredSearch), [deferredSearch]);
   const searchVersionRef = useRef(0);
   const [pendingDeletion, setPendingDeletion] = useState<Transaction | null>(null);
+  const [pendingBulkDeletion, setPendingBulkDeletion] = useState<readonly Transaction[] | null>(null);
   const [reconcileDraft, setReconcileDraft] = useState<ReconcileDraft | null>(null);
   const [reconciliationPreviewGeneration, setReconciliationPreviewGeneration] = useState(0);
   const [mutationError, setMutationError] = useState<string | null>(null);
@@ -549,9 +550,9 @@ export function TransactionsPage() {
     }
   };
 
-  const toggleCleared = async (transaction: Transaction) => {
-    if (mutationLockRef.current || (transaction.cleared !== "uncleared" && transaction.cleared !== "cleared")) return;
-    if (clearedInFlightRef.current.has(transaction.id)) return;
+  const toggleCleared = async (transaction: Transaction, options: { refresh?: boolean } = {}): Promise<boolean> => {
+    if (mutationLockRef.current || (transaction.cleared !== "uncleared" && transaction.cleared !== "cleared")) return false;
+    if (clearedInFlightRef.current.has(transaction.id)) return false;
     const cleared = transaction.cleared === "cleared" ? "uncleared" : "cleared";
     const overlay = { ...transaction, cleared };
     clearedInFlightRef.current.add(transaction.id);
@@ -563,8 +564,11 @@ export function TransactionsPage() {
     try {
       const updated = await api.updateTransactionCleared(planId, transaction.id, transaction.cleared, cleared);
       setReplacements((current) => new Map(current).set(updated.id, updated));
-      reload();
-      setReconciliationPreviewGeneration((generation) => generation + 1);
+      if (options.refresh !== false) {
+        reload();
+        setReconciliationPreviewGeneration((generation) => generation + 1);
+      }
+      return true;
     } catch (cause) {
       setClearedOverlays((current) => {
         const next = new Map(current);
@@ -573,14 +577,15 @@ export function TransactionsPage() {
       });
       setReplacements((current) => new Map(current).set(transaction.id, transaction));
       setMutationError(cause instanceof Error ? cause.message : String(cause));
+      return false;
     } finally {
       clearedInFlightRef.current.delete(transaction.id);
       setMutatingId((current) => (current === transaction.id ? null : current));
     }
   };
 
-  const deleteTransaction = async (transaction: Transaction) => {
-    if (mutationLockRef.current) return;
+  const deleteTransaction = async (transaction: Transaction, options: { refresh?: boolean } = {}): Promise<boolean> => {
+    if (mutationLockRef.current) return false;
     setMutatingId(transaction.id);
     setMutationError(null);
     setMutationSuccess(null);
@@ -615,13 +620,22 @@ export function TransactionsPage() {
       if (session.status !== "idle" && removed.has(rowId(session.row))) {
         replaceRowEdit(idleRowEdit());
       }
-      reload();
-      setReconciliationPreviewGeneration((generation) => generation + 1);
+      if (options.refresh !== false) {
+        reload();
+        setReconciliationPreviewGeneration((generation) => generation + 1);
+      }
+      return true;
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause.message : String(cause));
+      return false;
     } finally {
       setMutatingId((current) => (current === transaction.id ? null : current));
     }
+  };
+
+  const refreshRegister = () => {
+    reload();
+    setReconciliationPreviewGeneration((generation) => generation + 1);
   };
 
   const openCompose = () => {
@@ -1064,15 +1078,27 @@ export function TransactionsPage() {
     () => eligibleApprovalIds(matchedRows, approvalSession),
     [approvalSession, matchedRows],
   );
-  const selectionRows = useMemo(() => eligibleIds.map((id) => ({ id })), [eligibleIds]);
+  const selectableRows = useMemo(
+    () => rows.filter((txn) => !txn.deleted),
+    [rows],
+  );
+  const selectionRows = useMemo(() => selectableRows.map((txn) => ({ id: txn.id })), [selectableRows]);
   const dispatchSelection = (intent: RegisterSelectionIntent) => {
     setSelection((current) => reduceSelection(current, selectionRows, intent, listKey));
   };
-  const selectedApprovalIds = useMemo(
+  const selectedRowIds = useMemo(
     () => selectedIds(selection, selectionRows, listKey),
     [listKey, selection, selectionRows],
   );
-  const selectedApprovalIdSet = useMemo(() => new Set(selectedApprovalIds), [selectedApprovalIds]);
+  const selectedRowIdSet = useMemo(() => new Set(selectedRowIds), [selectedRowIds]);
+  const selectedRows = useMemo(
+    () => selectableRows.filter((txn) => selectedRowIdSet.has(txn.id)),
+    [selectableRows, selectedRowIdSet],
+  );
+  const selectedUnapprovedIds = useMemo(
+    () => selectedRows.filter((txn) => !txn.approved).map((txn) => txn.id),
+    [selectedRows],
+  );
   const selectionHeader = useMemo(
     () => headerState(selection, selectionRows, listKey),
     [listKey, selection, selectionRows],
@@ -1108,6 +1134,79 @@ export function TransactionsPage() {
       } else {
         setMutationError(cause instanceof Error ? cause.message : String(cause));
       }
+    }
+  };
+
+  const categoriseMany = async (targets: readonly Transaction[], categoryId: string) => {
+    const editable = targets.filter((txn) => !txn.transfer_account_id && !txn.parent_transaction_id && !(txn.subtransactions?.length));
+    if (mutationLockRef.current || editable.length === 0) return;
+    if (rowEditRef.current.status !== "idle") {
+      replaceRowEdit(idleRowEdit());
+    }
+    setWriteLocked(true);
+    setMutationError(null);
+    setMutationSuccess(null);
+    let done = 0;
+    try {
+      for (const txn of editable) {
+        const updated = await api.updateTransaction(planId, txn.id, { category_id: categoryId || null });
+        setReplacements((current) => new Map(current).set(updated.id, updated));
+        done += 1;
+      }
+      dispatchSelection({ kind: "none" });
+      setMutationSuccess(`Categorised ${done} transaction${done === 1 ? "" : "s"}.`);
+    } catch (cause) {
+      setMutationError(`${cause instanceof Error ? cause.message : String(cause)} (${done} of ${editable.length} updated)`);
+    } finally {
+      setWriteLocked(false);
+      reload();
+    }
+  };
+
+  const setClearedMany = async (targets: readonly Transaction[], cleared: "cleared" | "uncleared") => {
+    const applicable = targets.filter((txn) => txn.cleared !== "reconciled" && txn.cleared !== cleared);
+    if (applicable.length === 0) return;
+    if (rowEditRef.current.status !== "idle") {
+      replaceRowEdit(idleRowEdit());
+    }
+    setWriteLocked(true);
+    try {
+      for (const txn of applicable) {
+        const ok = await toggleCleared(txn, { refresh: false });
+        if (!ok) return;
+      }
+      dispatchSelection({ kind: "none" });
+    } finally {
+      setWriteLocked(false);
+      refreshRegister();
+    }
+  };
+
+  const deleteMany = async (targets: readonly Transaction[]) => {
+    const removed = new Set<string>(deletedIds);
+    let remaining = targets.filter((txn) => !removed.has(txn.id));
+    let attempted = false;
+    if (rowEditRef.current.status !== "idle") {
+      replaceRowEdit(idleRowEdit());
+    }
+    setWriteLocked(true);
+    try {
+      for (const txn of targets) {
+        if (removed.has(txn.id)) continue;
+        attempted = true;
+        const ok = await deleteTransaction(txn, { refresh: false });
+        if (!ok) {
+          setPendingBulkDeletion(remaining.length > 0 ? remaining : null);
+          return;
+        }
+        for (const id of deletedIdsForRemoval(txn)) removed.add(id);
+        remaining = remaining.filter((candidate) => !removed.has(candidate.id));
+      }
+      setPendingBulkDeletion(null);
+      dispatchSelection({ kind: "none" });
+    } finally {
+      setWriteLocked(false);
+      if (attempted) refreshRegister();
     }
   };
 
@@ -1298,27 +1397,37 @@ export function TransactionsPage() {
         </div>
       </div>
 
-      {selectedApprovalIds.length > 0 && (
+      {selectedRowIds.length > 0 && (
         <div className="register-bulk-bar" role="group" aria-label="Selected transaction actions">
-          <span className="register-bulk-count">{selectedApprovalIds.length} selected</span>
-          <button
-            type="button"
-            className="approval-pill"
-            onClick={() => void approveMany(selectedApprovalIds)}
-            disabled={writeLocked || selectedApprovalIds.some((id) => approvalSession.pending.has(id))}
-          >
-            {selectedApprovalIds.some((id) => approvalSession.pending.has(id))
-              ? "Approving…"
-              : approveSelectedLabel(selectedApprovalIds.length)}
+          <button type="button" className="register-bulk-action register-bulk-clear" onClick={() => dispatchSelection({ kind: "none" })} disabled={mutationBusy} aria-label="Clear selection">
+            × {selectedRowIds.length} selected
           </button>
-          <button
-            type="button"
-            className="text-button"
-            onClick={() => dispatchSelection({ kind: "none" })}
+          <span className="register-bulk-sep" aria-hidden="true" />
+          {selectedUnapprovedIds.length > 0 && (
+            <button
+              type="button"
+              className="register-bulk-action"
+              onClick={() => void approveMany(selectedUnapprovedIds)}
+              disabled={writeLocked || selectedUnapprovedIds.some((id) => approvalSession.pending.has(id))}
+            >
+              {selectedUnapprovedIds.some((id) => approvalSession.pending.has(id)) ? "Approving…" : `Approve ${selectedUnapprovedIds.length}`}
+            </button>
+          )}
+          <button type="button" className="register-bulk-action" onClick={() => { setPendingBulkDeletion(selectedRows); setMutationError(null); }} disabled={mutationBusy}>
+            {selectedRows.every((txn) => !txn.approved) ? "Reject" : "Delete"}
+          </button>
+          <span className="register-bulk-sep" aria-hidden="true" />
+          <CategorySelect
+            aria-label="Set category for selected transactions"
+            value=""
+            onChange={(categoryId) => { if (categoryId) void categoriseMany(selectedRows, categoryId); }}
+            groups={orderedGroups}
+            emptyLabel="Categorise…"
             disabled={mutationBusy}
-          >
-            Clear
-          </button>
+          />
+          <span className="register-bulk-sep" aria-hidden="true" />
+          <button type="button" className="register-bulk-action" onClick={() => void setClearedMany(selectedRows, "cleared")} disabled={mutationBusy}>Mark cleared</button>
+          <button type="button" className="register-bulk-action" onClick={() => void setClearedMany(selectedRows, "uncleared")} disabled={mutationBusy}>Mark uncleared</button>
         </div>
       )}
       {page.error && (
@@ -1523,6 +1632,24 @@ export function TransactionsPage() {
           </div>
         </section>
       )}
+      {pendingBulkDeletion && (
+        <section className="transaction-delete-confirm" role="region" aria-labelledby="delete-many-heading">
+          <div>
+            <h2 id="delete-many-heading">
+              {pendingBulkDeletion.every((txn) => !txn.approved)
+                ? `Reject ${pendingBulkDeletion.length} new transaction${pendingBulkDeletion.length === 1 ? "" : "s"}?`
+                : `Delete ${pendingBulkDeletion.length} transaction${pendingBulkDeletion.length === 1 ? "" : "s"}?`}
+            </h2>
+            <p>Linked transfer entries are removed with them. Split lines on other accounts stay and lose their transfer link.</p>
+          </div>
+          <div className="transaction-delete-confirm-actions">
+            <button type="button" className="text-button" onClick={() => setPendingBulkDeletion(null)} disabled={mutationBusy}>Cancel</button>
+            <button type="button" className="transaction-delete-button" onClick={() => void deleteMany(pendingBulkDeletion)} disabled={mutationBusy}>
+              {mutationBusy ? "Removing…" : pendingBulkDeletion.every((txn) => !txn.approved) ? "Reject transactions" : "Delete transactions"}
+            </button>
+          </div>
+        </section>
+      )}
       {page.loading && !page.loaded && (
         <div className="status-panel">
           <p className="status-title">Loading transactions...</p>
@@ -1553,8 +1680,8 @@ export function TransactionsPage() {
                         onChange={() => dispatchSelection({
                           kind: selectionHeader === "all" ? "none" : "all",
                         })}
-                        disabled={mutationBusy || eligibleIds.length === 0}
-                        aria-label="Select all visible unapproved transactions"
+                        disabled={mutationBusy || selectionRows.length === 0}
+                        aria-label="Select all visible transactions"
                       />
                     </th>
                     <th>Date</th>
@@ -1601,24 +1728,7 @@ export function TransactionsPage() {
                           key={txn.id}
                           row={{ kind: "posted", transaction: txn }}
                           surface={rowSurface}
-                          leading={!txn.approved && !txn.deleted ? (
-                            <input
-                              type="checkbox"
-                              checked={selectedApprovalIdSet.has(txn.id)}
-                              onClick={(event) => {
-                                const index = eligibleIds.indexOf(txn.id);
-                                if (index >= 0) {
-                                  dispatchSelection({
-                                    kind: event.shiftKey ? "extend" : "toggle",
-                                    index,
-                                  });
-                                }
-                              }}
-                              onChange={() => {}}
-                              disabled={mutationBusy}
-                              aria-label={`Select ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
-                            />
-                          ) : null}
+                          leading={null}
                           account={txn.account_name}
                           onDelete={() => {
                             rowSurface.cancel();
@@ -1630,6 +1740,8 @@ export function TransactionsPage() {
                               transaction={txn}
                               busy={writeLocked || mutatingId === txn.id}
                               onToggle={() => void toggleCleared(txn)}
+                              onApprove={() => void approveMany([txn.id])}
+                              approving={approvalSession.pending.has(txn.id)}
                             />
                           )}
                           payeeExtra={<FlagTag colour={txn.flag_color} name={namedFlagLabel(colourNamesByAccountId.get(txn.account_id), txn.flag_color, txn.flag_name)} />}
@@ -1653,12 +1765,12 @@ export function TransactionsPage() {
                       key={txn.id}
                       row={{ kind: "posted", transaction: txn }}
                       surface={rowSurface}
-                      leading={!txn.approved && !txn.deleted ? (
+                      leading={!txn.deleted ? (
                         <input
                           type="checkbox"
-                          checked={selectedApprovalIdSet.has(txn.id)}
+                          checked={selectedRowIdSet.has(txn.id)}
                           onClick={(event) => {
-                            const index = eligibleIds.indexOf(txn.id);
+                            const index = selectionRows.findIndex((row) => row.id === txn.id);
                             if (index >= 0) {
                               dispatchSelection({
                                 kind: event.shiftKey ? "extend" : "toggle",
@@ -1682,6 +1794,8 @@ export function TransactionsPage() {
                           transaction={txn}
                           busy={writeLocked || mutatingId === txn.id}
                           onToggle={() => void toggleCleared(txn)}
+                          onApprove={() => void approveMany([txn.id])}
+                          approving={approvalSession.pending.has(txn.id)}
                         />
                       )}
                       payeeExtra={<FlagTag colour={txn.flag_color} name={namedFlagLabel(colourNamesByAccountId.get(txn.account_id), txn.flag_color, txn.flag_name)} />}
@@ -1862,11 +1976,32 @@ function ClearedStatus({
   transaction,
   busy,
   onToggle,
+  onApprove,
+  approving,
 }: {
   transaction: Transaction;
   busy: boolean;
   onToggle: () => void;
+  onApprove: () => void;
+  approving: boolean;
 }) {
+  const payee = transaction.payee_name ?? (transaction.transfer_account_id ? "transfer" : "transaction");
+
+  if (!transaction.approved) {
+    return (
+      <button
+        type="button"
+        className="cleared-status approve-dot"
+        onClick={onApprove}
+        disabled={busy || approving}
+        aria-label={`Approve ${payee} on ${formatDate(transaction.date)}`}
+        title={approving ? "Approving…" : "New — click to approve"}
+      >
+        <span aria-hidden="true" />
+      </button>
+    );
+  }
+
   if (transaction.cleared === "reconciled") {
     return (
       <span className="cleared-status cleared-status-reconciled" aria-label="Reconciled" title="Reconciled">
@@ -1878,7 +2013,6 @@ function ClearedStatus({
   }
 
   const cleared = transaction.cleared === "cleared";
-  const payee = transaction.payee_name ?? (transaction.transfer_account_id ? "transfer" : "transaction");
   return (
     <button
       type="button"
