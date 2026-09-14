@@ -213,17 +213,35 @@ describe("D1 foundation", () => {
     const workerPackage = await Bun.file(new URL("../../worker/package.json", import.meta.url)).json();
     expect(workerPackage.scripts["build:web"]).toBe("bun run --cwd ../web build");
     expect(workerPackage.scripts.build).toBe("bun run build:web && wrangler deploy --dry-run --outdir dist");
-    expect(workerPackage.scripts.deploy).toBe("bun run build:web && wrangler deploy --profile yj");
-    expect(workerPackage.scripts["deploy:preview"]).toBe("bun run build:web && wrangler deploy --profile yj --env preview");
+    // A bare deploy must refuse: every real deploy pins a profile and env.
+    expect(workerPackage.scripts.deploy).toContain("Refusing unqualified deploy");
+    expect(workerPackage.scripts.deploy).toContain("exit 1");
+    expect(workerPackage.scripts["deploy:tk"]).toBe("bun run build:web && wrangler deploy --env tk --profile tinkertanker");
+    expect(workerPackage.scripts["deploy:yj-redirect"]).toBe("bun run build:web && wrangler deploy --profile yj");
+    expect(workerPackage.scripts["deploy:preview"]).toBe("bun run build:web && wrangler deploy --env preview --profile yj");
     const wranglerConfig = JSON.parse((await Bun.file(new URL("../../worker/wrangler.jsonc", import.meta.url)).text()).replace(/^\s*\/\/.*$/gm, ""));
+    // Top level = legacy YJ account: frozen backup database, permanent redirect, no cron.
     expect(wranglerConfig.d1_databases[0]).toMatchObject({ database_name: "howmuch-production", database_id: "57dc5569-d639-44c1-bb9d-6214f43a43b8" });
-    expect(wranglerConfig.env.preview.d1_databases[0]).toMatchObject({ database_name: "howmuch-preview", database_id: "7ca818bd-7f04-4b9b-8a84-8c8f84a6a272" });
-    expect(wranglerConfig.vars).toEqual({
+    expect(wranglerConfig.vars).toMatchObject({
       HOWMUCH_DEFAULT_PLAN_ID: "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
       HOWMUCH_TIME_ZONE: "Asia/Singapore",
+      HOWMUCH_REDIRECT_TARGET: "https://howmuch.tk.sg",
+    });
+    expect(wranglerConfig.triggers.crons).toEqual([]);
+    expect(wranglerConfig.routes).toEqual([{ pattern: "howmuch.soon.sg", custom_domain: true }]);
+    // tk env = production in the Tinkertanker account: SIN database, writable, daily materialisation, no redirect var.
+    expect(wranglerConfig.env.tk.d1_databases[0]).toMatchObject({ database_name: "howmuch-production-sg", database_id: "d13295f9-10d4-4ac0-bf62-b3e8c78cbf29" });
+    expect(wranglerConfig.env.tk.routes).toEqual([{ pattern: "howmuch.tk.sg", custom_domain: true }]);
+    expect(wranglerConfig.env.tk.triggers.crons).toEqual(["5 16 * * *"]);
+    expect(wranglerConfig.env.tk.vars).toEqual({
+      HOWMUCH_DEFAULT_PLAN_ID: "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
+      HOWMUCH_TIME_ZONE: "Asia/Singapore",
+      HOWMUCH_YNAB_PLAN_ID: "",
       HOWMUCH_TRANSITION_READ_ONLY: "false",
     });
-    expect(wranglerConfig.triggers.crons).toEqual(["5 16 * * *"]);
+    expect(wranglerConfig.env.tk.vars).not.toHaveProperty("HOWMUCH_REDIRECT_TARGET");
+    // preview env stays in the YJ account.
+    expect(wranglerConfig.env.preview.d1_databases[0]).toMatchObject({ database_name: "howmuch-preview", database_id: "7ca818bd-7f04-4b9b-8a84-8c8f84a6a272" });
     expect(wranglerConfig.env.preview.routes).toEqual([]);
     expect(wranglerConfig.env.preview.triggers.crons).toEqual([]);
     expect(wranglerConfig.env.preview.vars).toEqual({
