@@ -53,7 +53,7 @@ export class D1TransactionRepository {
       const merged: TransactionInput = {
         id: transactionId, account_id: patch.account_id ?? old.account_id, date: patch.date ?? old.date,
         amount: patch.amount ?? old.amount_milli, memo: patch.memo === undefined ? old.memo : patch.memo,
-        cleared: patch.cleared ?? old.cleared, approved: patch.approved ?? Boolean(old.approved),
+        cleared: patch.cleared ?? old.cleared, approved: patch.approved === undefined ? Boolean(old.approved) : patch.approved,
         payee_id: patch.payee_id === undefined ? old.payee_id : patch.payee_id,
         payee_name: patch.payee_name === undefined ? old.payee_name_snapshot : patch.payee_name,
         category_id: patch.category_id === undefined ? old.category_id : patch.category_id,

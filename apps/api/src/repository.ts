@@ -401,7 +401,7 @@ export class LedgerRepository {
 
   async updateAccount(planId: string, accountId: string, patch: AccountUpdatePatch): Promise<any> {
     const nextIcon = patch.icon === undefined ? undefined : parseAccountIcon(patch.icon);
-    if (patch.icon !== undefined && !nextIcon) throw new ValidationError("icon must be a single emoji");
+    if (nextIcon === null) throw new ValidationError("icon must be a single emoji");
     const nextName = patch.name === undefined ? undefined : String(patch.name).trim();
     if (patch.name !== undefined && !nextName) throw new ValidationError("account.name is required");
     if (nextIcon === undefined && nextName === undefined && patch.kind === undefined) {
@@ -1110,7 +1110,7 @@ export class LedgerRepository {
     if (patch.approved !== undefined && Object.keys(patch).length === 1) {
       let linkedSplit = false;
       await this.db.transaction(async () => {
-        linkedSplit = await this.applyLinkedSplitApproval(planId, transactionId, patch.approved!, plan);
+        linkedSplit = await this.applyLinkedSplitApproval(planId, transactionId, patch.approved ?? false, plan);
         if (linkedSplit) await this.executeMutationPlan(planId, plan);
       })();
       if (linkedSplit) {
@@ -1252,7 +1252,7 @@ export class LedgerRepository {
         if (
           item.patch.approved !== undefined &&
           Object.keys(item.patch).length === 1 &&
-          await this.applyLinkedSplitApproval(planId, item.id, item.patch.approved, plan)
+          await this.applyLinkedSplitApproval(planId, item.id, item.patch.approved ?? false, plan)
         ) {
           continue;
         }

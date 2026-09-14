@@ -1877,6 +1877,23 @@ describe("account icons", () => {
     expect(transfer.name).toBe("Transfer : Daily Spend");
   });
 
+  test("ignores non-string icon ingress like omission and rejects it as the only update", async () => {
+    const account = await createAccountViaApi({ name: "Everyday", type: "checking", icon: "🐷" });
+    for (const icon of [undefined, null, 42, false, ["💳"], { icon: "💳" }]) {
+      const renamed = await request(`/v1/plans/plan-test/accounts/${account.id}`, {
+        method: "PATCH",
+        body: { account: { name: "Daily Spend", icon } },
+      });
+      expect(renamed.status).toBe(200);
+      expect((await renamed.json()).data.account).toMatchObject({ name: "Daily Spend", icon: "🐷" });
+      const rejected = await request(`/v1/plans/plan-test/accounts/${account.id}`, {
+        method: "PATCH",
+        body: { account: { icon } },
+      });
+      expect(rejected.status).toBe(400);
+    }
+  });
+
   test("stores a renamed name as typed and does not lift a leading emoji", async () => {
     const account = await createAccountViaApi({ name: "Everyday", type: "checking" });
     const renamed = await request(`/v1/plans/plan-test/accounts/${account.id}`, {

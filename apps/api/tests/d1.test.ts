@@ -8,6 +8,7 @@ import { runDailyScheduledMaterialization, scheduledLocalDate, scheduledMaterial
 import { D1TransactionRepository } from "../src/d1-transaction-repository";
 import { D1MetadataRepository } from "../src/d1-metadata-repository";
 import { D1LedgerRepository } from "../src/d1-ledger-repository";
+import { LedgerRepository } from "../src/repository";
 import { D1AuthStore } from "../src/auth-store";
 import { CountingD1Database, fakeD1Binding } from "./helpers/counting-d1";
 import { newPersonalApiToken, newSession } from "../src/password-auth";
@@ -1644,6 +1645,48 @@ describe("D1 foundation", () => {
     expect(db.query("SELECT COUNT(*) count FROM transactions").get()).toEqual({ count: 0 });
     expect(db.query("SELECT write_version FROM write_state").get()).toEqual({ write_version: 0 });
   });
+});
+
+describe("nullable approval parity", () => {
+  for (const engine of ["SQLite", "D1"] as const) {
+    for (const mode of ["single", "batch"] as const) {
+      test(`${engine} ${mode} preserves omitted approval and clears explicit null`, async () => {
+        const db = await ledgerSqlite();
+        provisionTransferPayee(db, "a");
+        const repo = engine === "D1"
+          ? new D1LedgerRepository(new D1Database(fakeD1(db)), "p")
+          : new LedgerRepository(db, "p");
+        const update = async (id: string, patch: { approved?: boolean | null; memo?: string }) => {
+          if (mode === "single") await repo.updateTransaction("p", id, patch);
+          else await repo.updateTransactions("p", [{ lookup: { kind: "id", id }, patch }]);
+        };
+        await repo.createTransaction("p", {
+          id: "nullable", account_id: "a", date: "2026-07-01", amount: -300, approved: true,
+        });
+        await update("nullable", { memo: "approval omitted" });
+        expect((await repo.getTransaction("p", "nullable")).approved).toBe(true);
+        await update("nullable", { approved: null, memo: "explicit null" });
+        expect(await repo.getTransaction("p", "nullable")).toMatchObject({ approved: false, memo: "explicit null" });
+        await update("nullable", { approved: true });
+        await update("nullable", { approved: null });
+        expect((await repo.getTransaction("p", "nullable")).approved).toBe(false);
+
+        await repo.upsertAccount("p", { id: "b", name: "Savings" });
+        const split = await repo.createTransaction("p", {
+          id: "split-nullable", account_id: "a", date: "2026-07-01", amount: -300, approved: true,
+          subtransactions: [{ amount: -100, transfer_account_id: "b" }, { amount: -200 }],
+        });
+        const mirrorId = split.subtransactions.find((sub: { amount: number }) => sub.amount === -100).transfer_transaction_id;
+        expect(mirrorId).toBeString();
+        await update(mirrorId, { approved: null });
+        expect((await repo.getTransaction("p", split.id)).approved).toBe(false);
+        expect((await repo.getTransaction("p", mirrorId)).approved).toBe(false);
+        await update(mirrorId, { approved: true });
+        expect((await repo.getTransaction("p", split.id)).approved).toBe(true);
+        expect((await repo.getTransaction("p", mirrorId)).approved).toBe(true);
+      });
+    }
+  }
 });
 
 describe("D1 bulk transaction commands", () => {

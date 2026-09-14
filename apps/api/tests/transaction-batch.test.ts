@@ -9,6 +9,22 @@ import {
 import { MAX_TRANSACTION_WRITE_BATCH } from "../src/types";
 
 describe("transaction collection parse", () => {
+  test("preserves null versus omitted approval and rejects non-boolean ingress", () => {
+    expect(parseTransactionUpdates({ transactions: [
+      { id: "null", approved: null },
+      { id: "omitted", memo: "keep approval" },
+      { id: "false", approved: false },
+    ] })).toEqual([
+      { lookup: { kind: "id", id: "null" }, patch: { approved: null } },
+      { lookup: { kind: "id", id: "omitted" }, patch: { memo: "keep approval" } },
+      { lookup: { kind: "id", id: "false" }, patch: { approved: false } },
+    ]);
+    for (const approved of [0, 1, "false", [], {}]) {
+      expect(() => parseTransactionUpdates({ transactions: [{ id: "invalid", approved }] }))
+        .toThrow("approved must be a boolean");
+    }
+  });
+
   test("accepts one or many POST bodies and rejects both", () => {
     expect(collectionPostIntent({ transaction: { account_id: "a" } })).toBe("one");
     expect(collectionPostIntent({ transactions: [{ account_id: "a" }] })).toBe("many");

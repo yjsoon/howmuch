@@ -40,14 +40,18 @@ export class D1LedgerRepository extends LedgerRepository {
   override async upsertAccount(planId:string,account:any):Promise<void>{await this.metadata.upsertAccount(planId,account,this.context("account.upsert",planId,account.id));}
   override async updateAccount(planId:string,accountId:string,patch:AccountUpdatePatch):Promise<any>{
     const parsedIcon = patch.icon === undefined ? undefined : parseAccountIcon(patch.icon);
-    if (patch.icon !== undefined && !parsedIcon) throw new ValidationError("icon must be a single emoji");
+    if (parsedIcon === null) throw new ValidationError("icon must be a single emoji");
     const parsedName = patch.name === undefined ? undefined : String(patch.name).trim();
     if (patch.name !== undefined && !parsedName) throw new ValidationError("account.name is required");
     if (parsedIcon === undefined && parsedName === undefined && patch.kind === undefined) throw new ValidationError("account.icon, account.name, or account.type is required");
     const existing = await this.d1.get("SELECT name, icon, type FROM accounts WHERE id=? AND plan_id=? AND deleted=0", [accountId, planId]);
     if (!existing) throw new NotFoundError("Account not found");
     const fields = applyAccountUpdate(
-      { name: String(existing.name ?? ""), icon: existing.icon, type: existing.type },
+      {
+        name: String(existing.name ?? ""),
+        icon: typeof existing.icon === "string" ? existing.icon : null,
+        type: typeof existing.type === "string" ? existing.type : null,
+      },
       { ...(parsedIcon !== undefined ? { icon: parsedIcon } : {}), ...(parsedName !== undefined ? { name: parsedName } : {}), ...(patch.kind ? { kind: patch.kind } : {}) },
     );
     await this.metadata.updateAccount(planId, accountId, {
@@ -335,7 +339,7 @@ export class D1LedgerRepository extends LedgerRepository {
   protected override async applyTransactionUpdate(planId:string,id:string,patch:Partial<TransactionInput>):Promise<void>{
     try {
       if (patch.approved !== undefined && Object.keys(patch).length === 1) {
-        await this.transactions.approve(planId,id,patch.approved,this.context("transaction.approve",planId,id));
+        await this.transactions.approve(planId,id,patch.approved ?? false,this.context("transaction.approve",planId,id));
       } else {
         await this.transactions.update(planId,id,patch,this.context("transaction.update",planId,id));
       }
