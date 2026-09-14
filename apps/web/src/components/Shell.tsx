@@ -24,6 +24,19 @@ const REPORTS = [
   { to: "/rewards", label: "Rewards" },
 ];
 
+const COLLAPSED_KEY = "howmuch.sidebar-collapsed.v1";
+
+function loadCollapsed(): Set<string> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]");
+    return new Set(Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string") : []);
+  } catch { return new Set(); }
+}
+
+function saveCollapsed(ids: ReadonlySet<string>): void {
+  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...ids])); } catch { /* ignore */ }
+}
+
 export function Shell() {
   const location = useLocation();
   const {
@@ -47,6 +60,15 @@ export function Shell() {
     counts?: Record<string, number>;
     state: AccountUsageState;
   }>({ state: { phase: "idle", message: null } });
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(() => loadCollapsed());
+  const toggleGroup = (groupId: string) => {
+    setCollapsedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId); else next.add(groupId);
+      saveCollapsed(next);
+      return next;
+    });
+  };
   const openAccounts = useMemo(() => accounts.filter((account) => !account.closed), [accounts]);
   const accountGroups = useMemo(
     () => buildAccountGroups(accounts, accountPreferences, accountUsage.counts),
@@ -235,13 +257,13 @@ export function Shell() {
           </div>
           {collections.length > 0 && (
             <div className="account-list-band">
-              <AccountGroupSections groups={collections} selectedAccountId={selectedAccount?.id} onChangeIcon={updateAccountIcon} />
+              <AccountGroupSections groups={collections} selectedAccountId={selectedAccount?.id} onChangeIcon={updateAccountIcon} collapsed={collapsedGroups} onToggle={toggleGroup} />
             </div>
           )}
           {typeIndex.length > 0 && (
             <div className="account-list-band account-list-band-index">
               <p className="account-list-band-label">By type</p>
-              <AccountGroupSections groups={typeIndex} selectedAccountId={selectedAccount?.id} tone="index" onChangeIcon={updateAccountIcon} />
+              <AccountGroupSections groups={typeIndex} selectedAccountId={selectedAccount?.id} tone="index" onChangeIcon={updateAccountIcon} collapsed={collapsedGroups} onToggle={toggleGroup} />
             </div>
           )}
         </div>
@@ -311,38 +333,54 @@ function AccountGroupSections({
   selectedAccountId,
   tone,
   onChangeIcon,
+  collapsed,
+  onToggle,
 }: {
   groups: AccountGroup[];
   selectedAccountId: string | undefined;
   tone?: "index";
   onChangeIcon: (accountId: string, icon: string) => Promise<void>;
+  collapsed: ReadonlySet<string>;
+  onToggle: (groupId: string) => void;
 }) {
-  return groups.map((group) => (
-    <section key={group.id} className={tone === "index" ? "account-group account-group-index" : "account-group"}>
-      <div className="account-group-heading">
-        <span>{group.label}</span>
-        <span>{formatMoney(group.accounts.reduce((sum, account) => sum + account.balance, 0))}</span>
-      </div>
-      {group.accounts.map((account) => (
-        <div key={account.id} className="account-row">
-          <AccountIconButton
-            accountName={account.name}
-            icon={account.icon}
-            onChange={(icon) => onChangeIcon(account.id, icon)}
-          />
-          <NavLink
-            to={`/transactions?range=all&accounts=${encodeURIComponent(account.id)}`}
-            className={selectedAccountId === account.id ? "account-link sidebar-link-active" : "account-link"}
-          >
-            <span className="account-name" title={account.name}>{account.name}</span>
-            <span className={account.balance < 0 ? "sidebar-balance sidebar-balance-negative" : "sidebar-balance"}>
-              {formatMoney(account.balance)}
-            </span>
-          </NavLink>
+  return groups.map((group) => {
+    const open = !collapsed.has(group.id) || group.accounts.some((account) => account.id === selectedAccountId);
+    return (
+      <section key={group.id} className={tone === "index" ? "account-group account-group-index" : "account-group"}>
+        <button
+          type="button"
+          className="account-group-heading"
+          aria-expanded={open}
+          aria-controls={`account-group-${group.id}`}
+          onClick={() => onToggle(group.id)}
+        >
+          <span className="account-group-chevron" aria-hidden="true">{open ? "▾" : "▸"}</span>
+          <span className="account-group-label">{group.label}</span>
+          <span>{formatMoney(group.accounts.reduce((sum, account) => sum + account.balance, 0))}</span>
+        </button>
+        <div id={`account-group-${group.id}`} hidden={!open}>
+          {group.accounts.map((account) => (
+            <div key={account.id} className="account-row">
+              <AccountIconButton
+                accountName={account.name}
+                icon={account.icon}
+                onChange={(icon) => onChangeIcon(account.id, icon)}
+              />
+              <NavLink
+                to={`/transactions?range=all&accounts=${encodeURIComponent(account.id)}`}
+                className={selectedAccountId === account.id ? "account-link sidebar-link-active" : "account-link"}
+              >
+                <span className="account-name" title={account.name}>{account.name}</span>
+                <span className={account.balance < 0 ? "sidebar-balance sidebar-balance-negative" : "sidebar-balance"}>
+                  {formatMoney(account.balance)}
+                </span>
+              </NavLink>
+            </div>
+          ))}
         </div>
-      ))}
-    </section>
-  ));
+      </section>
+    );
+  });
 }
 
 function AccountOrganizationNotice({ sync, supported, usage, onRetrySave, onRetryUsage }: {

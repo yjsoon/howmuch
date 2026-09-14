@@ -320,14 +320,39 @@ textarea {
 
 .account-group-heading {
   display: flex;
+  width: 100%;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
   padding: 0 10px 5px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
   color: #a8aaa2;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+}
+
+.account-group-heading:hover {
+  color: #e1e0da;
+}
+
+.account-group-chevron {
+  width: 10px;
+  flex: 0 0 auto;
+  opacity: 0.7;
+}
+
+.account-group-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .account-group-index .account-group-heading {
