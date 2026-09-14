@@ -24,6 +24,11 @@ import {
   type UnapprovedCount,
   type TransactionBatchResult,
   type TransactionBatchUpdate,
+  type TransactionBulkOutcome,
+  type TransactionBulkResult,
+  type TransactionBulkStatus,
+  type TransactionClearedItem,
+  type TransactionDeleteItem,
   type TransactionLookup,
 } from "./types";
 import {
@@ -70,6 +75,13 @@ type TransactionMutationPlan = {
 function newTransactionMutationPlan(): TransactionMutationPlan {
   return { touchedTransactionIds: new Set(), accountIdsToRecalculate: new Set() };
 }
+
+/**
+ * Safe text for an ambiguous per-row bulk failure. The real error may name
+ * tables, bindings, or driver state, and the HTTP layer keeps those out of
+ * response bodies; a 200 bulk body must not leak what a 500 would redact.
+ */
+const BULK_UNRESOLVED_DETAIL = "This row's write could not be confirmed";
 
 function emptyRewardsTrackerSnapshot(cards: unknown[]): Record<string, unknown> {
   const trackedAccountIds = [...new Set(cards.flatMap((entry) => {
@@ -1084,6 +1096,16 @@ export class LedgerRepository {
   }
 
   async updateTransaction(planId: string, transactionId: string, patch: Partial<TransactionInput>): Promise<any> {
+    await this.applyTransactionUpdate(planId, transactionId, patch);
+    return this.getTransaction(planId, transactionId);
+  }
+
+  /**
+   * The write half of a transaction update, without the response hydration.
+   * Storage engines that can return the committed row themselves override this
+   * so bulk callers do not pay a discarded per-item read.
+   */
+  protected async applyTransactionUpdate(planId: string, transactionId: string, patch: Partial<TransactionInput>): Promise<void> {
     const plan = newTransactionMutationPlan();
     if (patch.approved !== undefined && Object.keys(patch).length === 1) {
       let linkedSplit = false;
@@ -1092,7 +1114,7 @@ export class LedgerRepository {
         if (linkedSplit) await this.executeMutationPlan(planId, plan);
       })();
       if (linkedSplit) {
-        return this.getTransaction(planId, transactionId);
+        return;
       }
     }
     await this.db.transaction(async () => {
@@ -1100,7 +1122,6 @@ export class LedgerRepository {
       await this.applyResolvedPatch(planId, prepared.existing, prepared.next, patch, plan);
       await this.executeMutationPlan(planId, plan);
     })();
-    return this.getTransaction(planId, transactionId);
   }
 
   async updateTransactionCleared(
@@ -1109,6 +1130,17 @@ export class LedgerRepository {
     expectedCleared: "uncleared" | "cleared",
     cleared: "uncleared" | "cleared",
   ): Promise<any> {
+    await this.applyTransactionCleared(planId, transactionId, expectedCleared, cleared);
+    return this.getTransaction(planId, transactionId);
+  }
+
+  /** Write half of the dedicated cleared toggle; see `applyTransactionUpdate`. */
+  protected async applyTransactionCleared(
+    planId: string,
+    transactionId: string,
+    expectedCleared: "uncleared" | "cleared",
+    cleared: "uncleared" | "cleared",
+  ): Promise<void> {
     const plan = newTransactionMutationPlan();
     await this.db.transaction(async () => {
       const existing = await this.getTransactionRow(planId, transactionId);
@@ -1121,7 +1153,88 @@ export class LedgerRepository {
       plan.touchedTransactionIds.add(transactionId);
       await this.executeMutationPlan(planId, plan);
     })();
-    return this.getTransaction(planId, transactionId);
+  }
+
+  /**
+   * Bounded bulk cleared. Each row keeps the dedicated single-item compare-and-set,
+   * including the split/transfer side handling. Expected conflicts are per-item
+   * outcomes and the loop continues; an ambiguous failure stops the command and
+   * leaves the remaining rows unattempted rather than replaying them.
+   */
+  async updateTransactionsCleared(planId: string, items: TransactionClearedItem[]): Promise<TransactionBulkResult> {
+    const { outcomes, serverKnowledge } = await this.runBulk(planId, items, (item) =>
+      this.applyTransactionCleared(planId, item.id, item.expected_cleared, item.cleared));
+    return this.summariseBulk(outcomes, serverKnowledge);
+  }
+
+  /**
+   * Bounded bulk delete. Each row keeps the single-item optional
+   * `expected_approved` guard and the transfer/split cascade.
+   *
+   * A row that is already gone is reported as `already_removed` and nothing
+   * more. This command cannot prove it removed a row it never committed — the
+   * transfer pair it cascaded to, an external deletion, and a row that never
+   * existed all look the same from here — so it never claims that attribution
+   * and never counts it as its own work. An earlier conflict that a later
+   * sibling delete happens to cascade over stays a `conflict`: that item's own
+   * command was rejected, and a sound cascade report would need the owning
+   * command to return the ids it actually committed.
+   */
+  async deleteTransactions(planId: string, items: TransactionDeleteItem[]): Promise<TransactionBulkResult> {
+    const { outcomes, serverKnowledge } = await this.runBulk(
+      planId,
+      items,
+      (item) => this.applyTransactionDelete(planId, item.id, item.expected_approved),
+    );
+    return this.summariseBulk(outcomes, serverKnowledge);
+  }
+
+  private async runBulk<Item extends { id: string }>(
+    planId: string,
+    items: readonly Item[],
+    apply: (item: Item) => Promise<void>,
+  ): Promise<{ outcomes: TransactionBulkOutcome[]; serverKnowledge: number }> {
+    const outcomes: TransactionBulkOutcome[] = [];
+    let stopped = false;
+    for (const item of items) {
+      if (stopped) {
+        outcomes.push({ id: item.id, status: "unattempted" });
+        continue;
+      }
+      try {
+        await apply(item);
+        outcomes.push({ id: item.id, status: "applied" });
+      } catch (error) {
+        if (error instanceof TransactionStateConflictError) {
+          outcomes.push({ id: item.id, status: "conflict", detail: error.message });
+          continue;
+        }
+        if (error instanceof NotFoundError) {
+          outcomes.push({ id: item.id, status: "already_removed", detail: error.message });
+          continue;
+        }
+        // Anything else may carry infrastructure detail (SQL, binding values,
+        // driver text). The HTTP layer deliberately keeps those out of the
+        // response body and logs them instead; a 200 bulk body must not leak
+        // what a 500 would redact.
+        outcomes.push({ id: item.id, status: "unresolved", detail: BULK_UNRESOLVED_DETAIL });
+        stopped = true;
+      }
+    }
+    return { outcomes, serverKnowledge: await this.getServerKnowledge(planId) };
+  }
+
+  private summariseBulk(outcomes: TransactionBulkOutcome[], serverKnowledge: number): TransactionBulkResult {
+    const count = (status: TransactionBulkStatus) => outcomes.filter((outcome) => outcome.status === status).length;
+    return {
+      outcomes,
+      applied_count: count("applied"),
+      conflict_count: count("conflict"),
+      already_removed_count: count("already_removed"),
+      unresolved_count: count("unresolved"),
+      unattempted_count: count("unattempted"),
+      server_knowledge: serverKnowledge,
+    };
   }
 
   async updateTransactions(planId: string, edits: TransactionBatchUpdate[]): Promise<TransactionBatchResult> {
@@ -1356,6 +1469,12 @@ export class LedgerRepository {
   }
 
   async deleteTransaction(planId: string, transactionId: string, expectedApproved?: boolean): Promise<any> {
+    await this.applyTransactionDelete(planId, transactionId, expectedApproved);
+    return this.getTransaction(planId, transactionId, true);
+  }
+
+  /** Write half of the tombstone; see `applyTransactionUpdate`. */
+  protected async applyTransactionDelete(planId: string, transactionId: string, expectedApproved?: boolean): Promise<void> {
     const plan = newTransactionMutationPlan();
     await this.db.transaction(async () => {
       const existing = await this.getTransactionRow(planId, transactionId);
@@ -1419,8 +1538,6 @@ export class LedgerRepository {
       }
       await this.executeMutationPlan(planId, plan);
     })();
-
-    return this.getTransaction(planId, transactionId, true);
   }
 
   async importTransactions(planId: string, inputs: TransactionInput[]): Promise<{

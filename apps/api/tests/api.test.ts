@@ -1100,6 +1100,8 @@ describe("YNAB-compatible API", () => {
       ["/v1/plans/plan-test/transactions", "POST"],
       ["/v1/plans/plan-test/transactions", "PATCH"],
       ["/v1/plans/plan-test/transactions/import", "POST"],
+      ["/v1/plans/plan-test/transactions/cleared", "POST"],
+      ["/v1/plans/plan-test/transactions/delete", "POST"],
       ["/v1/plans/plan-test/transactions/transaction-1", "PUT"],
       ["/v1/plans/plan-test/transactions/transaction-1", "PATCH"],
       ["/v1/budgets/plan-test/transactions/transaction-1", "DELETE"],
@@ -1709,6 +1711,122 @@ describe("YNAB-compatible API", () => {
 
     expect(fuzzyDuplicate.data.transaction_ids).toHaveLength(0);
     expect(fuzzyDuplicate.data.duplicate_transaction_ids).toHaveLength(1);
+  });
+});
+
+describe("bulk transaction commands", () => {
+  test("bulk cleared returns ordered outcomes and keeps the collection PATCH working", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertAccount("plan-test", { id: "cash", name: "Cash" });
+    await repo.createTransaction("plan-test", { id: "b1", account_id: "cash", date: "2026-08-01", amount: -100, cleared: "uncleared" });
+    await repo.createTransaction("plan-test", { id: "b2", account_id: "cash", date: "2026-08-02", amount: -200, cleared: "cleared" });
+
+    const response = await request("/v1/plans/plan-test/transactions/cleared", {
+      method: "POST",
+      body: {
+        transactions: [
+          { id: "b1", expected_cleared: "uncleared", cleared: "cleared" },
+          { id: "b2", expected_cleared: "uncleared", cleared: "cleared" },
+        ],
+      },
+    });
+    expect(response.status).toBe(200);
+    const data = (await response.json()).data;
+    expect(data.outcomes.map((outcome: { id: string; status: string }) => [outcome.id, outcome.status])).toEqual([
+      ["b1", "applied"],
+      ["b2", "conflict"],
+    ]);
+    expect(data.applied_count).toBe(1);
+    expect(data.conflict_count).toBe(1);
+    expect(data.unresolved_count).toBe(0);
+    expect(data.unattempted_count).toBe(0);
+    expect(typeof data.server_knowledge).toBe("number");
+    expect(db.query("SELECT id, cleared FROM transactions ORDER BY id").all()).toEqual([
+      { id: "b1", cleared: "cleared" },
+      { id: "b2", cleared: "cleared" },
+    ]);
+
+    const patched = await request("/v1/plans/plan-test/transactions", {
+      method: "PATCH",
+      body: { transactions: [{ id: "b2", memo: "collection patch still works" }] },
+    });
+    expect(patched.status).toBe(200);
+    expect((await patched.json()).data.transactions[0].memo).toBe("collection patch still works");
+  });
+
+  test("bulk delete reports a reject-guard conflict, cascades a pair, and validates the body", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertAccount("plan-test", { id: "cash", name: "Cash" });
+    await repo.createTransaction("plan-test", { id: "d1", account_id: "cash", date: "2026-08-01", amount: -100, approved: false });
+    await repo.createTransaction("plan-test", { id: "d2", account_id: "cash", date: "2026-08-02", amount: -200, approved: false });
+    await repo.updateTransaction("plan-test", "d2", { approved: true });
+
+    const response = await request("/v1/plans/plan-test/transactions/delete", {
+      method: "POST",
+      body: {
+        transactions: [
+          { id: "d1", expected_approved: false },
+          { id: "d2", expected_approved: false },
+        ],
+      },
+    });
+    expect(response.status).toBe(200);
+    const data = (await response.json()).data;
+    expect(data.outcomes.map((outcome: { id: string; status: string }) => [outcome.id, outcome.status])).toEqual([
+      ["d1", "applied"],
+      ["d2", "conflict"],
+    ]);
+    expect(db.query("SELECT id, deleted FROM transactions ORDER BY id").all()).toEqual([
+      { id: "d1", deleted: 1 },
+      { id: "d2", deleted: 0 },
+    ]);
+
+    expect((await request("/v1/plans/plan-test/transactions/delete", {
+      method: "POST",
+      body: { transactions: [] },
+    })).status).toBe(400);
+    expect((await request("/v1/plans/plan-test/transactions/cleared", {
+      method: "POST",
+      body: { transactions: [{ id: "d2", expected_cleared: "reconciled", cleared: "cleared" }] },
+    })).status).toBe(400);
+    expect((await request("/v1/plans/plan-test/transactions/cleared", {
+      method: "POST",
+      body: {
+        transactions: Array.from({ length: 101 }, (_, index) => ({
+          id: `t${index}`, expected_cleared: "uncleared", cleared: "cleared",
+        })),
+      },
+    })).status).toBe(400);
+  });
+
+  test("rejects duplicate ids before writing anything on either bulk route", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertAccount("plan-test", { id: "cash", name: "Cash" });
+    await repo.createTransaction("plan-test", { id: "dup", account_id: "cash", date: "2026-08-01", amount: -100, cleared: "uncleared" });
+
+    const cleared = await request("/v1/plans/plan-test/transactions/cleared", {
+      method: "POST",
+      body: {
+        transactions: [
+          { id: "dup", expected_cleared: "uncleared", cleared: "cleared" },
+          { id: "dup", expected_cleared: "uncleared", cleared: "cleared" },
+        ],
+      },
+    });
+    expect(cleared.status).toBe(400);
+    expect((await cleared.json()).error.detail).toContain("Duplicate transaction id");
+
+    const deleted = await request("/v1/plans/plan-test/transactions/delete", {
+      method: "POST",
+      body: { transactions: [{ id: "dup" }, { id: "dup" }] },
+    });
+    expect(deleted.status).toBe(400);
+    expect((await deleted.json()).error.detail).toContain("Duplicate transaction id");
+
+    expect(db.query("SELECT cleared, deleted FROM transactions WHERE id='dup'").get()).toEqual({
+      cleared: "uncleared",
+      deleted: 0,
+    });
   });
 });
 

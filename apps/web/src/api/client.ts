@@ -49,6 +49,128 @@ export class BulkApprovalError extends Error {
   }
 }
 
+export type TransactionBulkStatus = "applied" | "conflict" | "already_removed" | "unresolved" | "unattempted";
+
+export interface TransactionBulkOutcome {
+  id: string;
+  status: TransactionBulkStatus;
+  detail?: string;
+}
+
+/** The server's ordered per-item result for one bulk command chunk. */
+export interface TransactionBulkResult {
+  outcomes: TransactionBulkOutcome[];
+  applied_count: number;
+  conflict_count: number;
+  already_removed_count: number;
+  unresolved_count: number;
+  unattempted_count: number;
+  server_knowledge: number;
+}
+
+/** Ordered outcomes across every chunk a bulk command actually reached. */
+export interface TransactionBulkSummary {
+  outcomes: TransactionBulkOutcome[];
+  applied_count: number;
+  conflict_count: number;
+  already_removed_count: number;
+  unresolved_count: number;
+  unattempted_count: number;
+}
+
+export interface TransactionCategoryBulkItem {
+  id: string;
+  category_id: string | null;
+}
+
+export interface TransactionClearedBulkItem {
+  id: string;
+  expected_cleared: "uncleared" | "cleared";
+  cleared: "uncleared" | "cleared";
+}
+
+export interface TransactionDeleteBulkItem {
+  id: string;
+  expected_approved?: boolean;
+}
+
+function countBulkOutcomes(outcomes: readonly TransactionBulkOutcome[]): TransactionBulkSummary {
+  const summary: TransactionBulkSummary = {
+    outcomes: [...outcomes],
+    applied_count: 0,
+    conflict_count: 0,
+    already_removed_count: 0,
+    unresolved_count: 0,
+    unattempted_count: 0,
+  };
+  for (const outcome of outcomes) {
+    switch (outcome.status) {
+      case "applied": summary.applied_count += 1; break;
+      case "conflict": summary.conflict_count += 1; break;
+      case "already_removed": summary.already_removed_count += 1; break;
+      case "unresolved": summary.unresolved_count += 1; break;
+      case "unattempted": summary.unattempted_count += 1; break;
+    }
+  }
+  return summary;
+}
+
+/**
+ * Classifies a chunk that never produced per-item outcomes.
+ *
+ * The default is deliberately conservative: `unresolved`, because a chunk can
+ * commit earlier rows and then fail. A caller may narrow this to `unattempted`
+ * only when the endpoint and status demonstrably guarantee the server rejected
+ * the whole request before writing anything.
+ */
+type BulkFailureClassifier = (cause: unknown) => TransactionBulkStatus;
+
+const conservativeBulkFailure: BulkFailureClassifier = () => "unresolved";
+
+/**
+ * Runs a bulk command in bounded chunks and keeps its outcome honest.
+ *
+ * A chunk that the server answered is reported item by item. A chunk that
+ * failed is classified by `classifyFailure`. Once a chunk stops early, the
+ * chunks behind it are never sent and are reported as `unattempted`; nothing is
+ * replayed.
+ */
+async function runBulkChunks<Item extends { id: string }>(
+  items: readonly Item[],
+  send: (chunk: readonly Item[]) => Promise<readonly TransactionBulkOutcome[]>,
+  classifyFailure: BulkFailureClassifier = conservativeBulkFailure,
+): Promise<TransactionBulkSummary> {
+  const outcomes: TransactionBulkOutcome[] = [];
+  for (let offset = 0; offset < items.length; offset += TRANSACTION_WRITE_BATCH) {
+    const chunk = items.slice(offset, offset + TRANSACTION_WRITE_BATCH);
+    let chunkOutcomes: readonly TransactionBulkOutcome[];
+    try {
+      chunkOutcomes = await send(chunk);
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      const status = classifyFailure(cause);
+      for (const item of chunk) outcomes.push({ id: item.id, status, detail });
+      for (const item of items.slice(offset + chunk.length)) outcomes.push({ id: item.id, status: "unattempted" });
+      break;
+    }
+    outcomes.push(...chunkOutcomes);
+    if (chunkOutcomes.some((outcome) => outcome.status === "unresolved" || outcome.status === "unattempted")) {
+      for (const item of items.slice(offset + chunk.length)) outcomes.push({ id: item.id, status: "unattempted" });
+      break;
+    }
+  }
+  return countBulkOutcomes(outcomes);
+}
+
+/**
+ * A dedicated bulk command parses its whole body before it writes anything, so
+ * a 4xx really does mean nothing was written. The collection PATCH has no such
+ * guarantee: it applies rows one at a time, so a later mutation-time rejection
+ * can follow committed rows.
+ */
+const dedicatedCommandFailure: BulkFailureClassifier = (cause) =>
+  cause instanceof ApiError && cause.status >= 400 && cause.status < 500 ? "unattempted" : "unresolved";
+
 let onUnauthorized: (() => void) | null = null;
 let onLocalWrite: (() => void) | null = null;
 let requestEpoch = 0;
@@ -375,6 +497,74 @@ export const api = {
       }
     }
     return { approvedCount };
+  },
+  /**
+   * Categorises eligible rows through the existing collection PATCH, in
+   * bounded chunks.
+   *
+   * A 2xx is not enough: the server normalises a category away when the row is
+   * (or has just become) a split parent or a transfer, so the response is read
+   * back per row and only a returned category that matches the request counts
+   * as applied. Anything else is a `conflict`, and a chunk that failed without
+   * per-item outcomes is `unresolved` rather than guessed at.
+   */
+  categoriseTransactions: (planId: string, items: readonly TransactionCategoryBulkItem[]) => {
+    if (items.length === 0) throw new Error("Transactions to categorise must not be empty.");
+    return runBulkChunks(items, async (chunk) => {
+      const result = await request<{ transactions: Array<{ id: string; category_id: string | null }> }>(
+        planUrl(planId, "transactions"),
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            transactions: chunk.map((item) => ({ id: item.id, category_id: item.category_id })),
+          }),
+        },
+      );
+      const byId = new Map(result.transactions.map((transaction) => [transaction.id, transaction]));
+      return chunk.map((item) => {
+        const returned = byId.get(item.id);
+        if (!returned) {
+          return { id: item.id, status: "unresolved" as const, detail: "The server did not confirm this row" };
+        }
+        if ((returned.category_id ?? null) !== (item.category_id ?? null)) {
+          return { id: item.id, status: "conflict" as const, detail: "The server did not apply this category" };
+        }
+        return { id: item.id, status: "applied" as const };
+      });
+    });
+  },
+  /** Bulk cleared with a per-row compare-and-set, in bounded chunks. */
+  bulkClearedTransactions: (planId: string, items: readonly TransactionClearedBulkItem[]) => {
+    if (items.length === 0) throw new Error("Transactions to update must not be empty.");
+    return runBulkChunks(items, async (chunk) => {
+      const result = await request<TransactionBulkResult>(planUrl(planId, "transactions", "cleared"), {
+        method: "POST",
+        body: JSON.stringify({
+          transactions: chunk.map((item) => ({
+            id: item.id,
+            expected_cleared: item.expected_cleared,
+            cleared: item.cleared,
+          })),
+        }),
+      });
+      return result.outcomes;
+    }, dedicatedCommandFailure);
+  },
+  /** Bulk delete reusing the single-row guard and cascade, in bounded chunks. */
+  bulkDeleteTransactions: (planId: string, items: readonly TransactionDeleteBulkItem[]) => {
+    if (items.length === 0) throw new Error("Transactions to delete must not be empty.");
+    return runBulkChunks(items, async (chunk) => {
+      const result = await request<TransactionBulkResult>(planUrl(planId, "transactions", "delete"), {
+        method: "POST",
+        body: JSON.stringify({
+          transactions: chunk.map((item) => ({
+            id: item.id,
+            ...(item.expected_approved === undefined ? {} : { expected_approved: item.expected_approved }),
+          })),
+        }),
+      });
+      return result.outcomes;
+    }, dedicatedCommandFailure);
   },
   updateTransactionCleared: (
     planId: string,

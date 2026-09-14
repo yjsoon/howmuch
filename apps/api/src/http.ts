@@ -3,7 +3,7 @@ import type { ApiConfig } from "./config";
 import { AccountPreferencesConflictError, LedgerRepository, NotFoundError, ReconciliationMismatchError, TransactionStateConflictError, ValidationError } from "./repository";
 import { MAX_REGISTER_QUERY_LENGTH } from "@howmuch/register-query";
 import { DEFAULT_TRANSACTION_PAGE_SIZE, MAX_TRANSACTION_PAGE_SIZE, type AccountPreferences, type TransactionFilters } from "./types";
-import { collectionPostIntent, parseTransactionCreates, parseTransactionUpdates } from "./transaction-batch";
+import { collectionPostIntent, parseTransactionClearedBulk, parseTransactionCreates, parseTransactionDeleteBulk, parseTransactionUpdates } from "./transaction-batch";
 import { ReportService } from "./reports";
 import { decimalToMilliunits } from "./money";
 import { importCsvRows } from "./importers/csv";
@@ -495,6 +495,19 @@ async function handleV1(
     // not a transaction id.
     if (segments.length === 5 && segments[4] === "unapproved_count" && method === "GET") {
       return unapprovedCountResponse(repo, planId, countFilters(url));
+    }
+
+    // Bulk commands are also path segments, and must precede the item route.
+    // Each returns ordered per-item outcomes rather than promising atomicity:
+    // a D1 command commits row by row, so the caller has to be told which rows
+    // are confirmed, which conflicted, and which were never attempted.
+    if (segments.length === 5 && segments[4] === "cleared" && method === "POST") {
+      const result = await repo.updateTransactionsCleared(planId, parseTransactionClearedBulk(await readJson(request)));
+      return json({ data: result });
+    }
+    if (segments.length === 5 && segments[4] === "delete" && method === "POST") {
+      const result = await repo.deleteTransactions(planId, parseTransactionDeleteBulk(await readJson(request)));
+      return json({ data: result });
     }
 
     const { transactionId, expectedApprovedParameter } = transactionItemRef(segments[4], url);
@@ -1155,6 +1168,7 @@ function isTransitionFinancialWrite(methodValue: string, segments: string[]): bo
   if (resource === "transactions") {
     if (segments.length === 4) return method === "POST" || method === "PATCH";
     if (segments.length === 5 && segments[4] === "import") return method === "POST";
+    if (segments.length === 5 && (segments[4] === "cleared" || segments[4] === "delete")) return method === "POST";
     if (segments.length === 5) return method === "PUT" || method === "PATCH" || method === "DELETE";
     if (segments.length === 6 && segments[5] === "cleared") return method === "PATCH";
     return false;

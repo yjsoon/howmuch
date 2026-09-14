@@ -90,6 +90,52 @@ export type TransactionBatchResult = {
   server_knowledge: number;
 };
 
+/** One requested row's outcome in a bulk cleared or delete command. */
+export type TransactionBulkStatus =
+  /** The server confirmed this item's own write. */
+  | "applied"
+  /** An expected-state precondition failed; the item was left alone. */
+  | "conflict"
+  /**
+   * The row was already gone when this item was reached. This is an observation,
+   * not an attribution: a command cannot claim it removed a row it never
+   * committed, so `already_removed` is never counted as work this command did.
+   */
+  | "already_removed"
+  /** The write failed ambiguously and may or may not have landed. */
+  | "unresolved"
+  /** Never sent, because the command stopped at an earlier failure. */
+  | "unattempted";
+
+export type TransactionBulkOutcome = {
+  readonly id: string;
+  readonly status: TransactionBulkStatus;
+  readonly detail?: string;
+};
+
+export type TransactionBulkResult = {
+  outcomes: TransactionBulkOutcome[];
+  applied_count: number;
+  conflict_count: number;
+  already_removed_count: number;
+  unresolved_count: number;
+  unattempted_count: number;
+  server_knowledge: number;
+};
+
+/** One row of a bulk cleared command; each item carries its own compare-and-set. */
+export type TransactionClearedItem = {
+  readonly id: string;
+  readonly expected_cleared: "uncleared" | "cleared";
+  readonly cleared: "uncleared" | "cleared";
+};
+
+/** One row of a bulk delete command; `expected_approved` is the reject guard. */
+export type TransactionDeleteItem = {
+  readonly id: string;
+  readonly expected_approved?: boolean;
+};
+
 export type TransactionPage = {
   transactions: any[];
   has_more: boolean;

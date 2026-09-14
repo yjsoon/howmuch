@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { collectionPostIntent, parseTransactionCreates, parseTransactionUpdates } from "../src/transaction-batch";
+import {
+  collectionPostIntent,
+  parseTransactionClearedBulk,
+  parseTransactionCreates,
+  parseTransactionDeleteBulk,
+  parseTransactionUpdates,
+} from "../src/transaction-batch";
 import { MAX_TRANSACTION_WRITE_BATCH } from "../src/types";
 
 describe("transaction collection parse", () => {
@@ -35,5 +41,59 @@ describe("transaction collection parse", () => {
     expect(() => parseTransactionCreates(
       Array.from({ length: MAX_TRANSACTION_WRITE_BATCH + 1 }, () => ({ account_id: "a", date: "2026-01-01", amount: -1 })),
     )).toThrow(`${MAX_TRANSACTION_WRITE_BATCH}`);
+  });
+
+  test("parses bulk cleared items with their own compare-and-set", () => {
+    expect(parseTransactionClearedBulk({
+      transactions: [
+        { id: "t1", expected_cleared: "uncleared", cleared: "cleared" },
+        { id: "t2", expected_cleared: "cleared", cleared: "uncleared" },
+      ],
+    })).toEqual([
+      { id: "t1", expected_cleared: "uncleared", cleared: "cleared" },
+      { id: "t2", expected_cleared: "cleared", cleared: "uncleared" },
+    ]);
+    expect(() => parseTransactionClearedBulk({
+      transactions: [{ id: "t1", expected_cleared: "reconciled", cleared: "cleared" }],
+    })).toThrow("uncleared or cleared");
+    expect(() => parseTransactionClearedBulk({
+      transactions: [{ expected_cleared: "uncleared", cleared: "cleared" }],
+    })).toThrow("id must be a non-empty string");
+    expect(() => parseTransactionClearedBulk({ transactions: [] })).toThrow("empty");
+    expect(() => parseTransactionClearedBulk({
+      transactions: Array.from({ length: MAX_TRANSACTION_WRITE_BATCH + 1 }, (_, index) => ({
+        id: `t${index}`, expected_cleared: "uncleared", cleared: "cleared",
+      })),
+    })).toThrow(`${MAX_TRANSACTION_WRITE_BATCH}`);
+    expect(() => parseTransactionClearedBulk({})).toThrow("transactions is required");
+    expect(() => parseTransactionClearedBulk({
+      transactions: [
+        { id: "t1", expected_cleared: "uncleared", cleared: "cleared" },
+        { id: "t1", expected_cleared: "cleared", cleared: "uncleared" },
+      ],
+    })).toThrow("Duplicate transaction id t1 in batch");
+  });
+
+  test("parses bulk delete items with an optional explicit approval guard", () => {
+    expect(parseTransactionDeleteBulk({
+      transactions: [{ id: "t1" }, { id: "t2", expected_approved: false }, { id: "t3", expected_approved: true }],
+    })).toEqual([
+      { id: "t1" },
+      { id: "t2", expected_approved: false },
+      { id: "t3", expected_approved: true },
+    ]);
+    expect(() => parseTransactionDeleteBulk({
+      transactions: [{ id: "t1", expected_approved: "false" }],
+    })).toThrow("must be true or false");
+    expect(() => parseTransactionDeleteBulk({
+      transactions: [{ id: "t1", expected_approved: null }],
+    })).toThrow("must be true or false");
+    expect(() => parseTransactionDeleteBulk({ transactions: [] })).toThrow("empty");
+    expect(() => parseTransactionDeleteBulk({
+      transactions: Array.from({ length: MAX_TRANSACTION_WRITE_BATCH + 1 }, (_, index) => ({ id: `t${index}` })),
+    })).toThrow(`${MAX_TRANSACTION_WRITE_BATCH}`);
+    expect(() => parseTransactionDeleteBulk({
+      transactions: [{ id: "t1" }, { id: "t1", expected_approved: false }],
+    })).toThrow("Duplicate transaction id t1 in batch");
   });
 });

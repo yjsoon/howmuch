@@ -332,7 +332,7 @@ export class D1LedgerRepository extends LedgerRepository {
     const row=await this.transactions.create(planId,{...input,id},this.context("transaction.create",planId,id,options.operationId),{autoLink,upsert:!autoLink});
     return this.getTransaction(planId,row.id,Boolean(input.deleted));
   }
-  override async updateTransaction(planId:string,id:string,patch:Partial<TransactionInput>):Promise<any>{
+  protected override async applyTransactionUpdate(planId:string,id:string,patch:Partial<TransactionInput>):Promise<void>{
     try {
       if (patch.approved !== undefined && Object.keys(patch).length === 1) {
         await this.transactions.approve(planId,id,patch.approved,this.context("transaction.approve",planId,id));
@@ -345,16 +345,32 @@ export class D1LedgerRepository extends LedgerRepository {
       }
       throw error;
     }
-    return this.getTransaction(planId,id);
   }
-  override async updateTransactionCleared(planId:string,id:string,expectedCleared:"uncleared"|"cleared",cleared:"uncleared"|"cleared"):Promise<any>{
+  protected override async applyTransactionCleared(planId:string,id:string,expectedCleared:"uncleared"|"cleared",cleared:"uncleared"|"cleared"):Promise<void>{
     try {
       await this.transactions.updateCleared(planId,id,expectedCleared,cleared,this.context("transaction.cleared",planId,id));
     } catch (error) {
       if (error instanceof Error && error.message.includes("cleared state conflict")) throw new TransactionStateConflictError();
+      // Match the SQLite path: a row that is gone is `already_removed`, not an
+      // infrastructure failure that stops the whole command.
+      if (error instanceof Error && error.message === "Transaction not found") {
+        throw new NotFoundError("Transaction not found");
+      }
       throw error;
     }
-    return this.getTransaction(planId,id);
+  }
+  protected override async applyTransactionDelete(planId:string,id:string,expectedApproved?:boolean):Promise<void>{
+    try {
+      await this.transactions.delete(planId,id,this.context("transaction.delete",planId,id),expectedApproved);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("approved state conflict")) {
+        throw new TransactionStateConflictError("Transaction approval state changed");
+      }
+      if (error instanceof Error && error.message === "Transaction not found") {
+        throw new NotFoundError("Transaction not found");
+      }
+      throw error;
+    }
   }
   override async updateTransactions(planId: string, edits: TransactionBatchUpdate[]): Promise<TransactionBatchResult> {
     const ids: string[] = [];
@@ -365,8 +381,10 @@ export class D1LedgerRepository extends LedgerRepository {
       seen.add(id);
       ids.push(id);
     }
+    // Write-only per row: the committed row the writer returns is discarded here
+    // and the batch response is hydrated once, at the end, from the final state.
     for (const [index, edit] of edits.entries()) {
-      await this.updateTransaction(planId, ids[index], edit.patch);
+      await this.applyTransactionUpdate(planId, ids[index]!, edit.patch);
     }
     return this.loadTransactionSaveResult(planId, ids, []);
   }
@@ -398,20 +416,6 @@ export class D1LedgerRepository extends LedgerRepository {
       }
     }
     return this.loadTransactionSaveResult(planId, transactionIds, duplicateImportIds);
-  }
-  override async deleteTransaction(planId:string,id:string,expectedApproved?:boolean):Promise<any>{
-    try {
-      await this.transactions.delete(planId,id,this.context("transaction.delete",planId,id),expectedApproved);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes("approved state conflict")) {
-        throw new TransactionStateConflictError("Transaction approval state changed");
-      }
-      if (error instanceof Error && error.message === "Transaction not found") {
-        throw new NotFoundError("Transaction not found");
-      }
-      throw error;
-    }
-    return this.getTransaction(planId,id,true);
   }
   override async importTransactions(planId:string,inputs:TransactionInput[]):Promise<{transaction_ids:string[];duplicate_import_ids:string[];duplicate_transaction_ids:string[];server_knowledge:number}>{
     const transaction_ids:string[]=[]; const duplicate_import_ids=new Set<string>(); const duplicate_transaction_ids=new Set<string>();

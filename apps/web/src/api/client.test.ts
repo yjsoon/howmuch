@@ -317,6 +317,240 @@ describe("approveTransactions", () => {
   });
 });
 
+describe("bulk transaction commands", () => {
+  test("categorises through the collection PATCH in bounded chunks", async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    globalThis.fetch = (async (path: string | URL | Request, init?: RequestInit) => {
+      requests.push({ path: String(path), init });
+      // The server echoes the rows it committed; a matching category confirms.
+      const body = JSON.parse(String(init?.body)) as { transactions: Array<{ id: string; category_id: string | null }> };
+      return new Response(JSON.stringify({ data: { transaction_ids: [], transactions: body.transactions } }), {
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    let summary;
+    try {
+      summary = await api.categoriseTransactions(
+        "plan-1",
+        Array.from({ length: 101 }, (_, index) => ({ id: `txn-${index}`, category_id: "food" })),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(summary).toMatchObject({ applied_count: 101, unresolved_count: 0, unattempted_count: 0 });
+    expect(requests.map((entry) => entry.path)).toEqual([
+      "/v1/plans/plan-1/transactions",
+      "/v1/plans/plan-1/transactions",
+    ]);
+    expect(requests.map((entry) => entry.init?.method)).toEqual(["PATCH", "PATCH"]);
+    const firstBody = JSON.parse(String(requests[0]?.init?.body));
+    expect(firstBody.transactions).toHaveLength(100);
+    expect(firstBody.transactions[0]).toEqual({ id: "txn-0", category_id: "food" });
+    expect(JSON.parse(String(requests[1]?.init?.body)).transactions).toEqual([{ id: "txn-100", category_id: "food" }]);
+  });
+
+  test("marks a failed categorise chunk unresolved and never sends the rest", async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: string[] = [];
+    globalThis.fetch = (async (path: string | URL | Request) => {
+      requests.push(String(path));
+      return new Response(JSON.stringify({ error: { detail: "write failed" } }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    let summary;
+    try {
+      summary = await api.categoriseTransactions(
+        "plan-1",
+        Array.from({ length: 101 }, (_, index) => ({ id: `txn-${index}`, category_id: "food" })),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(requests).toHaveLength(1);
+    expect(summary).toMatchObject({ applied_count: 0, unresolved_count: 100, unattempted_count: 1 });
+  });
+
+  test("keeps the first chunk's rows applied when a later chunk fails", async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async (_path: string | URL | Request, init?: RequestInit) => {
+      calls += 1;
+      if (calls === 1) {
+        const body = JSON.parse(String(init?.body)) as { transactions: Array<{ id: string; category_id: string | null }> };
+        return new Response(JSON.stringify({ data: { transaction_ids: [], transactions: body.transactions } }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ error: { detail: "write failed" } }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    let summary;
+    try {
+      summary = await api.categoriseTransactions(
+        "plan-1",
+        Array.from({ length: 101 }, (_, index) => ({ id: `txn-${index}`, category_id: "food" })),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(calls).toBe(2);
+    expect(summary).toMatchObject({ applied_count: 100, unresolved_count: 1, unattempted_count: 0 });
+    expect(summary.outcomes[0]).toEqual({ id: "txn-0", status: "applied" });
+    expect(summary.outcomes[100]).toMatchObject({ id: "txn-100", status: "unresolved" });
+  });
+
+  test("does not count a row the server normalised back to no category as applied", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_path: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { transactions: Array<{ id: string; category_id: string | null }> };
+      // The second row became a split parent on the server, so its category was dropped.
+      const transactions = body.transactions.map((item) => (
+        item.id === "txn-1" ? { id: item.id, category_id: null } : item
+      ));
+      return new Response(JSON.stringify({ data: { transaction_ids: [], transactions } }), {
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    let summary;
+    try {
+      summary = await api.categoriseTransactions("plan-1", [
+        { id: "txn-0", category_id: "food" },
+        { id: "txn-1", category_id: "food" },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(summary).toMatchObject({ applied_count: 1, conflict_count: 1, unresolved_count: 0 });
+    expect(summary.outcomes).toEqual([
+      { id: "txn-0", status: "applied" },
+      { id: "txn-1", status: "conflict", detail: "The server did not apply this category" },
+    ]);
+  });
+
+  test("treats a failed categorise chunk as unresolved even on 4xx", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(
+      JSON.stringify({ error: { detail: "one row was rejected" } }),
+      { status: 400, headers: { "content-type": "application/json" } },
+    )) as typeof fetch;
+    let summary;
+    try {
+      summary = await api.categoriseTransactions("plan-1", [{ id: "a", category_id: "food" }, { id: "b", category_id: "food" }]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    // The collection PATCH can commit an earlier row before a later
+    // mutation-time rejection, so a 4xx is not proof that nothing was written.
+    expect(summary).toMatchObject({ applied_count: 0, unresolved_count: 2, unattempted_count: 0 });
+  });
+
+  test("treats a 4xx rejection as unattempted because nothing was written", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(
+      JSON.stringify({ error: { detail: "bad request" } }),
+      { status: 400, headers: { "content-type": "application/json" } },
+    )) as typeof fetch;
+    let summary;
+    try {
+      summary = await api.bulkDeleteTransactions("plan-1", [{ id: "a" }, { id: "b" }]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(summary).toMatchObject({ applied_count: 0, unresolved_count: 0, unattempted_count: 2 });
+  });
+
+  test("bulk cleared passes ordered outcomes through and stops when the server did", async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      const outcomes = Array.from({ length: 100 }, (_, index) => ({
+        id: `t${index}`,
+        status: index === 0 ? "applied" : index === 1 ? "unresolved" : "unattempted",
+      }));
+      return new Response(JSON.stringify({
+        data: {
+          outcomes,
+          applied_count: 1,
+          conflict_count: 0,
+          already_removed_count: 0,
+          unresolved_count: 1,
+          unattempted_count: 98,
+          server_knowledge: 5,
+        },
+      }), { headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    let summary;
+    try {
+      summary = await api.bulkClearedTransactions(
+        "plan-1",
+        Array.from({ length: 102 }, (_, index) => ({
+          id: `t${index}`, expected_cleared: "uncleared" as const, cleared: "cleared" as const,
+        })),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(calls).toBe(1);
+    expect(summary).toMatchObject({ applied_count: 1, unresolved_count: 1, unattempted_count: 98 + 2 });
+  });
+
+  test("bulk delete posts the optional reject guard and chunks at 100", async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    globalThis.fetch = (async (path: string | URL | Request, init?: RequestInit) => {
+      requests.push({ path: String(path), init });
+      const body = JSON.parse(String(init?.body)) as { transactions: Array<{ id: string }> };
+      const outcomes = body.transactions.map((item) => ({ id: item.id, status: "applied" }));
+      return new Response(JSON.stringify({
+        data: {
+          outcomes,
+          applied_count: outcomes.length,
+          conflict_count: 0,
+          already_removed_count: 0,
+          unresolved_count: 0,
+          unattempted_count: 0,
+          server_knowledge: 1,
+        },
+      }), { headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    let summary;
+    try {
+      summary = await api.bulkDeleteTransactions(
+        "plan-1",
+        Array.from({ length: 101 }, (_, index) => (
+          index === 0 ? { id: `d${index}`, expected_approved: false } : { id: `d${index}` }
+        )),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(summary).toMatchObject({ applied_count: 101 });
+    expect(requests.map((entry) => entry.path)).toEqual([
+      "/v1/plans/plan-1/transactions/delete",
+      "/v1/plans/plan-1/transactions/delete",
+    ]);
+    const firstBody = JSON.parse(String(requests[0]?.init?.body));
+    expect(firstBody.transactions[0]).toEqual({ id: "d0", expected_approved: false });
+    expect(firstBody.transactions[1]).toEqual({ id: "d1" });
+    expect(() => api.bulkDeleteTransactions("plan-1", [])).toThrow("must not be empty");
+    expect(() => api.categoriseTransactions("plan-1", [])).toThrow("must not be empty");
+  });
+});
+
 describe("write invalidation", () => {
   test("classifies the verbs that change server state", () => {
     expect(isWriteRequest("POST")).toBe(true);

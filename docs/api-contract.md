@@ -408,6 +408,63 @@ and SQLite applies none of the batch. The response is `200` with
 `transaction_ids`, `transactions`, and `server_knowledge`. SQLite bumps
 knowledge once for the batch.
 
+Bulk cleared and bulk delete:
+
+- `POST /v1/plans/{plan_id}/transactions/cleared`
+- `POST /v1/plans/{plan_id}/transactions/delete`
+
+These are bounded commands of at most 100 items, for register bulk actions that
+must keep the single-row guards. They are deliberately **not** all-or-nothing:
+D1 commits each row as its own guarded command, so a command can stop partway.
+The response is `200` with an ordered `outcomes` array — one entry per requested
+row, in request order — plus `applied_count`, `conflict_count`,
+`already_removed_count`, `unresolved_count`, `unattempted_count`, and
+`server_knowledge`. Duplicate ids are rejected with `400` before anything is
+written, because a repeated id would apply twice in one command and report a
+second, misleading outcome.
+
+```json
+{
+  "transactions": [
+    { "id": "txn-1", "expected_cleared": "uncleared", "cleared": "cleared" }
+  ]
+}
+```
+
+Cleared items each repeat the single-item body plus `id`, so every row keeps its
+own `expected_cleared` compare-and-set and its own reconciled-state protection.
+Delete items are `{ "id": "...", "expected_approved": false }`; the guard is
+optional and never inferred. A transfer leg or split node still cascades to its
+linked side, exactly as the single-row routes do.
+
+Outcome statuses are:
+
+- `applied` — the server confirmed this row's own write. This is the only status
+  that counts as work the command did.
+- `conflict` — an expected-state precondition failed. This item's write was not
+  applied, and the command continues to the next item.
+- `already_removed` — the row was already gone when this item was reached. This
+  is an observation, not an attribution: a transfer pair this command cascaded
+  to, a row another client deleted, and an id that never existed all look the
+  same here, so the command never claims it removed the row and never counts it
+  as its own work. An item whose own command conflicted and that a later sibling
+  delete then cascaded over stays `conflict`; a sound cascade report would
+  require the owning command to return the ids it actually committed.
+- `unresolved` — an infrastructure or ambiguous failure. The write may or may
+  not have landed; the command stops here and the caller must refetch. Nothing
+  is replayed, and the detail is a generic message rather than raw
+  infrastructure text.
+- `unattempted` — never sent, because the command stopped at an earlier failure.
+
+The collection PATCH remains the route for bulk categorisation and approval. It
+has no per-item outcomes, so a client that chunks it must treat a failed chunk
+as uncertain rather than assuming it applied cleanly, and must read the returned
+rows back — a `200` does not by itself mean the requested category survived the
+server's normalisation. The web client reports a category mismatch as a local
+`conflict` outcome (for example, when a row has become a split parent or
+transfer). This is derived from the returned category, not a server-provided
+PATCH outcome or a guarantee that the row was left unchanged.
+
 Individual transaction:
 
 - `GET /v1/plans/{plan_id}/transactions/{transaction_id}`

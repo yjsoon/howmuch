@@ -61,6 +61,7 @@ import {
   transactionMatchesQuery,
 } from "../lib/register-search";
 import { applyClearedOverlays, applyRegisterPatches, deletedIdsForRemoval, reconcileClearedOverlays, retainInFlightPatches, unlinkSplitMirrorParent } from "../lib/register-rows";
+import { bulkDeleteFollowUp, bulkOutcomeIsComplete, bulkOutcomeToast, bulkWriteTouchesReconciliation, categorisableRows, clearedTargets, remainingWorkIds, type BulkWriteKind } from "../lib/register-bulk";
 import {
   emptySelection,
   headerState,
@@ -310,6 +311,19 @@ export function TransactionsPage() {
     requestVersionRef.current += 1;
     setPage({ transactions: [], hasMore: false, nextOffset: null, loading: true, filling: true, loadingMore: false, loaded: false, error: null });
     setRefreshGeneration((generation) => generation + 1);
+  };
+
+  /**
+   * Re-reads everything a completed bulk register write can move: the visible
+   * rows, the account balances behind the header, and — when the write can
+   * change the reconciliation candidate set — the preview built from it.
+   */
+  const refreshAfterBulk = (kind: BulkWriteKind) => {
+    refreshFirstPage();
+    reload();
+    if (bulkWriteTouchesReconciliation(kind)) {
+      setReconciliationPreviewGeneration((generation) => generation + 1);
+    }
   };
 
   useEffect(() => {
@@ -631,11 +645,6 @@ export function TransactionsPage() {
     } finally {
       setMutatingId((current) => (current === transaction.id ? null : current));
     }
-  };
-
-  const refreshRegister = () => {
-    reload();
-    setReconciliationPreviewGeneration((generation) => generation + 1);
   };
 
   const openCompose = () => {
@@ -1112,6 +1121,8 @@ export function TransactionsPage() {
     if (!started) return;
     approvalSessionRef.current = started;
     setApprovalSession(started);
+    mutationLockRef.current = true;
+    setWriteLocked(true);
     setMutationError(null);
     setMutationSuccess(null);
     try {
@@ -1122,91 +1133,138 @@ export function TransactionsPage() {
       dispatchSelection({ kind: "none" });
       setMutationSuccess(approvedToast(result.approvedCount));
     } catch (cause) {
-      const approvedCount = cause instanceof BulkApprovalError ? cause.approvedCount : 0;
-      const failed = failApproval(approvalSessionRef.current, plannedIds, approvedCount);
+      // Only whole chunks are acknowledged. The failing chunk can still have
+      // committed some rows before its response failed, so the count is an
+      // uncertain remainder and never a clean zero. Refetch rather than guess.
+      const acknowledged = cause instanceof BulkApprovalError ? cause.approvedCount : 0;
+      const uncertain = Math.max(0, plannedIds.length - acknowledged);
+      const failed = failApproval(approvalSessionRef.current, plannedIds, acknowledged);
       approvalSessionRef.current = failed;
       setApprovalSession(failed);
-      if (cause instanceof BulkApprovalError && cause.approvedCount > 0) {
-        setMutationError(interruptedToast(
-          cause.approvedCount,
-          Math.max(0, plannedIds.length - cause.approvedCount),
-        ));
-      } else {
-        setMutationError(cause instanceof Error ? cause.message : String(cause));
-      }
+      const detail = cause instanceof Error && cause.message ? ` (${cause.message})` : "";
+      setMutationError(acknowledged > 0
+        ? `${interruptedToast(acknowledged, uncertain)}${detail}`
+        : `Approval did not complete. ${uncertain} transaction${uncertain === 1 ? "" : "s"} may or may not have been approved.${detail}`);
+      refreshFirstPage();
+      reload();
+    } finally {
+      mutationLockRef.current = false;
+      setWriteLocked(false);
     }
   };
 
   const categoriseMany = async (targets: readonly Transaction[], categoryId: string) => {
-    const editable = targets.filter((txn) => !txn.transfer_account_id && !txn.parent_transaction_id && !(txn.subtransactions?.length));
+    const editable = categorisableRows(targets);
     if (mutationLockRef.current || editable.length === 0) return;
     if (rowEditRef.current.status !== "idle") {
       replaceRowEdit(idleRowEdit());
     }
+    mutationLockRef.current = true;
     setWriteLocked(true);
     setMutationError(null);
     setMutationSuccess(null);
-    let done = 0;
     try {
-      for (const txn of editable) {
-        const updated = await api.updateTransaction(planId, txn.id, { category_id: categoryId || null });
-        setReplacements((current) => new Map(current).set(updated.id, updated));
-        done += 1;
+      const summary = await api.categoriseTransactions(
+        planId,
+        editable.map((txn) => ({ id: txn.id, category_id: categoryId || null })),
+      );
+      if (bulkOutcomeIsComplete(summary)) {
+        dispatchSelection({ kind: "none" });
+        setMutationSuccess(bulkOutcomeToast("Categorised", summary));
+      } else {
+        dispatchSelection({ kind: "only", ids: remainingWorkIds(summary) });
+        setMutationError(bulkOutcomeToast("Categorised", summary));
       }
-      dispatchSelection({ kind: "none" });
-      setMutationSuccess(`Categorised ${done} transaction${done === 1 ? "" : "s"}.`);
     } catch (cause) {
-      setMutationError(`${cause instanceof Error ? cause.message : String(cause)} (${done} of ${editable.length} updated)`);
+      setMutationError(cause instanceof Error ? cause.message : String(cause));
     } finally {
+      mutationLockRef.current = false;
       setWriteLocked(false);
-      reload();
+      // The register rows are re-read either way: a bulk write has no local
+      // patch to trust, and a partial one has no honest local view at all.
+      refreshAfterBulk("categorise");
     }
   };
 
   const setClearedMany = async (targets: readonly Transaction[], cleared: "cleared" | "uncleared") => {
-    const applicable = targets.filter((txn) => txn.cleared !== "reconciled" && txn.cleared !== cleared);
-    if (applicable.length === 0) return;
+    const applicable = clearedTargets(targets, cleared);
+    if (mutationLockRef.current || applicable.length === 0) return;
     if (rowEditRef.current.status !== "idle") {
       replaceRowEdit(idleRowEdit());
     }
+    mutationLockRef.current = true;
     setWriteLocked(true);
+    setMutationError(null);
+    setMutationSuccess(null);
     try {
-      for (const txn of applicable) {
-        const ok = await toggleCleared(txn, { refresh: false });
-        if (!ok) return;
+      const summary = await api.bulkClearedTransactions(
+        planId,
+        applicable.map((txn) => ({
+          id: txn.id,
+          expected_cleared: txn.cleared as "uncleared" | "cleared",
+          cleared,
+        })),
+      );
+      const label = cleared === "cleared" ? "Marked cleared" : "Marked uncleared";
+      if (bulkOutcomeIsComplete(summary)) {
+        dispatchSelection({ kind: "none" });
+        setMutationSuccess(bulkOutcomeToast(label, summary));
+      } else {
+        dispatchSelection({ kind: "only", ids: remainingWorkIds(summary) });
+        setMutationError(bulkOutcomeToast(label, summary));
       }
-      dispatchSelection({ kind: "none" });
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause.message : String(cause));
     } finally {
+      mutationLockRef.current = false;
       setWriteLocked(false);
-      refreshRegister();
+      refreshAfterBulk("cleared");
     }
   };
 
   const deleteMany = async (targets: readonly Transaction[]) => {
-    const removed = new Set<string>(deletedIds);
-    let remaining = targets.filter((txn) => !removed.has(txn.id));
-    let attempted = false;
+    const live = targets.filter((txn) => !deletedIds.has(txn.id));
+    if (live.length === 0) {
+      setPendingBulkDeletion(null);
+      return;
+    }
+    if (mutationLockRef.current) return;
     if (rowEditRef.current.status !== "idle") {
       replaceRowEdit(idleRowEdit());
     }
+    mutationLockRef.current = true;
     setWriteLocked(true);
+    setMutationError(null);
+    setMutationSuccess(null);
     try {
-      for (const txn of targets) {
-        if (removed.has(txn.id)) continue;
-        attempted = true;
-        const ok = await deleteTransaction(txn, { refresh: false });
-        if (!ok) {
-          setPendingBulkDeletion(remaining.length > 0 ? remaining : null);
-          return;
-        }
-        for (const id of deletedIdsForRemoval(txn)) removed.add(id);
-        remaining = remaining.filter((candidate) => !removed.has(candidate.id));
-      }
+      const summary = await api.bulkDeleteTransactions(
+        planId,
+        live.map((txn) => ({
+          id: txn.id,
+          ...(txn.approved ? {} : { expected_approved: false }),
+        })),
+      );
+      const label = live.every((txn) => !txn.approved) ? "Rejected" : "Deleted";
+      const followUp = bulkDeleteFollowUp(summary);
+      // The dialog held pre-command snapshots; a row may have moved on the
+      // server since. It is never reused, so any retry needs a fresh selection
+      // and a new confirmation rather than a blind replay of this one.
       setPendingBulkDeletion(null);
-      dispatchSelection({ kind: "none" });
+      if (followUp.complete) {
+        dispatchSelection({ kind: "none" });
+        setMutationSuccess(bulkOutcomeToast(label, summary));
+      } else {
+        dispatchSelection({ kind: "only", ids: followUp.retryIds });
+        setMutationError(bulkOutcomeToast(label, summary));
+      }
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause.message : String(cause));
+      setPendingBulkDeletion(null);
     } finally {
+      mutationLockRef.current = false;
       setWriteLocked(false);
-      if (attempted) refreshRegister();
+      // A bulk delete's server state is the only honest view, partial or not.
+      refreshAfterBulk("delete");
     }
   };
 

@@ -9,6 +9,7 @@ import { D1TransactionRepository } from "../src/d1-transaction-repository";
 import { D1MetadataRepository } from "../src/d1-metadata-repository";
 import { D1LedgerRepository } from "../src/d1-ledger-repository";
 import { D1AuthStore } from "../src/auth-store";
+import { CountingD1Database, fakeD1Binding } from "./helpers/counting-d1";
 import { newPersonalApiToken, newSession } from "../src/password-auth";
 import { ReportService } from "../src/reports";
 import { importYnabFromApi } from "../src/importers/ynab";
@@ -1645,6 +1646,275 @@ describe("D1 foundation", () => {
   });
 });
 
+describe("D1 bulk transaction commands", () => {
+  test("bulk cleared keeps per-row CAS, continues past conflicts, and reports ordered outcomes", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await repo.createTransaction("p", { id: "c1", account_id: "a", date: "2026-07-01", amount: -100, cleared: "uncleared" });
+    await repo.createTransaction("p", { id: "c2", account_id: "a", date: "2026-07-02", amount: -200, cleared: "uncleared" });
+    await repo.createTransaction("p", { id: "c3", account_id: "a", date: "2026-07-03", amount: -300, cleared: "cleared" });
+    await repo.createTransaction("p", { id: "c4", account_id: "a", date: "2026-07-04", amount: -400, cleared: "reconciled" });
+
+    const result = await repo.updateTransactionsCleared("p", [
+      { id: "c1", expected_cleared: "uncleared", cleared: "cleared" },
+      { id: "c2", expected_cleared: "cleared", cleared: "uncleared" },
+      { id: "c3", expected_cleared: "cleared", cleared: "uncleared" },
+      { id: "c4", expected_cleared: "cleared", cleared: "uncleared" },
+    ]);
+
+    expect(result.outcomes.map((outcome) => [outcome.id, outcome.status])).toEqual([
+      ["c1", "applied"],
+      ["c2", "conflict"],
+      ["c3", "applied"],
+      ["c4", "conflict"],
+    ]);
+    expect(result.applied_count).toBe(2);
+    expect(result.conflict_count).toBe(2);
+    expect(db.query("SELECT id, cleared FROM transactions ORDER BY id").all()).toEqual([
+      { id: "c1", cleared: "cleared" },
+      { id: "c2", cleared: "uncleared" },
+      { id: "c3", cleared: "uncleared" },
+      { id: "c4", cleared: "reconciled" },
+    ]);
+    // The reconciled row still counts toward the cleared balance, untouched.
+    expect(db.query("SELECT cleared_balance_milli, uncleared_balance_milli FROM accounts WHERE id='a'").get()).toEqual({
+      cleared_balance_milli: -500,
+      uncleared_balance_milli: -500,
+    });
+  });
+
+  test("bulk cleared changes only the selected transfer side", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await repo.upsertAccount("p", { id: "b", name: "Savings" });
+    provisionTransferPayee(db, "a");
+    const created = await repo.createTransaction("p", {
+      id: "leg-a", account_id: "a", date: "2026-07-01", amount: -250, transfer_account_id: "b", cleared: "uncleared",
+    });
+    const mirror = created.transfer_transaction_id as string;
+    expect(mirror).toBeString();
+
+    const result = await repo.updateTransactionsCleared("p", [
+      { id: "leg-a", expected_cleared: "uncleared", cleared: "cleared" },
+    ]);
+
+    expect(result.outcomes).toEqual([{ id: "leg-a", status: "applied" }]);
+    expect(db.query("SELECT id, cleared FROM transactions ORDER BY id").all()).toEqual([
+      { id: "leg-a", cleared: "cleared" },
+      { id: mirror, cleared: "uncleared" },
+    ]);
+  });
+
+  test("bulk cleared reports a missing row like SQLite and keeps going", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await repo.createTransaction("p", { id: "c-live", account_id: "a", date: "2026-07-01", amount: -100, cleared: "uncleared" });
+
+    const result = await repo.updateTransactionsCleared("p", [
+      { id: "c-missing", expected_cleared: "uncleared", cleared: "cleared" },
+      { id: "c-live", expected_cleared: "uncleared", cleared: "cleared" },
+    ]);
+
+    expect(result.outcomes.map((outcome) => [outcome.id, outcome.status])).toEqual([
+      ["c-missing", "already_removed"],
+      ["c-live", "applied"],
+    ]);
+    expect(result.already_removed_count).toBe(1);
+    expect(result.applied_count).toBe(1);
+    expect(db.query("SELECT cleared FROM transactions WHERE id='c-live'").get()).toEqual({ cleared: "cleared" });
+  });
+
+  test("bulk delete reports a selected transfer pair as one delete and one already-removed row", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await repo.upsertAccount("p", { id: "b", name: "Savings" });
+    provisionTransferPayee(db, "a");
+    const created = await repo.createTransaction("p", {
+      id: "leg-a", account_id: "a", date: "2026-07-01", amount: -250, transfer_account_id: "b",
+    });
+    const mirror = created.transfer_transaction_id as string;
+
+    const result = await repo.deleteTransactions("p", [{ id: "leg-a" }, { id: mirror }]);
+
+    expect(result.outcomes.map((outcome) => [outcome.id, outcome.status])).toEqual([
+      ["leg-a", "applied"],
+      [mirror, "already_removed"],
+    ]);
+    // Only the first leg is this command's work; the cascade is observed, not claimed.
+    expect(result.applied_count).toBe(1);
+    expect(result.already_removed_count).toBe(1);
+    expect(result.conflict_count).toBe(0);
+    expect(db.query("SELECT id, deleted FROM transactions ORDER BY id").all()).toEqual([
+      { id: "leg-a", deleted: 1 },
+      { id: mirror, deleted: 1 },
+    ]);
+    expect(db.query("SELECT id, balance_milli FROM accounts ORDER BY id").all()).toEqual([
+      { id: "a", balance_milli: 0 },
+      { id: "b", balance_milli: 0 },
+    ]);
+  });
+
+  test("bulk delete never claims an already-gone or unknown row as its own work", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await repo.createTransaction("p", { id: "gone", account_id: "a", date: "2026-07-01", amount: -100 });
+    await repo.createTransaction("p", { id: "here", account_id: "a", date: "2026-07-02", amount: -200 });
+    await repo.deleteTransaction("p", "gone");
+
+    const result = await repo.deleteTransactions("p", [{ id: "gone" }, { id: "here" }, { id: "never-existed" }]);
+
+    expect(result.outcomes.map((outcome) => [outcome.id, outcome.status])).toEqual([
+      ["gone", "already_removed"],
+      ["here", "applied"],
+      ["never-existed", "already_removed"],
+    ]);
+    expect(result.applied_count).toBe(1);
+    expect(result.already_removed_count).toBe(2);
+    expect(db.query("SELECT id, deleted FROM transactions ORDER BY id").all()).toEqual([
+      { id: "gone", deleted: 1 },
+      { id: "here", deleted: 1 },
+    ]);
+  });
+
+  test("bulk delete does not attribute an external deletion to this command", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await repo.createTransaction("p", { id: "x1", account_id: "a", date: "2026-07-01", amount: -100 });
+    await repo.createTransaction("p", { id: "x2", account_id: "a", date: "2026-07-02", amount: -200 });
+    // Another client removed x1 before this command reached it.
+    db.run("UPDATE transactions SET deleted=1 WHERE id='x1'");
+
+    const result = await repo.deleteTransactions("p", [{ id: "x1" }, { id: "x2" }]);
+
+    expect(result.outcomes.map((outcome) => [outcome.id, outcome.status])).toEqual([
+      ["x1", "already_removed"],
+      ["x2", "applied"],
+    ]);
+    expect(result.applied_count).toBe(1);
+    expect(result.already_removed_count).toBe(1);
+  });
+
+  test("bulk delete keeps an approval race as a conflict and leaves the row alone", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await repo.createTransaction("p", { id: "n1", account_id: "a", date: "2026-07-01", amount: -100, approved: false });
+    await repo.createTransaction("p", { id: "n2", account_id: "a", date: "2026-07-02", amount: -200, approved: false });
+    db.run("UPDATE transactions SET approved=1 WHERE id='n2'");
+
+    const result = await repo.deleteTransactions("p", [
+      { id: "n1", expected_approved: false },
+      { id: "n2", expected_approved: false },
+    ]);
+
+    expect(result.outcomes.map((outcome) => [outcome.id, outcome.status])).toEqual([
+      ["n1", "applied"],
+      ["n2", "conflict"],
+    ]);
+    expect(db.query("SELECT id, deleted FROM transactions ORDER BY id").all()).toEqual([
+      { id: "n1", deleted: 1 },
+      { id: "n2", deleted: 0 },
+    ]);
+  });
+
+  test("bulk delete keeps a conflict as a conflict even when a sibling delete cascades over it", async () => {
+    const db = await ledgerSqlite();
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await repo.upsertAccount("p", { id: "b", name: "Savings" });
+    provisionTransferPayee(db, "a");
+    const created = await repo.createTransaction("p", {
+      id: "leg-a", account_id: "a", date: "2026-07-01", amount: -250, transfer_account_id: "b", approved: false,
+    });
+    const mirror = created.transfer_transaction_id as string;
+    db.run("UPDATE transactions SET approved=1 WHERE id=?", [mirror]);
+
+    const result = await repo.deleteTransactions("p", [
+      { id: mirror, expected_approved: false },
+      { id: "leg-a", expected_approved: false },
+    ]);
+
+    // The mirror's own command was rejected; the later leg-a delete happens to
+    // cascade over it, but this command has no committed-deletion ids to prove
+    // that, so it must not restate the item as its own removal.
+    expect(result.outcomes.map((outcome) => [outcome.id, outcome.status])).toEqual([
+      [mirror, "conflict"],
+      ["leg-a", "applied"],
+    ]);
+    expect(result.applied_count).toBe(1);
+    expect(result.conflict_count).toBe(1);
+    expect(result.already_removed_count).toBe(0);
+    expect(db.query("SELECT deleted FROM transactions WHERE id=?").get(mirror)).toEqual({ deleted: 1 });
+  });
+
+  test("bulk delete stops at an ambiguous failure without replaying or leaking its detail", async () => {
+    const db = await ledgerSqlite();
+    const sentinel = "PRIVATE_ledger_table_9f3c";
+    let commandInserts = 0;
+    let armed = false;
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db, {
+      beforeRunMutation: async (sql) => {
+        if (!armed || !sql.includes("INSERT INTO write_commands")) return;
+        commandInserts += 1;
+        if (commandInserts === 2) throw new Error(`no such table: ${sentinel} (bound values withheld)`);
+      },
+    })), "p");
+    await repo.createTransaction("p", { id: "d1", account_id: "a", date: "2026-07-01", amount: -100 });
+    await repo.createTransaction("p", { id: "d2", account_id: "a", date: "2026-07-02", amount: -200 });
+    await repo.createTransaction("p", { id: "d3", account_id: "a", date: "2026-07-03", amount: -300 });
+    armed = true;
+
+    const result = await repo.deleteTransactions("p", [{ id: "d1" }, { id: "d2" }, { id: "d3" }]);
+
+    expect(result.outcomes.map((outcome) => [outcome.id, outcome.status])).toEqual([
+      ["d1", "applied"],
+      ["d2", "unresolved"],
+      ["d3", "unattempted"],
+    ]);
+    // A 200 bulk body must not carry what a 500 would redact.
+    expect(result.outcomes[1]!.detail).toBe("This row's write could not be confirmed");
+    expect(JSON.stringify(result)).not.toContain(sentinel);
+    expect(db.query("SELECT id, deleted FROM transactions ORDER BY id").all()).toEqual([
+      { id: "d1", deleted: 1 },
+      { id: "d2", deleted: 0 },
+      { id: "d3", deleted: 0 },
+    ]);
+    // The unresolved write left no receipt and was not replayed; the row behind
+    // it was never attempted.
+    expect(db.query("SELECT COUNT(*) count FROM write_commands WHERE kind='transaction.delete'").get()).toEqual({ count: 1 });
+    expect(db.query("SELECT COUNT(*) count FROM write_commands WHERE kind='transaction.delete' AND transaction_id='d2'").get()).toEqual({ count: 0 });
+  });
+
+  test("bulk update hydrates each row once instead of once per write and once per response", async () => {
+    const db = await ledgerSqlite();
+    const counting = new CountingD1Database(fakeD1Binding(db));
+    const repo = new D1LedgerRepository(counting, "p");
+    await repo.createTransaction("p", { id: "b1", account_id: "a", date: "2026-07-01", amount: -100 });
+    await repo.createTransaction("p", { id: "b2", account_id: "a", date: "2026-07-02", amount: -200 });
+
+    counting.reset();
+    const batch = await repo.updateTransactions("p", [
+      { lookup: { kind: "id", id: "b1" }, patch: { memo: "one" } },
+      { lookup: { kind: "id", id: "b2" }, patch: { memo: "two" } },
+    ]);
+
+    expect(batch.transactions.map((row) => row.memo)).toEqual(["one", "two"]);
+    // Two lookup reads, two guarded writes (each a batch read + a batch write),
+    // one hydration read per row, and one knowledge read. The discarded
+    // per-write hydration the batch used to do would add two more.
+    const hydrationReads = counting.roundTrips.filter((trip) => trip.kind === "all" && trip.sql.includes("st.*"));
+    expect(hydrationReads).toHaveLength(2);
+    expect(counting.count).toBe(15);
+  });
+});
+
+/** `ledgerSqlite` inserts account `a` directly, so a transfer needs its payee. */
+function provisionTransferPayee(db: Database, accountId: string): void {
+  db.run(
+    "INSERT INTO payees (id, plan_id, name, transfer_account_id) VALUES (?, 'p', ?, ?)",
+    [`to-${accountId}`, `Transfer to ${accountId}`, accountId],
+  );
+  db.run("UPDATE accounts SET transfer_payee_id=? WHERE id=?", [`to-${accountId}`, accountId]);
+}
+
 async function ledgerSqlite(): Promise<Database> {
   const db = sqlite();
   for (const path of ["../d1-migrations/0001_initial.sql", "../d1-migrations/0002_password_auth.sql", "../d1-migrations/0003_allow_duplicate_payee_names.sql", "../d1-migrations/0004_ynab_raw_objects.sql", "../d1-migrations/0005_plan_month_assignments.sql", "../d1-migrations/0006_plan_month_category_targets.sql", "../d1-migrations/0007_scheduled_transaction_edits.sql", "../d1-migrations/0008_scheduled_transaction_snapshot_assertions.sql", "../d1-migrations/0009_account_reconciliation_assertions.sql", "../d1-migrations/0010_unique_live_import_id.sql", "../d1-migrations/0011_personal_api_tokens.sql", "../d1-migrations/0012_account_preferences.sql", "../d1-migrations/0013_account_icons.sql", "../d1-migrations/0014_account_icon_emoji_backfill.sql", "../d1-migrations/0015_rewards_tracker.sql", "../d1-migrations/0016_query_covering_indexes.sql", "../d1-migrations/0017_ynab_source_month_activity.sql", "../d1-migrations/0018_account_month_balances.sql"]) db.exec(await Bun.file(new URL(path, import.meta.url)).text());
@@ -1655,7 +1925,7 @@ async function ledgerSqlite(): Promise<Database> {
 
 function sqlite(): Database { const db = new Database(":memory:", { strict: true }); databases.push(db); return db; }
 
-function fakeD1(db: Database, faults: { commitThenThrowOnce?: boolean; commitThenThrowSql?: RegExp; beforeWriteBatch?: (db: Database) => void; maxBindings?: number; beforeRunMutation?: () => Promise<void> } = {}): D1Binding {
+function fakeD1(db: Database, faults: { commitThenThrowOnce?: boolean; commitThenThrowSql?: RegExp; beforeWriteBatch?: (db: Database) => void; maxBindings?: number; beforeRunMutation?: (sql: string) => Promise<void> } = {}): D1Binding {
   let commitThenThrow = faults.commitThenThrowOnce ?? Boolean(faults.commitThenThrowSql);
   let mutateBeforeWrite = faults.beforeWriteBatch;
   // D1 serialises atomic batches.  Keep the fake faithful while still letting
@@ -1670,7 +1940,7 @@ function fakeD1(db: Database, faults: { commitThenThrowOnce?: boolean; commitThe
     }
     async all<Row>(): Promise<D1Result<Row>> { return { success: true, results: db.query(this.sql).all(...this.values as any[]) as Row[] }; }
     async first<Row>(): Promise<Row | null> { return db.query(this.sql).get(...this.values as any[]) as Row | null; }
-    async run(): Promise<D1Result> { await faults.beforeRunMutation?.(); const result = db.query(this.sql).run(...this.values as any[]); return { success: true, meta: { changes: Number(result.changes) } }; }
+    async run(): Promise<D1Result> { await faults.beforeRunMutation?.(this.sql); const result = db.query(this.sql).run(...this.values as any[]); return { success: true, meta: { changes: Number(result.changes) } }; }
     async execute<Row>(): Promise<D1Result<Row>> {
       return /^\s*(SELECT|WITH)\b/i.test(this.sql) ? this.all<Row>() : this.run() as Promise<D1Result<Row>>;
     }

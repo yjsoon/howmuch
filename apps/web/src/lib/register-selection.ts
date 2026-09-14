@@ -14,7 +14,9 @@ export type RegisterSelectionIntent =
   | { readonly kind: "toggle"; readonly index: number }
   | { readonly kind: "extend"; readonly index: number }
   | { readonly kind: "all" }
-  | { readonly kind: "none" };
+  | { readonly kind: "none" }
+  /** Replace the selection outright, e.g. with the rows a bulk write left unresolved. */
+  | { readonly kind: "only"; readonly ids: readonly string[] };
 
 export type RegisterSelectionRow = {
   readonly id: string;
@@ -95,6 +97,9 @@ export function reduceSelection(
       committed.add(row.id);
     }
     return { scopeKey, committed, range: null };
+  }
+  if (intent.kind === "only") {
+    return { scopeKey, committed: new Set(intent.ids), range: null };
   }
 
   const row = rows[intent.index];

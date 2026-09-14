@@ -66,6 +66,16 @@ describe("register selection", () => {
     expect(selection.range?.anchorId).toBe("c");
   });
 
+  test("replaces the selection outright for the rows a bulk write left unresolved", () => {
+    const visible = rows("a", "b", "c", "d");
+    let selection = reduceSelection(emptySelection(SCOPE), visible, { kind: "all" }, SCOPE);
+    selection = reduceSelection(selection, visible, { kind: "only", ids: ["b", "d", "gone"] }, SCOPE);
+    expect(selectedIds(selection, visible, SCOPE)).toEqual(["b", "d"]);
+    expect(selection.range).toBeNull();
+    expect(headerState(selection, visible, SCOPE)).toBe("some");
+    expect(selectedIds(reduceSelection(selection, visible, { kind: "only", ids: [] }, SCOPE), visible, SCOPE)).toEqual([]);
+  });
+
   test("ignores ticks from another filter scope", () => {
     const visible = rows("a", "b");
     const selection = reduceSelection(emptySelection(SCOPE), visible, { kind: "toggle", index: 0 }, SCOPE);

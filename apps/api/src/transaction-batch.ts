@@ -5,6 +5,8 @@ import {
   type NonEmpty,
   type SubtransactionInput,
   type TransactionBatchUpdate,
+  type TransactionClearedItem,
+  type TransactionDeleteItem,
   type TransactionFieldPatch,
   type TransactionInput,
   type TransactionLookup,
@@ -41,6 +43,70 @@ export function parseTransactionUpdates(body: unknown): NonEmpty<TransactionBatc
     if (!isPlainObject(item)) throw new ValidationError(`transactions[${index}] must be an object`);
     return { lookup: parseLookup(item, index), patch: parseFieldPatch(item) };
   }) as NonEmpty<TransactionBatchUpdate>;
+}
+
+/**
+ * A bulk cleared command: every item repeats the single-item body plus its id,
+ * so each row keeps its own `expected_cleared` compare-and-set.
+ */
+export function parseTransactionClearedBulk(body: unknown): NonEmpty<TransactionClearedItem> {
+  const items = assertBulkBody(body);
+  const parsed = items.map((item, index) => {
+    if (!isPlainObject(item)) throw new ValidationError(`transactions[${index}] must be an object`);
+    const expected = item.expected_cleared;
+    const cleared = item.cleared;
+    if (!isToggleClearedState(expected) || !isToggleClearedState(cleared)) {
+      throw new ValidationError(`transactions[${index}] expected_cleared and cleared must be uncleared or cleared`);
+    }
+    return {
+      id: requiredString(item.id, `transactions[${index}] id`),
+      expected_cleared: expected,
+      cleared,
+    };
+  }) as NonEmpty<TransactionClearedItem>;
+  assertUniqueIds(parsed);
+  return parsed;
+}
+
+/** A bulk delete command; `expected_approved` is optional and never inferred. */
+export function parseTransactionDeleteBulk(body: unknown): NonEmpty<TransactionDeleteItem> {
+  const items = assertBulkBody(body);
+  const parsed = items.map((item, index) => {
+    if (!isPlainObject(item)) throw new ValidationError(`transactions[${index}] must be an object`);
+    const expectedApproved = Object.hasOwn(item, "expected_approved")
+      ? booleanValue(item.expected_approved, `transactions[${index}] expected_approved`)
+      : undefined;
+    return {
+      id: requiredString(item.id, `transactions[${index}] id`),
+      ...(expectedApproved === undefined ? {} : { expected_approved: expectedApproved }),
+    };
+  }) as NonEmpty<TransactionDeleteItem>;
+  assertUniqueIds(parsed);
+  return parsed;
+}
+
+function assertBulkBody(value: unknown): unknown[] {
+  if (!isPlainObject(value) || !Array.isArray(value.transactions)) {
+    throw new ValidationError("transactions is required");
+  }
+  return assertWriteBatch(value.transactions);
+}
+
+/**
+ * A repeated id would be applied twice in one command: the second write would
+ * report a conflict (cleared) or an already-removed row (delete) that reads
+ * like real progress. Reject the whole command before it writes anything.
+ */
+function assertUniqueIds(items: readonly { id: string }[]): void {
+  const seen = new Set<string>();
+  for (const item of items) {
+    if (seen.has(item.id)) throw new ValidationError(`Duplicate transaction id ${item.id} in batch`);
+    seen.add(item.id);
+  }
+}
+
+function isToggleClearedState(value: unknown): value is "uncleared" | "cleared" {
+  return value === "uncleared" || value === "cleared";
 }
 
 function parseLookup(item: Record<string, unknown>, index: number): TransactionLookup {
@@ -158,6 +224,11 @@ function nullableString(value: unknown, label: string): string | null {
 function nullableBoolean(value: unknown, label: string): boolean | null {
   if (value === null || typeof value === "boolean") return value;
   throw new ValidationError(`${label} must be a boolean or null`);
+}
+
+function booleanValue(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") throw new ValidationError(`${label} must be true or false`);
+  return value;
 }
 
 function integer(value: unknown, label: string): number {
