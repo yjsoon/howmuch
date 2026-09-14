@@ -214,20 +214,22 @@ export function RegisterComposeRow({
             disabled={busy}
           />
         </td>
-        <td className="register-actions" />
         <td className="register-status" />
       </tr>
       <tr className="register-compose-actions-row">
-        <td colSpan={10}>
+        <td colSpan={9}>
           <div className="register-compose-actions">
-            <span className="field-label" id="register-compose-flag-label">Flag</span>
-            <FlagPicker
-              labelledBy="register-compose-flag-label"
-              value={state.draft.flagColor}
-              onChange={(flagColor) => patch({ flagColor })}
-              disabled={busy}
-              names={flagNames}
-            />
+            <div className="register-compose-flags">
+              <span className="field-label" id="register-compose-flag-label">Flag</span>
+              <FlagPicker
+                labelledBy="register-compose-flag-label"
+                value={state.draft.flagColor}
+                onChange={(flagColor) => patch({ flagColor })}
+                disabled={busy}
+                names={flagNames}
+              />
+            </div>
+            {state.error ? <p className="register-compose-error" role="alert">{state.error}</p> : null}
             <button type="button" className="register-compose-cancel" onClick={onCancel} disabled={busy}>
               Cancel
             </button>
@@ -240,13 +242,6 @@ export function RegisterComposeRow({
           </div>
         </td>
       </tr>
-      {state.error && (
-        <tr className="register-compose-error-row">
-          <td colSpan={10}>
-            <p className="register-compose-error" role="alert">{state.error}</p>
-          </td>
-        </tr>
-      )}
     </>
   );
 }

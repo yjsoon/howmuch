@@ -72,6 +72,7 @@ export function FlagPicker({
         tabIndex={value ? -1 : 0}
         aria-checked={!value}
         aria-label={noneLabel}
+        title={noneLabel}
         className={value ? "flag-picker-none" : "flag-picker-none is-selected"}
         onClick={() => onChange("")}
         disabled={disabled}
@@ -87,9 +88,6 @@ export function FlagPicker({
             name={names?.[colour]}
             onSelect={() => onChange(colour)}
           />
-          {names?.[colour]?.trim() ? (
-            <span className="flag-picker-caption">{names[colour]}</span>
-          ) : null}
         </span>
       ))}
     </div>
