@@ -134,7 +134,6 @@ export function TransactionsPage() {
     () => filters.accountIds.length ? visibleAccounts : visibleAccounts.filter((account) => !account.closed),
     [filters.accountIds.length, visibleAccounts],
   );
-  const usesActiveBalanceScope = filters.accountIds.length === 0;
   const registerLabel = filters.accountIds.length === 0
     ? "All Accounts"
     : selectedAccount?.name
@@ -1129,6 +1128,22 @@ export function TransactionsPage() {
     [rows],
   );
 
+  const hasMoreToLoad = ((registerQuery && !unapprovedOnly) ? searchPage.hasMore : page.hasMore)
+    && !page.filling
+    && !unapprovedOnly;
+  const footerMeta = registerQuery
+    ? searchStatusCopy({
+        shown: rows.length,
+        scheduled: visibleSchedules.length,
+        hasMore: searchPage.hasMore,
+        loading: searchPage.loading,
+        error: searchPage.error,
+      })
+    : `${rows.length} transactions · ${formatMoney(totals.inflow)} in · ${formatMoney(totals.outflow)} out · ${formatMoney(totals.net, { sign: true })} net`;
+  const footerMetaWithMore = filters.accountIds.length > 1 && hasMoreToLoad
+    ? `${footerMeta} · Load older entries to extend this multi-account result.`
+    : footerMeta;
+
   const emptyMessage =
     page.loaded && page.transactions.length === 0
       ? "No transactions yet."
@@ -1185,30 +1200,29 @@ export function TransactionsPage() {
 
   return (
     <>
-      <FilterRail filters={filters} setFilters={setFilters} busy={page.loading || page.filling || page.loadingMore} />
+      <FilterRail filters={filters} setFilters={setFilters} busy={page.loading || page.filling || page.loadingMore} collapsible />
       <div className="report-header">
         <div>
-          <span className="page-eyebrow">{usesActiveBalanceScope ? "All account history" : "Account register"}</span>
           <h1>{registerLabel}</h1>
         </div>
         <div className="headline-row register-balances">
           <div className="headline-figure">
             <span className="figure-value">{formatMoney(balances.cleared)}</span>
-            <span className="figure-label">{usesActiveBalanceScope ? "Active cleared balance" : "Cleared balance"}</span>
+            <span className="figure-label">Cleared</span>
           </div>
           <span className="balance-operator" aria-hidden="true">+</span>
           <div className="headline-figure">
             <span className={balances.uncleared >= 0 ? "figure-value figure-positive" : "figure-value figure-negative"}>
               {formatMoney(balances.uncleared)}
             </span>
-            <span className="figure-label">{usesActiveBalanceScope ? "Active uncleared balance" : "Uncleared balance"}</span>
+            <span className="figure-label">Uncleared</span>
           </div>
           <span className="balance-operator" aria-hidden="true">=</span>
           <div className="headline-figure">
             <span className={balances.working >= 0 ? "figure-value figure-positive" : "figure-value figure-negative"}>
               {formatMoney(balances.working)}
             </span>
-            <span className="figure-label">{usesActiveBalanceScope ? "Active working balance" : "Working balance"}</span>
+            <span className="figure-label">Working balance</span>
           </div>
         </div>
       </div>
@@ -1229,7 +1243,7 @@ export function TransactionsPage() {
             onClick={openReconcile}
             disabled={Boolean(mutatingId)}
           >
-            Reconcile account
+            Reconcile
           </button>
         </div>
         <div className="headline-row">
@@ -1275,25 +1289,11 @@ export function TransactionsPage() {
               type="search"
               name="search"
               className="search-input"
-              placeholder="Search payee, memo, category, account, or amount…"
+              placeholder="Search payee, memo, category or amount"
               value={search}
               onChange={(event) => startTransition(() => setSearch(event.target.value))}
               aria-label="Search transactions"
             />
-            <span className="search-meta">
-              {registerQuery
-                ? searchStatusCopy({
-                    shown: rows.length,
-                    scheduled: visibleSchedules.length,
-                    hasMore: searchPage.hasMore,
-                    loading: searchPage.loading,
-                    error: searchPage.error,
-                  })
-                : `Showing ${rows.length} of ${scopedRows.length} loaded filtered entries`}
-            </span>
-            {filters.accountIds.length > 1 && (registerQuery ? searchPage.hasMore : page.hasMore) && (
-              <span className="search-meta">Load older entries to extend this multi-account result.</span>
-            )}
           </div>
         </div>
       </div>
@@ -1538,12 +1538,6 @@ export function TransactionsPage() {
 
       {page.loaded && (
         <section className="report-section">
-          <div className="section-heading">
-            <span className="section-title">Register</span>
-            <span className="section-meta">
-              {rows.length} transactions · {formatMoney(totals.inflow)} in · {formatMoney(totals.outflow)} out · {formatMoney(totals.net, { sign: true })} net
-            </span>
-          </div>
           {rows.length > 0 || showScheduledDisclosure || compose.status === "open" ? (
             <div className="table-wrap table-wrap-wide">
               <table className="ledger-table register-table">
@@ -1570,7 +1564,6 @@ export function TransactionsPage() {
                     <th>Memo</th>
                     <th className="num">Outflow</th>
                     <th className="num">Inflow</th>
-                    <th className="register-actions-heading"><span className="sr-only">Actions</span></th>
                     <th className="register-status-heading"><span className="sr-only">Cleared status</span></th>
                   </tr>
                 </thead>
@@ -1627,33 +1620,11 @@ export function TransactionsPage() {
                             />
                           ) : null}
                           account={txn.account_name}
-                          actions={(
-                            <>
-                              {!txn.approved && (
-                                <button
-                                  type="button"
-                                  className="register-row-action register-row-action-approve"
-                                  onClick={() => void approveMany([txn.id])}
-                                  disabled={writeLocked || approvalSession.pending.has(txn.id)}
-                                  aria-label={`Approve ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
-                                >
-                                  {approvalSession.pending.has(txn.id) ? "Approving…" : "Approve"}
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                className="register-row-action register-row-action-danger"
-                                onClick={() => {
-                                  setPendingDeletion(txn);
-                                  setMutationError(null);
-                                }}
-                                disabled={writeLocked || mutatingId === txn.id}
-                                aria-label={`${txn.approved ? "Delete" : "Reject"} ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
-                              >
-                                {txn.approved ? "Delete" : "Reject"}
-                              </button>
-                            </>
-                          )}
+                          onDelete={() => {
+                            rowSurface.cancel();
+                            setPendingDeletion(txn);
+                            setMutationError(null);
+                          }}
                           status={(
                             <ClearedStatus
                               transaction={txn}
@@ -1671,7 +1642,6 @@ export function TransactionsPage() {
                             surface={rowSurface}
                             leading={null}
                             account={null}
-                            actions={null}
                             status={null}
                           />
                         )),
@@ -1702,33 +1672,11 @@ export function TransactionsPage() {
                         />
                       ) : null}
                       account={txn.account_name}
-                      actions={(
-                        <>
-                          {!txn.approved && (
-                            <button
-                              type="button"
-                              className="register-row-action register-row-action-approve"
-                              onClick={() => void approveMany([txn.id])}
-                              disabled={writeLocked || approvalSession.pending.has(txn.id)}
-                              aria-label={`Approve ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
-                            >
-                              {approvalSession.pending.has(txn.id) ? "Approving…" : "Approve"}
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className="register-row-action register-row-action-danger"
-                            onClick={() => {
-                              setPendingDeletion(txn);
-                              setMutationError(null);
-                            }}
-                            disabled={writeLocked || mutatingId === txn.id}
-                            aria-label={`${txn.approved ? "Delete" : "Reject"} ${txn.payee_name ?? (txn.transfer_account_id ? "transfer" : "transaction")} on ${formatDate(txn.date)}`}
-                          >
-                            {txn.approved ? "Delete" : "Reject"}
-                          </button>
-                        </>
-                      )}
+                      onDelete={() => {
+                        rowSurface.cancel();
+                        setPendingDeletion(txn);
+                        setMutationError(null);
+                      }}
                       status={(
                         <ClearedStatus
                           transaction={txn}
@@ -1746,7 +1694,6 @@ export function TransactionsPage() {
                         surface={rowSurface}
                         leading={null}
                         account={null}
-                        actions={null}
                         status={null}
                       />
                     )),
@@ -1766,8 +1713,9 @@ export function TransactionsPage() {
               <p className="status-detail">Try widening the date range, clearing filters, or shortening the search term.</p>
             </div>
           )}
-          {((registerQuery && !unapprovedOnly) ? searchPage.hasMore : page.hasMore) && !page.filling && !unapprovedOnly && (
-            <div className="register-load-more">
+          <div className="register-footer">
+            <span className="register-footer-meta">{footerMetaWithMore}</span>
+            {hasMoreToLoad && (
               <button
                 type="button"
                 className="register-load-more-button"
@@ -1778,8 +1726,8 @@ export function TransactionsPage() {
                   ? (searchPage.loadingMore ? "Loading older matches…" : "Load older matches")
                   : (page.loadingMore ? "Loading older transactions…" : "Load older transactions")}
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </section>
       )}
     </>
@@ -1831,12 +1779,11 @@ function RegisterScheduledDisclosure({
         <td className="nowrap">{schedule.date_next ? formatDate(schedule.date_next) : "No next date"}</td>
         <td>{accountName}</td>
         <td>{payee}</td>
-        <td className="muted">Scheduled · {scheduleRecurrence(schedule.frequency)} · {category}</td>
+        <td className="muted">Scheduled · {scheduleRecurrence(schedule.frequency)} · {category} · <NavLink className="register-row-action" to="/scheduled">Manage</NavLink></td>
         <td className="muted memo-cell" title={schedule.memo ?? ""}>{schedule.memo ?? "-"}</td>
         <td className="num amount-negative">{amount < 0 ? formatAmount(amount) : ""}</td>
         <td className="num amount-positive">{amount > 0 ? formatAmount(amount) : ""}</td>
-        <td className="register-actions"><NavLink className="register-row-action" to="/scheduled">Manage</NavLink></td>
-        <td />
+        <td className="register-status" />
       </tr>,
       ...(schedule.subtransactions ?? []).map((line) => {
         const lineTransfer = line.transfer_account_id ? transferScheduleLabel(line.transfer_account_id, accountNames) : null;
@@ -1849,7 +1796,6 @@ function RegisterScheduledDisclosure({
           <td className="muted memo-cell" title={line.memo ?? ""}>{line.memo ?? "-"}</td>
           <td className="num amount-negative">{line.amount < 0 ? formatAmount(line.amount) : ""}</td>
           <td className="num amount-positive">{line.amount > 0 ? formatAmount(line.amount) : ""}</td>
-          <td />
           <td />
         </tr>;
       }),
@@ -1874,7 +1820,7 @@ function RegisterScheduledDisclosure({
   if (error && count === 0) {
     return (
       <tr className="register-scheduled-message">
-        <td colSpan={10}>
+        <td colSpan={9}>
           <span role="alert">Could not load scheduled transactions: {error}</span>
           {" · "}
           <NavLink to="/scheduled">Manage schedules</NavLink>
@@ -1886,7 +1832,7 @@ function RegisterScheduledDisclosure({
   return (
     <>
       <tr className="register-scheduled-disclosure-row">
-        <td colSpan={10}>
+        <td colSpan={9}>
           <button
             type="button"
             className="register-scheduled-disclosure"
@@ -1903,7 +1849,7 @@ function RegisterScheduledDisclosure({
         </td>
       </tr>
       {expanded && loading && count === 0 && (
-        <tr className="register-scheduled-message"><td colSpan={10}><span role="status">Loading scheduled transactions…</span></td></tr>
+        <tr className="register-scheduled-message"><td colSpan={9}><span role="status">Loading scheduled transactions…</span></td></tr>
       )}
       {expanded && expandedRows.map((entry) => (
         <Fragment key={`${entry.kind}-${entry.id}`}>{entry.node}</Fragment>

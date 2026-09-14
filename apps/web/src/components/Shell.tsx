@@ -190,9 +190,11 @@ export function Shell() {
           >
             <span aria-hidden="true">◷</span> Scheduled
           </NavLink>
-          {/* `open` is a literal so React writes it once at mount and does not rewrite it while unchanged. The browser owns later toggles. */}
-          <details className="sidebar-reflect" open>
-            <summary className="sidebar-section-label sidebar-reflect-summary">Reflect</summary>
+          {/* The reflect group starts closed; the browser owns later toggles. */}
+          <details className="sidebar-reflect">
+            <summary className="sidebar-section-label sidebar-reflect-summary">
+              <span aria-hidden="true">◫</span> Reflect
+            </summary>
             {REPORTS.map((report) => (
               <NavLink
                 key={report.to}
@@ -219,13 +221,6 @@ export function Shell() {
             <span aria-hidden="true">▤</span> All Accounts
             <span className="sidebar-balance" title="Open-account working balance">{formatMoney(openAccounts.reduce((sum, account) => sum + account.balance, 0))}</span>
           </NavLink>
-          <button
-            type="button"
-            className="sidebar-primary-link account-organizer-entry"
-            onClick={(event) => openOrganizer(event.currentTarget)}
-          >
-            <span aria-hidden="true">☷</span> Organise accounts
-          </button>
           <SettingsLink
             className={({ isActive }) =>
               isActive ? "sidebar-primary-link sidebar-settings-nav sidebar-link-active" : "sidebar-primary-link sidebar-settings-nav"
@@ -234,9 +229,12 @@ export function Shell() {
         </nav>
 
         <div className="account-list">
+          <div className="account-list-head">
+            <span className="account-list-title">Accounts</span>
+            <button type="button" className="account-organizer-entry" onClick={(event) => openOrganizer(event.currentTarget)}>Organise</button>
+          </div>
           {collections.length > 0 && (
             <div className="account-list-band">
-              <p className="account-list-band-label">Your groups</p>
               <AccountGroupSections groups={collections} selectedAccountId={selectedAccount?.id} onChangeIcon={updateAccountIcon} />
             </div>
           )}
@@ -249,7 +247,6 @@ export function Shell() {
         </div>
 
         <div className="sidebar-footer">
-          <NavLink to={addEntryHref(selectedAccount && !selectedAccount.closed ? selectedAccount.id : null)} className="add-button">+ Add transaction</NavLink>
           <div className="sidebar-footer-utilities">
             <SettingsLink
               className={({ isActive }) =>

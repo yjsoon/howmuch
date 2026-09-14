@@ -38,12 +38,12 @@ export function RegisterEditableRow(props: {
   surface: RowEditSurface;
   leading: ReactNode;
   account: ReactNode;
-  actions: ReactNode;
   status: ReactNode;
   payeeExtra?: ReactNode;
   flagNames?: Record<string, string>;
+  onDelete?: () => void;
 }): ReactElement | null {
-  const { row, surface, leading, account, actions, status, payeeExtra, flagNames } = props;
+  const { row, surface, leading, account, status, payeeExtra, flagNames, onDelete } = props;
   const line = row.kind === "split-line"
     ? row.parent.subtransactions?.find((sub) => sub.id === row.lineId)
     : undefined;
@@ -83,6 +83,7 @@ export function RegisterEditableRow(props: {
   }
 
   if (!active || !draft) {
+    const linkedMirror = row.kind === "posted" && Boolean(row.transaction.parent_transaction_id);
     const className = [
       split ? "split-line-row" : null,
       !split && !approved ? "register-row-unapproved" : null,
@@ -123,6 +124,17 @@ export function RegisterEditableRow(props: {
         </IdleCell>
         <IdleCell row={row} focus="category" surface={surface} className="muted">
           {idleCategory(row, line)}
+          {linkedMirror && onDelete ? (
+            <button
+              type="button"
+              className="register-row-action register-row-action-danger register-row-action-inline"
+              onClick={(event) => { event.stopPropagation(); onDelete(); }}
+              onMouseDown={(event) => event.stopPropagation()}
+              onDoubleClick={(event) => event.stopPropagation()}
+            >
+              {approved ? "Delete" : "Reject"}
+            </button>
+          ) : null}
         </IdleCell>
         <IdleCell
           row={row}
@@ -139,7 +151,6 @@ export function RegisterEditableRow(props: {
         <IdleCell row={row} focus="inflow" surface={surface} className="num amount-positive">
           {idleInflow(row, line)}
         </IdleCell>
-        <td className="register-actions">{split ? null : actions}</td>
         <td className="register-status">{split ? null : status}</td>
       </tr>
     );
@@ -270,7 +281,6 @@ export function RegisterEditableRow(props: {
             idleInflow(row, line)
           )}
         </td>
-        <td className="register-actions" />
         <td className="register-status" />
       </tr>
       <tr
@@ -283,10 +293,10 @@ export function RegisterEditableRow(props: {
           surface.cancel();
         }}
       >
-        <td colSpan={10}>
+        <td colSpan={9}>
           <div className="register-compose-actions">
             {split ? null : (
-              <>
+              <div className="register-compose-flags">
                 <span className="field-label" id={`${fieldId}-flag-label`}>Flag</span>
                 <FlagPicker
                   labelledBy={`${fieldId}-flag-label`}
@@ -295,8 +305,14 @@ export function RegisterEditableRow(props: {
                   disabled={busy}
                   names={flagNames}
                 />
-              </>
+              </div>
             )}
+            {onDelete && !split ? (
+              <button type="button" className="register-compose-delete" onClick={onDelete} disabled={busy}>
+                {approved ? "Delete" : "Reject"}
+              </button>
+            ) : null}
+            {error ? <p className="register-compose-error" role="alert">{error}</p> : null}
             <button type="button" className="register-compose-cancel" onClick={surface.cancel} disabled={busy}>
               Cancel
             </button>
@@ -311,13 +327,6 @@ export function RegisterEditableRow(props: {
           </div>
         </td>
       </tr>
-      {error ? (
-        <tr className="register-compose-error-row">
-          <td colSpan={10}>
-            <p className="register-compose-error" role="alert">{error}</p>
-          </td>
-        </tr>
-      ) : null}
     </>
   );
 }

@@ -28,7 +28,6 @@ export function SettingsPage() {
     <>
       <header className="report-header">
         <div>
-          <span className="page-eyebrow">Account</span>
           <h1>Settings</h1>
         </div>
       </header>

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Interval } from "../api/types";
 import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
 import {
@@ -21,9 +22,12 @@ interface Props {
   groups?: Array<"flag" | "payee" | "category" | "memo">;
   /** Shows a quiet progress stripe along the rail while a report refetches. */
   busy?: boolean;
+  /** Collapses the rail behind a compact Filters line. Reports keep the full rail. */
+  collapsible?: boolean;
 }
 
-export function FilterRail({ filters, setFilters, intervals, showCategories = true, groups, busy = false }: Props) {
+export function FilterRail({ filters, setFilters, intervals, showCategories = true, groups, busy = false, collapsible = false }: Props) {
+  const [open, setOpen] = useState(false);
   const { accounts, categoryGroups } = usePlan();
   const activePreset = matchPreset(filters.from, filters.to);
   const month = calendarMonthOf(filters.from, filters.to);
@@ -82,8 +86,37 @@ export function FilterRail({ filters, setFilters, intervals, showCategories = tr
     .filter(Boolean)
     .join(" · ");
 
+  const clearFilters = () =>
+    setFilters({
+      from: undefined,
+      to: undefined,
+      accountIds: [],
+      categoryIds: [],
+      interval: intervals?.includes("month") ? "month" : (intervals?.[0] ?? "month"),
+      groupBy: "flag",
+    });
+
   return (
     <div className="filter-stack">
+      {collapsible && (
+        <div className="filter-bar">
+          <button
+            type="button"
+            className="filter-toggle"
+            aria-expanded={open}
+            onClick={() => setOpen((current) => !current)}
+          >
+            {open ? "Filters ▴" : "Filters ▾"}
+          </button>
+          <span className="filter-summary-text">{summary}</span>
+          {hasActiveFilters && (
+            <button type="button" className="text-button" onClick={clearFilters}>
+              Clear filters
+            </button>
+          )}
+        </div>
+      )}
+      {(!collapsible || open) && (
       <div className={busy ? "filter-rail filter-rail-busy" : "filter-rail"}>
         {month && (
           <div className="filter-cluster">
@@ -202,30 +235,20 @@ export function FilterRail({ filters, setFilters, intervals, showCategories = tr
           </div>
         )}
       </div>
+      )}
 
-      <div className="filter-summary">
-        <span className="filter-summary-text">{summary}</span>
-        <div className="filter-actions">
-          {hasActiveFilters && (
-            <button
-              type="button"
-              className="text-button"
-              onClick={() =>
-                setFilters({
-                  from: undefined,
-                  to: undefined,
-                  accountIds: [],
-                  categoryIds: [],
-                  interval: intervals?.includes("month") ? "month" : (intervals?.[0] ?? "month"),
-                  groupBy: "flag",
-                })
-              }
-            >
-              Clear filters
-            </button>
-          )}
+      {!collapsible && (
+        <div className="filter-summary">
+          <span className="filter-summary-text">{summary}</span>
+          <div className="filter-actions">
+            {hasActiveFilters && (
+              <button type="button" className="text-button" onClick={clearFilters}>
+                Clear filters
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
