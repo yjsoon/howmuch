@@ -1241,7 +1241,9 @@ a.page-eyebrow:hover {
   z-index: 20;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
+  max-width: calc(100vw - 32px);
   padding: 8px 14px;
   border: 0;
   border-radius: 10px;
@@ -1251,19 +1253,45 @@ a.page-eyebrow:hover {
   font-size: 12.5px;
 }
 
-.register-bulk-bar .approval-pill {
-  border-color: var(--paper);
+.register-bulk-action {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--paper);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.register-bulk-bar .approval-pill:hover:not(:disabled) {
-  background: var(--paper);
-  color: var(--ink);
+.register-bulk-action:hover:not(:disabled) {
+  background: #ffffff1f;
 }
 
-.register-bulk-bar .text-button {
+.register-bulk-action:disabled {
+  opacity: 0.5;
+}
+
+.register-bulk-clear {
+  font-weight: 500;
+}
+
+.register-bulk-sep {
+  width: 1px;
+  height: 18px;
+  background: #ffffff33;
+}
+
+.register-bulk-bar select {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid #ffffff55;
+  border-radius: 6px;
+  background: transparent;
   color: var(--paper);
+  color-scheme: dark;
+  font: inherit;
+  font-size: 12.5px;
 }
 
 .register-bulk-count {
@@ -1535,6 +1563,30 @@ a.page-eyebrow:hover {
   align-items: center;
   justify-content: center;
   color: var(--ink-soft);
+}
+
+.approve-dot {
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.approve-dot span {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--plan-accent);
+  transition: transform 120ms ease;
+}
+
+.approve-dot:hover:not(:disabled) span {
+  transform: scale(1.25);
+}
+
+.approve-dot:disabled {
+  opacity: 0.5;
+  cursor: progress;
 }
 
 .cleared-status-toggle {
