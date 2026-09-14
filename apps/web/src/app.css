@@ -1383,7 +1383,8 @@ a.page-eyebrow:hover {
 }
 
 .register-compose-row td {
-  padding: 6px 6px;
+  padding: 2px 4px;
+  vertical-align: top;
 }
 
 .register-compose-actions-row td {
@@ -1396,7 +1397,7 @@ a.page-eyebrow:hover {
   width: 100%;
   min-width: 0;
   height: 28px;
-  padding: 0 8px;
+  padding: 0 5px;
   border: 1px solid var(--rule);
   border-radius: 4px;
   background: var(--paper-raised);
@@ -1415,6 +1416,14 @@ a.page-eyebrow:hover {
   background-size: 10px 6px;
 }
 
+.register-compose-row input[type="date"] {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 0 5px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 .register-compose-row input:focus,
 .register-compose-row select:focus {
   border-color: var(--plan-accent);
@@ -1429,13 +1438,24 @@ a.page-eyebrow:hover {
 
 .register-compose-row .num input {
   text-align: right;
+  padding-right: 10px;
   font-family: var(--font-figures);
   font-variant-numeric: tabular-nums;
+}
+
+.register-compose-row td.muted,
+.register-compose-row td.register-select {
+  padding: 7px 10px 2px;
 }
 
 .register-compose-locked-account,
 .register-compose-transfer {
   color: var(--ink);
+}
+
+.register-compose-locked-account {
+  display: inline-block;
+  padding-top: 5px;
 }
 
 .register-compose-actions {
@@ -1863,16 +1883,25 @@ a.page-eyebrow:hover {
   display: inline-flex;
   align-items: center;
   margin-left: 8px;
-  padding: 1px 6px;
-  border-radius: 2px;
+  padding: 1px 7px;
+  border-radius: 3px;
   color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
   line-height: 1.4;
-  text-transform: uppercase;
+  text-transform: none;
   vertical-align: 1px;
   white-space: nowrap;
+}
+
+.flag-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: 8px;
+  border-radius: 50%;
+  vertical-align: -1px;
 }
 
 .flag-tag-red, .flag-colour-red { background: #b3261e; }

@@ -9,7 +9,13 @@ export function FlagTag({
   name?: string | null;
 }) {
   if (!isFlagColour(colour)) return null;
+  const named = Boolean(name?.trim());
   const label = flagTitle(colour, name);
+  if (!named) {
+    return (
+      <span className={`flag-dot flag-colour-${colour}`} role="img" aria-label={`${label} flag`} title={`${label} flag`} />
+    );
+  }
   return (
     <span className={`flag-tag flag-tag-${colour}`} title={label}>
       {label}
