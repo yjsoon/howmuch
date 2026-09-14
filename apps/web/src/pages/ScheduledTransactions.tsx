@@ -129,7 +129,6 @@ export function ScheduledTransactionsPage() {
     <>
       <header className="report-header schedule-header">
         <div>
-          <span className="page-eyebrow">Upcoming</span>
           <h1>Scheduled transactions</h1>
         </div>
         <div className="headline-row schedule-figures" aria-label="Schedule summary">
@@ -221,7 +220,7 @@ function ScheduleRows({ schedule, accounts, categories, payees, busy, onEdit, on
   const amount = amountFor(schedule);
   const detail = [account, category, scheduleRecurrence(schedule.frequency)].filter(Boolean).join(" · ");
   return <>
-    <tr className="schedule-row"><td className="schedule-date">{schedule.date_next ? formatDate(schedule.date_next) : "Date unavailable"}</td><td><div className="schedule-payee">{payee}<FlagTag colour={schedule.flag_color} /></div>{schedule.memo && <div className="schedule-memo">{schedule.memo}</div>}<div className="schedule-mobile-detail">{detail}</div></td><td>{account}</td><td>{category}</td><td>{scheduleRecurrence(schedule.frequency)}</td><td className={amount < 0 ? "num amount-negative" : amount > 0 ? "num amount-positive" : "num"}>{formatMoney(amount, { sign: amount > 0 })}</td><td className="register-actions"><button type="button" className="register-row-action" onClick={onEnter} disabled={busy || !schedule.date_next} aria-label={`Enter ${payee} now`}>Enter now</button><button type="button" className="register-row-action" onClick={onEdit} disabled={busy} aria-label={`Edit ${payee}`}>Edit</button><button type="button" className="register-row-action register-row-action-danger" onClick={onDelete} disabled={busy} aria-label={`Delete ${payee}`}>Delete</button></td></tr>
+    <tr className="schedule-row"><td className="schedule-date">{schedule.date_next ? formatDate(schedule.date_next) : "Date unavailable"}</td><td><div className="schedule-payee">{payee}<FlagTag colour={schedule.flag_color} /></div>{schedule.memo && <div className="schedule-memo">{schedule.memo}</div>}<div className="schedule-mobile-detail">{detail}</div></td><td>{account}</td><td>{category}</td><td>{scheduleRecurrence(schedule.frequency)}</td><td className={amount < 0 ? "num amount-negative" : amount > 0 ? "num amount-positive" : "num"}>{formatMoney(amount, { sign: amount > 0 })}</td><td className="schedule-actions"><button type="button" className="register-row-action" onClick={onEnter} disabled={busy || !schedule.date_next} aria-label={`Enter ${payee} now`}>Enter now</button><button type="button" className="register-row-action" onClick={onEdit} disabled={busy} aria-label={`Edit ${payee}`}>Edit</button><button type="button" className="register-row-action register-row-action-danger" onClick={onDelete} disabled={busy} aria-label={`Delete ${payee}`}>Delete</button></td></tr>
     {(schedule.subtransactions ?? []).map((line) => <SplitScheduleRow key={line.id} line={line} accounts={accounts} categories={categories} payees={payees} />)}
   </>;
 }

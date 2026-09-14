@@ -57,7 +57,7 @@ export function RewardTermsPage() {
     finally { setBusy(false); }
   };
   return <div className="reward-tool">
-    <header className="report-header"><div><span className="page-eyebrow">Tools</span><h1>Reward terms</h1></div><Link to="/settings">Settings</Link></header>
+    <header className="report-header"><div><h1>Reward terms</h1></div><Link to="/settings">Settings</Link></header>
     <p>Turn bank terms into a draft. Review every rate, spend cap and exclusion before saving. No ledger data or account identifiers are sent to the provider.</p>
     <label>Existing reward card<select disabled={busy} value={cardId} onChange={(event) => setParams({ card: event.target.value })}><option value="">Select a card…</option>{cards.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
     {cardId && cards.length > 0 && !card && <p role="alert">This card is unavailable.</p>}

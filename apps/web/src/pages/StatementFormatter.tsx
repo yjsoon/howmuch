@@ -49,7 +49,7 @@ export function StatementFormatterPage() {
     } catch { setError("Correct each date (YYYY-MM-DD) and amount (digits and decimal cents, one flow per row) before exporting."); }
   };
   return <div className="reward-tool">
-    <header className="report-header"><div><span className="page-eyebrow">Tools</span><h1>Statement formatter</h1></div><Link to="/settings">Settings</Link></header>
+    <header className="report-header"><div><h1>Statement formatter</h1></div><Link to="/settings">Settings</Link></header>
     <p>Extract images into editable CSV rows. Nothing is imported into your ledger. Images, rows and provider keys are held only in this page’s memory.</p>
     <form onSubmit={(event) => { event.preventDefault(); void extract(); }}><fieldset disabled={busy || loading}>
       <ToolProvider value={credentials} statement onChange={(value) => { setCredentials(value); setConsent(false); }} />
