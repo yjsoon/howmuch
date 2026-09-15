@@ -8,6 +8,7 @@ import {
   beginRowEdit,
   payeeListEntries,
   postingAccountId,
+  registerRowDomId,
   rowApproved,
   rowFieldWritable,
   rowGestureHandlers,
@@ -42,8 +43,9 @@ export function RegisterEditableRow(props: {
   payeeExtra?: ReactNode;
   flagNames?: Record<string, string>;
   onDelete?: () => void;
+  targeted?: boolean;
 }): ReactElement | null {
-  const { row, surface, leading, account, status, payeeExtra, flagNames, onDelete } = props;
+  const { row, surface, leading, account, status, payeeExtra, flagNames, onDelete, targeted = false } = props;
   const line = row.kind === "split-line"
     ? row.parent.subtransactions?.find((sub) => sub.id === row.lineId)
     : undefined;
@@ -59,6 +61,7 @@ export function RegisterEditableRow(props: {
   const rowRef = useRef<HTMLTableRowElement>(null);
   const approved = rowApproved(row);
   const split = row.kind === "split-line";
+  const domId = registerRowDomId(row);
 
   useEffect(() => {
     if (!active || !focus) {
@@ -78,6 +81,12 @@ export function RegisterEditableRow(props: {
     }
   }, [active, focus]);
 
+  useEffect(() => {
+    if (!targeted || !rowRef.current) return;
+    rowRef.current.scrollIntoView({ block: "center", inline: "nearest" });
+    rowRef.current.focus({ preventScroll: true });
+  }, [targeted]);
+
   if (row.kind === "split-line" && !line) {
     return null;
   }
@@ -87,11 +96,16 @@ export function RegisterEditableRow(props: {
     const className = [
       split ? "split-line-row" : null,
       !split && !approved ? "register-row-unapproved" : null,
+      targeted ? "register-row-targeted" : null,
     ].filter(Boolean).join(" ") || undefined;
     return (
       <tr
+        ref={rowRef}
+        id={domId}
         className={className}
         tabIndex={0}
+        aria-current={targeted ? "true" : undefined}
+        data-deep-link-target={targeted ? "true" : undefined}
         onKeyDown={(event) => {
           if (event.key !== "Enter" && event.key !== "F2") {
             return;
@@ -157,14 +171,18 @@ export function RegisterEditableRow(props: {
   }
 
   const busy = committing;
-  const rowClass = [split ? "split-line-row" : null, "register-compose-row"].filter(Boolean).join(" ");
-  const fieldId = rowDomId(row);
+  const rowClass = [split ? "split-line-row" : null, "register-compose-row", targeted ? "register-row-targeted" : null].filter(Boolean).join(" ");
+  const fieldId = domId;
 
   return (
     <>
       <tr
         ref={rowRef}
+        id={domId}
         className={rowClass}
+        tabIndex={-1}
+        aria-current={targeted ? "true" : undefined}
+        data-deep-link-target={targeted ? "true" : undefined}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             if (busy) {
@@ -538,10 +556,4 @@ function idleOutflow(row: RegisterRowRef, line: Subtransaction | undefined): str
 function idleInflow(row: RegisterRowRef, line: Subtransaction | undefined): string {
   const amount = row.kind === "split-line" ? line?.amount ?? 0 : row.transaction.amount;
   return amount > 0 ? formatAmount(amount) : "";
-}
-
-function rowDomId(row: RegisterRowRef): string {
-  return row.kind === "posted"
-    ? `register-row-${row.transaction.id}`
-    : `register-row-${row.parent.id}-${row.lineId}`;
 }

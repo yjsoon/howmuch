@@ -91,6 +91,28 @@ describe("shouldHandleUnauthorized", () => {
     expect(JSON.parse(String(captured!.init?.body))).toEqual({ expected_cleared: "uncleared", cleared: "cleared" });
   });
 
+  test("fetches one parent transaction directly with its subtransactions", async () => {
+    const originalFetch = globalThis.fetch;
+    let capturedPath = "";
+    globalThis.fetch = (async (path: string | URL | Request) => {
+      capturedPath = String(path);
+      return new Response(JSON.stringify({
+        data: {
+          transaction: {
+            id: "txn/older",
+            subtransactions: [{ id: "sub-1", amount: -5000 }],
+          },
+        },
+      }), { headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    try {
+      expect((await api.transaction("plan 1", "txn/older")).subtransactions?.[0]?.id).toBe("sub-1");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(capturedPath).toBe("/v1/plans/plan%201/transactions/txn%2Folder");
+  });
+
   test("creates a reward card with plan_id and the constructed card", async () => {
     const originalFetch = globalThis.fetch;
     let captured: { path: string; init?: RequestInit } | null = null;

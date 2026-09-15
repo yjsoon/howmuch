@@ -9,6 +9,7 @@ import {
   focusForRowError,
   postingAccountId,
   reduceRowEdit,
+  registerRowDomId,
   rowFieldWritable,
   rowGestureHandlers,
   rowId,
@@ -74,6 +75,14 @@ function splitParent(lines: Subtransaction[], overrides: Partial<Transaction> = 
     ...overrides,
   });
 }
+
+describe("registerRowDomId", () => {
+  test("gives parent and split rows deterministic distinct DOM identities", () => {
+    const parent = splitParent([line({ id: "line/1" })], { id: "txn 1" });
+    expect(registerRowDomId(posted(parent))).toBe("register-row-txn%201");
+    expect(registerRowDomId(splitLine(parent, "line/1"))).toBe("register-row-txn%201-line%2F1");
+  });
+});
 
 function payee(id: string, name: string, transferAccountId?: string): Payee {
   return { id, name, transfer_account_id: transferAccountId ?? null, deleted: false };

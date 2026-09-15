@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   choosePlanId,
+  chooseRequestedPlanId,
   decideSession,
   controllerKey,
   decideBootstrap,
@@ -81,6 +82,18 @@ describe("choosePlanId", () => {
   });
 });
 
+describe("chooseRequestedPlanId", () => {
+  test("gives an accessible URL plan precedence over preferences", () => {
+    expect(chooseRequestedPlanId([{ id: "usual" }, { id: "linked" }], "usual", "linked"))
+      .toEqual({ planId: "linked", requestedPlanRejected: false });
+  });
+
+  test("retains safe preference fallback when the URL plan is inaccessible", () => {
+    expect(chooseRequestedPlanId([{ id: "usual" }, { id: "other" }], "usual", "private"))
+      .toEqual({ planId: "usual", requestedPlanRejected: true });
+  });
+});
+
 describe("decideSession", () => {
   test("reads the session without consulting anything else", () => {
     expect(decideSession(signedIn)).toEqual({ kind: "signed-in", userId: "user-1" });
@@ -97,7 +110,7 @@ describe("decideBootstrap", () => {
       status: signedIn,
       plans: [{ id: "plan-a" }, { id: "plan-b" }],
       speculativePlanId: "plan-b",
-    })).toEqual({ kind: "ready", userId: "user-1", planId: "plan-b", keepSpeculative: true });
+    })).toEqual({ kind: "ready", userId: "user-1", planId: "plan-b", keepSpeculative: true, requestedPlanRejected: false });
   });
 
   test("falls back to the first plan and discards the batch when the hint is stale", () => {
@@ -105,7 +118,7 @@ describe("decideBootstrap", () => {
       status: signedIn,
       plans: [{ id: "plan-a" }],
       speculativePlanId: "plan-gone",
-    })).toEqual({ kind: "ready", userId: "user-1", planId: "plan-a", keepSpeculative: false });
+    })).toEqual({ kind: "ready", userId: "user-1", planId: "plan-a", keepSpeculative: false, requestedPlanRejected: false });
   });
 
   test("never keeps a batch that was not started", () => {
@@ -113,12 +126,39 @@ describe("decideBootstrap", () => {
       status: signedIn,
       plans: [{ id: "plan-a" }],
       speculativePlanId: null,
-    })).toEqual({ kind: "ready", userId: "user-1", planId: "plan-a", keepSpeculative: false });
+    })).toEqual({ kind: "ready", userId: "user-1", planId: "plan-a", keepSpeculative: false, requestedPlanRejected: false });
   });
 
   test("reports when the account has no readable plan", () => {
     expect(decideBootstrap({ status: signedIn, plans: [], speculativePlanId: null }))
       .toEqual({ kind: "no-plans" });
+  });
+
+  test("selects an accessible URL plan and rejects an inaccessible one", () => {
+    expect(decideBootstrap({
+      status: signedIn,
+      plans: [{ id: "usual" }, { id: "linked" }],
+      speculativePlanId: "usual",
+      requestedPlanId: "linked",
+    })).toEqual({
+      kind: "ready",
+      userId: "user-1",
+      planId: "linked",
+      keepSpeculative: false,
+      requestedPlanRejected: false,
+    });
+    expect(decideBootstrap({
+      status: signedIn,
+      plans: [{ id: "usual" }],
+      speculativePlanId: "usual",
+      requestedPlanId: "private",
+    })).toEqual({
+      kind: "ready",
+      userId: "user-1",
+      planId: "usual",
+      keepSpeculative: true,
+      requestedPlanRejected: true,
+    });
   });
 
   test("an invalid session yields no plan state even when plans and a batch arrived", () => {
@@ -165,5 +205,10 @@ describe("controllerKey", () => {
   test("scopes a controller to one user and plan", () => {
     expect(controllerKey("user-1", "plan-a")).toBe("user-1:plan-a");
     expect(controllerKey("user-1", "plan-a")).not.toBe(controllerKey("user-2", "plan-a"));
+  });
+
+  test("changes across user or plan boundaries so plan-owned UI state remounts", () => {
+    expect(controllerKey("user-a", "plan-a")).not.toBe(controllerKey("user-a", "plan-b"));
+    expect(controllerKey("user-a", "plan-a")).not.toBe(controllerKey("user-b", "plan-a"));
   });
 });

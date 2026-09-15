@@ -1372,6 +1372,20 @@ a.page-eyebrow:hover {
   box-shadow: inset 3px 0 var(--plan-accent);
 }
 
+.register-table tbody tr.register-row-targeted td,
+.register-table tbody tr.register-row-targeted:hover td {
+  background: color-mix(in srgb, var(--plan-accent) 20%, var(--paper));
+}
+
+.register-table tbody tr.register-row-targeted td:first-child {
+  box-shadow: inset 4px 0 var(--plan-accent);
+}
+
+.register-table tbody tr.register-row-targeted:focus-visible {
+  outline: 2px solid var(--plan-accent);
+  outline-offset: -2px;
+}
+
 .register-row-action {
   padding: 3px 5px;
   color: var(--ink-soft);

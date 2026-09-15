@@ -47,7 +47,7 @@ export type SessionDecision =
 export type BootstrapDecision =
   | { kind: "signed-out"; mode: "setup" | "login" }
   | { kind: "no-plans" }
-  | { kind: "ready"; userId: string; planId: string; keepSpeculative: boolean };
+  | { kind: "ready"; userId: string; planId: string; keepSpeculative: boolean; requestedPlanRejected: boolean };
 
 /**
  * Decide what to request before the session is known. On a reload the attached
@@ -74,6 +74,21 @@ export function choosePlanId(plans: readonly PlanRef[], hint: string | null): st
   return plans[0]?.id ?? null;
 }
 
+/** A URL request wins only after the authenticated plan list confirms access. */
+export function chooseRequestedPlanId(
+  plans: readonly PlanRef[],
+  hint: string | null,
+  requestedPlanId: string | null,
+): { planId: string | null; requestedPlanRejected: boolean } {
+  if (requestedPlanId && plans.some((plan) => plan.id === requestedPlanId)) {
+    return { planId: requestedPlanId, requestedPlanRejected: false };
+  }
+  return {
+    planId: choosePlanId(plans, hint),
+    requestedPlanRejected: requestedPlanId !== null,
+  };
+}
+
 /**
  * Read the session, and nothing else. The provider calls this the moment the
  * status arrives so the sign-in form can appear without waiting for requests
@@ -96,12 +111,17 @@ export function decideBootstrap(input: {
   status: BootstrapSessionStatus;
   plans: readonly PlanRef[];
   speculativePlanId: string | null;
+  requestedPlanId?: string | null;
 }): BootstrapDecision {
   const session = decideSession(input.status);
   if (session.kind === "signed-out") {
     return session;
   }
-  const planId = choosePlanId(input.plans, input.speculativePlanId);
+  const { planId, requestedPlanRejected } = chooseRequestedPlanId(
+    input.plans,
+    input.speculativePlanId,
+    input.requestedPlanId ?? null,
+  );
   if (!planId) {
     return { kind: "no-plans" };
   }
@@ -110,6 +130,7 @@ export function decideBootstrap(input: {
     userId: session.userId,
     planId,
     keepSpeculative: input.speculativePlanId !== null && planId === input.speculativePlanId,
+    requestedPlanRejected,
   };
 }
 

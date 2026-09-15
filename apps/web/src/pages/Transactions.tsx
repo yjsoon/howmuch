@@ -61,6 +61,7 @@ import {
   transactionMatchesQuery,
 } from "../lib/register-search";
 import { applyClearedOverlays, applyRegisterPatches, deletedIdsForRemoval, reconcileClearedOverlays, retainInFlightPatches, unlinkSplitMirrorParent } from "../lib/register-rows";
+import { applyDeepLinkedTransactionMutation, deepLinkedTransactionForRegister, deepLinkTargetsRow, mergeDeepLinkedTransaction, parseTransactionDeepLink, type DeepLinkedTransactionResolution } from "../lib/transaction-deep-link";
 import { bulkDeleteFollowUp, bulkOutcomeIsComplete, bulkOutcomeToast, bulkWriteTouchesReconciliation, categorisableRows, clearedTargets, remainingWorkIds, type BulkWriteKind } from "../lib/register-bulk";
 import {
   emptySelection,
@@ -96,7 +97,7 @@ type ReconcileDraft = {
 
 export function TransactionsPage() {
   const { filters, setFilters } = useFilters({ defaultRange: () => trailingMonthsRange(2) });
-  const { accounts, categoryGroups, planId, userId, ledgerKnowledge, knowledgeTrusted, cacheEpoch, reload } = usePlan();
+  const { accounts, categoryGroups, planId, planSelectionError, userId, ledgerKnowledge, knowledgeTrusted, cacheEpoch, reload } = usePlan();
   // `knowledgeTrusted` is false in two cases: before the bootstrap's check has
   // landed, where the number on hand came from the cache itself, and after a
   // local write, where the server has already moved past it. In both, these
@@ -118,6 +119,21 @@ export function TransactionsPage() {
     [rewardsSnapshot.data],
   );
   const [params] = useSearchParams();
+  const deepLinkParameterKey = JSON.stringify([
+    params.getAll("plan"),
+    params.getAll("transaction"),
+    params.getAll("subtransaction"),
+  ]);
+  const deepLink = useMemo(() => {
+    const deepLinkParams = new URLSearchParams();
+    for (const name of ["plan", "transaction", "subtransaction"] as const) {
+      for (const value of params.getAll(name)) deepLinkParams.append(name, value);
+    }
+    return parseTransactionDeepLink(deepLinkParams);
+  }, [deepLinkParameterKey]);
+  const [deepLinkedTransaction, setDeepLinkedTransaction] = useState<DeepLinkedTransactionResolution>(
+    { key: "", transaction: null, loading: false, error: null },
+  );
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const flow = params.get("flow");
@@ -211,6 +227,45 @@ export function TransactionsPage() {
   const clearedInFlightRef = useRef(new Set<string>());
   const [writeLocked, setWriteLocked] = useState(false);
   const selectedAccountId = filters.accountIds.length === 1 ? filters.accountIds[0]! : null;
+
+  useEffect(() => {
+    if (deepLink.kind !== "valid" || deepLink.link.planId !== planId) {
+      setDeepLinkedTransaction({ key: "", transaction: null, loading: false, error: null });
+      return;
+    }
+    const { transactionId, subtransactionId } = deepLink.link;
+    const key = `${planId}:${transactionId}:${subtransactionId ?? ""}`;
+    let cancelled = false;
+    setDeepLinkedTransaction({ key, transaction: null, loading: true, error: null });
+    api.transaction(planId, transactionId)
+      .then((transaction) => {
+        if (cancelled) return;
+        if (!deepLinkTargetsRow(deepLink.link, transaction)) {
+          setDeepLinkedTransaction({
+            key,
+            transaction: null,
+            loading: false,
+            error: subtransactionId
+              ? "The linked split line was not found in this transaction."
+              : "The linked transaction did not match the requested ID.",
+          });
+          return;
+        }
+        setDeepLinkedTransaction({ key, transaction, loading: false, error: null });
+      })
+      .catch((cause) => {
+        if (cancelled) return;
+        const notFound = cause instanceof ApiError && cause.status === 404;
+        setDeepLinkedTransaction({
+          key,
+          transaction: null,
+          loading: false,
+          error: notFound ? "The linked transaction was not found in this plan." : `Could not open the linked transaction: ${cause instanceof Error ? cause.message : String(cause)}`,
+        });
+      });
+    return () => { cancelled = true; };
+  }, [deepLink, planId, refreshGeneration]);
+
   const composeScope = selectedAccountId ?? (filters.accountIds.join(",") || "all");
   useEffect(() => {
     setCompose(closedCompose());
@@ -578,6 +633,7 @@ export function TransactionsPage() {
     try {
       const updated = await api.updateTransactionCleared(planId, transaction.id, transaction.cleared, cleared);
       setReplacements((current) => new Map(current).set(updated.id, updated));
+      setDeepLinkedTransaction((current) => applyDeepLinkedTransactionMutation(current, updated.id, updated));
       if (options.refresh !== false) {
         reload();
         setReconciliationPreviewGeneration((generation) => generation + 1);
@@ -615,6 +671,7 @@ export function TransactionsPage() {
         transfer_transaction_id: deleted.transfer_transaction_id ?? transaction.transfer_transaction_id,
       };
       setDeletedIds((current) => new Set([...current, ...removed]));
+      setDeepLinkedTransaction((current) => applyDeepLinkedTransactionMutation(current, transaction.id, "deleted"));
       setReplacements((current) => {
         const byId = new Map<string, Transaction>();
         for (const row of page.transactions) {
@@ -694,6 +751,7 @@ export function TransactionsPage() {
     try {
       const updated = await api.updateTransaction(planId, plan.transactionId, plan.input);
       setReplacements((current) => new Map(current).set(updated.id, updated));
+      setDeepLinkedTransaction((current) => applyDeepLinkedTransactionMutation(current, updated.id, updated));
       const prior = session.row.kind === "posted" ? session.row.transaction : session.row.parent;
       const priorMirrors = [
         prior.transfer_transaction_id,
@@ -968,7 +1026,7 @@ export function TransactionsPage() {
     resolvedSinceCount(resolvedIds, resolvedWhenCounted),
   );
 
-  const scopedRows = useMemo(() => {
+  const normallyScopedRows = useMemo(() => {
     const outflowOnly = flow === "outflow" || wantsUncategorised;
     return inScope
       .filter((txn) => !unapprovedOnly || !txn.approved)
@@ -989,6 +1047,29 @@ export function TransactionsPage() {
       })
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   }, [categoryIds, filters.categoryIds.length, flow, inScope, unapprovedOnly, wantsUncategorised]);
+
+  const deepLinkKey = deepLink.kind === "valid" && deepLink.link.planId === planId
+    ? `${planId}:${deepLink.link.transactionId}:${deepLink.link.subtransactionId ?? ""}`
+    : null;
+  const forcedTransaction = useMemo(() => {
+    if (!deepLinkKey || deepLinkedTransaction.key !== deepLinkKey) return null;
+    const direct = deepLinkedTransaction.transaction;
+    if (!direct) return null;
+    const projected = applyClearedOverlays(
+      applyRegisterPatches([direct], replacements, deletedIds),
+      clearedOverlays,
+    )[0];
+    return deepLinkedTransactionForRegister(
+      projected,
+      Boolean(projected && rowLooksApproved(projected, approvalSession)),
+    );
+  }, [approvalSession, clearedOverlays, deepLinkKey, deepLinkedTransaction, deletedIds, replacements]);
+  const scopedRows = useMemo(
+    () => mergeDeepLinkedTransaction(normallyScopedRows, forcedTransaction)
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
+    [forcedTransaction, normallyScopedRows],
+  );
+  const deepLinkedTransactionId = forcedTransaction?.id ?? null;
 
   const editingRowId = rowEdit.status === "idle" ? null : rowId(rowEdit.row);
   const applyRowFilters = (rows: Transaction[]) => {
@@ -1014,7 +1095,7 @@ export function TransactionsPage() {
   };
   const matchedRows = useMemo(() => {
     const localMatches = scopedRows.filter((txn) => {
-      if (editingRowId && txn.id === editingRowId) {
+      if ((editingRowId && txn.id === editingRowId) || txn.id === deepLinkedTransactionId) {
         return true;
       }
       return transactionMatchesQuery(registerQuery, txn);
@@ -1028,6 +1109,7 @@ export function TransactionsPage() {
     return mergeSearchRows(localMatches, applyRowFilters(patchedSearch));
   }, [
     categoryIds,
+    deepLinkedTransactionId,
     editingRowId,
     filters.categoryIds.length,
     filters.from,
@@ -1042,12 +1124,12 @@ export function TransactionsPage() {
     wantsUncategorised,
   ]);
   const rows = useMemo(
-    () => matchedRows.filter((txn) => !isUpcomingRegisterDate(txn.date, today)),
-    [matchedRows, today],
+    () => matchedRows.filter((txn) => txn.id === deepLinkedTransactionId || !isUpcomingRegisterDate(txn.date, today)),
+    [deepLinkedTransactionId, matchedRows, today],
   );
   const postedFutureRows = useMemo(
-    () => matchedRows.filter((txn) => isUpcomingRegisterDate(txn.date, today)),
-    [matchedRows, today],
+    () => matchedRows.filter((txn) => txn.id !== deepLinkedTransactionId && isUpcomingRegisterDate(txn.date, today)),
+    [deepLinkedTransactionId, matchedRows, today],
   );
   const visibleSchedules = useMemo(() => {
     if (unapprovedOnly) {
@@ -1130,6 +1212,9 @@ export function TransactionsPage() {
       const finished = finishApproval(approvalSessionRef.current, plannedIds);
       approvalSessionRef.current = finished;
       setApprovalSession(finished);
+      setDeepLinkedTransaction((current) => plannedIds.includes(current.transaction?.id ?? "")
+        ? applyDeepLinkedTransactionMutation(current, current.transaction!.id, "approved")
+        : current);
       dispatchSelection({ kind: "none" });
       setMutationSuccess(approvedToast(result.approvedCount));
     } catch (cause) {
@@ -1141,6 +1226,10 @@ export function TransactionsPage() {
       const failed = failApproval(approvalSessionRef.current, plannedIds, acknowledged);
       approvalSessionRef.current = failed;
       setApprovalSession(failed);
+      const acknowledgedIds = plannedIds.slice(0, acknowledged);
+      setDeepLinkedTransaction((current) => acknowledgedIds.includes(current.transaction?.id ?? "")
+        ? applyDeepLinkedTransactionMutation(current, current.transaction!.id, "approved")
+        : current);
       const detail = cause instanceof Error && cause.message ? ` (${cause.message})` : "";
       setMutationError(acknowledged > 0
         ? `${interruptedToast(acknowledged, uncertain)}${detail}`
@@ -1308,6 +1397,9 @@ export function TransactionsPage() {
         ? "No transactions match this search."
         : "No transactions match these filters.";
   const mutationBusy = writeLocked || Boolean(mutatingId);
+  const deepLinkError = planSelectionError
+    ?? (deepLink.kind === "invalid" ? deepLink.message : deepLinkedTransaction.error);
+  const registerLoaded = page.loaded || Boolean(forcedTransaction);
   const orderedGroups = useMemo(() => splitCategoryGroups(categoryGroups), [categoryGroups]);
   const rowSurface: RowEditSurface = {
     session: rowEdit,
@@ -1492,6 +1584,17 @@ export function TransactionsPage() {
         <div className="status-panel status-panel-error">
           <p className="status-title">Could not load {page.loaded ? "older " : ""}transactions.</p>
           <p className="status-detail">{page.error}</p>
+        </div>
+      )}
+      {deepLinkError && (
+        <div className="status-panel status-panel-error compact-panel" role="alert">
+          <p className="status-title">Could not open this transaction link.</p>
+          <p className="status-detail">{deepLinkError}</p>
+        </div>
+      )}
+      {deepLinkedTransaction.loading && (
+        <div className="status-panel compact-panel" role="status">
+          <p className="status-title">Opening linked transaction…</p>
         </div>
       )}
       {unapprovedCountQuery.error && !unapprovedOnly && (
@@ -1721,7 +1824,7 @@ export function TransactionsPage() {
         </div>
       )}
 
-      {page.loaded && (
+      {registerLoaded && (
         <section className="report-section">
           {rows.length > 0 || showScheduledDisclosure || compose.status === "open" ? (
             <div className="table-wrap table-wrap-wide">
@@ -1858,6 +1961,7 @@ export function TransactionsPage() {
                       )}
                       payeeExtra={<FlagTag colour={txn.flag_color} name={namedFlagLabel(colourNamesByAccountId.get(txn.account_id), txn.flag_color, txn.flag_name)} />}
                       flagNames={ledgerFlagNames(colourNamesByAccountId.get(txn.account_id) ?? {})}
+                      targeted={deepLink.kind === "valid" && deepLink.link.subtransactionId === null && txn.id === deepLinkedTransactionId}
                     />,
                     ...(txn.subtransactions ?? []).map((sub) => (
                       <RegisterEditableRow
@@ -1867,6 +1971,7 @@ export function TransactionsPage() {
                         leading={null}
                         account={null}
                         status={null}
+                        targeted={deepLink.kind === "valid" && deepLink.link.subtransactionId === sub.id && txn.id === deepLinkedTransactionId}
                       />
                     )),
                   ])}

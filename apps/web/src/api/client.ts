@@ -464,6 +464,10 @@ export const api = {
     request<TransactionPage>(
       `${planUrl(planId, "transactions")}${query(params)}`,
     ),
+  transaction: (planId: string, transactionId: string) =>
+    request<{ transaction: Transaction }>(
+      planUrl(planId, "transactions", transactionId),
+    ).then((data) => data.transaction),
   accountTransactions: (planId: string, accountId: string, params: { since_date?: string; until_date?: string; type?: "unapproved"; limit?: number; offset?: number; q?: string }) =>
     request<TransactionPage>(
       `${planUrl(planId, "accounts", accountId, "transactions")}${query(params)}`,

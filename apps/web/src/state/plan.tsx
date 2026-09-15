@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 import {
   ApiError,
   api,
@@ -16,6 +17,7 @@ import type {
   PlanSettings,
 } from "../api/types";
 import { configureMoney } from "../lib/money";
+import { parseTransactionDeepLink } from "../lib/transaction-deep-link";
 import { HalationMark } from "../components/Brand";
 import {
   AccountPreferencesController,
@@ -44,6 +46,8 @@ import {
 
 export interface PlanContextValue {
   planId: string;
+  /** Non-blocking notice when a URL requested a plan outside this user's memberships. */
+  planSelectionError: string | null;
   /** The signed-in user, so routes can key their own cache slots. */
   userId: string;
   /**
@@ -144,6 +148,7 @@ function provisionalPlanValue(
   const preferences = accountPreferences?.account_preferences ?? null;
   return {
     planId,
+    planSelectionError: null,
     userId: envelope.userId,
     provisional: true,
     knowledgeTrusted: false,
@@ -169,6 +174,11 @@ function provisionalPlanValue(
 }
 
 export function PlanProvider({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const locationDeepLink = location.pathname === "/transactions"
+    ? parseTransactionDeepLink(new URLSearchParams(location.search))
+    : { kind: "none" as const };
+  const requestedPlanId = locationDeepLink.kind === "valid" ? locationDeepLink.link.planId : null;
   const [value, setValue] = useState<PlanContextValue | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<"checking" | "setup" | "login" | "ready">("checking");
@@ -182,7 +192,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     bumpRequestEpoch();
-  }, [generation]);
+  }, [generation, requestedPlanId]);
 
   const reload = useCallback(() => setGeneration((number) => number + 1), []);
 
@@ -255,7 +265,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         const cached = hint && !attached && sessionLive
           ? readSlot<CachedReference>("reference", isCachedReference)
           : null;
-        const paintedCache = cached?.planId === hint ? cached : null;
+        const paintedCache = cached?.planId === hint && !requestedPlanId ? cached : null;
         if (paintedCache && hint && !cancelled) {
           configureMoney(paintedCache.data.settings.currency_format);
           setValue(provisionalPlanValue(hint, paintedCache, { reload, logout: signOut }));
@@ -315,6 +325,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
           status,
           plans: plansResult.value,
           speculativePlanId,
+          requestedPlanId,
         });
         if (decision.kind !== "ready") {
           throw new Error("No plans are available yet.");
@@ -418,6 +429,9 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         }
         setValue({
           planId,
+          planSelectionError: decision.requestedPlanRejected
+            ? "This transaction link names a plan you cannot access. Showing your usual plan instead."
+            : null,
           userId: decision.userId,
           provisional: false,
           knowledgeTrusted: true,
@@ -477,7 +491,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [generation]);
+  }, [generation, requestedPlanId]);
 
   useEffect(() => () => {
     accountPreferencesControllerRef.current?.controller.detach();
@@ -514,7 +528,14 @@ export function PlanProvider({ children }: { children: ReactNode }) {
   if (!value) {
     return <div className="boot-message">{authMode === "checking" ? "Checking session…" : "Loading…"}</div>;
   }
-  return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
+  // Everything below this boundary owns plan-scoped drafts, dialogs and async
+  // state. Remount it when identity changes so plan A state cannot submit or
+  // complete into plan B after a client-side deep-link navigation.
+  return (
+    <PlanContext.Provider value={value} key={bootstrapControllerKey(value.userId, value.planId)}>
+      {children}
+    </PlanContext.Provider>
+  );
 }
 
 function AuthForm({

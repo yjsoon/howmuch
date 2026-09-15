@@ -66,6 +66,13 @@ export function rowId(row: RegisterRowRef): string {
   return row.kind === "posted" ? row.transaction.id : row.parent.id;
 }
 
+/** Stable, query-safe identity for a posted row or one exact split line. */
+export function registerRowDomId(row: RegisterRowRef): string {
+  return row.kind === "posted"
+    ? `register-row-${encodeURIComponent(row.transaction.id)}`
+    : `register-row-${encodeURIComponent(row.parent.id)}-${encodeURIComponent(row.lineId)}`;
+}
+
 export function sameRow(a: RegisterRowRef, b: RegisterRowRef): boolean {
   if (a.kind === "posted" && b.kind === "posted") {
     return a.transaction.id === b.transaction.id;
