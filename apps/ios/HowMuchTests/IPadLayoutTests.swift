@@ -329,9 +329,7 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertEqual(RootChrome.compactTabRowClearance, 90)
     XCTAssertEqual(
       RootChrome.toastBottomPadding(idiom: .phone, horizontalSizeClass: .compact),
-      RootChrome.compactTabRowClearance
-        + RootChrome.compactFloatingAssistantClearance
-        + RootChrome.compactToastGap
+      RootChrome.compactToastGap
     )
     XCTAssertEqual(
       RootChrome.toastBottomPadding(idiom: .pad, horizontalSizeClass: .regular),
@@ -501,6 +499,56 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertEqual(chrome.overflow(on: .accounts), .assistant)
     XCTAssertEqual(chrome.compactBarTab, .accounts)
     XCTAssertEqual(chrome.tab, .accounts)
+  }
+
+  func testCompactSaveToastSitsJustAboveTheTabRow() async {
+    let harness = SnapshotHarness.make()
+    let chrome = RootChromeState()
+    harness.model.lastSaveMessage = SaveMessage(
+      id: 1,
+      text: "Marked transaction uncleared",
+      kind: .success
+    )
+    guard let surface = SnapshotSurface(
+      root: RootTabView(chrome: chrome, usesSidebar: false, workspace: harness.workspace)
+        .environment(harness.model)
+        .environment(chrome)
+        .environment(\.horizontalSizeClass, .compact),
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("compact save toast needs a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    let appeared = await surface.waitUntil {
+      surface.firstControl(label: "Marked transaction uncleared") != nil
+        && surface.firstControl(label: CompactRootBar.action.title) != nil
+    }
+    XCTAssertTrue(
+      appeared,
+      "compact chrome must show the save toast and Add: \(surface.accessibilityLabels())"
+    )
+    guard let toast = surface.firstControl(label: "Marked transaction uncleared") else {
+      XCTFail("save toast missing")
+      return
+    }
+    guard let add = surface.tabRowControl(label: CompactRootBar.action.title)
+            ?? surface.firstControl(label: CompactRootBar.action.title) else {
+      XCTFail("Add pin missing")
+      return
+    }
+    XCTAssertTrue(surface.windowBounds.contains(toast.frame), "save toast must stay on-screen")
+    XCTAssertLessThan(
+      toast.frame.maxY,
+      add.frame.minY - 4,
+      "save toast must sit above the tab row, not on Add"
+    )
+    XCTAssertGreaterThan(
+      toast.frame.maxY,
+      add.frame.minY - 48,
+      "save toast must sit just above the tab row, not mid-list"
+    )
   }
 
   func testSidebarRootTabViewDoesNotInstallTabRowAssistant() async {

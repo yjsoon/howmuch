@@ -154,25 +154,14 @@ private struct RootView: View {
       }
     }
     .overlay(alignment: .bottom) {
-      Group {
-        if let message = model.lastSaveMessage {
-          Text(message.text)
-            .font(.footnote.weight(.medium))
-            .foregroundStyle(message.kind == .failure ? Theme.outflow : Theme.textPrimary)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .glassEffect(.regular, in: .capsule)
-            .padding(
-              .bottom,
-              RootChrome.toastBottomPadding(
-                idiom: UIDevice.current.userInterfaceIdiom,
-                horizontalSizeClass: horizontalSizeClass
-              )
-            )
-            .transition(.move(edge: .bottom).combined(with: .opacity))
-        }
+      if usesSidebar {
+        RootSaveToastOverlay(
+          bottomPadding: RootChrome.toastBottomPadding(
+            idiom: UIDevice.current.userInterfaceIdiom,
+            horizontalSizeClass: horizontalSizeClass
+          )
+        )
       }
-      .animation(.snappy, value: model.lastSaveMessage?.id)
     }
     .sensoryFeedback(trigger: model.lastSaveMessage) { _, newValue in
       switch newValue?.kind {

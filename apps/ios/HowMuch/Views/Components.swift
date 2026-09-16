@@ -379,7 +379,28 @@ enum RootChrome {
     if usesSidebar(idiom: idiom, horizontalSizeClass: horizontalSizeClass) {
       return 28 + RootAddControl.diameter + 8
     }
-    return compactTabRowClearance + compactFloatingAssistantClearance + compactToastGap
+    return compactToastGap
+  }
+}
+
+struct RootSaveToastOverlay: View {
+  @Environment(AppModel.self) private var model
+  var bottomPadding: CGFloat
+
+  var body: some View {
+    Group {
+      if let message = model.lastSaveMessage {
+        Text(message.text)
+          .font(.footnote.weight(.medium))
+          .foregroundStyle(message.kind == .failure ? Theme.outflow : Theme.textPrimary)
+          .padding(.horizontal, 16)
+          .padding(.vertical, 10)
+          .glassEffect(.regular, in: .capsule)
+          .padding(.bottom, bottomPadding)
+          .transition(.move(edge: .bottom).combined(with: .opacity))
+      }
+    }
+    .animation(.snappy, value: model.lastSaveMessage?.id)
   }
 }
 
@@ -967,24 +988,31 @@ struct RootTabHost<Content: View>: View {
     )
     let overflow = usesSidebar ? nil : chrome.overflow(on: hostedTab)
     let router = CaptureRouter.shared
-    ZStack {
-      content
-        .allowsHitTesting(overflow == nil)
-        .accessibilityHidden(overflow != nil)
-      if let overflow {
-        RootMoreHost(destination: overflow, workspace: workspace)
-          .transition(.move(edge: .trailing))
+    ZStack(alignment: .bottom) {
+      ZStack {
+        content
+          .allowsHitTesting(overflow == nil)
+          .accessibilityHidden(overflow != nil)
+        if let overflow {
+          RootMoreHost(destination: overflow, workspace: workspace)
+            .transition(.move(edge: .trailing))
+        }
       }
-    }
-    .animation(.snappy, value: overflow)
-    .safeAreaInset(edge: .bottom, spacing: 0) {
-      if !usesSidebar,
-         !router.hidesTabRowOverlay,
-         workspace.pendingAssistantSessionID == nil
-      {
-        Color.clear
-          .frame(height: RootChrome.compactFloatingAssistantClearance)
-          .accessibilityHidden(true)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .animation(.snappy, value: overflow)
+      .safeAreaInset(edge: .bottom, spacing: 0) {
+        if !usesSidebar,
+           !router.hidesTabRowOverlay,
+           workspace.pendingAssistantSessionID == nil
+        {
+          Color.clear
+            .frame(height: RootChrome.compactFloatingAssistantClearance)
+            .accessibilityHidden(true)
+        }
+      }
+
+      if !usesSidebar {
+        RootSaveToastOverlay(bottomPadding: RootChrome.compactToastGap)
       }
     }
   }
