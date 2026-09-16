@@ -1011,7 +1011,7 @@ struct RootTabHost<Content: View>: View {
         }
       }
 
-      if !usesSidebar {
+      if !usesSidebar, hostedTab == chrome.compactBarTab {
         RootSaveToastOverlay(bottomPadding: RootChrome.compactToastGap)
       }
     }

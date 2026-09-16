@@ -538,6 +538,11 @@ final class IPadLayoutTests: XCTestCase {
       XCTFail("Add pin missing")
       return
     }
+    XCTAssertEqual(
+      surface.accessibilityLabels().filter { $0 == "Marked transaction uncleared" }.count,
+      1,
+      "only the selected tab host should draw the save toast"
+    )
     XCTAssertTrue(surface.windowBounds.contains(toast.frame), "save toast must stay on-screen")
     XCTAssertLessThan(
       toast.frame.maxY,
