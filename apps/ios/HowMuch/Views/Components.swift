@@ -318,6 +318,32 @@ enum RootChrome {
   static let compactFloatingAddGap: CGFloat = 16
   static let compactToastGap: CGFloat = 12
 
+  static func compactFloatingAddDiameter(pillHeight: CGFloat) -> CGFloat {
+    max(44, min(max(pillHeight, 48), 56))
+  }
+
+  static func compactFloatingAddReservation(pillHeight: CGFloat) -> CGFloat {
+    compactFloatingAddGap + compactFloatingAddDiameter(pillHeight: pillHeight)
+  }
+
+  static func compactFloatingAddSlotMinX(
+    pillHeight: CGFloat,
+    windowMaxX: CGFloat,
+    trailingGutter: CGFloat
+  ) -> CGFloat {
+    windowMaxX - trailingGutter - compactFloatingAddReservation(pillHeight: pillHeight)
+  }
+
+  static func compactFloatingAddOriginX(
+    pillMaxX: CGFloat,
+    pillHeight: CGFloat,
+    windowMaxX: CGFloat,
+    trailingGutter: CGFloat
+  ) -> CGFloat {
+    let side = compactFloatingAddDiameter(pillHeight: pillHeight)
+    return min(pillMaxX + compactFloatingAddGap, windowMaxX - trailingGutter - side)
+  }
+
   static func usesSidebar(
     idiom: UIUserInterfaceIdiom,
     horizontalSizeClass: UserInterfaceSizeClass?
@@ -588,6 +614,8 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
     private var addButton: UIButton?
     private var assistantButton: UIButton?
     private var displayLink: CADisplayLink?
+    private weak var trackedDestinationBar: UITabBar?
+    private var storedTrailingMargin: CGFloat?
 
     override func loadView() {
       view = UIView()
@@ -621,12 +649,19 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       guard let window = view.window else {
         return
       }
-      guard let row = destinationRow(in: window), !row.barHidden else {
+      if let bar = trackedDestinationBar, !isShownInHierarchy(bar) {
         hideOverlays()
         return
       }
+      guard let row = destinationRow(in: window) else {
+        hideOverlays()
+        return
+      }
+      rememberDestinationBar(row.bar)
+      reserveTrailingAddSlot(on: row.bar, pill: row.union, in: window)
+      let pill = destinationRow(in: window)?.union ?? row.union
       startTracking()
-      layoutAdd(relativeTo: row.union, in: window)
+      layoutAdd(relativeTo: pill, in: window)
       guard let addFrame = addButton?.frame, addButton?.isHidden == false else {
         hideAssistant()
         return
@@ -635,6 +670,8 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
     }
 
     func uninstall() {
+      restoreDestinationBarMargins()
+      trackedDestinationBar = nil
       hideOverlays()
       addButton = nil
       assistantButton = nil
@@ -668,10 +705,14 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       }
       button.tintColor = window.tintColor
 
-      let side = max(44, min(max(pill.height, 48), 56))
-      let gap = RootChrome.compactFloatingAddGap
-      let trailingLimit = window.bounds.maxX - max(window.safeAreaInsets.right, 8)
-      let x = min(pill.maxX + gap, trailingLimit - side)
+      let side = RootChrome.compactFloatingAddDiameter(pillHeight: pill.height)
+      let gutter = max(window.safeAreaInsets.right, 8)
+      let x = RootChrome.compactFloatingAddOriginX(
+        pillMaxX: pill.maxX,
+        pillHeight: pill.height,
+        windowMaxX: window.bounds.maxX,
+        trailingGutter: gutter
+      )
       button.isHidden = false
       button.layer.cornerRadius = side / 2
       button.clipsToBounds = true
@@ -777,7 +818,7 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       install()
     }
 
-    private func destinationRow(in window: UIWindow) -> (union: CGRect, barHidden: Bool)? {
+    private func destinationRow(in window: UIWindow) -> (union: CGRect, bar: UITabBar)? {
       let pins = accessibilityPins(in: window)
       let titles = [
         AppTab.accounts.title,
@@ -799,9 +840,13 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
         return nil
       }
       let union = frames.dropFirst().reduce(into: first) { $0 = $0.union($1) }
-      let bar = rowOwningTabBar(containing: union, in: window)
-      let barHidden = bar.map { !isShownInHierarchy($0) } ?? false
-      return (union, barHidden)
+      if let tracked = trackedDestinationBar, isShownInHierarchy(tracked) {
+        return (union, tracked)
+      }
+      guard let bar = rowOwningTabBar(containing: union, in: window), isShownInHierarchy(bar) else {
+        return nil
+      }
+      return (union, bar)
     }
 
     private struct AccessibilityPin {
@@ -904,7 +949,6 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
         bar.bounds.width > 1
           && bar.bounds.height > 1
           && bar.convert(bar.bounds, to: window).intersects(frame)
-          && tabBarHostsDestinationLabels(bar)
       }
       return owners.first { isShownInHierarchy($0) } ?? owners.first
     }
@@ -923,43 +967,13 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       return found
     }
 
-    private func tabBarHostsDestinationLabels(_ bar: UITabBar) -> Bool {
-      var labels: Set<String> = []
-      var seen = Set<ObjectIdentifier>()
-      func collect(_ object: NSObject) {
-        let identity = ObjectIdentifier(object)
-        guard !seen.contains(identity) else {
-          return
-        }
-        seen.insert(identity)
-        if let label = object.accessibilityLabel, !label.isEmpty {
-          labels.insert(label)
-        }
-        let count = object.accessibilityElementCount()
-        if count != NSNotFound, count > 0 {
-          for index in 0..<count {
-            if let element = object.accessibilityElement(at: index) as? NSObject {
-              collect(element)
-            }
-          }
-        } else if let elements = object.accessibilityElements {
-          for element in elements {
-            if let child = element as? NSObject {
-              collect(child)
-            }
-          }
-        }
-        if let view = object as? UIView {
-          for subview in view.subviews {
-            collect(subview)
-          }
-        }
-      }
-      collect(bar)
-      return labels.contains(AppTab.accounts.title)
-    }
-
     private func isShownInHierarchy(_ view: UIView) -> Bool {
+      guard view.window != nil else {
+        return false
+      }
+      if view is UITabBar, view.bounds.width <= 1 || view.bounds.height <= 1 {
+        return false
+      }
       var current: UIView? = view
       while let node = current {
         if node.isHidden || node.alpha <= 0.01 {
@@ -968,6 +982,67 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
         current = node.superview
       }
       return true
+    }
+
+    private func rememberDestinationBar(_ bar: UITabBar) {
+      if trackedDestinationBar !== bar {
+        restoreDestinationBarMargins()
+        trackedDestinationBar = bar
+        storedTrailingMargin = bar.directionalLayoutMargins.trailing
+      }
+    }
+
+    private func restoreDestinationBarMargins() {
+      guard let bar = trackedDestinationBar, let stored = storedTrailingMargin else {
+        storedTrailingMargin = nil
+        return
+      }
+      var margins = bar.directionalLayoutMargins
+      margins.trailing = stored
+      bar.directionalLayoutMargins = margins
+      storedTrailingMargin = nil
+    }
+
+    private func reserveTrailingAddSlot(on bar: UITabBar, pill: CGRect, in window: UIWindow) {
+      let reservation = RootChrome.compactFloatingAddReservation(pillHeight: pill.height)
+      let base = storedTrailingMargin ?? bar.directionalLayoutMargins.trailing
+      if storedTrailingMargin == nil {
+        storedTrailingMargin = base
+      }
+      var margins = bar.directionalLayoutMargins
+      let target = base + reservation
+      if abs(margins.trailing - target) > 0.5 {
+        margins.trailing = target
+        bar.directionalLayoutMargins = margins
+        bar.setNeedsLayout()
+        bar.layoutIfNeeded()
+      }
+
+      let gutter = max(window.safeAreaInsets.right, 8)
+      let slotMinX = RootChrome.compactFloatingAddSlotMinX(
+        pillHeight: pill.height,
+        windowMaxX: window.bounds.maxX,
+        trailingGutter: gutter
+      )
+      let minimumWidth = RootChrome.compactFloatingAddDiameter(pillHeight: pill.height)
+      shrinkTrailingEdge(of: bar, to: slotMinX, in: window, minimumWidth: minimumWidth)
+      bar.layoutIfNeeded()
+      shrinkTrailingEdge(of: bar, to: slotMinX, in: window, minimumWidth: minimumWidth)
+    }
+
+    private func shrinkTrailingEdge(
+      of view: UIView,
+      to slotMinX: CGFloat,
+      in window: UIWindow,
+      minimumWidth: CGFloat
+    ) {
+      let frameInWindow = view.convert(view.bounds, to: window)
+      guard frameInWindow.maxX > slotMinX + 0.5 else {
+        return
+      }
+      var frame = view.frame
+      frame.size.width = max(frame.width - (frameInWindow.maxX - slotMinX), minimumWidth)
+      view.frame = frame
     }
 
     private func accessibilityFrame(of object: NSObject, in window: UIWindow) -> CGRect? {
