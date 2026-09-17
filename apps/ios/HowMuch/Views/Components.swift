@@ -821,6 +821,7 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
     }
 
     /// Destination tabs live in the system pill. Add is laid out to their right.
+    /// A minimized bar may expose only the selected tab, so one pin is enough.
     private func destinationRow(in window: UIWindow) -> (union: CGRect, barHidden: Bool)? {
       let pins = accessibilityPins(in: window)
       let titles = [
@@ -839,10 +840,10 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
           frames.append(pin.frame)
         }
       }
-      guard frames.count == CompactRootBar.destinationCapacity else {
+      guard let first = frames.first else {
         return nil
       }
-      let union = frames.reduce(into: frames[0]) { $0 = $0.union($1) }
+      let union = frames.dropFirst().reduce(into: first) { $0 = $0.union($1) }
       let bar = rowOwningTabBar(containing: union, in: window)
       let barHidden = bar.map { !isShownInHierarchy($0) } ?? false
       return (union, barHidden)
