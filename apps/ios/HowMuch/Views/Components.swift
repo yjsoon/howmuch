@@ -334,16 +334,6 @@ enum RootChrome {
     windowMaxX - trailingGutter - compactFloatingAddReservation(pillHeight: pillHeight)
   }
 
-  static func compactFloatingAddOriginX(
-    pillMaxX: CGFloat,
-    pillHeight: CGFloat,
-    windowMaxX: CGFloat,
-    trailingGutter: CGFloat
-  ) -> CGFloat {
-    let side = compactFloatingAddDiameter(pillHeight: pillHeight)
-    return min(pillMaxX + compactFloatingAddGap, windowMaxX - trailingGutter - side)
-  }
-
   static func usesSidebar(
     idiom: UIUserInterfaceIdiom,
     horizontalSizeClass: UserInterfaceSizeClass?
@@ -660,7 +650,7 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       reserveHostedDestinationSlot(covering: row.union, bar: row.bar, in: window)
       let pill = destinationRow(in: window)?.union ?? row.union
       startTracking()
-      layoutAdd(relativeTo: pill, in: window)
+      layoutAdd(rowHeight: pill.height, rowMidY: pill.midY, in: window)
       guard let addFrame = addButton?.frame, addButton?.isHidden == false else {
         hideAssistant()
         return
@@ -690,7 +680,7 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       assistantButton?.removeFromSuperview()
     }
 
-    private func layoutAdd(relativeTo pill: CGRect, in window: UIWindow) {
+    private func layoutAdd(rowHeight: CGFloat, rowMidY: CGFloat, in window: UIWindow) {
       let button = addButton ?? makeAddButton()
       addButton = button
       if CaptureRouter.shared.hidesTabRowOverlay {
@@ -703,7 +693,7 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       }
       button.tintColor = window.tintColor
 
-      let side = RootChrome.compactFloatingAddDiameter(pillHeight: pill.height)
+      let side = RootChrome.compactFloatingAddDiameter(pillHeight: rowHeight)
       let gutter = max(window.safeAreaInsets.right, 8)
       let x = window.bounds.maxX - gutter - side
       button.isHidden = false
@@ -711,7 +701,7 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       button.clipsToBounds = true
       button.frame = CGRect(
         x: x,
-        y: pill.midY - side / 2,
+        y: rowMidY - side / 2,
         width: side,
         height: side
       )
