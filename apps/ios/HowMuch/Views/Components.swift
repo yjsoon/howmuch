@@ -615,7 +615,6 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
     private var assistantButton: UIButton?
     private var displayLink: CADisplayLink?
     private weak var trackedDestinationBar: UITabBar?
-    private var storedTrailingMargin: CGFloat?
 
     override func loadView() {
       view = UIView()
@@ -657,8 +656,8 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
         hideOverlays()
         return
       }
-      rememberDestinationBar(row.bar)
-      reserveTrailingAddSlot(on: row.bar, pill: row.union, in: window)
+      trackedDestinationBar = row.bar
+      reserveHostedDestinationSlot(covering: row.union, bar: row.bar, in: window)
       let pill = destinationRow(in: window)?.union ?? row.union
       startTracking()
       layoutAdd(relativeTo: pill, in: window)
@@ -670,7 +669,6 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
     }
 
     func uninstall() {
-      restoreDestinationBarMargins()
       trackedDestinationBar = nil
       hideOverlays()
       addButton = nil
@@ -707,12 +705,7 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
 
       let side = RootChrome.compactFloatingAddDiameter(pillHeight: pill.height)
       let gutter = max(window.safeAreaInsets.right, 8)
-      let x = RootChrome.compactFloatingAddOriginX(
-        pillMaxX: pill.maxX,
-        pillHeight: pill.height,
-        windowMaxX: window.bounds.maxX,
-        trailingGutter: gutter
-      )
+      let x = window.bounds.maxX - gutter - side
       button.isHidden = false
       button.layer.cornerRadius = side / 2
       button.clipsToBounds = true
@@ -984,50 +977,142 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       return true
     }
 
-    private func rememberDestinationBar(_ bar: UITabBar) {
-      if trackedDestinationBar !== bar {
-        restoreDestinationBarMargins()
-        trackedDestinationBar = bar
-        storedTrailingMargin = bar.directionalLayoutMargins.trailing
-      }
-    }
-
-    private func restoreDestinationBarMargins() {
-      guard let bar = trackedDestinationBar, let stored = storedTrailingMargin else {
-        storedTrailingMargin = nil
-        return
-      }
-      var margins = bar.directionalLayoutMargins
-      margins.trailing = stored
-      bar.directionalLayoutMargins = margins
-      storedTrailingMargin = nil
-    }
-
-    private func reserveTrailingAddSlot(on bar: UITabBar, pill: CGRect, in window: UIWindow) {
-      let reservation = RootChrome.compactFloatingAddReservation(pillHeight: pill.height)
-      let base = storedTrailingMargin ?? bar.directionalLayoutMargins.trailing
-      if storedTrailingMargin == nil {
-        storedTrailingMargin = base
-      }
-      var margins = bar.directionalLayoutMargins
-      let target = base + reservation
-      if abs(margins.trailing - target) > 0.5 {
-        margins.trailing = target
-        bar.directionalLayoutMargins = margins
-        bar.setNeedsLayout()
-        bar.layoutIfNeeded()
-      }
-
+    private func reserveHostedDestinationSlot(
+      covering union: CGRect,
+      bar: UITabBar,
+      in window: UIWindow
+    ) {
       let gutter = max(window.safeAreaInsets.right, 8)
       let slotMinX = RootChrome.compactFloatingAddSlotMinX(
-        pillHeight: pill.height,
+        pillHeight: union.height,
         windowMaxX: window.bounds.maxX,
         trailingGutter: gutter
       )
-      let minimumWidth = RootChrome.compactFloatingAddDiameter(pillHeight: pill.height)
-      shrinkTrailingEdge(of: bar, to: slotMinX, in: window, minimumWidth: minimumWidth)
-      bar.layoutIfNeeded()
-      shrinkTrailingEdge(of: bar, to: slotMinX, in: window, minimumWidth: minimumWidth)
+      let items = destinationItemViews(in: window, fallingBackTo: bar)
+      if let cluster = hostedDestinationCluster(from: items, window: window) {
+        shrinkTrailingEdge(
+          of: cluster,
+          to: slotMinX,
+          in: window,
+          minimumWidth: RootChrome.compactFloatingAddDiameter(pillHeight: union.height)
+        )
+        cluster.setNeedsLayout()
+        cluster.layoutIfNeeded()
+      }
+      compressDestinationItems(destinationItemViews(in: window, fallingBackTo: bar), to: slotMinX, in: window)
+    }
+
+    private func destinationItemViews(in window: UIWindow, fallingBackTo bar: UITabBar) -> [UIView] {
+      let titles = Set(CompactRootBar.destinationTabs.map(\.title))
+      var found: [UIView] = []
+      func walk(_ node: UIView) {
+        if node === addButton || node === assistantButton {
+          return
+        }
+        if node.isHidden || node.alpha <= 0.01 {
+          return
+        }
+        if let label = node.accessibilityLabel, titles.contains(label) {
+          let frame = node.convert(node.bounds, to: window)
+          if frame.midY > window.bounds.midY, frame.width > 1, frame.height > 1 {
+            found.append(node)
+          }
+        }
+        for child in node.subviews {
+          walk(child)
+        }
+      }
+      walk(window)
+      var smallest: [String: UIView] = [:]
+      for view in found {
+        let label = view.accessibilityLabel ?? ""
+        if let existing = smallest[label],
+           existing.bounds.width * existing.bounds.height <= view.bounds.width * view.bounds.height
+        {
+          continue
+        }
+        smallest[label] = view
+      }
+      let labeled = CompactRootBar.destinationTabs.compactMap { smallest[$0.title] }
+      if labeled.count >= 2 {
+        return labeled
+      }
+      return bar.subviews.filter { subview in
+        subview is UIControl && subview.bounds.width > 1 && !subview.isHidden
+      }
+    }
+
+    private func hostedDestinationCluster(from items: [UIView], window: UIWindow) -> UIView? {
+      guard items.count >= 2, var cluster = tightestCommonAncestor(items) else {
+        return nil
+      }
+      if cluster is UIWindow {
+        cluster = cluster.subviews.first { child in
+          items.allSatisfy { $0 === child || $0.isDescendant(of: child) }
+        } ?? cluster
+      }
+      while cluster.bounds.height > 140 || cluster.convert(cluster.bounds, to: window).midY < window.bounds.midY {
+        let children = cluster.subviews.filter { child in
+          items.allSatisfy { $0 === child || $0.isDescendant(of: child) }
+        }
+        guard let next = children.min(by: { $0.bounds.height < $1.bounds.height }), next !== cluster else {
+          break
+        }
+        cluster = next
+      }
+      if cluster is UITabBar {
+        let platters = cluster.subviews.filter { child in
+          items.allSatisfy { $0 === child || $0.isDescendant(of: child) }
+        }
+        if let platter = platters.min(by: { $0.bounds.width < $1.bounds.width }) {
+          cluster = platter
+        }
+      }
+      guard !(cluster is UIWindow), !(cluster is UITabBar) else {
+        return nil
+      }
+      let frame = cluster.convert(cluster.bounds, to: window)
+      guard frame.midY > window.bounds.midY, frame.height > 1, frame.height < 140 else {
+        return nil
+      }
+      return cluster
+    }
+
+    private func tightestCommonAncestor(_ views: [UIView]) -> UIView? {
+      guard var ancestor: UIView = views.first else {
+        return nil
+      }
+      while !views.allSatisfy({ $0 === ancestor || $0.isDescendant(of: ancestor) }) {
+        guard let next = ancestor.superview else {
+          return nil
+        }
+        ancestor = next
+      }
+      return ancestor
+    }
+
+    private func compressDestinationItems(_ items: [UIView], to slotMinX: CGFloat, in window: UIWindow) {
+      let placed = items
+        .map { item in (item, item.convert(item.bounds, to: window)) }
+        .filter { $0.1.width > 1 && $0.1.midY > window.bounds.midY }
+        .sorted { $0.1.minX < $1.1.minX }
+      guard placed.count >= 2, let leading = placed.first?.1.minX else {
+        return
+      }
+      let span = slotMinX - leading
+      guard span > 44 * CGFloat(placed.count) else {
+        return
+      }
+      let width = span / CGFloat(placed.count)
+      var cursor = leading
+      for (item, frame) in placed {
+        guard let superview = item.superview else {
+          continue
+        }
+        let origin = window.convert(CGPoint(x: cursor, y: frame.minY), to: superview)
+        item.frame = CGRect(x: origin.x, y: item.frame.minY, width: width, height: item.frame.height)
+        cursor += width
+      }
     }
 
     private func shrinkTrailingEdge(
