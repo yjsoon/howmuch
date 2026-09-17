@@ -978,6 +978,23 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
         windowMaxX: window.bounds.maxX,
         trailingGutter: gutter
       )
+      applyHostedDestinationCompression(to: slotMinX, covering: union, bar: bar, in: window)
+      if let axMaxX = destinationRow(in: window)?.union.maxX, axMaxX > slotMinX + 0.5 {
+        applyHostedDestinationCompression(
+          to: slotMinX - (axMaxX - slotMinX),
+          covering: union,
+          bar: bar,
+          in: window
+        )
+      }
+    }
+
+    private func applyHostedDestinationCompression(
+      to slotMinX: CGFloat,
+      covering union: CGRect,
+      bar: UITabBar,
+      in window: UIWindow
+    ) {
       let items = destinationItemViews(in: window, fallingBackTo: bar)
       if let cluster = hostedDestinationCluster(from: items, window: window) {
         shrinkTrailingEdge(
@@ -1013,23 +1030,30 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
         }
       }
       walk(window)
-      var smallest: [String: UIView] = [:]
+      var largest: [String: UIView] = [:]
       for view in found {
         let label = view.accessibilityLabel ?? ""
-        if let existing = smallest[label],
-           existing.bounds.width * existing.bounds.height <= view.bounds.width * view.bounds.height
-        {
+        if let existing = largest[label], !shouldReplaceDestinationItem(existing, with: view) {
           continue
         }
-        smallest[label] = view
+        largest[label] = view
       }
-      let labeled = CompactRootBar.destinationTabs.compactMap { smallest[$0.title] }
+      let labeled = CompactRootBar.destinationTabs.compactMap { largest[$0.title] }
       if labeled.count >= 2 {
         return labeled
       }
       return bar.subviews.filter { subview in
         subview is UIControl && subview.bounds.width > 1 && !subview.isHidden
       }
+    }
+
+    private func shouldReplaceDestinationItem(_ existing: UIView, with candidate: UIView) -> Bool {
+      let existingButton = existing is UIControl || existing.accessibilityTraits.contains(.button)
+      let candidateButton = candidate is UIControl || candidate.accessibilityTraits.contains(.button)
+      if candidateButton != existingButton {
+        return candidateButton
+      }
+      return candidate.bounds.width * candidate.bounds.height > existing.bounds.width * existing.bounds.height
     }
 
     private func hostedDestinationCluster(from items: [UIView], window: UIWindow) -> UIView? {
