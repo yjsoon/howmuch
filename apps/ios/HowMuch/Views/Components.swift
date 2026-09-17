@@ -227,58 +227,19 @@ enum AppTab: Hashable, CaseIterable {
     case .accounts, .rewards, .reflect: return nil
     }
   }
-
-  var compactBarSelection: CompactBarSelection? {
-    switch self {
-    case .accounts: return .accounts
-    case .rewards: return .rewards
-    case .reflect: return .reflect
-    case .plan, .assistant: return nil
-    }
-  }
-}
-
-enum CompactBarSelection: Hashable, CaseIterable {
-  case accounts
-  case rewards
-  case reflect
-  /// The one compact action. Not a destination tab.
-  case addTransaction
-
-  var tab: AppTab? {
-    switch self {
-    case .accounts: return .accounts
-    case .rewards: return .rewards
-    case .reflect: return .reflect
-    case .addTransaction: return nil
-    }
-  }
-
-  var isDestination: Bool { tab != nil }
-  var isAction: Bool { self == .addTransaction }
 }
 
 /// Compact iPhone chrome is structurally three destinations and one action button.
 /// The destination triple is the capacity: a fourth tab is a type change, not an append.
-/// The action floats beside the destination pill. It is not a Tab.
 enum CompactRootBar {
   static let destinationCapacity = 3
   static let actionCapacity = 1
   static let destinations: (AppTab, AppTab, AppTab) = (.accounts, .rewards, .reflect)
   static let action = RootTrailingAction.addTransaction
-  static let actionSelection = CompactBarSelection.addTransaction
 
   static var destinationTabs: [AppTab] {
     let (first, second, third) = destinations
     return [first, second, third]
-  }
-
-  static var destinationSelections: [CompactBarSelection] {
-    CompactBarSelection.allCases.filter(\.isDestination)
-  }
-
-  static var actionSelections: [CompactBarSelection] {
-    CompactBarSelection.allCases.filter(\.isAction)
   }
 }
 
@@ -354,8 +315,6 @@ enum RootChrome {
   static let compactTabRowClearance: CGFloat = 90
   /// Space above the compact tab bar reserved for the floating Assistant.
   static let compactFloatingAssistantClearance = RootAddControl.diameter + 10
-  /// Gap between the destination pill and the compact floating Add circle.
-  /// Measured from the other-app reference crop (about 20 pt at 3x).
   static let compactFloatingAddGap: CGFloat = 16
   static let compactToastGap: CGFloat = 12
 
@@ -545,7 +504,7 @@ struct RootTabView: View {
       .tabViewStyle(.tabBarOnly)
       .tabBarMinimizeBehavior(.onScrollDown)
       .overlay {
-        RootTabBarFloatingAssistant(
+        RootTabBarFloatingChrome(
           openAdd: presentManual,
           openAssistant: { chrome.openMore(.assistant) }
         )
@@ -600,9 +559,7 @@ struct RootTabView: View {
   }
 }
 
-/// Pins compact Add beside the destination pill and Assistant above Add.
-/// Neither control is a tab.
-struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
+struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
   var openAdd: () -> Void
   var openAssistant: () -> Void
 
@@ -820,8 +777,6 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
       install()
     }
 
-    /// Destination tabs live in the system pill. Add is laid out to their right.
-    /// A minimized bar may expose only the selected tab, so one pin is enough.
     private func destinationRow(in window: UIWindow) -> (union: CGRect, barHidden: Bool)? {
       let pins = accessibilityPins(in: window)
       let titles = [
@@ -949,7 +904,7 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
         bar.bounds.width > 1
           && bar.bounds.height > 1
           && bar.convert(bar.bounds, to: window).intersects(frame)
-          && tabBarHostsRowLabels(bar)
+          && tabBarHostsDestinationLabels(bar)
       }
       return owners.first { isShownInHierarchy($0) } ?? owners.first
     }
@@ -968,8 +923,7 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
       return found
     }
 
-    /// Ownership walk — includes hidden bars so we can tell which one hosts Add.
-    private func tabBarHostsRowLabels(_ bar: UITabBar) -> Bool {
+    private func tabBarHostsDestinationLabels(_ bar: UITabBar) -> Bool {
       var labels: Set<String> = []
       var seen = Set<ObjectIdentifier>()
       func collect(_ object: NSObject) {
