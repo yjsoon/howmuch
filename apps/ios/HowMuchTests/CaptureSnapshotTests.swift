@@ -376,6 +376,62 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertTrue(restored, "floating Add and Assistant must return when the tab bar is shown")
   }
 
+  func testCompactFloatingAddSurvivesCollapsedTabBarBesideDestinations() async {
+    guard let surface = SnapshotSurface(
+      root: Color.clear
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay {
+          RootTabBarFloatingChrome(openAdd: {}, openAssistant: {})
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        },
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("collapsed-bar Add chrome needs a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    surface.plantCompactDestinationsBesideCollapsedTabBar()
+    let appeared = await surface.waitUntil {
+      surface.tabRowOverlayButton(label: CompactRootBar.action.title) != nil
+        && surface.firstControl(label: "Accounts") != nil
+        && surface.firstControl(label: "Rewards") != nil
+        && surface.firstControl(label: "Reflect") != nil
+    }
+    XCTAssertTrue(
+      appeared,
+      "compact Add must stay while destination tabs remain visible beside a collapsed UITabBar: \(surface.accessibilityLabels())"
+    )
+    guard let add = surface.tabRowOverlayButton(label: CompactRootBar.action.title) else {
+      XCTFail("floating Add missing when destination views are visible")
+      return
+    }
+    XCTAssertEqual(add.frame.width, add.frame.height, accuracy: 1, "Add must be round")
+    XCTAssertTrue(surface.windowBounds.contains(add.frame), "Add must stay on-screen")
+    if let addView = add.object as? UIView, let bar = surface.collapsedTabBar() {
+      XCTAssertFalse(addView.isDescendant(of: bar), "Add must not join the destination pill")
+    }
+    var rightmost: SnapshotAXNode?
+    for label in ["Accounts", "Rewards", "Reflect"] {
+      guard let destination = surface.firstControl(label: label) else {
+        XCTFail("planted \(label) missing")
+        continue
+      }
+      XCTAssertFalse(add.frame.intersects(destination.frame), "Add must not overlap \(label)")
+      if rightmost.map({ $0.frame.maxX < destination.frame.maxX }) ?? true {
+        rightmost = destination
+      }
+    }
+    if let rightmost {
+      XCTAssertGreaterThanOrEqual(
+        add.frame.minX - rightmost.frame.maxX,
+        8,
+        "Add must sit past the destination views with a visible gap"
+      )
+    }
+  }
+
   func testTabRowAssistantHidesWhileAssistantConversationIsPushed() async {
     let harness = SnapshotHarness.make()
     let session = harness.admitConversation()
@@ -2846,6 +2902,37 @@ final class SnapshotSurface {
 
   func firstDescendant<T: UIView>(_ type: T.Type) -> T? {
     Self.search(host.view, type)
+  }
+
+  func plantCompactDestinationsBesideCollapsedTabBar() {
+    let bar = UITabBar()
+    bar.frame = CGRect(x: 0, y: 790, width: 1, height: 1)
+    bar.bounds = CGRect(x: 0, y: 0, width: 1, height: 1)
+    window.addSubview(bar)
+
+    for (index, title) in CompactRootBar.destinationTabs.map(\.title).enumerated() {
+      let button = UIButton(type: .system)
+      button.setTitle(title, for: .normal)
+      button.accessibilityLabel = title
+      button.accessibilityTraits = .button
+      button.frame = CGRect(x: 16 + CGFloat(index) * 90, y: 748, width: 84, height: 52)
+      window.addSubview(button)
+    }
+    layout()
+  }
+
+  func collapsedTabBar() -> UITabBar? {
+    var found: [UITabBar] = []
+    func walk(_ node: UIView) {
+      if let bar = node as? UITabBar {
+        found.append(bar)
+      }
+      for subview in node.subviews {
+        walk(subview)
+      }
+    }
+    walk(window)
+    return found.first { $0.bounds.width <= 1 || $0.bounds.height <= 1 }
   }
 
   /// `firstDescendant(UITabBar.self)` can hit a leftover already-hidden system bar.
