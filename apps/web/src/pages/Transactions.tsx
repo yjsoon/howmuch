@@ -60,7 +60,7 @@ import {
   searchStatusCopy,
   transactionMatchesQuery,
 } from "../lib/register-search";
-import { applyClearedOverlays, applyRegisterPatches, deletedIdsForRemoval, reconcileClearedOverlays, retainInFlightPatches, unlinkSplitMirrorParent } from "../lib/register-rows";
+import { applyClearedOverlays, applyRegisterPatches, deletedIdsForRemoval, reconcileClearedOverlays, retainInFlightPatches, supersedeClearedOverlays, unlinkSplitMirrorParent } from "../lib/register-rows";
 import { applyDeepLinkedTransactionMutation, deepLinkedTransactionForRegister, deepLinkTargetsRow, mergeDeepLinkedTransaction, parseTransactionDeepLink, type DeepLinkedTransactionResolution } from "../lib/transaction-deep-link";
 import { bulkDeleteFollowUp, bulkOutcomeIsComplete, bulkOutcomeToast, bulkWriteTouchesReconciliation, categorisableRows, clearedTargets, remainingWorkIds, type BulkWriteKind } from "../lib/register-bulk";
 import {
@@ -1277,7 +1277,7 @@ export function TransactionsPage() {
 
   const setClearedMany = async (targets: readonly Transaction[], cleared: "cleared" | "uncleared") => {
     const applicable = clearedTargets(targets, cleared);
-    if (mutationLockRef.current || applicable.length === 0) return;
+    if (mutationLockRef.current || clearedInFlightRef.current.size > 0 || applicable.length === 0) return;
     if (rowEditRef.current.status !== "idle") {
       replaceRowEdit(idleRowEdit());
     }
@@ -1307,6 +1307,9 @@ export function TransactionsPage() {
     } finally {
       mutationLockRef.current = false;
       setWriteLocked(false);
+      // Even an uncertain write supersedes the previous toggle. Let the fresh
+      // reads establish its result; refreshAfterBulk also drops replacements.
+      setClearedOverlays((current) => supersedeClearedOverlays(current, new Set(applicable.map((txn) => txn.id))));
       refreshAfterBulk("cleared");
     }
   };

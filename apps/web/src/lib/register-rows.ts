@@ -123,6 +123,19 @@ export function applyClearedOverlays<T extends ClearedOverlayRow>(
   });
 }
 
+/**
+ * A later cleared-state command owns its affected rows. Drop only the older
+ * optimistic values it supersedes; unrelated in-flight toggles keep theirs.
+ */
+export function supersedeClearedOverlays(
+  overlays: ReadonlyMap<string, string>,
+  ids: ReadonlySet<string>,
+): Map<string, string> {
+  const next = new Map(overlays);
+  for (const id of ids) next.delete(id);
+  return next;
+}
+
 export function reconcileClearedOverlays<T extends ClearedOverlayRow>(
   overlays: ReadonlyMap<string, string>,
   sources: ReadonlyArray<readonly T[]>,
