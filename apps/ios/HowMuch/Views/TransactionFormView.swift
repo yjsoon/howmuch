@@ -575,11 +575,7 @@ struct TransactionFormView: View {
       CardDivider()
 
       Button {
-        var hideKeypad = SwiftUI.Transaction()
-        hideKeypad.disablesAnimations = true
-        withTransaction(hideKeypad) {
-          isKeypadVisible = false
-        }
+        collapseKeypad()
         isShowingDate = true
       } label: {
         DisclosureValueRow(
@@ -604,6 +600,14 @@ struct TransactionFormView: View {
     SlipAccountPick.apply(accountID, to: &draft)
     accountCandidates = []
     showAccountPrompt = false
+  }
+
+  private func collapseKeypad() {
+    var transaction = SwiftUI.Transaction()
+    transaction.disablesAnimations = true
+    withTransaction(transaction) {
+      isKeypadVisible = false
+    }
   }
 
   private func ambiguousRail(
