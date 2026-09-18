@@ -635,7 +635,7 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
         hideOverlays()
         return
       }
-      guard let window = view.window else {
+      guard let window = hostWindow() else {
         return
       }
       if let bar = trackedDestinationBar, !isShownInHierarchy(bar) {
@@ -801,24 +801,21 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       install()
     }
 
-    private func destinationRow(in window: UIWindow) -> (union: CGRect, bar: UITabBar)? {
-      let pins = accessibilityPins(in: window)
-      let titles = [
-        AppTab.accounts.title,
-        AppTab.rewards.title,
-        AppTab.reflect.title,
-      ]
-      var frames: [CGRect] = []
-      for title in titles {
-        let aligned = pins.filter { pin in
-          pin.label == title && pin.frame.midY > window.bounds.midY
-        }
-        if let pin = aligned.max(by: { $0.frame.minX < $1.frame.minX })
-          ?? pins.last(where: { $0.label == title })
-        {
-          frames.append(pin.frame)
-        }
+    private func hostWindow() -> UIWindow? {
+      if let window = view.window {
+        return window
       }
+      let windows = UIApplication.shared.connectedScenes
+        .compactMap { $0 as? UIWindowScene }
+        .flatMap(\.windows)
+      return windows.first(where: \.isKeyWindow) ?? windows.first
+    }
+
+    private func destinationRow(in window: UIWindow) -> (union: CGRect, bar: UITabBar?)? {
+      let items = destinationItemViews(in: window, fallingBackTo: trackedDestinationBar)
+      let frames = items
+        .map { $0.convert($0.bounds, to: window) }
+        .filter { $0.width > 1 && $0.height > 1 && $0.midY > window.bounds.midY }
       guard let first = frames.first else {
         return nil
       }
@@ -826,105 +823,7 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       if let tracked = trackedDestinationBar, isShownInHierarchy(tracked) {
         return (union, tracked)
       }
-      guard let bar = rowOwningTabBar(containing: union, in: window), isShownInHierarchy(bar) else {
-        return nil
-      }
-      return (union, bar)
-    }
-
-    private struct AccessibilityPin {
-      let label: String
-      let frame: CGRect
-    }
-
-    private func accessibilityPins(in window: UIWindow) -> [AccessibilityPin] {
-      var pins: [AccessibilityPin] = []
-      var seen = Set<ObjectIdentifier>()
-      func collect(_ object: NSObject) {
-        let identity = ObjectIdentifier(object)
-        guard !seen.contains(identity) else {
-          return
-        }
-        seen.insert(identity)
-        if object === assistantButton || object === addButton {
-          return
-        }
-        if let view = object as? UIView, view.isHidden || view.alpha <= 0.01 {
-          return
-        }
-        let label = object.accessibilityLabel ?? ""
-        if !label.isEmpty,
-           let frame = accessibilityFrame(of: object, in: window),
-           frame.width > 1 || frame.height > 1,
-           isExposed(object, frame: frame, in: window)
-        {
-          pins.append(AccessibilityPin(label: label, frame: frame))
-        }
-        let count = object.accessibilityElementCount()
-        if count != NSNotFound, count > 0 {
-          for index in 0..<count {
-            if let element = object.accessibilityElement(at: index) as? NSObject {
-              collect(element)
-            }
-          }
-        } else if let elements = object.accessibilityElements {
-          for element in elements {
-            if let child = element as? NSObject {
-              collect(child)
-            }
-          }
-        }
-        if let view = object as? UIView {
-          for subview in view.subviews {
-            collect(subview)
-          }
-        }
-      }
-      collect(window)
-      return pins
-    }
-
-    /// Window-level AX objects are often neither `UIView` nor
-    /// `UIAccessibilityElement`. The iOS SDK exposes `accessibilityContainer`
-    /// on `UIAccessibilityElement`, not `NSObject`, so non-view nodes use a
-    /// responds-to lookup. Drop a pin whose frame sits in a hidden tab bar
-    /// that owns the row.
-    private func isExposed(_ object: NSObject, frame: CGRect, in window: UIWindow) -> Bool {
-      if !isExposedInContainerChain(object) {
-        return false
-      }
-      if let owner = rowOwningTabBar(containing: frame, in: window), !isShownInHierarchy(owner) {
-        return false
-      }
-      return true
-    }
-
-    private func isExposedInContainerChain(_ object: NSObject) -> Bool {
-      var current: NSObject? = object
-      var seen = Set<ObjectIdentifier>()
-      while let node = current, !seen.contains(ObjectIdentifier(node)) {
-        seen.insert(ObjectIdentifier(node))
-        if let view = node as? UIView, view.isHidden || view.alpha <= 0.01 {
-          return false
-        }
-        if let view = node as? UIView, let superview = view.superview {
-          current = superview
-          continue
-        }
-        current = accessibilityContainer(of: node)
-      }
-      return true
-    }
-
-    private func accessibilityContainer(of object: NSObject) -> NSObject? {
-      if let element = object as? UIAccessibilityElement {
-        return element.accessibilityContainer as? NSObject
-      }
-      let selector = NSSelectorFromString("accessibilityContainer")
-      guard object.responds(to: selector) else {
-        return nil
-      }
-      return object.perform(selector)?.takeUnretainedValue() as? NSObject
+      return (union, rowOwningTabBar(containing: union, in: window))
     }
 
     private func rowOwningTabBar(containing frame: CGRect, in window: UIWindow) -> UITabBar? {
@@ -954,9 +853,6 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       guard view.window != nil else {
         return false
       }
-      if view is UITabBar, view.bounds.width <= 1 || view.bounds.height <= 1 {
-        return false
-      }
       var current: UIView? = view
       while let node = current {
         if node.isHidden || node.alpha <= 0.01 {
@@ -969,7 +865,7 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
 
     private func reserveHostedDestinationSlot(
       covering union: CGRect,
-      bar: UITabBar,
+      bar: UITabBar?,
       in window: UIWindow
     ) {
       let gutter = max(window.safeAreaInsets.right, 8)
@@ -979,9 +875,9 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
         trailingGutter: gutter
       )
       applyHostedDestinationCompression(to: slotMinX, covering: union, bar: bar, in: window)
-      if let axMaxX = destinationRow(in: window)?.union.maxX, axMaxX > slotMinX + 0.5 {
+      if let rowMaxX = destinationRow(in: window)?.union.maxX, rowMaxX > slotMinX + 0.5 {
         applyHostedDestinationCompression(
-          to: slotMinX - (axMaxX - slotMinX),
+          to: slotMinX - (rowMaxX - slotMinX),
           covering: union,
           bar: bar,
           in: window
@@ -992,7 +888,7 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
     private func applyHostedDestinationCompression(
       to slotMinX: CGFloat,
       covering union: CGRect,
-      bar: UITabBar,
+      bar: UITabBar?,
       in window: UIWindow
     ) {
       let items = destinationItemViews(in: window, fallingBackTo: bar)
@@ -1009,7 +905,7 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       compressDestinationItems(destinationItemViews(in: window, fallingBackTo: bar), to: slotMinX, in: window)
     }
 
-    private func destinationItemViews(in window: UIWindow, fallingBackTo bar: UITabBar) -> [UIView] {
+    private func destinationItemViews(in window: UIWindow, fallingBackTo bar: UITabBar?) -> [UIView] {
       let titles = Set(CompactRootBar.destinationTabs.map(\.title))
       var found: [UIView] = []
       func walk(_ node: UIView) {
@@ -1039,8 +935,11 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
         largest[label] = view
       }
       let labeled = CompactRootBar.destinationTabs.compactMap { largest[$0.title] }
-      if labeled.count >= 2 {
+      if !labeled.isEmpty {
         return labeled
+      }
+      guard let bar else {
+        return []
       }
       return bar.subviews.filter { subview in
         subview is UIControl && subview.bounds.width > 1 && !subview.isHidden
@@ -1142,17 +1041,6 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       var frame = view.frame
       frame.size.width = max(frame.width - (frameInWindow.maxX - slotMinX), minimumWidth)
       view.frame = frame
-    }
-
-    private func accessibilityFrame(of object: NSObject, in window: UIWindow) -> CGRect? {
-      if let view = object as? UIView, view.bounds.width > 0 || view.bounds.height > 0 {
-        return view.convert(view.bounds, to: window)
-      }
-      let screen = object.accessibilityFrame
-      guard screen.width > 0 || screen.height > 0 else {
-        return nil
-      }
-      return window.convert(screen, from: nil)
     }
   }
 }
