@@ -605,6 +605,8 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
     private var assistantButton: UIButton?
     private var displayLink: CADisplayLink?
     private weak var trackedDestinationBar: UITabBar?
+    private var cachedDestinationHits: [DestinationHit] = []
+    private var cachedDestinationHitWindowID: ObjectIdentifier?
 
     override func loadView() {
       view = UIView()
@@ -631,6 +633,8 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
     }
 
     func install() {
+      cachedDestinationHits = []
+      cachedDestinationHitWindowID = nil
       if CaptureRouter.shared.hidesTabRowOverlay {
         hideOverlays()
         return
@@ -648,7 +652,7 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       }
       trackedDestinationBar = row.bar
       reserveHostedDestinationSlot(covering: row.union, bar: row.bar, in: window)
-      let pill = destinationRow(in: window)?.union ?? row.union
+      let pill = destinationHitUnion(in: window) ?? destinationRow(in: window)?.union ?? row.union
       startTracking()
       layoutAdd(rowHeight: pill.height, rowMidY: pill.midY, in: window)
       guard let addFrame = addButton?.frame, addButton?.isHidden == false else {
@@ -826,6 +830,134 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       return (union, rowOwningTabBar(containing: union, in: window))
     }
 
+    private struct DestinationHit {
+      let label: String
+      let frame: CGRect
+      let view: UIView?
+      let isButton: Bool
+    }
+
+    private func destinationHits(in window: UIWindow) -> [DestinationHit] {
+      if cachedDestinationHitWindowID == ObjectIdentifier(window), !cachedDestinationHits.isEmpty {
+        return cachedDestinationHits
+      }
+      let titles = Set(CompactRootBar.destinationTabs.map(\.title))
+      var hits: [DestinationHit] = []
+      var seen = Set<ObjectIdentifier>()
+      func collect(_ object: NSObject) {
+        let identity = ObjectIdentifier(object)
+        guard !seen.contains(identity) else {
+          return
+        }
+        seen.insert(identity)
+        if object === assistantButton || object === addButton {
+          return
+        }
+        if let view = object as? UIView, view.isHidden || view.alpha <= 0.01 {
+          return
+        }
+        let label = object.accessibilityLabel ?? ""
+        if titles.contains(label),
+           let frame = windowFrame(of: object, in: window),
+           frame.midY > window.bounds.midY,
+           frame.width > 1,
+           frame.height > 1
+        {
+          hits.append(
+            DestinationHit(
+              label: label,
+              frame: frame,
+              view: nearestView(from: object),
+              isButton: object is UIControl || object.accessibilityTraits.contains(.button)
+            )
+          )
+        }
+        let count = object.accessibilityElementCount()
+        if count != NSNotFound, count > 0 {
+          for index in 0..<count {
+            if let element = object.accessibilityElement(at: index) as? NSObject {
+              collect(element)
+            }
+          }
+        } else if let elements = object.accessibilityElements {
+          for element in elements {
+            if let child = element as? NSObject {
+              collect(child)
+            }
+          }
+        }
+        if let view = object as? UIView {
+          for subview in view.subviews {
+            collect(subview)
+          }
+        }
+      }
+      collect(window)
+      cachedDestinationHits = hits
+      cachedDestinationHitWindowID = ObjectIdentifier(window)
+      return hits
+    }
+
+    private func preferredDestinationHit(title: String, in window: UIWindow) -> DestinationHit? {
+      preferredDestinationHits(in: window)[title]
+    }
+
+    private func preferredDestinationHits(in window: UIWindow) -> [String: DestinationHit] {
+      var chosen: [String: DestinationHit] = [:]
+      for hit in destinationHits(in: window) {
+        if let existing = chosen[hit.label] {
+          if hit.isButton && !existing.isButton {
+            chosen[hit.label] = hit
+          }
+          continue
+        }
+        chosen[hit.label] = hit
+      }
+      return chosen
+    }
+
+    private func destinationHitUnion(in window: UIWindow) -> CGRect? {
+      let frames = CompactRootBar.destinationTabs.compactMap { title in
+        preferredDestinationHit(title: title, in: window)?.frame
+      }
+      guard let first = frames.first else {
+        return nil
+      }
+      return frames.dropFirst().reduce(into: first) { $0 = $0.union($1) }
+    }
+
+    private func windowFrame(of object: NSObject, in window: UIWindow) -> CGRect? {
+      if let view = object as? UIView, view.bounds.width > 0 || view.bounds.height > 0 {
+        return view.convert(view.bounds, to: window)
+      }
+      let screen = object.accessibilityFrame
+      guard screen.width > 0 || screen.height > 0 else {
+        return nil
+      }
+      return window.convert(screen, from: nil)
+    }
+
+    private func nearestView(from object: NSObject) -> UIView? {
+      var current: NSObject? = object
+      var seen = Set<ObjectIdentifier>()
+      while let node = current, !seen.contains(ObjectIdentifier(node)) {
+        seen.insert(ObjectIdentifier(node))
+        if let view = node as? UIView {
+          return view
+        }
+        if let element = node as? UIAccessibilityElement {
+          current = element.accessibilityContainer as? NSObject
+          continue
+        }
+        let selector = NSSelectorFromString("accessibilityContainer")
+        guard node.responds(to: selector) else {
+          return nil
+        }
+        current = node.perform(selector)?.takeUnretainedValue() as? NSObject
+      }
+      return nil
+    }
+
     private func rowOwningTabBar(containing frame: CGRect, in window: UIWindow) -> UITabBar? {
       let owners = tabBars(in: window).filter { bar in
         bar.bounds.width > 1
@@ -875,9 +1007,11 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
         trailingGutter: gutter
       )
       applyHostedDestinationCompression(to: slotMinX, covering: union, bar: bar, in: window)
-      if let rowMaxX = destinationRow(in: window)?.union.maxX, rowMaxX > slotMinX + 0.5 {
+      cachedDestinationHits = []
+      cachedDestinationHitWindowID = nil
+      if let hitMaxX = destinationHitUnion(in: window)?.maxX, hitMaxX > slotMinX + 0.5 {
         applyHostedDestinationCompression(
-          to: slotMinX - (rowMaxX - slotMinX),
+          to: slotMinX - (hitMaxX - slotMinX),
           covering: union,
           bar: bar,
           in: window
@@ -892,20 +1026,28 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       in window: UIWindow
     ) {
       let items = destinationItemViews(in: window, fallingBackTo: bar)
+      let minimumWidth = RootChrome.compactFloatingAddDiameter(pillHeight: union.height)
       if let cluster = hostedDestinationCluster(from: items, window: window) {
         shrinkTrailingEdge(
           of: cluster,
           to: slotMinX,
           in: window,
-          minimumWidth: RootChrome.compactFloatingAddDiameter(pillHeight: union.height)
+          minimumWidth: minimumWidth
         )
         cluster.setNeedsLayout()
         cluster.layoutIfNeeded()
       }
+      shrinkAncestorsCrossingSlot(items, to: slotMinX, in: window, minimumWidth: minimumWidth)
       compressDestinationItems(destinationItemViews(in: window, fallingBackTo: bar), to: slotMinX, in: window)
     }
 
     private func destinationItemViews(in window: UIWindow, fallingBackTo bar: UITabBar?) -> [UIView] {
+      let hitViews = CompactRootBar.destinationTabs.compactMap { title in
+        preferredDestinationHit(title: title, in: window)?.view
+      }
+      if !hitViews.isEmpty {
+        return hitViews
+      }
       let titles = Set(CompactRootBar.destinationTabs.map(\.title))
       var found: [UIView] = []
       func walk(_ node: UIView) {
@@ -1025,6 +1167,41 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
         let origin = window.convert(CGPoint(x: cursor, y: frame.minY), to: superview)
         item.frame = CGRect(x: origin.x, y: item.frame.minY, width: width, height: item.frame.height)
         cursor += width
+      }
+    }
+
+    private func shrinkAncestorsCrossingSlot(
+      _ items: [UIView],
+      to slotMinX: CGFloat,
+      in window: UIWindow,
+      minimumWidth: CGFloat
+    ) {
+      var seen = Set<ObjectIdentifier>()
+      for item in items {
+        var current: UIView? = item
+        while let view = current {
+          let identity = ObjectIdentifier(view)
+          if seen.contains(identity) {
+            break
+          }
+          seen.insert(identity)
+          if !(view is UIWindow), !(view is UITabBar) {
+            let frame = view.convert(view.bounds, to: window)
+            if frame.midY > window.bounds.midY,
+               frame.height > 1,
+               frame.height < 140,
+               frame.maxX > slotMinX + 0.5
+            {
+              shrinkTrailingEdge(
+                of: view,
+                to: slotMinX,
+                in: window,
+                minimumWidth: minimumWidth
+              )
+            }
+          }
+          current = view.superview
+        }
       }
     }
 
