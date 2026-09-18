@@ -32,8 +32,82 @@ final class ScreenshotOfferTests: XCTestCase {
     try? FileManager.default.removeItem(at: directory)
   }
 
-  private func makeController() -> ScreenshotOfferController {
-    ScreenshotOfferController(defaults: defaults, clipboard: clipboard, lineCounter: { _ in 3 })
+  private func makeController(epoch: String? = nil) -> ScreenshotOfferController {
+    ScreenshotOfferController(defaults: defaults, clipboard: clipboard, epoch: epoch, lineCounter: { _ in 3 })
+  }
+
+  func testNewBootReoffersDifferentImageAtSameRevision() async {
+    let first = makeController(epoch: "boot-A")
+    await first.setEnabled(true)
+    first.dismiss()
+    let sameBoot = makeController(epoch: "boot-A")
+    await sameBoot.refresh()
+    XCTAssertNil(sameBoot.offer)
+    XCTAssertEqual(clipboard.reads, 1)
+
+    clipboard.data = Data([9, 8, 7])
+    let newBoot = makeController(epoch: "boot-B")
+    await newBoot.refresh()
+    XCTAssertEqual(newBoot.offer?.imageData, Data([9, 8, 7]))
+    XCTAssertEqual(clipboard.reads, 2)
+  }
+
+  func testNewBootReoffersIdenticalImageAtSameRevision() async {
+    let first = makeController(epoch: "boot-A")
+    await first.setEnabled(true)
+    first.dismiss()
+    let newBoot = makeController(epoch: "boot-B")
+    await newBoot.refresh()
+    XCTAssertEqual(newBoot.offer?.imageData, clipboard.data)
+    XCTAssertEqual(clipboard.reads, 2)
+    XCTAssertFalse(newBoot.offer?.id.contains("boot-B") ?? true)
+  }
+
+  func testNewBootInvalidatesDeniedReadSuppression() async {
+    clipboard.data = nil
+    let first = makeController(epoch: "boot-A")
+    await first.setEnabled(true)
+    await makeController(epoch: "boot-A").refresh()
+    XCTAssertEqual(clipboard.reads, 1)
+
+    clipboard.data = Data([4, 5, 6])
+    let newBoot = makeController(epoch: "boot-B")
+    await newBoot.refresh()
+    XCTAssertEqual(newBoot.offer?.imageData, Data([4, 5, 6]))
+    XCTAssertEqual(clipboard.reads, 2)
+  }
+
+  func testMissingEpochInvalidatesLegacySuppressionAndDismissal() async {
+    await controller.setEnabled(true)
+    controller.dismiss()
+    defaults.removeObject(forKey: ScreenshotOfferController.epochKey)
+    let migrated = makeController()
+    await migrated.refresh()
+    XCTAssertEqual(migrated.offer?.imageData, clipboard.data)
+    XCTAssertEqual(clipboard.reads, 2)
+  }
+
+  func testRuntimeEpochProbeAndUnavailableFallback() async {
+    let boot = ClipboardOfferEpoch.readBootSessionUUID()
+    XCTAssertTrue(ClipboardOfferEpoch.current == ClipboardOfferEpoch.resolve(boot))
+    let fallback = ClipboardOfferEpoch.resolve(nil)
+    XCTAssertTrue(fallback == ClipboardOfferEpoch.resolve(nil), "fallback must be process-stable")
+    XCTAssertTrue(fallback.hasPrefix("process:"))
+    XCTAssertTrue(UUID(uuidString: String(fallback.dropFirst("process:".count))) != nil)
+
+    let oldProcess = makeController(epoch: "process:previous")
+    await oldProcess.setEnabled(true)
+    oldProcess.dismiss()
+    let currentProcess = makeController(epoch: fallback)
+    await currentProcess.refresh()
+    XCTAssertEqual(currentProcess.offer?.imageData, clipboard.data)
+    currentProcess.dismiss()
+    let sameProcess = makeController(epoch: ClipboardOfferEpoch.resolve(nil))
+    await sameProcess.refresh()
+    XCTAssertNil(sameProcess.offer)
+    XCTAssertEqual(clipboard.reads, 2)
+    // Report capability, never the local boot or process identifier itself.
+    print("Clipboard epoch: kern.bootsessionuuid available=\(boot != nil); unavailable fallback verified")
   }
 
   func testLegacyPhotosConsentDoesNotEnableClipboard() async {

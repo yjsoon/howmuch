@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Observation
 import SwiftUI
 import UIKit
@@ -45,6 +46,33 @@ final class PasteboardImageSource: ClipboardImageSource {
   }
 }
 
+enum ClipboardOfferEpoch {
+  // Cached once per process. A denied probe must not mistake a later process
+  // for the same boot: it may offer/prompt again after relaunch instead.
+  private static let processFallback = "process:\(UUID().uuidString)"
+  static let current = resolve(readBootSessionUUID())
+
+  static func resolve(_ bootSessionUUID: String?) -> String {
+    bootSessionUUID.map { "boot:\($0)" } ?? processFallback
+  }
+
+  static func readBootSessionUUID() -> String? {
+    var size = 0
+    guard sysctlbyname("kern.bootsessionuuid", nil, &size, nil, 0) == 0,
+      size > 0, size <= 128
+    else { return nil }
+    var buffer = [UInt8](repeating: 0, count: size)
+    let result = buffer.withUnsafeMutableBytes {
+      sysctlbyname("kern.bootsessionuuid", $0.baseAddress, &size, nil, 0)
+    }
+    guard result == 0,
+      let value = String(bytes: buffer.prefix(while: { $0 != 0 }), encoding: .utf8),
+      let uuid = UUID(uuidString: value)
+    else { return nil }
+    return uuid.uuidString
+  }
+}
+
 @MainActor
 @Observable
 final class ScreenshotOfferController {
@@ -54,6 +82,7 @@ final class ScreenshotOfferController {
   static let enabledKey = "HowMuch.clipboardOffer.enabled"
   static let suppressedRevisionKey = "HowMuch.clipboardOffer.suppressedRevision"
   static let dismissedKey = "HowMuch.clipboardOffer.dismissedID"
+  static let epochKey = "HowMuch.clipboardOffer.epoch"
 
   private(set) var isEnabled: Bool
   private(set) var offer: ScreenshotOffer?
@@ -69,12 +98,22 @@ final class ScreenshotOfferController {
   init(
     defaults: UserDefaults = .standard,
     clipboard: ClipboardImageSource? = nil,
+    epoch: String? = nil,
     lineCounter: @escaping @Sendable (Data) -> Int = { ScreenshotOfferController.countLines(in: $0) }
   ) {
     self.defaults = defaults
     self.clipboard = clipboard ?? PasteboardImageSource()
     self.lineCounter = lineCounter
     isEnabled = defaults.bool(forKey: Self.enabledKey)
+
+    // changeCount restarts after reboot. Keep the epoch only in local defaults,
+    // never in offer IDs or Inbox payloads. Missing epochs also invalidate legacy state.
+    let epoch = epoch ?? ClipboardOfferEpoch.current
+    if defaults.string(forKey: Self.epochKey) != epoch {
+      defaults.removeObject(forKey: Self.suppressedRevisionKey)
+      defaults.removeObject(forKey: Self.dismissedKey)
+      defaults.set(epoch, forKey: Self.epochKey)
+    }
   }
 
   isolated deinit {
