@@ -106,6 +106,20 @@ final class NarrowRefreshTests: XCTestCase {
     )
   }
 
+  func testRegisterPullAppliesExternallyChangedBalanceAndSchedule() async {
+    let model = makeModel()
+    await model.refresh(slices: [.accounts, .ledger, .schedules], quiet: false)
+    XCTAssertEqual(model.accounts.first?.balance, 100)
+    XCTAssertEqual(model.scheduledTransactions.first?.dateNext, "2026-01-03")
+
+    NarrowRefreshProtocol.setExternalRegisterChangesVisible()
+    await model.refresh(slices: TabRefresh.register, quiet: false)
+
+    XCTAssertEqual(model.accounts.first?.balance, 200)
+    XCTAssertEqual(model.scheduledTransactions.first?.dateNext, "2026-02-03")
+    XCTAssertEqual(NarrowRefreshProtocol.reportRequestCount(), 0)
+  }
+
   // MARK: - #180 (iOS half): reports leave the launch path
 
   func testLaunchFetchesNoReports() async {
@@ -344,9 +358,26 @@ private final class NarrowRefreshProtocol: URLProtocol {
   static let planID = "plan-1"
   static let transactionID = "txn-1"
   static let accountID = "acct-1"
+  private static let stateLock = NSLock()
+  private static var hasExternalRegisterChanges = false
 
   static func reset() {
     NarrowRefreshLog.shared.reset()
+    stateLock.lock()
+    hasExternalRegisterChanges = false
+    stateLock.unlock()
+  }
+
+  static func setExternalRegisterChangesVisible() {
+    stateLock.lock()
+    hasExternalRegisterChanges = true
+    stateLock.unlock()
+  }
+
+  private static var externalRegisterChangesVisible: Bool {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+    return hasExternalRegisterChanges
   }
 
   static func log() -> [RecordedRequest] {
@@ -441,7 +472,8 @@ private final class NarrowRefreshProtocol: URLProtocol {
     case "/v1/plans":
       return #"{"data":{"plans":[{"id":"\#(planID)","name":"Fixture Plan"}]}}"#
     case "\(plan)/accounts":
-      return #"{"data":{"accounts":[],"server_knowledge":7}}"#
+      let balance = externalRegisterChangesVisible ? 200 : 100
+      return #"{"data":{"accounts":[{"id":"acct-1","name":"Fixture Account","icon":null,"type":"cash","on_budget":true,"closed":false,"balance":\#(balance),"cleared_balance":\#(balance),"uncleared_balance":0,"last_reconciled_date":null,"deleted":false}],"server_knowledge":7}}"#
     case "\(plan)/payees":
       return #"{"data":{"payees":[],"server_knowledge":7}}"#
     case "\(plan)/transactions":
@@ -449,7 +481,8 @@ private final class NarrowRefreshProtocol: URLProtocol {
         ? #"{"data":{"transaction":\#(transactionJSON),"server_knowledge":8}}"#
         : #"{"data":{"transactions":[],"has_more":false,"server_knowledge":7}}"#
     case "\(plan)/scheduled_transactions":
-      return #"{"data":{"scheduled_transactions":[],"server_knowledge":7}}"#
+      let date = externalRegisterChangesVisible ? "2026-02-03" : "2026-01-03"
+      return #"{"data":{"scheduled_transactions":[{"id":"schedule-1","date_first":"2026-01-03","date_next":"\#(date)","frequency":"monthly","amount":-100,"memo":null,"flag_color":null,"account_id":"acct-1","payee_id":null,"category_id":null,"transfer_account_id":null,"deleted":false,"subtransactions":[]}],"server_knowledge":7}}"#
     case "\(plan)/transactions/\(transactionID)/cleared",
          "\(plan)/transactions/\(transactionID)":
       return #"{"data":{"transaction":\#(transactionJSON),"server_knowledge":8}}"#

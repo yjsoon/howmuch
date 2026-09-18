@@ -52,9 +52,10 @@ enum TabRefresh {
   ) -> Set<RefreshSlice> {
     referencePhase == .loaded && !isReferenceProvisional ? accounts : [.referenceData]
   }
-  /// The register shows the ledger page; `.ledger` also refreshes the count and,
-  /// while the approval flow is open, the queue rows behind it.
-  static let register: Set<RefreshSlice> = [.ledger]
+  /// The register shows ledger rows, account balance, and scheduled rows.
+  /// `.ledger` also refreshes the count and, while the approval flow is open,
+  /// the queue rows behind it.
+  static let register: Set<RefreshSlice> = [.accounts, .ledger, .schedules]
   static let reflect: Set<RefreshSlice> = [.reports]
 }
 
