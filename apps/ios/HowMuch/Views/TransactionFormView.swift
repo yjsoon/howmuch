@@ -1265,6 +1265,7 @@ struct DateFieldView: View {
         .datePickerStyle(.graphical)
         .tint(Theme.accent)
         .padding(.horizontal, 8)
+        .fixedSize(horizontal: false, vertical: true)
         .ynabCard()
         .padding(16)
         .onChange(of: date) {
@@ -1272,7 +1273,6 @@ struct DateFieldView: View {
         }
       Spacer()
     }
-    .containerRelativeFrame(.vertical, alignment: .top)
     .background(Theme.canvas)
     .navigationTitle("Date")
     .navigationBarTitleDisplayMode(.inline)
