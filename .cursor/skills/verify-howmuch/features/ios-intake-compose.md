@@ -34,7 +34,7 @@ Preconditions:
 - Use payee `Intake Toast Verify` when you need a unique saved row.
 - Stub parse (#99) is enough for `compose-parse-n1` if it fills from a known sentence. Real `SlipReader` (#102) is required for live category/account matching beyond the stub.
 
-- **Open.** Tap the floating plus `Add Transaction`. Title `Add Transaction`. First card is a white text field. No mic button. No caption “Type a spend”. Placeholder looks like `{n} of {Category} on {Account}` using live names (Groceries / Everyday Account are seeded), not a hardcoded DBS string.
+- **Open.** Tap the tab-row plus `Add Transaction`. Title `Add Transaction`. First card is a white text field. No mic button. No caption “Type a spend”. Placeholder looks like `{n} of {Category} on {Account}` using live names (Groceries / Everyday Account are seeded), not a hardcoded DBS string.
 - **Focus compose.** Tap the field. System keyboard. Amount keypad **hidden**. Trailing `Save` **hidden**. Amount header and Payee/Category/Account stay on screen, unchanged until Return.
 - **Amount fight.** Tap the amount. Compose resigns. Keypad shown. Save hidden. Tap compose again. Keypad hidden, QWERTY back, Save hidden. Exactly one of {QWERTY, keypad}.
 - **Parse N==1.** Type a sentence with amount 5, category Groceries, account Everyday Account (or the placeholder sentence). Return. Amount header shows 5.00 outflow. Category `Groceries`. Account `Everyday Account`. Compose still shows the sentence. Keypad hidden. `Save` visible and enabled. No “Looks right?” caption. No chat bubble.

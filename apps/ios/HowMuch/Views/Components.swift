@@ -227,6 +227,34 @@ enum AppTab: Hashable, CaseIterable {
     case .accounts, .rewards, .reflect: return nil
     }
   }
+
+  var compactBarSelection: CompactBarSelection? {
+    switch self {
+    case .accounts: return .accounts
+    case .rewards: return .rewards
+    case .reflect: return .reflect
+    case .plan, .assistant: return nil
+    }
+  }
+}
+
+enum CompactBarSelection: Hashable, CaseIterable {
+  case accounts
+  case rewards
+  case reflect
+  case addTransaction
+
+  var tab: AppTab? {
+    switch self {
+    case .accounts: return .accounts
+    case .rewards: return .rewards
+    case .reflect: return .reflect
+    case .addTransaction: return nil
+    }
+  }
+
+  var isDestination: Bool { tab != nil }
+  var isAction: Bool { self == .addTransaction }
 }
 
 /// Compact iPhone chrome is structurally three destinations and one action button.
@@ -236,10 +264,19 @@ enum CompactRootBar {
   static let actionCapacity = 1
   static let destinations: (AppTab, AppTab, AppTab) = (.accounts, .rewards, .reflect)
   static let action = RootTrailingAction.addTransaction
+  static let actionSelection = CompactBarSelection.addTransaction
 
   static var destinationTabs: [AppTab] {
     let (first, second, third) = destinations
     return [first, second, third]
+  }
+
+  static var destinationSelections: [CompactBarSelection] {
+    CompactBarSelection.allCases.filter(\.isDestination)
+  }
+
+  static var actionSelections: [CompactBarSelection] {
+    CompactBarSelection.allCases.filter(\.isAction)
   }
 }
 
@@ -315,27 +352,7 @@ enum RootChrome {
   static let compactTabRowClearance: CGFloat = 90
   /// Space above the compact tab bar reserved for the floating Assistant.
   static let compactFloatingAssistantClearance = RootAddControl.diameter + 10
-  static let compactFloatingAddGap: CGFloat = 16
   static let compactToastGap: CGFloat = 12
-
-  static func compactFloatingAddDiameter(pillHeight: CGFloat) -> CGFloat {
-    max(44, min(max(pillHeight, 48), 56))
-  }
-
-  static func compactFloatingAddReservation(pillHeight: CGFloat) -> CGFloat {
-    compactFloatingAddGap + compactFloatingAddDiameter(pillHeight: pillHeight)
-  }
-
-  static func compactFloatingAddSlotMinX(
-    pillHeight: CGFloat,
-    windowMaxX: CGFloat,
-    trailingGutter: CGFloat
-  ) -> CGFloat {
-    windowMaxX - trailingGutter - compactFloatingAddReservation(pillHeight: pillHeight)
-  }
-
-  static let compactFloatingAddTrailingInset =
-    compactFloatingAddReservation(pillHeight: 56) + 8
 
   static func usesSidebar(
     idiom: UIUserInterfaceIdiom,
@@ -515,17 +532,16 @@ struct RootTabView: View {
       .tabViewStyle(.sidebarAdaptable)
       .defaultAdaptableTabBarPlacement(.sidebar)
     } else {
-      TabView(selection: compactTabSelection) {
+      TabView(selection: compactBarSelection) {
         compactDestinationTab(CompactRootBar.destinations.0)
         compactDestinationTab(CompactRootBar.destinations.1)
         compactDestinationTab(CompactRootBar.destinations.2)
+        RootCaptureTab()
       }
       .tabViewStyle(.tabBarOnly)
       .tabBarMinimizeBehavior(.onScrollDown)
-      .padding(.trailing, compactFloatingChromeTrailingInset)
       .overlay {
-        RootTabBarFloatingChrome(
-          openAdd: presentManual,
+        RootTabBarFloatingAssistant(
           openAssistant: { chrome.openMore(.assistant) }
         )
         .allowsHitTesting(false)
@@ -534,9 +550,9 @@ struct RootTabView: View {
     }
   }
 
-  @TabContentBuilder<AppTab>
-  private func compactDestinationTab(_ tab: AppTab) -> some TabContent<AppTab> {
-    Tab(tab.title, systemImage: tab.systemImage, value: tab) {
+  @TabContentBuilder<CompactBarSelection>
+  private func compactDestinationTab(_ tab: AppTab) -> some TabContent<CompactBarSelection> {
+    Tab(tab.title, systemImage: tab.systemImage, value: tab.compactBarSelection ?? .accounts) {
       RootChromeScope(chrome: chrome) {
         RootTabHost(for: tab, workspace: workspace) {
           compactDestinationRoot(tab)
@@ -563,18 +579,19 @@ struct RootTabView: View {
     }
   }
 
-  private var compactTabSelection: Binding<AppTab> {
+  private var compactBarSelection: Binding<CompactBarSelection> {
     Binding(
-      get: { chrome.compactBarTab },
-      set: { chrome.tab = $0 }
+      get: { chrome.compactBarTab.compactBarSelection ?? .accounts },
+      set: { selection in
+        if selection == CompactRootBar.actionSelection {
+          presentManual()
+          return
+        }
+        if let tab = selection.tab {
+          chrome.tab = tab
+        }
+      }
     )
-  }
-
-  private var compactFloatingChromeTrailingInset: CGFloat {
-    if CaptureRouter.shared.hidesTabRowOverlay || workspace.pendingAssistantSessionID != nil {
-      return 0
-    }
-    return RootChrome.compactFloatingAddTrailingInset
   }
 
   private func presentManual() {
@@ -586,19 +603,30 @@ struct RootTabView: View {
   }
 }
 
-struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
-  var openAdd: () -> Void
+/// The one compact action. Search role keeps it a trailing button, not a fourth tab.
+struct RootCaptureTab: TabContent {
+  var body: some TabContent<CompactBarSelection> {
+    Tab(
+      CompactRootBar.action.title,
+      systemImage: CompactRootBar.action.systemImage,
+      value: CompactRootBar.actionSelection,
+      role: .search
+    ) {
+      Color.clear
+    }
+  }
+}
+
+struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
   var openAssistant: () -> Void
 
   func makeUIViewController(context: Context) -> Controller {
     let controller = Controller()
-    controller.openAdd = openAdd
     controller.openAssistant = openAssistant
     return controller
   }
 
   func updateUIViewController(_ controller: Controller, context: Context) {
-    controller.openAdd = openAdd
     controller.openAssistant = openAssistant
     controller.startTracking()
     controller.install()
@@ -610,12 +638,9 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
   }
 
   final class Controller: UIViewController {
-    var openAdd: () -> Void = {}
     var openAssistant: () -> Void = {}
-    private var addButton: UIButton?
     private var assistantButton: UIButton?
     private var displayLink: CADisplayLink?
-    private weak var trackedDestinationBar: UITabBar?
 
     override func loadView() {
       view = UIView()
@@ -643,45 +668,25 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
 
     func install() {
       if CaptureRouter.shared.hidesTabRowOverlay {
-        hideOverlays()
-        return
-      }
-      guard let window = hostWindow() else {
-        return
-      }
-      if let bar = trackedDestinationBar, !isShownInHierarchy(bar) {
-        hideOverlays()
-        return
-      }
-      guard let row = destinationRow(in: window) else {
-        hideOverlays()
-        return
-      }
-      trackedDestinationBar = row.bar
-      startTracking()
-      layoutAdd(rowHeight: row.union.height, rowMidY: row.union.midY, in: window)
-      guard let addFrame = addButton?.frame, addButton?.isHidden == false else {
         hideAssistant()
         return
       }
+      guard let window = view.window else {
+        return
+      }
+      // Hide when the tab-row Add pin is gone, not when a leftover system
+      // UITabBarController.tabBar happens to be hidden.
+      guard let addFrame = addPinFrame(in: window) else {
+        hideAssistant()
+        return
+      }
+      startTracking()
       layoutAssistant(relativeTo: addFrame, in: window)
     }
 
     func uninstall() {
-      trackedDestinationBar = nil
-      hideOverlays()
-      addButton = nil
-      assistantButton = nil
-    }
-
-    private func hideOverlays() {
-      hideAdd()
       hideAssistant()
-    }
-
-    private func hideAdd() {
-      addButton?.isHidden = true
-      addButton?.removeFromSuperview()
+      assistantButton = nil
     }
 
     private func hideAssistant() {
@@ -689,39 +694,11 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       assistantButton?.removeFromSuperview()
     }
 
-    private func layoutAdd(rowHeight: CGFloat, rowMidY: CGFloat, in window: UIWindow) {
-      let button = addButton ?? makeAddButton()
-      addButton = button
-      if CaptureRouter.shared.hidesTabRowOverlay {
-        hideOverlays()
-        return
-      }
-      if button.superview !== window {
-        button.removeFromSuperview()
-        window.addSubview(button)
-      }
-      button.tintColor = window.tintColor
-
-      let side = RootChrome.compactFloatingAddDiameter(pillHeight: rowHeight)
-      let gutter = max(window.safeAreaInsets.right, 8)
-      let x = window.bounds.maxX - gutter - side
-      button.isHidden = false
-      button.layer.cornerRadius = side / 2
-      button.clipsToBounds = true
-      button.frame = CGRect(
-        x: x,
-        y: rowMidY - side / 2,
-        width: side,
-        height: side
-      )
-      window.bringSubviewToFront(button)
-    }
-
     private func layoutAssistant(relativeTo pin: CGRect, in window: UIWindow) {
       let button = assistantButton ?? makeAssistantButton()
       assistantButton = button
       if CaptureRouter.shared.hidesTabRowOverlay {
-        hideOverlays()
+        hideAssistant()
         return
       }
       if button.superview !== window {
@@ -747,29 +724,6 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
         height: size.height
       )
       window.bringSubviewToFront(button)
-    }
-
-    private func makeAddButton() -> UIButton {
-      let button = UIButton(type: .system)
-      var configuration = UIButton.Configuration.glass()
-      configuration.image = UIImage(systemName: CompactRootBar.action.systemImage)
-      configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
-        pointSize: 18,
-        weight: .semibold
-      )
-      configuration.baseForegroundColor = .label
-      configuration.cornerStyle = .capsule
-      button.configuration = configuration
-      button.accessibilityLabel = CompactRootBar.action.title
-      button.accessibilityTraits = .button
-      button.isAccessibilityElement = true
-      button.addAction(UIAction { [weak self] _ in
-        self?.openAdd()
-      }, for: .touchUpInside)
-      button.addAction(UIAction { [weak self] _ in
-        self?.openAdd()
-      }, for: .primaryActionTriggered)
-      return button
     }
 
     private func makeAssistantButton() -> UIButton {
@@ -810,29 +764,116 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       install()
     }
 
-    private func hostWindow() -> UIWindow? {
-      if let window = view.window {
-        return window
+    /// Same AX walk the snapshot tests use. iOS 26 tab buttons often exist only
+    /// as accessibility elements, not as labelled UIView / UITabBar children.
+    private func addPinFrame(in window: UIWindow) -> CGRect? {
+      let pins = accessibilityPins(in: window)
+      let accounts = pins.last { $0.label == AppTab.accounts.title && $0.frame.midY > window.bounds.midY }
+        ?? pins.last { $0.label == AppTab.accounts.title }
+      let addTitle = CompactRootBar.action.title
+      let aligned = pins.filter { pin in
+        pin.label == addTitle
+          && (accounts.map { abs(pin.frame.midY - $0.frame.midY) <= 40 } ?? (pin.frame.midY > window.bounds.midY))
       }
-      let windows = UIApplication.shared.connectedScenes
-        .compactMap { $0 as? UIWindowScene }
-        .flatMap(\.windows)
-      return windows.first(where: \.isKeyWindow) ?? windows.first
+      if let add = aligned.max(by: { $0.frame.minX < $1.frame.minX }) {
+        return add.frame
+      }
+      return pins.last { $0.label == addTitle && $0.frame.midY > window.bounds.midY }?.frame
     }
 
-    private func destinationRow(in window: UIWindow) -> (union: CGRect, bar: UITabBar?)? {
-      let items = destinationItemViews(in: window, fallingBackTo: trackedDestinationBar)
-      let frames = items
-        .map { $0.convert($0.bounds, to: window) }
-        .filter { $0.width > 1 && $0.height > 1 && $0.midY > window.bounds.midY }
-      guard let first = frames.first else {
+    private struct AccessibilityPin {
+      let label: String
+      let frame: CGRect
+    }
+
+    private func accessibilityPins(in window: UIWindow) -> [AccessibilityPin] {
+      var pins: [AccessibilityPin] = []
+      var seen = Set<ObjectIdentifier>()
+      func collect(_ object: NSObject) {
+        let identity = ObjectIdentifier(object)
+        guard !seen.contains(identity) else {
+          return
+        }
+        seen.insert(identity)
+        if object === assistantButton {
+          return
+        }
+        if let view = object as? UIView, view.isHidden || view.alpha <= 0.01 {
+          return
+        }
+        let label = object.accessibilityLabel ?? ""
+        if !label.isEmpty,
+           let frame = accessibilityFrame(of: object, in: window),
+           frame.width > 1 || frame.height > 1,
+           isExposed(object, frame: frame, in: window)
+        {
+          pins.append(AccessibilityPin(label: label, frame: frame))
+        }
+        let count = object.accessibilityElementCount()
+        if count != NSNotFound, count > 0 {
+          for index in 0..<count {
+            if let element = object.accessibilityElement(at: index) as? NSObject {
+              collect(element)
+            }
+          }
+        } else if let elements = object.accessibilityElements {
+          for element in elements {
+            if let child = element as? NSObject {
+              collect(child)
+            }
+          }
+        }
+        if let view = object as? UIView {
+          for subview in view.subviews {
+            collect(subview)
+          }
+        }
+      }
+      collect(window)
+      return pins
+    }
+
+    /// Window-level AX objects are often neither `UIView` nor
+    /// `UIAccessibilityElement`. The iOS SDK exposes `accessibilityContainer`
+    /// on `UIAccessibilityElement`, not `NSObject`, so non-view nodes use a
+    /// responds-to lookup. Drop a pin whose frame sits in a hidden tab bar
+    /// that owns the row.
+    private func isExposed(_ object: NSObject, frame: CGRect, in window: UIWindow) -> Bool {
+      if !isExposedInContainerChain(object) {
+        return false
+      }
+      if let owner = rowOwningTabBar(containing: frame, in: window), !isShownInHierarchy(owner) {
+        return false
+      }
+      return true
+    }
+
+    private func isExposedInContainerChain(_ object: NSObject) -> Bool {
+      var current: NSObject? = object
+      var seen = Set<ObjectIdentifier>()
+      while let node = current, !seen.contains(ObjectIdentifier(node)) {
+        seen.insert(ObjectIdentifier(node))
+        if let view = node as? UIView, view.isHidden || view.alpha <= 0.01 {
+          return false
+        }
+        if let view = node as? UIView, let superview = view.superview {
+          current = superview
+          continue
+        }
+        current = accessibilityContainer(of: node)
+      }
+      return true
+    }
+
+    private func accessibilityContainer(of object: NSObject) -> NSObject? {
+      if let element = object as? UIAccessibilityElement {
+        return element.accessibilityContainer as? NSObject
+      }
+      let selector = NSSelectorFromString("accessibilityContainer")
+      guard object.responds(to: selector) else {
         return nil
       }
-      let union = frames.dropFirst().reduce(into: first) { $0 = $0.union($1) }
-      if let tracked = trackedDestinationBar, isShownInHierarchy(tracked) {
-        return (union, tracked)
-      }
-      return (union, rowOwningTabBar(containing: union, in: window))
+      return object.perform(selector)?.takeUnretainedValue() as? NSObject
     }
 
     private func rowOwningTabBar(containing frame: CGRect, in window: UIWindow) -> UITabBar? {
@@ -840,6 +881,7 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
         bar.bounds.width > 1
           && bar.bounds.height > 1
           && bar.convert(bar.bounds, to: window).intersects(frame)
+          && tabBarHostsRowLabelsIncludingHidden(bar)
       }
       return owners.first { isShownInHierarchy($0) } ?? owners.first
     }
@@ -858,10 +900,43 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       return found
     }
 
-    private func isShownInHierarchy(_ view: UIView) -> Bool {
-      guard view.window != nil else {
-        return false
+    private func tabBarHostsRowLabelsIncludingHidden(_ bar: UITabBar) -> Bool {
+      var labels: Set<String> = []
+      var seen = Set<ObjectIdentifier>()
+      func collect(_ object: NSObject) {
+        let identity = ObjectIdentifier(object)
+        guard !seen.contains(identity) else {
+          return
+        }
+        seen.insert(identity)
+        if let label = object.accessibilityLabel, !label.isEmpty {
+          labels.insert(label)
+        }
+        let count = object.accessibilityElementCount()
+        if count != NSNotFound, count > 0 {
+          for index in 0..<count {
+            if let element = object.accessibilityElement(at: index) as? NSObject {
+              collect(element)
+            }
+          }
+        } else if let elements = object.accessibilityElements {
+          for element in elements {
+            if let child = element as? NSObject {
+              collect(child)
+            }
+          }
+        }
+        if let view = object as? UIView {
+          for subview in view.subviews {
+            collect(subview)
+          }
+        }
       }
+      collect(bar)
+      return labels.contains(CompactRootBar.action.title) || labels.contains(AppTab.accounts.title)
+    }
+
+    private func isShownInHierarchy(_ view: UIView) -> Bool {
       var current: UIView? = view
       while let node = current {
         if node.isHidden || node.alpha <= 0.01 {
@@ -872,54 +947,15 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
       return true
     }
 
-    private func destinationItemViews(in window: UIWindow, fallingBackTo bar: UITabBar?) -> [UIView] {
-      let titles = Set(CompactRootBar.destinationTabs.map(\.title))
-      var found: [UIView] = []
-      func walk(_ node: UIView) {
-        if node === addButton || node === assistantButton {
-          return
-        }
-        if node.isHidden || node.alpha <= 0.01 {
-          return
-        }
-        if let label = node.accessibilityLabel, titles.contains(label) {
-          let frame = node.convert(node.bounds, to: window)
-          if frame.midY > window.bounds.midY, frame.width > 1, frame.height > 1 {
-            found.append(node)
-          }
-        }
-        for child in node.subviews {
-          walk(child)
-        }
+    private func accessibilityFrame(of object: NSObject, in window: UIWindow) -> CGRect? {
+      if let view = object as? UIView, view.bounds.width > 0 || view.bounds.height > 0 {
+        return view.convert(view.bounds, to: window)
       }
-      walk(window)
-      var largest: [String: UIView] = [:]
-      for view in found {
-        let label = view.accessibilityLabel ?? ""
-        if let existing = largest[label], !shouldReplaceDestinationItem(existing, with: view) {
-          continue
-        }
-        largest[label] = view
+      let screen = object.accessibilityFrame
+      guard screen.width > 0 || screen.height > 0 else {
+        return nil
       }
-      let labeled = CompactRootBar.destinationTabs.compactMap { largest[$0.title] }
-      if !labeled.isEmpty {
-        return labeled
-      }
-      guard let bar else {
-        return []
-      }
-      return bar.subviews.filter { subview in
-        subview is UIControl && subview.bounds.width > 1 && !subview.isHidden
-      }
-    }
-
-    private func shouldReplaceDestinationItem(_ existing: UIView, with candidate: UIView) -> Bool {
-      let existingButton = existing is UIControl || existing.accessibilityTraits.contains(.button)
-      let candidateButton = candidate is UIControl || candidate.accessibilityTraits.contains(.button)
-      if candidateButton != existingButton {
-        return candidateButton
-      }
-      return candidate.bounds.width * candidate.bounds.height > existing.bounds.width * existing.bounds.height
+      return window.convert(screen, from: nil)
     }
   }
 }

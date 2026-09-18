@@ -193,11 +193,11 @@ final class CaptureSnapshotTests: XCTestCase {
       }
       defer { surface.detach() }
       let appeared = await surface.waitUntil {
-        surface.tabRowOverlayButton(label: CompactRootBar.action.title) != nil
+        surface.firstControl(label: CompactRootBar.action.title) != nil
           && surface.tabRowOverlayButton(label: "Assistant") != nil
       }
       XCTAssertTrue(appeared, "compact chrome must host Add and a floating Assistant: \(surface.accessibilityLabels())")
-      guard let button = surface.tabRowOverlayButton(label: CompactRootBar.action.title) else { continue }
+      guard let button = surface.firstControl(label: CompactRootBar.action.title) else { continue }
       guard let assistant = surface.tabRowOverlayButton(label: "Assistant") else {
         XCTFail("floating Assistant missing")
         continue
@@ -206,18 +206,6 @@ final class CaptureSnapshotTests: XCTestCase {
       surface.assertMinimumHitTarget(assistant)
       XCTAssertTrue(surface.windowBounds.contains(button.frame))
       XCTAssertTrue(surface.windowBounds.contains(assistant.frame))
-      XCTAssertEqual(
-        button.frame.width,
-        button.frame.height,
-        accuracy: 1,
-        "Add must be a round control, not a pill segment"
-      )
-      if let addView = button.object as? UIView, let bar = surface.tabBarOwningRow() {
-        XCTAssertFalse(
-          addView.isDescendant(of: bar),
-          "Add must float beside the destination pill, not live inside it"
-        )
-      }
       XCTAssertLessThan(
         assistant.frame.maxY,
         button.frame.minY - 4,
@@ -234,7 +222,6 @@ final class CaptureSnapshotTests: XCTestCase {
         "the old in-row chat bubble must be gone"
       )
       XCTAssertNil(surface.addTransactionsManualAction(), "Add has no tap-and-hold or extra VoiceOver action")
-      var rightmostDestination: SnapshotAXNode?
       for label in ["Accounts", "Rewards", "Reflect"] {
         guard let destination = surface.firstControl(label: label) else {
           XCTFail("root tab missing \(label)")
@@ -245,11 +232,7 @@ final class CaptureSnapshotTests: XCTestCase {
           button.frame.midY,
           destination.frame.midY,
           accuracy: 24,
-          "Add must share the tab row height with \(label)"
-        )
-        XCTAssertFalse(
-          button.frame.intersects(destination.frame),
-          "Add must not overlap \(label)"
+          "Add must share the tab row, not a separate accessory"
         )
         XCTAssertGreaterThan(
           abs(assistant.frame.midY - destination.frame.midY),
@@ -258,16 +241,6 @@ final class CaptureSnapshotTests: XCTestCase {
         )
         XCTAssertFalse(destination.object.accessibilityCustomActions?.contains { $0.name == "Add manually" } == true)
         XCTAssertFalse(assistant.object.accessibilityCustomActions?.contains { $0.name == "Add manually" } == true)
-        if rightmostDestination.map({ $0.frame.maxX < destination.frame.maxX }) ?? true {
-          rightmostDestination = destination
-        }
-      }
-      if let rightmost = rightmostDestination {
-        XCTAssertGreaterThanOrEqual(
-          button.frame.minX - rightmost.frame.maxX,
-          8,
-          "Add must sit past the destination pill with a visible gap"
-        )
       }
       attachImage(surface.captureVisible(), name: "manual-entry-tab-row-\(size)")
       XCTAssertTrue(surface.activate(button))
@@ -311,7 +284,6 @@ final class CaptureSnapshotTests: XCTestCase {
     defer { surface.detach() }
     let appeared = await surface.waitUntil {
       surface.tabRowOverlayButton(label: "Assistant") != nil
-        && surface.tabRowOverlayButton(label: CompactRootBar.action.title) != nil
     }
     XCTAssertTrue(appeared, "compact tab row must host overlay Assistant: \(surface.accessibilityLabels())")
     router.presented = CaptureRequest(
@@ -320,15 +292,13 @@ final class CaptureSnapshotTests: XCTestCase {
     )
     let hidden = await surface.waitUntil {
       surface.tabRowOverlayButton(label: "Assistant") == nil
-        && surface.tabRowOverlayButton(label: CompactRootBar.action.title) == nil
     }
-    XCTAssertTrue(hidden, "compact Add and Assistant must not cover Add Transactions: \(surface.accessibilityLabels())")
+    XCTAssertTrue(hidden, "Assistant overlay must not cover Add Transactions: \(surface.accessibilityLabels())")
     router.presented = nil
     let restored = await surface.waitUntil {
       surface.tabRowOverlayButton(label: "Assistant") != nil
-        && surface.tabRowOverlayButton(label: CompactRootBar.action.title) != nil
     }
-    XCTAssertTrue(restored, "compact Add and Assistant must return after capture dismisses")
+    XCTAssertTrue(restored, "Assistant overlay must return after capture dismisses")
   }
 
   func testTabRowAssistantHidesWhenTabBarHides() async {
@@ -352,84 +322,26 @@ final class CaptureSnapshotTests: XCTestCase {
     defer { surface.detach() }
     let appeared = await surface.waitUntil {
       surface.firstControl(label: "Accounts") != nil
-        && surface.tabRowOverlayButton(label: CompactRootBar.action.title) != nil
+        && surface.firstControl(label: CompactRootBar.action.title) != nil
         && surface.tabRowOverlayButton(label: "Assistant") != nil
     }
     XCTAssertTrue(appeared, "compact chrome must host floating Assistant: \(surface.accessibilityLabels())")
     guard let tabBar = surface.tabBarOwningRow() else {
-      XCTFail("compact root must host the UITabBar that owns the destination tabs")
+      XCTFail("compact root must host the UITabBar that owns Add")
       return
     }
     tabBar.isHidden = true
     surface.layoutNow()
     let hidden = await surface.waitUntil {
       surface.tabRowOverlayButton(label: "Assistant") == nil
-        && surface.tabRowOverlayButton(label: CompactRootBar.action.title) == nil
     }
-    XCTAssertTrue(hidden, "floating Add and Assistant must unparent when the tab bar is hidden")
+    XCTAssertTrue(hidden, "floating Assistant must unparent when the tab bar is hidden")
     tabBar.isHidden = false
     surface.layoutNow()
     let restored = await surface.waitUntil {
       surface.tabRowOverlayButton(label: "Assistant") != nil
-        && surface.tabRowOverlayButton(label: CompactRootBar.action.title) != nil
     }
-    XCTAssertTrue(restored, "floating Add and Assistant must return when the tab bar is shown")
-  }
-
-  func testCompactFloatingAddSurvivesCollapsedTabBarBesideDestinations() async {
-    guard let surface = SnapshotSurface(
-      root: Color.clear
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay {
-          RootTabBarFloatingChrome(openAdd: {}, openAssistant: {})
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-        },
-      size: CGSize(width: 390, height: 844)
-    ) else {
-      XCTFail("collapsed-bar Add chrome needs a connected UIWindowScene")
-      return
-    }
-    defer { surface.detach() }
-
-    surface.plantCompactDestinationsBesideCollapsedTabBar()
-    let appeared = await surface.waitUntil {
-      surface.tabRowOverlayButton(label: CompactRootBar.action.title) != nil
-        && surface.firstControl(label: "Accounts") != nil
-        && surface.firstControl(label: "Rewards") != nil
-        && surface.firstControl(label: "Reflect") != nil
-    }
-    XCTAssertTrue(
-      appeared,
-      "compact Add must stay while destination tabs remain visible beside a collapsed UITabBar: \(surface.accessibilityLabels())"
-    )
-    guard let add = surface.tabRowOverlayButton(label: CompactRootBar.action.title) else {
-      XCTFail("floating Add missing when destination views are visible")
-      return
-    }
-    XCTAssertEqual(add.frame.width, add.frame.height, accuracy: 1, "Add must be round")
-    XCTAssertTrue(surface.windowBounds.contains(add.frame), "Add must stay on-screen")
-    if let addView = add.object as? UIView, let bar = surface.collapsedTabBar() {
-      XCTAssertFalse(addView.isDescendant(of: bar), "Add must not join the destination pill")
-    }
-    var rightmost: SnapshotAXNode?
-    for label in ["Accounts", "Rewards", "Reflect"] {
-      guard let destination = surface.firstControl(label: label) else {
-        XCTFail("planted \(label) missing")
-        continue
-      }
-      XCTAssertFalse(add.frame.intersects(destination.frame), "Add must not overlap \(label)")
-      if rightmost.map({ $0.frame.maxX < destination.frame.maxX }) ?? true {
-        rightmost = destination
-      }
-    }
-    if let rightmost {
-      XCTAssertGreaterThanOrEqual(
-        add.frame.minX - rightmost.frame.maxX,
-        8,
-        "Add must sit past the destination views with a visible gap"
-      )
-    }
+    XCTAssertTrue(restored, "floating Assistant must return when the tab bar is shown")
   }
 
   func testTabRowAssistantHidesWhileAssistantConversationIsPushed() async {
@@ -454,7 +366,6 @@ final class CaptureSnapshotTests: XCTestCase {
     defer { surface.detach() }
     let appeared = await surface.waitUntil {
       surface.tabRowOverlayButton(label: "Assistant") != nil
-        && surface.tabRowOverlayButton(label: CompactRootBar.action.title) != nil
     }
     XCTAssertTrue(appeared, "compact chrome must host floating Assistant: \(surface.accessibilityLabels())")
     chrome.openMore(.assistant)
@@ -462,19 +373,17 @@ final class CaptureSnapshotTests: XCTestCase {
     surface.layoutNow()
     let hidden = await surface.waitUntil {
       surface.tabRowOverlayButton(label: "Assistant") == nil
-        && surface.tabRowOverlayButton(label: CompactRootBar.action.title) == nil
     }
     XCTAssertTrue(
       hidden,
-      "floating Add and Assistant must hide with the tab bar on a pushed conversation: \(surface.accessibilityLabels())"
+      "floating Assistant must hide with the tab bar on a pushed conversation: \(surface.accessibilityLabels())"
     )
     harness.workspace.pendingAssistantSessionID = nil
     surface.layoutNow()
     let restored = await surface.waitUntil {
       surface.tabRowOverlayButton(label: "Assistant") != nil
-        && surface.tabRowOverlayButton(label: CompactRootBar.action.title) != nil
     }
-    XCTAssertTrue(restored, "floating Add and Assistant must return on Assistant home")
+    XCTAssertTrue(restored, "floating Assistant must return on Assistant home")
   }
 
   func testManualIntakeHostPreservesConversationAndAccountIntent() async {
@@ -3001,37 +2910,6 @@ final class SnapshotSurface {
     Self.search(host.view, type)
   }
 
-  func plantCompactDestinationsBesideCollapsedTabBar() {
-    let bar = UITabBar()
-    bar.frame = CGRect(x: 0, y: 790, width: 1, height: 1)
-    bar.bounds = CGRect(x: 0, y: 0, width: 1, height: 1)
-    window.addSubview(bar)
-
-    for (index, title) in CompactRootBar.destinationTabs.map(\.title).enumerated() {
-      let button = UIButton(type: .system)
-      button.setTitle(title, for: .normal)
-      button.accessibilityLabel = title
-      button.accessibilityTraits = .button
-      button.frame = CGRect(x: 16 + CGFloat(index) * 90, y: 748, width: 84, height: 52)
-      window.addSubview(button)
-    }
-    layout()
-  }
-
-  func collapsedTabBar() -> UITabBar? {
-    var found: [UITabBar] = []
-    func walk(_ node: UIView) {
-      if let bar = node as? UITabBar {
-        found.append(bar)
-      }
-      for subview in node.subviews {
-        walk(subview)
-      }
-    }
-    walk(window)
-    return found.first { $0.bounds.width <= 1 || $0.bounds.height <= 1 }
-  }
-
   /// `firstDescendant(UITabBar.self)` can hit a leftover already-hidden system bar.
   func tabBarOwningRow() -> UITabBar? {
     var found: [UITabBar] = []
@@ -3045,8 +2923,8 @@ final class SnapshotSurface {
     }
     walk(window)
     let sized = found.filter { $0.bounds.width > 1 && $0.bounds.height > 1 }
-    if let accounts = firstControl(label: AppTab.accounts.title) {
-      let hitting = sized.filter { $0.convert($0.bounds, to: window).intersects(accounts.frame) }
+    if let add = firstControl(label: CompactRootBar.action.title) {
+      let hitting = sized.filter { $0.convert($0.bounds, to: window).intersects(add.frame) }
       if let shown = hitting.first(where: { !$0.isHidden && $0.alpha > 0.01 }) {
         return shown
       }
