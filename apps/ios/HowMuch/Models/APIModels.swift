@@ -2469,6 +2469,7 @@ struct TransactionCollectionApprovalEnvelope: Encodable {
 
 struct TransactionCollectionPayload: Decodable {
   let transactionIds: [String]?
+  let transactions: [Transaction]
   let serverKnowledge: Int?
 }
 

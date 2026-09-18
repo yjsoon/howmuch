@@ -314,6 +314,13 @@ struct APIClient {
     throw APIClientError.server("Transactions changed while the approval queue was loading. Try again.")
   }
 
+  func fetchTransaction(planID: String, transactionID: String) async throws -> Transaction {
+    let response: APIEnvelope<TransactionPayload> = try await request(
+      path: "/v1/plans/\(planID)/transactions/\(transactionID)"
+    )
+    return response.data.transaction
+  }
+
   /// How many live unapproved rows the plan has, without fetching any of them.
   /// One bounded server-side count, so launch no longer waits on a full walk of
   /// the queue just to label the inbox.
@@ -563,7 +570,7 @@ struct APIClient {
     return response.data.transaction
   }
 
-  func approveTransactionBatch(planID: String, transactionIDs: [String]) async throws {
+  func approveTransactionBatch(planID: String, transactionIDs: [String]) async throws -> [Transaction] {
     guard !transactionIDs.isEmpty else {
       throw APIClientError.validation("Transaction approval batch must not be empty.")
     }
@@ -572,13 +579,14 @@ struct APIClient {
         "Transaction approval batch cannot exceed \(RegisterApproval.batchLimit) items."
       )
     }
-    let _: APIEnvelope<TransactionCollectionPayload> = try await request(
+    let response: APIEnvelope<TransactionCollectionPayload> = try await request(
       path: "/v1/plans/\(planID)/transactions",
       method: "PATCH",
       body: TransactionCollectionApprovalEnvelope(
         transactions: transactionIDs.map { .init(id: $0, approved: true) }
       )
     )
+    return response.data.transactions
   }
 
   func updateTransactionCleared(

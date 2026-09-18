@@ -2625,6 +2625,45 @@ final class AppModel {
     serverTransactions = serverTransactions.map { ids.contains($0.id) ? $0.withApproved(true) : $0 }
   }
 
+  /// The batch endpoint returns the requested rows, not every row its split
+  /// approval cascaded to. Resolve each returned row to its split parent so
+  /// loaded mirrors disappear immediately. A mirror can be visible while its
+  /// (older) parent is not, so fetch that parent rather than assuming a first
+  /// page reload would find it.
+  private func approvedGraphIDs(
+    from returned: [Transaction],
+    submitted: Set<String>,
+    destination: EditDestination
+  ) async throws -> Set<String> {
+    var graphIDs = Set(returned.map(\.id)).union(submitted)
+    for row in returned {
+      let parentID = row.parentTransactionID ?? row.id
+      let parent: Transaction
+      if let loaded = returned.first(where: { $0.id == parentID })
+        ?? serverTransactions.first(where: { $0.id == parentID })
+        ?? serverUnapprovedTransactions.first(where: { $0.id == parentID }) {
+        parent = loaded
+      } else {
+        parent = try await destination.client.fetchTransaction(planID: destination.planID, transactionID: parentID)
+      }
+      guard isCurrentApproval(destination) else {
+        return []
+      }
+      graphIDs.insert(parent.id)
+      graphIDs.formUnion(parent.linkedTransferIDs)
+    }
+    return graphIDs
+  }
+
+  /// Only rows observed unapproved before the write belong in badge and queue
+  /// bookkeeping. A graph may contain an already-approved transfer companion;
+  /// treating every graph id as new would decrement the badge twice.
+  private func locallyUnapprovedIDs(in ids: Set<String>) -> Set<String> {
+    Set((serverTransactions + serverUnapprovedTransactions).lazy.filter {
+      ids.contains($0.id) && !$0.approved && !$0.deleted
+    }.map(\.id))
+  }
+
   private func eligibleApprovalCount(in rows: [Transaction]) -> Int {
     RegisterApproval.eligibleIDs(
       in: rows.filter { pendingEdits[$0.id] == nil }.map(\.approvalRow),
@@ -2842,7 +2881,7 @@ final class AppModel {
     var approvedCount = 0
     do {
       for chunk in plan.chunks {
-        try await destination.client.approveTransactionBatch(
+        let returned = try await destination.client.approveTransactionBatch(
           planID: destination.planID,
           transactionIDs: chunk.ids
         )
@@ -2850,7 +2889,17 @@ final class AppModel {
           return
         }
         approvedCount += chunk.count
-        applyApprovedIDs(Set(chunk.ids))
+        let graphIDs = try await approvedGraphIDs(
+          from: returned,
+          submitted: Set(chunk.ids),
+          destination: destination
+        )
+        guard isCurrentApproval(destination) else {
+          return
+        }
+        let knownUnapproved = locallyUnapprovedIDs(in: graphIDs)
+        applyApprovedIDs(graphIDs)
+        approvalSession.confirmed.formUnion(knownUnapproved)
       }
       guard isCurrentApproval(destination) else {
         return
