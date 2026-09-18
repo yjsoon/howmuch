@@ -123,6 +123,9 @@ final class AppModel {
   /// Flipped cleared values that must survive `refreshLedger` replacing
   /// `serverTransactions` with a fetch that still has the pre-PATCH row.
   private var clearedToggleOverlays: [String: ClearedState] = [:]
+  /// An editor acknowledgement supersedes a toggle, but not an older read.
+  /// A new ledger generation and a response containing this row retire it.
+  private var clearedOverlayMinimumLedgerGeneration: [String: Int] = [:]
   @ObservationIgnored private var needsAnotherDrain = false
   @ObservationIgnored private var coalescedDrainTrigger: OutboxDrainTrigger?
   private var accountsByID: [String: Account] = [:]
@@ -367,6 +370,7 @@ final class AppModel {
     unapprovedQueueViewers = []
     approvalSession = .empty
     clearedToggleOverlays.removeAll()
+    clearedOverlayMinimumLedgerGeneration.removeAll()
     clearedTogglesInFlight.removeAll()
     scheduledTransactions = []
     spendingBreakdown = nil
@@ -1295,15 +1299,28 @@ final class AppModel {
     return rows.map { $0.applyingApproval(session: approvalSession) }
   }
 
-  /// Keep an in-flight (or just-acked) flip when a fetch still has the old
-  /// `cleared` value. Drop it once the server snapshot matches, but never
-  /// while the PATCH is still outstanding.
-  private func reconcileClearedToggleOverlays() {
+  /// Editor overrides belong to the pre-save read generation, not a value:
+  /// a later authoritative response may reflect another client's change.
+  /// Legacy toggle overrides still wait for a matching server snapshot.
+  private func reconcileClearedToggleOverlays(generation: Int, fetched: [Transaction]) {
     guard !clearedToggleOverlays.isEmpty else {
       return
     }
     for (id, cleared) in clearedToggleOverlays {
       if clearedTogglesInFlight.contains(id) {
+        continue
+      }
+      guard let authoritative = fetched.first(where: { $0.id == id }) else {
+        continue
+      }
+      if let minimum = clearedOverlayMinimumLedgerGeneration[id] {
+        guard generation >= minimum else { continue }
+        // Older-page merges prefer already-loaded rows; update their status
+        // from this response before removing the editor's temporary override.
+        serverTransactions = serverTransactions.map { $0.id == id ? $0.withCleared(authoritative.cleared) : $0 }
+        serverUnapprovedTransactions = serverUnapprovedTransactions.map { $0.id == id ? $0.withCleared(authoritative.cleared) : $0 }
+        clearedToggleOverlays[id] = nil
+        clearedOverlayMinimumLedgerGeneration[id] = nil
         continue
       }
       let snapshots = [serverTransactions, serverUnapprovedTransactions].compactMap { rows in
@@ -1314,6 +1331,7 @@ final class AppModel {
       }
       if snapshots.allSatisfy({ $0.cleared == cleared }) {
         clearedToggleOverlays[id] = nil
+        clearedOverlayMinimumLedgerGeneration[id] = nil
       }
     }
   }
@@ -1763,7 +1781,7 @@ final class AppModel {
           )
         }
       }
-      reconcileClearedToggleOverlays()
+      reconcileClearedToggleOverlays(generation: generation, fetched: page.transactions)
       applyTransactionPageCursor(page)
       ledgerPhase = .loaded
       ledgerIsProvisional = false
@@ -1802,7 +1820,7 @@ final class AppModel {
           else {
             return
           }
-          applyOlderTransactionPage(older)
+          applyOlderTransactionPage(older, generation: generation)
         } catch {
           guard generation == ledgerPageGeneration, planID == settings.planID else {
             return
@@ -1887,6 +1905,7 @@ final class AppModel {
       guard generation == ledgerPageGeneration, planID == settings.planID else { return }
       guard stillWantsUnapprovedQueue() else { return }
       replaceUnapprovedQueue(with: unapproved)
+      reconcileClearedToggleOverlays(generation: generation, fetched: unapproved)
       unapprovedQueuePhase = .loaded
     } catch {
       guard generation == ledgerPageGeneration, planID == settings.planID else { return }
@@ -1935,6 +1954,7 @@ final class AppModel {
     unapprovedQueueViewers = []
     approvalSession = .empty
     clearedToggleOverlays.removeAll()
+    clearedOverlayMinimumLedgerGeneration.removeAll()
     clearedTogglesInFlight.removeAll()
     scheduledTransactions = []
     spendingBreakdown = nil
@@ -2202,6 +2222,7 @@ final class AppModel {
         }
         loaded = sortedUniqueTransactions(loaded + page.transactions).filter { $0.accountID == accountID }
         serverTransactions = sortedUniqueTransactions(serverTransactions + page.transactions)
+        reconcileClearedToggleOverlays(generation: generation, fetched: page.transactions)
         offset = page.nextOffset ?? loaded.count
         hasMore = page.hasMore && page.nextOffset != nil
       } catch {
@@ -2257,7 +2278,7 @@ final class AppModel {
       else {
         return
       }
-      applyOlderTransactionPage(page)
+      applyOlderTransactionPage(page, generation: generation)
     } catch {
       guard generation == ledgerPageGeneration, planID == settings.planID else {
         return
@@ -2271,9 +2292,9 @@ final class AppModel {
     nextTransactionOffset = hasMoreTransactions ? page.nextOffset : nil
   }
 
-  private func applyOlderTransactionPage(_ page: TransactionPage) {
+  private func applyOlderTransactionPage(_ page: TransactionPage, generation: Int) {
     serverTransactions = sortedUniqueTransactions(serverTransactions + page.transactions)
-    reconcileClearedToggleOverlays()
+    reconcileClearedToggleOverlays(generation: generation, fetched: page.transactions)
     applyTransactionPageCursor(page)
   }
 
@@ -2477,7 +2498,7 @@ final class AppModel {
       let existingRow = serverTransactions.first(where: { $0.id == transactionID })
         ?? serverUnapprovedTransactions.first(where: { $0.id == transactionID })
       if let existingRow {
-        applySavedTransaction(saved, replacing: existingRow)
+        applySavedTransaction(saved, replacing: existingRow, ownsCleared: draft.shouldWriteCleared)
       }
       pendingEdits[transactionID] = nil
       editTasks[transactionID] = nil
@@ -2553,6 +2574,7 @@ final class AppModel {
     let cleared: ClearedState = transaction.cleared == .cleared ? .uncleared : .cleared
     clearedTogglesInFlight.insert(transaction.id)
     clearedToggleOverlays[transaction.id] = cleared
+    clearedOverlayMinimumLedgerGeneration[transaction.id] = nil
     defer { clearedTogglesInFlight.remove(transaction.id) }
     do {
       let saved = try await apiClient.updateTransactionCleared(
@@ -2567,6 +2589,7 @@ final class AppModel {
     } catch {
       if clearedToggleOverlays[transaction.id] == cleared {
         clearedToggleOverlays[transaction.id] = nil
+        clearedOverlayMinimumLedgerGeneration[transaction.id] = nil
       }
       await refreshLedger(quiet: true)
       throw error
@@ -2594,8 +2617,16 @@ final class AppModel {
     return payee(withID: payeeID) == nil
   }
 
-  private func applySavedTransaction(_ saved: Transaction, replacing existing: Transaction) {
+  private func applySavedTransaction(
+    _ saved: Transaction,
+    replacing existing: Transaction,
+    ownsCleared: Bool = false
+  ) {
     let next = saved.preservingParent(from: existing)
+    if ownsCleared {
+      clearedToggleOverlays[saved.id] = saved.cleared
+      clearedOverlayMinimumLedgerGeneration[saved.id] = ledgerPageGeneration + 1
+    }
     if let index = serverTransactions.firstIndex(where: { $0.id == existing.id }) {
       serverTransactions[index] = next
     }
