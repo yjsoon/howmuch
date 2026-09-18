@@ -541,14 +541,14 @@ final class CaptureSnapshotTests: XCTestCase {
       XCTAssertTrue(opened, "\(item.name) manual form must show the date row: \(surface.accessibilityLabels())")
       await surface.settleNavigation()
       if item.amount == 0 {
-        let keypadVisible = await surface.waitUntil { surface.firstControl(label: "1") != nil }
+        let keypadVisible = await surface.waitUntil { surface.calculatorKeypadDigitOne() != nil }
         XCTAssertTrue(
           keypadVisible,
           "\(item.name) must show CalculatorKeypad before Date: \(surface.accessibilityLabels())"
         )
       } else {
         XCTAssertNil(
-          surface.firstControl(label: "1"),
+          surface.calculatorKeypadDigitOne(),
           "\(item.name) must not mount CalculatorKeypad: \(surface.accessibilityLabels())"
         )
       }
@@ -581,7 +581,7 @@ final class CaptureSnapshotTests: XCTestCase {
       }
       XCTAssertTrue(pickerOpened, "\(item.name) graphical date picker must appear: \(surface.accessibilityLabels())")
       XCTAssertNil(
-        surface.firstControl(label: "1"),
+        surface.calculatorKeypadDigitOne(),
         "\(item.name) Date must hide CalculatorKeypad once the calendar exists: \(surface.accessibilityLabels())"
       )
       attachImage(surface.captureVisible(), name: "manual-date-picker-first-\(item.name)")
@@ -3073,6 +3073,16 @@ final class SnapshotSurface {
     return nodes.first {
       $0.label == label && $0.traits.contains(.button)
     } ?? nodes.first { $0.label == label }
+  }
+
+  func calculatorKeypadDigitOne() -> SnapshotAXNode? {
+    guard firstControl(label: "done") != nil
+      || firstControl(label: "next") != nil
+      || firstControl(label: "save") != nil
+    else {
+      return nil
+    }
+    return firstControl(label: "1")
   }
 
   func tabRowControl(label: String) -> SnapshotAXNode? {
