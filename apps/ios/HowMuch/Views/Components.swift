@@ -945,17 +945,20 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
         if let view = node as? UIView {
           return view
         }
-        if let element = node as? UIAccessibilityElement {
-          current = element.accessibilityContainer as? NSObject
-          continue
-        }
-        let selector = NSSelectorFromString("accessibilityContainer")
-        guard node.responds(to: selector) else {
-          return nil
-        }
-        current = node.perform(selector)?.takeUnretainedValue() as? NSObject
+        current = accessibilityContainer(of: node)
       }
       return nil
+    }
+
+    private func accessibilityContainer(of object: NSObject) -> NSObject? {
+      if let element = object as? UIAccessibilityElement {
+        return element.accessibilityContainer as? NSObject
+      }
+      let selector = NSSelectorFromString("accessibilityContainer")
+      guard object.responds(to: selector) else {
+        return nil
+      }
+      return object.perform(selector)?.takeUnretainedValue() as? NSObject
     }
 
     private func rowOwningTabBar(containing frame: CGRect, in window: UIWindow) -> UITabBar? {
