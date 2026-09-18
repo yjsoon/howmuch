@@ -160,6 +160,7 @@ struct TransactionFormView: View {
   @State private var categoryCandidates: [SlipCandidate] = []
   @State private var showAccountPrompt = false
   @State private var showCategoryPrompt = false
+  @State private var isShowingDate = false
   private let isEditing: Bool
   private let allowsDeletion: Bool
   private let chrome: TransactionFormChrome
@@ -262,6 +263,9 @@ struct TransactionFormView: View {
       .background(Theme.canvas)
       .navigationDestination(isPresented: $isAutoAdvancingToPayee) {
         PayeePickerView(draft: $draft)
+      }
+      .navigationDestination(isPresented: $isShowingDate) {
+        DateFieldView(date: $draft.date)
       }
       .navigationTitle(formTitle)
       .navigationBarTitleDisplayMode(.inline)
@@ -570,8 +574,13 @@ struct TransactionFormView: View {
       }
       CardDivider()
 
-      NavigationLink {
-        DateFieldView(date: $draft.date)
+      Button {
+        var hideKeypad = SwiftUI.Transaction()
+        hideKeypad.disablesAnimations = true
+        withTransaction(hideKeypad) {
+          isKeypadVisible = false
+        }
+        isShowingDate = true
       } label: {
         DisclosureValueRow(
           icon: "calendar",
