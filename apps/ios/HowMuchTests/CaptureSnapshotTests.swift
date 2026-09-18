@@ -176,6 +176,7 @@ final class CaptureSnapshotTests: XCTestCase {
       let harness = SnapshotHarness.make()
       let origin = CaptureOrigin.visibleRegister(accountID: "acct-travel")
       let chrome = RootChromeState()
+      chrome.tab = .reflect
       guard let surface = SnapshotSurface(
         root: RootTabView(
           chrome: chrome,
@@ -250,7 +251,8 @@ final class CaptureSnapshotTests: XCTestCase {
       }
       XCTAssertTrue(draft.accountID.isEmpty, "resolve the frozen origin only after references load")
       XCTAssertEqual(router.pending?.origin, origin)
-      XCTAssertEqual(chrome.tab, .accounts, "Add must not replace the selected destination")
+      XCTAssertEqual(chrome.tab, .reflect, "Add must not replace the selected destination")
+      XCTAssertEqual(chrome.compactBarTab, .reflect)
       XCTAssertTrue(harness.model.pendingRows.isEmpty)
     }
   }
@@ -3275,6 +3277,12 @@ final class SnapshotSurface {
     into nodes: inout [SnapshotAXNode],
     seen: inout Set<ObjectIdentifier>
   ) {
+    // Hidden native tab bars can retain stale Add controls with different geometry.
+    var ancestor = object as? UIView
+    while let view = ancestor {
+      guard !view.isHidden, view.alpha > 0.01 else { return }
+      ancestor = view.superview
+    }
     let identity = ObjectIdentifier(object)
     guard !seen.contains(identity) else {
       return

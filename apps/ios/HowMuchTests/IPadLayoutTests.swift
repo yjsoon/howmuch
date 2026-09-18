@@ -450,6 +450,7 @@ final class IPadLayoutTests: XCTestCase {
         && surface.firstControl(label: CompactRootBar.action.title) != nil
         && surface.tabRowOverlayButton(label: "Assistant") != nil
     }
+    attachImage(surface.captureVisible(), name: "compact-root-accounts")
     XCTAssertTrue(
       appeared,
       "compact root must show three tabs plus Add and a floating Assistant: \(surface.accessibilityLabels())"
@@ -470,6 +471,21 @@ final class IPadLayoutTests: XCTestCase {
             ?? surface.firstControl(label: CompactRootBar.action.title) else {
       XCTFail("compact root must host the Add button")
       return
+    }
+    XCTAssertEqual(
+      add.frame.width,
+      add.frame.height,
+      accuracy: 8,
+      "Add must be a separate round control, not a fourth destination in the pill"
+    )
+    if let reflect = surface.tabRowControl(label: "Reflect") {
+      XCTAssertGreaterThan(
+        add.frame.minX - reflect.frame.maxX,
+        8,
+        "Add must have a visible gap from the Reflect end of the destination pill"
+      )
+    } else {
+      XCTFail("compact root missing Reflect")
     }
     XCTAssertLessThan(
       assistant.frame.maxY,

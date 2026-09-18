@@ -603,14 +603,22 @@ struct RootTabView: View {
   }
 }
 
-/// The one compact action. Search role keeps it a trailing button, not a fourth tab.
+/// The compact action stays separate from the destination pill.
 struct RootCaptureTab: TabContent {
+  private var role: TabRole {
+    if #available(iOS 27.0, *) {
+      // Search no longer guarantees the separate prominent treatment.
+      return .prominent
+    }
+    return .search
+  }
+
   var body: some TabContent<CompactBarSelection> {
     Tab(
       CompactRootBar.action.title,
       systemImage: CompactRootBar.action.systemImage,
       value: CompactRootBar.actionSelection,
-      role: .search
+      role: role
     ) {
       Color.clear
     }
@@ -713,10 +721,6 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
       button.isHidden = false
       button.layer.cornerRadius = size.height / 2
       button.clipsToBounds = false
-      button.layer.shadowColor = UIColor.black.cgColor
-      button.layer.shadowOpacity = 0.18
-      button.layer.shadowRadius = 8
-      button.layer.shadowOffset = CGSize(width: 0, height: 4)
       button.frame = CGRect(
         x: pin.midX - size.width / 2,
         y: pin.minY - gap - size.height,
@@ -728,11 +732,10 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
 
     private func makeAssistantButton() -> UIButton {
       let button = UIButton(type: .system)
-      var configuration = UIButton.Configuration.plain()
+      var configuration = UIButton.Configuration.glass()
       configuration.image = UIImage(systemName: RootTrailingAction.assistant.systemImage)
       configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
       configuration.baseForegroundColor = .label
-      configuration.background.backgroundColor = .white.withAlphaComponent(0.96)
       configuration.cornerStyle = .capsule
       button.configuration = configuration
       button.accessibilityLabel = RootTrailingAction.assistant.title
