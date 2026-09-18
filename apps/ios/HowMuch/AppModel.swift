@@ -2940,6 +2940,10 @@ final class AppModel {
     }
     provisionalLedgerRowIDs.removeAll { removedIDs.contains($0) }
     recordLedgerDelete(removedIDs: removedIDs, mirror: mirror)
+    // The accounts refresh can fail, and provisional data cannot be persisted.
+    // Invalidate disk state and queued pre-delete writes now; a later successful
+    // refresh can persist the repaired page without resurrecting the old link.
+    snapshotStore.delete()
   }
 
   // MARK: - Delete read-order ownership
