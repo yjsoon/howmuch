@@ -917,8 +917,8 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
     }
 
     private func destinationHitUnion(in window: UIWindow) -> CGRect? {
-      let frames = CompactRootBar.destinationTabs.compactMap { title in
-        preferredDestinationHit(title: title, in: window)?.frame
+      let frames = CompactRootBar.destinationTabs.compactMap { tab in
+        preferredDestinationHit(title: tab.title, in: window)?.frame
       }
       guard let first = frames.first else {
         return nil
@@ -1045,8 +1045,8 @@ struct RootTabBarFloatingChrome: UIViewControllerRepresentable {
     }
 
     private func destinationItemViews(in window: UIWindow, fallingBackTo bar: UITabBar?) -> [UIView] {
-      let hitViews = CompactRootBar.destinationTabs.compactMap { title in
-        preferredDestinationHit(title: title, in: window)?.view
+      let hitViews = CompactRootBar.destinationTabs.compactMap { tab in
+        preferredDestinationHit(title: tab.title, in: window)?.view
       }
       if !hitViews.isEmpty {
         return hitViews
