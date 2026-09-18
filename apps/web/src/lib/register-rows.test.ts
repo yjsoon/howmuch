@@ -7,6 +7,7 @@ import {
   reconcileClearedOverlays,
   replaceRowById,
   retainInFlightPatches,
+  supersedeClearedOverlays,
   unlinkSplitMirrorParent,
 } from "./register-rows";
 
@@ -92,6 +93,18 @@ describe("register rows", () => {
       row("a"),
       row("b", false, "cleared"),
       row("c"),
+    ]);
+  });
+
+  test("a bulk command discards targeted overlays before complete or uncertain outcomes", () => {
+    const overlays = new Map([
+      ["confirmed-row", "cleared"],
+      ["uncertain-row", "uncleared"],
+      ["unrelated-in-flight", "uncleared"],
+    ]);
+
+    expect([...supersedeClearedOverlays(overlays, new Set(["confirmed-row", "uncertain-row"]))]).toEqual([
+      ["unrelated-in-flight", "uncleared"],
     ]);
   });
 
