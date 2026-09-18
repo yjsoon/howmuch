@@ -495,83 +495,180 @@ final class CaptureSnapshotTests: XCTestCase {
     let router = CaptureRouter.shared
     let previous = router.presented
     defer { router.presented = previous }
-    var draft = TransactionDraft()
-    draft.amountMagnitudeMilli = 5_400
-    draft.accountID = "acct-everyday"
-    let dateLabel = draft.date.formatted(date: .long, time: .omitted)
-    let harness = SnapshotHarness.make()
-    let request = CaptureRequest(
-      kind: .manual(draft),
-      connectionFingerprint: harness.model.settings.connectionFingerprint,
-      origin: .presetDraft
-    )
-    router.presented = request
-    guard let surface = SnapshotSurface(
-      root: Text("Entry fixture")
+    let cases: [(name: String, amount: Int)] = [
+      ("keypad-down", 5_400),
+      ("keypad-up", 0),
+    ]
+    for item in cases {
+      var draft = TransactionDraft()
+      draft.amountMagnitudeMilli = item.amount
+      draft.accountID = "acct-everyday"
+      let dateLabel = draft.date.formatted(date: .long, time: .omitted)
+      let harness = SnapshotHarness.make()
+      let chrome = RootChromeState()
+      let request = CaptureRequest(
+        kind: .manual(draft),
+        connectionFingerprint: harness.model.settings.connectionFingerprint,
+        origin: .presetDraft
+      )
+      router.presented = request
+      guard let surface = SnapshotSurface(
+        root: RootTabView(
+          chrome: chrome,
+          usesSidebar: false,
+          workspace: harness.workspace,
+          presentingManually: {}
+        )
+        .environment(chrome)
+        .environment(harness.model)
+        .environment(\.horizontalSizeClass, .compact)
         .sheet(item: Binding(get: { router.presented }, set: { router.presented = $0 })) { request in
           CaptureIntakeHost(request: request, workspace: harness.workspace)
+            .id(request.id)
             .environment(harness.model)
         },
-      size: CGSize(width: 390, height: 844)
-    ) else {
-      return XCTFail("date picker sheet needs a connected UIWindowScene")
-    }
-    defer { surface.detach() }
-
-    let opened = await surface.waitUntil {
-      surface.firstControl(label: "Cancel") != nil
-        && surface.firstControl(labelContains: dateLabel) != nil
-    }
-    XCTAssertTrue(opened, "manual form must show the date row: \(surface.accessibilityLabels())")
-    await surface.settleNavigation()
-    let formSheet = try XCTUnwrap(surface.presentedSheetFrame(), "Add Transaction sheet must be presented")
-
-    let dateRow = try XCTUnwrap(
-      surface.firstControl(label: "Date")
-        ?? surface.firstControl(labelContains: dateLabel)
-        ?? surface.firstControl(labelContains: "Date"),
-      "Date row missing: \(surface.accessibilityLabels())"
-    )
-    XCTAssertTrue(surface.activate(dateRow))
-    let pickerOpened = await surface.waitUntil {
-      surface.presentedCalendarFrame() != nil
-    }
-    XCTAssertTrue(pickerOpened, "graphical date picker must appear: \(surface.accessibilityLabels())")
-    await surface.settleNavigation()
-
-    let firstSheet = try XCTUnwrap(surface.presentedSheetFrame())
-    let firstCalendar = try XCTUnwrap(surface.presentedCalendarFrame())
-    var sheetHeights = [firstSheet.height]
-    var calendarHeights = [firstCalendar.height]
-    for _ in 0..<24 {
-      try await Task.sleep(nanoseconds: 50_000_000)
-      surface.layoutNow()
-      if let height = surface.presentedSheetFrame()?.height {
-        sheetHeights.append(height)
+        size: CGSize(width: 390, height: 844)
+      ) else {
+        XCTFail("\(item.name) date picker sheet needs a connected UIWindowScene")
+        continue
       }
-      if let height = surface.presentedCalendarFrame()?.height {
-        calendarHeights.append(height)
+      defer { surface.detach() }
+
+      let opened = await surface.waitUntil {
+        surface.firstControl(label: "Cancel") != nil
+          && surface.firstControl(labelContains: dateLabel) != nil
       }
+      XCTAssertTrue(opened, "\(item.name) manual form must show the date row: \(surface.accessibilityLabels())")
+      await surface.settleNavigation()
+      if item.amount == 0 {
+        let keypadVisible = await surface.waitUntil { surface.calculatorKeypadDigitOne() != nil }
+        XCTAssertTrue(
+          keypadVisible,
+          "\(item.name) must show CalculatorKeypad before Date: \(surface.accessibilityLabels())"
+        )
+      } else {
+        XCTAssertNil(
+          surface.calculatorKeypadDigitOne(),
+          "\(item.name) must not mount CalculatorKeypad: \(surface.accessibilityLabels())"
+        )
+      }
+      let formSheet = try XCTUnwrap(
+        surface.presentedSheetFrame(),
+        "\(item.name) Add Transaction sheet must be presented"
+      )
+
+      let dateRow = try XCTUnwrap(
+        surface.firstControl(label: "Date")
+          ?? surface.firstControl(labelContains: dateLabel)
+          ?? surface.firstControl(labelContains: "Date"),
+        "\(item.name) Date row missing: \(surface.accessibilityLabels())"
+      )
+      XCTAssertTrue(surface.activate(dateRow))
+
+      var sheetFrames: [CGRect] = []
+      var calendarSizes: [CGSize] = []
+      var navBarFrames: [CGRect] = []
+      let pickerOpened = await surface.waitUntil {
+        guard let sample = surface.datePickerCensus() else {
+          return false
+        }
+        sheetFrames = [sample.sheet]
+        calendarSizes = [sample.calendar.size]
+        if let navBar = sample.navBar {
+          navBarFrames = [navBar]
+        }
+        return true
+      }
+      XCTAssertTrue(pickerOpened, "\(item.name) graphical date picker must appear: \(surface.accessibilityLabels())")
+      XCTAssertNil(
+        surface.calculatorKeypadDigitOne(),
+        "\(item.name) Date must hide CalculatorKeypad once the calendar exists: \(surface.accessibilityLabels())"
+      )
+      attachImage(surface.captureVisible(), name: "manual-date-picker-first-\(item.name)")
+
+      for _ in 0..<24 {
+        try await Task.sleep(nanoseconds: 50_000_000)
+        surface.layoutNow()
+        guard let sample = surface.datePickerCensus() else {
+          continue
+        }
+        sheetFrames.append(sample.sheet)
+        calendarSizes.append(sample.calendar.size)
+        if let navBar = sample.navBar {
+          navBarFrames.append(navBar)
+        }
+      }
+      attachImage(surface.captureVisible(), name: "manual-date-picker-open-\(item.name)")
+
+      let firstSheet = try XCTUnwrap(sheetFrames.first, "\(item.name) must sample the sheet as soon as the calendar exists")
+      if item.amount != 0 {
+        XCTAssertEqual(
+          formSheet.minX,
+          firstSheet.minX,
+          accuracy: 0.5,
+          "\(item.name) opening Date must not move the sheet x: form \(formSheet) picker \(firstSheet)"
+        )
+        XCTAssertEqual(
+          formSheet.minY,
+          firstSheet.minY,
+          accuracy: 0.5,
+          "\(item.name) opening Date must not move the sheet y: form \(formSheet) picker \(firstSheet)"
+        )
+        XCTAssertEqual(
+          formSheet.width,
+          firstSheet.width,
+          accuracy: 0.5,
+          "\(item.name) opening Date must not change the sheet width: form \(formSheet) picker \(firstSheet)"
+        )
+        XCTAssertEqual(
+          formSheet.height,
+          firstSheet.height,
+          accuracy: 0.5,
+          "\(item.name) opening Date must not change the sheet height: form \(formSheet) picker \(firstSheet)"
+        )
+      }
+      XCTAssertLessThan(
+        Self.axisJump(sheetFrames.map(\.minX)),
+        0.5,
+        "\(item.name) sheet x jumped after the date picker appeared: \(sheetFrames)"
+      )
+      XCTAssertLessThan(
+        Self.axisJump(sheetFrames.map(\.minY)),
+        0.5,
+        "\(item.name) sheet y jumped after the date picker appeared: \(sheetFrames) nav \(navBarFrames)"
+      )
+      XCTAssertLessThan(
+        Self.axisJump(sheetFrames.map(\.width)),
+        0.5,
+        "\(item.name) sheet width jumped after the date picker appeared: \(sheetFrames)"
+      )
+      XCTAssertLessThan(
+        Self.axisJump(sheetFrames.map(\.height)),
+        0.5,
+        "\(item.name) sheet height jumped after the date picker appeared: \(sheetFrames)"
+      )
+      XCTAssertLessThan(
+        Self.axisJump(calendarSizes.map(\.width)),
+        0.5,
+        "\(item.name) date picker width jumped after it appeared: \(calendarSizes)"
+      )
+      XCTAssertLessThan(
+        Self.axisJump(calendarSizes.map(\.height)),
+        0.5,
+        "\(item.name) date picker height jumped after it appeared: \(calendarSizes)"
+      )
+      XCTAssertFalse(navBarFrames.isEmpty, "\(item.name) must sample the navigation bar after the date picker appeared")
+      XCTAssertLessThan(
+        Self.axisJump(navBarFrames.map(\.height)),
+        0.5,
+        "\(item.name) navigation bar height jumped after the date picker appeared: \(navBarFrames)"
+      )
+      router.presented = nil
     }
-    attachImage(surface.captureVisible(), name: "manual-date-picker-open")
-    let sheetJump = (sheetHeights.max() ?? 0) - (sheetHeights.min() ?? 0)
-    let calendarJump = (calendarHeights.max() ?? 0) - (calendarHeights.min() ?? 0)
-    XCTAssertEqual(
-      formSheet.height,
-      firstSheet.height,
-      accuracy: 0.5,
-      "opening Date must not change the sheet height: form \(formSheet.height) picker \(firstSheet.height)"
-    )
-    XCTAssertLessThan(
-      sheetJump,
-      0.5,
-      "sheet height jumped after the date picker appeared: \(sheetHeights)"
-    )
-    XCTAssertLessThan(
-      calendarJump,
-      0.5,
-      "date picker height jumped after it appeared: \(calendarHeights)"
-    )
+  }
+
+  private static func axisJump(_ values: [CGFloat]) -> CGFloat {
+    (values.max() ?? 0) - (values.min() ?? 0)
   }
 
   func testManualShortcutTransferRequiresDistinctInheritedSource() async throws {
@@ -2889,7 +2986,40 @@ final class SnapshotSurface {
     guard let calendar = firstCalendarView() else {
       return nil
     }
-    return windowFrame(of: calendar)
+    let frame = windowFrame(of: calendar)
+    return frame.height > 1 ? frame : nil
+  }
+
+  func presentedNavigationBarFrame() -> CGRect? {
+    guard let root = presentedController()?.view else {
+      return nil
+    }
+    func walk(_ view: UIView) -> UINavigationBar? {
+      if let bar = view as? UINavigationBar, bar.bounds.height > 1 {
+        return bar
+      }
+      for child in view.subviews {
+        if let found = walk(child) {
+          return found
+        }
+      }
+      return nil
+    }
+    guard let bar = walk(root) else {
+      return nil
+    }
+    return windowFrame(of: bar)
+  }
+
+  func datePickerCensus() -> (
+    sheet: CGRect,
+    calendar: CGRect,
+    navBar: CGRect?
+  )? {
+    guard let sheet = presentedSheetFrame(), let calendar = presentedCalendarFrame() else {
+      return nil
+    }
+    return (sheet, calendar, presentedNavigationBarFrame())
   }
 
   private func presentedController() -> UIViewController? {
@@ -2943,6 +3073,16 @@ final class SnapshotSurface {
     return nodes.first {
       $0.label == label && $0.traits.contains(.button)
     } ?? nodes.first { $0.label == label }
+  }
+
+  func calculatorKeypadDigitOne() -> SnapshotAXNode? {
+    guard firstControl(label: "done") != nil
+      || firstControl(label: "next") != nil
+      || firstControl(label: "save") != nil
+    else {
+      return nil
+    }
+    return firstControl(label: "1")
   }
 
   func tabRowControl(label: String) -> SnapshotAXNode? {

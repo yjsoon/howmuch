@@ -160,6 +160,7 @@ struct TransactionFormView: View {
   @State private var categoryCandidates: [SlipCandidate] = []
   @State private var showAccountPrompt = false
   @State private var showCategoryPrompt = false
+  @State private var isShowingDate = false
   private let isEditing: Bool
   private let allowsDeletion: Bool
   private let chrome: TransactionFormChrome
@@ -262,6 +263,9 @@ struct TransactionFormView: View {
       .background(Theme.canvas)
       .navigationDestination(isPresented: $isAutoAdvancingToPayee) {
         PayeePickerView(draft: $draft)
+      }
+      .navigationDestination(isPresented: $isShowingDate) {
+        DateFieldView(date: $draft.date)
       }
       .navigationTitle(formTitle)
       .navigationBarTitleDisplayMode(.inline)
@@ -570,8 +574,9 @@ struct TransactionFormView: View {
       }
       CardDivider()
 
-      NavigationLink {
-        DateFieldView(date: $draft.date)
+      Button {
+        collapseKeypad()
+        isShowingDate = true
       } label: {
         DisclosureValueRow(
           icon: "calendar",
@@ -595,6 +600,15 @@ struct TransactionFormView: View {
     SlipAccountPick.apply(accountID, to: &draft)
     accountCandidates = []
     showAccountPrompt = false
+  }
+
+  private func collapseKeypad() {
+    draft.amountMagnitudeMilli = keypad.commitValue()
+    var transaction = SwiftUI.Transaction()
+    transaction.disablesAnimations = true
+    withTransaction(transaction) {
+      isKeypadVisible = false
+    }
   }
 
   private func ambiguousRail(
@@ -1261,11 +1275,8 @@ struct DateFieldView: View {
 
   var body: some View {
     VStack {
-      DatePicker("Date", selection: $date, displayedComponents: .date)
-        .datePickerStyle(.graphical)
-        .tint(Theme.accent)
+      PrimedInlineDatePicker(date: $date)
         .padding(.horizontal, 8)
-        .fixedSize(horizontal: false, vertical: true)
         .ynabCard()
         .padding(16)
         .onChange(of: date) {
@@ -1276,5 +1287,150 @@ struct DateFieldView: View {
     .background(Theme.canvas)
     .navigationTitle("Date")
     .navigationBarTitleDisplayMode(.inline)
+  }
+}
+
+private struct PrimedInlineDatePicker: UIViewRepresentable {
+  @Binding var date: Date
+
+  func makeCoordinator() -> Coordinator {
+    Coordinator(date: $date)
+  }
+
+  func makeUIView(context: Context) -> PrimedDatePickerView {
+    let view = PrimedDatePickerView()
+    view.picker.tintColor = UIColor(Theme.accent)
+    view.picker.date = date
+    view.picker.addTarget(
+      context.coordinator,
+      action: #selector(Coordinator.changed(_:)),
+      for: .valueChanged
+    )
+    return view
+  }
+
+  func updateUIView(_ view: PrimedDatePickerView, context: Context) {
+    context.coordinator.date = $date
+    if view.picker.date != date {
+      view.picker.date = date
+    }
+    view.picker.tintColor = UIColor(Theme.accent)
+  }
+
+  func sizeThatFits(
+    _ proposal: ProposedViewSize,
+    uiView: PrimedDatePickerView,
+    context: Context
+  ) -> CGSize? {
+    let width = proposal.width ?? uiView.bounds.width
+    guard width > 1 else {
+      return uiView.bounds.size
+    }
+    return uiView.prime(width: width)
+  }
+
+  final class Coordinator: NSObject {
+    var date: Binding<Date>
+
+    init(date: Binding<Date>) {
+      self.date = date
+    }
+
+    @objc func changed(_ picker: UIDatePicker) {
+      date.wrappedValue = picker.date
+    }
+  }
+}
+
+private final class PrimedDatePickerView: UIView {
+  static let compressedMinimumHeight: CGFloat = 324
+
+  let picker: UIDatePicker = {
+    let picker = UIDatePicker()
+    picker.datePickerMode = .date
+    picker.preferredDatePickerStyle = .inline
+    picker.calendar = .current
+    picker.locale = .current
+    return picker
+  }()
+
+  private var lockedHeight: CGFloat = 0
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    clipsToBounds = true
+  }
+
+  required init?(coder: NSCoder) {
+    return nil
+  }
+
+  @discardableResult
+  func prime(width: CGFloat) -> CGSize {
+    if picker.superview == nil {
+      addSubview(picker)
+    }
+    let measured = twoPassHeight(width: width)
+    let height: CGFloat
+    if abs(measured - Self.compressedMinimumHeight) < 0.5 {
+      height = max(measured, Self.reservedHeight(forWidth: width))
+    } else {
+      height = measured
+    }
+    lockedHeight = height
+    applyFrames(width: width, height: height)
+    return CGSize(width: width, height: height)
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    guard picker.superview != nil, lockedHeight > 1 else {
+      return
+    }
+    applyFrames(width: bounds.width, height: lockedHeight)
+  }
+
+  private func twoPassHeight(width: CGFloat) -> CGFloat {
+    let fitting = CGSize(width: width, height: UIView.layoutFittingExpandedSize.height)
+    bounds.size.width = width
+    picker.frame.size.width = width
+    picker.setNeedsLayout()
+    picker.layoutIfNeeded()
+    var height = picker.sizeThatFits(fitting).height
+    picker.frame.size.height = max(height, 1)
+    picker.setNeedsLayout()
+    picker.layoutIfNeeded()
+    height = max(height, picker.sizeThatFits(fitting).height)
+    guard let calendar = Self.calendarView(in: picker) else {
+      return height
+    }
+    calendar.setNeedsLayout()
+    calendar.layoutIfNeeded()
+    let first = calendar.sizeThatFits(fitting).height
+    calendar.bounds.size.height = max(first, 1)
+    calendar.setNeedsLayout()
+    calendar.layoutIfNeeded()
+    let second = calendar.sizeThatFits(fitting).height
+    return max(height, first, second)
+  }
+
+  private func applyFrames(width: CGFloat, height: CGFloat) {
+    picker.frame = CGRect(x: 0, y: 0, width: width, height: height)
+    bounds.size = CGSize(width: width, height: height)
+    if let calendar = Self.calendarView(in: picker) {
+      calendar.bounds.size.height = height
+    }
+  }
+
+  private static func reservedHeight(forWidth width: CGFloat) -> CGFloat {
+    let cell = floor(width / 7)
+    return 54 + 22 + (6 * cell)
+  }
+
+  private static func calendarView(in view: UIView) -> UIView? {
+    if String(describing: type(of: view)).contains("UICalendarView") {
+      return view
+    }
+    return view.subviews.lazy.compactMap { calendarView(in: $0) }.first
   }
 }
