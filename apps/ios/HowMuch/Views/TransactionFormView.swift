@@ -1272,6 +1272,7 @@ struct DateFieldView: View {
         }
       Spacer()
     }
+    .containerRelativeFrame(.vertical, alignment: .top)
     .background(Theme.canvas)
     .navigationTitle("Date")
     .navigationBarTitleDisplayMode(.inline)
