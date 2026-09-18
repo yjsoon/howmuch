@@ -242,7 +242,6 @@ enum CompactBarSelection: Hashable, CaseIterable {
   case accounts
   case rewards
   case reflect
-  /// The one compact action. Not a destination tab.
   case addTransaction
 
   var tab: AppTab? {
@@ -618,8 +617,6 @@ struct RootCaptureTab: TabContent {
   }
 }
 
-/// Pins the floating Assistant above the compact Add button. It is not a tab
-/// and must not sit in the destination row.
 struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
   var openAssistant: () -> Void
 
@@ -884,7 +881,7 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
         bar.bounds.width > 1
           && bar.bounds.height > 1
           && bar.convert(bar.bounds, to: window).intersects(frame)
-          && tabBarHostsRowLabels(bar)
+          && tabBarHostsRowLabelsIncludingHidden(bar)
       }
       return owners.first { isShownInHierarchy($0) } ?? owners.first
     }
@@ -903,8 +900,7 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
       return found
     }
 
-    /// Ownership walk — includes hidden bars so we can tell which one hosts Add.
-    private func tabBarHostsRowLabels(_ bar: UITabBar) -> Bool {
+    private func tabBarHostsRowLabelsIncludingHidden(_ bar: UITabBar) -> Bool {
       var labels: Set<String> = []
       var seen = Set<ObjectIdentifier>()
       func collect(_ object: NSObject) {

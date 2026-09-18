@@ -2910,7 +2910,6 @@ final class SnapshotSurface {
     Self.search(host.view, type)
   }
 
-  /// The visible (or last remaining) tab bar that hosts the compact Add row.
   /// `firstDescendant(UITabBar.self)` can hit a leftover already-hidden system bar.
   func tabBarOwningRow() -> UITabBar? {
     var found: [UITabBar] = []
