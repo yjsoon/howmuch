@@ -123,6 +123,42 @@ final class SplitMirrorDeleteTests: XCTestCase {
     )
   }
 
+  func testSuccessfulDeleteInvalidatesSnapshotWhenAccountsRefreshFails() async throws {
+    let initial = makeModel()
+    await loadLedger(initial)
+    store.waitForPendingWrites()
+    let snapshot = try XCTUnwrap(store.load())
+    XCTAssertTrue(snapshot.ledgerPage?.transactions.contains {
+      $0.id == SplitMirrorFixtureProtocol.mirrorID
+    } == true)
+
+    // Delete from a warm launch, before its provisional references have been
+    // refreshed. Simply calling persistSnapshot would refuse to write here.
+    let model = AppModel(settings: initial.settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    XCTAssertTrue(model.ledgerIsProvisional)
+    let mirror = try XCTUnwrap(loadedMirror(in: model))
+    SplitMirrorFixtureProtocol.failReadsAfterDelete()
+    // A queued pre-delete write must not recreate the invalidated file either.
+    store.scheduleWrite(snapshot)
+    try await model.deleteTransaction(mirror)
+    await model.refresh(slices: [.accounts])
+    assertMirrorGoneAndParentUnlinked(model)
+    let requests = SplitMirrorFixtureProtocol.requests()
+    let deleteIndex = try XCTUnwrap(requests.firstIndex { $0.method == "DELETE" })
+    XCTAssertTrue(requests.dropFirst(deleteIndex + 1).contains {
+      $0.method == "GET" && $0.path.hasSuffix("/accounts")
+    })
+    store.waitForPendingWrites()
+
+    // No network refresh runs on this new model: this is the offline first frame.
+    let restored = AppModel(settings: model.settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    XCTAssertFalse(restored.transactions.contains { $0.id == SplitMirrorFixtureProtocol.mirrorID })
+    XCTAssertFalse(restored.transactions.flatMap(\.subtransactions).contains {
+      $0.transferTransactionID == SplitMirrorFixtureProtocol.mirrorID
+    })
+    XCTAssertNil(store.load(), "failed follow-up reads must not leave the pre-delete snapshot")
+  }
+
   // MARK: - Reads that were already in flight
 
   func testADelayedFirstPageCannotResurrectTheDeletedMirrorOrItsLink() async throws {
@@ -501,6 +537,7 @@ private final class SplitMirrorFixtureProtocol: URLProtocol {
   private static var firstPageRecentRows = false
   private static var parentMetadataOmitted = false
   private static var relinkAfterDelete = false
+  private static var readsFailAfterDelete = false
 
   static func reset() {
     lock.lock()
@@ -513,6 +550,13 @@ private final class SplitMirrorFixtureProtocol: URLProtocol {
     firstPageRecentRows = false
     parentMetadataOmitted = false
     relinkAfterDelete = false
+    readsFailAfterDelete = false
+    lock.unlock()
+  }
+
+  static func failReadsAfterDelete() {
+    lock.lock()
+    readsFailAfterDelete = true
     lock.unlock()
   }
 
@@ -724,6 +768,10 @@ private final class SplitMirrorFixtureProtocol: URLProtocol {
   private static func body(for url: URL, method: String) -> String? {
     let path = url.path
     let query = url.query ?? ""
+    lock.lock()
+    let failRead = method == "GET" && deleteLanded && readsFailAfterDelete
+    lock.unlock()
+    if failRead { return nil }
     if method == "DELETE" {
       return encoded(
         Envelope(data: SingleTransactionBody(transaction: tombstoneRow(), serverKnowledge: 8))
