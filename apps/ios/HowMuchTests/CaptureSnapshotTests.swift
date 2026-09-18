@@ -491,6 +491,89 @@ final class CaptureSnapshotTests: XCTestCase {
     }
   }
 
+  func testAddTransactionDatePickerDoesNotResizeSheet() async throws {
+    let router = CaptureRouter.shared
+    let previous = router.presented
+    defer { router.presented = previous }
+    var draft = TransactionDraft()
+    draft.amountMagnitudeMilli = 5_400
+    draft.accountID = "acct-everyday"
+    let dateLabel = draft.date.formatted(date: .long, time: .omitted)
+    let harness = SnapshotHarness.make()
+    let request = CaptureRequest(
+      kind: .manual(draft),
+      connectionFingerprint: harness.model.settings.connectionFingerprint,
+      origin: .presetDraft
+    )
+    router.presented = request
+    guard let surface = SnapshotSurface(
+      root: Text("Entry fixture")
+        .sheet(item: Binding(get: { router.presented }, set: { router.presented = $0 })) { request in
+          CaptureIntakeHost(request: request, workspace: harness.workspace)
+            .environment(harness.model)
+        },
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      return XCTFail("date picker sheet needs a connected UIWindowScene")
+    }
+    defer { surface.detach() }
+
+    let opened = await surface.waitUntil {
+      surface.firstControl(label: "Cancel") != nil
+        && surface.firstControl(labelContains: dateLabel) != nil
+    }
+    XCTAssertTrue(opened, "manual form must show the date row: \(surface.accessibilityLabels())")
+    await surface.settleNavigation()
+    let formSheet = try XCTUnwrap(surface.presentedSheetFrame(), "Add Transaction sheet must be presented")
+
+    let dateRow = try XCTUnwrap(
+      surface.firstControl(label: "Date")
+        ?? surface.firstControl(labelContains: dateLabel)
+        ?? surface.firstControl(labelContains: "Date"),
+      "Date row missing: \(surface.accessibilityLabels())"
+    )
+    XCTAssertTrue(surface.activate(dateRow))
+    let pickerOpened = await surface.waitUntil {
+      surface.presentedCalendarFrame() != nil
+    }
+    XCTAssertTrue(pickerOpened, "graphical date picker must appear: \(surface.accessibilityLabels())")
+    await surface.settleNavigation()
+
+    let firstSheet = try XCTUnwrap(surface.presentedSheetFrame())
+    let firstCalendar = try XCTUnwrap(surface.presentedCalendarFrame())
+    var sheetHeights = [firstSheet.height]
+    var calendarHeights = [firstCalendar.height]
+    for _ in 0..<24 {
+      try await Task.sleep(nanoseconds: 50_000_000)
+      surface.layoutNow()
+      if let height = surface.presentedSheetFrame()?.height {
+        sheetHeights.append(height)
+      }
+      if let height = surface.presentedCalendarFrame()?.height {
+        calendarHeights.append(height)
+      }
+    }
+    attachImage(surface.captureVisible(), name: "manual-date-picker-open")
+    let sheetJump = (sheetHeights.max() ?? 0) - (sheetHeights.min() ?? 0)
+    let calendarJump = (calendarHeights.max() ?? 0) - (calendarHeights.min() ?? 0)
+    XCTAssertEqual(
+      formSheet.height,
+      firstSheet.height,
+      accuracy: 0.5,
+      "opening Date must not change the sheet height: form \(formSheet.height) picker \(firstSheet.height)"
+    )
+    XCTAssertLessThan(
+      sheetJump,
+      0.5,
+      "sheet height jumped after the date picker appeared: \(sheetHeights)"
+    )
+    XCTAssertLessThan(
+      calendarJump,
+      0.5,
+      "date picker height jumped after it appeared: \(calendarHeights)"
+    )
+  }
+
   func testManualShortcutTransferRequiresDistinctInheritedSource() async throws {
     let router = CaptureRouter.shared
     let previous = router.presented
@@ -2790,6 +2873,55 @@ final class SnapshotSurface {
   var windowBounds: CGRect { window.bounds }
 
   var windowSafeAreaInsets: UIEdgeInsets { window.safeAreaInsets }
+
+  func presentedSheetFrame() -> CGRect? {
+    guard let presented = presentedController() else {
+      return nil
+    }
+    if let frame = presented.presentationController?.frameOfPresentedViewInContainerView, frame.height > 1 {
+      return frame
+    }
+    let frame = presented.view.frame
+    return frame.height > 1 ? frame : nil
+  }
+
+  func presentedCalendarFrame() -> CGRect? {
+    guard let calendar = firstCalendarView() else {
+      return nil
+    }
+    return windowFrame(of: calendar)
+  }
+
+  private func presentedController() -> UIViewController? {
+    var presenter: UIViewController? = host
+    var last: UIViewController?
+    while let current = presenter {
+      guard let presented = current.presentedViewController else {
+        break
+      }
+      last = presented
+      presenter = presented
+    }
+    return last
+  }
+
+  private func firstCalendarView() -> UIView? {
+    func walk(_ view: UIView) -> UIView? {
+      if String(describing: type(of: view)).contains("UICalendarView") {
+        return view
+      }
+      for child in view.subviews {
+        if let found = walk(child) {
+          return found
+        }
+      }
+      return nil
+    }
+    if let presented = presentedController()?.view, let found = walk(presented) {
+      return found
+    }
+    return walk(window)
+  }
 
   func windowFrame(of view: UIView) -> CGRect {
     windowFrame(of: view as NSObject)
