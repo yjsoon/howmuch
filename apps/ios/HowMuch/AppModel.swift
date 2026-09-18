@@ -27,6 +27,15 @@ private enum AccountUsageScanError: LocalizedError {
   }
 }
 
+/// One local delete, kept only while a ledger read that started before it can
+/// still land. `removedIDs` are the rows the server tombstoned; `mirror` names
+/// the split line the server unlinked on the surviving parent.
+private struct LedgerDelete {
+  let generation: Int
+  let removedIDs: Set<String>
+  let mirror: SplitMirrorLink
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -143,6 +152,19 @@ final class AppModel {
   private var payeesGeneration = 0
   private var scheduledTransactionsGeneration = 0
   private var reportsGeneration = 0
+  /// Read-order boundary for local deletes. Every ledger request captures this
+  /// when it is issued; a delete advances it and records the rows it tombstoned
+  /// and the split line it unlinked. A request issued earlier applies through
+  /// those records, so a response fetched before the delete cannot put the
+  /// mirror or the parent's obsolete link back on screen, while a page asked
+  /// for after it is applied as it came.
+  @ObservationIgnored private var ledgerReadGeneration = 0
+  /// Ledger requests in flight, by the generation each captured when it was
+  /// issued. A delete's record is dropped as soon as no request old enough to
+  /// need it is still in flight, so this stays bounded by read order rather
+  /// than becoming a session-long blacklist.
+  @ObservationIgnored private var inFlightLedgerReads: [Int: Int] = [:]
+  @ObservationIgnored private var ledgerDeletes: [LedgerDelete] = []
   /// Latest plan cursor seen on a ledger fetch. Changes made on another
   /// device advance it, which is how the reports cache (#180) notices them.
   private(set) var serverKnowledge: Int?
@@ -385,6 +407,9 @@ final class AppModel {
     scheduledTransactionsPhase = .idle
     reportsPhase = .idle
     ledgerPageGeneration += 1
+    ledgerReadGeneration &+= 1
+    inFlightLedgerReads.removeAll()
+    ledgerDeletes.removeAll()
     isShowingSettings = true
     wipeIntentCatalog()
   }
@@ -1741,7 +1766,7 @@ final class AppModel {
       // The register is ready when its first page lands. The unapproved queue
       // used to be awaited here too, which made launch cost a full serial walk
       // of that queue before a single row could be shown.
-      let page = try await apiClient.fetchTransactions(planID: planID)
+      let page = try await fetchLedgerPage(planID: planID)
       guard generation == ledgerPageGeneration, planID == settings.planID else {
         return
       }
@@ -1773,11 +1798,11 @@ final class AppModel {
         if quiet, ledgerIsProvisional {
           let displaced = Set(provisionalLedgerRowIDs)
           serverTransactions = sortedUniqueTransactions(
-            page.transactions + serverTransactions.filter { !displaced.contains($0.id) }
+            fetchedFirstPage + serverTransactions.filter { !displaced.contains($0.id) }
           )
         } else {
           serverTransactions = sortedUniqueTransactions(
-            quiet ? page.transactions + serverTransactions : page.transactions
+            quiet ? fetchedFirstPage + serverTransactions : fetchedFirstPage
           )
         }
       }
@@ -1787,7 +1812,7 @@ final class AppModel {
       ledgerIsProvisional = false
       provisionalLedgerRowIDs = []
       lastLedgerFirstPage = ReferenceSnapshot.LedgerPage(
-        transactions: page.transactions,
+        transactions: fetchedFirstPage,
         hasMore: page.hasMore,
         nextOffset: page.nextOffset
       )
@@ -1812,7 +1837,7 @@ final class AppModel {
           break
         }
         do {
-          let older = try await apiClient.fetchTransactions(planID: planID, offset: offset)
+          let older = try await fetchLedgerPage(planID: planID, offset: offset)
           guard
             generation == ledgerPageGeneration,
             planID == settings.planID,
@@ -1899,13 +1924,21 @@ final class AppModel {
   }
 
   private func loadUnapprovedQueue(generation: Int, planID: String) async {
+    // The client walks this queue's pages internally, so the fence covers the
+    // walk rather than one request. That stays safe: a page asked for after a
+    // delete cannot name the rows it removed or the line it unlinked, and a
+    // line that has since been relinked names a different mirror, which
+    // `linksSplitMirror` refuses to unlink.
+    let readGeneration = beginLedgerRead()
+    defer { endLedgerRead(readGeneration) }
     unapprovedQueuePhase = .loading
     do {
       let unapproved = try await apiClient.fetchAllUnapprovedTransactions(planID: planID)
       guard generation == ledgerPageGeneration, planID == settings.planID else { return }
       guard stillWantsUnapprovedQueue() else { return }
-      replaceUnapprovedQueue(with: unapproved)
-      reconcileClearedToggleOverlays(generation: generation, fetched: unapproved)
+      let repaired = repairingStaleRead(unapproved, startedAt: readGeneration)
+      replaceUnapprovedQueue(with: repaired)
+      reconcileClearedToggleOverlays(generation: generation, fetched: repaired)
       unapprovedQueuePhase = .loaded
     } catch {
       guard generation == ledgerPageGeneration, planID == settings.planID else { return }
@@ -1979,6 +2012,12 @@ final class AppModel {
     payeesGeneration &+= 1
     scheduledTransactionsGeneration &+= 1
     reportsGeneration &+= 1
+    // A delete's records and the reads that needed them belong to one
+    // connection: nothing from the old scope can land after this, and a row in
+    // the new plan that happens to share a deleted id is its own row.
+    ledgerReadGeneration &+= 1
+    inFlightLedgerReads.removeAll()
+    ledgerDeletes.removeAll()
     // A cursor and a reports cache belong to one plan; carrying them across a
     // connection change would serve the previous plan's reports.
     serverKnowledge = nil
@@ -2207,7 +2246,7 @@ final class AppModel {
       rowCount: loaded.count
     ) {
       do {
-        let page = try await apiClient.fetchTransactions(
+        let page = try await fetchLedgerPage(
           planID: planID,
           accountID: accountID,
           offset: offset,
@@ -2270,7 +2309,7 @@ final class AppModel {
     }
 
     do {
-      let page = try await apiClient.fetchTransactions(planID: planID, offset: offset)
+      let page = try await fetchLedgerPage(planID: planID, offset: offset)
       guard
         generation == ledgerPageGeneration,
         planID == settings.planID,
@@ -2839,19 +2878,35 @@ final class AppModel {
     isSubmitting = true
     defer { isSubmitting = false }
 
-    _ = try await apiClient.deleteTransaction(
+    let deleted = try await apiClient.deleteTransaction(
       planID: settings.planID,
       transactionID: transaction.id,
       expectedApproved: transaction.approved ? nil : false
     )
-    var removedIDs: Set<String> = [transaction.id]
-    if let linkedID = transaction.transferTransactionID {
-      removedIDs.insert(linkedID)
-    }
-    for subtransaction in transaction.subtransactions {
-      if let linkedID = subtransaction.transferTransactionID {
-        removedIDs.insert(linkedID)
-      }
+    applyDeletedTransaction(deleted, fallback: transaction)
+    showSaveMessage("Deleted \(transaction.payeeName ?? "transaction")")
+    scheduleRefresh(after: .transactionDeleted)
+  }
+
+  /// Applies a delete from the row the server returned, falling back to the row
+  /// in hand for the link metadata an older response may omit. The server
+  /// tombstones the target -- and, for a whole transfer, its other side -- but
+  /// leaves a split parent in place and only clears the matching line's transfer
+  /// link (web: `unlinkSplitMirrorParent`), so the parent must survive here too.
+  private func applyDeletedTransaction(_ deleted: Transaction, fallback: Transaction) {
+    let mirror = SplitMirrorLink(
+      id: deleted.id,
+      parentTransactionID: deleted.parentTransactionID ?? fallback.parentTransactionID,
+      transferTransactionID: deleted.transferTransactionID ?? fallback.transferTransactionID
+    )
+    var removedIDs: Set<String> = [mirror.id, fallback.id]
+    if mirror.parentTransactionID == nil {
+      // A split mirror's own transfer id names the parent's subtransaction, not
+      // a transaction, and the server removes only the mirror row: the parent
+      // and its other lines stay. Every other delete cascades to the ids the
+      // response names -- a transfer's other half, or a parent's mirrored lines.
+      let links = Set(deleted.linkedTransferIDs)
+      removedIDs.formUnion(links.isEmpty ? Set(fallback.linkedTransferIDs) : links)
     }
     // Rejecting a row awaiting approval takes it off the "New" badge, the same
     // as approving it would. Recorded before the arrays are cleared, and also
@@ -2859,13 +2914,117 @@ final class AppModel {
     for row in serverUnapprovedTransactions where removedIDs.contains(row.id) {
       rejectedUnapprovedAccounts[row.id] = row.accountID
     }
-    if !transaction.approved {
-      rejectedUnapprovedAccounts[transaction.id] = transaction.accountID
+    if !fallback.approved {
+      rejectedUnapprovedAccounts[fallback.id] = fallback.accountID
     }
-    serverTransactions.removeAll { removedIDs.contains($0.id) }
-    serverUnapprovedTransactions.removeAll { removedIDs.contains($0.id) }
-    showSaveMessage("Deleted \(transaction.payeeName ?? "transaction")")
-    scheduleRefresh(after: .transactionDeleted)
+    serverTransactions = SplitMirrorUnlink.applying(
+      mirror,
+      to: serverTransactions.filter { !removedIDs.contains($0.id) }
+    )
+    serverUnapprovedTransactions = SplitMirrorUnlink.applying(
+      mirror,
+      to: serverUnapprovedTransactions.filter { !removedIDs.contains($0.id) }
+    )
+    // The snapshot is written from the first page as the network returned it, so
+    // it has to lose the mirror too: the next accounts refresh persists it, and
+    // a cold launch would otherwise restore a row this delete removed.
+    if let page = lastLedgerFirstPage {
+      lastLedgerFirstPage = ReferenceSnapshot.LedgerPage(
+        transactions: SplitMirrorUnlink.applying(
+          mirror,
+          to: page.transactions.filter { !removedIDs.contains($0.id) }
+        ),
+        hasMore: page.hasMore,
+        nextOffset: page.nextOffset
+      )
+    }
+    provisionalLedgerRowIDs.removeAll { removedIDs.contains($0) }
+    recordLedgerDelete(removedIDs: removedIDs, mirror: mirror)
+  }
+
+  // MARK: - Delete read-order ownership
+
+  /// One HTTP page of the ledger, with the read-order fence captured for that
+  /// request alone and applied before the page leaves this function. A page
+  /// asked for after a delete is therefore handed over untouched even when it
+  /// belongs to a walk that started before it -- the later page of a horizon
+  /// fill, or of a register's older-page load. A page asked for before the
+  /// delete is repaired against what the delete removed.
+  private func fetchLedgerPage(
+    planID: String,
+    accountID: String? = nil,
+    offset: Int = 0,
+    sinceDate: String? = nil
+  ) async throws -> TransactionPage {
+    let generation = beginLedgerRead()
+    defer { endLedgerRead(generation) }
+    let page = try await apiClient.fetchTransactions(
+      planID: planID,
+      accountID: accountID,
+      offset: offset,
+      sinceDate: sinceDate
+    )
+    return TransactionPage(
+      transactions: repairingStaleRead(page.transactions, startedAt: generation),
+      hasMore: page.hasMore,
+      nextOffset: page.nextOffset,
+      serverKnowledge: page.serverKnowledge
+    )
+  }
+
+  /// Registers one request as a read. Every call must be paired with
+  /// `endLedgerRead` once its rows have been repaired.
+  private func beginLedgerRead() -> Int {
+    let generation = ledgerReadGeneration
+    inFlightLedgerReads[generation, default: 0] += 1
+    return generation
+  }
+
+  private func endLedgerRead(_ generation: Int) {
+    if let count = inFlightLedgerReads[generation], count > 1 {
+      inFlightLedgerReads[generation] = count - 1
+    } else {
+      inFlightLedgerReads[generation] = nil
+    }
+    pruneLedgerDeletes()
+  }
+
+  /// Drops delete records no in-flight request can still need. A request needs
+  /// the record of every delete newer than the generation it captured when it
+  /// was issued.
+  private func pruneLedgerDeletes() {
+    guard let oldestInFlight = inFlightLedgerReads.keys.min() else {
+      ledgerDeletes.removeAll()
+      return
+    }
+    ledgerDeletes.removeAll { oldestInFlight >= $0.generation }
+  }
+
+  /// Records a delete for the requests that were issued before it, then advances
+  /// the read-order boundary so every later request applies untouched.
+  private func recordLedgerDelete(removedIDs: Set<String>, mirror: SplitMirrorLink) {
+    ledgerReadGeneration &+= 1
+    ledgerDeletes.append(
+      LedgerDelete(generation: ledgerReadGeneration, removedIDs: removedIDs, mirror: mirror)
+    )
+    pruneLedgerDeletes()
+  }
+
+  /// Repairs rows a request issued before a delete could know about: the rows
+  /// that delete tombstoned are dropped, and any surviving parent row forgets
+  /// the link the server cleared. A request issued at the current generation
+  /// needs no repair.
+  private func repairingStaleRead(_ rows: [Transaction], startedAt generation: Int) -> [Transaction] {
+    let stale = ledgerDeletes.filter { $0.generation > generation }
+    guard !stale.isEmpty else {
+      return rows
+    }
+    return stale.reduce(rows) { repaired, delete in
+      SplitMirrorUnlink.applying(
+        delete.mirror,
+        to: repaired.filter { !delete.removedIDs.contains($0.id) }
+      )
+    }
   }
 
   func approveEligible(from rows: [Transaction]) {

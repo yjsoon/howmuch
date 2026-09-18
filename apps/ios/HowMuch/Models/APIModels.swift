@@ -1519,6 +1519,122 @@ extension Transaction {
       subtransactions: subtransactions
     )
   }
+
+  /// Returns a copy carrying `subtransactions`. Split-line writes replace the
+  /// whole set, so every other field is kept as-is.
+  func replacingSubtransactions(_ subtransactions: [Subtransaction]) -> Transaction {
+    Transaction(
+      id: id,
+      date: date,
+      amount: amount,
+      memo: memo,
+      cleared: cleared,
+      approved: approved,
+      flagColor: flagColor,
+      flagName: flagName,
+      accountID: accountID,
+      accountName: accountName,
+      payeeID: payeeID,
+      payeeName: payeeName,
+      categoryID: categoryID,
+      categoryName: categoryName,
+      transferAccountID: transferAccountID,
+      transferTransactionID: transferTransactionID,
+      parentTransactionID: parentTransactionID,
+      matchedTransactionID: matchedTransactionID,
+      importID: importID,
+      importPayeeName: importPayeeName,
+      importPayeeNameOriginal: importPayeeNameOriginal,
+      deleted: deleted,
+      subtransactions: subtransactions
+    )
+  }
+
+  /// The server leaves a split parent in place when one of its mirrored lines is
+  /// deleted and clears only that line's transfer link, so the parent must not
+  /// be removed here either. Returns the repaired row, or `nil` when no line
+  /// linked to the mirror. Web parity: `unlinkSplitMirrorParent`.
+  func unlinkingSplitMirror(_ mirror: SplitMirrorLink) -> Transaction? {
+    var changed = false
+    let lines = subtransactions.map { line -> Subtransaction in
+      guard line.linksSplitMirror(mirror),
+            line.transferAccountID != nil || line.transferTransactionID != nil else {
+        return line
+      }
+      changed = true
+      return line.clearingTransferLink()
+    }
+    return changed ? replacingSubtransactions(lines) : nil
+  }
+}
+
+/// The link a deleted split mirror leaves behind: the row the server tombstoned,
+/// the split parent it belonged to when the server named one, and the split line
+/// that linked to it.
+struct SplitMirrorLink: Equatable {
+  let id: String
+  let parentTransactionID: String?
+  let transferTransactionID: String?
+}
+
+/// Applies a deleted mirror's link clearing across a set of rows. The mirror may
+/// name its parent directly, or only be reachable from the line that linked to
+/// it -- an older response that omits `parent_transaction_id` still gets
+/// repaired. Web parity: `unlinkSplitMirrorParent` in `apps/web/src/lib/register-rows.ts`.
+enum SplitMirrorUnlink {
+  static func applying(_ mirror: SplitMirrorLink, to rows: [Transaction]) -> [Transaction] {
+    guard let index = parentIndex(for: mirror, in: rows),
+          let repaired = rows[index].unlinkingSplitMirror(mirror) else {
+      return rows
+    }
+    var next = rows
+    next[index] = repaired
+    return next
+  }
+
+  private static func parentIndex(for mirror: SplitMirrorLink, in rows: [Transaction]) -> Int? {
+    if let parentID = mirror.parentTransactionID,
+       let index = rows.firstIndex(where: { $0.id == parentID }) {
+      return index
+    }
+    return rows.firstIndex { row in
+      row.subtransactions.contains { $0.linksSplitMirror(mirror) }
+    }
+  }
+}
+
+extension Subtransaction {
+  /// True when this line is the one a deleted mirror left behind. A line that
+  /// still names the deleted mirror is one; the mirror's own row names its line
+  /// back, but only a line that names no mirror of its own can be that line --
+  /// a line that now names a different mirror has been relinked and must be
+  /// left alone.
+  func linksSplitMirror(_ mirror: SplitMirrorLink) -> Bool {
+    if transferTransactionID == mirror.id {
+      return true
+    }
+    guard transferTransactionID == nil, let mirrorTransferID = mirror.transferTransactionID else {
+      return false
+    }
+    return id == mirrorTransferID
+  }
+
+  /// The line survives a mirror delete; it just forgets the transfer.
+  func clearingTransferLink() -> Subtransaction {
+    Subtransaction(
+      id: id,
+      transactionID: transactionID,
+      amount: amount,
+      memo: memo,
+      payeeID: payeeID,
+      payeeName: payeeName,
+      categoryID: categoryID,
+      categoryName: categoryName,
+      transferAccountID: nil,
+      transferTransactionID: nil,
+      deleted: deleted
+    )
+  }
 }
 
 struct Subtransaction: Codable, Hashable {
