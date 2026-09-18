@@ -603,6 +603,7 @@ struct TransactionFormView: View {
   }
 
   private func collapseKeypad() {
+    draft.amountMagnitudeMilli = keypad.commitValue()
     var transaction = SwiftUI.Transaction()
     transaction.disablesAnimations = true
     withTransaction(transaction) {

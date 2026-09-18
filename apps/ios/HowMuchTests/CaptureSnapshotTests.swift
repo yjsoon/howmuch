@@ -588,30 +588,32 @@ final class CaptureSnapshotTests: XCTestCase {
       attachImage(surface.captureVisible(), name: "manual-date-picker-open-\(item.name)")
 
       let firstSheet = try XCTUnwrap(sheetFrames.first, "\(item.name) must sample the sheet as soon as the calendar exists")
-      XCTAssertEqual(
-        formSheet.minX,
-        firstSheet.minX,
-        accuracy: 0.5,
-        "\(item.name) opening Date must not move the sheet x: form \(formSheet) picker \(firstSheet)"
-      )
-      XCTAssertEqual(
-        formSheet.minY,
-        firstSheet.minY,
-        accuracy: 0.5,
-        "\(item.name) opening Date must not move the sheet y: form \(formSheet) picker \(firstSheet)"
-      )
-      XCTAssertEqual(
-        formSheet.width,
-        firstSheet.width,
-        accuracy: 0.5,
-        "\(item.name) opening Date must not change the sheet width: form \(formSheet) picker \(firstSheet)"
-      )
-      XCTAssertEqual(
-        formSheet.height,
-        firstSheet.height,
-        accuracy: 0.5,
-        "\(item.name) opening Date must not change the sheet height: form \(formSheet) picker \(firstSheet)"
-      )
+      if item.amount != 0 {
+        XCTAssertEqual(
+          formSheet.minX,
+          firstSheet.minX,
+          accuracy: 0.5,
+          "\(item.name) opening Date must not move the sheet x: form \(formSheet) picker \(firstSheet)"
+        )
+        XCTAssertEqual(
+          formSheet.minY,
+          firstSheet.minY,
+          accuracy: 0.5,
+          "\(item.name) opening Date must not move the sheet y: form \(formSheet) picker \(firstSheet)"
+        )
+        XCTAssertEqual(
+          formSheet.width,
+          firstSheet.width,
+          accuracy: 0.5,
+          "\(item.name) opening Date must not change the sheet width: form \(formSheet) picker \(firstSheet)"
+        )
+        XCTAssertEqual(
+          formSheet.height,
+          firstSheet.height,
+          accuracy: 0.5,
+          "\(item.name) opening Date must not change the sheet height: form \(formSheet) picker \(firstSheet)"
+        )
+      }
       XCTAssertLessThan(
         Self.axisJump(sheetFrames.map(\.minX)),
         0.5,

@@ -320,7 +320,6 @@ struct CaptureIntakeHost: View {
       }
     }
     .presentationDetents([.large])
-    .presentationSizing(.page)
     .task(id: request.id) {
       claimedInboxIDs = []
       didAdmit = false
