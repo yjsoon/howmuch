@@ -318,6 +318,13 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertEqual(RootChrome.compactFloatingAddDiameter(pillHeight: 56), 56)
     XCTAssertEqual(RootChrome.compactFloatingAddDiameter(pillHeight: 40), 48)
     XCTAssertEqual(RootChrome.compactFloatingAddReservation(pillHeight: 56), 72)
+    XCTAssertEqual(RootChrome.compactFloatingAddTrailingInset, 80)
+    XCTAssertGreaterThanOrEqual(
+      RootChrome.compactFloatingAddTrailingInset
+        - 8
+        - RootChrome.compactFloatingAddDiameter(pillHeight: 56),
+      8
+    )
     XCTAssertEqual(
       RootChrome.compactFloatingAddSlotMinX(pillHeight: 56, windowMaxX: 390, trailingGutter: 8),
       310
