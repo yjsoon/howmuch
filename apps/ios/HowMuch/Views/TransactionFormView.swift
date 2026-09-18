@@ -1306,7 +1306,6 @@ private struct PrimedInlineDatePicker: UIViewRepresentable {
       action: #selector(Coordinator.changed(_:)),
       for: .valueChanged
     )
-    view.prime(width: PrimedDatePickerView.compactSheetWidth)
     return view
   }
 
@@ -1344,7 +1343,7 @@ private struct PrimedInlineDatePicker: UIViewRepresentable {
 }
 
 private final class PrimedDatePickerView: UIView {
-  static let compactSheetWidth: CGFloat = 390 - 48
+  static let compressedMinimumHeight: CGFloat = 324
 
   let picker: UIDatePicker = {
     let picker = UIDatePicker()
@@ -1360,7 +1359,6 @@ private final class PrimedDatePickerView: UIView {
   override init(frame: CGRect) {
     super.init(frame: frame)
     clipsToBounds = true
-    addSubview(picker)
   }
 
   required init?(coder: NSCoder) {
@@ -1369,6 +1367,30 @@ private final class PrimedDatePickerView: UIView {
 
   @discardableResult
   func prime(width: CGFloat) -> CGSize {
+    if picker.superview == nil {
+      addSubview(picker)
+    }
+    let measured = twoPassHeight(width: width)
+    let height: CGFloat
+    if abs(measured - Self.compressedMinimumHeight) < 0.5 {
+      height = max(measured, Self.reservedHeight(forWidth: width))
+    } else {
+      height = measured
+    }
+    lockedHeight = height
+    applyFrames(width: width, height: height)
+    return CGSize(width: width, height: height)
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    guard picker.superview != nil, lockedHeight > 1 else {
+      return
+    }
+    applyFrames(width: bounds.width, height: lockedHeight)
+  }
+
+  private func twoPassHeight(width: CGFloat) -> CGFloat {
     let fitting = CGSize(width: width, height: UIView.layoutFittingExpandedSize.height)
     bounds.size.width = width
     picker.frame.size.width = width
@@ -1379,32 +1401,24 @@ private final class PrimedDatePickerView: UIView {
     picker.setNeedsLayout()
     picker.layoutIfNeeded()
     height = max(height, picker.sizeThatFits(fitting).height)
-    if let calendar = Self.calendarView(in: picker) {
-      calendar.setNeedsLayout()
-      calendar.layoutIfNeeded()
-      let first = calendar.sizeThatFits(fitting).height
-      calendar.bounds.size.height = max(first, 1)
-      calendar.setNeedsLayout()
-      calendar.layoutIfNeeded()
-      let second = calendar.sizeThatFits(fitting).height
-      height = max(height, first, second)
+    guard let calendar = Self.calendarView(in: picker) else {
+      return height
     }
-    let reserved = Self.reservedHeight(forWidth: width)
-    lockedHeight = max(lockedHeight, height, reserved)
-    picker.frame = CGRect(x: 0, y: 0, width: width, height: lockedHeight)
-    if let calendar = Self.calendarView(in: picker) {
-      calendar.bounds.size.height = lockedHeight
-    }
-    bounds.size = CGSize(width: width, height: lockedHeight)
-    return bounds.size
+    calendar.setNeedsLayout()
+    calendar.layoutIfNeeded()
+    let first = calendar.sizeThatFits(fitting).height
+    calendar.bounds.size.height = max(first, 1)
+    calendar.setNeedsLayout()
+    calendar.layoutIfNeeded()
+    let second = calendar.sizeThatFits(fitting).height
+    return max(height, first, second)
   }
 
-  override func layoutSubviews() {
-    super.layoutSubviews()
-    let height = max(lockedHeight, bounds.height)
-    picker.frame = CGRect(x: 0, y: 0, width: bounds.width, height: height)
-    if let calendar = Self.calendarView(in: picker), lockedHeight > 1 {
-      calendar.bounds.size.height = lockedHeight
+  private func applyFrames(width: CGFloat, height: CGFloat) {
+    picker.frame = CGRect(x: 0, y: 0, width: width, height: height)
+    bounds.size = CGSize(width: width, height: height)
+    if let calendar = Self.calendarView(in: picker) {
+      calendar.bounds.size.height = height
     }
   }
 
