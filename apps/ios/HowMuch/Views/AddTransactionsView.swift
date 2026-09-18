@@ -145,6 +145,7 @@ struct AddTransactionsView: View {
           allowsDeletion: false
         )
         .presentationDetents([.large])
+        .presentationSizing(.page)
         .blocksCapturePresentation()
       }
       .navigationDestination(isPresented: Binding(

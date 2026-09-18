@@ -298,7 +298,6 @@ struct CaptureIntakeHost: View {
         admissionPlaceholder
       } else if let manualDraft {
         TransactionFormView(draft: manualDraft, isEditing: false, allowsDeletion: false)
-          .presentationDetents([.large])
       } else if isReadingInbox {
         InboxReadingView(
           preferredAccountID: session?.selectedAccountID,
@@ -316,11 +315,12 @@ struct CaptureIntakeHost: View {
         )
       } else if let session {
         AddTransactionsView(session: session, workspace: workspace)
-          .presentationDetents([.large])
       } else {
         Theme.canvas
       }
     }
+    .presentationDetents([.large])
+    .presentationSizing(.page)
     .task(id: request.id) {
       claimedInboxIDs = []
       didAdmit = false
