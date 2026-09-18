@@ -152,7 +152,7 @@ final class RefreshPlanTests: XCTestCase {
     XCTAssertEqual(TabRefresh.accounts, [.accounts])
     XCTAssertFalse(TabRefresh.accounts.contains(.reports))
     XCTAssertFalse(TabRefresh.accounts.contains(.ledger))
-    XCTAssertEqual(TabRefresh.register, [.ledger])
+    XCTAssertEqual(TabRefresh.register, [.accounts, .ledger, .schedules])
     XCTAssertEqual(TabRefresh.reflect, [.reports])
   }
 
