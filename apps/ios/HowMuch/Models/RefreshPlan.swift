@@ -123,10 +123,12 @@ enum RefreshPlanner {
     case .transactionDeleted:
       return [.accounts]
 
-    // Approval flips a flag. It moves no money, so nothing needs refetching;
-    // the approved ids are applied locally as each batch succeeds.
+    // The batch response returns only requested rows, while approving a split
+    // also changes its parent and transfer mirrors. The model applies the
+    // graph it can resolve locally, then reloads the bounded first page and
+    // unapproved count for any unloaded companion.
     case .transactionsApproved:
-      return []
+      return [.ledger]
 
     // The POST returns the new account, which the caller inserts. The server
     // also provisions the account's "Transfer : …" payee, which it does not

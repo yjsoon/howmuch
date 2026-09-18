@@ -73,11 +73,11 @@ final class RefreshPlanTests: XCTestCase {
     XCTAssertEqual(RefreshPlanner.slices(after: .transactionDeleted), [.accounts])
   }
 
-  func testApprovalRefreshesNothing() {
+  func testApprovalRefreshesLedgerForCascadedRows() {
     XCTAssertEqual(
       RefreshPlanner.slices(after: .transactionsApproved),
-      [],
-      "approval flips a flag that is applied locally; nothing on the server changed that a read would reveal"
+      [.ledger],
+      "approval can cascade from a split to unloaded mirrors, so the first ledger page and its count must reconcile"
     )
     XCTAssertFalse(RefreshPlanner.invalidatesPlanAndReports(after: .transactionsApproved))
   }
