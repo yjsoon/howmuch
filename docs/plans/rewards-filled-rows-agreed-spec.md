@@ -48,3 +48,12 @@ No server/calculator changes, no "hide until next cycle", no web changes. Existi
 - Miles valuation sheet keeps explanatory footnote, validation and save error. Customise Board keeps Show All Cards and Reset display preferences.
 - Range Report keeps month/preset/custom ranges via `ReportFilterBar`.
 - Editor keeps its embedded ledger for now (via extracted `RewardCardLedgerView`); iPad uses single column at readable width.
+
+## Native review amendments (2026-09-23)
+Made after the first simulator renders; these supersede the matching lines above.
+- Featured and Today sit in one rounded card-coloured bar as the first list row, not a pinned glass `safeAreaBar`. The pinned bar dimmed the large "Rewards" title, and the concept draws a single bar under the title. Each menu label shows a chevron. At accessibility sizes the bar stacks.
+- Monthly qualification reads "$X to monthly minimum". The action never wraps mid-phrase: if it and the deadline don't fit on one line, the deadline drops below.
+- Fallback order puts cards that still need spend (minimum, monthly minimum, next tier, cap headroom) first by nearest deadline, then capped, failed and untargeted cards by reset, then name.
+- Increase Contrast uses the stronger fill and the 1pt outline only; the fill-edge tick crossed glyphs.
+- Detail sheet: status row in its own clear section without the repeated card name, opaque grouped background, "View Transactions", and progress tints that follow the row tones.
+- The summary line is omitted when there are no cards; the "N hidden · Show" footer is omitted when the all-hidden empty state already offers Show Hidden Cards.
