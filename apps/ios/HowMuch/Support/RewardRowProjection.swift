@@ -358,7 +358,9 @@ struct RewardRowText {
       exceptionLines = allExceptions
     }
 
-    var spoken = [amount.map { "\($0) \(actionLabel)" } ?? actionLabel]
+    // Locals, not self: a closure may not capture self before init completes.
+    let label = actionLabel
+    var spoken: [String] = [amount.map { "\($0) \(label)" } ?? label]
     if let basis = projection.basis, basis.target > 0, projection.action != .range {
       let percent = Int((min(1, max(0, basis.spend / basis.target)) * 100).rounded())
       spoken.append("\(money(basis.spend)) of \(money(basis.target)), \(percent) per cent")
@@ -366,7 +368,7 @@ struct RewardRowText {
       spoken.append(basisLine)
     }
     if let due = projection.deadline, let deadline {
-      spoken.append("\(deadline), ends \(RewardsCalendar.shortLabel(due.end))")
+      spoken.append("\(deadline), \(due.kind == .ends ? "ends" : "period ends") \(RewardsCalendar.shortLabel(due.end))")
     }
     if projection.action != .range {
       spoken.append("\(earned) earned")

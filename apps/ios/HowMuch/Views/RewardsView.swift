@@ -296,7 +296,11 @@ struct RewardsView: View {
       let isExpanded = !preferences.collapsedGroups.contains(kind.rawValue)
       Button {
         updatePreferences {
-          if isExpanded { $0.collapsedGroups.insert(kind.rawValue) } else { $0.collapsedGroups.remove(kind.rawValue) }
+          if isExpanded {
+            _ = $0.collapsedGroups.insert(kind.rawValue)
+          } else {
+            _ = $0.collapsedGroups.remove(kind.rawValue)
+          }
         }
       } label: {
         HStack {
@@ -685,7 +689,11 @@ struct RewardsView: View {
             get: { !preferences.hiddenCardIDs.contains(row.cardID) },
             set: { visible in
               updatePreferences {
-                if visible { $0.hiddenCardIDs.remove(row.cardID) } else { $0.hiddenCardIDs.insert(row.cardID) }
+                if visible {
+                  _ = $0.hiddenCardIDs.remove(row.cardID)
+                } else {
+                  _ = $0.hiddenCardIDs.insert(row.cardID)
+                }
               }
             }
           )) {
@@ -958,8 +966,8 @@ struct LeadingFill: Shape {
     var x = rightToLeft ? rect.maxX - width : rect.minX
     var drawn = width
     if let edgeWidth {
-      x = rightToLeft ? rect.maxX - width : rect.minX + width - edgeWidth
       drawn = min(edgeWidth, width)
+      x = rightToLeft ? rect.maxX - width : rect.minX + width - drawn
     }
     return Path(CGRect(x: x, y: rect.minY, width: drawn, height: rect.height))
   }

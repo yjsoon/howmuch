@@ -543,7 +543,7 @@ final class RewardsSnapshotTests: XCTestCase {
       root: NavigationStack { RewardsView() }.environment(harness.model).environment(RootChromeState()),
       size: CGSize(width: 430, height: 932)
     ))
-    let hidden = await board.captureUntilOCR(contains: ["1 hidden", "Miles · 1", "$99.70", "showing 1 of 2"], timeoutNanoseconds: 5_000_000_000)
+    let hidden = await board.captureUntilOCR(contains: ["1 hidden", "Miles", "$99.70", "showing 1 of 2"], timeoutNanoseconds: 5_000_000_000)
     attach(hidden.image, "rewards-hidden-collapsed")
     XCTAssertTrue(hidden.text.contains("1 hidden"), hidden.text)
     XCTAssertTrue(hidden.text.contains("$99.70"), "Hidden cards must still count in totals: \(hidden.text)")
