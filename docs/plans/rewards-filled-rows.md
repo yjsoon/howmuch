@@ -18,6 +18,13 @@ and large totals card above the same information.
 
 ## Selected layout
 
+![Compact Rewards concepts: A filled rows (selected), B progress edge, and C compact ledger](rewards-filled-rows/concepts.png)
+
+**Implement A, the left panel.** B and C are comparison alternatives, not additional
+screens to build. This owner-approved graphic is a generated design reference,
+not an app screenshot or validation evidence. It omits the collapsed exception
+warning required below; keep that warning visible in the implementation.
+
 This wireframe uses synthetic data. The pale fill in the first example occupies
 60% of the entire row behind all three lines, not just the amount line.
 
@@ -165,6 +172,7 @@ the exact contract gap before expanding beyond the view/model boundary.
   with synthetic data. Record limitations honestly. No Speedflight, signing,
   deployment or merge without the corresponding authorization.
 
-The private design discussion includes financial screenshots; do not publish them
-or generated images containing those details in this public repository. This
-synthetic wireframe and the requirements above are the public handoff contract.
+The owner explicitly authorized publishing the concept graphic above. That does
+not authorize publishing the original financial screenshots or unrelated private
+data. The selected A panel and requirements above define the handoff; use synthetic
+data for subsequent implementation evidence.
