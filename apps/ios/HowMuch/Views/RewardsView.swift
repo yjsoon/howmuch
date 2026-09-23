@@ -162,8 +162,11 @@ struct RewardsView: View {
       RewardsBoard(report: $0, preferences: preferences, currencyFormat: model.currencyFormat)
     }
     List {
+      controlBar(board)
       if let report = currentReport, let board {
-        summaryRow(board)
+        if !report.cards.isEmpty {
+          summaryRow(board)
+        }
         if let asOf = filter.asOfISO {
           pastDateBanner(asOf)
         }
@@ -183,9 +186,6 @@ struct RewardsView: View {
     .listStyle(.plain)
     .scrollContentBackground(.hidden)
     .background(Theme.canvas)
-    .safeAreaBar(edge: .top) {
-      controlBar(board)
-    }
     .navigationTitle("Rewards")
     .navigationBarTitleDisplayMode(.large)
     .toolbar {
@@ -273,7 +273,7 @@ struct RewardsView: View {
         boardRow(projection)
       }
     }
-    if board.hiddenCount > 0 {
+    if board.hiddenCount > 0, !board.visible.isEmpty {
       Button {
         sheet = .customise
       } label: {
@@ -317,6 +317,7 @@ struct RewardsView: View {
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
+      .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 0, trailing: 20))
       .listRowBackground(Color.clear)
       .listRowSeparator(.hidden)
       .accessibilityLabel("\(title), \(matching.count) cards")
@@ -391,19 +392,14 @@ struct RewardsView: View {
     return Button {
       route = .summary
     } label: {
-      HStack(spacing: 4) {
-        Text(line)
-          .font(.footnote)
-          .foregroundStyle(Theme.rowSecondary)
-          .multilineTextAlignment(.center)
-        Image(systemName: "chevron.forward")
-          .font(.caption2.weight(.semibold))
-          .foregroundStyle(Theme.rowSecondary)
-          .accessibilityHidden(true)
-      }
-      .frame(maxWidth: .infinity, minHeight: 44)
+      Text("\(line)\u{00A0}\(Image(systemName: "chevron.forward"))")
+        .font(.footnote)
+        .foregroundStyle(Theme.rowSecondary)
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity, minHeight: 44)
     }
     .buttonStyle(.plain)
+    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
     .listRowBackground(Color.clear)
     .listRowSeparator(.hidden)
     .accessibilityLabel("Summary for current periods, \(line)")
@@ -459,23 +455,42 @@ struct RewardsView: View {
   // MARK: Controls
 
   private func controlBar(_ board: RewardsBoard?) -> some View {
-    GlassEffectContainer(spacing: 8) {
-      ViewThatFits(in: .horizontal) {
-        HStack(spacing: 8) {
-          featuredMenu(board)
-          Spacer(minLength: 8)
-          accountsButton
-          dateMenu
-        }
-        VStack(alignment: .leading, spacing: 8) {
-          featuredMenu(board)
-          accountsButton
-          dateMenu
-        }
+    ViewThatFits(in: .horizontal) {
+      HStack(spacing: 4) {
+        featuredMenu(board)
+        Spacer(minLength: 8)
+        accountsButton
+        dateMenu
+      }
+      VStack(alignment: .leading, spacing: 0) {
+        featuredMenu(board)
+        Divider()
+        accountsButton
+        dateMenu
       }
     }
-    .padding(.horizontal, 16)
-    .padding(.vertical, 6)
+    .padding(.horizontal, 6)
+    .background(Theme.card, in: .rect(cornerRadius: 16, style: .continuous))
+    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 0, trailing: 16))
+    .listRowBackground(Color.clear)
+    .listRowSeparator(.hidden)
+  }
+
+  private func menuLabel(_ title: String, systemImage: String? = nil) -> some View {
+    HStack(spacing: 6) {
+      if let systemImage {
+        Image(systemName: systemImage)
+          .foregroundStyle(Theme.rowSecondary)
+      }
+      Text(title)
+        .foregroundStyle(Theme.textPrimary)
+      Image(systemName: "chevron.down")
+        .font(.footnote.weight(.semibold))
+        .foregroundStyle(Theme.rowSecondary)
+    }
+    .padding(.horizontal, 10)
+    .frame(minHeight: 44)
+    .contentShape(.rect)
   }
 
   private func featuredMenu(_ board: RewardsBoard?) -> some View {
@@ -495,10 +510,8 @@ struct RewardsView: View {
         set: { value in updatePreferences { $0.groupsByType = value } }
       ))
     } label: {
-      Label(title, systemImage: "line.3.horizontal.decrease")
+      menuLabel(title)
     }
-    .menuStyle(.button)
-    .buttonStyle(.glass)
     .accessibilityLabel("Cards, \(title)")
   }
 
@@ -506,21 +519,25 @@ struct RewardsView: View {
   private var accountsButton: some View {
     if !filter.scope.accountIDs.isEmpty {
       let count = filter.scope.accountIDs.count
-      HStack(spacing: 4) {
+      HStack(spacing: 0) {
         Button {
           sheet = .accounts
         } label: {
           Label("\(count) Account\(count == 1 ? "" : "s")", systemImage: "building.columns")
+            .padding(.leading, 10)
+            .frame(minHeight: 44)
         }
         .accessibilityHint("Choose which accounts the report covers.")
         Button {
           filter.scope.accountIDs = []
         } label: {
-          Image(systemName: "xmark")
+          Image(systemName: "xmark.circle.fill")
+            .symbolRenderingMode(.hierarchical)
+            .frame(minWidth: 36, minHeight: 44)
         }
         .accessibilityLabel("Show all accounts")
       }
-      .buttonStyle(.glass)
+      .buttonStyle(.borderless)
       .tint(Theme.accent)
     }
   }
@@ -552,11 +569,8 @@ struct RewardsView: View {
         }
       }
     } label: {
-      Label(title, systemImage: "calendar")
+      menuLabel(title, systemImage: "calendar")
     }
-    .menuStyle(.button)
-    .buttonStyle(.glass)
-    .tint(filter.useAsOfDate ? Theme.accent : nil)
     .accessibilityLabel("As of, \(title)")
   }
 
@@ -834,6 +848,8 @@ struct RewardFilledRow: View {
   var icon: String?
   let currencyFormat: CurrencyFormat?
   var showsChevron = true
+  /// Off in the detail sheet, whose navigation title already names the card.
+  var showsTitle = true
 
   @Environment(\.colorSchemeContrast) private var contrast
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -849,23 +865,8 @@ struct RewardFilledRow: View {
     let palette = RewardTonePalette.palette(for: projection.tone)
     let increased = contrast == .increased
     VStack(alignment: .leading, spacing: 3) {
-      HStack(alignment: .firstTextBaseline, spacing: 6) {
-        if let icon {
-          Text(icon)
-            .font(.headline)
-            .accessibilityHidden(true)
-        }
-        Text(projection.title)
-          .font(.headline)
-          .foregroundStyle(Theme.textPrimary)
-          .lineLimit(2)
-        Spacer(minLength: 8)
-        if showsChevron {
-          Image(systemName: "chevron.forward")
-            .font(.footnote.weight(.semibold))
-            .foregroundStyle(Theme.rowSecondary)
-            .accessibilityHidden(true)
-        }
+      if showsTitle {
+        titleLine
       }
       actionLine(text, palette: palette)
       if let basis = text.basisLine {
@@ -873,16 +874,19 @@ struct RewardFilledRow: View {
           .font(.subheadline)
           .monospacedDigit()
           .foregroundStyle(Theme.rowSecondary)
+          .fixedSize(horizontal: false, vertical: true)
       }
       ForEach(text.exceptionLines, id: \.self) { line in
-        Label {
-          Text(line)
-            .foregroundStyle(Theme.textPrimary)
-        } icon: {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
           Image(systemName: "exclamationmark.triangle.fill")
             .foregroundStyle(palette.ink)
+            .accessibilityHidden(true)
+          Text(line)
+            .foregroundStyle(Theme.textPrimary)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .font(.footnote.weight(.medium))
+        .padding(.top, 2)
       }
     }
     .padding(.vertical, verticalPadding)
@@ -894,10 +898,6 @@ struct RewardFilledRow: View {
         if let fill = projection.fill {
           LeadingFill(fraction: fill, rightToLeft: layoutDirection == .rightToLeft)
             .fill(palette.fill)
-          if increased, fill > 0, fill < 1 {
-            LeadingFill(fraction: fill, rightToLeft: layoutDirection == .rightToLeft, edgeWidth: 2)
-              .fill(palette.ink)
-          }
         }
       }
       .animation(reduceMotion ? nil : .smooth, value: projection.fill)
@@ -915,6 +915,27 @@ struct RewardFilledRow: View {
     .accessibilityValue(text.accessibilityValue)
   }
 
+  private var titleLine: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 6) {
+      if let icon {
+        Text(icon)
+          .font(.headline)
+          .accessibilityHidden(true)
+      }
+      Text(projection.title)
+        .font(.headline)
+        .foregroundStyle(Theme.textPrimary)
+        .lineLimit(2)
+      Spacer(minLength: 8)
+      if showsChevron {
+        Image(systemName: "chevron.forward")
+          .font(.footnote.weight(.semibold))
+          .foregroundStyle(Theme.rowSecondary)
+          .accessibilityHidden(true)
+      }
+    }
+  }
+
   @ViewBuilder
   private func actionLine(_ text: RewardRowText, palette: RewardTonePalette) -> some View {
     let headline = headlineText(text)
@@ -923,16 +944,23 @@ struct RewardFilledRow: View {
         .font(.subheadline.weight(text.isUrgent ? .semibold : .regular))
         .foregroundStyle(text.isUrgent ? palette.ink : Theme.rowSecondary)
     }
+    let stacked = VStack(alignment: .leading, spacing: 2) {
+      headline
+        .fixedSize(horizontal: false, vertical: true)
+      deadline
+    }
     if dynamicTypeSize.isAccessibilitySize {
-      VStack(alignment: .leading, spacing: 2) {
-        headline
-        deadline
-      }
+      stacked
     } else {
-      HStack(alignment: .firstTextBaseline, spacing: 8) {
-        headline
-        Spacer(minLength: 8)
-        deadline
+      // The deadline drops below rather than breaking the action mid-phrase.
+      ViewThatFits(in: .horizontal) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          headline
+            .lineLimit(1)
+          Spacer(minLength: 8)
+          deadline
+        }
+        stacked
       }
     }
   }
@@ -950,11 +978,9 @@ struct RewardFilledRow: View {
 }
 
 /// The leading part of a rect, square-edged so small values read as a quantity.
-/// With `edgeWidth`, only a tick at the fill boundary.
 struct LeadingFill: Shape {
   var fraction: Double
   var rightToLeft = false
-  var edgeWidth: CGFloat?
 
   var animatableData: Double {
     get { fraction }
@@ -963,13 +989,8 @@ struct LeadingFill: Shape {
 
   func path(in rect: CGRect) -> Path {
     let width = rect.width * min(1, max(0, fraction))
-    var x = rightToLeft ? rect.maxX - width : rect.minX
-    var drawn = width
-    if let edgeWidth {
-      drawn = min(edgeWidth, width)
-      x = rightToLeft ? rect.maxX - width : rect.minX + width - drawn
-    }
-    return Path(CGRect(x: x, y: rect.minY, width: drawn, height: rect.height))
+    let x = rightToLeft ? rect.maxX - width : rect.minX
+    return Path(CGRect(x: x, y: rect.minY, width: width, height: rect.height))
   }
 }
 
@@ -990,9 +1011,14 @@ struct RewardCardDetailSheet: View {
     NavigationStack {
       List {
         Section {
-          RewardFilledRow(projection: projection, icon: icon, currencyFormat: currencyFormat, showsChevron: false)
-            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-            .listRowBackground(Color.clear)
+          RewardFilledRow(
+            projection: projection, icon: icon, currencyFormat: currencyFormat, showsChevron: false, showsTitle: false
+          )
+          .listRowInsets(EdgeInsets())
+          .listRowBackground(Color.clear)
+        }
+        .listSectionSpacing(12)
+        Section {
           if let period = currentPeriod {
             LabeledContent("Period", value: "\(short(period.start)) – \(short(period.end))")
           }
@@ -1004,7 +1030,7 @@ struct RewardCardDetailSheet: View {
             Button {
               onOpenAccount()
             } label: {
-              Label("View Transactions in \(row.accountName)", systemImage: "list.bullet.rectangle")
+              Label("View Transactions", systemImage: "list.bullet.rectangle")
             }
           }
         }
@@ -1028,6 +1054,8 @@ struct RewardCardDetailSheet: View {
     }
     .presentationDetents([.medium, .large])
     .presentationDragIndicator(.visible)
+    // Financial figures stay on an opaque surface, not the glass sheet.
+    .presentationBackground(Color(.systemGroupedBackground))
   }
 
   private var calc: RewardsCalculation { row.calculation }
@@ -1053,7 +1081,8 @@ struct RewardCardDetailSheet: View {
             calc.minimumSpendMet ? "Minimum met" : "Minimum",
             spend: calc.totalSpend,
             target: minimum,
-            caption: "Qualifying spend before rounding."
+            caption: "Qualifying spend before rounding.",
+            tone: calc.minimumSpendMet ? .earning : .needsMinimum
           )
         }
         if let month = activeMonth {
@@ -1061,11 +1090,12 @@ struct RewardCardDetailSheet: View {
             "This month's minimum",
             spend: month.spend,
             target: month.minimumSpend,
-            caption: "\(short(month.start)) – \(short(month.end)), net of refunds."
+            caption: "\(short(month.start)) – \(short(month.end)), net of refunds.",
+            tone: month.spend >= month.minimumSpend ? .earning : .needsMinimum
           )
         }
         if calc.hasNextSpendingTier == true, let threshold = calc.nextSpendingTierThreshold {
-          progressRow("Next tier", spend: calc.totalSpend, target: threshold, caption: nil)
+          progressRow("Next tier", spend: calc.totalSpend, target: threshold, caption: nil, tone: .earning)
         }
         if maximum > 0 {
           progressRow(
@@ -1074,7 +1104,8 @@ struct RewardCardDetailSheet: View {
             target: maximum,
             caption: (row.card.earningBlockSize ?? 0) > 0
               ? "Counts spend in whole earning blocks, so the room left can differ by up to one block."
-              : nil
+              : nil,
+            tone: calc.maximumSpendExceeded ? .complete : .earning
           )
         }
       }
@@ -1197,7 +1228,9 @@ struct RewardCardDetailSheet: View {
     }
   }
 
-  private func progressRow(_ title: String, spend: Double, target: Double, caption: String?) -> some View {
+  private func progressRow(
+    _ title: String, spend: Double, target: Double, caption: String?, tone: RewardRowProjection.Tone
+  ) -> some View {
     VStack(alignment: .leading, spacing: 6) {
       HStack {
         Text(title)
@@ -1207,7 +1240,7 @@ struct RewardCardDetailSheet: View {
           .foregroundStyle(.secondary)
       }
       ProgressView(value: target > 0 ? min(1, max(0, spend / target)) : 0)
-        .tint(Theme.accent)
+        .tint(RewardTonePalette.palette(for: tone).ink)
       if let caption {
         Text(caption)
           .font(.caption)

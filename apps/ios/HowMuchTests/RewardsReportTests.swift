@@ -484,7 +484,7 @@ final class RewardsSnapshotTests: XCTestCase {
     // traversal used by other tests; they do not establish accessibility.
     // Pending monthly qualification, $830.80 of $1,000 in May, as of 24 May:
     // $169.20 to go and eight days (24–31 May) left.
-    let expected = ["Travel Fixture", "Cash Fixture", "$169.20", "this month's minimum", "8 days left",
+    let expected = ["Travel Fixture", "Cash Fixture", "$169.20", "monthly minimum", "8 days left",
       "$830.80 / $1,000.00", "3,323 miles earned", "$49.85 earned"]
     let board = await surface.captureUntilOCR(contains: expected, timeoutNanoseconds: 5_000_000_000)
     attach(board.image, "rewards-board-filled-rows")
@@ -523,7 +523,7 @@ final class RewardsSnapshotTests: XCTestCase {
       size: CGSize(width: 430, height: 1600)
     ))
     defer { surface.detach() }
-    let expected = ["Travel Fixture", "Dining over cap", "Edit", "View Transactions in Travel", "Targets",
+    let expected = ["Travel Fixture", "Dining over cap", "Edit", "View Transactions", "Targets",
       "This month's minimum", "Next tier", "Tiers", "From $500.00", "Active", "Qualification", "Categories",
       "Category cap reached", "$250.00 / $200.00"]
     let rendered = await surface.captureUntilOCR(contains: expected, timeoutNanoseconds: 5_000_000_000)
@@ -814,7 +814,7 @@ final class RewardRowProjectionTests: XCTestCase {
     XCTAssertEqual(projection.action, .monthlyMinimum(remaining: 50))
     XCTAssertEqual(projection.basis, .init(spend: 250, target: 300))
     XCTAssertEqual(projection.deadline, .init(end: "2026-09-30", days: 8, kind: .ends))
-    XCTAssertEqual(RewardRowText(projection, currencyFormat: sgd).actionLabel, "to this month's minimum")
+    XCTAssertEqual(RewardRowText(projection, currencyFormat: sgd).actionLabel, "to monthly minimum")
   }
 
   func testPendingMonthAlreadyMetFallsThroughWithLockedException() throws {
@@ -973,6 +973,15 @@ final class RewardRowProjectionTests: XCTestCase {
     let soonA = try project(["minimum_spend": 800], name: "apple", id: "soon-a")
     let none = try project(["minimum_spend": 800], name: "Aardvark", id: "none", asOf: nil)
     XCTAssertEqual(RewardsBoardOrdering.fallbackOrder([late, none, soonB, soonA]), ["soon-a", "soon-b", "late", "none"])
+  }
+
+  func testFallbackOrderPutsCardsNeedingSpendBeforeCappedOnes() throws {
+    // The capped card resets in 5 days (23–27 Sep); the minimum card has 8.
+    let capped = try project(["maximum_spend": 2000, "total_spend": 2000, "counted_spend": 2000, "maximum_spend_exceeded": true,
+      "should_stop_using": true], name: "Capped", id: "capped", period: ("2026-09-01", "2026-09-27"))
+    let minimum = try project(["minimum_spend": 800], name: "Minimum", id: "minimum")
+    let unlimited = try project([:], name: "Unlimited", id: "unlimited", period: ("2026-09-01", "2026-09-24"))
+    XCTAssertEqual(RewardsBoardOrdering.fallbackOrder([capped, unlimited, minimum]), ["minimum", "unlimited", "capped"])
   }
 
   func testAccessibilityValueStatesTargetProgressAndDeadline() throws {

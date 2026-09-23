@@ -298,7 +298,7 @@ struct RewardRowText {
       actionLabel = "Monthly minimum missed"
     case .monthlyMinimum(let remaining):
       amount = money(Self.roundedUpToCent(remaining))
-      actionLabel = "to this month's minimum"
+      actionLabel = "to monthly minimum"
     case .minimum(let remaining):
       amount = money(Self.roundedUpToCent(remaining))
       actionLabel = "to minimum"
@@ -456,9 +456,12 @@ struct RewardsBoardSummary: Equatable {
 }
 
 enum RewardsBoardOrdering {
-  /// Fallback for cards without a saved position: nearest deadline, then name.
+  /// Fallback for cards without a saved position: cards that still need
+  /// spend by a deadline first, nearest deadline first; then capped, failed
+  /// and untargeted cards by their reset; then name.
   static func fallbackOrder(_ projections: [RewardRowProjection]) -> [String] {
     projections.sorted { left, right in
+      if left.needsSpend != right.needsSpend { return left.needsSpend }
       let leftDays = left.deadline?.days ?? Int.max
       let rightDays = right.deadline?.days ?? Int.max
       if leftDays != rightDays { return leftDays < rightDays }
@@ -467,5 +470,14 @@ enum RewardsBoardOrdering {
       return left.cardID < right.cardID
     }
     .map(\.cardID)
+  }
+}
+
+private extension RewardRowProjection {
+  var needsSpend: Bool {
+    switch action {
+    case .monthlyMinimum, .minimum, .nextTier, .capHeadroom: return true
+    default: return false
+    }
   }
 }
