@@ -17,7 +17,7 @@ final class RewardsReportTests: XCTestCase {
     XCTAssertEqual(filter.accountIDs, ["a", "b"])
     XCTAssertNil(filter.from)
     XCTAssertNil(filter.to)
-    filter.asOfDate = try date(2025, 4, 10)
+    filter.asOfDate = try singaporeDate(2025, 4, 10)
     filter.useAsOfDate = true
     XCTAssertNil(filter.from)
     XCTAssertEqual(filter.to, "2025-04-10")
@@ -74,6 +74,26 @@ final class RewardsReportTests: XCTestCase {
 
   private func date(_ year: Int, _ month: Int, _ day: Int) throws -> Date {
     try XCTUnwrap(Calendar.current.date(from: DateComponents(year: year, month: month, day: day, hour: 12)))
+  }
+
+  private func singaporeDate(_ year: Int, _ month: Int, _ day: Int) throws -> Date {
+    try XCTUnwrap(RewardsCalendar.calendar.date(from: DateComponents(year: year, month: month, day: day, hour: 0)))
+  }
+
+  func testAsOfDateIsTheSingaporeDayWhateverTheDeviceZone() throws {
+    let original = NSTimeZone.default
+    defer { NSTimeZone.default = original }
+    for zone in ["America/Los_Angeles", "Pacific/Kiritimati", "Asia/Singapore"] {
+      NSTimeZone.default = try XCTUnwrap(TimeZone(identifier: zone))
+      var filter = RewardsReportFilter()
+      // Midnight 10 April in Singapore is still 9 April in Los Angeles.
+      filter.asOfDate = try singaporeDate(2025, 4, 10)
+      filter.useAsOfDate = true
+      XCTAssertEqual(filter.to, "2025-04-10", zone)
+      XCTAssertEqual(RewardsCalendar.days(from: "2026-03-07", to: "2026-03-09"), 2, zone)
+    }
+    // 17:30 UTC on 22 Sep is 01:30 on 23 Sep in Singapore.
+    XCTAssertEqual(RewardsCalendar.isoString(Date(timeIntervalSince1970: 1_790_098_200)), "2026-09-23")
   }
 
   func testQualificationAndAttributedRewardsDecodeWithOlderServerFallback() throws {
@@ -349,11 +369,33 @@ final class RewardsBoardPreferencesTests: XCTestCase {
       hiddenCardIDs: ["b"], cardOrder: ["removed", "c", "b", "c"], collapsedGroups: ["miles"]
     )
     XCTAssertEqual(preferences.orderedIDs(["a", "b", "c", "new"]), ["c", "b", "a", "new"])
-    // Reordering one type must not erase another type or unhide any card.
-    preferences.reorder(["new", "a"])
-    XCTAssertEqual(preferences.orderedIDs(["a", "b", "c", "new"]), ["new", "a", "c", "b"])
+    // Reordering a subset swaps it within the slots it held: c and b stay put,
+    // no card is unhidden, and other preferences survive.
+    preferences.reorder(["new", "a"], within: ["a", "b", "c", "new"])
+    XCTAssertEqual(preferences.orderedIDs(["a", "b", "c", "new"]), ["c", "b", "new", "a"])
     XCTAssertEqual(preferences.hiddenCardIDs, ["b"])
     XCTAssertEqual(preferences.collapsedGroups, ["miles"])
+  }
+
+  func testReorderingAFilteredSubsetKeepsCardsOutsideItInPlace() {
+    var preferences = RewardsBoardPreferences(cardOrder: ["a", "b", "c", "d"])
+    // Only b and d are visible (say, Featured); move d above b.
+    preferences.reorder(["d", "b"], within: ["b", "d"])
+    XCTAssertEqual(preferences.orderedIDs(["a", "b", "c", "d"]), ["a", "d", "c", "b"])
+  }
+
+  func testPreferencesSavedBeforeNewFieldsStillDecode() throws {
+    let legacy = #"{"hiddenCardIDs":["x"],"cardOrder":["b","a"],"collapsedGroups":["miles"]}"#
+    let decoded = try JSONDecoder().decode(RewardsBoardPreferences.self, from: Data(legacy.utf8))
+    XCTAssertEqual(decoded.hiddenCardIDs, ["x"])
+    XCTAssertEqual(decoded.cardOrder, ["b", "a"])
+    XCTAssertNil(decoded.featuredOnly)
+    XCTAssertFalse(decoded.groupsByType)
+    var updated = decoded
+    updated.featuredOnly = false
+    updated.groupsByType = true
+    let roundTrip = try JSONDecoder().decode(RewardsBoardPreferences.self, from: JSONEncoder().encode(updated))
+    XCTAssertEqual(roundTrip, updated)
   }
 
   func testPreferencesPersistIndependentlyPerPlanAndResetLocally() throws {
@@ -389,16 +431,19 @@ final class RewardsSnapshotTests: XCTestCase {
     filter.range.customTo = selectedDate
     filter.scope.accountIDs = ["acct-travel"]
     let surface = try XCTUnwrap(SnapshotSurface(
-      root: NavigationStack { RewardsView(filter: filter) }.environment(harness.model).environment(RootChromeState()),
+      root: NavigationStack { RewardsReportScreen(filter: filter, allowsRange: true) }
+        .environment(harness.model).environment(RootChromeState()),
       size: CGSize(width: 430, height: 1800)
     ))
     defer { surface.detach() }
-    let expected = ["Historical range", "20 May 2026", "1 Account", "Travel Fixture", "$100.00", "$6.00", "Full-period minimum met", "$700.00 / $500.00"]
+    // A range is totals plus unfilled rows: spend and earned, never progress.
+    let expected = ["Range Report", "20 May 2026", "1 Account", "Travel Fixture", "$100.00", "$6.00", "400 miles", "earned"]
     let rendered = await surface.captureUntilOCR(contains: expected, timeoutNanoseconds: 5_000_000_000)
     attach(rendered.image, "rewards-historical-account-filtered")
     for text in expected { XCTAssertTrue(rendered.text.contains(text.lowercased()), "Missing \(text): \(rendered.text)") }
     XCTAssertFalse(rendered.text.contains("cash fixture"), rendered.text)
     XCTAssertFalse(rendered.text.contains("$9,999.00"), rendered.text)
+    XCTAssertFalse(rendered.text.contains("days left"), rendered.text)
   }
 
   func testRewardsTabInCompactRootRenders() async throws {
@@ -415,8 +460,8 @@ final class RewardsSnapshotTests: XCTestCase {
     ))
     defer { surface.detach() }
     // Filter labels appear before the report loads; require the populated root.
-    let expected = ["Accounts", "Rewards", "Reflect", "Display preferences", "0 hidden", "Current card periods", "All Accounts",
-      "As of 2026-05-24", "$1,661.60", "$99.70"]
+    let expected = ["Accounts", "Rewards", "Reflect", "Featured", "Today", "$99.70 earned", "2 below minimum",
+      "Travel Fixture", "$169.20", "8 days left"]
     let rendered = await surface.captureUntilOCR(contains: expected, timeoutNanoseconds: 5_000_000_000)
     attach(rendered.image, "rewards-compact-root")
     for text in expected { XCTAssertTrue(rendered.text.contains(text.lowercased()), "Missing \(text): \(rendered.text)") }
@@ -437,11 +482,53 @@ final class RewardsSnapshotTests: XCTestCase {
     defer { surface.detach() }
     // Pixel assertions establish rendering independently of the in-process AX
     // traversal used by other tests; they do not establish accessibility.
-    let expected = ["Travel Fixture", "Cash Fixture", "As of 2026-05-24", "2026-05-01", "2026-05-31",
-      "Qualification: pending", "Active tier threshold", "$500.00", "Next tier at", "$1,000.00", "$830.80", "0.015"]
+    // Pending monthly qualification, $830.80 of $1,000 in May, as of 24 May:
+    // $169.20 to go and eight days (24–31 May) left.
+    let expected = ["Travel Fixture", "Cash Fixture", "$169.20", "this month's minimum", "8 days left",
+      "$830.80 / $1,000.00", "3,323 miles earned", "$49.85 earned"]
     let board = await surface.captureUntilOCR(contains: expected, timeoutNanoseconds: 5_000_000_000)
-    attach(board.image, "rewards-board-qualification-tier")
+    attach(board.image, "rewards-board-filled-rows")
     for text in expected { XCTAssertTrue(board.text.contains(text.lowercased()), "Missing \(text): \(board.text)") }
+  }
+
+  func testCardDetailSheetShowsTargetsTiersAndQualification() async throws {
+    let harness = SnapshotHarness.make(baseURLString: "https://rewards-snapshot.test")
+    let json = """
+    {"card":{"id":"travel","name":"Travel Fixture","issuer":"Demo","type":"miles","ynabAccountId":"acct-travel","featured":true,
+      "earningRate":4,"spendingTiers":[{"id":"tier-500","spendThreshold":500,"earningRate":4,"maximumSpend":900},
+      {"id":"tier-1000","spendThreshold":1000,"earningRate":6}]},
+     "account_id":"acct-travel","account_name":"Travel",
+     "calculation":{"period":"2026-05-01/2026-05-31","total_spend":830.8,"counted_spend":830.8,"eligible_spend":830.8,
+      "reward_earned":3323.2,"reward_earned_dollars":49.848,"reward_type":"miles","minimum_spend_met":true,
+      "maximum_spend_exceeded":false,"qualification_status":"pending","monthly_minimum_spend":1000,
+      "monthly_qualifications":[{"start":"2026-05-01","end":"2026-05-31","spend":830.8,"minimumSpend":1000,"status":"pending"}],
+      "active_spending_tier_id":"tier-500","has_next_spending_tier":true,"next_spending_tier_id":"tier-1000",
+      "next_spending_tier_threshold":1000,
+      "periods":[{"start":"2026-05-01","end":"2026-05-31","calculation":{"period":"2026-05","total_spend":830.8,
+        "counted_spend":830.8,"eligible_spend":830.8,"reward_earned":3323.2,"reward_earned_dollars":49.848,
+        "reward_type":"miles","minimum_spend_met":true,"maximum_spend_exceeded":false,"flags":[]}}],
+      "flags":[{"subcategoryId":"dining","name":"Dining","flagColor":"red","totalSpend":250,"countedSpend":250,
+        "eligibleSpend":250,"rewardEarned":1000,"rewardRate":4,"minimumSpendMet":true,"maximumSpend":200,
+        "maximumSpendExceeded":true}]}}
+    """
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    let row = try decoder.decode(RewardsCardRow.self, from: Data(json.utf8))
+    let surface = try XCTUnwrap(SnapshotSurface(
+      root: RewardCardDetailSheet(
+        row: row, asOf: "2026-05-24", icon: "💳", currencyFormat: harness.model.currencyFormat,
+        canOpenAccount: true, onEdit: {}, onOpenAccount: {}
+      )
+      .environment(harness.model),
+      size: CGSize(width: 430, height: 1600)
+    ))
+    defer { surface.detach() }
+    let expected = ["Travel Fixture", "Dining over cap", "Edit", "View Transactions in Travel", "Targets",
+      "This month's minimum", "Next tier", "Tiers", "From $500.00", "Active", "Qualification", "Categories",
+      "Category cap reached", "$250.00 / $200.00"]
+    let rendered = await surface.captureUntilOCR(contains: expected, timeoutNanoseconds: 5_000_000_000)
+    attach(rendered.image, "rewards-card-detail")
+    for text in expected { XCTAssertTrue(rendered.text.contains(text.lowercased()), "Missing \(text): \(rendered.text)") }
   }
 
   func testHiddenCollapsedBoardAndDisabledEditorRender() async throws {
@@ -450,13 +537,13 @@ final class RewardsSnapshotTests: XCTestCase {
     let harness = SnapshotHarness.make(baseURLString: "https://rewards-snapshot.test")
     harness.model.settings.planID = "rewards-disabled-\(UUID().uuidString)"
     defer { UserDefaults.standard.removeObject(forKey: RewardsBoardPreferences.storageKey(planID: harness.model.settings.planID)) }
-    RewardsBoardPreferences(hiddenCardIDs: ["cash"], cardOrder: ["travel", "cash"], collapsedGroups: ["miles"])
+    RewardsBoardPreferences(hiddenCardIDs: ["cash"], cardOrder: ["travel", "cash"], collapsedGroups: ["miles"], groupsByType: true)
       .save(planID: harness.model.settings.planID)
     let board = try XCTUnwrap(SnapshotSurface(
       root: NavigationStack { RewardsView() }.environment(harness.model).environment(RootChromeState()),
       size: CGSize(width: 430, height: 932)
     ))
-    let hidden = await board.captureUntilOCR(contains: ["1 hidden", "Miles", "$99.70"], timeoutNanoseconds: 5_000_000_000)
+    let hidden = await board.captureUntilOCR(contains: ["1 hidden", "Miles · 1", "$99.70", "showing 1 of 2"], timeoutNanoseconds: 5_000_000_000)
     attach(hidden.image, "rewards-hidden-collapsed")
     XCTAssertTrue(hidden.text.contains("1 hidden"), hidden.text)
     XCTAssertTrue(hidden.text.contains("$99.70"), "Hidden cards must still count in totals: \(hidden.text)")
@@ -587,5 +674,368 @@ private final class RewardsSnapshotProtocol: URLProtocol {
     } catch {
       client?.urlProtocol(self, didFailWithError: error)
     }
+  }
+}
+
+/// Expected values are worked out by hand from the fixture numbers, never read
+/// back from the projection under test.
+final class RewardRowProjectionTests: XCTestCase {
+  private let sgd = CurrencyFormat(
+    isoCode: "SGD", exampleFormat: "$123,456.78", decimalDigits: 2,
+    decimalSeparator: ".", groupSeparator: ",", symbolFirst: true, currencySymbol: "$"
+  )
+
+  // MARK: Minimum
+
+  func testBelowMinimumShowsRemainderOnRawSpendWithPeriodDeadline() throws {
+    let projection = try project(["minimum_spend": 800, "total_spend": 698, "counted_spend": 690, "minimum_spend_met": false])
+    XCTAssertEqual(projection.action, .minimum(remaining: 102))
+    XCTAssertEqual(projection.tone, .needsMinimum)
+    XCTAssertEqual(projection.basis, .init(spend: 698, target: 800))
+    XCTAssertEqual(try XCTUnwrap(projection.fill), 0.8725, accuracy: 0.0001)
+    // 23 Sep to 30 Sep inclusive.
+    XCTAssertEqual(projection.deadline, .init(end: "2026-09-30", days: 8, kind: .ends))
+    let text = RewardRowText(projection, currencyFormat: sgd)
+    XCTAssertEqual(text.amount, "$102.00")
+    XCTAssertEqual(text.actionLabel, "to minimum")
+    XCTAssertEqual(text.deadline, "8 days left")
+    XCTAssertEqual(text.basisLine, "$698.00 / $800.00 · $0.00 earned")
+    XCTAssertFalse(text.isUrgent)
+  }
+
+  func testExactlyAtMinimumIsNotAmber() throws {
+    let projection = try project(["minimum_spend": 800, "total_spend": 800, "minimum_spend_met": true])
+    XCTAssertEqual(projection.action, .noTarget)
+    XCTAssertNotEqual(projection.tone, .needsMinimum)
+    XCTAssertNil(projection.fill)
+  }
+
+  func testAboveMinimumMovesToCapHeadroomOnCountedSpend() throws {
+    let projection = try project([
+      "minimum_spend": 500, "maximum_spend": 1000, "total_spend": 700, "counted_spend": 650, "minimum_spend_met": true,
+    ])
+    XCTAssertEqual(projection.action, .capHeadroom(remaining: 350))
+    XCTAssertEqual(projection.basis, .init(spend: 650, target: 1000))
+    XCTAssertEqual(projection.tone, .earning)
+  }
+
+  func testRemainderRoundsUpToTheCent() throws {
+    let projection = try project(["minimum_spend": 100, "total_spend": 99.996, "minimum_spend_met": false])
+    XCTAssertEqual(RewardRowText(projection, currencyFormat: sgd).amount, "$0.01")
+    XCTAssertEqual(RewardRowText.roundedUpToCent(102.0000000001), 102)
+    XCTAssertEqual(RewardRowText.roundedUpToCent(101.001), 101.01)
+  }
+
+  // MARK: Tiers and caps
+
+  func testUnmetBaseMinimumOutranksNextTier() throws {
+    let projection = try project([
+      "minimum_spend": 500, "total_spend": 300, "minimum_spend_met": false,
+      "has_next_spending_tier": true, "next_spending_tier_threshold": 500,
+    ])
+    XCTAssertEqual(projection.action, .minimum(remaining: 200))
+  }
+
+  func testNextTierUsesTotalSpendAgainstThreshold() throws {
+    let projection = try project([
+      "total_spend": 1340, "counted_spend": 1300, "maximum_spend": 1600,
+      "has_next_spending_tier": true, "next_spending_tier_threshold": 1600, "reward_earned": 76,
+    ])
+    XCTAssertEqual(projection.action, .nextTier(remaining: 260))
+    XCTAssertEqual(projection.basis, .init(spend: 1340, target: 1600))
+    XCTAssertEqual(projection.tone, .earning)
+    XCTAssertEqual(RewardRowText(projection, currencyFormat: sgd).basisLine, "$1,340.00 / $1,600.00 · $76.00 earned")
+  }
+
+  func testIntermediateCapShowsNextTierWithException() throws {
+    let projection = try project([
+      "total_spend": 1340, "maximum_spend": 1000, "maximum_spend_exceeded": true,
+      "has_next_spending_tier": true, "next_spending_tier_threshold": 1600, "should_stop_using": false,
+    ])
+    XCTAssertEqual(projection.action, .nextTier(remaining: 260))
+    XCTAssertEqual(projection.exceptions, [.tierCapReached])
+    XCTAssertFalse(projection.isTerminalCap)
+  }
+
+  func testTerminalCapIsCompleteFullAndReportsSpendBeyondCap() throws {
+    let projection = try project([
+      "total_spend": 2150, "counted_spend": 2000, "maximum_spend": 2000, "maximum_spend_exceeded": true,
+      "should_stop_using": true, "has_next_spending_tier": false, "reward_earned": 80,
+    ])
+    XCTAssertEqual(projection.action, .capReached(beyond: 150, terminal: true))
+    XCTAssertEqual(projection.tone, .complete)
+    XCTAssertEqual(projection.fill, 1)
+    XCTAssertEqual(projection.deadline?.kind, .resets)
+    let text = RewardRowText(projection, currencyFormat: sgd)
+    XCTAssertEqual(text.actionLabel, "Cap reached")
+    XCTAssertNil(text.amount)
+    XCTAssertEqual(text.deadline, "Resets in 8 days")
+    XCTAssertEqual(text.basisLine, "$2,000.00 / $2,000.00 · $80.00 earned · $150.00 beyond cap")
+  }
+
+  func testOlderServerWithoutStopFlagTreatsExceededCapAsTerminal() throws {
+    let projection = try project(["total_spend": 1000, "counted_spend": 1000, "maximum_spend": 1000, "maximum_spend_exceeded": true])
+    XCTAssertEqual(projection.action, .capReached(beyond: 0, terminal: true))
+  }
+
+  func testPartialBlockHeadroomStillCountsAsCapReached() throws {
+    // Less than one block left: the server flags the cap as exceeded.
+    let projection = try project([
+      "total_spend": 996, "counted_spend": 995, "maximum_spend": 1000, "maximum_spend_exceeded": true, "should_stop_using": true,
+    ])
+    XCTAssertEqual(projection.action, .capReached(beyond: 0, terminal: true))
+    XCTAssertEqual(projection.fill, 1)
+    XCTAssertEqual(projection.basis, .init(spend: 995, target: 1000))
+  }
+
+  func testUnlimitedCardHasNoFabricatedTargetOrFill() throws {
+    let extras: [[String: Any]] = [[:], ["minimum_spend": 0, "maximum_spend": 0]]
+    for extra in extras {
+      let projection = try project(extra.merging(["total_spend": 420, "reward_earned": 8.4]) { $1 })
+      XCTAssertEqual(projection.action, .noTarget)
+      XCTAssertNil(projection.fill)
+      XCTAssertNil(projection.basis)
+      XCTAssertNotEqual(projection.tone, .complete)
+      XCTAssertEqual(RewardRowText(projection, currencyFormat: sgd).basisLine, "$420.00 spent · $8.40 earned")
+    }
+  }
+
+  // MARK: Qualification
+
+  func testPendingMonthBehindUsesTheMonthAndItsEnd() throws {
+    // Anchored three-month period; the month ends before the period does.
+    let projection = try project([
+      "total_spend": 900, "qualification_status": "pending", "minimum_spend_met": false,
+      "monthly_qualifications": [
+        ["start": "2026-08-01", "end": "2026-08-31", "spend": 400, "minimumSpend": 300, "status": "met"],
+        ["start": "2026-09-01", "end": "2026-09-30", "spend": 250, "minimumSpend": 300, "status": "pending"],
+      ],
+    ], period: ("2026-08-01", "2026-10-31"))
+    XCTAssertEqual(projection.action, .monthlyMinimum(remaining: 50))
+    XCTAssertEqual(projection.basis, .init(spend: 250, target: 300))
+    XCTAssertEqual(projection.deadline, .init(end: "2026-09-30", days: 8, kind: .ends))
+    XCTAssertEqual(RewardRowText(projection, currencyFormat: sgd).actionLabel, "to this month's minimum")
+  }
+
+  func testPendingMonthAlreadyMetFallsThroughWithLockedException() throws {
+    let projection = try project([
+      "total_spend": 900, "qualification_status": "pending", "minimum_spend_met": false,
+      "monthly_qualifications": [
+        ["start": "2026-09-01", "end": "2026-09-30", "spend": 320, "minimumSpend": 300, "status": "met"],
+        ["start": "2026-10-01", "end": "2026-10-31", "spend": 0, "minimumSpend": 300, "status": "pending"],
+      ],
+    ], period: ("2026-09-01", "2026-10-31"))
+    XCTAssertEqual(projection.action, .noTarget)
+    XCTAssertEqual(projection.exceptions, [.rewardsLocked(until: "2026-10-31")])
+    XCTAssertEqual(RewardRowText(projection, currencyFormat: sgd).exceptionLines, ["Rewards unlock after 31 Oct"])
+  }
+
+  func testFailedQualificationOutranksAMetCardMinimum() throws {
+    let projection = try project([
+      "minimum_spend": 500, "total_spend": 700, "qualification_status": "failed", "minimum_spend_met": false,
+    ])
+    XCTAssertEqual(projection.action, .qualificationFailed)
+    XCTAssertEqual(projection.tone, .failed)
+    XCTAssertNil(projection.fill)
+    XCTAssertEqual(projection.deadline?.kind, .resets)
+    XCTAssertTrue(projection.exceptions.isEmpty)
+  }
+
+  func testServerMinimumUnmetWithoutARawGapIsFlagged() throws {
+    // Spend reached the figure, but a tier minimum still withholds rewards.
+    let projection = try project(["minimum_spend": 500, "total_spend": 600, "minimum_spend_met": false])
+    XCTAssertEqual(projection.action, .noTarget)
+    XCTAssertEqual(projection.exceptions, [.minimumNotMet])
+  }
+
+  // MARK: Category exceptions
+
+  func testCategoryOverCapShowsWhenCardCapIsNot() throws {
+    let projection = try project(["total_spend": 400, "flags": [
+      flag("Dining", total: 250, maximum: 200, exceeded: true),
+      flag("Groceries", total: 50, maximum: 200, exceeded: false),
+    ]])
+    XCTAssertEqual(projection.exceptions, [.categoriesAtCap(names: ["Dining"], over: true)])
+    XCTAssertEqual(RewardRowText(projection, currencyFormat: sgd).exceptionLines, ["Dining over cap"])
+  }
+
+  func testCategoryExactlyAtCapSaysAtCap() throws {
+    let projection = try project(["total_spend": 400, "flags": [
+      flag("Dining", total: 200, maximum: 200, exceeded: true),
+      flag("Travel", total: 150, maximum: 150, exceeded: true),
+    ]])
+    XCTAssertEqual(RewardRowText(projection, currencyFormat: sgd).exceptionLines, ["2 categories at cap"])
+  }
+
+  func testCardCapExceededSuppressesCategoryCapException() throws {
+    let projection = try project([
+      "total_spend": 1000, "maximum_spend": 1000, "maximum_spend_exceeded": true, "should_stop_using": true,
+      "flags": [flag("Dining", total: 250, maximum: 200, exceeded: true)],
+    ])
+    XCTAssertTrue(projection.exceptions.isEmpty)
+  }
+
+  func testCategoryBelowItsMinimumOnceCardMinimumIsMet() throws {
+    let projection = try project(["total_spend": 400, "flags": [
+      flag("Dining", total: 120, minimum: 200, minimumMet: false),
+    ]])
+    XCTAssertEqual(projection.exceptions, [.categoriesBelowMinimum(names: ["Dining"])])
+  }
+
+  func testMoreThanTwoExceptionsCollapseIntoAMoreLine() throws {
+    let projection = try project([
+      "total_spend": 1340, "maximum_spend": 1000, "maximum_spend_exceeded": false,
+      "has_next_spending_tier": true, "next_spending_tier_threshold": 1600,
+      "flags": [
+        flag("Dining", total: 250, maximum: 200, exceeded: true),
+        flag("Travel", total: 20, minimum: 100, minimumMet: false),
+      ],
+      "qualification_status": "pending",
+      "monthly_qualifications": [["start": "2026-09-01", "end": "2026-09-30", "spend": 400, "minimumSpend": 300, "status": "met"]],
+    ])
+    XCTAssertEqual(projection.exceptions.count, 3)
+    let lines = RewardRowText(projection, currencyFormat: sgd).exceptionLines
+    XCTAssertEqual(lines.count, 3)
+    XCTAssertEqual(lines.last, "+1 more")
+  }
+
+  // MARK: Dates
+
+  func testLastDayAndResetTomorrowWording() throws {
+    let ends = try project(["minimum_spend": 100, "total_spend": 10], period: ("2026-02-01", "2026-02-28"), asOf: "2026-02-28")
+    XCTAssertEqual(ends.deadline?.days, 1)
+    let endsText = RewardRowText(ends, currencyFormat: sgd)
+    XCTAssertEqual(endsText.deadline, "Last day")
+    XCTAssertTrue(endsText.isUrgent)
+    let resets = try project(["total_spend": 10], period: ("2026-02-01", "2026-02-28"), asOf: "2026-02-28")
+    XCTAssertEqual(RewardRowText(resets, currencyFormat: sgd).deadline, "Resets tomorrow")
+    XCTAssertEqual(RewardRowText.deadlineText(.init(end: "2026-02-28", days: 0, kind: .ends)), "Period ended")
+  }
+
+  func testHistoricalAsOfCountsDaysFromThatDate() throws {
+    let projection = try project(["minimum_spend": 800, "total_spend": 100], asOf: "2026-09-10")
+    XCTAssertEqual(projection.deadline?.days, 21)
+  }
+
+  func testDaysLeftDoNotDependOnTheDeviceZone() throws {
+    let original = NSTimeZone.default
+    defer { NSTimeZone.default = original }
+    for zone in ["America/Los_Angeles", "Europe/London", "Pacific/Kiritimati"] {
+      NSTimeZone.default = try XCTUnwrap(TimeZone(identifier: zone))
+      // Across the March DST change in the US and the UK.
+      let projection = try project(["minimum_spend": 800, "total_spend": 100], period: ("2026-03-01", "2026-03-31"), asOf: "2026-03-07")
+      XCTAssertEqual(projection.deadline?.days, 25, zone)
+    }
+  }
+
+  func testMissingAsOfLeavesNoDeadline() throws {
+    let projection = try project(["minimum_spend": 800, "total_spend": 100], asOf: nil)
+    XCTAssertNil(projection.deadline)
+    XCTAssertEqual(projection.action, .minimum(remaining: 700))
+  }
+
+  // MARK: Range, summary, ordering
+
+  func testRangeRowsHaveNoFillDeadlineOrExceptions() throws {
+    let projection = try project([
+      "total_spend": 1000, "maximum_spend": 500, "maximum_spend_exceeded": true, "reward_earned": 40,
+      "flags": [flag("Dining", total: 250, maximum: 200, exceeded: true)],
+    ], isRange: true)
+    XCTAssertEqual(projection.action, .range)
+    XCTAssertNil(projection.fill)
+    XCTAssertNil(projection.deadline)
+    XCTAssertTrue(projection.exceptions.isEmpty)
+    let text = RewardRowText(projection, currencyFormat: sgd)
+    XCTAssertEqual(text.amount, "$40.00")
+    XCTAssertEqual(text.basisLine, "$1,000.00 spent")
+  }
+
+  func testSummaryCountsLabelledStatusesAndApproximatesOnlyValuedMiles() throws {
+    let below = try project(["minimum_spend": 800, "total_spend": 100])
+    let failed = try project(["qualification_status": "failed"])
+    let capped = try project(["maximum_spend": 100, "total_spend": 100, "counted_spend": 100, "maximum_spend_exceeded": true, "should_stop_using": true])
+    let plain = try project(["total_spend": 10])
+    let valued = try report(miles: 1300, cashback: 50, rewardDollars: 69.5, valuation: 0.015)
+    let summary = RewardsBoardSummary(report: valued, projections: [below, failed, capped, plain], currencyFormat: sgd)
+    XCTAssertEqual(summary.line, "≈ $69.50 earned · 1 below minimum · 1 failed · 1 capped")
+    let unvalued = try report(miles: 1300, cashback: 50, rewardDollars: 50, valuation: 0)
+    XCTAssertEqual(
+      RewardsBoardSummary(report: unvalued, projections: [plain], currencyFormat: sgd).line,
+      "$50.00 cashback · 1,300 miles"
+    )
+    let cashOnly = try report(miles: 0, cashback: 50, rewardDollars: 50, valuation: 0.015)
+    XCTAssertEqual(RewardsBoardSummary(report: cashOnly, projections: [], currencyFormat: sgd).line, "$50.00 earned")
+  }
+
+  func testFallbackOrderIsNearestDeadlineThenName() throws {
+    let late = try project(["minimum_spend": 800], name: "Alpha", id: "late", period: ("2026-09-01", "2026-10-15"))
+    let soonB = try project(["minimum_spend": 800], name: "Bravo", id: "soon-b")
+    let soonA = try project(["minimum_spend": 800], name: "apple", id: "soon-a")
+    let none = try project(["minimum_spend": 800], name: "Aardvark", id: "none", asOf: nil)
+    XCTAssertEqual(RewardsBoardOrdering.fallbackOrder([late, none, soonB, soonA]), ["soon-a", "soon-b", "late", "none"])
+  }
+
+  func testAccessibilityValueStatesTargetProgressAndDeadline() throws {
+    let projection = try project(["minimum_spend": 500, "total_spend": 300, "reward_earned": 1300, "reward_type": "miles"])
+    let value = RewardRowText(projection, currencyFormat: sgd).accessibilityValue
+    XCTAssertEqual(value, "$200.00 to minimum. $300.00 of $500.00, 60 per cent. 8 days left, ends 30 Sep. 1,300 miles earned")
+  }
+
+  // MARK: Fixtures
+
+  private func project(
+    _ calculation: [String: Any],
+    name: String = "Everyday Card",
+    id: String = "card",
+    period: (String, String) = ("2026-09-01", "2026-09-30"),
+    asOf: String? = "2026-09-23",
+    isRange: Bool = false
+  ) throws -> RewardRowProjection {
+    var calc: [String: Any] = [
+      "period": "\(period.0)/\(period.1)", "total_spend": 0, "counted_spend": calculation["total_spend"] ?? 0,
+      "eligible_spend": 0, "reward_earned": 0, "reward_earned_dollars": 0, "reward_type": "cashback",
+      "minimum_spend_met": true, "maximum_spend_exceeded": false, "flags": [],
+    ]
+    calc.merge(calculation) { $1 }
+    var withPeriod = calc
+    withPeriod["periods"] = [["start": period.0, "end": period.1, "calculation": calc]]
+    let json: [String: Any] = [
+      "card": ["id": id, "name": name, "issuer": "Demo", "type": calc["reward_type"] ?? "cashback", "ynabAccountId": "acct-\(id)", "featured": true],
+      "account_id": "acct-\(id)", "account_name": name, "calculation": withPeriod,
+    ]
+    let row = try decoder.decode(RewardsCardRow.self, from: JSONSerialization.data(withJSONObject: json))
+    return .make(row: row, asOf: asOf, isRange: isRange)
+  }
+
+  private func flag(
+    _ name: String,
+    total: Double,
+    maximum: Double? = nil,
+    exceeded: Bool = false,
+    minimum: Double? = nil,
+    minimumMet: Bool = true
+  ) -> [String: Any] {
+    var flag: [String: Any] = [
+      "subcategoryId": name.lowercased(), "name": name, "flagColor": "red", "totalSpend": total, "countedSpend": total,
+      "eligibleSpend": total, "rewardEarned": 0, "minimumSpendMet": minimumMet, "maximumSpendExceeded": exceeded,
+    ]
+    if let maximum { flag["maximumSpend"] = maximum }
+    if let minimum { flag["minimumSpend"] = minimum }
+    return flag
+  }
+
+  private func report(miles: Double, cashback: Double, rewardDollars: Double, valuation: Double) throws -> RewardsReport {
+    let json: [String: Any] = [
+      "group_by": "flag", "miles_valuation": valuation,
+      "totals": ["spend": 0, "reward_dollars": rewardDollars, "cashback": cashback, "miles": miles],
+      "cards": [], "groups": [],
+    ]
+    return try decoder.decode(RewardsReport.self, from: JSONSerialization.data(withJSONObject: json))
+  }
+
+  private var decoder: JSONDecoder {
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    return decoder
   }
 }

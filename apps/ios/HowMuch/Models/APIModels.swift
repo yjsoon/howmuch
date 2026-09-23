@@ -2444,6 +2444,13 @@ struct RewardsFlagRow: Decodable, Identifiable, Sendable {
   let rewardEarned: Double
   let rewardEarnedDollars: Double?
   let rewardRate: Double?
+  // Category limits; older servers omit them.
+  var countedSpend: Double? = nil
+  var minimumSpend: Double? = nil
+  var minimumSpendMet: Bool? = nil
+  var maximumSpend: Double? = nil
+  var maximumSpendExceeded: Bool? = nil
+  var blockSize: Double? = nil
 }
 
 struct RewardsGroupRow: Decodable, Identifiable, Sendable {

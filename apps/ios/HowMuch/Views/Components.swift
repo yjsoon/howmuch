@@ -431,6 +431,23 @@ final class RootChromeState {
     overflowByTab[tab] = nil
   }
 
+  /// Cross-tab links between a Rewards card and its account register. The
+  /// receiving tab consumes (clears) the request once it has acted on it.
+  var pendingAccountID: String?
+  var pendingRewardsCardID: String?
+
+  func showAccount(_ accountID: String) {
+    overflowByTab[.accounts] = nil
+    pendingAccountID = accountID
+    tab = .accounts
+  }
+
+  func showRewardsCard(_ cardID: String) {
+    overflowByTab[.rewards] = nil
+    pendingRewardsCardID = cardID
+    tab = .rewards
+  }
+
   func adoptSidebarLayout() {
     guard let overflow = overflow(on: tab) else {
       return
@@ -1106,11 +1123,18 @@ struct RootAddControl: View {
   }
 }
 
-struct DestinationsMenu: View {
+struct DestinationsMenu<Leading: View>: View {
   var omitting: MoreDestination?
+  /// Screen-specific actions, shown as the first section.
+  var leading: Leading
   @Environment(AppModel.self) private var model
   @Environment(RootChromeState.self) private var chrome
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+  init(omitting: MoreDestination? = nil, @ViewBuilder leading: () -> Leading) {
+    self.omitting = omitting
+    self.leading = leading()
+  }
 
   var body: some View {
     let overflowItems = MoreDestination.overflowItems(
@@ -1121,6 +1145,9 @@ struct DestinationsMenu: View {
       omitting: omitting
     )
     Menu {
+      Section {
+        leading
+      }
       if !overflowItems.isEmpty {
         ForEach(overflowItems) { destination in
           Button {
@@ -1141,6 +1168,12 @@ struct DestinationsMenu: View {
     }
     .tint(Theme.accent)
     .accessibilityLabel("More")
+  }
+}
+
+extension DestinationsMenu where Leading == EmptyView {
+  init(omitting: MoreDestination? = nil) {
+    self.init(omitting: omitting) { EmptyView() }
   }
 }
 

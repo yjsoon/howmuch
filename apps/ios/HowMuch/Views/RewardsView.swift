@@ -4,15 +4,31 @@ struct RewardsBoardPreferences: Codable, Equatable {
   var hiddenCardIDs: Set<String> = []
   var cardOrder: [String] = []
   var collapsedGroups: Set<String> = []
+  /// nil until chosen: Featured when any card is featured, otherwise All Cards.
+  var featuredOnly: Bool? = nil
+  var groupsByType = false
+
+  private enum CodingKeys: String, CodingKey {
+    case hiddenCardIDs, cardOrder, collapsedGroups, featuredOnly, groupsByType
+  }
 
   func orderedIDs(_ available: [String]) -> [String] {
     var remaining = Set(available)
     return (cardOrder + available).filter { remaining.remove($0) != nil }
   }
 
-  mutating func reorder(_ ids: [String]) {
+  /// Reorders `ids` among the slots they already occupy, so moving cards in a
+  /// filtered or grouped subset keeps every other card where it was.
+  mutating func reorder(_ ids: [String], within available: [String]) {
+    var seen = Set<String>()
+    var sequence = (cardOrder + available).filter { seen.insert($0).inserted }
     let moved = Set(ids)
-    cardOrder = ids + cardOrder.filter { !moved.contains($0) }
+    let slots = sequence.indices.filter { moved.contains(sequence[$0]) }
+    let known = Set(sequence)
+    for (slot, id) in zip(slots, ids.filter { known.contains($0) }) {
+      sequence[slot] = id
+    }
+    cardOrder = sequence
   }
 
   static func storageKey(planID: String) -> String { "howmuch.rewards.board.v1.\(planID)" }
@@ -26,6 +42,19 @@ struct RewardsBoardPreferences: Codable, Equatable {
   func save(planID: String, to defaults: UserDefaults = .standard) {
     guard let data = try? JSONEncoder().encode(self) else { return }
     defaults.set(data, forKey: Self.storageKey(planID: planID))
+  }
+}
+
+extension RewardsBoardPreferences {
+  /// Tolerates missing keys, so preferences saved before a field existed keep
+  /// their hidden cards and ordering.
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    hiddenCardIDs = try container.decodeIfPresent(Set<String>.self, forKey: .hiddenCardIDs) ?? []
+    cardOrder = try container.decodeIfPresent([String].self, forKey: .cardOrder) ?? []
+    collapsedGroups = try container.decodeIfPresent(Set<String>.self, forKey: .collapsedGroups) ?? []
+    featuredOnly = try container.decodeIfPresent(Bool.self, forKey: .featuredOnly)
+    groupsByType = try container.decodeIfPresent(Bool.self, forKey: .groupsByType) ?? false
   }
 }
 
@@ -43,140 +72,651 @@ struct RewardsReportFilter {
   var range = ReportRange()
   var scope = ReportScope()
 
+  /// The as-of day in Asia/Singapore, or nil for today (the server decides).
+  var asOfISO: String? { useAsOfDate ? RewardsCalendar.isoString(asOfDate) : nil }
+
   // An omitted lower bound selects current card periods on the rewards API.
   // All Time must instead send a comparison-only lower bound for aggregation.
   var from: String? { mode == .current ? nil : (range.fromISO ?? "0001-01-01") }
-  var to: String? { mode == .current ? (useAsOfDate ? asOfDate.isoDateString : nil) : range.toISO }
+  var to: String? { mode == .current ? asOfISO : range.toISO }
   var accountIDs: [String] { scope.accountIDs.sorted() }
   var key: String {
-    "\(mode.rawValue)|\(useAsOfDate)|\(asOfDate.isoDateString)|\(range.key)|\(scope.key)"
+    "\(mode.rawValue)|\(useAsOfDate)|\(RewardsCalendar.isoString(asOfDate))|\(range.key)|\(scope.key)"
+  }
+}
+
+enum RewardsSheet: Identifiable {
+  case detail(String)
+  case editor(RewardCardEditorDestination)
+  case customise
+  case valuation
+  case importExport
+  case accounts
+  case asOfDate
+
+  var id: String {
+    switch self {
+    case .detail(let cardID): return "detail-\(cardID)"
+    case .editor(let destination): return "editor-\(destination.id)"
+    case .customise: return "customise"
+    case .valuation: return "valuation"
+    case .importExport: return "import-export"
+    case .accounts: return "accounts"
+    case .asOfDate: return "as-of-date"
+    }
+  }
+}
+
+enum RewardsRoute: Hashable {
+  case summary
+  case rangeReport
+}
+
+/// One report's rows, ordered and filtered for the board.
+private struct RewardsBoard {
+  let ordered: [RewardRowProjection]
+  let visible: [RewardRowProjection]
+  let featuredIDs: Set<String>
+  let featuredOnly: Bool
+  let hiddenCount: Int
+  let unhiddenCount: Int
+  let summary: RewardsBoardSummary
+
+  init(report: RewardsReport, preferences: RewardsBoardPreferences, currencyFormat: CurrencyFormat?) {
+    let projections = report.cards.map { RewardRowProjection.make(row: $0, asOf: report.asOf, isRange: false) }
+    let byID = Dictionary(projections.map { ($0.cardID, $0) }, uniquingKeysWith: { first, _ in first })
+    ordered = preferences.orderedIDs(RewardsBoardOrdering.fallbackOrder(projections)).compactMap { byID[$0] }
+    featuredIDs = Set(report.cards.filter(\.card.featured).map(\.id))
+    featuredOnly = preferences.featuredOnly ?? !featuredIDs.isEmpty
+    let hidden = preferences.hiddenCardIDs
+    hiddenCount = ordered.filter { hidden.contains($0.cardID) }.count
+    unhiddenCount = ordered.count - hiddenCount
+    let featuredSet = self.featuredIDs
+    let onlyFeatured = self.featuredOnly
+    visible = ordered.filter { (!onlyFeatured || featuredSet.contains($0.cardID)) && !hidden.contains($0.cardID) }
+    summary = RewardsBoardSummary(report: report, projections: projections, currencyFormat: currencyFormat)
   }
 }
 
 struct RewardsView: View {
   @Environment(AppModel.self) private var model
+  @Environment(RootChromeState.self) private var chrome: RootChromeState?
   @State private var filter: RewardsReportFilter
-  @State private var featuredOnly = false
-  @State private var group: RewardGroupBy = .flag
   @State private var report: RewardsReport?
   @State private var reportPlanID: String?
   @State private var phase: LoadPhase = .idle
-  @State private var showingImport = false
-  @State private var editorDestination: RewardCardEditorDestination?
-  @State private var showingDisplayPreferences = false
+  @State private var sheet: RewardsSheet?
+  @State private var route: RewardsRoute?
   @State private var preferencesByPlan: [String: RewardsBoardPreferences] = [:]
-  @State private var milesValuationText: String?
-  @State private var savingValuation = false
-  @State private var valuationError: String?
+  @State private var rewardAccountIDsByPlan: [String: Set<String>] = [:]
 
   init(filter: RewardsReportFilter = RewardsReportFilter()) {
-    _filter = State(initialValue: filter)
+    // The board always shows current card periods; ranges live in Range Report.
+    var board = filter
+    board.mode = .current
+    _filter = State(initialValue: board)
   }
 
   var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 16) {
-        VStack(alignment: .leading) {
-          Picker("Period", selection: $filter.mode) {
-            ForEach(RewardsReportFilter.Mode.allCases) { Text($0.rawValue).tag($0) }
-          }
-          .pickerStyle(.segmented)
-          if filter.mode == .current {
-            Toggle("Choose as-of date", isOn: $filter.useAsOfDate)
-            if filter.useAsOfDate {
-              DatePicker("As of", selection: $filter.asOfDate, displayedComponents: .date)
-            }
-          }
-          ReportFilterBar(
-            range: filter.mode == .historical ? $filter.range : nil,
-            group: $group,
-            scope: $filter.scope
-          )
-          Picker("Cards", selection: $featuredOnly) {
-            Text("All cards").tag(false)
-            Text("Featured").tag(true)
-          }
-          .pickerStyle(.segmented)
-          Button("Display preferences · \(orderedCards.filter { preferences.hiddenCardIDs.contains($0.id) }.count) hidden") {
-            showingDisplayPreferences = true
-          }
-          Text("Display preferences are device-local for this plan. Hidden cards still count in totals; configuration import/export is separate.")
-            .font(.caption).foregroundStyle(.secondary)
-        }
-
-        if let report, reportPlanID == model.settings.planID {
-          headlines(report)
-
-          if let message = phase.errorMessage {
-            Label(message, systemImage: "wifi.exclamationmark")
-              .font(.footnote)
-              .foregroundStyle(.secondary)
-          }
-
-          if report.cards.isEmpty {
-            emptyState
-          } else {
-            Button("Add card") {
-              editorDestination = .create
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(Theme.accent)
-            .accessibilityLabel("Add card")
-            board(report)
-          }
-          groupsTable(report)
-        } else {
-          PhasePlaceholder(phase: phase) {
-            await fetch()
-          }
-        }
-      }
-      .padding(.horizontal, 16)
-      .padding(.bottom, 24)
+    let board = currentReport.map {
+      RewardsBoard(report: $0, preferences: preferences, currencyFormat: model.currencyFormat)
     }
+    List {
+      if let report = currentReport, let board {
+        summaryRow(board)
+        if let asOf = filter.asOfISO {
+          pastDateBanner(asOf)
+        }
+        if let message = phase.errorMessage {
+          errorRow(message)
+        }
+        boardRows(report, board: board)
+      } else {
+        PhasePlaceholder(phase: phase) {
+          await fetch()
+        }
+        .frame(maxWidth: .infinity, minHeight: 240)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+      }
+    }
+    .listStyle(.plain)
+    .scrollContentBackground(.hidden)
     .background(Theme.canvas)
+    .safeAreaBar(edge: .top) {
+      controlBar(board)
+    }
     .navigationTitle("Rewards")
     .navigationBarTitleDisplayMode(.large)
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
-        DestinationsMenu()
-      }
-      ToolbarItem(placement: .topBarTrailing) {
-        Button("Import / export") { showingImport = true }
+        DestinationsMenu {
+          rewardsMenuItems
+        }
       }
     }
-    .sheet(isPresented: $showingImport) {
-      NavigationStack {
-        RewardsImportView()
+    .navigationDestination(item: $route) { route in
+      switch route {
+      case .summary:
+        RewardsReportScreen(filter: filter, allowsRange: false)
+      case .rangeReport:
+        RewardsReportScreen(filter: rangeFilter, allowsRange: true)
       }
-      .blocksCapturePresentation()
     }
-    .sheet(item: $editorDestination) { destination in
-      RewardCardEditorView(cardID: destination.cardID)
-        .blocksCapturePresentation()
-    }
-    .sheet(isPresented: $showingDisplayPreferences) {
-      displayPreferences
+    .sheet(item: $sheet) { sheet in
+      sheetContent(sheet)
         .blocksCapturePresentation()
     }
     .task(id: fetchKey) {
       await fetch()
     }
-    .onChange(of: model.settings.planID) {
-      milesValuationText = nil
-      valuationError = nil
-    }
     .refreshable {
       await fetch()
     }
+    .onChange(of: chrome?.pendingRewardsCardID, initial: true) { _, _ in
+      consumeCardRequest()
+    }
   }
+
+  // MARK: Board
+
+  private var currentReport: RewardsReport? {
+    reportPlanID == model.settings.planID ? report : nil
+  }
+
+  @ViewBuilder
+  private func boardRows(_ report: RewardsReport, board: RewardsBoard) -> some View {
+    if report.cards.isEmpty {
+      if filter.scope.accountIDs.isEmpty {
+        emptyState(
+          "No Reward Cards",
+          systemImage: "creditcard",
+          description: "Add a card to track minimums and caps, or import your Rewards Tracker configuration."
+        ) {
+          Button("Add Card") { sheet = .editor(.create) }
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.accent)
+          Button("Import Rewards") { sheet = .importExport }
+        }
+      } else {
+        emptyState(
+          "No Cards in These Accounts",
+          systemImage: "building.columns",
+          description: "None of the selected accounts has a reward card."
+        ) {
+          Button("Show All Accounts") { filter.scope.accountIDs = [] }
+        }
+      }
+    } else if board.visible.isEmpty {
+      if board.unhiddenCount == 0 {
+        emptyState(
+          "All Cards Hidden",
+          systemImage: "eye.slash",
+          description: "Hidden cards still count in the totals above."
+        ) {
+          Button("Show Hidden Cards") { updatePreferences { $0.hiddenCardIDs = [] } }
+        }
+      } else {
+        emptyState(
+          "No Featured Cards",
+          systemImage: "star",
+          description: "None of the visible cards is featured."
+        ) {
+          Button("Show All Cards") { updatePreferences { $0.featuredOnly = false } }
+        }
+      }
+    } else if preferences.groupsByType {
+      typeSection("Cashback", kind: .cashback, rows: board.visible)
+      typeSection("Miles", kind: .miles, rows: board.visible)
+    } else {
+      ForEach(board.visible, id: \.cardID) { projection in
+        boardRow(projection)
+      }
+    }
+    if board.hiddenCount > 0 {
+      Button {
+        sheet = .customise
+      } label: {
+        Text("\(board.hiddenCount) hidden · Show")
+          .font(.footnote.weight(.medium))
+          .foregroundStyle(Theme.accent)
+          .frame(maxWidth: .infinity, minHeight: 44)
+      }
+      .buttonStyle(.plain)
+      .listRowBackground(Color.clear)
+      .listRowSeparator(.hidden)
+      .accessibilityHint("Opens Customise Board to show hidden cards.")
+    }
+  }
+
+  @ViewBuilder
+  private func typeSection(_ title: String, kind: RewardKind, rows: [RewardRowProjection]) -> some View {
+    let matching = rows.filter { $0.rewardType == kind }
+    if !matching.isEmpty {
+      let isExpanded = !preferences.collapsedGroups.contains(kind.rawValue)
+      Button {
+        updatePreferences {
+          if isExpanded { $0.collapsedGroups.insert(kind.rawValue) } else { $0.collapsedGroups.remove(kind.rawValue) }
+        }
+      } label: {
+        HStack {
+          Text("\(title) · \(matching.count)")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Theme.rowSecondary)
+          Spacer()
+          Image(systemName: "chevron.down")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Theme.rowSecondary)
+            .rotationEffect(.degrees(isExpanded ? 0 : -90))
+        }
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .listRowBackground(Color.clear)
+      .listRowSeparator(.hidden)
+      .accessibilityLabel("\(title), \(matching.count) cards")
+      .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+      if isExpanded {
+        ForEach(matching, id: \.cardID) { projection in
+          boardRow(projection)
+        }
+      }
+    }
+  }
+
+  private func boardRow(_ projection: RewardRowProjection) -> some View {
+    let text = RewardRowText(projection, currencyFormat: model.currencyFormat)
+    return Button {
+      sheet = .detail(projection.cardID)
+    } label: {
+      RewardFilledRow(projection: projection, icon: icon(for: projection.accountID), currencyFormat: model.currencyFormat)
+    }
+    .buttonStyle(.plain)
+    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+    .listRowBackground(Color.clear)
+    .listRowSeparator(.hidden)
+    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+      Button {
+        hide(projection.cardID)
+      } label: {
+        Label("Hide", systemImage: "eye.slash")
+      }
+      .tint(.gray)
+    }
+    .contextMenu {
+      Button {
+        sheet = .detail(projection.cardID)
+      } label: {
+        Label("Show Details", systemImage: "info.circle")
+      }
+      Button {
+        sheet = .editor(.edit(projection.cardID))
+      } label: {
+        Label("Edit Card", systemImage: "pencil")
+      }
+      if let chrome {
+        Button {
+          chrome.showAccount(projection.accountID)
+        } label: {
+          Label("View Transactions", systemImage: "list.bullet.rectangle")
+        }
+      }
+      Button {
+        hide(projection.cardID)
+      } label: {
+        Label("Hide on This Device", systemImage: "eye.slash")
+      }
+    }
+    .accessibilityLabel(projection.title)
+    .accessibilityValue(text.accessibilityValue)
+    .accessibilityHint("Shows details.")
+    .accessibilityAction(named: "Edit Card") {
+      sheet = .editor(.edit(projection.cardID))
+    }
+    .accessibilityAction(named: "Hide") {
+      hide(projection.cardID)
+    }
+  }
+
+  private func summaryRow(_ board: RewardsBoard) -> some View {
+    var line = board.summary.line
+    if board.visible.count < board.ordered.count {
+      line += " · showing \(board.visible.count) of \(board.ordered.count)"
+    }
+    return Button {
+      route = .summary
+    } label: {
+      HStack(spacing: 4) {
+        Text(line)
+          .font(.footnote)
+          .foregroundStyle(Theme.rowSecondary)
+          .multilineTextAlignment(.center)
+        Image(systemName: "chevron.forward")
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(Theme.rowSecondary)
+          .accessibilityHidden(true)
+      }
+      .frame(maxWidth: .infinity, minHeight: 44)
+    }
+    .buttonStyle(.plain)
+    .listRowBackground(Color.clear)
+    .listRowSeparator(.hidden)
+    .accessibilityLabel("Summary for current periods, \(line)")
+    .accessibilityHint("Opens totals and the breakdown.")
+  }
+
+  private func pastDateBanner(_ asOf: String) -> some View {
+    HStack(spacing: 8) {
+      Label(
+        "Showing \(RewardsCalendar.shortLabel(asOf, referenceISO: RewardsCalendar.today()))",
+        systemImage: "clock.arrow.circlepath"
+      )
+      .font(.subheadline)
+      .foregroundStyle(Theme.textPrimary)
+      Spacer(minLength: 8)
+      Button("Back to Today") {
+        backToToday()
+      }
+      .buttonStyle(.borderless)
+      .font(.subheadline.weight(.semibold))
+      .tint(Theme.accent)
+      .frame(minHeight: 44)
+    }
+    .listRowBackground(Color.clear)
+    .listRowSeparator(.hidden)
+  }
+
+  private func errorRow(_ message: String) -> some View {
+    Label(message, systemImage: "wifi.exclamationmark")
+      .font(.footnote)
+      .foregroundStyle(Theme.rowSecondary)
+      .listRowBackground(Color.clear)
+      .listRowSeparator(.hidden)
+  }
+
+  private func emptyState<Actions: View>(
+    _ title: String,
+    systemImage: String,
+    description: String,
+    @ViewBuilder actions: () -> Actions
+  ) -> some View {
+    ContentUnavailableView {
+      Label(title, systemImage: systemImage)
+    } description: {
+      Text(description)
+    } actions: {
+      actions()
+    }
+    .listRowBackground(Color.clear)
+    .listRowSeparator(.hidden)
+  }
+
+  // MARK: Controls
+
+  private func controlBar(_ board: RewardsBoard?) -> some View {
+    GlassEffectContainer(spacing: 8) {
+      ViewThatFits(in: .horizontal) {
+        HStack(spacing: 8) {
+          featuredMenu(board)
+          Spacer(minLength: 8)
+          accountsButton
+          dateMenu
+        }
+        VStack(alignment: .leading, spacing: 8) {
+          featuredMenu(board)
+          accountsButton
+          dateMenu
+        }
+      }
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 6)
+  }
+
+  private func featuredMenu(_ board: RewardsBoard?) -> some View {
+    let featuredOnly = board?.featuredOnly ?? (preferences.featuredOnly ?? true)
+    let title = featuredOnly ? "Featured" : "All Cards"
+    return Menu {
+      Picker("Cards", selection: Binding(
+        get: { featuredOnly },
+        set: { value in updatePreferences { $0.featuredOnly = value } }
+      )) {
+        Text("Featured (\(board?.featuredIDs.count ?? 0))").tag(true)
+        Text("All Cards (\(board?.ordered.count ?? 0))").tag(false)
+      }
+      .pickerStyle(.inline)
+      Toggle("Group by Reward Type", isOn: Binding(
+        get: { preferences.groupsByType },
+        set: { value in updatePreferences { $0.groupsByType = value } }
+      ))
+    } label: {
+      Label(title, systemImage: "line.3.horizontal.decrease")
+    }
+    .menuStyle(.button)
+    .buttonStyle(.glass)
+    .accessibilityLabel("Cards, \(title)")
+  }
+
+  @ViewBuilder
+  private var accountsButton: some View {
+    if !filter.scope.accountIDs.isEmpty {
+      let count = filter.scope.accountIDs.count
+      HStack(spacing: 4) {
+        Button {
+          sheet = .accounts
+        } label: {
+          Label("\(count) Account\(count == 1 ? "" : "s")", systemImage: "building.columns")
+        }
+        .accessibilityHint("Choose which accounts the report covers.")
+        Button {
+          filter.scope.accountIDs = []
+        } label: {
+          Image(systemName: "xmark")
+        }
+        .accessibilityLabel("Show all accounts")
+      }
+      .buttonStyle(.glass)
+      .tint(Theme.accent)
+    }
+  }
+
+  private var dateMenu: some View {
+    let title = filter.asOfISO.map { RewardsCalendar.shortLabel($0, referenceISO: RewardsCalendar.today()) } ?? "Today"
+    return Menu {
+      if filter.useAsOfDate {
+        Button {
+          backToToday()
+        } label: {
+          Label("Back to Today", systemImage: "arrow.uturn.backward")
+        }
+      } else {
+        Button {} label: {
+          Label("Today", systemImage: "checkmark")
+        }
+      }
+      Button {
+        sheet = .asOfDate
+      } label: {
+        Label("Choose Date…", systemImage: "calendar")
+      }
+      Section {
+        Button {
+          route = .rangeReport
+        } label: {
+          Label("Range Report…", systemImage: "calendar.badge.clock")
+        }
+      }
+    } label: {
+      Label(title, systemImage: "calendar")
+    }
+    .menuStyle(.button)
+    .buttonStyle(.glass)
+    .tint(filter.useAsOfDate ? Theme.accent : nil)
+    .accessibilityLabel("As of, \(title)")
+  }
+
+  @ViewBuilder
+  private var rewardsMenuItems: some View {
+    Button {
+      sheet = .editor(.create)
+    } label: {
+      Label("Add Card", systemImage: "plus.rectangle.on.rectangle")
+    }
+    Button {
+      sheet = .customise
+    } label: {
+      Label("Customise Board…", systemImage: "slider.horizontal.3")
+    }
+    Button {
+      sheet = .accounts
+    } label: {
+      Text("Accounts…")
+      Text(filter.scope.accountIDs.isEmpty ? "All accounts" : "\(filter.scope.accountIDs.count) selected")
+      Image(systemName: "building.columns")
+    }
+    Button {
+      sheet = .valuation
+    } label: {
+      Text("Miles Valuation…")
+      if let valuation = currentReport?.milesValuation {
+        Text("\(valuation.formatted()) per mile")
+      }
+      Image(systemName: "airplane")
+    }
+    Button {
+      sheet = .importExport
+    } label: {
+      Label("Import & Export…", systemImage: "square.and.arrow.up.on.square")
+    }
+  }
+
+  // MARK: Sheets
+
+  @ViewBuilder
+  private func sheetContent(_ sheet: RewardsSheet) -> some View {
+    switch sheet {
+    case .detail(let cardID):
+      detailSheet(cardID)
+    case .editor(let destination):
+      RewardCardEditorView(cardID: destination.cardID)
+    case .customise:
+      customiseSheet
+    case .valuation:
+      RewardsValuationSheet(current: currentReport?.milesValuation)
+    case .importExport:
+      NavigationStack {
+        RewardsImportView()
+      }
+    case .accounts:
+      AccountScopePicker(
+        selection: $filter.scope.accountIDs,
+        candidateIDs: rewardAccountIDsByPlan[model.settings.planID]
+      )
+    case .asOfDate:
+      RewardsAsOfDateSheet(filter: $filter)
+    }
+  }
+
+  @ViewBuilder
+  private func detailSheet(_ cardID: String) -> some View {
+    // Looked up live, so edits and refreshes update the open sheet.
+    if let report = currentReport, let row = report.cards.first(where: { $0.id == cardID }) {
+      RewardCardDetailSheet(
+        row: row,
+        asOf: report.asOf,
+        icon: icon(for: row.accountId),
+        currencyFormat: model.currencyFormat,
+        canOpenAccount: chrome != nil,
+        onEdit: { sheet = .editor(.edit(cardID)) },
+        onOpenAccount: {
+          sheet = nil
+          chrome?.showAccount(row.accountId)
+        }
+      )
+    } else {
+      ContentUnavailableView(
+        "Card Unavailable",
+        systemImage: "creditcard",
+        description: Text("This card is no longer in the report.")
+      )
+      .presentationDetents([.medium])
+    }
+  }
+
+  private var customiseSheet: some View {
+    let ordered = currentReport.map {
+      RewardsBoard(report: $0, preferences: preferences, currencyFormat: model.currencyFormat).ordered
+    } ?? []
+    let available = ordered.map(\.cardID)
+    return NavigationStack {
+      List {
+        Section {
+          Text("Device-local for this plan. Drag to reorder, and show or hide cards, including cards excluded by Featured. These choices do not change rewards, totals or configuration exports.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+          Button("Show All Cards") { updatePreferences { $0.hiddenCardIDs = [] } }
+          Button("Reset Display Preferences") { updatePreferences { $0 = RewardsBoardPreferences() } }
+        }
+        if preferences.groupsByType {
+          customiseSection("Cashback", rows: ordered.filter { $0.rewardType == .cashback }, available: available)
+          customiseSection("Miles", rows: ordered.filter { $0.rewardType == .miles }, available: available)
+        } else {
+          customiseSection("Cards", rows: ordered, available: available)
+        }
+      }
+      .environment(\.editMode, .constant(.active))
+      .navigationTitle("Customise Board")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Done") { sheet = nil }
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func customiseSection(_ title: String, rows: [RewardRowProjection], available: [String]) -> some View {
+    if !rows.isEmpty {
+      Section(title) {
+        ForEach(rows, id: \.cardID) { row in
+          Toggle(isOn: Binding(
+            get: { !preferences.hiddenCardIDs.contains(row.cardID) },
+            set: { visible in
+              updatePreferences {
+                if visible { $0.hiddenCardIDs.remove(row.cardID) } else { $0.hiddenCardIDs.insert(row.cardID) }
+              }
+            }
+          )) {
+            HStack(spacing: 6) {
+              if let icon = icon(for: row.accountID) {
+                Text(icon).accessibilityHidden(true)
+              }
+              Text(row.title)
+            }
+          }
+          .accessibilityLabel("Show \(row.title)")
+        }
+        .onMove { offsets, destination in
+          var ids = rows.map(\.cardID)
+          ids.move(fromOffsets: offsets, toOffset: destination)
+          updatePreferences { $0.reorder(ids, within: available) }
+        }
+      }
+    }
+  }
+
+  // MARK: State
 
   private var fetchKey: String {
-    "\(model.settings.planID)|\(model.rewardsRefreshGeneration)|\(filter.key)|\(group.rawValue)"
+    "\(model.settings.planID)|\(model.rewardsRefreshGeneration)|\(filter.key)"
   }
 
-  private var visibleCards: [RewardsCardRow] {
-    orderedCards.filter { (!featuredOnly || $0.card.featured) && !preferences.hiddenCardIDs.contains($0.id) }
+  private var rangeFilter: RewardsReportFilter {
+    var range = RewardsReportFilter(mode: .historical)
+    range.scope = filter.scope
+    return range
   }
 
   private var preferences: RewardsBoardPreferences {
@@ -191,273 +731,32 @@ struct RewardsView: View {
     next.save(planID: planID)
   }
 
-  private var orderedCards: [RewardsCardRow] {
-    let cards = reportPlanID == model.settings.planID ? (report?.cards ?? []) : []
-    let byID = Dictionary(cards.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-    return preferences.orderedIDs(cards.map(\.id)).compactMap { byID[$0] }
+  private func hide(_ cardID: String) {
+    updatePreferences { $0.hiddenCardIDs.insert(cardID) }
   }
 
-  private func expanded(_ key: String) -> Binding<Bool> {
-    Binding(
-      get: { !preferences.collapsedGroups.contains(key) },
-      set: { value in
-        updatePreferences {
-          if value { $0.collapsedGroups.remove(key) } else { $0.collapsedGroups.insert(key) }
-        }
-      }
-    )
+  private func icon(for accountID: String) -> String? {
+    model.accounts.first { $0.id == accountID }?.displayIcon
   }
 
-  private var displayPreferences: some View {
-    NavigationStack {
-      List {
-        Section {
-          Text("Device-local for this plan. Drag to reorder within each reward type. Show or hide cards here, including cards excluded by Featured. These choices do not change rewards or configuration exports.")
-            .font(.footnote).foregroundStyle(.secondary)
-          Button("Show all cards") { updatePreferences { $0.hiddenCardIDs = [] } }
-          Button("Reset display preferences") { updatePreferences { $0 = RewardsBoardPreferences() } }
-        }
-        displaySection("Cashback", kind: .cashback)
-        displaySection("Miles", kind: .miles)
-      }
-      .environment(\.editMode, .constant(.active))
-      .navigationTitle("Display preferences")
-      .toolbar {
-        ToolbarItem(placement: .confirmationAction) {
-          Button("Done") { showingDisplayPreferences = false }
-        }
-      }
-    }
+  private func backToToday() {
+    filter.useAsOfDate = false
+    filter.asOfDate = Date()
   }
 
-  private func displaySection(_ title: String, kind: RewardKind) -> some View {
-    let cards = orderedCards.filter { $0.card.type == kind }
-    return Section(title) {
-      Toggle("Expand \(title)", isOn: expanded(kind.rawValue))
-      ForEach(cards) { row in
-        Toggle(row.card.name, isOn: Binding(
-          get: { !preferences.hiddenCardIDs.contains(row.id) },
-          set: { visible in
-            updatePreferences {
-              if visible { $0.hiddenCardIDs.remove(row.id) } else { $0.hiddenCardIDs.insert(row.id) }
-            }
-          }
-        ))
-        .accessibilityLabel("Show \(row.card.name)")
-      }
-      .onMove { offsets, destination in
-        var ids = cards.map(\.id)
-        ids.move(fromOffsets: offsets, toOffset: destination)
-        updatePreferences { $0.reorder(ids) }
-      }
-    }
-  }
-
-  private var cashback: [RewardsCardRow] {
-    visibleCards.filter { $0.card.type == .cashback }
-  }
-
-  private var miles: [RewardsCardRow] {
-    visibleCards.filter { $0.card.type == .miles }
-  }
-
-  @ViewBuilder
-  private func headlines(_ report: RewardsReport) -> some View {
-    VStack(alignment: .leading, spacing: 10) {
-      if let asOf = report.asOf {
-        Text("As of \(asOf)").font(.caption).foregroundStyle(.secondary)
-      }
-      HStack {
-        TextField("Miles valuation", text: Binding(
-          get: { milesValuationText ?? String(report.milesValuation) },
-          set: { milesValuationText = $0 }
-        ))
-        .keyboardType(.decimalPad)
-        .accessibilityLabel("Miles valuation")
-        Button(savingValuation ? "Saving…" : "Save valuation") {
-          Task { await saveValuation() }
-        }
-        .disabled(savingValuation || milesValuationText == nil)
-      }
-      Text("Currency units per mile. Zero keeps miles but assigns no cash value.")
-        .font(.caption).foregroundStyle(.secondary)
-      if let valuationError {
-        Text(valuationError).font(.caption).foregroundStyle(Theme.outflow)
-      }
-      Text("Qualifying spend")
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-      Text(MoneyCodec.displayString(forCurrencyUnits: report.totals.spend, currencyFormat: model.currencyFormat))
-        .font(.title.weight(.bold))
-        .monospacedDigit()
-        .foregroundStyle(Theme.textPrimary)
-
-      HStack {
-        Text("Value")
-          .foregroundStyle(.secondary)
-        Spacer()
-        Text(MoneyCodec.displayString(forCurrencyUnits: report.totals.rewardDollars, currencyFormat: model.currencyFormat))
-          .monospacedDigit()
-          .foregroundStyle(Theme.inflow)
-      }
-      .font(.subheadline)
-
-      if report.totals.miles > 0 {
-        HStack {
-          Text("Miles")
-            .foregroundStyle(.secondary)
-          Spacer()
-          Text(Self.milesString(report.totals.miles))
-            .monospacedDigit()
-            .foregroundStyle(Theme.textPrimary)
-        }
-        .font(.subheadline)
-      }
-
-      if report.totals.cashback > 0 {
-        HStack {
-          Text("Cashback")
-            .foregroundStyle(.secondary)
-          Spacer()
-          Text(MoneyCodec.displayString(forCurrencyUnits: report.totals.cashback, currencyFormat: model.currencyFormat))
-            .monospacedDigit()
-            .foregroundStyle(Theme.inflow)
-        }
-        .font(.subheadline)
-      }
-    }
-    .padding(16)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .ynabCard()
-  }
-
-  private var emptyState: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Text("No reward cards in this range.")
-        .font(.headline)
-        .foregroundStyle(Theme.textPrimary)
-      Text("Import from Connection settings → Rewards import, or choose Add card to score one of your HowMuch cards.")
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-      Button("Add card") {
-        editorDestination = .create
-      }
-      .buttonStyle(.borderedProminent)
-      .tint(Theme.accent)
-      .accessibilityLabel("Add card")
-      Button("Rewards import") {
-        showingImport = true
-      }
-      .buttonStyle(.bordered)
-    }
-    .padding(16)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .ynabCard()
-  }
-
-  @ViewBuilder
-  private func board(_ report: RewardsReport) -> some View {
-    if visibleCards.isEmpty {
-      Text("No cards match these display choices. Choose All cards or show hidden cards in Display preferences.")
-        .foregroundStyle(.secondary)
-    }
-    if !cashback.isEmpty {
-      section(title: "Cashback", key: "cashback", rows: cashback)
-    }
-    if !miles.isEmpty {
-      section(title: "Miles", key: "miles", rows: miles)
-    }
-  }
-
-  private func section(title: String, key: String, rows: [RewardsCardRow]) -> some View {
-    DisclosureGroup("\(title) · \(rows.count)", isExpanded: expanded(key)) {
-      LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)], spacing: 12) {
-        ForEach(rows) { row in
-          Button {
-            editorDestination = .edit(row.card.id)
-          } label: {
-            RewardTile(row: row, asOf: report?.asOf, currencyFormat: model.currencyFormat)
-          }
-          .buttonStyle(.plain)
-          .accessibilityLabel(row.card.name)
-          .contextMenu {
-            Button("Hide card on this device", systemImage: "eye.slash") {
-              updatePreferences { $0.hiddenCardIDs.insert(row.id) }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  @ViewBuilder
-  private func groupsTable(_ report: RewardsReport) -> some View {
-    if !report.groups.isEmpty {
-      VStack(alignment: .leading, spacing: 10) {
-        HStack {
-          Text("By \(group.title)")
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.secondary)
-          Spacer()
-          Text("\(report.groups.count) groups")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-        VStack(spacing: 0) {
-          ForEach(Array(report.groups.enumerated()), id: \.element.id) { index, row in
-            HStack(spacing: 8) {
-              Circle()
-                .fill(Theme.flagColour(named: row.flagColor) ?? Color.secondary.opacity(0.4))
-                .frame(width: 8, height: 8)
-              Text(row.label)
-                .font(.subheadline)
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(1)
-              Spacer()
-              Text(MoneyCodec.displayString(forCurrencyUnits: row.spend, currencyFormat: model.currencyFormat))
-                .font(.subheadline)
-                .monospacedDigit()
-              Text(MoneyCodec.displayString(forCurrencyUnits: row.rewardDollars, currencyFormat: model.currencyFormat))
-                .font(.subheadline)
-                .monospacedDigit()
-                .foregroundStyle(Theme.inflow)
-              Text("\(row.transactionCount)")
-                .font(.caption)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-            }
-            .padding(.vertical, 10)
-            if index < report.groups.count - 1 {
-              Divider()
-            }
-          }
-        }
-        .padding(.horizontal, 16)
-        .ynabCard()
-      }
-    }
-  }
-
-  private func saveValuation() async {
-    guard !savingValuation else { return }
-    guard let text = milesValuationText,
-      let value = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)),
-      value.isFinite, value >= 0 else {
-      valuationError = "Miles valuation must be a nonnegative number."
-      return
-    }
-    let planID = model.settings.planID
-    savingValuation = true
-    valuationError = nil
-    defer { savingValuation = false }
-    do {
-      _ = try await model.apiClient.updateRewardSettings(planID: planID, milesValuation: value)
-      guard planID == model.settings.planID else { return }
-      milesValuationText = nil
-      model.noteRewardsBoardChanged()
-    } catch {
-      guard planID == model.settings.planID else { return }
-      valuationError = error.localizedDescription
+  /// Opens the card a register link asked for, widening the account scope or
+  /// date first if they exclude it.
+  private func consumeCardRequest() {
+    guard let chrome, let cardID = chrome.pendingRewardsCardID, let report = currentReport else { return }
+    route = nil
+    if report.cards.contains(where: { $0.id == cardID }) {
+      chrome.pendingRewardsCardID = nil
+      sheet = .detail(cardID)
+    } else if !filter.scope.accountIDs.isEmpty || filter.useAsOfDate {
+      filter.scope.accountIDs = []
+      backToToday()
+    } else {
+      chrome.pendingRewardsCardID = nil
     }
   }
 
@@ -471,7 +770,7 @@ struct RewardsView: View {
         from: filter.from,
         to: filter.to,
         accountIDs: filter.accountIDs,
-        group: group
+        group: .flag
       )
       guard key == fetchKey, planID == model.settings.planID else {
         return
@@ -479,6 +778,10 @@ struct RewardsView: View {
       report = next
       reportPlanID = planID
       phase = .loaded
+      if filter.accountIDs.isEmpty {
+        rewardAccountIDsByPlan[planID] = Set(next.cards.map(\.accountId))
+      }
+      consumeCardRequest()
     } catch {
       guard key == fetchKey, planID == model.settings.planID else {
         return
@@ -488,10 +791,6 @@ struct RewardsView: View {
       }
       phase = .failed(error.localizedDescription)
     }
-  }
-
-  fileprivate static func milesString(_ value: Double) -> String {
-    Int(value.rounded()).formatted(IntegerFormatStyle<Int>(locale: Locale(identifier: "en_GB")))
   }
 }
 
@@ -518,156 +817,796 @@ enum RewardCardEditorDestination: Identifiable {
   }
 }
 
-private struct RewardTile: View {
-  let row: RewardsCardRow
-  let asOf: String?
+// MARK: - Filled row
+
+/// A rounded row whose whole background is the progress track. Text colours
+/// never change across the fill edge.
+struct RewardFilledRow: View {
+  let projection: RewardRowProjection
+  var icon: String?
   let currencyFormat: CurrencyFormat?
+  var showsChevron = true
+
+  @Environment(\.colorSchemeContrast) private var contrast
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.layoutDirection) private var layoutDirection
+  @ScaledMetric(relativeTo: .body) private var verticalPadding = 14.0
+  @ScaledMetric(relativeTo: .body) private var horizontalPadding = 16.0
+
+  private static let cornerRadius: CGFloat = 18
 
   var body: some View {
-    let calc = row.calculation
-    let fullPeriod = calc.periods?.last(where: { period in
-      guard let asOf else { return false }
-      return period.start <= asOf && period.end >= asOf
-    })?.calculation
-    VStack(alignment: .leading, spacing: 12) {
-      HStack(alignment: .top) {
-        VStack(alignment: .leading, spacing: 2) {
-          Text(row.card.name)
+    let text = RewardRowText(projection, currencyFormat: currencyFormat)
+    let palette = RewardTonePalette.palette(for: projection.tone)
+    let increased = contrast == .increased
+    VStack(alignment: .leading, spacing: 3) {
+      HStack(alignment: .firstTextBaseline, spacing: 6) {
+        if let icon {
+          Text(icon)
             .font(.headline)
-            .foregroundStyle(Theme.textPrimary)
-          Text(subtitle)
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .accessibilityHidden(true)
         }
-        Spacer()
-        Text(earnedLabel)
-          .font(.caption.weight(.semibold))
+        Text(projection.title)
+          .font(.headline)
+          .foregroundStyle(Theme.textPrimary)
+          .lineLimit(2)
+        Spacer(minLength: 8)
+        if showsChevron {
+          Image(systemName: "chevron.forward")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(Theme.rowSecondary)
+            .accessibilityHidden(true)
+        }
+      }
+      actionLine(text, palette: palette)
+      if let basis = text.basisLine {
+        Text(basis)
+          .font(.subheadline)
           .monospacedDigit()
-          .padding(.horizontal, 8)
-          .padding(.vertical, 4)
-          .background(Theme.surfaceMuted, in: Capsule())
-          .foregroundStyle(Theme.inflow)
+          .foregroundStyle(Theme.rowSecondary)
       }
-
-      HStack {
-        labeled("Qualifying spend", MoneyCodec.displayString(forCurrencyUnits: calc.totalSpend, currencyFormat: currencyFormat))
-        Spacer()
-        labeled("Value", MoneyCodec.displayString(forCurrencyUnits: calc.rewardEarnedDollars, currencyFormat: currencyFormat))
-      }
-
-      if let periods = calc.periods, !periods.isEmpty {
-        ForEach(Array(periods.enumerated()), id: \.offset) { _, period in
-          Text("\(period.start) – \(period.end)").font(.caption).foregroundStyle(.secondary)
+      ForEach(text.exceptionLines, id: \.self) { line in
+        Label {
+          Text(line)
+            .foregroundStyle(Theme.textPrimary)
+        } icon: {
+          Image(systemName: "exclamationmark.triangle.fill")
+            .foregroundStyle(palette.ink)
         }
-      } else {
-        Text(calc.period).font(.caption).foregroundStyle(.secondary)
+        .font(.footnote.weight(.medium))
       }
-      if calc.maximumSpendExceeded || calc.shouldStopUsing == true {
-        Label(calc.hasNextSpendingTier == true ? "Current cap reached · a higher tier is available" : "Cap reached · consider another card", systemImage: "exclamationmark.circle")
-          .font(.caption).foregroundStyle(Theme.outflow)
-      }
-      if let status = calc.qualificationStatus {
-        Text("Qualification: \(status.replacingOccurrences(of: "_", with: " "))")
-          .font(.caption)
-      }
-      if let minimum = calc.monthlyMinimumSpend {
-        labeled("Monthly minimum", MoneyCodec.displayString(forCurrencyUnits: minimum, currencyFormat: currencyFormat))
-      }
-      ForEach(Array((calc.monthlyQualifications ?? []).enumerated()), id: \.offset) { _, month in
-        VStack(alignment: .leading, spacing: 2) {
-          Text("\(month.start) – \(month.end) · \(month.status)")
-          Text("\(MoneyCodec.displayString(forCurrencyUnits: month.spend, currencyFormat: currencyFormat)) / \(MoneyCodec.displayString(forCurrencyUnits: month.minimumSpend, currencyFormat: currencyFormat))")
-            .monospacedDigit()
-        }
-        .font(.caption)
-      }
-      if let tierID = calc.activeSpendingTierId {
-        if let tier = row.card.spendingTiers?.first(where: { $0.id == tierID }) {
-          labeled("Active tier threshold", MoneyCodec.displayString(forCurrencyUnits: tier.spendThreshold, currencyFormat: currencyFormat))
-          if let rate = tier.earningRate { Text("Tier rate: \(rate.formatted())").font(.caption) }
-          if let maximum = tier.maximumSpend {
-            labeled("Tier cap", MoneyCodec.displayString(forCurrencyUnits: maximum, currencyFormat: currencyFormat))
+    }
+    .padding(.vertical, verticalPadding)
+    .padding(.horizontal, horizontalPadding)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background {
+      ZStack(alignment: .leading) {
+        palette.track
+        if let fill = projection.fill {
+          LeadingFill(fraction: fill, rightToLeft: layoutDirection == .rightToLeft)
+            .fill(palette.fill)
+          if increased, fill > 0, fill < 1 {
+            LeadingFill(fraction: fill, rightToLeft: layoutDirection == .rightToLeft, edgeWidth: 2)
+              .fill(palette.ink)
           }
-        } else {
-          Text("Active tier: \(tierID)").font(.caption)
         }
       }
-      if calc.hasNextSpendingTier == true, let threshold = calc.nextSpendingTierThreshold {
-        labeled("Next tier at", MoneyCodec.displayString(forCurrencyUnits: threshold, currencyFormat: currencyFormat))
+      .animation(reduceMotion ? nil : .smooth, value: projection.fill)
+    }
+    .clipShape(.rect(cornerRadius: Self.cornerRadius, style: .continuous))
+    .overlay {
+      if increased {
+        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+          .strokeBorder(Color.primary.opacity(0.3), lineWidth: 1)
       }
+    }
+    .contentShape(.rect(cornerRadius: Self.cornerRadius, style: .continuous))
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(projection.title)
+    .accessibilityValue(text.accessibilityValue)
+  }
 
-      if let minimum = calc.minimumSpend {
-        let progress = min(1, max(0, (calc.minimumSpendProgress ?? 0) / 100))
-        VStack(alignment: .leading, spacing: 4) {
-          HStack {
-            Text(fullPeriod != nil
-              ? (calc.minimumSpendMet ? "Full-period minimum met" : "Full-period minimum")
-              : (calc.minimumSpendMet ? "Minimum met" : "Minimum spend"))
-            Spacer()
-            Text("\(MoneyCodec.displayString(forCurrencyUnits: fullPeriod?.totalSpend ?? calc.totalSpend, currencyFormat: currencyFormat)) / \(MoneyCodec.displayString(forCurrencyUnits: minimum, currencyFormat: currencyFormat))")
-              .monospacedDigit()
+  @ViewBuilder
+  private func actionLine(_ text: RewardRowText, palette: RewardTonePalette) -> some View {
+    let headline = headlineText(text)
+    let deadline = text.deadline.map { value in
+      Text(value)
+        .font(.subheadline.weight(text.isUrgent ? .semibold : .regular))
+        .foregroundStyle(text.isUrgent ? palette.ink : Theme.rowSecondary)
+    }
+    if dynamicTypeSize.isAccessibilitySize {
+      VStack(alignment: .leading, spacing: 2) {
+        headline
+        deadline
+      }
+    } else {
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        headline
+        Spacer(minLength: 8)
+        deadline
+      }
+    }
+  }
+
+  private func headlineText(_ text: RewardRowText) -> Text {
+    if let amount = text.amount {
+      return Text("\(Text(amount).font(.title2.bold()).monospacedDigit()) \(text.actionLabel)")
+        .font(.body)
+        .foregroundStyle(Theme.textPrimary)
+    }
+    return Text(text.actionLabel)
+      .font(.title3.weight(.semibold))
+      .foregroundStyle(projection.tone == .failed ? Theme.outflow : Theme.textPrimary)
+  }
+}
+
+/// The leading part of a rect, square-edged so small values read as a quantity.
+/// With `edgeWidth`, only a tick at the fill boundary.
+struct LeadingFill: Shape {
+  var fraction: Double
+  var rightToLeft = false
+  var edgeWidth: CGFloat?
+
+  var animatableData: Double {
+    get { fraction }
+    set { fraction = newValue }
+  }
+
+  func path(in rect: CGRect) -> Path {
+    let width = rect.width * min(1, max(0, fraction))
+    var x = rightToLeft ? rect.maxX - width : rect.minX
+    var drawn = width
+    if let edgeWidth {
+      x = rightToLeft ? rect.maxX - width : rect.minX + width - edgeWidth
+      drawn = min(edgeWidth, width)
+    }
+    return Path(CGRect(x: x, y: rect.minY, width: drawn, height: rect.height))
+  }
+}
+
+// MARK: - Detail sheet
+
+struct RewardCardDetailSheet: View {
+  @Environment(\.dismiss) private var dismiss
+  let row: RewardsCardRow
+  let asOf: String?
+  let icon: String?
+  let currencyFormat: CurrencyFormat?
+  let canOpenAccount: Bool
+  let onEdit: () -> Void
+  let onOpenAccount: () -> Void
+
+  var body: some View {
+    let projection = RewardRowProjection.make(row: row, asOf: asOf, isRange: false)
+    NavigationStack {
+      List {
+        Section {
+          RewardFilledRow(projection: projection, icon: icon, currencyFormat: currencyFormat, showsChevron: false)
+            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            .listRowBackground(Color.clear)
+          if let period = currentPeriod {
+            LabeledContent("Period", value: "\(short(period.start)) – \(short(period.end))")
           }
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          ProgressView(value: progress)
-            .tint(Theme.accent)
-        }
-      }
-
-      ForEach(calc.flags) { flag in
-        HStack {
-          Circle()
-            .fill(Theme.flagColour(named: flag.flagColor) ?? Color.secondary.opacity(0.4))
-            .frame(width: 8, height: 8)
-          Text(flag.name)
-            .font(.subheadline)
-          if let rate = flag.rewardRate {
-            Text("\(rate.formatted())\(calc.rewardType == .cashback ? "%" : " miles/$")")
-              .font(.caption)
+          if let asOf, asOf < RewardsCalendar.today() {
+            Label("Showing \(short(asOf))", systemImage: "clock.arrow.circlepath")
               .foregroundStyle(.secondary)
           }
-          Spacer()
-          Text(flagEarned(flag, type: calc.rewardType))
-            .font(.subheadline)
-            .monospacedDigit()
+          if canOpenAccount {
+            Button {
+              onOpenAccount()
+            } label: {
+              Label("View Transactions in \(row.accountName)", systemImage: "list.bullet.rectangle")
+            }
+          }
+        }
+        targetsSection
+        tiersSection
+        monthsSection
+        categoriesSection
+        periodsSection
+      }
+      .listStyle(.insetGrouped)
+      .navigationTitle(row.card.name)
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Done") { dismiss() }
+        }
+        ToolbarItem(placement: .primaryAction) {
+          Button("Edit") { onEdit() }
         }
       }
     }
-    .padding(16)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .ynabCard()
+    .presentationDetents([.medium, .large])
+    .presentationDragIndicator(.visible)
   }
 
-  private var subtitle: String {
-    [row.card.issuer, row.accountName].filter { !$0.isEmpty }.joined(separator: " · ")
+  private var calc: RewardsCalculation { row.calculation }
+
+  private var currentPeriod: RewardsCalculationPeriod? {
+    guard let asOf else { return calc.periods?.last }
+    return calc.periods?.last(where: { $0.start <= asOf && asOf <= $0.end })
   }
 
-  private var earnedLabel: String {
-    formatReward(row.calculation.rewardEarned, row.calculation.rewardType)
+  private var activeMonth: RewardsMonthlyQualification? {
+    guard let asOf else { return nil }
+    return calc.monthlyQualifications?.first(where: { $0.start <= asOf && asOf <= $0.end })
   }
 
-  private func flagEarned(_ flag: RewardsFlagRow, type: RewardKind) -> String {
-    formatReward(flag.rewardEarned, type)
-  }
-
-  private func formatReward(_ value: Double, _ type: RewardKind) -> String {
-    switch type {
-    case .cashback:
-      return MoneyCodec.displayString(forCurrencyUnits: value, currencyFormat: currencyFormat)
-    case .miles:
-      return RewardsView.milesString(value)
+  @ViewBuilder
+  private var targetsSection: some View {
+    let minimum = calc.minimumSpend ?? 0
+    let maximum = calc.maximumSpend ?? 0
+    if minimum > 0 || maximum > 0 || activeMonth != nil || calc.nextSpendingTierThreshold != nil {
+      Section("Targets") {
+        if minimum > 0 {
+          progressRow(
+            calc.minimumSpendMet ? "Minimum met" : "Minimum",
+            spend: calc.totalSpend,
+            target: minimum,
+            caption: "Qualifying spend before rounding."
+          )
+        }
+        if let month = activeMonth {
+          progressRow(
+            "This month's minimum",
+            spend: month.spend,
+            target: month.minimumSpend,
+            caption: "\(short(month.start)) – \(short(month.end)), net of refunds."
+          )
+        }
+        if calc.hasNextSpendingTier == true, let threshold = calc.nextSpendingTierThreshold {
+          progressRow("Next tier", spend: calc.totalSpend, target: threshold, caption: nil)
+        }
+        if maximum > 0 {
+          progressRow(
+            calc.maximumSpendExceeded ? "Cap reached" : "Cap",
+            spend: calc.countedSpend,
+            target: maximum,
+            caption: (row.card.earningBlockSize ?? 0) > 0
+              ? "Counts spend in whole earning blocks, so the room left can differ by up to one block."
+              : nil
+          )
+        }
+      }
     }
   }
 
-  private func labeled(_ title: String, _ value: String) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
+  @ViewBuilder
+  private var tiersSection: some View {
+    let tiers = (row.card.spendingTiers ?? []).sorted { $0.spendThreshold < $1.spendThreshold }
+    if !tiers.isEmpty {
+      Section("Tiers") {
+        ForEach(tiers) { tier in
+          HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+              Text("From \(money(tier.spendThreshold))")
+                .monospacedDigit()
+              Text(tierDetail(tier))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if tier.id == calc.activeSpendingTierId {
+              Label("Active", systemImage: "checkmark.circle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.inflow)
+            } else if tier.id == calc.nextSpendingTierId {
+              Text("Next")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            }
+          }
+          .accessibilityElement(children: .combine)
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var monthsSection: some View {
+    let months = calc.monthlyQualifications ?? []
+    if !months.isEmpty {
+      Section("Qualification") {
+        ForEach(Array(months.enumerated()), id: \.offset) { _, month in
+          HStack {
+            Label {
+              Text("\(short(month.start)) – \(short(month.end))")
+            } icon: {
+              Image(systemName: statusSymbol(month.status))
+                .foregroundStyle(month.status == "failed" ? Theme.outflow : month.status == "met" ? Theme.inflow : Color.secondary)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+              Text("\(money(month.spend)) / \(money(month.minimumSpend))")
+                .monospacedDigit()
+              Text(month.status.replacingOccurrences(of: "_", with: " ").capitalized)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+          .accessibilityElement(children: .combine)
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var categoriesSection: some View {
+    if !calc.flags.isEmpty {
+      Section("Categories") {
+        ForEach(calc.flags) { flag in
+          VStack(alignment: .leading, spacing: 4) {
+            HStack {
+              Circle()
+                .fill(Theme.flagColour(named: flag.flagColor) ?? Color.secondary.opacity(0.4))
+                .frame(width: 8, height: 8)
+                .accessibilityHidden(true)
+              Text(flag.name)
+              if let rate = flag.rewardRate {
+                Text(rateText(rate))
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
+              Spacer()
+              Text(RewardRowText.reward(flag.rewardEarned, calc.rewardType, currencyFormat: currencyFormat))
+                .monospacedDigit()
+            }
+            if let maximum = flag.maximumSpend, maximum > 0 {
+              labelledUsage(
+                flag.maximumSpendExceeded == true ? "Category cap reached" : "Category cap",
+                spend: flag.countedSpend ?? flag.totalSpend ?? flag.eligibleSpend,
+                target: maximum
+              )
+            }
+            if let minimum = flag.minimumSpend, minimum > 0 {
+              labelledUsage(
+                flag.minimumSpendMet == true ? "Category minimum met" : "Category minimum",
+                spend: flag.totalSpend ?? flag.eligibleSpend,
+                target: minimum
+              )
+            }
+          }
+          .accessibilityElement(children: .combine)
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var periodsSection: some View {
+    let periods = calc.periods ?? []
+    if periods.count > 1 {
+      Section("Periods") {
+        ForEach(Array(periods.enumerated()), id: \.offset) { _, period in
+          LabeledContent("\(short(period.start)) – \(short(period.end))") {
+            Text(money(period.calculation.totalSpend))
+              .monospacedDigit()
+          }
+        }
+      }
+    }
+  }
+
+  private func progressRow(_ title: String, spend: Double, target: Double, caption: String?) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack {
+        Text(title)
+        Spacer()
+        Text("\(money(spend)) / \(money(target))")
+          .monospacedDigit()
+          .foregroundStyle(.secondary)
+      }
+      ProgressView(value: target > 0 ? min(1, max(0, spend / target)) : 0)
+        .tint(Theme.accent)
+      if let caption {
+        Text(caption)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .accessibilityElement(children: .combine)
+  }
+
+  private func labelledUsage(_ title: String, spend: Double, target: Double) -> some View {
+    HStack {
       Text(title)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-      Text(value)
-        .font(.subheadline)
+      Spacer()
+      Text("\(money(spend)) / \(money(target))")
         .monospacedDigit()
-        .foregroundStyle(Theme.textPrimary)
+    }
+    .font(.caption)
+    .foregroundStyle(.secondary)
+  }
+
+  private func tierDetail(_ tier: CardSpendingTier) -> String {
+    var parts: [String] = []
+    if let rate = tier.earningRate {
+      parts.append(rateText(rate))
+    }
+    if let maximum = tier.maximumSpend {
+      parts.append("cap \(money(maximum))")
+    }
+    return parts.isEmpty ? "Base rate" : parts.joined(separator: " · ")
+  }
+
+  private func rateText(_ rate: Double) -> String {
+    calc.rewardType == .cashback ? "\(rate.formatted())%" : "\(rate.formatted()) miles/$"
+  }
+
+  private func statusSymbol(_ status: String) -> String {
+    switch status {
+    case "met": return "checkmark.circle.fill"
+    case "failed": return "xmark.octagon.fill"
+    default: return "clock"
+    }
+  }
+
+  private func money(_ value: Double) -> String {
+    MoneyCodec.displayString(forCurrencyUnits: value, currencyFormat: currencyFormat)
+  }
+
+  private func short(_ iso: String) -> String {
+    RewardsCalendar.shortLabel(iso, referenceISO: RewardsCalendar.today())
+  }
+}
+
+// MARK: - Summary and range report
+
+/// Totals and the breakdown table for the board's scope, or for a historical
+/// range. A range never appears as progress rows.
+struct RewardsReportScreen: View {
+  @Environment(AppModel.self) private var model
+  @State private var filter: RewardsReportFilter
+  @State private var group: RewardGroupBy = .flag
+  @State private var report: RewardsReport?
+  @State private var reportPlanID: String?
+  @State private var phase: LoadPhase = .idle
+  let allowsRange: Bool
+
+  init(filter: RewardsReportFilter, allowsRange: Bool) {
+    _filter = State(initialValue: filter)
+    self.allowsRange = allowsRange
+  }
+
+  var body: some View {
+    List {
+      Section {
+        if allowsRange {
+          ReportFilterBar(range: $filter.range, group: $group, scope: $filter.scope)
+        } else {
+          Text(scopeDescription)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+          RewardGroupMenu(group: $group)
+        }
+      }
+      .listRowBackground(Color.clear)
+      .listRowSeparator(.hidden)
+
+      if let report = reportPlanID == model.settings.planID ? report : nil {
+        if let message = phase.errorMessage {
+          Label(message, systemImage: "wifi.exclamationmark")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        }
+        totalsSection(report)
+        if allowsRange, !report.cards.isEmpty {
+          Section("Cards") {
+            ForEach(report.cards) { row in
+              RewardFilledRow(
+                projection: .make(row: row, asOf: report.asOf, isRange: true),
+                icon: model.accounts.first { $0.id == row.accountId }?.displayIcon,
+                currencyFormat: model.currencyFormat,
+                showsChevron: false
+              )
+              .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+              .listRowBackground(Color.clear)
+            }
+          }
+        }
+        groupsSection(report)
+      } else {
+        PhasePlaceholder(phase: phase) {
+          await fetch()
+        }
+        .frame(maxWidth: .infinity, minHeight: 200)
+        .listRowBackground(Color.clear)
+      }
+    }
+    .listStyle(.insetGrouped)
+    .scrollContentBackground(.hidden)
+    .background(Theme.canvas)
+    .navigationTitle(allowsRange ? "Range Report" : "Summary")
+    .navigationBarTitleDisplayMode(.inline)
+    .task(id: fetchKey) {
+      await fetch()
+    }
+    .refreshable {
+      await fetch()
+    }
+  }
+
+  private var scopeDescription: String {
+    let date = filter.asOfISO.map { "as of \(RewardsCalendar.shortLabel($0, referenceISO: RewardsCalendar.today()))" } ?? "as of today"
+    let accounts = filter.scope.accountIDs.isEmpty
+      ? "all accounts"
+      : "\(filter.scope.accountIDs.count) account\(filter.scope.accountIDs.count == 1 ? "" : "s")"
+    return "Current card periods, \(date), \(accounts). Includes hidden and non-featured cards."
+  }
+
+  private func totalsSection(_ report: RewardsReport) -> some View {
+    Section("Totals") {
+      if let asOf = report.asOf {
+        LabeledContent("As of", value: RewardsCalendar.shortLabel(asOf, referenceISO: RewardsCalendar.today()))
+      }
+      LabeledContent("Qualifying spend") {
+        Text(money(report.totals.spend)).monospacedDigit()
+      }
+      LabeledContent("Value") {
+        Text(money(report.totals.rewardDollars))
+          .monospacedDigit()
+          .foregroundStyle(Theme.inflow)
+      }
+      if report.totals.cashback > 0 {
+        LabeledContent("Cashback") {
+          Text(money(report.totals.cashback)).monospacedDigit()
+        }
+      }
+      if report.totals.miles > 0 {
+        LabeledContent("Miles") {
+          Text(RewardRowText.milesString(report.totals.miles)).monospacedDigit()
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func groupsSection(_ report: RewardsReport) -> some View {
+    if !report.groups.isEmpty {
+      Section("By \(group.title) · \(report.groups.count)") {
+        ForEach(report.groups) { row in
+          HStack(spacing: 8) {
+            Circle()
+              .fill(Theme.flagColour(named: row.flagColor) ?? Color.secondary.opacity(0.4))
+              .frame(width: 8, height: 8)
+              .accessibilityHidden(true)
+            Text(row.label)
+              .lineLimit(1)
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+              Text(money(row.spend))
+                .monospacedDigit()
+              Text("\(money(row.rewardDollars)) · \(row.transactionCount) txn")
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(Theme.inflow)
+            }
+          }
+          .accessibilityElement(children: .combine)
+        }
+      }
+    }
+  }
+
+  private var fetchKey: String {
+    "\(model.settings.planID)|\(model.rewardsRefreshGeneration)|\(filter.key)|\(group.rawValue)"
+  }
+
+  private func money(_ value: Double) -> String {
+    MoneyCodec.displayString(forCurrencyUnits: value, currencyFormat: model.currencyFormat)
+  }
+
+  private func fetch() async {
+    let planID = model.settings.planID
+    let key = fetchKey
+    phase = .loading
+    do {
+      let next = try await model.apiClient.fetchRewards(
+        planID: planID,
+        from: filter.from,
+        to: filter.to,
+        accountIDs: filter.accountIDs,
+        group: group
+      )
+      guard key == fetchKey, planID == model.settings.planID else { return }
+      report = next
+      reportPlanID = planID
+      phase = .loaded
+    } catch {
+      guard key == fetchKey, planID == model.settings.planID else { return }
+      if error is CancellationError || (error as? URLError)?.code == .cancelled {
+        return
+      }
+      phase = .failed(error.localizedDescription)
+    }
+  }
+}
+
+// MARK: - Small sheets
+
+struct RewardsAsOfDateSheet: View {
+  @Environment(\.dismiss) private var dismiss
+  @Binding var filter: RewardsReportFilter
+  @State private var draft: Date
+
+  init(filter: Binding<RewardsReportFilter>) {
+    _filter = filter
+    _draft = State(initialValue: filter.wrappedValue.useAsOfDate ? filter.wrappedValue.asOfDate : Date())
+  }
+
+  var body: some View {
+    NavigationStack {
+      // Pinned to Singapore so the chosen day is the day sent to the server,
+      // whatever zone the device is in.
+      DatePicker("As of", selection: $draft, in: ...Date(), displayedComponents: .date)
+        .datePickerStyle(.graphical)
+        .environment(\.timeZone, RewardsCalendar.timeZone)
+        .environment(\.calendar, RewardsCalendar.calendar)
+        .padding(.horizontal)
+        .navigationTitle("Show Rewards As Of")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+          ToolbarItem(placement: .cancellationAction) {
+            Button("Today") {
+              filter.useAsOfDate = false
+              filter.asOfDate = Date()
+              dismiss()
+            }
+          }
+          ToolbarItem(placement: .confirmationAction) {
+            Button("Done") {
+              apply()
+              dismiss()
+            }
+          }
+        }
+    }
+    .presentationDetents([.medium, .large])
+  }
+
+  private func apply() {
+    if RewardsCalendar.isoString(draft) >= RewardsCalendar.today() {
+      filter.useAsOfDate = false
+      filter.asOfDate = Date()
+    } else {
+      filter.asOfDate = draft
+      filter.useAsOfDate = true
+    }
+  }
+}
+
+struct RewardsValuationSheet: View {
+  @Environment(AppModel.self) private var model
+  @Environment(\.dismiss) private var dismiss
+  @State private var text: String
+  @State private var saving = false
+  @State private var error: String?
+
+  init(current: Double?) {
+    _text = State(initialValue: current.map { String($0) } ?? "")
+  }
+
+  var body: some View {
+    NavigationStack {
+      Form {
+        Section {
+          TextField("Miles valuation", text: $text)
+            .keyboardType(.decimalPad)
+            .accessibilityLabel("Miles valuation")
+        } footer: {
+          Text("Currency units per mile. Zero keeps miles but assigns no cash value.")
+        }
+        if let error {
+          Section {
+            Text(error)
+              .foregroundStyle(Theme.outflow)
+          }
+        }
+      }
+      .navigationTitle("Miles Valuation")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Cancel") { dismiss() }
+        }
+        ToolbarItem(placement: .confirmationAction) {
+          Button(saving ? "Saving…" : "Save") {
+            Task { await save() }
+          }
+          .disabled(saving)
+        }
+      }
+    }
+    .presentationDetents([.medium])
+  }
+
+  private func save() async {
+    guard !saving else { return }
+    guard let value = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+      value.isFinite, value >= 0 else {
+      error = "Miles valuation must be a nonnegative number."
+      return
+    }
+    let planID = model.settings.planID
+    saving = true
+    error = nil
+    defer { saving = false }
+    do {
+      _ = try await model.apiClient.updateRewardSettings(planID: planID, milesValuation: value)
+      guard planID == model.settings.planID else { return }
+      model.noteRewardsBoardChanged()
+      dismiss()
+    } catch {
+      guard planID == model.settings.planID else { return }
+      self.error = error.localizedDescription
+    }
+  }
+}
+
+// MARK: - Register strip
+
+/// The reward rows for one account, shown in its register so the limit is in
+/// view while adding transactions. Tapping opens the card in Rewards.
+struct RegisterRewardsStrip: View {
+  @Environment(AppModel.self) private var model
+  @Environment(RootChromeState.self) private var chrome: RootChromeState?
+  let accountID: String
+  @State private var rows: [RewardsCardRow] = []
+  @State private var asOf: String?
+  @State private var loadedPlanID: String?
+
+  var body: some View {
+    VStack(spacing: 8) {
+      if loadedPlanID == model.settings.planID {
+        ForEach(rows) { row in
+          let projection = RewardRowProjection.make(row: row, asOf: asOf, isRange: false)
+          Button {
+            chrome?.showRewardsCard(row.id)
+          } label: {
+            RewardFilledRow(projection: projection, currencyFormat: model.currencyFormat, showsChevron: chrome != nil)
+          }
+          .buttonStyle(.plain)
+          .disabled(chrome == nil)
+          .accessibilityLabel("Rewards, \(projection.title)")
+          .accessibilityValue(RewardRowText(projection, currencyFormat: model.currencyFormat).accessibilityValue)
+          .accessibilityHint("Opens this card in Rewards.")
+        }
+      }
+    }
+    .padding(.top, rows.isEmpty ? 0 : 6)
+    .task(id: fetchKey) {
+      await load()
+    }
+  }
+
+  /// Refetches when this account's transactions change, so a new transaction
+  /// moves the limit without leaving the register.
+  private var fetchKey: String {
+    var hasher = Hasher()
+    for transaction in model.transactions where transaction.accountID == accountID {
+      hasher.combine(transaction)
+    }
+    return "\(model.settings.planID)|\(accountID)|\(model.rewardsRefreshGeneration)|\(hasher.finalize())"
+  }
+
+  private func load() async {
+    let planID = model.settings.planID
+    do {
+      let report = try await model.apiClient.fetchRewards(
+        planID: planID,
+        from: nil,
+        to: nil,
+        accountIDs: [accountID],
+        group: .flag
+      )
+      guard planID == model.settings.planID else { return }
+      rows = report.cards.filter { $0.accountId == accountID }
+      asOf = report.asOf
+      loadedPlanID = planID
+    } catch {
+      // The register stands on its own; keep the last rows on failure.
     }
   }
 }

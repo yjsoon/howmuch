@@ -55,6 +55,7 @@ enum AccountsPaneSelection {
 
 struct AccountsView: View {
   @Environment(AppModel.self) private var model
+  @Environment(RootChromeState.self) private var chrome: RootChromeState?
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   var usesSplit: Bool
@@ -130,6 +131,12 @@ struct AccountsView: View {
     }
     .onChange(of: model.referencePhase) { _, _ in
       reconcilePane()
+    }
+    .onChange(of: chrome?.pendingAccountID, initial: true) { _, accountID in
+      // Opened from a Rewards card: show that account's register.
+      guard let accountID else { return }
+      chrome?.pendingAccountID = nil
+      pane = .account(accountID)
     }
     .sheet(item: $presentedSheet) { sheet in
       Group {

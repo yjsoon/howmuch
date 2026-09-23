@@ -104,7 +104,73 @@ enum Theme {
   }
 }
 
+/// Rewards row tones: track behind the row, leading progress fill, and ink
+/// for the icon, urgent deadline and fill-edge tick. Text colours never change
+/// across the fill, so every track and fill stays light (or dark) enough for
+/// `textPrimary` and `rowSecondary`.
+struct RewardTonePalette {
+  let track: Color
+  let fill: Color
+  let ink: Color
+
+  static func palette(for tone: RewardRowProjection.Tone) -> RewardTonePalette {
+    switch tone {
+    case .needsMinimum:
+      return RewardTonePalette(
+        track: Color(light: 0xFFF7EC, dark: 0x262117),
+        fill: Color(light: 0xFBE2C2, dark: 0x46351A, increasedLight: 0xF5CB94, increasedDark: 0x5E4720),
+        ink: Color(light: 0x9A5410, dark: 0xF1B566)
+      )
+    case .earning:
+      return RewardTonePalette(
+        track: Color(light: 0xF0F9F3, dark: 0x17261F),
+        fill: Color(light: 0xCBEBD7, dark: 0x1F4631, increasedLight: 0xA9DDBD, increasedDark: 0x2A5E42),
+        ink: Color(light: 0x1A6E44, dark: 0x6BC78C)
+      )
+    case .complete:
+      return RewardTonePalette(
+        track: Color(light: 0xF5F4FB, dark: 0x1F1E33),
+        fill: Color(light: 0xE2E0F5, dark: 0x322F58, increasedLight: 0xCBC7EE, increasedDark: 0x45407A),
+        ink: Color(light: 0x5A578F, dark: 0xB9B6F0)
+      )
+    case .failed:
+      return RewardTonePalette(track: Theme.card, fill: .clear, ink: Theme.outflow)
+    case .neutral:
+      return RewardTonePalette(track: Theme.card, fill: .clear, ink: Theme.accent)
+    }
+  }
+}
+
+extension Theme {
+  /// Secondary text on tinted Rewards rows. `.secondary` drops to about 2.7:1
+  /// on the amber fill; this stays above 5.4:1 on every track and fill.
+  static let rowSecondary = Color(light: 0x4E5468, dark: 0xB3B8C9)
+}
+
 extension Color {
+  init(hex: UInt32) {
+    self.init(
+      red: Double((hex >> 16) & 0xFF) / 255,
+      green: Double((hex >> 8) & 0xFF) / 255,
+      blue: Double(hex & 0xFF) / 255
+    )
+  }
+
+  /// Light/dark hex pair, with optional stronger values for Increase Contrast.
+  init(light: UInt32, dark: UInt32, increasedLight: UInt32? = nil, increasedDark: UInt32? = nil) {
+    let lightColour = UIColor(Color(hex: light))
+    let darkColour = UIColor(Color(hex: dark))
+    let increasedLightColour = UIColor(Color(hex: increasedLight ?? light))
+    let increasedDarkColour = UIColor(Color(hex: increasedDark ?? dark))
+    self.init(uiColor: UIColor { traits in
+      let increased = traits.accessibilityContrast == .high
+      if traits.userInterfaceStyle == .dark {
+        return increased ? increasedDarkColour : darkColour
+      }
+      return increased ? increasedLightColour : lightColour
+    })
+  }
+
   init(light: Color, dark: Color) {
     self.init(uiColor: UIColor { traits in
       traits.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light)
