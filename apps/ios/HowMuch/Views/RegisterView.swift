@@ -441,6 +441,8 @@ struct RegisterView: View {
           .buttonStyle(.plain)
           .accessibilityLabel(lastReconciledSubtitle)
           .accessibilityHint("Opens reconcile.")
+          // Reward minimum/cap for this account's card, in view while adding.
+          RegisterRewardsStrip(accountID: account.id)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)

@@ -7,7 +7,7 @@ not its Expo client. HowMuch uses the same reward calculation rules against its 
 ## Import configuration separately from ledger history
 
 1. Export settings from Rewards Tracker web.
-2. In HowMuch, open **Settings → Rewards import** (native: **Rewards → Import / export**).
+2. In HowMuch, open **Settings → Rewards import** (native: **Rewards → More (…) → Import & Export…**).
 3. Export the existing HowMuch configuration before replacing it, then import the tracker JSON.
 4. Check linked account names, rates, flag categories and spend tiers. HowMuch can track open on-budget checking/debit accounts as well as credit accounts.
 5. Open Rewards at a known historical date and compare the card periods, qualifying spend and rewards.
@@ -18,7 +18,7 @@ Older cache dumps are supported: explicit null metadata clears prior values, omi
 
 ## Read the board at the right date
 
-The default board evaluates each card in **its own reward period**, as of today in Asia/Singapore. A billing card, calendar card and quarterly card can legitimately show different start/end dates. Choose an as-of date to inspect a prior state. Future purchases are not counted as earned rewards.
+The default board evaluates each card in **its own reward period**, as of today in Asia/Singapore. A billing card, calendar card and quarterly card can legitimately show different start/end dates. Choose an as-of date to inspect a prior state (native: the **Today** menu → **Choose Date…**; **Range Report…** in the same menu aggregates a historical range). Future purchases are not counted as earned rewards.
 
 Historical transaction ranges retain earlier spending in the same cycle when determining minimums, tier rates and cap use. Only the selected transactions contribute to range totals. Full-period context is shown separately; do not add those context totals to the range totals.
 

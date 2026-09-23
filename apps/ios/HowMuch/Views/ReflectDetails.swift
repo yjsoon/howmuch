@@ -280,10 +280,18 @@ private func menuRow(_ title: String, selected: Bool) -> some View {
 
 
 /// Multi-select over open accounts; empty selection means "all accounts".
+/// `candidateIDs` narrows the list (closed accounts included), e.g. to the
+/// accounts that have reward cards.
 struct AccountScopePicker: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
   @Binding var selection: Set<String>
+  var candidateIDs: Set<String>? = nil
+
+  private var accounts: [Account] {
+    guard let candidateIDs, !candidateIDs.isEmpty else { return model.openAccounts }
+    return model.accounts.filter { candidateIDs.contains($0.id) && !$0.deleted }
+  }
 
   var body: some View {
     NavigationStack {
@@ -303,7 +311,7 @@ struct AccountScopePicker: View {
         }
 
         Section {
-          ForEach(model.openAccounts) { account in
+          ForEach(accounts) { account in
             Button {
               toggle(account.id)
             } label: {
