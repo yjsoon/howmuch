@@ -2,6 +2,66 @@ import Foundation
 import XCTest
 @testable import HowMuch
 
+final class SplitTransferDraftTests: XCTestCase {
+  func testDuplicatingClearsSplitAndMirrorIdentitiesButPreservesAllocations() throws {
+    let source = try splitTransfer()
+    let draft = TransactionDraft(duplicating: source)
+    let request = draft.writeRequest()
+
+    XCTAssertNil(draft.id)
+    XCTAssertNotNil(draft.importID)
+    XCTAssertNotEqual(draft.importID, source.importID)
+    XCTAssertEqual(draft.subtransactions.map(\.id), [nil, nil, nil])
+    XCTAssertEqual(draft.subtransactions.map(\.transferTransactionID), [nil, nil, nil])
+    XCTAssertEqual(request.subtransactions.map(\.id), [nil, nil, nil])
+    XCTAssertEqual(request.subtransactions.map(\.transferTransactionID), [nil, nil, nil])
+    XCTAssertEqual(request.subtransactions.map(\.transferAccountID), ["savings", nil, "travel"])
+    XCTAssertEqual(request.subtransactions.map(\.amount), [-60_500, -13_980, -44_580])
+    XCTAssertEqual(request.subtransactions.map(\.memo), ["Savings allocation", "Lunch", "Travel allocation"])
+    XCTAssertEqual(request.subtransactions.map(\.categoryID), [nil, "dining", nil])
+    XCTAssertEqual(request.subtransactions[1].payeeID, "cafe")
+    XCTAssertEqual(request.amount, -119_060)
+    XCTAssertEqual(request.accountID, "everyday")
+    XCTAssertEqual(request.memo, "Original split")
+    XCTAssertEqual(request.cleared, .uncleared)
+    XCTAssertEqual(source.subtransactions.map(\.transferTransactionID), ["mirror-savings", nil, "mirror-travel"])
+  }
+
+  func testEditingPreservesSplitAndMirrorIdentities() throws {
+    let draft = TransactionDraft(transaction: try splitTransfer())
+    let request = draft.writeRequest()
+
+    XCTAssertEqual(draft.id, "original")
+    XCTAssertEqual(request.subtransactions.map(\.id), ["line-savings", "line-lunch", "line-travel"])
+    XCTAssertEqual(request.subtransactions.map(\.transferTransactionID), ["mirror-savings", nil, "mirror-travel"])
+    XCTAssertEqual(request.subtransactions.map(\.transferAccountID), ["savings", nil, "travel"])
+    XCTAssertEqual(request.subtransactions.map(\.amount), [-60_500, -13_980, -44_580])
+    XCTAssertFalse(draft.changesReconciliationGraph)
+  }
+
+  private func splitTransfer() throws -> Transaction {
+    try JSONDecoder().decode(Transaction.self, from: Data(#"""
+      {
+        "id": "original", "date": "2026-09-20", "amount": -119060,
+        "memo": "Original split", "cleared": "cleared", "approved": true,
+        "accountId": "everyday", "accountName": "Everyday", "importId": "original-import",
+        "deleted": false,
+        "subtransactions": [
+          {"id": "line-savings", "transactionId": "original", "amount": -60500,
+           "memo": "Savings allocation", "transferAccountId": "savings",
+           "transferTransactionId": "mirror-savings", "deleted": false},
+          {"id": "line-lunch", "transactionId": "original", "amount": -13980,
+           "memo": "Lunch", "payeeId": "cafe", "payeeName": "Cafe",
+           "categoryId": "dining", "deleted": false},
+          {"id": "line-travel", "transactionId": "original", "amount": -44580,
+           "memo": "Travel allocation", "transferAccountId": "travel",
+           "transferTransactionId": "mirror-travel", "deleted": false}
+        ]
+      }
+      """#.utf8))
+  }
+}
+
 /// Regression tests for deleting one side of a split transfer.
 ///
 /// The server tombstones the deleted row and, when that row was the mirrored
