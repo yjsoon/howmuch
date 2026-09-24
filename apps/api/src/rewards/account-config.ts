@@ -82,7 +82,7 @@ export async function importRewardsAccountConfig(repo: LedgerStore, planId: stri
   });
   // Unlike an editor save, importing configuration must not retitle ledger rows.
   // Replacing this card (rather than patch-merging) clears omitted old limits.
-  await repo.upsertRewardsTrackerCard(planId, card);
+  await repo.importRewardsTrackerAccountCard(planId, card);
   return card;
 }
 
