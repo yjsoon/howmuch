@@ -4,6 +4,43 @@ The compatibility reference is the **web app** in
 [`yjsoon/ynab-rewards-tracker`](https://github.com/yjsoon/ynab-rewards-tracker/tree/60cd90ab8c44c4507515f56364ec00d0c97784d2/apps/web),
 not its Expo client. HowMuch uses the same reward calculation rules against its own ledger.
 
+## Exchange one account’s configuration
+
+In the web app, open **Settings → Rewards import → One account’s rewards configuration**.
+Choose an account and **Export account config** to download a JSON file compatible
+with Rewards Tracker’s per-account exchange. To import, choose the destination
+account, select the per-account JSON file, check the source and destination shown,
+then select **Import account config**.
+
+On iOS, open **Rewards → More (…) → Import & Export…** and use the separate
+per-account import section. Choose the destination account and a JSON file from
+Files, then confirm replacement. The whole-app import below remains a different
+operation. Per-account export is currently available in the web app.
+
+This replaces only that account’s rewards configuration. Omitted limits, tiers and
+periods are cleared rather than merged with old rules. The destination card’s ID,
+account link, name and featured preference stay; an account without rewards gets a
+new card using its account name. Other cards, global settings, balances and ledger
+transactions (including their stored flag names) are untouched. Reimporting updates
+the same card. Multiple reward cards linked to one account must be resolved first.
+
+The versioned `rewards-account-config` file includes rates, earning blocks, spend
+limits, billing/reward/promotional periods, flag subcategories, tiers and optional
+card flag labels. It excludes credentials, account IDs, transactions, calculated
+rewards and global preferences such as miles valuation. Nested category/tier IDs
+remain so tier overrides keep their references. Monetary configuration values use
+currency units, not transaction milliunits. Both apps must use the same currency;
+this exchange does not convert values. The synthetic example is
+[`fixtures/rewards-account-config.json`](../fixtures/rewards-account-config.json).
+
+Rewards Tracker requires an explicit unflagged category when flag categories are
+enabled. It rejects files missing that category before writing anything, rather
+than adding a default earning rule silently. Review the intended unflagged behavior
+and add an explicit rule in HowMuch before exporting for Rewards Tracker.
+
+This is separate from the whole-app settings import below. Do not use that
+replacement flow to import a single account.
+
 ## Import configuration separately from ledger history
 
 1. Export settings from Rewards Tracker web.

@@ -10,6 +10,7 @@ import { importCsvRows } from "./importers/csv";
 import { importRewardsTrackerExport } from "./importers/rewards-tracker";
 import { importYnabFromApi } from "./importers/ynab";
 import { parseRewardGroupBy } from "./rewards/parse";
+import { exportRewardsAccountConfig, importRewardsAccountConfig } from "./rewards/account-config";
 import {
   createRewardsCard,
   deleteRewardsCard,
@@ -753,10 +754,19 @@ async function handleNative(
     const targetPlanId = body.plan_id ?? planId;
     const denied = authorizePlan(principal, targetPlanId, defaultPlanId, method);
     if (denied) return denied;
-    // Every branch below is a write. Ensuring unconditionally meant a GET that
-    // matches no branch still created the plan on its way to a 404.
+    // Reads must not create a plan as a side effect.
     if (isUnsafeMethod(method)) await repo.ensurePlan(targetPlanId);
 
+    if (segments[2] === "accounts" && segments[4] === "config" && segments.length === 5) {
+      let accountId: string;
+      try { accountId = decodeURIComponent(segments[3]); }
+      catch { throw new ValidationError("Invalid account ID encoding"); }
+      if (method === "GET") return json({ data: await exportRewardsAccountConfig(repo, targetPlanId, accountId) });
+      if (method === "PUT") {
+        const card = await importRewardsAccountConfig(repo, targetPlanId, accountId, body.payload);
+        return json({ data: { card } });
+      }
+    }
     if (segments[2] === "cards" && segments.length === 3 && method === "POST") {
       const card = await createRewardsCard(repo, targetPlanId, body.card);
       return json({ data: { card } }, 201);

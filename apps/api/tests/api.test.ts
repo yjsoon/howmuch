@@ -2718,6 +2718,78 @@ describe("native reports and imports", () => {
     expect(response.status).toBe(400);
   });
 
+  test("exchanges one account's rewards config without touching siblings, settings or transactions", async () => {
+    await createAccount("config-source", { name: "Source" });
+    await createAccount("config-target", { name: "Destination" });
+    const repo = new LedgerRepository(db, "plan-test");
+    await repo.upsertRewardsTrackerCard("plan-test", {
+      id: "source-card", ynabAccountId: "config-source", name: "Source rules", issuer: "Bank", type: "miles", featured: true,
+      earningRate: 0, maximumSpend: null, subcategoriesEnabled: false,
+      rewardPeriod: { monthCount: 3, anchorDate: "2026-08-15", monthlyMinimumSpend: 500 },
+      flagNames: { red: "Dining" }, apiKey: "must-not-export",
+      subcategories: [{ id: "dining", name: "Dining", flagColor: "red", rewardValue: 4, priority: 1, active: true, createdAt: "2026-01-01", updatedAt: "2026-01-01", secret: "nested-secret" }],
+      spendingTiers: [{ id: "tier", spendThreshold: 700, subcategories: [{ subcategoryId: "dining", rewardValue: 6, maximumSpend: 200 }] }],
+    });
+    await repo.upsertRewardsTrackerCard("plan-test", {
+      id: "target-card", ynabAccountId: "config-target", name: "My destination", issuer: "Old", type: "cashback", featured: false,
+      promotionalPeriod: { endDate: "2026-12-31" }, earningRate: 9,
+    });
+    await repo.patchRewardsTrackerSettings("plan-test", { milesValuation: 0.021 });
+    await createTransaction({ account_id: "config-target", date: "2026-09-01", amount: -123450, flag_color: "red", flag_name: "Original label" });
+    const before = await repo.getRewardsTrackerSnapshot("plan-test");
+    const transactions = await repo.listTransactions("plan-test", {});
+    const exported = await request("/api/rewards/accounts/config-source/config");
+    expect(exported.status).toBe(200);
+    const file = (await exported.json()).data;
+    expect(file).toMatchObject({ format: "rewards-account-config", version: 1, card: { earningRate: 0, maximumSpend: null, subcategoriesEnabled: false } });
+    expect(file.card).not.toHaveProperty("id");
+    expect(file.card).not.toHaveProperty("ynabAccountId");
+    expect(file.card).not.toHaveProperty("featured");
+    expect(JSON.stringify(file)).not.toContain("secret");
+    expect(file.card).not.toHaveProperty("apiKey");
+    for (let i = 0; i < 2; i++) {
+      const payload = i === 0 ? file : { ...file, card: { ...file.card, id: "source-card", ynabAccountId: "config-source", featured: true } };
+      const imported = await request("/api/rewards/accounts/config-target/config", { method: "PUT", body: { payload } });
+      expect(imported.status).toBe(200);
+      const card = (await imported.json()).data.card;
+      expect(card).toEqual({ ...file.card, id: "target-card", ynabAccountId: "config-target", name: "My destination", featured: false });
+      expect(card).not.toHaveProperty("promotionalPeriod");
+    }
+    const after = await repo.getRewardsTrackerSnapshot("plan-test");
+    expect(after.cards).toHaveLength(2);
+    expect(after.cards.find((card: any) => card.id === "source-card")).toEqual(before.cards.find((card: any) => card.id === "source-card"));
+    expect((after.snapshot as any).settings).toEqual((before.snapshot as any).settings);
+    expect(await repo.listTransactions("plan-test", {})).toEqual(transactions);
+
+    for (const payload of [{ ...file, version: 2 }, { ...file, format: "other" }, { ...file, card: [] }, { ...file, card: { ...file.card, earningRate: "4" } }]) {
+      expect((await request("/api/rewards/accounts/config-target/config", { method: "PUT", body: { payload } })).status).toBe(400);
+    }
+    expect((await repo.getRewardsTrackerSnapshot("plan-test")).cards).toEqual(after.cards);
+    expect((await request("/api/rewards/accounts/missing/config", { method: "PUT", body: { payload: file } })).status).toBe(404);
+    expect((await request("/api/rewards/accounts/config-target/config", { headers: { authorization: "Bearer invalid" } })).status).toBe(401);
+    expect((await request("/api/rewards/accounts/config-target/config?plan_id=other")).status).toBe(404);
+    expect((await request("/api/rewards/accounts/config-target/config", { method: "PUT", body: { plan_id: "other", payload: file } })).status).toBe(404);
+    await createAccount("config-new", { name: "New destination" });
+    const created = await request("/api/rewards/accounts/config-new/config", { method: "PUT", body: { payload: file } });
+    expect(created.status).toBe(200);
+    expect((await created.json()).data.card).toMatchObject({ name: "New destination", ynabAccountId: "config-new", earningRate: 0 });
+  });
+
+  test("per-account config decodes account IDs once and concurrent first imports reuse one card", async () => {
+    const repo = new LedgerRepository(db, "plan-test");
+    const accountId = "card / 50%";
+    await repo.upsertAccount("plan-test", { id: accountId, name: "Encoded account" });
+    const payload = { format: "rewards-account-config", version: 1, card: { name: "Source", issuer: "", type: "cashback", earningRate: 2 } };
+    const path = `/api/rewards/accounts/${encodeURIComponent(accountId)}/config`;
+    const responses = await Promise.all([1, 2].map(() => request(path, { method: "PUT", body: { payload } })));
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    const [first, second] = await Promise.all(responses.map((response) => response.json()));
+    expect(first.data.card.id).toBe(second.data.card.id);
+    expect((await repo.getRewardsTrackerSnapshot("plan-test")).cards).toHaveLength(1);
+    expect((await request(path)).status).toBe(200);
+    expect((await request("/api/rewards/accounts/%invalid/config")).status).toBe(400);
+  });
+
   test("creates, patches, and deletes a native rewards card", async () => {
     await createAccount("acct-native-card", { name: "Native card" });
     await createTransaction({

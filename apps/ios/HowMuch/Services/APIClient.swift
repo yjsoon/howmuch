@@ -482,7 +482,7 @@ struct APIClient {
   }
 
   func importRewardsTracker(planID: String, payloadJSON: Data) async throws -> RewardsTrackerImportResult {
-    let payload = try JSONSerialization.jsonObject(with: payloadJSON)
+    let payload = try RewardsImportFile.wholeSettings(payloadJSON)
     let body = try JSONSerialization.data(withJSONObject: [
       "plan_id": planID,
       "payload": payload,
@@ -493,6 +493,18 @@ struct APIClient {
       bodyData: body
     )
     return response.data
+  }
+
+  func importRewardsAccountConfig(planID: String, accountID: String, payloadJSON: Data) async throws -> CreditCard {
+    _ = try RewardsImportFile.accountConfig(payloadJSON)
+    // JSONSerialization preserves absent keys, explicit nulls and unknown configuration.
+    // CreditCard decoding/encoding would silently normalise those distinctions.
+    let payload = try JSONSerialization.jsonObject(with: payloadJSON)
+    let body = try JSONSerialization.data(withJSONObject: ["plan_id": planID, "payload": payload])
+    let response: APIEnvelope<RewardCardPayload> = try await executeRequest(
+      path: "/api/rewards/accounts", appendedPathSegments: [accountID, "config"], method: "PUT", bodyData: body
+    )
+    return response.data.card
   }
 
   func createRewardCard(planID: String, card: CreditCard) async throws -> CreditCard {
@@ -673,12 +685,13 @@ struct APIClient {
 
   private func executeRequest<Payload: Decodable>(
     path: String,
+    appendedPathSegments: [String] = [],
     queryItems: [URLQueryItem] = [],
     method: String = "GET",
     headers: [String: String] = [:],
     bodyData: Data?
   ) async throws -> Payload {
-    let url = try makeURL(path: path, queryItems: queryItems)
+    let url = try makeURL(path: path, appendedPathSegments: appendedPathSegments, queryItems: queryItems)
     var request = URLRequest(url: url)
     request.httpMethod = method
     request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -752,14 +765,23 @@ struct APIClient {
     }
   }
 
-  private func makeURL(path: String, queryItems: [URLQueryItem]) throws -> URL {
+  private func makeURL(path: String, appendedPathSegments: [String], queryItems: [URLQueryItem]) throws -> URL {
     guard let baseURL = settings.baseURL,
           var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
     else {
       throw APIClientError.invalidBaseURL
     }
 
-    let requestPath = Self.encodedPath(path)
+    // Dynamic IDs are opaque segments: a slash or percent sign belongs to the
+    // identifier, not the route. Match encodeURIComponent's ASCII allowlist.
+    let segmentCharacters = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()")
+    let suffix = try appendedPathSegments.map { segment in
+      guard let encoded = segment.addingPercentEncoding(withAllowedCharacters: segmentCharacters) else {
+        throw APIClientError.invalidBaseURL
+      }
+      return "/" + encoded
+    }.joined()
+    let requestPath = Self.encodedPath(path) + suffix
     let basePath = components.percentEncodedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     components.percentEncodedPath = basePath.isEmpty ? requestPath : "/\(basePath)\(requestPath)"
     components.queryItems = queryItems.isEmpty ? nil : queryItems

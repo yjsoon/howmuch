@@ -14,6 +14,8 @@ import { CountingD1Database, fakeD1Binding } from "./helpers/counting-d1";
 import { newPersonalApiToken, newSession } from "../src/password-auth";
 import { ReportService } from "../src/reports";
 import { importYnabFromApi } from "../src/importers/ynab";
+import { exportRewardsAccountConfig, importRewardsAccountConfig } from "../src/rewards/account-config";
+import rewardsAccountConfig from "../../../fixtures/rewards-account-config.json";
 import worker from "../../worker/src/index";
 
 const databases: Database[] = [];
@@ -999,6 +1001,24 @@ describe("D1 foundation", () => {
     expect(await actual.incomeVsSpending("p", { interval: "week" })).toEqual(expected.incomeVsSpending("p", { interval: "week" }));
     expect(await actual.netWorth("p", { from: "2026-01-01", to: "2026-01-31" })).toEqual(expected.netWorth("p", { from: "2026-01-01", to: "2026-01-31" }));
     expect(await actual.ageOfMoney("p", { from: "2026-01-01", to: "2026-01-31" })).toEqual(expected.ageOfMoney("p", { from: "2026-01-01", to: "2026-01-31" }));
+  });
+
+  test("D1 per-account config exchange preserves destination identity and sibling configuration", async () => {
+    const db = await ledgerSqlite();
+    db.run("INSERT INTO accounts(id,plan_id,name) VALUES('b','p','Sibling')");
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    const sibling = { id: "sibling", ynabAccountId: "b", name: "Sibling", issuer: "Other", type: "cashback", earningRate: 2 };
+    await repo.upsertRewardsTrackerCard("p", sibling);
+    const [card, replay] = await Promise.all([
+      importRewardsAccountConfig(repo, "p", "a", rewardsAccountConfig),
+      importRewardsAccountConfig(repo, "p", "a", rewardsAccountConfig),
+    ]);
+    expect(replay.id).toBe(card.id);
+    expect(await exportRewardsAccountConfig(repo, "p", "a")).toEqual({ ...rewardsAccountConfig, card: { ...rewardsAccountConfig.card, name: "Cash" } });
+    const stored = await repo.getRewardsTrackerSnapshot("p");
+    expect(stored.cards).toHaveLength(2);
+    expect(stored.cards.find((entry: any) => entry.id === "sibling")).toEqual(sibling);
+    expect(db.query("SELECT COUNT(*) AS n FROM transactions").get()).toEqual({ n: 0 });
   });
 
   test("D1 and SQLite rewards retain history before a cut-in range and reset monthly caps", async () => {
