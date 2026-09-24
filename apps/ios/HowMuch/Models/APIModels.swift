@@ -3050,7 +3050,7 @@ struct TransactionSubtransactionDraft: Equatable, Codable {
     payeeName = subtransaction.payeeName ?? ""
     categoryID = subtransaction.categoryID
     transferAccountID = subtransaction.transferAccountID
-    transferTransactionID = subtransaction.transferTransactionID
+    transferTransactionID = preserveID ? subtransaction.transferTransactionID : nil
     mirroredTransferAccountID = subtransaction.transferAccountID
     memo = subtransaction.memo ?? ""
   }
