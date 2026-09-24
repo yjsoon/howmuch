@@ -654,6 +654,33 @@ Import replaces the stored card set: omitted cards are removed, and `cards: []` 
 
 Returns the stored portable snapshot and live cards for the plan.
 
+`GET /api/rewards/accounts/:accountId/config?plan_id=...`
+
+Returns `{ "data": { "format": "rewards-account-config", "version": 1, "card": { ... } } }`.
+The downloadable file is the `data` object. `card` uses the allowlisted `CreditCard`
+configuration fields below, excluding `id`, `ynabAccountId` and `featured`. Nested
+subcategory/tier IDs remain for tier references. No transactions, global settings or
+credentials are exported. Missing accounts or configuration return 404; multiple
+cards on the same account return 400 rather than choosing arbitrarily.
+
+`PUT /api/rewards/accounts/:accountId/config`
+
+Body: `{ "plan_id"?: string, "payload": { "format": "rewards-account-config", "version": 1, "card": { ... } } }`.
+Requires a live destination account. Replaces only its rewards configuration,
+clearing omitted optional fields, while preserving its existing card ID, name,
+account link and featured preference. Creates a card named after the account if
+none exists. Other cards, global settings and all ledger rows are unchanged.
+Returns `{ "data": { "card" } }`; repeated imports reuse the destination card ID.
+Malformed format/version/configuration, duplicate category/tier IDs, repeated flag
+colours or tier override references, and dangling tier references return 400.
+Account not found returns 404. Normal plan authorization
+and cookie CSRF checks apply. `name`, string `issuer` (may be empty), and
+`type: "cashback" | "miles"` are required in the file. Numeric/date rules match
+card writes below; boolean fields must be booleans. Optional `flagNames` maps
+supported colours (including `unflagged`) to strings and is card metadata, not a
+request to rewrite transaction labels. Currency-unit amounts are not converted.
+Unknown properties are discarded recursively through known-field projection.
+
 `POST /api/rewards/cards`
 
 Creates a Rewards Tracker card mapped to a live HowMuch account. Body is `{ "plan_id"?: string, "card": { ... } }`. If `card.id` is omitted, the server assigns one. Native writes allowlist the `CreditCard` fields and strip secrets (`pat`, `howmuchToken`, Cloud Sync fields, cached data). Unknown or missing `ynabAccountId` returns 422. Closed accounts are still live. Returns `201 { "data": { "card" } }`.

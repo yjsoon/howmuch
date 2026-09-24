@@ -14,6 +14,8 @@ import { CountingD1Database, fakeD1Binding } from "./helpers/counting-d1";
 import { newPersonalApiToken, newSession } from "../src/password-auth";
 import { ReportService } from "../src/reports";
 import { importYnabFromApi } from "../src/importers/ynab";
+import { exportRewardsAccountConfig, importRewardsAccountConfig } from "../src/rewards/account-config";
+import rewardsAccountConfig from "../../../fixtures/rewards-account-config.json";
 import worker from "../../worker/src/index";
 
 const databases: Database[] = [];
@@ -1000,6 +1002,84 @@ describe("D1 foundation", () => {
     expect(await actual.netWorth("p", { from: "2026-01-01", to: "2026-01-31" })).toEqual(expected.netWorth("p", { from: "2026-01-01", to: "2026-01-31" }));
     expect(await actual.ageOfMoney("p", { from: "2026-01-01", to: "2026-01-31" })).toEqual(expected.ageOfMoney("p", { from: "2026-01-01", to: "2026-01-31" }));
   });
+
+  test("D1 per-account config exchange preserves destination identity and sibling configuration", async () => {
+    const db = await ledgerSqlite();
+    db.run("INSERT INTO accounts(id,plan_id,name) VALUES('b','p','Sibling')");
+    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    const sibling = { id: "sibling", ynabAccountId: "b", name: "Sibling", issuer: "Other", type: "cashback", earningRate: 2 };
+    await repo.upsertRewardsTrackerCard("p", sibling);
+    const [card, replay] = await Promise.all([
+      importRewardsAccountConfig(repo, "p", "a", rewardsAccountConfig),
+      importRewardsAccountConfig(repo, "p", "a", rewardsAccountConfig),
+    ]);
+    expect(replay.id).toBe(card.id);
+    expect(await exportRewardsAccountConfig(repo, "p", "a")).toEqual({ ...rewardsAccountConfig, card: { ...rewardsAccountConfig.card, name: "Cash" } });
+    const stored = await repo.getRewardsTrackerSnapshot("p");
+    expect(stored.cards).toHaveLength(2);
+    expect(stored.cards.find((entry: any) => entry.id === "sibling")).toEqual(sibling);
+    expect(db.query("SELECT COUNT(*) AS n FROM transactions").get()).toEqual({ n: 0 });
+  });
+
+  for (const backend of ["SQLite", "D1"] as const) {
+    test(`${backend} config import can restore a deleted card on the same account`, async () => {
+      const db = await ledgerSqlite();
+      const repo = backend === "D1" ? new D1LedgerRepository(new D1Database(fakeD1(db)), "p") : new LedgerRepository(db, "p");
+      const card = await importRewardsAccountConfig(repo, "p", "a", rewardsAccountConfig);
+      await repo.deleteRewardsTrackerCard("p", card.id);
+      expect((await importRewardsAccountConfig(repo, "p", "a", rewardsAccountConfig)).id).toBe(card.id);
+      expect((await repo.getRewardsTrackerSnapshot("p")).cards).toEqual([card]);
+    });
+
+    test(`${backend} config import cannot overwrite a card remapped to a sibling`, async () => {
+      const db = await ledgerSqlite();
+      db.run("INSERT INTO accounts(id,plan_id,name) VALUES('b','p','Sibling')");
+      const repo = backend === "D1" ? new D1LedgerRepository(new D1Database(fakeD1(db)), "p") : new LedgerRepository(db, "p");
+      const card = await importRewardsAccountConfig(repo, "p", "a", rewardsAccountConfig);
+      await repo.upsertRewardsTrackerCard("p", { ...card, ynabAccountId: "b", name: "B rules", earningRate: 9 });
+      const before = await repo.getRewardsTrackerSnapshot("p");
+      await expect(importRewardsAccountConfig(repo, "p", "a", rewardsAccountConfig)).rejects.toThrow("account mapping");
+      expect(await repo.getRewardsTrackerSnapshot("p")).toEqual(before);
+    });
+
+    test(`${backend} config import atomically rejects account remaps after preflight`, async () => {
+      for (const moveDestinationAway of [true, false]) {
+        const db = await ledgerSqlite();
+        db.run("INSERT INTO accounts(id,plan_id,name) VALUES('b','p','Sibling')");
+        const repo = backend === "D1" ? new D1LedgerRepository(new D1Database(fakeD1(db)), "p") : new LedgerRepository(db, "p");
+        const card = await importRewardsAccountConfig(repo, "p", moveDestinationAway ? "a" : "b", rewardsAccountConfig);
+        const getSnapshot = repo.getRewardsTrackerSnapshot.bind(repo);
+        const remapped = { ...card, ynabAccountId: moveDestinationAway ? "b" : "a", name: "Remapped rules", earningRate: 9 };
+        repo.getRewardsTrackerSnapshot = async (planId) => {
+          const result = await getSnapshot(planId);
+          await repo.upsertRewardsTrackerCard(planId, remapped);
+          return result;
+        };
+        await expect(importRewardsAccountConfig(repo, "p", "a", rewardsAccountConfig)).rejects.toThrow("account mapping");
+        expect((await getSnapshot("p")).cards).toEqual([remapped]);
+      }
+    });
+
+    test(`${backend} config import leaves concurrently saved global settings untouched`, async () => {
+      const db = await ledgerSqlite();
+      const makeRepo = () => backend === "D1" ? new D1LedgerRepository(new D1Database(fakeD1(db)), "p") : new LedgerRepository(db, "p");
+      const repo = makeRepo();
+      const other = makeRepo();
+      await repo.patchRewardsTrackerSettings("p", { milesValuation: 0.01 });
+      // Save on another connection after the import has read its destination.
+      const getSnapshot = repo.getRewardsTrackerSnapshot.bind(repo);
+      repo.getRewardsTrackerSnapshot = async (planId) => {
+        const result = await getSnapshot(planId);
+        await other.patchRewardsTrackerSettings(planId, { milesValuation: 0.03 });
+        return result;
+      };
+      const before = db.query("SELECT payload_json FROM rewards_tracker_snapshots").get() as { payload_json: string };
+      await importRewardsAccountConfig(repo, "p", "a", rewardsAccountConfig);
+      const after = db.query("SELECT payload_json FROM rewards_tracker_snapshots").get() as { payload_json: string };
+      expect(JSON.parse(after.payload_json)).toEqual({ ...JSON.parse(before.payload_json), settings: { milesValuation: 0.03 } });
+      expect((await getSnapshot("p")).cards).toHaveLength(1);
+    });
+  }
 
   test("D1 and SQLite rewards retain history before a cut-in range and reset monthly caps", async () => {
     const db = await ledgerSqlite();

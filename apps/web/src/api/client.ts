@@ -602,6 +602,13 @@ export const api = {
     }).then((d) => d.transaction),
   rewardsTrackerSnapshot: (planId: string) =>
     request<RewardsTrackerSnapshot>(`/api/import/rewards-tracker${query({ plan_id: planId })}`),
+  exportRewardsAccountConfig: (planId: string, accountId: string) =>
+    request<RewardsAccountConfig>(`/api/rewards/accounts/${encodeURIComponent(accountId)}/config${query({ plan_id: planId })}`),
+  importRewardsAccountConfig: (planId: string, accountId: string, payload: unknown) =>
+    request<{ card: CreditCard }>(`/api/rewards/accounts/${encodeURIComponent(accountId)}/config`, {
+      method: "PUT",
+      body: JSON.stringify({ plan_id: planId, payload }),
+    }),
   importRewardsTracker: (planId: string, payload: unknown) =>
     request<RewardsTrackerImportResult>("/api/import/rewards-tracker", {
       method: "POST",
@@ -630,6 +637,12 @@ export const api = {
 };
 
 export type RewardsTrackerCard = CreditCard;
+
+export type RewardsAccountConfig = {
+  format: "rewards-account-config";
+  version: 1;
+  card: Omit<CreditCard, "id" | "ynabAccountId" | "featured">;
+};
 
 export type RewardsTrackerSnapshot = {
   snapshot: { cards?: RewardsTrackerCard[]; settings?: Record<string, unknown>; rules?: unknown[]; tagMappings?: unknown[]; themeGroups?: unknown[]; hiddenCards?: unknown[] } | null;

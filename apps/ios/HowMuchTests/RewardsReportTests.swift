@@ -3,6 +3,152 @@ import UIKit
 import XCTest
 @testable import HowMuch
 
+@MainActor
+final class RewardsAccountImportTests: XCTestCase {
+  private let file = Data(#"{"format":"rewards-account-config","version":1,"card":{"name":"Synthetic Miles Card","issuer":"Example Bank","type":"miles","minimumSpend":null,"futureRule":{"value":17,"limit":null},"subcategories":[{"id":"dining","minimumSpend":null}]}}"#.utf8)
+
+  func testFilePreflightRejectsWrongFlowAndMalformedEnvelopes() throws {
+    XCTAssertEqual(try RewardsImportFile.accountConfig(file), "Synthetic Miles Card")
+    XCTAssertThrowsError(try RewardsImportFile.wholeSettings(file))
+    XCTAssertNotNil(try RewardsImportFile.wholeSettings(Data(#"{"cards":[],"settings":{}}"#.utf8)))
+    for json in ["not JSON", "[]", "null", #"{"cards":[]}"#,
+      #"{"format":"rewards-account-config","version":true,"card":{"name":"Name","issuer":"","type":"miles"}}"#,
+      #"{"format":"rewards-account-config","version":2,"card":{"name":"Name","issuer":"","type":"miles"}}"#,
+      #"{"format":"rewards-account-config","version":1,"card":{"name":" ","issuer":"","type":"miles"}}"#,
+      #"{"format":"rewards-account-config","version":1,"card":[]}"#] {
+      XCTAssertThrowsError(try RewardsImportFile.accountConfig(Data(json.utf8)), json)
+    }
+    let selection = RewardsAccountImportSelection()
+    try selection.choose(data: file, fileName: "valid.json")
+    XCTAssertThrowsError(try selection.choose(data: Data("[]".utf8), fileName: "bad.json"))
+    XCTAssertNil(selection.data)
+    XCTAssertNil(selection.sourceName)
+    selection.accountID = "old-plan-account"
+    selection.success = "Old result"
+    selection.reset()
+    XCTAssertEqual(selection.accountID, "")
+    XCTAssertNil(selection.success)
+  }
+
+  func testPUTPreservesRawConfigurationAndDecodesCard() async throws {
+    XCTAssertTrue(URLProtocol.registerClass(RewardsAccountImportProtocol.self))
+    defer { URLProtocol.unregisterClass(RewardsAccountImportProtocol.self) }
+    var settings = APISettings()
+    settings.baseURLString = "https://rewards-account-import.test"
+    let card = try await APIClient(settings: settings).importRewardsAccountConfig(
+      planID: "destination-plan", accountID: "card / 50%", payloadJSON: file)
+    XCTAssertEqual(card.id, "existing-card")
+    XCTAssertEqual(card.name, "Destination")
+    XCTAssertEqual(card.ynabAccountId, "acct-destination")
+    XCTAssertEqual(card.featured, false)
+  }
+
+  func testImportSelectionConfirmationSuccessErrorAndPlanResetRender() async throws {
+    XCTAssertTrue(URLProtocol.registerClass(RewardsSnapshotProtocol.self))
+    defer { URLProtocol.unregisterClass(RewardsSnapshotProtocol.self) }
+    let harness = SnapshotHarness.make(baseURLString: "https://rewards-snapshot.test")
+    let selection = RewardsAccountImportSelection()
+    selection.accountID = "acct-travel"
+    try selection.choose(data: file, fileName: "synthetic-miles.json")
+    let surface = try XCTUnwrap(SnapshotSurface(
+      root: NavigationStack { RewardsImportView(accountImport: selection) }.environment(harness.model),
+      size: CGSize(width: 430, height: 1100)))
+    defer { surface.detach() }
+    var rendered = await surface.captureUntilOCR(contains: ["Import into one account", "Travel", "synthetic-miles.json", "Review account import"])
+    attach(rendered.image, "account-import-selected")
+    XCTAssertTrue(rendered.text.contains("synthetic-miles.json"), rendered.text)
+    await surface.settleNavigation()
+    let review = try XCTUnwrap(surface.firstControl(label: "Review account import"))
+    XCTAssertTrue(surface.activate(review))
+    rendered = await surface.captureUntilOCR(contains: ["Replace rewards configuration?", "Synthetic Miles Card", "Travel", "Replace account configuration"])
+    attach(rendered.image, "account-import-confirmation")
+    XCTAssertEqual(selection.confirmation?.accountID, "acct-travel")
+    XCTAssertEqual(selection.confirmation?.planID, "fixture-plan")
+    XCTAssertTrue(rendered.text.contains("clearing omitted fields"), rendered.text)
+    // Exercise the real button and API success path, including the refresh generation.
+    let generation = harness.model.rewardsRefreshGeneration
+    let replace = try XCTUnwrap(surface.firstControl(label: "Replace account configuration"))
+    XCTAssertTrue(surface.activate(replace))
+    let completed = await surface.waitUntil(timeoutNanoseconds: 5_000_000_000) {
+      selection.success != nil || selection.error != nil
+    }
+    XCTAssertTrue(completed, "Import must settle before inspecting its result")
+    rendered = await surface.captureUntilOCR(contains: ["Imported Synthetic Miles Card into Travel."])
+    attach(rendered.image, "account-import-success")
+    XCTAssertTrue(rendered.text.contains("imported synthetic miles card into travel"), rendered.text)
+    XCTAssertGreaterThan(harness.model.rewardsRefreshGeneration, generation)
+    XCTAssertNil(selection.data)
+    // Exercise a synthetic server rejection through the same controls.
+    selection.accountID = "acct-everyday"
+    try selection.choose(data: file, fileName: "synthetic-miles.json")
+    _ = await surface.captureUntilOCR(contains: ["Everyday", "Review account import"])
+    XCTAssertTrue(surface.activate(try XCTUnwrap(surface.firstControl(label: "Review account import"))))
+    _ = await surface.captureUntilOCR(contains: ["Replace account configuration"])
+    XCTAssertTrue(surface.activate(try XCTUnwrap(surface.firstControl(label: "Replace account configuration"))))
+    let rejected = await surface.waitUntil(timeoutNanoseconds: 5_000_000_000) { selection.error != nil }
+    XCTAssertTrue(rejected)
+    rendered = await surface.captureUntilOCR(contains: ["multiple rewards cards"])
+    attach(rendered.image, "account-import-error")
+    XCTAssertTrue(rendered.text.contains("multiple rewards cards"), rendered.text)
+    XCTAssertNil(selection.confirmation)
+    XCTAssertNotNil(selection.data, "A failed import retains its file for review and retry")
+    harness.model.settings.planID = "other-plan"
+    let reset = await surface.waitUntil { selection.accountID.isEmpty && selection.error == nil }
+    XCTAssertTrue(reset)
+  }
+
+  private func attach(_ image: UIImage, _ name: String) {
+    let attachment = XCTAttachment(image: image)
+    attachment.name = name
+    attachment.lifetime = .keepAlways
+    add(attachment)
+  }
+}
+
+private final class RewardsAccountImportProtocol: URLProtocol {
+  override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "rewards-account-import.test" }
+  override class func canInit(with task: URLSessionTask) -> Bool {
+    (task.currentRequest ?? task.originalRequest).map(canInit(with:)) ?? false
+  }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func stopLoading() {}
+  override func startLoading() {
+    do {
+      XCTAssertEqual(request.httpMethod, "PUT")
+      let url = try XCTUnwrap(request.url)
+      XCTAssertEqual(URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedPath,
+        "/api/rewards/accounts/card%20%2F%2050%25/config")
+      var data = request.httpBody ?? Data()
+      if let stream = request.httpBodyStream {
+        stream.open()
+        defer { stream.close() }
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+          let count = stream.read(&buffer, maxLength: buffer.count)
+          if count <= 0 { break }
+          data.append(buffer, count: count)
+        }
+      }
+      let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+      XCTAssertEqual(body["plan_id"] as? String, "destination-plan")
+      let payload = try XCTUnwrap(body["payload"] as? [String: Any])
+      XCTAssertEqual(payload["format"] as? String, "rewards-account-config")
+      XCTAssertEqual(payload["version"] as? Int, 1)
+      let card = try XCTUnwrap(payload["card"] as? [String: Any])
+      XCTAssertTrue(card["minimumSpend"] is NSNull)
+      XCTAssertNil(card["maximumSpend"])
+      let future = try XCTUnwrap(card["futureRule"] as? [String: Any])
+      XCTAssertEqual(future["value"] as? Int, 17)
+      XCTAssertTrue(future["limit"] is NSNull)
+      XCTAssertTrue((card["subcategories"] as? [[String: Any]])?.first?["minimumSpend"] is NSNull)
+      let response = Data(#"{"data":{"card":{"id":"existing-card","name":"Destination","issuer":"Example Bank","type":"miles","ynabAccountId":"acct-destination","featured":false}}}"#.utf8)
+      client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocol(self, didLoad: response)
+      client?.urlProtocolDidFinishLoading(self)
+    } catch { client?.urlProtocol(self, didFailWithError: error) }
+  }
+}
+
 final class RewardsReportTests: XCTestCase {
   func testCurrentPeriodsOmitRangeButRetainAccountScopeAndOptionalAsOf() throws {
     var filter = RewardsReportFilter()
@@ -663,6 +809,14 @@ private final class RewardsSnapshotProtocol: URLProtocol {
       }
     case "/api/import/rewards-tracker":
       payload = ["cards": [card, cash]]
+    case "/api/rewards/accounts/acct-travel/config":
+      payload = ["card": card]
+    case "/api/rewards/accounts/acct-everyday/config":
+      let data = Data(#"{"error":{"id":"400.1","name":"validation_error","detail":"This account has multiple rewards cards; resolve them before exchanging configuration."}}"#.utf8)
+      client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocol(self, didLoad: data)
+      client?.urlProtocolDidFinishLoading(self)
+      return
     default:
       payload = ["transactions": [], "has_more": false]
     }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, useApi, type RewardsTrackerImportResult } from "../api/client";
+import { api, useApi, type RewardsAccountConfig, type RewardsTrackerImportResult } from "../api/client";
 import { SettingsCrumb } from "../components/SettingsCrumb";
 import { portableRewardsExport } from "../lib/rewards-export";
 import { usePlan } from "../state/plan";
@@ -63,7 +63,13 @@ export function RewardsImportPage() {
         <SettingsCrumb current="Rewards import" />
       </header>
 
+      <AccountConfigExchange key={planId} busy={busy} setBusy={setBusy} configuredAccounts={cards.map((card) => card.ynabAccountId)} onImported={() => {
+        setGeneration((value) => value + 1);
+        reload();
+      }} />
+
       <section className="report-section" aria-label="Export rewards">
+        <h2>Whole-app rewards settings</h2>
         <button type="button" className="save-button" disabled={!snapshot.data || snapshot.loading || busy} onClick={exportFile}>Export rewards JSON</button>
         <p className="field-note">Portable current cards, rules, tag mappings, and reward settings. No API credentials, connection settings, or cached transactions. Account IDs are retained for re-import.</p>
       </section>
@@ -163,6 +169,94 @@ export function RewardsImportPage() {
         )}
       </section>
     </>
+  );
+}
+
+function AccountConfigExchange({ busy, setBusy, configuredAccounts, onImported }: {
+  busy: boolean;
+  setBusy: (busy: boolean) => void;
+  configuredAccounts: string[];
+  onImported: () => void;
+}) {
+  const { planId, accounts } = usePlan();
+  const [accountId, setAccountId] = useState("");
+  const [file, setFile] = useState<RewardsAccountConfig | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const account = accounts.find((entry) => entry.id === accountId);
+
+  const chooseFile = async (selected: File | undefined) => {
+    setFile(null);
+    setError(null);
+    setMessage(null);
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const parsed = JSON.parse(await selected.text());
+      if (parsed?.format !== "rewards-account-config" || parsed?.version !== 1 || !parsed.card || typeof parsed.card.name !== "string") {
+        throw new Error("Choose a per-account rewards config version 1 file, not a whole-app settings export.");
+      }
+      setFile(parsed);
+    } catch (cause) {
+      setError(cause instanceof SyntaxError ? "That file is not valid JSON." : cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exchange = async (action: "export" | "import") => {
+    if (!account || busy || (action === "import" && !file)) return;
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      if (action === "import") {
+        await api.importRewardsAccountConfig(planId, account.id, file);
+        setMessage(`Rewards configuration imported to ${account.name}. Transactions and other accounts are unchanged.`);
+        onImported();
+      } else {
+        const exported = await api.exportRewardsAccountConfig(planId, account.id);
+        const url = URL.createObjectURL(new Blob([JSON.stringify(exported, null, 2)], { type: "application/json" }));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${account.name.replace(/[^a-z0-9_-]+/gi, "-")}-rewards-config.json`;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        setMessage(`Exported rewards configuration for ${account.name}.`);
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="report-section" aria-labelledby="account-config-heading">
+      <h2 id="account-config-heading">One account’s rewards configuration</h2>
+      <p className="field-note">Exchange rates, tiers, caps, periods and flag categories with Rewards Tracker. No transactions, account IDs, global settings or credentials.</p>
+      <div className="rewards-import-form">
+        <label className="field">
+          <span className="field-label">Account for export or import</span>
+          <select value={accountId} disabled={busy} onChange={(event) => { setAccountId(event.target.value); setMessage(null); setError(null); }}>
+            <option value="">Choose an account…</option>
+            {accounts.filter((entry) => !entry.closed || configuredAccounts.includes(entry.id)).map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+          </select>
+        </label>
+        <button type="button" className="save-button" disabled={busy || !account || !configuredAccounts.includes(accountId)} onClick={() => void exchange("export")}>Export account config</button>
+      </div>
+      <div className="rewards-import-form">
+        <label className="field">
+          <span className="field-label">Per-account rewards JSON</span>
+          <input type="file" accept="application/json,.json" disabled={busy} onChange={(event) => void chooseFile(event.target.files?.[0])} />
+        </label>
+        <button type="button" className="save-button" disabled={busy || !account || !file} onClick={() => void exchange("import")}>Import account config</button>
+      </div>
+      {file && <p className="field-note">Selected configuration: <strong>{file.card.name}</strong>. {account ? <>Import replaces only the rewards configuration for <strong>{account.name}</strong>, including clearing old settings absent from the file.</> : "Choose the destination account above."}</p>}
+      <p className="field-note">The destination account’s name stays. Other accounts and all ledger transactions stay unchanged.</p>
+      {error && <p className="status-panel status-panel-error" role="alert">{error}</p>}
+      {message && <p className="status-panel" role="status">{message}</p>}
+    </section>
   );
 }
 

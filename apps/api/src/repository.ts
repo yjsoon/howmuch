@@ -2684,6 +2684,13 @@ export class LedgerRepository {
     return row ? String(row.id) : null;
   }
 
+  async importRewardsTrackerAccountCard(planId: string, card: object): Promise<void> {
+    // Row-backed cards are authoritative for reports and exports. Do not rewrite
+    // the archival snapshot: that would race with saves of global settings.
+    const written = await this.writeRewardsTrackerCardRow(planId, card as Record<string, unknown>, true);
+    if (!written) throw new ValidationError("The rewards card account mapping changed or conflicts with another card. Resolve the mapping and retry.");
+  }
+
   async upsertRewardsTrackerCard(planId: string, card: object): Promise<void> {
     await this.ensurePlan(planId);
     const written = await this.writeRewardsTrackerCardRow(planId, card as Record<string, unknown>);
@@ -2770,16 +2777,19 @@ export class LedgerRepository {
       .run(planId, json);
   }
 
-  private async writeRewardsTrackerCardRow(planId: string, card: Record<string, unknown>): Promise<string | null> {
+  private async writeRewardsTrackerCardRow(planId: string, card: Record<string, unknown>, guardAccount = false): Promise<string | null> {
     const id = typeof card.id === "string" ? card.id.trim() : "";
     const name = typeof card.name === "string" ? card.name.trim() : "";
     const accountId = typeof card.ynabAccountId === "string" ? card.ynabAccountId.trim() : "";
     if (!id || !name || !accountId) return null;
-    await this.db
+    const result = await this.db
       .query(
         `INSERT INTO rewards_tracker_cards (
            plan_id, id, account_id, name, issuer, type, payload_json, deleted, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
+         ) SELECT ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP
+         WHERE ${guardAccount ? `NOT EXISTS (
+           SELECT 1 FROM rewards_tracker_cards WHERE plan_id = ? AND account_id = ? AND id <> ? AND deleted = 0
+         )` : "1"}
          ON CONFLICT(plan_id, id) DO UPDATE SET
            account_id = excluded.account_id,
            name = excluded.name,
@@ -2787,7 +2797,8 @@ export class LedgerRepository {
            type = excluded.type,
            payload_json = excluded.payload_json,
            deleted = 0,
-           updated_at = CURRENT_TIMESTAMP`,
+           updated_at = CURRENT_TIMESTAMP
+         ${guardAccount ? "WHERE rewards_tracker_cards.account_id = excluded.account_id" : ""}`,
       )
       .run(
         planId,
@@ -2797,8 +2808,9 @@ export class LedgerRepository {
         typeof card.issuer === "string" ? card.issuer : "",
         typeof card.type === "string" ? card.type : "cashback",
         JSON.stringify(card),
+        ...(guardAccount ? [planId, accountId, id] : []),
       );
-    return id;
+    return result.changes === 1 ? id : null;
   }
 
   async recordImportRow(sessionId: string, rowIndex: number, status: string, payload: unknown, error?: string, transactionId?: string): Promise<void> {
