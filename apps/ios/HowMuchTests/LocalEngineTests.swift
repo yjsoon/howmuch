@@ -99,4 +99,39 @@ final class LocalEngineTests: XCTestCase {
     XCTAssertEqual(summary.occurrenceCount, 0)
     XCTAssertEqual(summary.failureCount, 0)
   }
+
+  private func currencyCode(_ engine: LocalEngine, config: LocalEngineConfig) async throws -> String? {
+    let response = try await engine.handle(
+      config: config,
+      method: "GET",
+      path: "/v1/plans/plan_test/settings",
+      query: nil,
+      headers: ["Authorization": "Bearer test-token"],
+      body: nil
+    )
+    XCTAssertEqual(response.status, 200)
+    let object = try JSONSerialization.jsonObject(with: response.body) as? [String: Any]
+    let settings = (object?["data"] as? [String: Any])?["settings"] as? [String: Any]
+    return (settings?["currency_format"] as? [String: Any])?["iso_code"] as? String
+  }
+
+  func testNewPlanTakesTheSeededSettings() async throws {
+    var seeded = config
+    seeded.newPlanSettings = PlanSettingsSeed.from(locale: Locale(identifier: "ja_JP"))
+    let engine = LocalEngine(databaseURL: databaseURL)
+    let code = try await currencyCode(engine, config: seeded)
+    XCTAssertEqual(code, "JPY")
+  }
+
+  func testExistingPlanKeepsItsSettings() async throws {
+    let first = LocalEngine(databaseURL: databaseURL)
+    let initial = try await currencyCode(first, config: config)
+    XCTAssertEqual(initial, "SGD")
+
+    var seeded = config
+    seeded.newPlanSettings = PlanSettingsSeed.from(locale: Locale(identifier: "en_US"))
+    let second = LocalEngine(databaseURL: databaseURL)
+    let reopened = try await currencyCode(second, config: seeded)
+    XCTAssertEqual(reopened, "SGD")
+  }
 }

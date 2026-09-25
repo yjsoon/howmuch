@@ -78,7 +78,17 @@ const binding: D1Binding = {
   },
 };
 
-type EngineConfig = { apiToken: string; defaultPlanId: string; timeZone: string };
+/**
+ * `newPlanSettings` seeds a plan this call creates, in the stored
+ * `currency_format`/`date_format` shapes. A plan that already exists keeps
+ * its settings.
+ */
+type EngineConfig = {
+  apiToken: string;
+  defaultPlanId: string;
+  timeZone: string;
+  newPlanSettings?: { currency_format: Record<string, unknown>; date_format: { format: string } };
+};
 
 type Engine = {
   config: EngineConfig;
@@ -114,7 +124,11 @@ async function configure(configJson: string): Promise<void> {
     auth: new D1AuthStore(database),
     config: apiConfig,
   });
+  const existed = await database.get("SELECT 1 FROM plans WHERE id=?", [config.defaultPlanId]);
   await repo.ensurePlan(config.defaultPlanId);
+  if (!existed && config.newPlanSettings) {
+    await repo.upsertPlan(config.defaultPlanId, { name: "HowMuch" }, config.newPlanSettings);
+  }
   engine = { config, repo, handler };
 }
 

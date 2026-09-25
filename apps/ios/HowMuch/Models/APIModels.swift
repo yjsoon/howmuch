@@ -449,9 +449,13 @@ extension APISettings {
     LocalEngineConfig(
       apiToken: sessionToken,
       defaultPlanId: planID,
-      timeZone: TimeZone.current.identifier
+      timeZone: TimeZone.current.identifier,
+      newPlanSettings: Self.newPlanSettings
     )
   }
+
+  /// Read once per launch so the engine config stays equal between calls.
+  private static let newPlanSettings = PlanSettingsSeed.from(locale: .current)
 }
 
 extension APISettings {

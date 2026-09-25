@@ -104,6 +104,8 @@
 		A30000000000000000000006 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
 		A3000000000000000000000B /* HowMuchShare.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* HowMuchShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B10000000000000000000011 /* LocalEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000010 /* LocalEngine.swift */; };
+		B100000000000000000000F1 /* PlanSettingsSeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000F0 /* PlanSettingsSeed.swift */; };
+		B100000000000000000000F3 /* PlanSettingsSeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000F2 /* PlanSettingsSeedTests.swift */; };
 		B10000000000000000000013 /* LocalDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* LocalDatabase.swift */; };
 		B10000000000000000000015 /* howmuch-engine.js in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* howmuch-engine.js */; };
 		B10000000000000000000017 /* migrations in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* migrations */; };
@@ -217,6 +219,8 @@
 		A1000000000000000000001A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000000000000000000001B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B10000000000000000000010 /* LocalEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalEngine.swift; sourceTree = "<group>"; };
+		B100000000000000000000F0 /* PlanSettingsSeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanSettingsSeed.swift; sourceTree = "<group>"; };
+		B100000000000000000000F2 /* PlanSettingsSeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanSettingsSeedTests.swift; sourceTree = "<group>"; };
 		B10000000000000000000012 /* LocalDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDatabase.swift; sourceTree = "<group>"; };
 		B10000000000000000000014 /* howmuch-engine.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = howmuch-engine.js; sourceTree = "<group>"; };
 		B10000000000000000000016 /* migrations */ = {isa = PBXFileReference; lastKnownFileType = folder; path = migrations; sourceTree = "<group>"; };
@@ -463,6 +467,7 @@
 				A200000000000000000000F2 /* SplitMirrorDeleteTests.swift */,
 				A200000000000000000000F4 /* AccountGroupOrderTests.swift */,
 				B1000000000000000000001C /* LocalEngineTests.swift */,
+				B100000000000000000000F2 /* PlanSettingsSeedTests.swift */,
 				B1000000000000000000001E /* LocalModeTests.swift */,
 				B10000000000000000000024 /* ServerConnectionTests.swift */,
 			);
@@ -483,6 +488,7 @@
 			isa = PBXGroup;
 			children = (
 				B10000000000000000000010 /* LocalEngine.swift */,
+				B100000000000000000000F0 /* PlanSettingsSeed.swift */,
 				B10000000000000000000012 /* LocalDatabase.swift */,
 				B10000000000000000000014 /* howmuch-engine.js */,
 				B10000000000000000000016 /* migrations */,
@@ -654,6 +660,7 @@
 				A10000000000000000000028 /* SettingsView.swift in Sources */,
 				A10000000000000000000020 /* HowMuchApp.swift in Sources */,
 				B10000000000000000000011 /* LocalEngine.swift in Sources */,
+				B100000000000000000000F1 /* PlanSettingsSeed.swift in Sources */,
 				B10000000000000000000013 /* LocalDatabase.swift in Sources */,
 				B10000000000000000000019 /* StarterCategories.swift in Sources */,
 				B1000000000000000000001B /* WelcomeView.swift in Sources */,
@@ -724,6 +731,7 @@
 				A200000000000000000000F3 /* SplitMirrorDeleteTests.swift in Sources */,
 				A200000000000000000000F5 /* AccountGroupOrderTests.swift in Sources */,
 				B1000000000000000000001D /* LocalEngineTests.swift in Sources */,
+				B100000000000000000000F3 /* PlanSettingsSeedTests.swift in Sources */,
 				B1000000000000000000001F /* LocalModeTests.swift in Sources */,
 				B10000000000000000000025 /* ServerConnectionTests.swift in Sources */,
 			);

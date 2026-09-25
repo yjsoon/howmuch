@@ -10,6 +10,9 @@ struct LocalEngineConfig: Codable, Equatable {
   var defaultPlanId: String
   /// The plan's home time zone, used for the daily schedule catch-up.
   var timeZone: String
+  /// Seeds the plan only when `configure` creates it; an existing plan keeps
+  /// its settings.
+  var newPlanSettings: PlanSettingsSeed? = nil
 }
 
 struct LocalEngineResponse: Equatable {
