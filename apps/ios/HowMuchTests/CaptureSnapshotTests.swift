@@ -2410,6 +2410,11 @@ final class SnapshotHarness {
     }
     let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), captureAI: CaptureAISettings(
       defaults: UserDefaults(suiteName: "howmuch.tests.ai.\(UUID().uuidString)")!, keys: CaptureAIMemoryKeys()
+    ), snapshotStore: SnapshotStore(
+      // Every harness shares one fingerprint, so a report cached by one render
+      // test must not appear in the next one's first frame.
+      directory: FileManager.default.temporaryDirectory
+        .appendingPathComponent("HowMuchSnapshotHarness/\(UUID().uuidString)", isDirectory: true)
     ))
     model.accounts = [
       account("acct-everyday", "Everyday"),

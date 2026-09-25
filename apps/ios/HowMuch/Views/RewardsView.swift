@@ -142,9 +142,6 @@ struct RewardsView: View {
   @Environment(AppModel.self) private var model
   @Environment(RootChromeState.self) private var chrome: RootChromeState?
   @State private var filter: RewardsReportFilter
-  @State private var report: RewardsReport?
-  @State private var reportPlanID: String?
-  @State private var phase: LoadPhase = .idle
   @State private var sheet: RewardsSheet?
   @State private var route: RewardsRoute?
   @State private var preferencesByPlan: [String: RewardsBoardPreferences] = [:]
@@ -170,12 +167,12 @@ struct RewardsView: View {
         if let asOf = filter.asOfISO {
           pastDateBanner(asOf)
         }
-        if let message = phase.errorMessage {
+        if let message = model.rewardsPhase.errorMessage {
           errorRow(message)
         }
         boardRows(report, board: board)
       } else {
-        PhasePlaceholder(phase: phase) {
+        PhasePlaceholder(phase: model.rewardsPhase) {
           await fetch()
         }
         .frame(maxWidth: .infinity, minHeight: 240)
@@ -183,6 +180,8 @@ struct RewardsView: View {
         .listRowSeparator(.hidden)
       }
     }
+    // Loaded data arrives with the shared motion, as the Reflect overview does.
+    .animation(Theme.Motion.arrive, value: model.rewardsPhase)
     .listStyle(.plain)
     .scrollContentBackground(.hidden)
     .background(Theme.canvas)
@@ -220,8 +219,20 @@ struct RewardsView: View {
 
   // MARK: Board
 
+  /// The model holds the board's report, so the overview board (cached on
+  /// disk) is on screen at launch while this view revalidates it. A report is
+  /// shown only under the request that produced it.
   private var currentReport: RewardsReport? {
-    reportPlanID == model.settings.planID ? report : nil
+    model.rewardsReport(for: request)
+  }
+
+  private var request: RewardsRequest {
+    RewardsRequest(
+      planID: model.settings.planID,
+      from: filter.from,
+      to: filter.to,
+      accountIDs: filter.accountIDs
+    )
   }
 
   @ViewBuilder
@@ -786,38 +797,19 @@ struct RewardsView: View {
   }
 
   private func fetch() async {
-    let planID = model.settings.planID
+    let request = request
     let key = fetchKey
-    phase = .loading
-    do {
-      let next = try await model.apiClient.fetchRewards(
-        planID: planID,
-        from: filter.from,
-        to: filter.to,
-        accountIDs: filter.accountIDs,
-        group: .flag
-      )
-      guard key == fetchKey, planID == model.settings.planID else {
-        return
-      }
-      withAnimation(Theme.Motion.arrive) {
-        report = next
-        reportPlanID = planID
-        phase = .loaded
-      }
-      if filter.accountIDs.isEmpty {
-        rewardAccountIDsByPlan[planID] = Set(next.cards.map(\.accountId))
-      }
-      consumeCardRequest()
-    } catch {
-      guard key == fetchKey, planID == model.settings.planID else {
-        return
-      }
-      if error is CancellationError || (error as? URLError)?.code == .cancelled {
-        return
-      }
-      phase = .failed(error.localizedDescription)
+    guard let next = await model.refreshRewards(request),
+          key == fetchKey,
+          request.planID == model.settings.planID
+    else {
+      return
     }
+    let planID = request.planID
+    if request.accountIDs.isEmpty {
+      rewardAccountIDsByPlan[planID] = Set(next.cards.map(\.accountId))
+    }
+    consumeCardRequest()
   }
 }
 

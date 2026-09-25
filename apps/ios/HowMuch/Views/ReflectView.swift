@@ -11,6 +11,13 @@ struct ReflectView: View {
             await model.refreshReportsIfNeeded(force: true)
           }
         } else {
+          // Reports from the cache or an earlier load stay up when a refresh
+          // fails; say so, as Rewards does, rather than pass them off as fresh.
+          if let message = model.reportsStaleMessage {
+            Label(message, systemImage: "wifi.exclamationmark")
+              .font(.footnote)
+              .foregroundStyle(Theme.rowSecondary)
+          }
           LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)], spacing: 12) {
             ReflectCard(icon: "chart.pie.fill", title: "Spending Breakdown") {
               SpendingBreakdownDetailView()

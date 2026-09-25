@@ -121,6 +121,12 @@ final class AppModel {
   private(set) var reportsRefreshGeneration = 0
   private(set) var rewardsRefreshGeneration = 0
   var reportsPhase: LoadPhase = .idle
+  /// The Rewards board's last report and the request that produced it. Read
+  /// through `rewardsReport(for:)`, so a report is never shown under another
+  /// filter's controls.
+  private var rewardsReport: RewardsReport?
+  private var rewardsReportRequest: RewardsRequest?
+  private(set) var rewardsPhase: LoadPhase = .idle
   var isSubmitting = false
   var lastSaveMessage: SaveMessage?
   var isShowingSettings = false
@@ -218,6 +224,15 @@ final class AppModel {
   // MARK: - #176: the on-device reference snapshot
 
   @ObservationIgnored private let snapshotStore: SnapshotStore
+  /// The Reflect overview and the default Rewards board, in the same
+  /// directory as the reference snapshot and discarded with it.
+  @ObservationIgnored private let reportsStore: ReportsSnapshotStore
+  /// The default board request's last report. Kept apart from
+  /// `rewardsReport`, which may hold a filtered board that is never cached.
+  @ObservationIgnored private var cachedRewardsOverview: RewardsReport?
+  @ObservationIgnored private var rewardsGeneration = 0
+  /// The month the Reflect reports on screen were fetched for (`yyyy-MM`).
+  @ObservationIgnored private var reflectMonth: String?
   /// True while the reference set on screen came from the snapshot rather than
   /// from this launch's network refresh. Each area clears its own flag the
   /// moment the network replaces it.
@@ -252,6 +267,7 @@ final class AppModel {
     hasSavedSettings: Bool = APISettings.hasSavedSettings()
   ) {
     self.snapshotStore = snapshotStore
+    self.reportsStore = ReportsSnapshotStore(directory: snapshotStore.directory)
     var scopedStore = ScopedViewPrefsStore.load()
     let scope = settings.viewPrefsScopeKey
     if scope == nil {
@@ -288,6 +304,71 @@ final class AppModel {
     // #176: before the first frame, and off the network. A snapshot that does
     // not belong to this connection is deleted rather than shown.
     restoreSnapshot()
+    restoreReports()
+  }
+
+  /// Puts the last Reflect overview and Rewards board on screen. Each is
+  /// revalidated quietly when its view appears: `reportsGenerationAtLastFetch`
+  /// stays `nil`, so `ReportsRefreshPolicy` asks for one refetch, and a loaded
+  /// phase keeps that refetch free of spinners.
+  private func restoreReports() {
+    guard let snapshot = reportsStore.load() else {
+      return
+    }
+    guard ReportsSnapshot.rejection(snapshot, settings: settings) == nil else {
+      reportsStore.delete()
+      return
+    }
+    if snapshot.hasReflectOverview,
+       ReportsSnapshot.reflectIsCurrent(storedMonth: snapshot.reflectMonth, now: .now) {
+      reflectMonth = snapshot.reflectMonth
+      spendingBreakdown = snapshot.spendingBreakdown
+      incomeVsSpending = snapshot.incomeVsSpending
+      netWorth = snapshot.netWorth
+      ageOfMoney = snapshot.ageOfMoney
+      reportsPhase = .loaded
+    }
+    if let rewards = snapshot.rewards {
+      cachedRewardsOverview = rewards
+      rewardsReport = rewards
+      rewardsReportRequest = .overview(planID: snapshot.planID)
+      rewardsPhase = .loaded
+    }
+  }
+
+  /// The board's report, only when it was produced by exactly this request.
+  func rewardsReport(for request: RewardsRequest) -> RewardsReport? {
+    rewardsReportRequest == request ? rewardsReport : nil
+  }
+
+  /// Set while Reflect shows reports its last refresh could not replace, so
+  /// the screen can say they may be out of date.
+  var reportsStaleMessage: String? {
+    guard spendingBreakdown != nil || netWorth != nil else { return nil }
+    return reportsPhase.errorMessage
+  }
+
+  /// Writes whatever reports are in hand. Each is written as it last loaded;
+  /// they share no cursor, so a mixture of ages is fine.
+  private func persistReports() {
+    guard settings.isAuthenticated,
+          !settings.planID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+          !settings.authenticatedUserID.isEmpty else {
+      return
+    }
+    reportsStore.scheduleWrite(
+      ReportsSnapshot(
+        connectionFingerprint: settings.connectionFingerprint,
+        authenticatedUserID: settings.authenticatedUserID,
+        planID: settings.planID,
+        spendingBreakdown: spendingBreakdown,
+        incomeVsSpending: incomeVsSpending,
+        netWorth: netWorth,
+        ageOfMoney: ageOfMoney,
+        reflectMonth: reflectMonth,
+        rewards: cachedRewardsOverview
+      )
+    )
   }
 
   /// Puts the last written reference set on screen so a warm launch renders
@@ -403,6 +484,10 @@ final class AppModel {
   /// one endpoint, user and plan, so any change to those discards it outright.
   private func discardSnapshot() {
     snapshotStore.delete()
+    // The reports cache belongs to the same endpoint, user and plan.
+    reportsStore.delete()
+    cachedRewardsOverview = nil
+    reflectMonth = nil
     referenceIsProvisional = false
     ledgerIsProvisional = false
     schedulesIsProvisional = false
@@ -454,6 +539,7 @@ final class AppModel {
     incomeVsSpending = nil
     netWorth = nil
     ageOfMoney = nil
+    clearRewards()
     cancelPendingEdits()
     invalidateAccountUsage()
     rebuildLookups()
@@ -2261,6 +2347,7 @@ final class AppModel {
     incomeVsSpending = nil
     netWorth = nil
     ageOfMoney = nil
+    clearRewards()
     cancelPendingEdits()
     hasMoreTransactions = false
     nextTransactionOffset = nil
@@ -2298,6 +2385,56 @@ final class AppModel {
     rewardsRefreshGeneration &+= 1
     invalidateAccountUsage()
     wipeIntentCatalog()
+  }
+
+  private func clearRewards() {
+    rewardsReport = nil
+    rewardsReportRequest = nil
+    rewardsPhase = .idle
+    rewardsGeneration &+= 1
+  }
+
+  /// Loads the Rewards board for one request. Only the latest call may land,
+  /// so a filter changed mid-flight cannot be overwritten by the one before
+  /// it. The overview request is cached for the next launch; a filtered one
+  /// is not. Returns the report when it landed, for the view's own follow-up.
+  @discardableResult
+  func refreshRewards(_ request: RewardsRequest) async -> RewardsReport? {
+    rewardsGeneration &+= 1
+    let generation = rewardsGeneration
+    rewardsPhase = .loading
+    do {
+      let next = try await apiClient.fetchRewards(
+        planID: request.planID,
+        from: request.from,
+        to: request.to,
+        accountIDs: request.accountIDs,
+        group: .flag
+      )
+      guard generation == rewardsGeneration, request.planID == settings.planID else {
+        return nil
+      }
+      rewardsReport = next
+      rewardsReportRequest = request
+      rewardsPhase = .loaded
+      if request.isOverview {
+        cachedRewardsOverview = next
+        persistReports()
+      }
+      return next
+    } catch {
+      guard generation == rewardsGeneration, request.planID == settings.planID else {
+        return nil
+      }
+      // Leaving the tab cancels the view's task. That is not a failure, and a
+      // phase stuck at `.loading` would spin forever: settle it as Reflect does.
+      if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
+        rewardsPhase = rewardsReport(for: request) == nil ? .idle : .loaded
+        return nil
+      }
+      rewardsPhase = .failed(error.localizedDescription)
+      return nil
+    }
   }
 
   func noteRewardsBoardChanged() {
@@ -2677,7 +2814,9 @@ final class AppModel {
       incomeVsSpending = incomeReport
       netWorth = worthReport
       ageOfMoney = ageReport
+      reflectMonth = ReportsSnapshot.month(of: monthStart)
       reportsPhase = .loaded
+      persistReports()
       return true
     } catch {
       guard generation == reportsGeneration,

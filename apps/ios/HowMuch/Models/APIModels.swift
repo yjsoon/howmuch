@@ -1889,12 +1889,12 @@ struct ReconciliationMismatchDetail: Equatable {
   let message: String
 }
 
-struct SpendingBreakdownReport: Decodable {
+struct SpendingBreakdownReport: Codable {
   let total: Int
   let groups: [SpendingBreakdownGroup]
 }
 
-struct SpendingBreakdownGroup: Decodable, Identifiable {
+struct SpendingBreakdownGroup: Codable, Identifiable {
   var id: String { categoryID }
 
   let categoryID: String
@@ -1916,12 +1916,12 @@ struct SpendingBreakdownGroup: Decodable, Identifiable {
   }
 }
 
-struct IncomeVsSpendingReport: Decodable {
+struct IncomeVsSpendingReport: Codable {
   let interval: String
   let periods: [IncomeVsSpendingPeriod]
 }
 
-struct IncomeVsSpendingPeriod: Decodable, Identifiable {
+struct IncomeVsSpendingPeriod: Codable, Identifiable {
   var id: String { period }
 
   let period: String
@@ -1931,11 +1931,11 @@ struct IncomeVsSpendingPeriod: Decodable, Identifiable {
   let cumulativeNet: Int
 }
 
-struct NetWorthReport: Decodable {
+struct NetWorthReport: Codable {
   let periods: [NetWorthPeriod]
 }
 
-struct NetWorthPeriod: Decodable, Identifiable {
+struct NetWorthPeriod: Codable, Identifiable {
   var id: String { period }
 
   let period: String
@@ -1945,7 +1945,7 @@ struct NetWorthPeriod: Decodable, Identifiable {
   let accounts: [NetWorthAccount]
 }
 
-struct NetWorthAccount: Decodable, Identifiable {
+struct NetWorthAccount: Codable, Identifiable {
   var id: String { accountID }
 
   let accountID: String
@@ -1959,12 +1959,12 @@ struct NetWorthAccount: Decodable, Identifiable {
   }
 }
 
-struct AgeOfMoneyReport: Decodable {
+struct AgeOfMoneyReport: Codable {
   let interval: String
   let periods: [AgeOfMoneyPeriod]
 }
 
-struct AgeOfMoneyPeriod: Decodable, Identifiable {
+struct AgeOfMoneyPeriod: Codable, Identifiable {
   var id: String { period }
 
   let period: String
@@ -1989,7 +1989,7 @@ private extension KeyedDecodingContainer {
   }
 }
 
-enum RewardGroupBy: String, CaseIterable, Identifiable, Decodable, Sendable {
+enum RewardGroupBy: String, CaseIterable, Identifiable, Codable, Sendable {
   case flag
   case payee
   case category
@@ -2427,7 +2427,7 @@ struct RewardSettingsPayload: Decodable, Sendable {
 typealias RewardsCard = CreditCard
 typealias RewardsTrackerCard = CreditCard
 
-struct RewardsReport: Decodable, Sendable {
+struct RewardsReport: Codable, Sendable {
   let from: String?
   let to: String?
   let asOf: String?
@@ -2458,14 +2458,14 @@ struct RewardsReport: Decodable, Sendable {
   }
 }
 
-struct RewardsTotals: Decodable, Sendable {
+struct RewardsTotals: Codable, Sendable {
   let spend: Double
   let rewardDollars: Double
   let cashback: Double
   let miles: Double
 }
 
-struct RewardsCardRow: Decodable, Identifiable, Sendable {
+struct RewardsCardRow: Codable, Identifiable, Sendable {
   var id: String { card.id }
 
   let card: RewardsCard
@@ -2474,7 +2474,7 @@ struct RewardsCardRow: Decodable, Identifiable, Sendable {
   let calculation: RewardsCalculation
 }
 
-struct RewardsCalculation: Decodable, Sendable {
+struct RewardsCalculation: Codable, Sendable {
   let period: String
   let totalSpend: Double
   let countedSpend: Double
@@ -2500,13 +2500,13 @@ struct RewardsCalculation: Decodable, Sendable {
   let flags: [RewardsFlagRow]
 }
 
-struct RewardsCalculationPeriod: Decodable, Sendable {
+struct RewardsCalculationPeriod: Codable, Sendable {
   let start: String
   let end: String
   let calculation: RewardsCalculation
 }
 
-struct RewardsMonthlyQualification: Decodable, Sendable {
+struct RewardsMonthlyQualification: Codable, Sendable {
   let start: String
   let end: String
   let spend: Double
@@ -2514,12 +2514,12 @@ struct RewardsMonthlyQualification: Decodable, Sendable {
   let status: String
 }
 
-struct RewardsTransactionReward: Decodable, Sendable {
+struct RewardsTransactionReward: Codable, Sendable {
   let reward: Double
   let rewardDollars: Double
 }
 
-struct RewardsFlagRow: Decodable, Identifiable, Sendable {
+struct RewardsFlagRow: Codable, Identifiable, Sendable {
   var id: String { subcategoryId }
 
   let subcategoryId: String
@@ -2539,7 +2539,7 @@ struct RewardsFlagRow: Decodable, Identifiable, Sendable {
   var blockSize: Double? = nil
 }
 
-struct RewardsGroupRow: Decodable, Identifiable, Sendable {
+struct RewardsGroupRow: Codable, Identifiable, Sendable {
   var id: String { key }
 
   let key: String
