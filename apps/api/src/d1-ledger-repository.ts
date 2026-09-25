@@ -4,7 +4,7 @@ import { parseAccountIcon } from "./account-icon";
 import { applyAccountUpdate, type AccountUpdatePatch } from "./account-kind";
 import { LedgerRepository, NotFoundError, ReconciliationMismatchError, TransactionStateConflictError, ValidationError, type TransactionWriteOptions } from "./repository";
 import type { LedgerStore } from "./storage";
-import type { AccountReconciliationOptions, AccountReconciliationPreview, AccountReconciliationResult, MonthCategoryTargetInput, ScheduledTransactionInput, ScheduledWriteOptions, TransactionBatchResult, TransactionBatchUpdate, TransactionInput } from "./types";
+import type { AccountReconciliationOptions, AccountReconciliationPreview, AccountReconciliationResult, ScheduledTransactionInput, ScheduledWriteOptions, TransactionBatchResult, TransactionBatchUpdate, TransactionInput } from "./types";
 import { D1Database } from "./d1";
 import { D1MetadataRepository, type AccountReconciliationSnapshot, type ScheduledMutationSnapshot } from "./d1-metadata-repository";
 import { D1TransactionRepository, type D1WriteContext } from "./d1-transaction-repository";
@@ -154,64 +154,9 @@ export class D1LedgerRepository extends LedgerRepository {
   override async ensurePayee(planId:string,payeeId:string,name?:string):Promise<void>{await this.metadata.upsertPayee(planId,{id:payeeId,name:name??`Imported payee ${payeeId.slice(0,8)}`},this.context("payee.ensure",planId,payeeId));}
   override async upsertPayee(planId:string,payee:any):Promise<void>{await this.metadata.upsertPayee(planId,payee,this.context("payee.upsert",planId,payee.id));}
   override async upsertYnabRawObject(planId:string,objectType:string,objectId:string,payload:unknown,serverKnowledge?:number):Promise<void>{await this.metadata.upsertYnabRawObject(planId,objectType,objectId,payload,serverKnowledge,this.context("ynab-raw.upsert",planId,`${objectType}:${objectId}`));}
-  override async rematerialiseYnabMonthActivity(planId:string):Promise<void>{await this.metadata.rematerialiseYnabMonthActivity(planId,this.context("ynab-month-activity.rematerialise",planId,planId));}
   override async ensureCategory(planId:string,categoryId:string,name?:string,groupId?:string|null):Promise<void>{await this.metadata.ensureCategory(planId,categoryId,name,groupId??"uncategorized-group",this.context("category.ensure",planId,categoryId));}
   override async upsertCategoryGroup(planId:string,group:any):Promise<void>{await this.metadata.upsertCategoryGroup(planId,group,this.context("category-group.upsert",planId,group.id));}
   override async upsertCategory(planId:string,category:any,groupId?:string|null):Promise<void>{await this.metadata.upsertCategory(planId,category,groupId,this.context("category.upsert",planId,category.id));}
-  override async setMonthCategoryAssignment(planId: string, month: string, categoryId: string, budgetedMilli: number): Promise<any> {
-    if (!Number.isSafeInteger(budgetedMilli)) throw new ValidationError("budgeted must be integer milliunits");
-    const start = normaliseBudgetMonth(month);
-    await this.ensurePlan(planId);
-    const sourceMonth = await this.d1.get(
-      "SELECT 1 FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month' AND object_id = ?",
-      [planId, start],
-    );
-    if (!sourceMonth) throw new NotFoundError("Imported month not found");
-    const source = await this.d1.get<{ payload_json: string }>(
-      "SELECT payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month_category' AND object_id = ?",
-      [planId, `${start}\u001f${categoryId}`],
-    );
-    if (!source) throw new NotFoundError("Imported month category not found");
-    const category = JSON.parse(source.payload_json) as { budgeted?: unknown; deleted?: unknown };
-    if (category.deleted) throw new ValidationError("Deleted categories cannot be assigned");
-    const ownedCategory = await this.d1.get(
-      "SELECT 1 FROM categories WHERE id = ? AND plan_id = ? AND deleted = 0",
-      [categoryId, planId],
-    );
-    if (!ownedCategory) throw new NotFoundError("Category not found");
-    const sourceBudgeted = integerMilliunits(category.budgeted, "source category budgeted");
-    await this.metadata.setMonthCategoryAssignment(
-      planId, start, categoryId, budgetedMilli, sourceBudgeted,
-      this.context("plan.assignment.set", planId, `${start}\u001f${categoryId}`),
-    );
-    return this.getMonth(planId, start);
-  }
-  override async setMonthCategoryTarget(planId: string, month: string, categoryId: string, target: MonthCategoryTargetInput): Promise<any> {
-    const start = normaliseBudgetMonth(month);
-    const normalised = normaliseTarget(target);
-    await this.ensurePlan(planId);
-    const sourceMonth = await this.d1.get("SELECT 1 FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month' AND object_id = ?", [planId, start]);
-    if (!sourceMonth) throw new NotFoundError("Imported month not found");
-    const source = await this.d1.get<{ payload_json: string }>("SELECT payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month_category' AND object_id = ?", [planId, `${start}\u001f${categoryId}`]);
-    if (!source) throw new NotFoundError("Imported month category not found");
-    if ((JSON.parse(source.payload_json) as { deleted?: unknown }).deleted) throw new ValidationError("Deleted categories cannot have targets");
-    const ownedCategory = await this.d1.get("SELECT 1 FROM categories WHERE id = ? AND plan_id = ? AND deleted = 0", [categoryId, planId]);
-    if (!ownedCategory) throw new NotFoundError("Category not found");
-    await this.metadata.setMonthCategoryTarget(planId, start, categoryId, normalised, this.context("plan.target.set", planId, `${start}\u001f${categoryId}`));
-    return this.getMonth(planId, start);
-  }
-  override async restoreMonthCategoryTarget(planId: string, month: string, categoryId: string): Promise<any> {
-    const start = normaliseBudgetMonth(month);
-    await this.ensurePlan(planId);
-    const sourceMonth = await this.d1.get("SELECT 1 FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month' AND object_id = ?", [planId, start]);
-    if (!sourceMonth) throw new NotFoundError("Imported month not found");
-    const source = await this.d1.get<{ payload_json: string }>("SELECT payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month_category' AND object_id = ?", [planId, `${start}\u001f${categoryId}`]);
-    if (!source) throw new NotFoundError("Imported month category not found");
-    const ownedCategory = await this.d1.get("SELECT 1 FROM categories WHERE id = ? AND plan_id = ? AND deleted = 0", [categoryId, planId]);
-    if (!ownedCategory) throw new NotFoundError("Category not found");
-    await this.metadata.restoreMonthCategoryTarget(planId, start, categoryId, this.context("plan.target.restore", planId, `${start}\u001f${categoryId}`));
-    return this.getMonth(planId, start);
-  }
 
   override async createScheduledTransaction(planId: string, input: ScheduledTransactionInput, options: ScheduledWriteOptions = {}): Promise<any> {
     await this.ensurePlan(planId);
@@ -434,12 +379,6 @@ export class D1LedgerRepository extends LedgerRepository {
 const _d1LedgerStoreTypecheck: LedgerStore = null as unknown as D1LedgerRepository;
 void _d1LedgerStoreTypecheck;
 
-function normaliseBudgetMonth(month: string): string {
-  const start = month.length === 7 ? `${month}-01` : month;
-  if (!/^\d{4}-(0[1-9]|1[0-2])-01$/.test(start)) throw new ValidationError("month must be YYYY-MM");
-  return start;
-}
-
 function normaliseReconciliationDate(date: string): string {
   if (typeof date !== "string" || !/^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(date)) {
     throw new ValidationError("statement_date must be an ISO date (YYYY-MM-DD)");
@@ -449,12 +388,6 @@ function normaliseReconciliationDate(date: string): string {
     throw new ValidationError("statement_date must be a valid ISO date");
   }
   return date;
-}
-
-function integerMilliunits(value: unknown, label: string): number {
-  const number = value == null ? 0 : Number(value);
-  if (!Number.isSafeInteger(number)) throw new ValidationError(`${label} must be integer milliunits`);
-  return number;
 }
 
 function scheduleId(seed: string): string {
@@ -470,19 +403,4 @@ function assertExpectedD1Schedule(payload: Record<string, any>, expected: Schedu
 
 function isStaleScheduledTransaction(error: unknown): boolean {
   return String(error).includes("stale scheduled transaction");
-}
-
-function normaliseTarget(target: MonthCategoryTargetInput): { goal_type: string | null; goal_target: number | null; goal_target_month: string | null } {
-  if (!target || typeof target !== "object" || Array.isArray(target)) throw new ValidationError("target must be an object or null");
-  if (target.goal_type === null) {
-    if (target.goal_target != null || target.goal_target_month != null) throw new ValidationError("Cleared targets cannot include an amount or target month");
-    return { goal_type: null, goal_target: null, goal_target_month: null };
-  }
-  if (!["TB", "TBD", "MF", "NEED", "DEBT"].includes(String(target.goal_type))) throw new ValidationError("goal_type must be TB, TBD, MF, NEED, or DEBT");
-  if (!Number.isSafeInteger(target.goal_target) || Number(target.goal_target) <= 0) throw new ValidationError("goal_target must be a positive integer milliunits");
-  return {
-    goal_type: target.goal_type,
-    goal_target: Number(target.goal_target),
-    goal_target_month: target.goal_target_month == null ? null : normaliseBudgetMonth(target.goal_target_month),
-  };
 }

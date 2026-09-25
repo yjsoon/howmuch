@@ -385,64 +385,17 @@ async function handleV1(
     return json({ data: { scheduled_subtransactions: await repo.listScheduledSubtransactions(planId), server_knowledge: await repo.getServerKnowledge(planId) } });
   }
 
-  // These source-only YNAB resources have no normalised write model yet. The
-  // raw mirror makes them safely available for clients switching over without
-  // discarding their existing scheduled/payee-location/movement data.
+  // Payee locations have no normalised write model yet. The raw mirror makes
+  // them available to clients switching over without discarding them. YNAB
+  // money movements are budgeting data: the importer still mirrors them, but
+  // HowMuch has no budgeting and no longer serves them.
   const sourceOnlyCollections: Record<string, { type: string; field: string }> = {
     payee_locations: { type: "payee_location", field: "payee_locations" },
-    money_movements: { type: "money_movement", field: "money_movements" },
-    money_movement_groups: { type: "money_movement_group", field: "money_movement_groups" },
   };
   const sourceOnly = sourceOnlyCollections[resource];
   if (sourceOnly && segments.length === 4 && method === "GET") {
     const sourceObjects = await repo.listYnabRawObjects(planId, sourceOnly.type);
     return json({ data: { [sourceOnly.field]: sourceObjects, server_knowledge: await repo.getServerKnowledge(planId) } });
-  }
-
-  if (resource === "months") {
-    const month = segments[4];
-    if (segments.length === 5 && method === "GET") {
-      return json({ data: { month: await repo.getMonth(planId, month), server_knowledge: await repo.getServerKnowledge(planId) } });
-    }
-    if (segments.length === 7 && segments[5] === "categories" && method === "PATCH") {
-      const body = await readJson(request);
-      if (!body || typeof body !== "object" || Array.isArray(body) || !body.category || typeof body.category !== "object" || Array.isArray(body.category)) {
-        throw new ValidationError("category with budgeted is required");
-      }
-      const category = body.category as Record<string, unknown>;
-      let updated: any;
-      if (Object.hasOwn(category, "target") || Object.hasOwn(category, "restore_target")) {
-        if (Object.hasOwn(category, "budgeted")) throw new ValidationError("Update either budgeted or target, not both");
-        if (category.restore_target === true) {
-          if (Object.hasOwn(category, "target")) throw new ValidationError("restore_target cannot be combined with target");
-          updated = await repo.restoreMonthCategoryTarget(planId, month, segments[6]);
-        } else if (Object.hasOwn(category, "target")) {
-          const target = category.target;
-          if (target !== null && (typeof target !== "object" || Array.isArray(target))) throw new ValidationError("target must be an object or null");
-          updated = await repo.setMonthCategoryTarget(planId, month, segments[6], target === null
-            ? { goal_type: null }
-            : target as { goal_type: "TB" | "TBD" | "MF" | "NEED" | "DEBT" | null; goal_target?: number | null; goal_target_month?: string | null });
-        } else {
-          throw new ValidationError("restore_target must be true");
-        }
-      } else {
-        const budgeted = category.budgeted;
-        if (typeof budgeted !== "number" || !Number.isSafeInteger(budgeted)) throw new ValidationError("budgeted must be integer milliunits");
-        updated = await repo.setMonthCategoryAssignment(planId, month, segments[6], budgeted);
-      }
-      return json({ data: { category: updated.categories.find((category: { id: string }) => category.id === segments[6]), month: updated, server_knowledge: await repo.getServerKnowledge(planId) } });
-    }
-    if (segments.length === 6 && segments[5] === "transactions" && method === "GET") {
-      return transactionListResponse(repo, planId, queryFilters(url, { month }));
-    }
-    if (segments.length === 6 && method === "GET" && (segments[5] === "money_movements" || segments[5] === "money_movement_groups")) {
-      const mapping = segments[5] === "money_movements"
-        ? { type: "money_movement", field: "money_movements" }
-        : { type: "money_movement_group", field: "money_movement_groups" };
-      const objects = await repo.listYnabRawObjects(planId, mapping.type);
-      const monthStart = month.length === 7 ? `${month}-01` : month;
-      return json({ data: { [mapping.field]: objects.filter((object: any) => object.month === monthStart), server_knowledge: await repo.getServerKnowledge(planId) } });
-    }
   }
 
   if (resource === "transactions") {
@@ -1220,10 +1173,7 @@ function isTransitionFinancialWrite(methodValue: string, segments: string[]): bo
     if (segments.length === 6 && segments[5] === "materialize") return method === "POST";
     return false;
   }
-  return resource === "months"
-    && segments.length === 7
-    && segments[5] === "categories"
-    && method === "PATCH";
+  return false;
 }
 
 function isToggleClearedState(value: unknown): value is "uncleared" | "cleared" {

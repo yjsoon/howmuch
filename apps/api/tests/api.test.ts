@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 describe("YNAB-compatible API", () => {
-  test("reads mirrored scheduled transactions, payee locations, and month-filtered money movements", async () => {
+  test("reads mirrored scheduled transactions and payee locations, but no longer serves money movements", async () => {
     const repo = new LedgerRepository(db, "plan-test");
     await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
     await repo.upsertYnabRawObject("plan-test", "scheduled_transaction", "scheduled-1", { id: "scheduled-1", date_next: "2026-07-01" });
@@ -53,8 +53,10 @@ describe("YNAB-compatible API", () => {
     expect(one.data.scheduled_transaction.deleted).toBe(false);
     const locations = await (await request("/v1/plans/plan-test/payee_locations")).json();
     expect(locations.data.payee_locations).toEqual([{ id: "location-1", payee_id: "payee-1", latitude: "1.2" }]);
-    const movements = await (await request("/v1/plans/plan-test/months/2026-06/money_movements")).json();
-    expect(movements.data.money_movements).toEqual([{ id: "movement-1", month: "2026-06-01", amount: 100 }]);
+    // Money movements are YNAB budgeting data: still mirrored, never served.
+    expect((await request("/v1/plans/plan-test/money_movements")).status).toBe(404);
+    expect((await request("/v1/plans/plan-test/months/2026-06/money_movements")).status).toBe(404);
+    expect(db.query("SELECT COUNT(*) AS count FROM ynab_raw_objects WHERE object_type = 'money_movement'").get()).toEqual({ count: 1 });
   });
 
   test("creates, overlays, and deletes schedules without mutating imported YNAB rows", async () => {
@@ -555,204 +557,23 @@ describe("YNAB-compatible API", () => {
     expect(db.query("SELECT COUNT(*) count FROM transactions WHERE source_kind='scheduled-transaction'").get()).toEqual({ count: 1 });
   });
 
-  test("overlays a local category assignment without mutating the YNAB month mirror", async () => {
+  test("budgeting month routes are gone and leave the retained overlay tables untouched", async () => {
     const repo = new LedgerRepository(db, "plan-test");
     await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
     await repo.upsertCategoryGroup("plan-test", { id: "group-food", name: "Food" });
     await repo.upsertCategory("plan-test", { id: "category-food", category_group_id: "group-food", name: "Groceries" });
-    const sourceMonth = { month: "2026-06-01", budgeted: 5000, to_be_budgeted: 4000, activity: -1200, categories: [] };
-    const sourceCategory = { id: "category-food", category_group_id: "group-food", name: "Groceries", budgeted: 5000, activity: -1200, balance: 3800, deleted: false };
-    await repo.upsertYnabRawObject("plan-test", "month", "2026-06-01", sourceMonth);
-    await repo.upsertYnabRawObject("plan-test", "month_category", "2026-06-01\u001fcategory-food", sourceCategory);
-    await repo.upsertYnabRawObject("plan-test", "transaction", "source-spend", { id: "source-spend", date: "2026-06-05", amount: -1200, category_id: "category-food", deleted: false });
-    await repo.createTransaction("plan-test", {
-      id: "source-spend", account_id: "cash", date: "2026-06-05", amount: -1200, category_id: "category-food",
-      source_kind: "ynab-import", external_ynab_id: "source-spend",
-    });
-    const rawBefore = db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category' AND object_id='2026-06-01\u001fcategory-food'").get() as { payload_json: string };
-
-    const assigned = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", {
-      method: "PATCH",
-      body: { category: { budgeted: 7000 } },
-    });
-    expect(assigned.status).toBe(200);
-    const assignedMonth = (await assigned.json()).data.month;
-    expect(assignedMonth).toMatchObject({ budgeted: 7000, to_be_budgeted: 2000 });
-    expect(assignedMonth.categories).toEqual([expect.objectContaining({
-      id: "category-food", budgeted: 7000, balance: 5800, source_budgeted: 5000, assignment_source: "howmuch-local",
-    })]);
-    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category' AND object_id='2026-06-01\u001fcategory-food'").get()).toEqual(rawBefore);
-    expect(db.query("SELECT budgeted_milli,source FROM plan_month_assignments").get()).toEqual({ budgeted_milli: 7000, source: "howmuch-local" });
-
-    // A later source sync changes the raw baseline but retains the local
-    // decision and recalculates availability/Ready to assign from that base.
-    await repo.upsertYnabRawObject("plan-test", "month", "2026-06-01", { ...sourceMonth, budgeted: 6000, to_be_budgeted: 3000 });
-    await repo.upsertYnabRawObject("plan-test", "month_category", "2026-06-01\u001fcategory-food", { ...sourceCategory, budgeted: 6000, balance: 4800 });
-    const afterSync = await (await request("/v1/plans/plan-test/months/2026-06")).json();
-    expect(afterSync.data.month).toMatchObject({ budgeted: 7000, to_be_budgeted: 2000 });
-    expect(afterSync.data.month.categories).toEqual([expect.objectContaining({ id: "category-food", budgeted: 7000, balance: 5800, source_budgeted: 6000 })]);
-
-    // A new local transaction immediately changes the effective Plan activity
-    // and Available amount, while both imported source rows stay untouched.
-    await repo.createTransaction("plan-test", { id: "new-spend", account_id: "cash", date: "2026-06-10", amount: -800, category_id: "category-food" });
-    const afterLocalSpend = await (await request("/v1/plans/plan-test/months/2026-06")).json();
-    expect(afterLocalSpend.data.month).toMatchObject({ activity: -2000 });
-    expect(afterLocalSpend.data.month.categories).toEqual([expect.objectContaining({ id: "category-food", activity: -2000, balance: 5000 })]);
-    await repo.deleteTransaction("plan-test", "new-spend");
-    const afterDelete = await (await request("/v1/plans/plan-test/months/2026-06")).json();
-    expect(afterDelete.data.month).toMatchObject({ activity: -1200 });
-    expect(afterDelete.data.month.categories).toEqual([expect.objectContaining({ id: "category-food", activity: -1200, balance: 5800 })]);
-  });
-
-  test("carries local assignment deltas into a later month's Available amount", async () => {
-    const repo = new LedgerRepository(db, "plan-test");
-    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
-    await repo.upsertCategoryGroup("plan-test", { id: "group-food", name: "Food" });
-    await repo.upsertCategory("plan-test", { id: "category-food", category_group_id: "group-food", name: "Groceries" });
-    for (const month of ["2026-06-01", "2026-07-01"]) {
-      await repo.upsertYnabRawObject("plan-test", "month", month, { month, budgeted: 5000, to_be_budgeted: 4000, activity: 0, categories: [] });
-      await repo.upsertYnabRawObject("plan-test", "month_category", `${month}\u001fcategory-food`, {
-        id: "category-food", category_group_id: "group-food", name: "Groceries", budgeted: 5000, activity: 0, balance: 5000, deleted: false,
-      });
-    }
-
-    const assigned = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", {
-      method: "PATCH",
-      body: { category: { budgeted: 7000 } },
-    });
-    expect(assigned.status).toBe(200);
-    const july = await (await request("/v1/plans/plan-test/months/2026-07")).json();
-    expect(july.data.month).toMatchObject({ budgeted: 5000, to_be_budgeted: 4000 });
-    expect(july.data.month.categories).toEqual([expect.objectContaining({ id: "category-food", budgeted: 5000, balance: 7000 })]);
-  });
-
-  test("overlays, clears, and restores a local target without changing the YNAB mirror", async () => {
-    const repo = new LedgerRepository(db, "plan-test");
-    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
-    await repo.upsertCategoryGroup("plan-test", { id: "group-food", name: "Food" });
-    await repo.upsertCategory("plan-test", { id: "category-food", category_group_id: "group-food", name: "Groceries" });
-    const source = { id: "category-food", category_group_id: "group-food", name: "Groceries", budgeted: 0, activity: 0, balance: 1200, goal_type: "NEED", goal_target: 5000, goal_target_month: "2026-07-01", deleted: false };
-    await repo.upsertYnabRawObject("plan-test", "month", "2026-06-01", { month: "2026-06-01", budgeted: 0, to_be_budgeted: 0, activity: 0 });
-    await repo.upsertYnabRawObject("plan-test", "month_category", "2026-06-01\u001fcategory-food", source);
-    const rawBefore = db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category'").get();
-
-    const updated = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", {
-      method: "PATCH", body: { category: { target: { goal_type: "TB", goal_target: 9000, goal_target_month: "2026-12" } } },
-    });
-    expect(updated.status).toBe(200);
-    expect((await updated.json()).data.category).toMatchObject({ goal_type: "TB", goal_target: 9000, goal_target_month: "2026-12-01", target_source: "howmuch-local" });
-    expect(db.query("SELECT goal_type,goal_target_milli,goal_target_month FROM plan_month_category_targets").get()).toEqual({ goal_type: "TB", goal_target_milli: 9000, goal_target_month: "2026-12-01" });
-    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category'").get()).toEqual(rawBefore);
-
-    const omittedTarget = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", { method: "PATCH", body: { category: {} } });
-    expect(omittedTarget.status).toBe(400);
-    expect((await omittedTarget.json()).error.detail).toBe("budgeted must be integer milliunits");
-
-    const cleared = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", { method: "PATCH", body: { category: { target: null } } });
-    expect(cleared.status).toBe(200);
-    expect((await cleared.json()).data.category).toMatchObject({ goal_type: null, goal_target: null, target_source: "howmuch-local" });
-
-    const restored = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", { method: "PATCH", body: { category: { restore_target: true } } });
-    expect(restored.status).toBe(200);
-    expect((await restored.json()).data.category).toMatchObject({ goal_type: "NEED", goal_target: 5000, goal_target_month: "2026-07-01" });
-    expect(db.query("SELECT COUNT(*) AS count FROM plan_month_category_targets").get()).toEqual({ count: 0 });
-    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category'").get()).toEqual(rawBefore);
-  });
-
-  test("keeps YNAB activity rounding while applying local deltas to the imported Uncategorized category", async () => {
-    const repo = new LedgerRepository(db, "plan-test");
-    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
-    await repo.upsertCategoryGroup("plan-test", { id: "group-food", name: "Food" });
-    await repo.upsertCategory("plan-test", { id: "meals", category_group_id: "group-food", name: "Meals" });
-    await repo.upsertCategory("plan-test", { id: "ynab-uncategorized", category_group_id: "group-food", name: "Uncategorized", internal: true });
-    await repo.upsertYnabRawObject("plan-test", "month", "2026-08-01", {
-      month: "2026-08-01", budgeted: 0, to_be_budgeted: 0, activity: -2004,
-    });
-    await repo.upsertYnabRawObject("plan-test", "month_category", "2026-08-01\u001fmeals", {
-      id: "meals", category_group_id: "group-food", name: "Meals", budgeted: 0, activity: -1004, balance: -1004, deleted: false,
-    });
-    await repo.upsertYnabRawObject("plan-test", "month_category", "2026-08-01\u001fynab-uncategorized", {
-      id: "ynab-uncategorized", category_group_id: "group-food", name: "Uncategorized", budgeted: 0, activity: -1000, balance: -1000, deleted: false,
-    });
-    for (const transaction of [
-      { id: "source-meals", amount: -1000, category_id: "meals" },
-      { id: "source-uncategorized", amount: -1000, category_id: null },
-    ]) {
-      await repo.upsertYnabRawObject("plan-test", "transaction", transaction.id, { ...transaction, date: "2026-08-05", deleted: false });
-      await repo.createTransaction("plan-test", {
-        ...transaction, account_id: "cash", date: "2026-08-05", source_kind: "ynab-import", external_ynab_id: transaction.id,
-      });
-    }
-
-    // YNAB's -1004 Meals activity intentionally differs from its source
-    // transaction sum. A read with no local change must return it exactly.
-    const baseline = await repo.getMonth("plan-test", "2026-08");
-    expect(baseline).toMatchObject({ activity: -2004 });
-    expect(baseline.categories).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "meals", activity: -1004 }),
-      expect.objectContaining({ id: "ynab-uncategorized", activity: -1000 }),
-    ]));
-
-    // The raw objects above were written without materialising, so that read
-    // took the unmaterialised fallback. Materialising must not change a digit:
-    // the uncategorised source line is stored under the `''` sentinel and
-    // resolved back to the imported Uncategorized category on read.
-    await repo.rematerialiseYnabMonthActivity("plan-test");
-    expect(await repo.getMonth("plan-test", "2026-08")).toEqual(baseline);
-
-    await repo.createTransaction("plan-test", { id: "local-uncategorized", account_id: "cash", date: "2026-08-10", amount: -200 });
-    const afterLocalEntry = await repo.getMonth("plan-test", "2026-08");
-    expect(afterLocalEntry).toMatchObject({ activity: -2204 });
-    expect(afterLocalEntry.categories).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "meals", activity: -1004, balance: -1004 }),
-      expect.objectContaining({ id: "ynab-uncategorized", activity: -1200, balance: -1200 }),
-    ]));
-  });
-
-  test("rejects invalid plan assignments without creating an overlay", async () => {
-    const response = await request("/v1/plans/plan-test/months/not-a-month/categories/missing", {
-      method: "PATCH",
-      body: { category: { budgeted: 1.25 } },
-    });
-    expect(response.status).toBe(400);
-    expect(db.query("SELECT COUNT(*) AS count FROM plan_month_assignments").get()).toEqual({ count: 0 });
-  });
-
-  test("requires a source month, owned category, exact PATCH body, and authentication", async () => {
-    const repo = new LedgerRepository(db, "plan-test");
-    await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
-    await repo.upsertCategoryGroup("plan-test", { id: "group-food", name: "Food" });
-    await repo.upsertCategory("plan-test", { id: "category-food", category_group_id: "group-food", name: "Groceries" });
+    await repo.upsertYnabRawObject("plan-test", "month", "2026-06-01", { month: "2026-06-01", budgeted: 5000, categories: [] });
     await repo.upsertYnabRawObject("plan-test", "month_category", "2026-06-01\u001fcategory-food", { id: "category-food", budgeted: 5000, balance: 5000, deleted: false });
+    db.run("INSERT INTO plan_month_assignments (plan_id, month, category_id, budgeted_milli) VALUES ('plan-test', '2026-06-01', 'category-food', 7000)");
+    const before = db.query("SELECT * FROM plan_month_assignments").all();
 
-    const missingMonth = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", {
-      method: "PATCH", body: { category: { budgeted: 7000 } },
-    });
-    expect(missingMonth.status).toBe(404);
-    const wrongBody = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", {
-      method: "PUT", body: { budgeted: 7000 },
-    });
-    expect(wrongBody.status).toBe(404);
-    const malformedBody = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", {
-      method: "PATCH", body: { budgeted: 7000 },
-    });
-    expect(malformedBody.status).toBe(400);
-    const unauthorised = await handler(new Request("http://howmuch.test/v1/plans/plan-test/months/2026-06/categories/category-food", {
-      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ category: { budgeted: 7000 } }),
-    }));
-    expect(unauthorised.status).toBe(401);
-    expect(db.query("SELECT COUNT(*) AS count FROM plan_month_assignments").get()).toEqual({ count: 0 });
-  });
-
-  test("rejects invalid or unauthenticated target writes without an overlay", async () => {
-    const invalid = await request("/v1/plans/plan-test/months/2026-06/categories/missing", {
-      method: "PATCH", body: { category: { target: { goal_type: "TB", goal_target: 1.25 } } },
-    });
-    expect(invalid.status).toBe(400);
-    const unauthorised = await handler(new Request("http://howmuch.test/v1/plans/plan-test/months/2026-06/categories/missing", {
-      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ category: { target: { goal_type: "TB", goal_target: 1000 } } }),
-    }));
-    expect(unauthorised.status).toBe(401);
+    expect((await request("/v1/plans/plan-test/months/2026-06")).status).toBe(404);
+    expect((await request("/v1/plans/plan-test/months/2026-06/transactions")).status).toBe(404);
+    for (const body of [{ category: { budgeted: 9000 } }, { category: { target: { goal_type: "TB", goal_target: 1000 } } }, { category: { restore_target: true } }]) {
+      const response = await request("/v1/plans/plan-test/months/2026-06/categories/category-food", { method: "PATCH", body });
+      expect(response.status).toBe(404);
+    }
+    expect(db.query("SELECT * FROM plan_month_assignments").all()).toEqual(before);
     expect(db.query("SELECT COUNT(*) AS count FROM plan_month_category_targets").get()).toEqual({ count: 0 });
   });
 
@@ -1111,7 +932,6 @@ describe("YNAB-compatible API", () => {
       ["/v1/plans/plan-test/scheduled_transactions/scheduled-1", "PATCH"],
       ["/v1/plans/plan-test/scheduled_transactions/scheduled-1", "DELETE"],
       ["/v1/plans/plan-test/scheduled_transactions/scheduled-1/materialize", "POST"],
-      ["/v1/plans/plan-test/months/2026-08/categories/category-1", "PATCH"],
       ["/api/mobile/quick-entry", "POST"],
       ["/api/import/csv", "POST"],
       ["/api/import/ynab", "POST"],

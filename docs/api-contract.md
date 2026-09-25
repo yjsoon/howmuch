@@ -202,32 +202,13 @@ Create body:
 
 `GET /v1/plans/{plan_id}/categories`
 
-Return category groups with categories. For a locally created plan, assignment fields may be zero/null when not meaningful.
+Return category groups with categories. HowMuch has no budgeting, so the YNAB-shaped assignment fields on each category (`budgeted`, `activity`, `balance`, `goal_*`) are always zero or null.
 
-### Months
+### Budgeting (removed)
 
-`GET /v1/plans/{plan_id}/months/{month}`
+HowMuch has no budgeting. The YNAB month routes (`GET /v1/plans/{plan_id}/months/{month}`, `PATCH …/months/{month}/categories/{category_id}` for assignments and targets, and `GET …/months/{month}/transactions`) and the money-movement routes now return `404`.
 
-For an API-imported YNAB plan, this returns the imported month and category records, including assigned/budgeted, activity, balance, notes, targets, goals, and deleted flags. For a local-only plan with no imported month mirror, the service falls back to transaction-derived activity and zero/null assignment fields.
-
-`PATCH /v1/plans/{plan_id}/months/{month}/categories/{category_id}`
-
-Update one imported category assignment with a safe-integer milliunit value:
-
-```json
-{ "category": { "budgeted": 125000 } }
-```
-
-The value is stored as a HowMuch assignment overlay; imported YNAB objects remain unchanged. The response includes the updated `category` and projected `month`. Ready to assign and Available are recalculated from the assignment delta and current normalised month activity. Setting the amount back to the imported assignment clears the overlay.
-
-Update a HowMuch-local target with a supported YNAB goal type and a positive integer milliunit amount:
-
-```http
-PATCH /v1/plans/{plan_id}/months/{month}/categories/{category_id}
-{ "category": { "target": { "goal_type": "TB", "goal_target": 500000, "goal_target_month": "2026-12" } } }
-```
-
-`goal_type` is one of `TB`, `TBD`, `MF`, `NEED`, or `DEBT`; the target month is optional. `{ "target": null }` hides the target in a HowMuch-local overlay. `{ "restore_target": true }` deletes that overlay and returns to the exact imported target. Both target mutations are authenticated and use D1's versioned guarded-command protocol; neither mutates `ynab_raw_objects` or writes back to YNAB.
+The YNAB importer still mirrors months, month categories and money movements into `ynab_raw_objects`. The tables behind the old overlays (`plan_month_assignments`, `plan_month_category_targets`) and the materialised `ynab_source_month_activity` baseline are retained legacy tables: no migration drops them and no code reads or writes them.
 
 ### Scheduled transactions
 
@@ -264,13 +245,7 @@ Production invokes a separate, private automatic materialiser at `16:05 UTC` eac
 
 ### Imported read-only collections
 
-The following GET endpoints return exact objects from the imported YNAB mirror. They have no HowMuch mutation endpoint yet:
-
-- `GET /v1/plans/{plan_id}/payee_locations`
-- `GET /v1/plans/{plan_id}/money_movements`
-- `GET /v1/plans/{plan_id}/money_movement_groups`
-- `GET /v1/plans/{plan_id}/months/{month}/money_movements`
-- `GET /v1/plans/{plan_id}/months/{month}/money_movement_groups`
+`GET /v1/plans/{plan_id}/payee_locations` returns exact objects from the imported YNAB mirror. It has no HowMuch mutation endpoint yet.
 
 ### Transactions
 
@@ -308,7 +283,6 @@ Scoped lists:
 - `GET /v1/plans/{plan_id}/accounts/{account_id}/transactions`
 - `GET /v1/plans/{plan_id}/payees/{payee_id}/transactions`
 - `GET /v1/plans/{plan_id}/categories/{category_id}/transactions`
-- `GET /v1/plans/{plan_id}/months/{month}/transactions`
 
 Unapproved count:
 
