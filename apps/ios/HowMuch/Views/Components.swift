@@ -245,7 +245,6 @@ enum AppTab: Hashable, CaseIterable {
   case accounts
   case rewards
   case reflect
-  case plan
   case assistant
 
   /// Compact destinations are the `CompactRootBar` triple — not an open-ended list.
@@ -260,7 +259,6 @@ enum AppTab: Hashable, CaseIterable {
     case .accounts: return "Accounts"
     case .rewards: return "Rewards"
     case .reflect: return "Reflect"
-    case .plan: return "Plan"
     case .assistant: return "Assistant"
     }
   }
@@ -270,7 +268,6 @@ enum AppTab: Hashable, CaseIterable {
     case .accounts: return "building.columns"
     case .rewards: return "creditcard"
     case .reflect: return "chart.bar.fill"
-    case .plan: return "square.grid.2x2"
     case .assistant: return "bubble.left.and.bubble.right"
     }
   }
@@ -280,14 +277,12 @@ enum AppTab: Hashable, CaseIterable {
     case .accounts: return .accounts
     case .rewards: return .rewards
     case .reflect: return .reflect
-    case .plan: return .plan
     case .assistant: return .assistant
     }
   }
 
   var overflowDestination: MoreDestination? {
     switch self {
-    case .plan: return .plan
     case .assistant: return .assistant
     case .accounts, .rewards, .reflect: return nil
     }
@@ -298,7 +293,7 @@ enum AppTab: Hashable, CaseIterable {
     case .accounts: return .accounts
     case .rewards: return .rewards
     case .reflect: return .reflect
-    case .plan, .assistant: return nil
+    case .assistant: return nil
     }
   }
 }
@@ -365,35 +360,30 @@ enum RootTrailingAction: Equatable {
 }
 
 enum MoreDestination: Hashable, CaseIterable, Identifiable {
-  case plan
   case assistant
 
   var id: Self { self }
 
   var title: String {
     switch self {
-    case .plan: return "Plan"
     case .assistant: return "Assistant"
     }
   }
 
   var systemImage: String {
     switch self {
-    case .plan: return "square.grid.2x2"
     case .assistant: return "bubble.left.and.bubble.right"
     }
   }
 
   var captureSurface: CaptureSurface {
     switch self {
-    case .plan: return .plan
     case .assistant: return .assistant
     }
   }
 
   var tab: AppTab {
     switch self {
-    case .plan: return .plan
     case .assistant: return .assistant
     }
   }
@@ -540,8 +530,8 @@ final class RootChromeState {
     openMore(destination)
   }
 
-  /// Compact TabView only hosts Accounts / Rewards / Reflect. Plan and Assistant
-  /// stay in More overlays, so the bar selection must never be those values.
+  /// Compact TabView only hosts Accounts / Rewards / Reflect. Assistant
+  /// stays in a More overlay, so the bar selection must never be that value.
   var compactBarTab: AppTab {
     tab.isCompactDestination ? tab : lastCompactTab
   }
@@ -607,13 +597,6 @@ struct RootTabView: View {
             }
           }
         }
-        Tab(AppTab.plan.title, systemImage: AppTab.plan.systemImage, value: AppTab.plan) {
-          RootChromeScope(chrome: chrome) {
-            NavigationStack {
-              CategoriesView()
-            }
-          }
-        }
         Tab(AppTab.assistant.title, systemImage: AppTab.assistant.systemImage, value: AppTab.assistant) {
           RootChromeScope(chrome: chrome) {
             NavigationStack {
@@ -667,7 +650,7 @@ struct RootTabView: View {
       NavigationStack {
         ReflectView()
       }
-    case .plan, .assistant:
+    case .assistant:
       EmptyView()
     }
   }
@@ -1138,8 +1121,6 @@ struct RootMoreHost: View {
   @ViewBuilder
   private var destinationRoot: some View {
     switch destination {
-    case .plan:
-      CategoriesView()
     case .assistant:
       AssistantView(workspace: workspace)
     }

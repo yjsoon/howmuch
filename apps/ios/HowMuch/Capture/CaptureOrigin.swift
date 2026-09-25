@@ -80,7 +80,6 @@ enum CaptureSurface: Hashable, Sendable {
   case accounts
   case rewards
   case assistant
-  case plan
   case reflect
 }
 

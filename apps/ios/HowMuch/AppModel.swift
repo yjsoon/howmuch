@@ -115,9 +115,6 @@ final class AppModel {
   var referencePhase: LoadPhase = .idle
   var ledgerPhase: LoadPhase = .idle
   var scheduledTransactionsPhase: LoadPhase = .idle
-  /// Increments after mutations that affect a plan month, so the Plan
-  /// destination reloads its locally held monthly snapshot when it becomes visible.
-  private(set) var planRefreshGeneration = 0
   private(set) var reportsRefreshGeneration = 0
   private(set) var rewardsRefreshGeneration = 0
   var reportsPhase: LoadPhase = .idle
@@ -1557,7 +1554,6 @@ final class AppModel {
   @discardableResult
   func scheduleRefresh(after mutation: MutationKind) -> Task<Void, Never>? {
     if RefreshPlanner.invalidatesPlanAndReports(after: mutation) {
-      planRefreshGeneration &+= 1
       reportsRefreshGeneration &+= 1
     }
     return enqueue(RefreshRequest(slices: RefreshPlanner.slices(after: mutation)))
@@ -2125,7 +2121,6 @@ final class AppModel {
     reportsKnowledge = nil
     reportsGenerationAtLastFetch = nil
     queuedRefresh = .none
-    planRefreshGeneration &+= 1
     // ReflectView's only trigger is `.task(id: reportsRefreshGeneration)`, so
     // without this a plan switch made while Reflect is visible leaves it
     // sitting on an empty placeholder.

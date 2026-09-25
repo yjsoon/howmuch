@@ -1247,7 +1247,7 @@ struct RegisterView: View {
 
   /// A register narrowed by anything the count endpoint cannot express keeps
   /// loading the queue, exactly as it did before. The endpoint scopes by plan,
-  /// by one account, and by date; a category drill-down (CategoriesView) or a
+  /// by one account, and by date; a category drill-down or a
   /// date-ranged drill-down (Reflect) has no matching count, and neither does a
   /// multi-account selection -- showing the plan-wide number in any of those
   /// would overstate "Review N new transactions".

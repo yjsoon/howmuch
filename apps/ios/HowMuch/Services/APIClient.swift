@@ -200,50 +200,6 @@ struct APIClient {
     return response.data.payees.filter { $0.deleted != true }
   }
 
-  func fetchPlanMonth(planID: String, month: String) async throws -> PlanMonth {
-    let response: APIEnvelope<PlanMonthPayload> = try await request(
-      path: "/v1/plans/\(planID)/months/\(month)"
-    )
-    return response.data.month
-  }
-
-  func setPlanMonthCategoryAssignment(
-    planID: String,
-    month: String,
-    categoryID: String,
-    budgeted: Int,
-  ) async throws -> PlanMonth {
-    let response: APIEnvelope<PlanMonthPayload> = try await request(
-      path: "/v1/plans/\(planID)/months/\(month)/categories/\(categoryID)",
-      method: "PATCH",
-      body: PlanAssignmentRequest(budgeted: budgeted)
-    )
-    return response.data.month
-  }
-
-  func setPlanMonthCategoryTarget(
-    planID: String,
-    month: String,
-    categoryID: String,
-    target: PlanTargetPayload?
-  ) async throws -> PlanMonth {
-    let response: APIEnvelope<PlanMonthPayload> = try await request(
-      path: "/v1/plans/\(planID)/months/\(month)/categories/\(categoryID)",
-      method: "PATCH",
-      body: PlanTargetRequest(target: target)
-    )
-    return response.data.month
-  }
-
-  func restorePlanMonthCategoryTarget(planID: String, month: String, categoryID: String) async throws -> PlanMonth {
-    let response: APIEnvelope<PlanMonthPayload> = try await request(
-      path: "/v1/plans/\(planID)/months/\(month)/categories/\(categoryID)",
-      method: "PATCH",
-      body: PlanTargetRestoreRequest()
-    )
-    return response.data.month
-  }
-
   func fetchTransactions(
     planID: String,
     accountID: String? = nil,
