@@ -146,12 +146,12 @@ struct SettingsView: View {
             NavigationLink {
               RewardsImportView()
             } label: {
-              Text("Rewards import")
+              Text("Rewards Import & Export")
             }
           } header: {
             Text("Tools")
           } footer: {
-            Text("Import a Rewards Tracker for YNAB settings export. This does not connect to live YNAB.")
+            Text("Import or export Rewards Tracker settings. Does not connect to live YNAB.")
           }
         }
 
