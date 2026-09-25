@@ -18,12 +18,6 @@ struct CategoriesView: View {
         MonthStepper(monthAnchor: $monthAnchor)
 
         if let planMonth {
-          // Grouping sorts every group and the month range formats four dates,
-          // so both are built once per render rather than per use and per row.
-          let groups = self.groups
-          let quietGroups = groups.filter(\.isQuiet)
-          let month = monthRangeISO
-          let monthRange = month.from ... month.to
           summary(for: planMonth)
 
           if let message = phase.errorMessage {
@@ -32,15 +26,15 @@ struct CategoriesView: View {
               .foregroundStyle(.secondary)
           }
 
-          ForEach(groups.filter { !$0.isQuiet }) { group in
-            groupSection(group, monthRange: monthRange)
+          ForEach(primaryGroups) { group in
+            groupSection(group)
           }
 
           if !quietGroups.isEmpty {
             quietGroupsToggle
             if showsQuietGroups {
               ForEach(quietGroups) { group in
-                groupSection(group, monthRange: monthRange)
+                groupSection(group)
               }
             }
           }
@@ -195,6 +189,9 @@ struct CategoriesView: View {
     return result
   }
 
+  private var primaryGroups: [PlanCategoryGroup] { groups.filter { !$0.isQuiet } }
+  private var quietGroups: [PlanCategoryGroup] { groups.filter(\.isQuiet) }
+
   private func fetch() async {
     let month = monthKey
     let generation = model.planRefreshGeneration
@@ -219,7 +216,7 @@ struct CategoriesView: View {
 
   // MARK: Sections
 
-  private func groupSection(_ group: PlanCategoryGroup, monthRange: ClosedRange<String>) -> some View {
+  private func groupSection(_ group: PlanCategoryGroup) -> some View {
     let isCollapsed = collapsedGroups.contains(group.id)
     let available = group.categories.reduce(0) { $0 + ($1.balance ?? 0) }
 
@@ -251,7 +248,7 @@ struct CategoriesView: View {
       if !isCollapsed {
         VStack(spacing: 0) {
           ForEach(group.categories) { category in
-            categoryRow(category, monthRange: monthRange)
+            categoryRow(category)
             if category.id != group.categories.last?.id {
               Divider().padding(.leading, 16)
             }
@@ -262,10 +259,10 @@ struct CategoriesView: View {
     }
   }
 
-  private func categoryRow(_ category: PlanMonthCategory, monthRange: ClosedRange<String>) -> some View {
+  private func categoryRow(_ category: PlanMonthCategory) -> some View {
     HStack(alignment: .top, spacing: 8) {
       NavigationLink {
-        RegisterView(scope: .all, categoryID: category.id, dateRange: monthRange)
+        RegisterView(scope: .all, categoryID: category.id, dateRange: monthRangeISO.from ... monthRangeISO.to)
       } label: {
       VStack(alignment: .leading, spacing: 9) {
         HStack(spacing: 8) {

@@ -38,6 +38,29 @@ final class IntentCatalogTests: XCTestCase {
     XCTAssertEqual(snapshot.openAccounts.map(\.id), model.openAccounts.map(\.id))
   }
 
+  func testPayeesSortedByNameFollowsPayeeChanges() {
+    var settings = APISettings()
+    settings.baseURLString = "https://howmuch.example.test"
+    settings.planID = "local-plan"
+    settings.authenticatedUserID = "user-1"
+    settings.sessionToken = "token"
+
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+    model.payees = [
+      Payee(id: "payee-banana", name: "banana", transferAccountId: nil, deleted: false),
+      Payee(id: "payee-apple", name: "Apple", transferAccountId: nil, deleted: false),
+    ]
+    XCTAssertEqual(model.payeesSortedByName.map(\.id), ["payee-apple", "payee-banana"])
+    XCTAssertEqual(model.payeesSortedByName.map(\.id), ["payee-apple", "payee-banana"], "a cached read must match")
+
+    model.payees.append(Payee(id: "payee-avocado", name: "avocado", transferAccountId: nil, deleted: false))
+    XCTAssertEqual(
+      model.payeesSortedByName.map(\.id),
+      ["payee-apple", "payee-avocado", "payee-banana"],
+      "changing payees must re-sort, not serve the cached order"
+    )
+  }
+
   func testPublishThenLoadMatchesOpenAccounts() {
     var settings = APISettings()
     settings.baseURLString = "https://howmuch.example.test"

@@ -152,6 +152,9 @@ struct TransactionFormView: View {
   @State private var isKeypadVisible: Bool
   @State private var errorMessage: String?
   @State private var isConfirmingDelete = false
+  /// Looked up when Delete is tapped, not in the alert's message builder, which
+  /// runs with every body pass (each keypad tap included).
+  @State private var deleteDetail: String?
   @State private var isConfirmingEdit = false
   @State private var isConfirmingSplitRemoval = false
   @State private var isAutoAdvancingToPayee = false
@@ -206,6 +209,7 @@ struct TransactionFormView: View {
 
             if isEditing && allowsDeletion {
               Button(role: .destructive) {
+                deleteDetail = deleteConfirmationDetail
                 isConfirmingDelete = true
               } label: {
                 Text("Delete Transaction")
@@ -305,10 +309,8 @@ struct TransactionFormView: View {
         isPresented: $isConfirmingDelete,
         confirm: .destructive("Delete Transaction"),
         message: {
-          // The message builder runs with every body pass, including each
-          // keypad tap, so only look the row up while the alert is showing.
-          if isConfirmingDelete, let deleteConfirmationDetail {
-            Text(deleteConfirmationDetail)
+          if let deleteDetail {
+            Text(deleteDetail)
           }
         }
       ) {

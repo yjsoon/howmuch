@@ -88,6 +88,20 @@ final class AppModel {
   /// This is separate from `transactions`, which is intentionally paged for
   /// the register and may not contain every transaction in that window.
   private(set) var accountUsageLast30Days: [String: Int] = [:]
+  /// The last counts a scan loaded, kept across `invalidateAccountUsage()` so
+  /// "Most used" groups hold their order while the next scan runs. Read only
+  /// alongside observed usage state, which changes whenever this does.
+  @ObservationIgnored private var lastLoadedAccountUsage: (planID: String, scope: String?, counts: [String: Int])?
+
+  private var lastLoadedAccountUsageForCurrentScope: [String: Int] {
+    guard let last = lastLoadedAccountUsage,
+          last.planID == settings.planID,
+          last.scope == activeViewPrefsScope
+    else {
+      return [:]
+    }
+    return last.counts
+  }
   private(set) var accountUsagePhase: LoadPhase = .idle
   /// Invalidates the Accounts view's usage task after a ledger or connection
   /// refresh, so a loaded 30-day ranking never survives changed source data.
@@ -770,14 +784,13 @@ final class AppModel {
       return source.sorted(by: accountNameOrder)
     case .mostUsedLast30Days:
       // Every ledger refresh drops the counts and rescans them. Until they are
-      // back, hold the order the last scan produced rather than flashing the
-      // group into name order and back.
-      if accountUsagePhase != .loaded, viewPrefs.accountOrderByGroup[groupID] != nil {
-        return manualOrderedAccounts(source, groupID: groupID)
-      }
+      // back, rank by the last counts this plan and scope loaded rather than
+      // flashing the group into name order and back. Never the manual drag
+      // order, which shares `accountOrderByGroup`.
+      let usage = accountUsagePhase == .loaded ? accountUsageLast30Days : lastLoadedAccountUsageForCurrentScope
       return source.sorted { first, second in
-        let firstUsage = accountUsageLast30Days[first.id, default: 0]
-        let secondUsage = accountUsageLast30Days[second.id, default: 0]
+        let firstUsage = usage[first.id, default: 0]
+        let secondUsage = usage[second.id, default: 0]
         if firstUsage != secondUsage {
           return firstUsage > secondUsage
         }
@@ -1020,8 +1033,9 @@ final class AppModel {
         return
       }
       accountUsageLast30Days = counts
-      // Loaded before the snapshot: `orderedAccounts` holds the saved order
-      // until then, and the snapshot must record the order the counts give.
+      lastLoadedAccountUsage = (planID: planID, scope: scope, counts: counts)
+      // Loaded before the snapshot: `orderedAccounts` ranks by the previous
+      // counts until then, and the snapshot must record the order these give.
       accountUsagePhase = .loaded
       snapshotMostUsedAccountOrders()
     } catch {
@@ -1155,18 +1169,20 @@ final class AppModel {
     payeesByID[id]
   }
 
-  @ObservationIgnored private var payeesSortedByNameCache: (source: [Payee], sorted: [Payee])?
+  @ObservationIgnored private var payeesSortedByNameCache: (source: [Payee], locale: String, sorted: [Payee])?
 
   /// `payees` in picker order, sorted once per change rather than on every
   /// picker render and keystroke. Reading `payees` keeps observation intact,
-  /// and an unchanged array compares equal by identity without a scan.
+  /// and an unchanged array compares equal by identity without a scan. The
+  /// comparison is locale-aware, so a language or region change re-sorts.
   var payeesSortedByName: [Payee] {
     let source = payees
-    if let cache = payeesSortedByNameCache, cache.source == source {
+    let locale = Locale.current.identifier
+    if let cache = payeesSortedByNameCache, cache.locale == locale, cache.source == source {
       return cache.sorted
     }
     let sorted = source.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-    payeesSortedByNameCache = (source: source, sorted: sorted)
+    payeesSortedByNameCache = (source: source, locale: locale, sorted: sorted)
     return sorted
   }
 
