@@ -131,10 +131,4 @@ extension Transaction {
   var approvalRow: RegisterApproval.Row {
     RegisterApproval.Row(id: id, approved: approved, deleted: deleted)
   }
-
-  func applyingApproval(session: RegisterApproval.Session) -> Transaction {
-    RegisterApproval.looksApproved(approvalRow, session: session)
-      ? (approved ? self : withApproved(true))
-      : self
-  }
 }

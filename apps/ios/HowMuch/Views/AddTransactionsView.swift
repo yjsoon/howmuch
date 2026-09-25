@@ -608,11 +608,21 @@ struct AddTransactionsView: View {
       return
     }
     errorMessage = nil
-    if session.isWaitingOnAttachmentOCR {
+    if isWaitingOnAttachments {
       waitForReadableAttachmentsThenSend()
       return
     }
     commitComposerTurn()
+  }
+
+  /// OCR still running on an attachment, or a photo in the current image batch
+  /// that is still loading or encoding (no bytes yet). Sending then would
+  /// freeze the turn without it. Bounded by the batch: ingestion always clears
+  /// `isTransferringImages` when it ends, so a stale placeholder cannot hold
+  /// the send forever.
+  private var isWaitingOnAttachments: Bool {
+    session.isWaitingOnAttachmentOCR
+      || (session.isTransferringImages && session.attachments.contains { $0.isReading && $0.data.isEmpty })
   }
 
   private func waitForReadableAttachmentsThenSend() {
@@ -620,7 +630,7 @@ struct AddTransactionsView: View {
     let turnScope = capturedTurnScope()
     Task { @MainActor in
       defer { isWaitingToSend = false }
-      while self.isCurrent(turnScope), self.session.isWaitingOnAttachmentOCR {
+      while self.isCurrent(turnScope), self.isWaitingOnAttachments {
         try? await Task.sleep(for: .milliseconds(50))
       }
       guard self.isCurrent(turnScope), self.session.canFreezeComposer else {

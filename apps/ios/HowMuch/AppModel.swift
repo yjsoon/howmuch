@@ -1357,7 +1357,7 @@ final class AppModel {
     }
   }
 
-  /// `applyingApproval(session:)` per row, with the session's union taken once.
+  /// `RegisterApproval.looksApproved` per row, with the session's union taken once.
   /// Rows the server already reports approved need no copy, so once they all
   /// do, reads return the array as is.
   private func overlayingApproval(on rows: [Transaction]) -> [Transaction] {
@@ -2285,6 +2285,8 @@ final class AppModel {
     // that replaces the rows bumps the generation first.
     let fillKey = "\(generation)|\(planID)|\(startDate)"
     if completedAccountHorizonFills[accountID] == fillKey {
+      // Reappearing still clears a stale error, as a fresh fill would.
+      olderTransactionsError = nil
       return
     }
     let replacedCountAtStart = ledgerRowsReplacedCount
