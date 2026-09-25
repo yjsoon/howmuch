@@ -183,7 +183,7 @@ struct RegisterView: View {
       if showingUnapprovedQueue, let approveAllTitle = model.approveAllTitle(for: transactions) {
         ToolbarItem(placement: .topBarTrailing) {
           Button(approveAllTitle) {
-            withAnimation(.snappy) {
+            withAnimation(Theme.Motion.standard) {
               model.approveEligible(from: transactions)
             }
           }
@@ -377,19 +377,19 @@ struct RegisterView: View {
   @ViewBuilder
   private var registerFilterMenuItems: some View {
     if scope != .unapproved, (unapprovedCount > 0 || unapprovedOnly) {
-      Toggle(isOn: $unapprovedOnly) {
+      Toggle(isOn: $unapprovedOnly.animation(Theme.Motion.standard)) {
         Label(reviewNewMenuTitle, systemImage: "tray")
       }
       .menuActionDismissBehavior(.disabled)
     }
     if unclearedCount > 0 || unclearedOnly {
-      Toggle(isOn: $unclearedOnly) {
+      Toggle(isOn: $unclearedOnly.animation(Theme.Motion.standard)) {
         Label(unclearedMenuTitle, systemImage: "circle")
       }
       .menuActionDismissBehavior(.disabled)
     }
     if uncategorisedCount > 0 || uncategorisedOnly {
-      Toggle(isOn: $uncategorisedOnly) {
+      Toggle(isOn: $uncategorisedOnly.animation(Theme.Motion.standard)) {
         Label(uncategorisedMenuTitle, systemImage: "tag.slash")
       }
       .menuActionDismissBehavior(.disabled)
@@ -420,8 +420,7 @@ struct RegisterView: View {
           Text(MoneyCodec.displayString(for: current, currencyFormat: model.currencyFormat))
             .font(.title2.weight(.bold))
             .monospacedDigit()
-            .contentTransition(.numericText(value: Double(current)))
-            .animation(.snappy, value: current)
+            .rollingNumber(current)
             .foregroundStyle(Theme.textPrimary)
             .accessibilityLabel(headlineAccessibilityLabel(current: current, working: working))
           if current != working {
@@ -473,7 +472,7 @@ struct RegisterView: View {
               .foregroundStyle(Theme.textPrimary)
             Spacer(minLength: 8)
             Button("Clear") {
-              withAnimation(.snappy) {
+              withAnimation(Theme.Motion.standard) {
                 clearRegisterFilters()
               }
             }
@@ -781,7 +780,7 @@ struct RegisterView: View {
   }
 
   private func approve(_ transaction: Transaction) {
-    withAnimation(.snappy) {
+    withAnimation(Theme.Motion.standard) {
       model.approveTransaction(transaction)
     }
   }
@@ -924,7 +923,7 @@ struct RegisterView: View {
     } else if !showingUnapprovedQueue, snapshot.scheduledDisclosureCount > 0 {
       Section {
         Button {
-          withAnimation(.snappy) {
+          withAnimation(Theme.Motion.standard) {
             toggleScheduledExpanded()
           }
         } label: {
@@ -1102,11 +1101,11 @@ struct RegisterView: View {
         .font(.caption)
         .foregroundStyle(.secondary)
       HStack {
-        summaryColumn("Money In", MoneyCodec.displayString(for: inflow, currencyFormat: model.currencyFormat), colour: Theme.inflow)
+        summaryColumn("Money In", amount: inflow, MoneyCodec.displayString(for: inflow, currencyFormat: model.currencyFormat), colour: Theme.inflow)
         Spacer()
-        summaryColumn("Money Out", MoneyCodec.displayString(for: outflow, currencyFormat: model.currencyFormat), colour: Theme.outflow)
+        summaryColumn("Money Out", amount: outflow, MoneyCodec.displayString(for: outflow, currencyFormat: model.currencyFormat), colour: Theme.outflow)
         Spacer()
-        summaryColumn("Net", MoneyCodec.signedDisplayString(for: net, currencyFormat: model.currencyFormat), colour: Theme.amountColour(net))
+        summaryColumn("Net", amount: net, MoneyCodec.signedDisplayString(for: net, currencyFormat: model.currencyFormat), colour: Theme.amountColour(net))
       }
     }
     .padding(.horizontal, 16)
@@ -1115,7 +1114,7 @@ struct RegisterView: View {
     .ynabCard()
   }
 
-  private func summaryColumn(_ label: String, _ value: String, colour: Color) -> some View {
+  private func summaryColumn(_ label: String, amount: Int, _ value: String, colour: Color) -> some View {
     VStack(spacing: 2) {
       Text(label)
         .font(.caption)
@@ -1124,6 +1123,7 @@ struct RegisterView: View {
         .font(.footnote.weight(.semibold))
         .monospacedDigit()
         .foregroundStyle(colour)
+        .rollingNumber(amount)
     }
   }
 
@@ -1951,26 +1951,24 @@ struct TransactionRow: View {
       .frame(width: 44, height: 44)
   }
 
-  @ViewBuilder
+  /// One Image across states, so approving or clearing morphs the symbol
+  /// in place instead of swapping views.
   private func statusGlyph(_ status: RegisterStatus) -> some View {
-    switch status {
+    let glyph: (name: String, font: Font, style: AnyShapeStyle) = switch status {
     case .new:
-      Image(systemName: "circle.fill")
-        .font(.title3)
-        .foregroundStyle(Theme.newStatus)
+      ("circle.fill", .title3, AnyShapeStyle(Theme.newStatus))
     case .uncleared:
-      Image(systemName: "checkmark.circle")
-        .font(.title3)
-        .foregroundStyle(.tertiary)
+      ("checkmark.circle", .title3, AnyShapeStyle(.tertiary))
     case .cleared:
-      Image(systemName: "checkmark.circle.fill")
-        .font(.title3)
-        .foregroundStyle(Theme.inflow)
+      ("checkmark.circle.fill", .title3, AnyShapeStyle(Theme.inflow))
     case .reconciled:
-      Image(systemName: "lock.fill")
-        .font(.caption)
-        .foregroundStyle(Theme.inflow)
+      ("lock.fill", .caption, AnyShapeStyle(Theme.inflow))
     }
+    return Image(systemName: glyph.name)
+      .font(glyph.font)
+      .foregroundStyle(glyph.style)
+      .contentTransition(.symbolEffect(.replace))
+      .animation(Theme.Motion.standard, value: glyph.name)
   }
 
   private func statusAccessibilityLabel(_ status: RegisterStatus) -> String {

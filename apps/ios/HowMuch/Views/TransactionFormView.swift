@@ -209,9 +209,12 @@ struct TransactionFormView: View {
                 isConfirmingDelete = true
               } label: {
                 Text("Delete Transaction")
+                  .foregroundStyle(Theme.cancellation)
                   .frame(maxWidth: .infinity)
                   .padding(.vertical, 13)
+                  .contentShape(Rectangle())
               }
+              .buttonStyle(.cardRow)
               .ynabCard()
             }
 
@@ -244,7 +247,7 @@ struct TransactionFormView: View {
               }
               let action = keypadPrimaryAction
               draft.amountMagnitudeMilli = keypad.commitValue()
-              withAnimation(.snappy) {
+              withAnimation(Theme.Motion.standard) {
                 isKeypadVisible = false
               }
               switch action {
@@ -330,7 +333,7 @@ struct TransactionFormView: View {
           Text("The split lines will be replaced with their total. Their payees, categories and memos will be removed.")
         }
       ) {
-        withAnimation(.snappy) {
+        withAnimation(Theme.Motion.standard) {
           draft.disableSplit()
         }
       }
@@ -414,7 +417,7 @@ struct TransactionFormView: View {
         guard !draft.isSplit else {
           return
         }
-        withAnimation(.snappy) {
+        withAnimation(Theme.Motion.standard) {
           isKeypadVisible = true
         }
       } label: {
@@ -424,6 +427,7 @@ struct TransactionFormView: View {
           .foregroundStyle(displayedSignedAmount < 0 ? Theme.outflow : Theme.textPrimary)
           .lineLimit(1)
           .minimumScaleFactor(0.5)
+          .rollingNumber(displayedSignedAmount)
       }
       .buttonStyle(.plain)
     }
@@ -431,10 +435,17 @@ struct TransactionFormView: View {
     .padding(.vertical, 16)
     .padding(.horizontal, 12)
     .background(
-      displayedSignedAmount > 0 ? Theme.lime : Color.clear,
-      in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+      showsInflowHeader ? Theme.lime : Color.clear,
+      in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
     )
+    .animation(Theme.Motion.standard, value: showsInflowHeader)
     .sensoryFeedback(.selection, trigger: draft.direction)
+  }
+
+  /// Lime sits behind any inflow, including a blank one, so the header
+  /// matches the lime Inflow toggle from the moment it is chosen.
+  private var showsInflowHeader: Bool {
+    displayedSignedAmount > 0 || (!draft.isSplit && draft.direction == .inflow)
   }
 
   /// Signed milliunits shown in the amount header.
@@ -472,7 +483,7 @@ struct TransactionFormView: View {
   private func directionSegment(_ direction: EntryDirection) -> some View {
     let isSelected = draft.direction == direction
     return Button {
-      withAnimation(.snappy) {
+      withAnimation(Theme.Motion.standard) {
         draft.direction = direction
       }
     } label: {
@@ -755,7 +766,7 @@ struct TransactionFormView: View {
 
   private func setSplit(_ shouldSplit: Bool) {
     if shouldSplit {
-      withAnimation(.snappy) {
+      withAnimation(Theme.Motion.standard) {
         draft.enableSplit()
       }
     } else if draft.isSplit {
@@ -1208,7 +1219,7 @@ struct CalculatorKeypad: View {
     .padding(10)
     // The panel is glass; the done key stays a solid fill because glass
     // cannot sample other glass.
-    .glassEffect(.regular, in: .rect(cornerRadius: 28))
+    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
     .padding(.horizontal, 8)
     .padding(.bottom, 4)
     .sensoryFeedback(.impact(weight: .light), trigger: digitTaps)
@@ -1251,10 +1262,13 @@ struct CalculatorKeypad: View {
       Text(primaryAction.title)
         .font(.headline)
         .foregroundStyle(.white)
+        .contentTransition(.interpolate)
         .frame(maxWidth: .infinity)
         .frame(height: 52)
-        .background(Theme.accent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Theme.accent, in: RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+        .animation(Theme.Motion.standard, value: primaryAction.title)
     }
+    .buttonStyle(.pressable)
     .frame(maxWidth: .infinity)
   }
 
@@ -1265,7 +1279,20 @@ struct CalculatorKeypad: View {
         .frame(height: 52)
         .contentShape(Rectangle())
     }
-    .buttonStyle(.plain)
+    .buttonStyle(KeypadKeyStyle())
+  }
+}
+
+/// Keys light up under the finger like a physical calculator, alongside the
+/// haptic tick.
+private struct KeypadKeyStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .background {
+        RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+          .fill(Theme.textPrimary.opacity(configuration.isPressed ? 0.1 : 0))
+      }
+      .animation(Theme.Motion.press, value: configuration.isPressed)
   }
 }
 

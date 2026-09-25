@@ -179,7 +179,7 @@ struct AccountIconPicker: View {
       .aspectRatio(1, contentMode: .fit)
       .background(
         isSelected ? Theme.accent.opacity(0.15) : Color.clear,
-        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        in: RoundedRectangle(cornerRadius: Theme.Radius.inset, style: .continuous)
       )
       .accessibilityLabel(parameters.emoji.localizedName)
       .accessibilityAddTraits(isSelected ? .isSelected : [])

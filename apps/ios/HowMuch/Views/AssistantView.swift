@@ -110,6 +110,7 @@ struct AssistantView: View {
         }
       }
       .padding(16)
+      .animation(Theme.Motion.standard, value: workspace.recents.map(\.id))
     }
   }
 
@@ -117,7 +118,9 @@ struct AssistantView: View {
     VStack(alignment: .leading, spacing: 8) {
       Text("Today")
         .font(.headline)
-      if isLoadingBrief {
+      // A refresh keeps the last brief on screen rather than flashing the
+      // loading line every time the Assistant reappears.
+      if isLoadingBrief, brief == nil {
         Text("Loading recorded spending…")
           .font(.subheadline)
           .foregroundStyle(.secondary)
@@ -156,6 +159,7 @@ struct AssistantView: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(16)
     .ynabCard()
+    .animation(Theme.Motion.arrive, value: isLoadingBrief)
   }
 
   private func recentRow(_ snapshot: CaptureSessionSnapshot) -> some View {
@@ -180,10 +184,14 @@ struct AssistantView: View {
       } label: {
         Image(systemName: "trash")
           .foregroundStyle(Theme.outflow)
+          .frame(width: 44, height: 44)
+          .contentShape(Rectangle())
       }
       .accessibilityLabel("Discard this conversation")
     }
-    .padding(12)
+    .padding(.leading, 16)
+    .padding(.trailing, 4)
+    .padding(.vertical, 8)
     .ynabCard()
   }
 

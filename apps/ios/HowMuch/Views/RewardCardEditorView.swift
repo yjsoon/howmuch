@@ -800,7 +800,9 @@ struct RewardCardEditorView: View {
           flagEditor($flag)
         }
         Button("Add flag") {
-          draft.addFlag()
+          withAnimation(Theme.Motion.standard) {
+            draft.addFlag()
+          }
         }
       } header: {
         Text("Flag subcategories")
@@ -813,7 +815,9 @@ struct RewardCardEditorView: View {
           tierEditor($tier)
         }
         Button("Add spending tier") {
-          draft.addTier()
+          withAnimation(Theme.Motion.standard) {
+            draft.addTier()
+          }
         }
       }
 
@@ -970,9 +974,16 @@ struct RewardCardEditorView: View {
         set: { flag.wrappedValue.excludeFromRewards = $0; flag.wrappedValue.touch() }
       ))
       Button("Remove", role: .destructive) {
-        draft.flags.removeAll { $0.id == flag.wrappedValue.id }
+        let id = flag.wrappedValue.id
+        withAnimation(Theme.Motion.standard) {
+          draft.flags.removeAll { $0.id == id }
+        }
       }
     }
+    // Several controls share this Form row. Borderless buttons take only
+    // their own taps; the default style would fire Remove from anywhere in
+    // the row.
+    .buttonStyle(.borderless)
   }
 
   @ViewBuilder
@@ -996,18 +1007,29 @@ struct RewardCardEditorView: View {
         TextField("Override maximum", text: $override.maximumSpend)
           .keyboardType(.decimalPad)
         Button("Remove override", role: .destructive) {
-          tier.wrappedValue.overrides.removeAll { $0.id == override.id }
+          let id = override.id
+          withAnimation(Theme.Motion.standard) {
+            tier.wrappedValue.overrides.removeAll { $0.id == id }
+          }
         }
       }
       Button("Add flag override") {
-        tier.wrappedValue.overrides.append(
-          RewardTierOverrideDraft(subcategoryId: draft.flags.first?.id ?? "")
-        )
+        withAnimation(Theme.Motion.standard) {
+          tier.wrappedValue.overrides.append(
+            RewardTierOverrideDraft(subcategoryId: draft.flags.first?.id ?? "")
+          )
+        }
       }
       Button("Remove tier", role: .destructive) {
-        draft.tiers.removeAll { $0.id == tier.wrappedValue.id }
+        let id = tier.wrappedValue.id
+        withAnimation(Theme.Motion.standard) {
+          draft.tiers.removeAll { $0.id == id }
+        }
       }
     }
+    // Remove override, Add flag override and Remove tier share one Form row;
+    // borderless keeps each tap on its own button.
+    .buttonStyle(.borderless)
   }
 
   @ViewBuilder

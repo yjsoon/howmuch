@@ -310,7 +310,7 @@ struct AddTransactionsView: View {
       }
       .onChange(of: jumpToMessage) { _, id in
         if let id {
-          withAnimation {
+          withAnimation(Theme.Motion.standard) {
             proxy.scrollTo(id, anchor: .top)
           }
           jumpToMessage = nil
@@ -326,11 +326,13 @@ struct AddTransactionsView: View {
           .font(.subheadline.weight(.semibold))
           .padding(.horizontal, 14)
           .padding(.vertical, 8)
-          .background(Theme.card, in: Capsule())
+          .glassEffect(.regular.interactive(), in: .capsule)
           .padding(.bottom, 8)
           .accessibilityLabel("Jump to latest response")
+          .transition(.move(edge: .bottom).combined(with: .opacity))
         }
       }
+      .animation(Theme.Motion.standard, value: showJumpToLatest && !isNearBottom)
     }
   }
 
@@ -498,7 +500,7 @@ struct AddTransactionsView: View {
   }
 
   private func revealLatest(_ proxy: ScrollViewProxy) {
-    withAnimation {
+    withAnimation(Theme.Motion.standard) {
       proxy.scrollTo("conversation-end", anchor: .bottom)
     }
   }
