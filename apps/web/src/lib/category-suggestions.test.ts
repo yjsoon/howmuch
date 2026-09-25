@@ -14,6 +14,7 @@ const suggest = (key: string, categoryId: string | null, confidence: number): Ca
   suggestion: categoryId ? { category_id: categoryId, category_name: categoryId, group_name: "G", probability: confidence } : null,
   confidence,
   alternatives: [],
+  evidence: { same_payee: 1, similar_names: 0 },
 });
 
 test("only asks about categorisable rows with something to read", () => {
@@ -45,4 +46,10 @@ test("ticks confident changes only and applies ticked edits", () => {
     { id: "sure", category_id: "transport" },
     { id: "unsure", category_id: "food" },
   ]);
+});
+
+test("a suggestion with no history needs more confidence to be ticked", () => {
+  const guess = { ...suggest("new", "food", 0.7), evidence: { same_payee: 0, similar_names: 0 } };
+  const sure = { ...suggest("sure", "food", 0.9), evidence: { same_payee: 0, similar_names: 0 } };
+  expect(reviewRows([txn("new"), txn("sure")], [guess, sure]).map((row) => row.include)).toEqual([false, true]);
 });

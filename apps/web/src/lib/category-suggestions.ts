@@ -10,6 +10,8 @@ export const MAX_CATEGORY_SUGGESTIONS = 100;
  * point to tune against real corrections, not a validated threshold.
  */
 export const SUGGESTION_PRESELECT_CONFIDENCE = 0.6;
+/** Matches the server's rule for creates: a guess from the name alone needs to be surer. */
+export const SUGGESTION_PRESELECT_CONFIDENCE_WITHOUT_EVIDENCE = 0.85;
 
 export interface CategorySuggestionOption {
   category_id: string;
@@ -23,6 +25,8 @@ export interface CategorySuggestion {
   suggestion: CategorySuggestionOption | null;
   confidence: number;
   alternatives: CategorySuggestionOption[];
+  /** Past transactions Jev was shown: the exact payee's, and similarly named ones. */
+  evidence: { same_payee: number; similar_names: number };
 }
 
 export interface CategorySuggestionRequestItem {
@@ -71,10 +75,14 @@ export function reviewRows(rows: readonly Transaction[], suggestions: readonly C
     const suggestion = byKey.get(transaction.id) ?? null;
     const categoryId = suggestion?.suggestion?.category_id ?? transaction.category_id ?? "";
     const include = Boolean(suggestion?.suggestion)
-      && suggestion!.confidence >= SUGGESTION_PRESELECT_CONFIDENCE
+      && suggestion!.confidence >= (hasEvidence(suggestion!) ? SUGGESTION_PRESELECT_CONFIDENCE : SUGGESTION_PRESELECT_CONFIDENCE_WITHOUT_EVIDENCE)
       && categoryId !== (transaction.category_id ?? "");
     return { transaction, suggestion, categoryId, include };
   });
+}
+
+export function hasEvidence(suggestion: CategorySuggestion): boolean {
+  return (suggestion.evidence?.same_payee ?? 0) > 0 || (suggestion.evidence?.similar_names ?? 0) > 0;
 }
 
 export function appliedReviewItems(rows: readonly SuggestionReviewRow[]): Array<{ id: string; category_id: string }> {

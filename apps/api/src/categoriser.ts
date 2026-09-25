@@ -12,6 +12,7 @@ import {
 import type { LedgerStore } from "./storage";
 import { NotFoundError, ValidationError } from "./repository";
 import type { TransactionInput } from "./types";
+import { nameSimilarity, payeeSearchStem, payeeTokens } from "./payee-names";
 
 /**
  * Category suggestions from TypeSafe's Jev model.
@@ -26,14 +27,10 @@ import type { TransactionInput } from "./types";
 export const MAX_CATEGORISE_BATCH = 25;
 const PAYEE_HISTORY_LIMIT = 50;
 const PAYEE_HISTORY_CATEGORIES = 5;
-const SIMILAR_SEARCH_LIMIT = 60;
+const SIMILAR_SEARCH_LIMIT = 150;
 const SIMILAR_EXAMPLES = 8;
-/** Words that say nothing about what a merchant sells, so they make poor search terms. */
-const GENERIC_PAYEE_WORDS = new Set([
-  "the", "and", "pte", "ltd", "limited", "inc", "llc", "company", "group", "holdings", "singapore", "sgp",
-  "www", "com", "http", "https", "payment", "payments", "pay", "paynow", "card", "visa", "mastercard",
-  "purchase", "pos", "nets", "transfer", "online", "debit", "credit", "ref",
-]);
+/** Past names scoring below this are a different merchant sharing a word. */
+const MIN_NAME_SIMILARITY = 0.5;
 const ALTERNATIVES = 3;
 const NO_MATCH = "None of these";
 
@@ -53,6 +50,12 @@ const CREATE_BUDGET: CallBudget = { timeout: 5_000, maxRetries: 0 };
  * A starting point to tune against corrections, not a validated threshold.
  */
 export const AUTO_CATEGORISE_MIN_CONFIDENCE = 0.6;
+/**
+ * With no history for the payee and no similarly named past transactions, Jev
+ * is guessing from the name alone, which goes badly for coded bank names. Such
+ * a create needs a much surer answer before it is categorised unreviewed.
+ */
+export const AUTO_CATEGORISE_MIN_CONFIDENCE_WITHOUT_EVIDENCE = 0.85;
 
 export type CategoriseItem = {
   key: string;
@@ -73,6 +76,19 @@ export type CategorySuggestion = {
   /** Concentration of Jev's distribution, from zero to one. Not a correctness guarantee. */
   confidence: number;
   alternatives: Array<CategoryOption & { probability: number }>;
+  /** Past transactions Jev was shown: the exact payee's, and similarly named ones. */
+  evidence: { same_payee: number; similar_names: number };
+};
+
+type SimilarExample = {
+  payee: string | null;
+  memo: string | null;
+  direction: string;
+  amount: string;
+  date: string | null;
+  category: string;
+  name_similarity: number;
+  times: number;
 };
 
 export type CategoriseResult = {
@@ -170,6 +186,7 @@ export async function suggestCategories(
   const state = {
     transactions: items.map((item) => ({
       payee: item.payee_name,
+      payee_cleaned: payeeTokens(item.payee_name).join(" ") || null,
       memo: item.memo,
       direction: item.amount < 0 ? "outflow (money spent)" : "inflow (money received)",
       amount: (Math.abs(item.amount) / 1000).toFixed(2),
@@ -184,11 +201,15 @@ export async function suggestCategories(
     const path = `transactions[${index}]`;
     questions[`t${index}`] = choice(
       `Which budget category does the transaction \`${path}\` belong to? Use its payee, memo, direction, amount and account. `
+        + `Bank payee names often carry reference codes, card numbers, branches and payment words (NETS, PayNow, SQ *, PAYPAL *); `
+        + `\`${path}.payee_cleaned\` is the merchant name with those removed, so read the merchant from it. `
         + `\`${path}.payee_history\` counts the categories this exact payee was given before; treat it as strong evidence, `
         + `but not binding when the memo or amount points elsewhere. \`${path}.similar_past_transactions\` are earlier `
-        + `transactions whose payee or memo shares a word with this payee, with the category each was given. Some may be `
-        + `unrelated merchants that happen to share the word: follow the ones that are clearly the same merchant or the same `
-        + `kind of purchase. Inflows are usually income unless they look like a refund.`,
+        + `transactions with similar merchant names, each with its category, how many such transactions there were, and a `
+        + `name_similarity from 0 to 1 (1 means every merchant word matched). A high similarity usually means the same merchant `
+        + `under a different code; a lower one may be a different business sharing a word, so weigh it accordingly. `
+        + `If the merchant is unrecognisable and there is no history, prefer "${NO_MATCH}" to a guess. `
+        + `Inflows are usually income unless they look like a refund.`,
       criteria,
     );
   });
@@ -215,11 +236,16 @@ export async function suggestCategories(
       .sort((a, b) => b[1] - a[1])
       .map(([label, probability]) => ({ ...byLabel.get(label)!, probability }));
     const chosen = byLabel.get(answer.choice);
+    const history = item.payee_id ? histories.get(item.payee_id) ?? [] : [];
     return {
       key: item.key,
       suggestion: chosen ? { ...chosen, probability: answer.probabilities[answer.choice] ?? 0 } : null,
       confidence: answer.confidence,
       alternatives: ranked.filter((option) => option.category_id !== chosen?.category_id).slice(0, ALTERNATIVES),
+      evidence: {
+        same_payee: history.reduce((sum, entry) => sum + entry.times, 0),
+        similar_names: (similar.get(item.key) ?? []).reduce((sum, example) => sum + example.times, 0),
+      },
     };
   });
   return { model: response.model, suggestions, usage: response.usage };
@@ -295,7 +321,9 @@ export async function autoCategorise<T extends TransactionInput>(
     try {
       const result = await suggestCategories(repo, planId, chunk.map(({ item }) => item), config, CREATE_BUDGET);
       result.suggestions.forEach((suggestion, index) => {
-        if (suggestion.suggestion && suggestion.confidence >= AUTO_CATEGORISE_MIN_CONFIDENCE) {
+        const hasEvidence = suggestion.evidence.same_payee > 0 || suggestion.evidence.similar_names > 0;
+        const threshold = hasEvidence ? AUTO_CATEGORISE_MIN_CONFIDENCE : AUTO_CATEGORISE_MIN_CONFIDENCE_WITHOUT_EVIDENCE;
+        if (suggestion.suggestion && suggestion.confidence >= threshold) {
           chunk[index].input.category_id = suggestion.suggestion.category_id;
           applied += 1;
         }
@@ -345,58 +373,63 @@ async function payeeHistories(
 }
 
 /**
- * The most distinctive word of a payee name, for finding its past transactions
- * under other spellings ("GRAB*RIDES 8812" and "Grab" share "grab").
- */
-export function payeeSearchTerm(name: string | null): string | null {
-  if (!name) return null;
-  const words = name.toLowerCase().replace(/[^a-z]+/g, " ").split(" ");
-  return words.find((word) => word.length >= 3 && !GENERIC_PAYEE_WORDS.has(word)) ?? null;
-}
-
-/**
- * Categorised past transactions whose payee or memo contains the item's payee
- * search term, newest first. Code retrieves the candidates; Jev judges which
- * of them are relevant.
+ * Categorised past transactions with similar merchant names, most similar
+ * first. A short stem of the merchant word finds candidates in SQL; code then
+ * scores each by cleaned-name similarity and drops different merchants that
+ * merely share letters. Rows differing only in reference codes collapse into
+ * one example with a count, so eight slots show eight different things.
  */
 async function similarTransactions(
   repo: LedgerStore,
   planId: string,
   items: CategoriseItem[],
   labelFor: Map<string, string>,
-): Promise<Map<string, Array<Record<string, string | null>>>> {
+): Promise<Map<string, SimilarExample[]>> {
   const excluded = new Set(items.map((item) => item.key));
-  const terms = [...new Set(items.map((item) => payeeSearchTerm(item.payee_name)).filter((term): term is string => Boolean(term)))];
-  const byTerm = new Map(await Promise.all(terms.map(async (term) => {
-    const page = await repo.listTransactionsPage(planId, { q: term, limit: SIMILAR_SEARCH_LIMIT });
-    const seen = new Set<string>();
-    const examples: Array<Record<string, string | null>> = [];
-    for (const transaction of page.transactions) {
-      if (examples.length >= SIMILAR_EXAMPLES) break;
-      const category = transaction.category_id ? labelFor.get(transaction.category_id) : undefined;
-      if (!category || excluded.has(transaction.id) || transaction.transfer_account_id || transaction.subtransactions?.length) continue;
-      const payee = transaction.payee_name ?? null;
-      const memo = transaction.memo ?? null;
-      if (!`${payee ?? ""} ${memo ?? ""}`.toLowerCase().includes(term)) continue;
-      // Repeats of one purchase teach nothing new; keep the variety.
-      const signature = `${payee}|${memo}|${category}`.toLowerCase();
-      if (seen.has(signature)) continue;
-      seen.add(signature);
-      examples.push({
-        payee,
-        memo,
+  const tokensFor = new Map(items.map((item) => [item.key, payeeTokens(item.payee_name)]));
+  const stems = [...new Set([...tokensFor.values()].map(payeeSearchStem).filter((stem): stem is string => Boolean(stem)))];
+  const pools = new Map(await Promise.all(stems.map(async (stem) => {
+    const page = await repo.listTransactionsPage(planId, { q: stem, limit: SIMILAR_SEARCH_LIMIT });
+    const usable = page.transactions.filter((transaction: any) => !excluded.has(transaction.id)
+      && !transaction.transfer_account_id
+      && !transaction.subtransactions?.length
+      && transaction.category_id && labelFor.has(transaction.category_id));
+    return [stem, usable] as const;
+  })));
+
+  const result = new Map<string, SimilarExample[]>();
+  for (const item of items) {
+    const tokens = tokensFor.get(item.key)!;
+    const stem = payeeSearchStem(tokens);
+    if (!stem) continue;
+    const grouped = new Map<string, SimilarExample>();
+    for (const transaction of pools.get(stem) ?? []) {
+      const candidateTokens = payeeTokens(transaction.payee_name);
+      const similarity = nameSimilarity(tokens, candidateTokens);
+      if (similarity < MIN_NAME_SIMILARITY) continue;
+      const category = labelFor.get(transaction.category_id)!;
+      const key = `${candidateTokens.join(" ")}|${category}`;
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.times += 1;
+        continue;
+      }
+      // Pools are newest first, so the kept example is the most recent of its group.
+      grouped.set(key, {
+        payee: transaction.payee_name ?? null,
+        memo: transaction.memo ?? null,
         direction: transaction.amount < 0 ? "outflow" : "inflow",
         amount: (Math.abs(transaction.amount) / 1000).toFixed(2),
         date: transaction.date ?? null,
         category,
+        name_similarity: Math.round(similarity * 100) / 100,
+        times: 1,
       });
     }
-    return [term, examples] as const;
-  })));
-  const result = new Map<string, Array<Record<string, string | null>>>();
-  for (const item of items) {
-    const term = payeeSearchTerm(item.payee_name);
-    if (term) result.set(item.key, byTerm.get(term) ?? []);
+    const examples = [...grouped.values()]
+      .sort((a, b) => b.name_similarity - a.name_similarity || b.times - a.times)
+      .slice(0, SIMILAR_EXAMPLES);
+    result.set(item.key, examples);
   }
   return result;
 }

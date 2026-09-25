@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { applyMigrations } from "./db";
 import { createHandler } from "./http";
 import { LedgerRepository } from "./repository";
-import { categoryOptions, payeeSearchTerm } from "./categoriser";
+import { categoryOptions } from "./categoriser";
 
 const config = { dbPath: ":memory:", port: 0, apiToken: "test-token", defaultPlanId: "test-plan", transitionReadOnly: false };
 
@@ -56,6 +56,7 @@ test("offers visible plan categories and maps Jev's choice back to ids", async (
       suggestion: { category_id: "transport", category_name: "Transport", group_name: "Living", probability: 0.85 },
       confidence: 0.8,
       alternatives: [{ category_id: "food", category_name: "Food", group_name: "Living", probability: 0.1 }],
+      evidence: { same_payee: 3, similar_names: 3 },
     }]);
 
     expect(sent).toHaveLength(1);
@@ -125,23 +126,18 @@ test("finds past transactions under other spellings of the payee", async () => {
   try {
     const response = await post(handler, { transactions: [{ key: "pending", payee_name: "GRAB*RIDES SG 1234", amount: -4_000 }] });
     expect(response.status).toBe(200);
-    const similar = sent[0].body.state.transactions[0].similar_past_transactions;
-    // Newest first, one row per distinct payee/memo/category, without the row being classified.
-    expect(similar.map((row: any) => [row.payee, row.memo, row.category])).toEqual([
-      ["GRABFOOD*ORDER 8812", "dinner", "Living: Food"],
-      ["Grab", null, "Living: Food"],
-      ["Grab", null, "Living: Transport"],
+    const sentItem = sent[0].body.state.transactions[0];
+    expect(sentItem.payee_cleaned).toBe("grab rides");
+    // Grouped by cleaned name and category with counts, without the row being classified.
+    expect(sentItem.similar_past_transactions.map((row: any) => [row.payee, row.category, row.times, row.name_similarity])).toEqual([
+      ["GRABFOOD*ORDER 8812", "Living: Food", 2, 0.67],
+      ["Grab", "Living: Transport", 2, 0.67],
+      ["Grab", "Living: Food", 1, 0.67],
     ]);
     expect(sent[0].body.state.transactions[0].payee_history).toEqual([]);
   } finally { db.close(); }
 });
 
-test("picks a distinctive payee word to search by", () => {
-  expect(payeeSearchTerm("GRAB*RIDES SG 1234")).toBe("grab");
-  expect(payeeSearchTerm("The Coffee Bean Pte Ltd")).toBe("coffee");
-  expect(payeeSearchTerm("SP Group")).toBeNull();
-  expect(payeeSearchTerm(null)).toBeNull();
-});
 
 function scriptedJev(sent: any[], confidence: number, choice = "Living: Transport") {
   return async (_url: string, init?: RequestInit) => {
@@ -237,5 +233,30 @@ test("transfers are skipped and a retried create keeps the category from its fir
     expect(retry.status).toBe(201);
     expect((await retry.json()).data.transaction.category_id).toBe("transport");
     expect(sent).toHaveLength(1);
+  } finally { db.close(); }
+});
+
+test("coded names of one merchant count as evidence; an unrecognisable name needs a surer answer", async () => {
+  const db = await seeded();
+  const repo = new LedgerRepository(db, "test-plan");
+  for (const [id, code] of [["c1", "A-5X7K9"], ["c2", "B-8Q2M1"], ["c3", "C-1Z9P4"]]) {
+    await repo.upsertPayee("test-plan", { id: `payee-${id}`, name: `GRAB*${code} SINGAPORE SG` });
+    await repo.createTransaction("test-plan", { id, account_id: "card", date: "2026-09-10", amount: -9_000, payee_id: `payee-${id}`, category_id: "transport" });
+  }
+  const sent: any[] = [];
+  const handler = createHandler({ db, config: { ...config, typesafeApiKey: "ts-key" }, typesafeFetch: scriptedJev(sent, 0.7) });
+  try {
+    const coded = await (await createOne(handler, { payee_name: "GRAB*D-7T3W2 SINGAPORE SG" })).json();
+    expect(coded.data.transaction.category_id).toBe("transport");
+    const examples = sent[0].state.transactions[0].similar_past_transactions;
+    // Three differently coded payees, one Food Grab row, collapse to two examples.
+    expect(examples.map((row: any) => [row.category, row.times, row.name_similarity])).toEqual([
+      ["Living: Transport", 5, 1],
+      ["Living: Food", 1, 1],
+    ]);
+
+    const unknown = await (await createOne(handler, { payee_name: "QXZ*8812 MERCHANT 00" })).json();
+    expect(unknown.data.transaction.category_id).toBeNull();
+    expect(sent[1].state.transactions[0].similar_past_transactions).toEqual([]);
   } finally { db.close(); }
 });

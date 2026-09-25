@@ -740,11 +740,16 @@ Jev's distribution was, not whether the answer is correct.
 
 Jev chooses only among the plan's live, visible categories (plus inflow
 categories; credit card payment categories are excluded), so payee or memo text
-cannot make it return anything else. As evidence, each item carries the category
-counts from that payee's last 50 transactions and up to eight distinct categorised
-past transactions whose payee or memo contains the payee's most distinctive word
-(so "GRAB*RIDES 1234" finds earlier "Grab" rows). Jev judges which examples are
-relevant. The request sends payee names, memos, amounts, dates, account names,
+cannot make it return anything else. Bank payee names are cleaned before
+matching: reference codes, card numbers, anything containing a digit, payment
+words (NETS, PayNow, FAST, POS), processor prefixes (`SQ *`, `TST*`, `PAYPAL *`),
+company suffixes and common place names are dropped, so "GRAB*A-5X7K9 SINGAPORE
+SG" reads as "grab". Jev receives that cleaned name, the category counts from the
+exact payee's last 50 transactions, and up to eight categorised past examples with
+similar cleaned names (the first merchant word must match). Examples that differ
+only in codes are grouped with a count and a `name_similarity` score.
+Each suggestion reports `evidence: { same_payee, similar_names }`, the number of
+past transactions behind it. The request sends payee names, memos, amounts, dates, account names,
 category names and those past examples to TypeSafe. Errors: `503 categoriser_not_configured` without a key,
 `502 categoriser_unavailable` when TypeSafe fails or rejects the key,
 `429 categoriser_rate_limited`.
@@ -753,8 +758,9 @@ category names and those past examples to TypeSafe. Errors: `503 categoriser_not
 `POST /v1/plans/{plan_id}/transactions` (single and batch) and
 `POST /api/mobile/quick-entry` ask Jev for a category for each new transaction
 that names a payee (`payee_name` or `payee_id`) but no `category_id`. Jev's pick is
-stored only when its confidence is at least 0.6 and it is not "none of these";
-otherwise the transaction is created uncategorised. Transfers, splits and rows with
+stored only when it is not "none of these" and its confidence is at least 0.6,
+or at least 0.85 when there is no past evidence (no history for the payee and no
+similarly named transactions); otherwise the transaction is created uncategorised. Transfers, splits and rows with
 an explicit category are never changed. The step is best effort: it has a 5-second
 budget with no retries, and a slow or failing TypeSafe never fails the create.
 A create that repeats an existing transaction id (a retry) keeps that row's stored

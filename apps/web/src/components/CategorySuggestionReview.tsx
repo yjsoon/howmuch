@@ -1,6 +1,6 @@
 import { CategorySelect } from "./CategorySelect";
 import { splitCategoryGroups } from "../lib/categories";
-import { appliedReviewItems, type SuggestionReviewRow } from "../lib/category-suggestions";
+import { appliedReviewItems, hasEvidence, type SuggestionReviewRow } from "../lib/category-suggestions";
 import { formatMoney } from "../lib/money";
 
 export function CategorySuggestionReview({
@@ -72,7 +72,7 @@ export function CategorySuggestionReview({
                     />
                   </td>
                   <td className="num muted">
-                    {suggestion ? `${Math.round(suggestion.confidence * 100)}%` : "—"}
+                    {suggestion ? `${Math.round(suggestion.confidence * 100)}%${hasEvidence(suggestion) ? "" : " · no history"}` : "—"}
                   </td>
                 </tr>
               );
