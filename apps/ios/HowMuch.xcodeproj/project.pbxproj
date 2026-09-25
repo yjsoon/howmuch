@@ -103,6 +103,11 @@
 		A30000000000000000000003 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000002 /* ShareViewController.swift */; };
 		A30000000000000000000006 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
 		A3000000000000000000000B /* HowMuchShare.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* HowMuchShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B10000000000000000000011 /* LocalEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000010 /* LocalEngine.swift */; };
+		B10000000000000000000013 /* LocalDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* LocalDatabase.swift */; };
+		B10000000000000000000015 /* howmuch-engine.js in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* howmuch-engine.js */; };
+		B10000000000000000000017 /* migrations in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* migrations */; };
+		B1000000000000000000001D /* LocalEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001C /* LocalEngineTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -205,6 +210,11 @@
 		A50000000000000000000030 /* RewardRowProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardRowProjection.swift; sourceTree = "<group>"; };
 		A1000000000000000000001A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000000000000000000001B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B10000000000000000000010 /* LocalEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalEngine.swift; sourceTree = "<group>"; };
+		B10000000000000000000012 /* LocalDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDatabase.swift; sourceTree = "<group>"; };
+		B10000000000000000000014 /* howmuch-engine.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = howmuch-engine.js; sourceTree = "<group>"; };
+		B10000000000000000000016 /* migrations */ = {isa = PBXFileReference; lastKnownFileType = folder; path = migrations; sourceTree = "<group>"; };
+		B1000000000000000000001C /* LocalEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalEngineTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXContainerItemProxy section */
@@ -282,6 +292,7 @@
 				A1000000000000000000001A /* Assets.xcassets */,
 				A1000000000000000000001B /* Info.plist */,
 				A20000000000000000000014 /* Capture */,
+				B1000000000000000000000A /* Engine */,
 				A20000000000000000000032 /* Intents */,
 				A10000000000000000000005 /* Models */,
 				A10000000000000000000006 /* Services */,
@@ -435,6 +446,7 @@
 				A200000000000000000000F0 /* ReferenceSnapshotTests.swift */,
 				A200000000000000000000F2 /* SplitMirrorDeleteTests.swift */,
 				A200000000000000000000F4 /* AccountGroupOrderTests.swift */,
+				B1000000000000000000001C /* LocalEngineTests.swift */,
 			);
 			path = HowMuchTests;
 			sourceTree = "<group>";
@@ -447,6 +459,17 @@
 				A30000000000000000000005 /* HowMuchShare.entitlements */,
 			);
 			path = HowMuchShare;
+			sourceTree = "<group>";
+		};
+		B1000000000000000000000A /* Engine */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000010 /* LocalEngine.swift */,
+				B10000000000000000000012 /* LocalDatabase.swift */,
+				B10000000000000000000014 /* howmuch-engine.js */,
+				B10000000000000000000016 /* migrations */,
+			);
+			path = Engine;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -560,6 +583,8 @@
 			files = (
 				A1000000000000000000002A /* Assets.xcassets in Resources */,
 				A60000000000000000000017 /* AIModels.json in Resources */,
+				B10000000000000000000015 /* howmuch-engine.js in Resources */,
+				B10000000000000000000017 /* migrations in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -610,6 +635,8 @@
 				A10000000000000000000069 /* ScheduledTransactionEditorView.swift in Sources */,
 				A10000000000000000000028 /* SettingsView.swift in Sources */,
 				A10000000000000000000020 /* HowMuchApp.swift in Sources */,
+				B10000000000000000000011 /* LocalEngine.swift in Sources */,
+				B10000000000000000000013 /* LocalDatabase.swift in Sources */,
 				A20000000000000000000011 /* CaptureRequest.swift in Sources */,
 				A40000000000000000000011 /* CaptureOrigin.swift in Sources */,
 				A40000000000000000000013 /* CaptureSession.swift in Sources */,
@@ -674,6 +701,7 @@
 				A200000000000000000000F1 /* ReferenceSnapshotTests.swift in Sources */,
 				A200000000000000000000F3 /* SplitMirrorDeleteTests.swift in Sources */,
 				A200000000000000000000F5 /* AccountGroupOrderTests.swift in Sources */,
+				B1000000000000000000001D /* LocalEngineTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
