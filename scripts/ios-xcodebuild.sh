@@ -44,6 +44,15 @@ Environment:
   HOWMUCH_XCODE_JOBS                  default 2 (tunable, not a universal optimum)
   HOWMUCH_XCODE_HEARTBEAT_SECS        default 30
   HOWMUCH_SHUTDOWN_OTHER_SIMULATORS=1 shut down booted sims that are not the pin
+  HOWMUCH_SIM_SIGNING                 adhoc (default) or unsigned; see below
+
+Simulator signing:
+  Simulator builds are signed ad hoc ("Sign to Run Locally", identity "-")
+  so the test host carries Xcode's simulated entitlements. Without them every
+  Keychain call fails with errSecMissingEntitlement (-34018). Ad hoc signing
+  uses no certificate, provisioning profile, or network, and the product
+  cannot run on a device. HOWMUCH_SIM_SIGNING=unsigned restores
+  CODE_SIGNING_ALLOWED=NO; the real Keychain test is then expected to fail.
 
 Examples:
   scripts/ios-xcodebuild.sh build
@@ -224,6 +233,7 @@ maybe_shutdown_other_simulators() {
 warn_host() {
   local others
   echo "runner: jobs=$JOBS COMPILER_INDEX_STORE_ENABLE=NO destination=$DEST_SPEC"
+  echo "runner: simulator signing=${HOWMUCH_SIM_SIGNING:-adhoc}"
   echo "runner: derivedData=$SIM_DERIVED"
   echo "runner: $(pressure_line)"
   others="$(booted_simulator_lines)"
@@ -244,9 +254,32 @@ warn_host() {
   fi
 }
 
+signing_settings() {
+  case "${HOWMUCH_SIM_SIGNING:-adhoc}" in
+    adhoc)
+      SIGNING_SETTINGS=(
+        CODE_SIGNING_ALLOWED=YES
+        CODE_SIGN_IDENTITY=-
+        CODE_SIGNING_REQUIRED=NO
+        CODE_SIGN_STYLE=Manual
+        PROVISIONING_PROFILE=
+        PROVISIONING_PROFILE_SPECIFIER=
+      )
+      ;;
+    unsigned)
+      SIGNING_SETTINGS=(CODE_SIGNING_ALLOWED=NO)
+      ;;
+    *)
+      echo "error: HOWMUCH_SIM_SIGNING must be adhoc or unsigned" >&2
+      exit 2
+      ;;
+  esac
+}
+
 common_settings() {
+  signing_settings
   XCODE_SETTINGS=(
-    CODE_SIGNING_ALLOWED=NO
+    "${SIGNING_SETTINGS[@]}"
     COMPILER_INDEX_STORE_ENABLE=NO
     ONLY_ACTIVE_ARCH=YES
     ARCHS=arm64
