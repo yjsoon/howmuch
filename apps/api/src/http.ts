@@ -35,7 +35,7 @@ import { randomBytes } from "node:crypto";
 import { ScheduledTransactionValidationError } from "./scheduled-transactions";
 import { ACCOUNT_KINDS, parseAccountKind, type AccountUpdatePatch } from "./account-kind";
 import { handleRewardTool } from "./reward-tools";
-import { CategoriserUnavailableError, parseCategoriseItems, suggestCategories, type CategoriserConfig } from "./categoriser";
+import { autoCategorise, CategoriserUnavailableError, parseCategoriseItems, suggestCategories, type CategoriserConfig } from "./categoriser";
 import type { Fetch } from "@typesafe-ai/sdk";
 
 type HandlerOptions = {
@@ -87,16 +87,18 @@ export function createHandler(options: HandlerOptions): (request: Request) => Pr
         );
       }
 
+      const categoriser: CategoriserConfig = {
+        apiKey: config.typesafeApiKey,
+        model: config.typesafeModel,
+        fetch: options.typesafeFetch,
+      };
+
       if (segments[0] === "v1") {
-        return await handleV1(request, url, segments, repo, principal, config.defaultPlanId, config.transitionReadOnly);
+        return await handleV1(request, url, segments, repo, principal, config.defaultPlanId, config.transitionReadOnly, categoriser);
       }
 
       if (segments[0] === "api") {
-        return await handleNative(request, url, segments, repo, reports, principal, config.defaultPlanId, {
-          apiKey: config.typesafeApiKey,
-          model: config.typesafeModel,
-          fetch: options.typesafeFetch,
-        });
+        return await handleNative(request, url, segments, repo, reports, principal, config.defaultPlanId, categoriser);
       }
 
       return apiError(404, "not_found", "Route not found");
@@ -163,6 +165,7 @@ async function handleV1(
   principal: Principal,
   defaultPlanId: string,
   transitionReadOnly: boolean,
+  categoriser: CategoriserConfig,
 ): Promise<Response> {
   const method = request.method.toUpperCase();
 
@@ -453,7 +456,9 @@ async function handleV1(
     if (segments.length === 4 && method === "POST") {
       const body = await readJson(request);
       if (collectionPostIntent(body) === "many") {
-        const result = await repo.createTransactions(planId, parseTransactionCreates(body.transactions));
+        const inputs = parseTransactionCreates(body.transactions);
+        await autoCategorise(repo, planId, inputs, categoriser);
+        const result = await repo.createTransactions(planId, inputs);
         return json({ data: result }, 201);
       }
       const input = body.transaction;
@@ -475,6 +480,7 @@ async function handleV1(
       }
       try {
         await stampTransactionFlagName(repo, planId, input.account_id, input);
+        await autoCategorise(repo, planId, [input], categoriser);
         const created = await repo.createTransaction(planId, input);
         return json({ data: { transaction: created, transaction_ids: [created.id], server_knowledge: await repo.getServerKnowledge(planId) } }, 201);
       } catch (error) {
@@ -723,6 +729,7 @@ async function handleNative(
       subtransactions,
     };
     await stampTransactionFlagName(repo, targetPlanId, input.account_id, input);
+    await autoCategorise(repo, targetPlanId, [input], categoriser);
     const transaction = await repo.createTransaction(targetPlanId, input);
     return json({ data: { transaction, server_knowledge: await repo.getServerKnowledge(targetPlanId) } }, 201);
   }

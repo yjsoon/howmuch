@@ -10,7 +10,8 @@ import {
   type Fetch,
 } from "@typesafe-ai/sdk";
 import type { LedgerStore } from "./storage";
-import { ValidationError } from "./repository";
+import { NotFoundError, ValidationError } from "./repository";
+import type { TransactionInput } from "./types";
 
 /**
  * Category suggestions from TypeSafe's Jev model.
@@ -41,6 +42,17 @@ export type CategoriserConfig = {
   model?: string;
   fetch?: Fetch;
 };
+
+/** Per-attempt timeout and retries; creates use a tighter budget than the review panel. */
+type CallBudget = { timeout: number; maxRetries: number };
+const REVIEW_BUDGET: CallBudget = { timeout: 20_000, maxRetries: 1 };
+const CREATE_BUDGET: CallBudget = { timeout: 5_000, maxRetries: 0 };
+
+/**
+ * Minimum confidence for a create to take Jev's category without review.
+ * A starting point to tune against corrections, not a validated threshold.
+ */
+export const AUTO_CATEGORISE_MIN_CONFIDENCE = 0.6;
 
 export type CategoriseItem = {
   key: string;
@@ -129,6 +141,7 @@ export async function suggestCategories(
   planId: string,
   items: CategoriseItem[],
   config: CategoriserConfig,
+  budget: CallBudget = REVIEW_BUDGET,
 ): Promise<CategoriseResult> {
   if (!config.apiKey) {
     throw new CategoriserUnavailableError(503, "categoriser_not_configured", "Category suggestions are not configured on this server");
@@ -184,8 +197,8 @@ export async function suggestCategories(
     apiKey: config.apiKey,
     defaultModel: config.model,
     fetch: config.fetch,
-    timeout: 20_000,
-    retry: { maxRetries: 1 },
+    timeout: budget.timeout,
+    retry: { maxRetries: budget.maxRetries },
     logLevel: "error",
   });
   let response;
@@ -210,6 +223,100 @@ export async function suggestCategories(
     };
   });
   return { model: response.model, suggestions, usage: response.usage };
+}
+
+/**
+ * Fills `category_id` on new transactions that name a payee but no category,
+ * when Jev is confident. Mutates and returns the inputs.
+ *
+ * Best effort by design: without a key, or if TypeSafe is slow or failing, the
+ * transactions are created uncategorised exactly as before. A create never
+ * fails because of this step. Transfers, splits and rows with a category are
+ * left alone.
+ *
+ * Creates are upserts by id, so a retried create (an offline queue resending
+ * after a lost response) would otherwise overwrite the category chosen on the
+ * first attempt with null. Such a retry keeps the stored category instead, and
+ * Jev is not asked again.
+ */
+export async function autoCategorise<T extends TransactionInput>(
+  repo: LedgerStore,
+  planId: string,
+  inputs: T[],
+  config: CategoriserConfig,
+): Promise<T[]> {
+  if (!config.apiKey) return inputs;
+  const uncategorised = inputs.filter((input) => !input.category_id
+    && !input.transfer_account_id
+    && !input.subtransactions?.length
+    && Boolean(input.payee_name?.trim() || input.payee_id));
+  if (uncategorised.length === 0) return inputs;
+
+  const candidates: T[] = [];
+  for (const input of uncategorised) {
+    const existing = input.id ? await existingTransaction(repo, planId, input.id) : null;
+    if (existing) {
+      if (existing.category_id) input.category_id = existing.category_id;
+    } else {
+      candidates.push(input);
+    }
+  }
+  if (candidates.length === 0) return inputs;
+
+  const payees = await repo.listPayees(planId);
+  const byId = new Map(payees.map((payee: any) => [payee.id, payee]));
+  const byName = new Map(payees.map((payee: any) => [String(payee.name).trim().toLowerCase(), payee]));
+  const accounts = new Map((await repo.listAccounts(planId)).map((account: any) => [account.id, account.name]));
+  const items: Array<{ input: T; item: CategoriseItem }> = [];
+  for (const input of candidates) {
+    const payee = (input.payee_id ? byId.get(input.payee_id) : undefined)
+      ?? (input.payee_name ? byName.get(input.payee_name.trim().toLowerCase()) : undefined);
+    if (payee?.transfer_account_id) continue;
+    const payeeName = input.payee_name?.trim() || payee?.name || null;
+    if (!payeeName) continue;
+    items.push({
+      input,
+      item: {
+        key: String(items.length),
+        payee_id: payee?.id ?? null,
+        payee_name: payeeName.slice(0, 200),
+        memo: input.memo?.trim().slice(0, 500) || null,
+        amount: input.amount,
+        date: input.date ?? null,
+        account_name: accounts.get(input.account_id) ?? null,
+      },
+    });
+  }
+
+  const chunks: Array<typeof items> = [];
+  for (let start = 0; start < items.length; start += MAX_CATEGORISE_BATCH) chunks.push(items.slice(start, start + MAX_CATEGORISE_BATCH));
+  let applied = 0;
+  await Promise.all(chunks.map(async (chunk) => {
+    try {
+      const result = await suggestCategories(repo, planId, chunk.map(({ item }) => item), config, CREATE_BUDGET);
+      result.suggestions.forEach((suggestion, index) => {
+        if (suggestion.suggestion && suggestion.confidence >= AUTO_CATEGORISE_MIN_CONFIDENCE) {
+          chunk[index].input.category_id = suggestion.suggestion.category_id;
+          applied += 1;
+        }
+      });
+    } catch (error) {
+      // Any failure here, including an unexpected one, leaves the rows uncategorised rather than failing the create.
+      const reason = error instanceof CategoriserUnavailableError ? error.code : error instanceof Error ? error.name : "unknown";
+      console.warn(JSON.stringify({ event: "auto_categorise_skipped", reason, count: chunk.length }));
+    }
+  }));
+  if (items.length > 0) console.log(JSON.stringify({ event: "auto_categorise", asked: items.length, applied }));
+  return inputs;
+}
+
+async function existingTransaction(repo: LedgerStore, planId: string, id: string): Promise<any | null> {
+  try {
+    return await repo.getTransaction(planId, id);
+  } catch (error) {
+    if (error instanceof NotFoundError) return null;
+    throw error;
+  }
 }
 
 /** Recent categories per payee, most frequent first, labelled as Jev will see them. */

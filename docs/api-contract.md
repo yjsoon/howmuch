@@ -749,6 +749,18 @@ category names and those past examples to TypeSafe. Errors: `503 categoriser_not
 `502 categoriser_unavailable` when TypeSafe fails or rejects the key,
 `429 categoriser_rate_limited`.
 
+**Automatic categorisation on create.** When `TYPESAFE_API_KEY` is set,
+`POST /v1/plans/{plan_id}/transactions` (single and batch) and
+`POST /api/mobile/quick-entry` ask Jev for a category for each new transaction
+that names a payee (`payee_name` or `payee_id`) but no `category_id`. Jev's pick is
+stored only when its confidence is at least 0.6 and it is not "none of these";
+otherwise the transaction is created uncategorised. Transfers, splits and rows with
+an explicit category are never changed. The step is best effort: it has a 5-second
+budget with no retries, and a slow or failing TypeSafe never fails the create.
+A create that repeats an existing transaction id (a retry) keeps that row's stored
+category and does not call Jev again. Imports, CSV uploads and scheduled
+materialisation are not auto-categorised.
+
 ### AI-assisted reward tools
 
 Both routes require authentication, same-origin CSRF validation and write access to

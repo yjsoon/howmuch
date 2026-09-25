@@ -819,7 +819,10 @@ export function TransactionsPage() {
         return { ...current, transactions: [transaction, ...current.transactions] };
       });
       setReconciliationPreviewGeneration((generation) => generation + 1);
-      const savedName = transaction.payee_name ?? "Entry";
+      // The server fills in a category Jev is confident about when none was chosen; say which.
+      const savedName = !result.input.category_id && transaction.category_name
+        ? `${transaction.payee_name ?? "Entry"} (categorised as ${transaction.category_name})`
+        : transaction.payee_name ?? "Entry";
       setMutationSuccess(
         dateInRegisterWindow(transaction.date, filters.from, filters.to, today)
           ? `${savedName} saved.`
