@@ -101,6 +101,28 @@ enum CaptureAdmissionGate {
     return phase == .idle
   }
 
+  enum ReferenceWait: Equatable {
+    case admit
+    case wait
+    /// Nothing is loading the reference data and nothing will: the full
+    /// refresh ended before it reached it (the plan list failed or needs a
+    /// choice). Waiting would spin behind the spinner forever.
+    case stalled
+  }
+
+  static func referenceWait(referencePhase: LoadPhase, isRefreshingAll: Bool) -> ReferenceWait {
+    if canAdmit(referencePhase: referencePhase) {
+      return .admit
+    }
+    // `.loading` always ends: whichever refresh set it also settles it.
+    if referencePhase == .idle, !isRefreshingAll {
+      return .stalled
+    }
+    return .wait
+  }
+
+  static let stalledMessage = "Couldn’t load your accounts."
+
   static func shouldAdmitAfterRefresh(
     request: CaptureRequest,
     presented: CaptureRequest?,

@@ -176,6 +176,15 @@ final class AppModel {
   /// single queued request that runs once the in-flight one finishes.
   @ObservationIgnored private var inFlightRefresh: Task<Void, Never>?
   @ObservationIgnored private var queuedRefresh = RefreshRequest.none
+  /// The full `refreshAll()` run in flight, keyed on the connection it
+  /// started for. A second call for the same connection (the capture sheet
+  /// opening while the launch refresh is still resolving the plan) awaits it
+  /// rather than repeating the whole waterfall. The run is unstructured, so a
+  /// caller's cancellation never reaches it: a joiner must not inherit a dead
+  /// run. A superseded run finishes, and its writes are discarded by the same
+  /// fingerprint, generation, planID and scope guards a plan switch relies on.
+  @ObservationIgnored private var inFlightRefreshAll: (fingerprint: String, generation: Int, task: Task<Void, Never>)?
+  @ObservationIgnored private var refreshAllGeneration = 0
   /// Serialises preference writes so a slower earlier request cannot overwrite
   /// a newer reorder on the server.
   @ObservationIgnored private var accountPreferencesSyncTask: Task<Void, Never>?
@@ -1426,7 +1435,33 @@ final class AppModel {
     }
   }
 
+  /// True while a `refreshAll()` run is in flight, including the plan
+  /// resolution that precedes any phase change. Not observable: poll it.
+  var isRefreshingAll: Bool {
+    inFlightRefreshAll != nil
+  }
+
   func refreshAll(quiet: Bool = false) async {
+    let fingerprint = settings.connectionFingerprint
+    if let inFlight = inFlightRefreshAll, inFlight.fingerprint == fingerprint {
+      await inFlight.task.value
+      return
+    }
+    refreshAllGeneration &+= 1
+    let generation = refreshAllGeneration
+    let task = Task { @MainActor [weak self] () -> Void in
+      await self?.performRefreshAll(quiet: quiet)
+    }
+    inFlightRefreshAll = (fingerprint, generation, task)
+    await task.value
+    // A plan switch may have started a newer run for another fingerprint
+    // meanwhile; only clear the record this run owns.
+    if inFlightRefreshAll?.generation == generation {
+      inFlightRefreshAll = nil
+    }
+  }
+
+  private func performRefreshAll(quiet: Bool) async {
     guard await resolvePlanSelection() else {
       return
     }

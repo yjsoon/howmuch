@@ -368,10 +368,26 @@ struct CaptureIntakeHost: View {
     if CaptureAdmissionGate.shouldRefreshReference(phase: model.referencePhase, explicitRetry: explicitRetry) {
       await model.refreshAll()
     }
-    while !CaptureAdmissionGate.canAdmit(referencePhase: model.referencePhase) {
-      try? await Task.sleep(for: .milliseconds(50))
-      if Task.isCancelled {
+    // `refreshAll()` joins the launch refresh when one is in flight, so this
+    // wait only covers reference loads another path owns.
+    waiting: while true {
+      switch CaptureAdmissionGate.referenceWait(
+        referencePhase: model.referencePhase,
+        isRefreshingAll: model.isRefreshingAll
+      ) {
+      case .admit:
+        break waiting
+      case .stalled:
+        guard !Task.isCancelled else {
+          return
+        }
+        admissionError = CaptureAdmissionGate.stalledMessage
         return
+      case .wait:
+        try? await Task.sleep(for: .milliseconds(50))
+        if Task.isCancelled {
+          return
+        }
       }
     }
     if Task.isCancelled {
