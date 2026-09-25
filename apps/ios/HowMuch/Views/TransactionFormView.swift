@@ -427,7 +427,8 @@ struct TransactionFormView: View {
           .foregroundStyle(displayedSignedAmount < 0 ? Theme.outflow : Theme.textPrimary)
           .lineLimit(1)
           .minimumScaleFactor(0.5)
-          .rollingNumber(displayedSignedAmount)
+          // No numeric roll here: cents-shift entry moves every digit on
+          // every keypad tap, so typed input must update instantly.
       }
       .buttonStyle(.plain)
     }
