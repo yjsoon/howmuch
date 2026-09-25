@@ -204,6 +204,29 @@ Create body:
 
 Return category groups with categories. HowMuch has no budgeting, so the YNAB-shaped assignment fields on each category (`budgeted`, `activity`, `balance`, `goal_*`) are always zero or null.
 
+#### Managing categories (HowMuch-native plans only)
+
+- `POST /v1/plans/{plan_id}/category_groups` with `{ "category_group": { "id"?, "name", "hidden"? } }`
+- `PATCH /v1/plans/{plan_id}/category_groups/{category_group_id}` with `{ "category_group": { "name"?, "hidden"? } }`
+- `POST /v1/plans/{plan_id}/categories` with `{ "category": { "id"?, "category_group_id", "name", "hidden"? } }`
+- `PATCH /v1/plans/{plan_id}/categories/{category_id}` with `{ "category": { "name"?, "hidden"?, "category_group_id"? } }`
+- `DELETE /v1/plans/{plan_id}/categories/{category_id}`
+
+A plan is **native** when it has no YNAB `month` raw object. On a YNAB-mirror plan, such as the owner's production plan, every route above returns `409 ynab_mirror_plan` and changes nothing.
+
+Owners and editors may call these routes; the default-plan API token is also accepted. Creates return `201`, updates and deletes `200`. Each response carries the `category_group` (with its live `categories`) or the `category`, plus `server_knowledge`. Every write moves `server_knowledge`, so clients revalidate cached categories.
+
+Rules:
+
+- Ids are chosen by the client and must be 1–128 letters, digits, dots, underscores, colons or hyphens. Without an id, the server derives a stable one from the `Idempotency-Key`, or generates one. An id that already exists anywhere on the server returns `409 conflict`.
+- Names are trimmed and must be 1–100 visible characters. Unknown fields return `400`.
+- `category_group_id` must name a live group in the same plan, otherwise `400`. A missing category or group in the path returns `404`.
+- Internal groups and categories (YNAB's bookkeeping rows, flagged `internal`) are read-only, and new categories cannot be added to an internal group.
+- `DELETE` is a soft delete (`deleted: true`). It returns `409 category_in_use` while a live transaction, split line, schedule or schedule split still names the category.
+- Send an `Idempotency-Key` (the Idempotency-Key rules above apply). An exact retry replays the result; reusing the key for a different request returns `409 conflict`.
+
+SQLite checks and writes in one immediate transaction. D1 repeats every check inside the guarded write batch, so a concurrent change aborts the whole write.
+
 ### Budgeting (removed)
 
 HowMuch has no budgeting. The YNAB month routes (`GET /v1/plans/{plan_id}/months/{month}`, `PATCH …/months/{month}/categories/{category_id}` for assignments and targets, and `GET …/months/{month}/transactions`) and the money-movement routes now return `404`.

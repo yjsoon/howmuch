@@ -6,6 +6,7 @@ import { D1GuardedCommandExecutor, statement } from "./d1-guarded-command";
 import type { EffectiveScheduledTransaction } from "./scheduled-transactions";
 import { resolveAccountPresentation } from "./account-icon";
 import { onBudgetForKind, type AccountUpdatePatch } from "./account-kind";
+import { ynabMirrorGuard, type PlannedSql } from "./category-management";
 
 /** Exact effective-source snapshot required to merge a scheduled mutation. */
 export type ScheduledMutationSnapshot = Readonly<{
@@ -331,6 +332,20 @@ export class D1MetadataRepository {
       assertion(commandId,"metadata_plan_exists",planId,planId), assertion(commandId,"metadata_payee",payee.id,planId),
       statement("INSERT INTO payees(id,plan_id,name,external_ynab_id) VALUES (?,?,?,?)", [payee.id,planId,payee.name,payee.id]),
       statement("UPDATE plans SET server_knowledge=server_knowledge+1,updated_at=CURRENT_TIMESTAMP WHERE id=?", [planId]),
+    ]);
+  }
+
+  /**
+   * One guarded batch for a HowMuch-native plan command. The caller supplies
+   * the planned statements; this adds the plan-exists assertion and the
+   * in-batch refusal to touch a YNAB-mirror plan.
+   */
+  async applyNativeCommand(kind: string, planId: string, resourceId: string, payload: unknown, statements: readonly PlannedSql[], context?: D1WriteContext): Promise<void> {
+    const commandId = this.id(context);
+    await this.run(kind, planId, resourceId, payload, context, [
+      assertion(commandId, "metadata_plan_exists", planId, planId),
+      ynabMirrorGuard(commandId, planId),
+      ...statements.map((planned) => statement(planned.sql, planned.values as unknown[])),
     ]);
   }
 

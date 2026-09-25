@@ -37,6 +37,16 @@ import { ACCOUNT_KINDS, parseAccountKind, type AccountUpdatePatch } from "./acco
 import { handleRewardTool } from "./reward-tools";
 import { autoCategorise, CategoriserUnavailableError, parseCategoriseExclusions, parseCategoriseItems, suggestCategories, type CategoriserConfig } from "./categoriser";
 import type { Fetch } from "@typesafe-ai/sdk";
+import {
+  CategoryInUseError,
+  CategoryValidationError,
+  EntityConflictError,
+  YnabMirrorPlanError,
+  parseCategoryCreate,
+  parseCategoryGroupCreate,
+  parseCategoryGroupPatch,
+  parseCategoryPatch,
+} from "./category-management";
 
 type HandlerOptions = {
   db?: Database;
@@ -123,6 +133,18 @@ export function createHandler(options: HandlerOptions): (request: Request) => Pr
       }
       if (error instanceof ScheduledTransactionValidationError) {
         return apiError(400, "bad_request", error.message);
+      }
+      if (error instanceof CategoryValidationError) {
+        return apiError(400, "bad_request", error.message);
+      }
+      if (error instanceof YnabMirrorPlanError) {
+        return apiError(409, "ynab_mirror_plan", error.message);
+      }
+      if (error instanceof CategoryInUseError) {
+        return apiError(409, "category_in_use", error.message);
+      }
+      if (error instanceof EntityConflictError) {
+        return apiError(409, "conflict", error.message);
       }
       if (error instanceof ReconciliationMismatchError) {
         return json({
@@ -305,8 +327,39 @@ async function handleV1(
     }
   }
 
+  if (resource === "category_groups") {
+    if (segments.length === 4 && method === "POST") {
+      const body = await readJson(request);
+      const input = parseCategoryGroupCreate(body?.category_group);
+      const categoryGroup = await repo.createCategoryGroup(planId, input, scheduledWriteOptions(request));
+      return json({ data: { category_group: categoryGroup, server_knowledge: await repo.getServerKnowledge(planId) } }, 201);
+    }
+    if (segments.length === 5 && method === "PATCH") {
+      const body = await readJson(request);
+      const patch = parseCategoryGroupPatch(body?.category_group);
+      const categoryGroup = await repo.updateCategoryGroup(planId, segments[4], patch, scheduledWriteOptions(request));
+      return json({ data: { category_group: categoryGroup, server_knowledge: await repo.getServerKnowledge(planId) } });
+    }
+  }
+
   if (resource === "categories" && segments.length === 4 && method === "GET") {
     return json({ data: await repo.listCategoryGroupsWithKnowledge(planId) });
+  }
+  if (resource === "categories" && segments.length === 4 && method === "POST") {
+    const body = await readJson(request);
+    const input = parseCategoryCreate(body?.category);
+    const category = await repo.createCategory(planId, input, scheduledWriteOptions(request));
+    return json({ data: { category, server_knowledge: await repo.getServerKnowledge(planId) } }, 201);
+  }
+  if (resource === "categories" && segments.length === 5 && method === "PATCH") {
+    const body = await readJson(request);
+    const patch = parseCategoryPatch(body?.category);
+    const category = await repo.updateCategory(planId, segments[4], patch, scheduledWriteOptions(request));
+    return json({ data: { category, server_knowledge: await repo.getServerKnowledge(planId) } });
+  }
+  if (resource === "categories" && segments.length === 5 && method === "DELETE") {
+    const category = await repo.deleteCategory(planId, segments[4], scheduledWriteOptions(request));
+    return json({ data: { category, server_knowledge: await repo.getServerKnowledge(planId) } });
   }
   if (resource === "categories") {
     const categoryId = segments[4];
@@ -1154,6 +1207,11 @@ function isTransitionFinancialWrite(methodValue: string, segments: string[]): bo
   const resource = segments[3];
   if ((resource === "accounts" || resource === "payees") && segments.length === 4) {
     return method === "POST";
+  }
+  if (resource === "category_groups" || resource === "categories") {
+    if (segments.length === 4) return method === "POST";
+    if (segments.length === 5) return method === "PATCH" || method === "DELETE";
+    return false;
   }
   if (resource === "accounts" && segments.length === 6 && segments[5] === "reconcile") {
     return method === "POST";

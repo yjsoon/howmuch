@@ -38,8 +38,44 @@ import {
 import { parseAccountIcon, resolveAccountPresentation, splitLegacyAccountName } from "./account-icon";
 import { applyAccountUpdate, type AccountUpdatePatch } from "./account-kind";
 import { parseRegisterQuery, transactionSearchSql } from "@howmuch/register-query";
+import {
+  CATEGORY_IN_USE_CONDITION,
+  CategoryInUseError,
+  EntityConflictError,
+  YNAB_MONTH_PRESENT_SQL,
+  YnabMirrorPlanError,
+  categoryCommandStatements,
+  categoryInUseValues,
+  createCategoryCommand,
+  createCategoryGroupCommand,
+  deleteCategoryCommand,
+  isUniqueViolation,
+  updateCategoryCommand,
+  updateCategoryGroupCommand,
+  type CategoryCommand,
+  type CategoryCreate,
+  type CategoryGroupCreate,
+  type CategoryGroupPatch,
+  type CategoryGroupRow,
+  type CategoryPatch,
+  type CategoryRow,
+} from "./category-management";
+import { requestHash } from "./d1-guarded-command";
 
 type Row = Record<string, any>;
+
+export type CategoryWriteOptions = { operationId?: string };
+
+/** Stable across retries when the client sends an Idempotency-Key but no id. */
+function derivedEntityId(prefix: string, planId: string, operationId?: string): string {
+  return operationId
+    ? `${prefix}_${createHash("sha256").update(`${planId}:${operationId}`).digest("hex").slice(0, 24)}`
+    : createId(prefix);
+}
+
+function categoryRequestHash(action: string, planId: string, resourceId: string, request: unknown): string {
+  return requestHash({ action, planId, resourceId, request });
+}
 
 function displayAccountName(value: unknown): string | null {
   if (value == null) return null;
@@ -780,6 +816,130 @@ export class LedgerRepository {
       category_groups: assembleCategoryGroups(groups ?? [], categories ?? []),
       server_knowledge: knowledgeFrom(knowledgeRows),
     };
+  }
+
+  /** Plan-level gate: a native plan has no YNAB `month` raw object at all. */
+  async isNativePlan(planId: string): Promise<boolean> {
+    return !(await this.db.query(YNAB_MONTH_PRESENT_SQL).get(planId));
+  }
+
+  protected async requireNativePlan(planId: string): Promise<void> {
+    if (!(await this.isNativePlan(planId))) throw new YnabMirrorPlanError();
+  }
+
+  async createCategoryGroup(planId: string, input: CategoryGroupCreate, options: CategoryWriteOptions = {}): Promise<any> {
+    const id = input.id ?? derivedEntityId("category_group", planId, options.operationId);
+    return this.applyCategoryCommand(planId, "category_group.create", id, input, options,
+      () => this.planCreateCategoryGroup(planId, id, input), () => this.readCategoryGroupResponse(planId, id));
+  }
+
+  async updateCategoryGroup(planId: string, groupId: string, patch: CategoryGroupPatch, options: CategoryWriteOptions = {}): Promise<any> {
+    return this.applyCategoryCommand(planId, "category_group.update", groupId, patch, options,
+      () => this.planUpdateCategoryGroup(planId, groupId, patch), () => this.readCategoryGroupResponse(planId, groupId));
+  }
+
+  async createCategory(planId: string, input: CategoryCreate, options: CategoryWriteOptions = {}): Promise<any> {
+    const id = input.id ?? derivedEntityId("category", planId, options.operationId);
+    return this.applyCategoryCommand(planId, "category.create", id, input, options,
+      () => this.planCreateCategory(planId, id, input), () => this.readCategoryResponse(planId, id));
+  }
+
+  async updateCategory(planId: string, categoryId: string, patch: CategoryPatch, options: CategoryWriteOptions = {}): Promise<any> {
+    return this.applyCategoryCommand(planId, "category.update", categoryId, patch, options,
+      () => this.planUpdateCategory(planId, categoryId, patch), () => this.readCategoryResponse(planId, categoryId));
+  }
+
+  /** Soft delete, refused while any live transaction or schedule names the category. */
+  async deleteCategory(planId: string, categoryId: string, options: CategoryWriteOptions = {}): Promise<any> {
+    return this.applyCategoryCommand(planId, "category.delete", categoryId, {}, options,
+      () => this.planDeleteCategory(planId, categoryId), () => this.readCategoryResponse(planId, categoryId));
+  }
+
+  /**
+   * SQLite runner: replay check, planning reads and the write share one
+   * BEGIN IMMEDIATE, so the checks cannot go stale before the write lands.
+   */
+  protected async applyCategoryCommand(
+    planId: string,
+    action: CategoryCommand["action"],
+    resourceId: string,
+    request: unknown,
+    options: CategoryWriteOptions,
+    plan: () => Promise<CategoryCommand>,
+    read: () => Promise<any>,
+  ): Promise<any> {
+    const hash = categoryRequestHash(action, planId, resourceId, request);
+    return this.db.transaction(async () => {
+      if (await this.replayedScheduleMutation(planId, resourceId, action, options.operationId, hash)) return read();
+      const command = await plan();
+      const auditId = options.operationId ? `audit_${scheduleDigest(options.operationId).slice(0, 24)}` : createId("audit");
+      for (const planned of categoryCommandStatements(command, planId, auditId, hash)) {
+        await this.db.query(planned.sql).run(...planned.values);
+      }
+      return read();
+    })();
+  }
+
+  protected async planCreateCategoryGroup(planId: string, id: string, input: CategoryGroupCreate): Promise<CategoryCommand> {
+    await this.requireNativePlan(planId);
+    if (await this.db.query("SELECT 1 FROM category_groups WHERE id = ?").get(id)) {
+      throw new EntityConflictError("Category group already exists");
+    }
+    return createCategoryGroupCommand(planId, id, input);
+  }
+
+  protected async planUpdateCategoryGroup(planId: string, groupId: string, patch: CategoryGroupPatch): Promise<CategoryCommand> {
+    await this.requireNativePlan(planId);
+    const current = await this.liveCategoryGroupRow(planId, groupId);
+    if (!current) throw new NotFoundError("Category group not found");
+    return updateCategoryGroupCommand(planId, current, patch);
+  }
+
+  protected async planCreateCategory(planId: string, id: string, input: CategoryCreate): Promise<CategoryCommand> {
+    await this.requireNativePlan(planId);
+    const group = await this.liveCategoryGroupRow(planId, input.category_group_id);
+    if (!group) throw new ValidationError("Category group not found");
+    if (await this.db.query("SELECT 1 FROM categories WHERE id = ?").get(id)) {
+      throw new EntityConflictError("Category already exists");
+    }
+    return createCategoryCommand(planId, id, input, group);
+  }
+
+  protected async planUpdateCategory(planId: string, categoryId: string, patch: CategoryPatch): Promise<CategoryCommand> {
+    await this.requireNativePlan(planId);
+    const current = await this.db.query("SELECT * FROM categories WHERE id = ? AND plan_id = ? AND deleted = 0").get(categoryId, planId) as CategoryRow | null;
+    if (!current) throw new NotFoundError("Category not found");
+    const targetGroup = patch.category_group_id === undefined ? null : await this.liveCategoryGroupRow(planId, patch.category_group_id);
+    if (patch.category_group_id !== undefined && !targetGroup) throw new ValidationError("Category group not found");
+    return updateCategoryCommand(planId, current, patch, targetGroup);
+  }
+
+  protected async planDeleteCategory(planId: string, categoryId: string): Promise<CategoryCommand> {
+    await this.requireNativePlan(planId);
+    const current = await this.db.query("SELECT * FROM categories WHERE id = ? AND plan_id = ? AND deleted = 0").get(categoryId, planId) as CategoryRow | null;
+    if (!current) throw new NotFoundError("Category not found");
+    const inUse = await this.db.query(`SELECT ${CATEGORY_IN_USE_CONDITION} AS in_use`).get(...categoryInUseValues(planId, categoryId)) as Row | null;
+    if (toBoolean(inUse?.in_use)) throw new CategoryInUseError();
+    return deleteCategoryCommand(planId, current);
+  }
+
+  private async liveCategoryGroupRow(planId: string, groupId: string): Promise<CategoryGroupRow | null> {
+    return await this.db.query("SELECT * FROM category_groups WHERE id = ? AND plan_id = ? AND deleted = 0").get(groupId, planId) as CategoryGroupRow | null;
+  }
+
+  protected async readCategoryGroupResponse(planId: string, groupId: string): Promise<any> {
+    const [groups, categories] = await this.db.batchRead([
+      { sql: "SELECT * FROM category_groups WHERE id = ? AND plan_id = ?", values: [groupId, planId] },
+      { sql: "SELECT * FROM categories WHERE category_group_id = ? AND plan_id = ? AND deleted = 0 ORDER BY name", values: [groupId, planId] },
+    ]);
+    if (!groups?.length) throw new NotFoundError("Category group not found");
+    return assembleCategoryGroups(groups, categories ?? [])[0];
+  }
+
+  protected async readCategoryResponse(planId: string, categoryId: string): Promise<any> {
+    const row = await this.db.query("SELECT * FROM categories WHERE id = ? AND plan_id = ?").get(categoryId, planId) as Row | null;
+    if (!row) throw new NotFoundError("Category not found");
+    return formatCategory(row);
   }
 
   async createTransaction(planId: string, input: TransactionInput, options: TransactionWriteOptions = {}): Promise<any> {

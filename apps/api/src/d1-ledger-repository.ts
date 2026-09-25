@@ -2,7 +2,21 @@ import { createId } from "./ids";
 import { createHash } from "node:crypto";
 import { parseAccountIcon } from "./account-icon";
 import { applyAccountUpdate, type AccountUpdatePatch } from "./account-kind";
-import { LedgerRepository, NotFoundError, ReconciliationMismatchError, TransactionStateConflictError, ValidationError, type TransactionWriteOptions } from "./repository";
+import { LedgerRepository, NotFoundError, ReconciliationMismatchError, TransactionStateConflictError, ValidationError, type CategoryWriteOptions, type TransactionWriteOptions } from "./repository";
+import {
+  EntityConflictError,
+  categoryCommandStatements,
+  categoryInUseGuard,
+  isPreconditionFailure,
+  isUniqueViolation,
+  type CategoryCommand,
+  type CategoryCreate,
+  type CategoryGroupCreate,
+  type CategoryGroupPatch,
+  type CategoryPatch,
+  type PlannedSql,
+} from "./category-management";
+import { requestHash } from "./d1-guarded-command";
 import type { LedgerStore } from "./storage";
 import type { AccountReconciliationOptions, AccountReconciliationPreview, AccountReconciliationResult, ScheduledTransactionInput, ScheduledWriteOptions, TransactionBatchResult, TransactionBatchUpdate, TransactionInput } from "./types";
 import { D1Database } from "./d1";
@@ -157,6 +171,77 @@ export class D1LedgerRepository extends LedgerRepository {
   override async ensureCategory(planId:string,categoryId:string,name?:string,groupId?:string|null):Promise<void>{await this.metadata.ensureCategory(planId,categoryId,name,groupId??"uncategorized-group",this.context("category.ensure",planId,categoryId));}
   override async upsertCategoryGroup(planId:string,group:any):Promise<void>{await this.metadata.upsertCategoryGroup(planId,group,this.context("category-group.upsert",planId,group.id));}
   override async upsertCategory(planId:string,category:any,groupId?:string|null):Promise<void>{await this.metadata.upsertCategory(planId,category,groupId,this.context("category.upsert",planId,category.id));}
+  override async createCategoryGroup(planId: string, input: CategoryGroupCreate, options: CategoryWriteOptions = {}): Promise<any> {
+    const id = input.id ?? d1DerivedEntityId("category_group", planId, options.operationId);
+    return this.applyD1CategoryCommand(planId, "category_group.create", id, input, options,
+      () => this.planCreateCategoryGroup(planId, id, input), () => this.readCategoryGroupResponse(planId, id), () => []);
+  }
+  override async updateCategoryGroup(planId: string, groupId: string, patch: CategoryGroupPatch, options: CategoryWriteOptions = {}): Promise<any> {
+    return this.applyD1CategoryCommand(planId, "category_group.update", groupId, patch, options,
+      () => this.planUpdateCategoryGroup(planId, groupId, patch), () => this.readCategoryGroupResponse(planId, groupId),
+      (commandId) => [categoryAssertion(commandId, "metadata_category_group_exists", groupId, planId)]);
+  }
+  override async createCategory(planId: string, input: CategoryCreate, options: CategoryWriteOptions = {}): Promise<any> {
+    const id = input.id ?? d1DerivedEntityId("category", planId, options.operationId);
+    return this.applyD1CategoryCommand(planId, "category.create", id, input, options,
+      () => this.planCreateCategory(planId, id, input), () => this.readCategoryResponse(planId, id),
+      (commandId) => [categoryAssertion(commandId, "metadata_category_group_exists", input.category_group_id, planId)]);
+  }
+  override async updateCategory(planId: string, categoryId: string, patch: CategoryPatch, options: CategoryWriteOptions = {}): Promise<any> {
+    return this.applyD1CategoryCommand(planId, "category.update", categoryId, patch, options,
+      () => this.planUpdateCategory(planId, categoryId, patch), () => this.readCategoryResponse(planId, categoryId),
+      (commandId) => [
+        categoryAssertion(commandId, "category", categoryId, planId),
+        ...(patch.category_group_id === undefined ? [] : [categoryAssertion(commandId, "metadata_category_group_exists", patch.category_group_id, planId)]),
+      ]);
+  }
+  override async deleteCategory(planId: string, categoryId: string, options: CategoryWriteOptions = {}): Promise<any> {
+    return this.applyD1CategoryCommand(planId, "category.delete", categoryId, {}, options,
+      () => this.planDeleteCategory(planId, categoryId), () => this.readCategoryResponse(planId, categoryId),
+      (commandId) => [categoryAssertion(commandId, "category", categoryId, planId), categoryInUseGuard(commandId, planId, categoryId)]);
+  }
+
+  /**
+   * D1 runner. Planning reads give precise errors up front; the guarded batch
+   * re-asserts every precondition, so a concurrent change aborts the whole
+   * write. On such an abort the plan is re-read to report why.
+   */
+  private async applyD1CategoryCommand(
+    planId: string,
+    action: CategoryCommand["action"],
+    resourceId: string,
+    request: unknown,
+    options: CategoryWriteOptions,
+    plan: () => Promise<CategoryCommand>,
+    read: () => Promise<any>,
+    guards: (commandId: string) => PlannedSql[],
+  ): Promise<any> {
+    const hash = requestHash({ action, planId, resourceId, request });
+    const context = this.context(action, planId, resourceId, options.operationId);
+    const payload = { request_hash: hash };
+    const receipt = options.operationId ? await this.d1.get("SELECT 1 FROM write_commands WHERE id=?", [context.operationId]) : null;
+    if (receipt) {
+      // The executor verifies kind, plan, resource and hash before replaying.
+      await this.metadata.applyNativeCommand(action, planId, resourceId, payload, [], context);
+      return read();
+    }
+    const command = await plan();
+    const auditId = `audit_${createHash("sha256").update(context.operationId).digest("hex").slice(0, 24)}`;
+    try {
+      await this.metadata.applyNativeCommand(action, planId, resourceId, payload, [
+        ...guards(context.operationId),
+        ...categoryCommandStatements(command, planId, auditId, hash),
+      ], context);
+    } catch (error) {
+      if (isPreconditionFailure(error)) {
+        await plan();
+        throw new EntityConflictError("The plan changed while this category change was being saved; refresh and try again");
+      }
+      if (isUniqueViolation(error)) throw new EntityConflictError(action === "category_group.create" ? "Category group already exists" : "Category already exists");
+      throw error;
+    }
+    return read();
+  }
 
   override async createScheduledTransaction(planId: string, input: ScheduledTransactionInput, options: ScheduledWriteOptions = {}): Promise<any> {
     await this.ensurePlan(planId);
@@ -404,3 +489,12 @@ function assertExpectedD1Schedule(payload: Record<string, any>, expected: Schedu
 function isStaleScheduledTransaction(error: unknown): boolean {
   return String(error).includes("stale scheduled transaction");
 }
+
+function d1DerivedEntityId(prefix: string, planId: string, operationId?: string): string {
+  return operationId ? `${prefix}_${scheduleId(`${planId}:${operationId}`)}` : createId(prefix);
+}
+
+function categoryAssertion(commandId: string, kind: string, targetId: string, planId: string): PlannedSql {
+  return { sql: "INSERT INTO write_assertions(command_id,kind,target_id,plan_id) VALUES (?,?,?,?)", values: [commandId, kind, targetId, planId] };
+}
+
