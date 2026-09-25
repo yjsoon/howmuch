@@ -129,10 +129,10 @@ test("finds past transactions under other spellings of the payee", async () => {
     const sentItem = sent[0].body.state.transactions[0];
     expect(sentItem.payee_cleaned).toBe("grab rides");
     // Grouped by cleaned name and category with counts, without the row being classified.
+    // GrabFood is a related but different merchant ("grab" only prefixes "grabfood"), so it is left out.
     expect(sentItem.similar_past_transactions.map((row: any) => [row.payee, row.category, row.times, row.name_similarity])).toEqual([
-      ["GRABFOOD*ORDER 8812", "Living: Food", 2, 0.67],
-      ["Grab", "Living: Transport", 2, 0.67],
-      ["Grab", "Living: Food", 1, 0.67],
+      ["Grab", "Living: Transport", 2, 0.83],
+      ["Grab", "Living: Food", 1, 0.83],
     ]);
     expect(sent[0].body.state.transactions[0].payee_history).toEqual([]);
   } finally { db.close(); }

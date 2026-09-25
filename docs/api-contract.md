@@ -746,7 +746,11 @@ words (NETS, PayNow, FAST, POS), processor prefixes (`SQ *`, `TST*`, `PAYPAL *`)
 company suffixes and common place names are dropped, so "GRAB*A-5X7K9 SINGAPORE
 SG" reads as "grab". Jev receives that cleaned name, the category counts from the
 exact payee's last 50 transactions, and up to eight categorised past examples with
-similar cleaned names (the first merchant word must match). Examples that differ
+similar cleaned names. The first merchant words of both names must match, a word
+that only starts the other ("Grab" in "Grabfood") counts half, and names that run
+together are also compared joined up ("DIANXIAOERGROUPPTELTD" and "Dian Xiao Er").
+Common spellings such as "7-11" and "7-Eleven", HTML entities and PayNow "(Mobile
+ending …)" suffixes are normalised first. Examples that differ
 only in codes are grouped with a count and a `name_similarity` score.
 Each suggestion reports `evidence: { same_payee, similar_names }`, the number of
 past transactions behind it. The request sends payee names, memos, amounts, dates, account names,

@@ -30,7 +30,7 @@ const PAYEE_HISTORY_CATEGORIES = 5;
 const SIMILAR_SEARCH_LIMIT = 150;
 const SIMILAR_EXAMPLES = 8;
 /** Past names scoring below this are a different merchant sharing a word. */
-const MIN_NAME_SIMILARITY = 0.5;
+const MIN_NAME_SIMILARITY = 0.6;
 const ALTERNATIVES = 3;
 const NO_MATCH = "None of these";
 
