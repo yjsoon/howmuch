@@ -1,6 +1,6 @@
 # Standalone iOS (local-first) plan
 
-Status: phase 1 in progress (branch `feat/standalone-ios`, 2026-09-25).
+Status: phase 1 done on `feat/standalone-ios` (2026-09-26). See [the handover](standalone-ios-handover.md).
 
 ## Goal
 
