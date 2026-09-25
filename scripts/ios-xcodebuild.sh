@@ -32,7 +32,7 @@ Usage:
   scripts/ios-xcodebuild.sh build [--generic]
   scripts/ios-xcodebuild.sh build-for-testing
   scripts/ios-xcodebuild.sh test-without-building [-- extra xcodebuild args]
-  scripts/ios-xcodebuild.sh test [-- extra xcodebuild args]
+  scripts/ios-xcodebuild.sh test [-- extra xcodebuild args]   (always build-for-testing first)
   scripts/ios-xcodebuild.sh app-path
   scripts/ios-xcodebuild.sh destination
 
@@ -439,10 +439,9 @@ cmd_test_without_building() {
 
 cmd_test() {
   prepare_build 0
-  if ! test_product_exists; then
-    echo "runner: no test products yet; build-for-testing once, then test-without-building"
-    xcode_invocation build-for-testing build-for-testing
-  fi
+  # Always rebuild: skipping when products exist ran tests against stale binaries.
+  # Incremental builds are cheap; use test-without-building to reuse products deliberately.
+  xcode_invocation build-for-testing build-for-testing
   xcode_invocation test-without-building test-without-building "$@"
 }
 
