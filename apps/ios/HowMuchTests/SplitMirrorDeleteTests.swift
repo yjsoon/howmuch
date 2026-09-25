@@ -1180,3 +1180,121 @@ private struct PlansBody: Encodable {
 
   let plans: [Plan]
 }
+
+/// What a delete takes off each account. Pure: rows in, deltas out. Every
+/// value is invented.
+final class DeleteBalanceDeltaTests: XCTestCase {
+  func testAPlainRowComesOffItsAccountByClearedState() {
+    let uncleared = Self.row("txn-1", account: "acct-a", amount: -1_000, cleared: .uncleared)
+    XCTAssertEqual(
+      DeleteBalanceDelta.deltas(deleted: uncleared, removedIDs: ["txn-1"], knownRows: [:]),
+      ["acct-a": .init(balance: 1_000, cleared: 0, uncleared: 1_000)]
+    )
+    let reconciled = Self.row("txn-2", account: "acct-a", amount: 2_500, cleared: .reconciled)
+    XCTAssertEqual(
+      DeleteBalanceDelta.deltas(deleted: reconciled, removedIDs: ["txn-2"], knownRows: [:]),
+      ["acct-a": .init(balance: -2_500, cleared: -2_500, uncleared: 0)]
+    )
+  }
+
+  func testATransferTakesBothSidesUsingEachSidesClearedState() {
+    let out = Self.row("out", account: "acct-a", amount: -5_000, cleared: .cleared,
+                       transferAccount: "acct-b", transferID: "in")
+    let into = Self.row("in", account: "acct-b", amount: 5_000, cleared: .uncleared,
+                        transferAccount: "acct-a", transferID: "out")
+    XCTAssertEqual(
+      DeleteBalanceDelta.deltas(deleted: out, removedIDs: ["out", "in"], knownRows: ["out": out, "in": into]),
+      [
+        "acct-a": .init(balance: 5_000, cleared: 5_000, uncleared: 0),
+        "acct-b": .init(balance: -5_000, cleared: 0, uncleared: -5_000),
+      ]
+    )
+  }
+
+  func testATransferSideNotInHandIsDerivedFromTheLink() {
+    let out = Self.row("out", account: "acct-a", amount: -5_000, cleared: .cleared,
+                       transferAccount: "acct-b", transferID: "in")
+    XCTAssertEqual(
+      DeleteBalanceDelta.deltas(deleted: out, removedIDs: ["out", "in"], knownRows: [:])["acct-b"],
+      .init(balance: -5_000, cleared: 0, uncleared: -5_000)
+    )
+  }
+
+  func testASplitParentTakesItsMirroredLines() {
+    let parent = Self.row("parent", account: "acct-a", amount: -3_000, cleared: .uncleared, lines: [
+      Self.line("line-1", parent: "parent", amount: -1_000),
+      Self.line("line-2", parent: "parent", amount: -2_000, transferAccount: "acct-b", transferID: "mirror"),
+    ])
+    XCTAssertEqual(
+      DeleteBalanceDelta.deltas(deleted: parent, removedIDs: ["parent", "mirror"], knownRows: [:]),
+      [
+        "acct-a": .init(balance: 3_000, cleared: 0, uncleared: 3_000),
+        "acct-b": .init(balance: -2_000, cleared: 0, uncleared: -2_000),
+      ]
+    )
+  }
+
+  /// Deleting a split mirror removes only the mirror; the parent and its line
+  /// stay, so the parent's account does not move.
+  func testASplitMirrorMovesOnlyItsOwnAccount() {
+    let mirror = Self.row("mirror", account: "acct-b", amount: 2_000, cleared: .cleared,
+                          transferAccount: "acct-a", transferID: "line-2", parentID: "parent")
+    XCTAssertEqual(
+      DeleteBalanceDelta.deltas(deleted: mirror, removedIDs: ["mirror"], knownRows: [:]),
+      ["acct-b": .init(balance: -2_000, cleared: -2_000, uncleared: 0)]
+    )
+  }
+
+  func testApplyingAdjustsOnlyTheNamedAccounts() {
+    let accounts = [Self.account("acct-a", balance: 10_000, cleared: 8_000), Self.account("acct-b", balance: 0, cleared: 0)]
+    let next = DeleteBalanceDelta.applying(["acct-a": .init(balance: 1_000, cleared: 0, uncleared: 1_000)], to: accounts)
+    XCTAssertEqual(next[0].balance, 11_000)
+    XCTAssertEqual(next[0].clearedBalance, 8_000)
+    XCTAssertEqual(next[0].unclearedBalance, 3_000)
+    XCTAssertEqual(next[1], accounts[1])
+  }
+
+  // MARK: Fixtures
+
+  private static func row(
+    _ id: String,
+    account: String,
+    amount: Int,
+    cleared: ClearedState,
+    transferAccount: String? = nil,
+    transferID: String? = nil,
+    parentID: String? = nil,
+    lines: [Subtransaction] = []
+  ) -> Transaction {
+    Transaction(
+      id: id, date: "2026-01-02", amount: amount, memo: nil, cleared: cleared, approved: true,
+      flagColor: nil, flagName: nil, accountID: account, accountName: "Fixture", payeeID: nil,
+      payeeName: nil, categoryID: nil, categoryName: nil, transferAccountID: transferAccount,
+      transferTransactionID: transferID, parentTransactionID: parentID, matchedTransactionID: nil,
+      importID: nil, importPayeeName: nil, importPayeeNameOriginal: nil, deleted: false,
+      subtransactions: lines
+    )
+  }
+
+  private static func line(
+    _ id: String,
+    parent: String,
+    amount: Int,
+    transferAccount: String? = nil,
+    transferID: String? = nil
+  ) -> Subtransaction {
+    Subtransaction(
+      id: id, transactionID: parent, amount: amount, memo: nil, payeeID: nil, payeeName: nil,
+      categoryID: nil, categoryName: nil, transferAccountID: transferAccount,
+      transferTransactionID: transferID, deleted: false
+    )
+  }
+
+  private static func account(_ id: String, balance: Int, cleared: Int) -> Account {
+    Account(
+      id: id, name: "Fixture", icon: nil, type: "checking", onBudget: true, closed: false,
+      balance: balance, clearedBalance: cleared, unclearedBalance: balance - cleared,
+      lastReconciledDate: nil, deleted: false
+    )
+  }
+}

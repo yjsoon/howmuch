@@ -1623,6 +1623,72 @@ enum SplitMirrorUnlink {
   }
 }
 
+/// What a delete takes off each account's balances, so the accounts on screen
+/// (and the snapshot written from them) match the server before the follow-up
+/// read lands -- or when it never does.
+enum DeleteBalanceDelta {
+  struct Delta: Equatable {
+    var balance = 0
+    var cleared = 0
+    var uncleared = 0
+  }
+
+  /// One entry per account a removed row sat in. `removedIDs` are every row
+  /// the server tombstoned; `knownRows` are rows in hand before the delete,
+  /// by id. A removed row not in hand (the far side of a transfer on an
+  /// unloaded page) is derived from the link that names it, and counts as
+  /// uncleared: its own cleared state is unknown, and the next accounts read
+  /// settles the split between cleared and uncleared either way.
+  static func deltas(
+    deleted: Transaction,
+    removedIDs: Set<String>,
+    knownRows: [String: Transaction]
+  ) -> [String: Delta] {
+    var result: [String: Delta] = [:]
+    func take(_ amount: Int, from accountID: String, cleared: ClearedState) {
+      var delta = result[accountID, default: Delta()]
+      delta.balance -= amount
+      if cleared == .uncleared {
+        delta.uncleared -= amount
+      } else {
+        delta.cleared -= amount
+      }
+      result[accountID] = delta
+    }
+    for id in removedIDs.sorted() {
+      if let row = knownRows[id] ?? (id == deleted.id ? deleted : nil) {
+        guard !row.deleted else { continue }
+        take(row.amount, from: row.accountID, cleared: row.cleared)
+      } else if deleted.transferTransactionID == id, let accountID = deleted.transferAccountID {
+        take(-deleted.amount, from: accountID, cleared: .uncleared)
+      } else if let line = deleted.subtransactions.first(where: { $0.transferTransactionID == id }),
+                let accountID = line.transferAccountID {
+        take(-line.amount, from: accountID, cleared: .uncleared)
+      }
+    }
+    return result.filter { $0.value != Delta() }
+  }
+
+  static func applying(_ deltas: [String: Delta], to accounts: [Account]) -> [Account] {
+    accounts.map { account in
+      guard let delta = deltas[account.id] else { return account }
+      return Account(
+        id: account.id,
+        name: account.name,
+        icon: account.icon,
+        type: account.type,
+        onBudget: account.onBudget,
+        closed: account.closed,
+        balance: account.balance + delta.balance,
+        clearedBalance: account.clearedBalance + delta.cleared,
+        unclearedBalance: account.unclearedBalance + delta.uncleared,
+        lastReconciledDate: account.lastReconciledDate,
+        deleted: account.deleted
+      )
+    }
+  }
+}
+
 extension Subtransaction {
   /// True when this line is the one a deleted mirror left behind. A line that
   /// still names the deleted mirror is one; the mirror's own row names its line

@@ -60,7 +60,8 @@ private enum SnapshotFixture {
     id: String,
     accountID: String = "acct-1",
     date: String = "2026-01-02",
-    amount: Int = -1230
+    amount: Int = -1230,
+    approved: Bool = true
   ) -> Transaction {
     Transaction(
       id: id,
@@ -68,7 +69,7 @@ private enum SnapshotFixture {
       amount: amount,
       memo: nil,
       cleared: .uncleared,
-      approved: true,
+      approved: approved,
       flagColor: nil,
       flagName: nil,
       accountID: accountID,
@@ -749,6 +750,62 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     XCTAssertEqual(store.load()?.unapprovedCount, SnapshotRefreshProtocol.networkUnapprovedCount)
   }
 
+  /// A delete used to wipe the snapshot, so the next launch -- offline, say --
+  /// started cold. It now writes the repaired page at once: the deleted row is
+  /// gone from it, and a row rejected from the "New" queue is off the stored
+  /// count, even when every follow-up read fails.
+  func testDeletePersistsTheRepairedSnapshotWhenFollowUpReadsFail() async throws {
+    let settings = fixtureSettings()
+    XCTAssertTrue(
+      store.save(
+        SnapshotFixture.snapshot(
+          settings: settings,
+          serverKnowledge: SnapshotRefreshProtocol.serverKnowledge - 1
+        )
+      )
+    )
+    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    await model.refreshAll()
+    let counted = await waitUntil {
+      model.unapprovedBadgeCount == SnapshotRefreshProtocol.networkUnapprovedCount
+    }
+    XCTAssertTrue(counted, "the server's count must land before the delete")
+    XCTAssertFalse(model.isProvisional, "the launch refresh must own the screen before the delete")
+    XCTAssertEqual(model.transactions.map(\.id), [SnapshotRefreshProtocol.networkTransactionID])
+
+    // Every read after the delete fails, as it would if the connection
+    // dropped straight after the write.
+    SnapshotRefreshProtocol.goOfflineAfterDelete()
+    let row = SnapshotFixture.transaction(
+      id: SnapshotRefreshProtocol.networkTransactionID,
+      accountID: SnapshotRefreshProtocol.networkAccountID,
+      approved: false
+    )
+    try await model.deleteTransaction(row)
+    XCTAssertEqual(model.unapprovedBadgeCount, SnapshotRefreshProtocol.networkUnapprovedCount - 1)
+    await model.refresh(slices: [.accounts, .ledger])
+
+    store.waitForPendingWrites()
+    let persisted = try XCTUnwrap(store.load(), "a delete must not leave the next launch cold")
+    XCTAssertEqual(persisted.ledgerPage?.transactions.map(\.id), [])
+    // The network row (-4560, uncleared) comes off its account's balances.
+    let persistedAccount = try XCTUnwrap(persisted.accounts.first)
+    XCTAssertEqual(persistedAccount.balance, 999 + 4_560, "the saved balance must not still count the deleted row")
+    XCTAssertEqual(persistedAccount.clearedBalance, 999)
+    XCTAssertEqual(persistedAccount.unclearedBalance, 4_560)
+    XCTAssertEqual(
+      persisted.unapprovedCount,
+      SnapshotRefreshProtocol.networkUnapprovedCount - 1,
+      "the rejected row must not come back on the tile at the next launch"
+    )
+
+    let relaunched = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    XCTAssertEqual(relaunched.referencePhase, .loaded)
+    XCTAssertEqual(relaunched.accounts.map(\.id), [SnapshotRefreshProtocol.networkAccountID])
+    XCTAssertTrue(relaunched.transactions.isEmpty)
+    XCTAssertEqual(relaunched.unapprovedBadgeCount, SnapshotRefreshProtocol.networkUnapprovedCount - 1)
+  }
+
   func testSignOutDeletesTheSnapshot() async {
     let settings = fixtureSettings()
     XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: settings)))
@@ -808,6 +865,7 @@ private final class SnapshotRefreshLog: @unchecked Sendable {
   private var recorded: [String] = []
   private var held = false
   private var offline = false
+  private var offlineAfterDelete = false
   private var pending: [SnapshotRefreshProtocol] = []
 
   func reset() {
@@ -815,7 +873,23 @@ private final class SnapshotRefreshLog: @unchecked Sendable {
     recorded = []
     held = false
     offline = false
+    offlineAfterDelete = false
     pending = []
+    lock.unlock()
+  }
+
+  func goOfflineAfterDelete() {
+    lock.lock()
+    offlineAfterDelete = true
+    lock.unlock()
+  }
+
+  /// Called once a DELETE has been answered.
+  func noteDelete() {
+    lock.lock()
+    if offlineAfterDelete {
+      offline = true
+    }
     lock.unlock()
   }
 
@@ -920,6 +994,11 @@ private final class SnapshotRefreshProtocol: URLProtocol {
     SnapshotRefreshLog.shared.goOffline()
   }
 
+  /// Answers the next DELETE, then fails every request after it.
+  static func goOfflineAfterDelete() {
+    SnapshotRefreshLog.shared.goOfflineAfterDelete()
+  }
+
   /// Lets every held response finish. Called from the test's thread; the
   /// stub never blocks a URLSession worker, so a held request cannot stop the
   /// next one from being issued.
@@ -959,6 +1038,11 @@ private final class SnapshotRefreshProtocol: URLProtocol {
     // slice, so holding it would park the launch before the code under test
     // ever runs. Everything else is parked and returned to, rather than slept
     // on, so no URLSession worker is blocked and later requests still issue.
+    if request.httpMethod == "DELETE" {
+      finish()
+      SnapshotRefreshLog.shared.noteDelete()
+      return
+    }
     if url.path != "/v1/plans", SnapshotRefreshLog.shared.park(self) {
       return
     }
@@ -1073,6 +1157,9 @@ private final class SnapshotRefreshProtocol: URLProtocol {
       return #"{"data":{"transactions":[\#(olderTransactionJSON)],"has_more":false,"server_knowledge":\#(serverKnowledge)}}"#
     }
     switch path {
+    case "\(plan)/transactions/\(networkTransactionID)":
+      // Only DELETE reaches this path in these tests.
+      return #"{"data":{"transaction":\#(transactionJSON),"server_knowledge":\#(serverKnowledge + 1)}}"#
     case "/v1/plans":
       return #"{"data":{"plans":[{"id":"\#(planID)","name":"Fixture Plan"}]}}"#
     case "\(plan)/settings":

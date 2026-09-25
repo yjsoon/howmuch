@@ -343,8 +343,11 @@ final class AppModel {
 
   /// Writes the current reference set, tagged with the cursor the last ledger
   /// fetch observed. Called from every slice's success path; the store
-  /// coalesces queued writes and encodes off the main actor.
-  private func persistSnapshot() {
+  /// coalesces queued writes and encodes off the main actor. Returns false
+  /// when nothing was written, so a caller that must not leave the old file
+  /// behind can delete it.
+  @discardableResult
+  private func persistSnapshot() -> Bool {
     guard settings.isAuthenticated,
           !settings.planID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
           !settings.authenticatedUserID.isEmpty,
@@ -354,7 +357,7 @@ final class AppModel {
           // have come from the network at that cursor. The slice that clears
           // the final provisional flag is the one that writes.
           !isProvisional else {
-      return
+      return false
     }
     snapshotStore.scheduleWrite(
       ReferenceSnapshot(
@@ -369,9 +372,13 @@ final class AppModel {
         accountPreferences: lastSyncedAccountPreferences,
         scheduledTransactions: scheduledTransactions,
         ledgerPage: lastLedgerFirstPage,
-        unapprovedCount: serverUnapprovedCount
+        // What the tile shows, not the server's last raw number: a row
+        // approved or rejected here since that count was taken is already off
+        // the badge, and a restore has no record of it to subtract again.
+        unapprovedCount: unapprovedBadgeCount
       )
     )
+    return true
   }
 
   /// Reports a launch that never reached the plan-scoped requests against the
@@ -2131,17 +2138,25 @@ final class AppModel {
   }
 
   private func refreshUnapprovedCount(generation: Int, planID: String, accountID: String?) async {
+    // What the count can already reflect is what was resolved before it was
+    // asked for. A row approved or rejected while the request is out may land
+    // either side of the server's count, so it stays subtracted until the next
+    // count rather than being assumed counted.
+    let resolvedAtRequest = locallyResolvedUnapprovedIDs
     guard let count = try? await apiClient.fetchUnapprovedCount(planID: planID, accountID: accountID) else { return }
     guard generation == ledgerPageGeneration, planID == settings.planID else { return }
     if let accountID {
       serverUnapprovedCountsByAccount[accountID] = count
     } else {
       serverUnapprovedCount = count
+    }
+    confirmedWhenCounted[countScopeKey(accountID)] = resolvedAtRequest
+    if accountID == nil {
       // The count lands after the ledger page that spawned it, so the snapshot
-      // written there carries the previous number. Rewrite it with this one.
+      // written there carries the previous number. Rewrite it with this one,
+      // once the rows it already reflects are no longer subtracted from it.
       persistSnapshot()
     }
-    confirmedWhenCounted[countScopeKey(accountID)] = locallyResolvedUnapprovedIDs
   }
 
   /// Rows this session has taken off the queue: approved, or rejected.
@@ -3194,6 +3209,18 @@ final class AppModel {
     if !fallback.approved {
       rejectedUnapprovedAccounts[fallback.id] = fallback.accountID
     }
+    // Take the removed rows off their accounts now, from the rows as they stood
+    // before the delete, so the balances on screen and in the snapshot below
+    // are right even when the follow-up accounts read fails.
+    var knownRows: [String: Transaction] = [:]
+    for row in serverUnapprovedTransactions + serverTransactions where removedIDs.contains(row.id) {
+      knownRows[row.id] = row
+    }
+    let balanceDeltas = DeleteBalanceDelta.deltas(deleted: fallback, removedIDs: removedIDs, knownRows: knownRows)
+    if !balanceDeltas.isEmpty {
+      accounts = DeleteBalanceDelta.applying(balanceDeltas, to: accounts)
+      rebuildLookups()
+    }
     serverTransactions = SplitMirrorUnlink.applying(
       mirror,
       to: serverTransactions.filter { !removedIDs.contains($0.id) }
@@ -3217,10 +3244,15 @@ final class AppModel {
     }
     provisionalLedgerRowIDs.removeAll { removedIDs.contains($0) }
     recordLedgerDelete(removedIDs: removedIDs, mirror: mirror)
-    // The accounts refresh can fail, and provisional data cannot be persisted.
-    // Invalidate disk state and queued pre-delete writes now; a later successful
-    // refresh can persist the repaired page without resurrecting the old link.
-    snapshotStore.delete()
+    // Persist the repaired page now rather than waiting on the follow-up
+    // refresh, which can fail: the next launch then starts warm, without the
+    // deleted row. The write queues behind any pre-delete one, so it lands
+    // last. Provisional data cannot be persisted, so while the launch refresh
+    // is still out the old file is deleted instead -- a queued pre-delete
+    // write included -- and a later successful refresh persists the repair.
+    if !persistSnapshot() {
+      snapshotStore.delete()
+    }
   }
 
   // MARK: - Delete read-order ownership
