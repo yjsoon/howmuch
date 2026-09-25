@@ -75,9 +75,12 @@ struct RewardRowProjection: Equatable {
     case minimum(remaining: Double)
     case nextTier(remaining: Double)
     case capHeadroom(remaining: Double)
+    /// Past the last spend tier with no card-wide cap; categories may still cap.
+    case topTier
     /// `terminal` is false for an intermediate cap with no reachable tier left.
     case capReached(beyond: Double, terminal: Bool)
-    case noTarget
+    /// `categoryCaps`: some categories still cap, only the card as a whole does not.
+    case noTarget(categoryCaps: Bool)
     case range
   }
 
@@ -227,8 +230,17 @@ struct RewardRowProjection: Equatable {
       }
       fill = 1
       due = deadline(periodEnd, .resets)
+    } else if row.card.spendingTiers?.isEmpty == false, calc.hasNextSpendingTier == false,
+      (calc.minimumSpend ?? 0) > 0
+    {
+      // Every threshold is behind: the minimum branch above has passed and
+      // no next tier is left. Category caps, if any, show as exceptions.
+      action = .topTier
+      tone = .earning
+      fill = 1
+      due = deadline(periodEnd, .resets)
     } else {
-      action = .noTarget
+      action = .noTarget(categoryCaps: calc.flags.contains { ($0.maximumSpend ?? 0) > 0 })
       tone = .neutral
       due = deadline(periodEnd, .resets)
     }
@@ -311,9 +323,12 @@ struct RewardRowText {
     case .capReached:
       amount = nil
       actionLabel = "Cap reached"
-    case .noTarget:
+    case .topTier:
       amount = nil
-      actionLabel = "No cap"
+      actionLabel = "Top tier reached"
+    case .noTarget(let categoryCaps):
+      amount = nil
+      actionLabel = categoryCaps ? "No card cap" : "No cap"
     case .range:
       amount = earned
       actionLabel = "earned"
