@@ -36,18 +36,18 @@ Adding another model with an existing capability combination requires only catal
 
 ### Simulator Keychain validation
 
-The real Keychain round-trip test is separate from the in-memory settings tests. An entitlement-less simulator host built with `CODE_SIGNING_ALLOWED=NO` can fail with `errSecMissingEntitlement` (`-34018`). Preserve and report that failure; do not skip it or substitute insecure storage. Simulator-only ad-hoc signing needs explicit approval, but no Apple certificate, provisioning profile, archive, or publication.
+The real Keychain round-trip test (`CaptureAITests/testKeychainCanReplaceAndDeleteOnlyItsOwnCredential`) is separate from the in-memory settings tests. It needs a test host that carries an `application-identifier` entitlement; an entitlement-less host built with `CODE_SIGNING_ALLOWED=NO` fails every `SecItem*` call with `errSecMissingEntitlement` (`-34018`). That failure is an environment signal, not a code bug: do not skip the test or substitute insecure storage.
 
-Use Xcode's normal simulator packaging/link/sign pipeline, not `codesign --entitlements` with iOS entitlements attached directly to the host's native signature. The latter passed static verification but failed runtime launch with AMFI's restricted-entitlement rejection. Xcode's generated `*-Simulated.xcent` embeds simulated entitlements in `__TEXT,__entitlements`; the ad-hoc native signature can have an empty entitlement dictionary. This route passed the real Keychain test on Xcode 26.6 / simulator 26.5.
-
-The wrapper currently hardcodes unsigned builds and does not forward extra `build-for-testing` arguments. For an explicitly approved signed simulator build, use its logged invocation with the same destination, cache, jobs, lock ownership, and log/heartbeat discipline, replacing only signing settings with:
+`scripts/ios-xcodebuild.sh` therefore signs simulator builds ad hoc by default:
 
 ```text
 CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO
 CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE= PROVISIONING_PROFILE_SPECIFIER=
 ```
 
-Preserve the existing team, bundle IDs, and tracked entitlements. Verify effective settings and resulting signatures say **Sign to Run Locally / adhoc**, with no certificate authority or embedded provisioning profile. Reinstall the checked app immediately before `scripts/ios-xcodebuild.sh test-without-building --` with those same overrides and `-only-testing:HowMuchTests/CaptureAITests/testKeychainCanReplaceAndDeleteOnlyItsOwnCredential`; after it passes, reinstall again before the matching full suite. Record rebuilt binary provenance separately from unsigned evidence. Never treat zero collected tests as success or clear simulator data to manufacture a pass.
+This is Xcode's normal simulator packaging/link/sign pipeline. It needs no Apple certificate, provisioning profile, network access, archive, or publication, and the product cannot run on a device. Xcode's generated `HowMuch.app-Simulated.xcent` (with `application-identifier` `PQ6U5ESLN2.sg.soon.howmuch` and the tracked entitlements) is embedded in `__TEXT,__entitlements`; the native signature is `adhoc` with no team or authority. Keep the existing team, bundle IDs, and tracked entitlements. Do not attach iOS entitlements with `codesign --entitlements` directly: that passed static verification but failed runtime launch with AMFI's restricted-entitlement rejection.
+
+`HOWMUCH_SIM_SIGNING=unsigned` restores `CODE_SIGNING_ALLOWED=NO` (for example, to reproduce an unsigned-only problem); the Keychain test is then expected to fail with `-34018`. Rebuild with `build-for-testing` whenever you switch modes, and pass the same mode to `test-without-building`. To check a build, `codesign -dv build/xcode/DerivedData-simulator/Build/Products/Debug-iphonesimulator/HowMuch.app` should report `flags=0x2(adhoc)`. An unsigned build also says `Signature=adhoc`, but its flags include `linker-signed` and the binary has no `__TEXT,__entitlements` section (`otool -l …/HowMuch.app/HowMuch | grep __entitlements`). There should be no `embedded.mobileprovision` either way. Never treat zero collected tests as success or clear simulator data to manufacture a pass.
 
 ## Privacy and recovery boundaries
 

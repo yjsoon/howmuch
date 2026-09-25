@@ -281,7 +281,11 @@ final class CaptureSession: Identifiable {
   var pendingUpdateChanges: [CaptureMappedChange]
   var isTransferringImages: Bool
   private var undoStack: [CaptureUndoSnapshot]
-  private var admitted: Bool
+  /// False once the workspace stops owning this session (scope change,
+  /// resume/start of another session, discard). A view can still hold the
+  /// instance, so send, freeze, and save must refuse rather than rely on
+  /// every caller re-checking `CaptureTurnScope`.
+  private(set) var admitted: Bool
 
   init(
     id: UUID = UUID(),
@@ -354,13 +358,13 @@ final class CaptureSession: Identifiable {
   var canSendComposer: Bool {
     let hasText = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     let hasSendableAttachment = attachments.contains { !$0.data.isEmpty }
-    return (hasText || hasSendableAttachment) && !isBusy && !isSaving
+    return (hasText || hasSendableAttachment) && admitted && !isBusy && !isSaving
   }
 
   var canFreezeComposer: Bool {
     let hasText = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     let hasReadyAttachment = attachments.contains { !$0.data.isEmpty && !$0.isReading }
-    return (hasText || hasReadyAttachment) && !isBusy && !isSaving
+    return (hasText || hasReadyAttachment) && admitted && !isBusy && !isSaving
   }
 
   var isWaitingOnAttachmentOCR: Bool {
@@ -369,6 +373,7 @@ final class CaptureSession: Identifiable {
 
   var canSaveIncluded: Bool {
     !includedDrafts.isEmpty
+      && admitted
       && !hasUnresolvedAmbiguity
       && !isBusy
       && !isIngesting
@@ -828,6 +833,14 @@ final class CaptureSession: Identifiable {
 
   func matchesTurn(generation expected: Int) -> Bool {
     generation == expected && isBusy
+  }
+
+  /// Called by the workspace when it stops owning this session. Cancels any
+  /// in-flight turn and permanently blocks send, freeze, and save on this
+  /// instance; reopening a conversation restores a fresh session instead.
+  func evict() {
+    cancelTurn()
+    admitted = false
   }
 
   func cancelTurn() {

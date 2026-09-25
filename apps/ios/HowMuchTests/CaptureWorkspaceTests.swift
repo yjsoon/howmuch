@@ -212,12 +212,22 @@ final class CaptureWorkspaceTests: XCTestCase {
     XCTAssertNotEqual(first.id, second.id)
     XCTAssertFalse(first.matchesTurn(generation: token.generation))
     XCTAssertFalse(first.isBusy)
+    first.composerText = "Lunch $12"
+    XCTAssertFalse(first.canSendComposer, "a session the workspace no longer owns must not send")
+    second.composerText = "Coffee $4"
+    let stopped = second.beginTurn()
+    second.cancelTurn()
+    XCTAssertFalse(second.matchesTurn(generation: stopped.generation))
+    XCTAssertTrue(second.canSendComposer, "Stop must leave the current session sendable")
     second.appendUserMessage("Second")
     workspace.persistCurrentIfNeeded()
     let thirdToken = second.beginTurn()
     let resumed = workspace.resume(workspace.recents.first(where: { $0.id == first.id })!.id)
     XCTAssertEqual(resumed?.id, first.id)
     XCTAssertFalse(second.matchesTurn(generation: thirdToken.generation))
+    XCTAssertFalse(second.canSendComposer)
+    resumed?.composerText = "Lunch $12"
+    XCTAssertEqual(resumed?.canSendComposer, true, "a resumed conversation is a fresh, admitted instance")
   }
 
   func testSamePlanScopeSwitchDropsCurrentSession() {

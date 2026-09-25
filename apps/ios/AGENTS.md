@@ -12,6 +12,8 @@ Use `scripts/ios-xcodebuild.sh` from the repository root. One validation owner p
 
 Do not hard-code a simulator UDID: runner inventories are not shared. The wrapper pins one available iOS 26+ simulator (prefer a booted iPhone, HowMuch Verification when present) and reuses that UDID for build, test, install, and launch. Override with `SIMULATOR_UDID` when you need a specific device, including iPad. Rebuild after source changes; never test stale products after a failed build. Select relevant tests/UI recipes for the task rather than every feature recipe.
 
+The wrapper signs simulator builds ad hoc (`CODE_SIGN_IDENTITY=-`, no certificate or profile) so the test host has the simulated entitlements the real Keychain test needs; `HOWMUCH_SIM_SIGNING=unsigned` opts out. Details: [Simulator Keychain validation](../../docs/ai-providers.md#simulator-keychain-validation).
+
 ```sh
 scripts/ios-xcodebuild.sh test
 UDID="$(scripts/ios-xcodebuild.sh destination)"
