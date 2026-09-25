@@ -974,10 +974,7 @@ struct RewardCardEditorView: View {
         set: { flag.wrappedValue.excludeFromRewards = $0; flag.wrappedValue.touch() }
       ))
       Button("Remove", role: .destructive) {
-        let id = flag.wrappedValue.id
-        withAnimation(Theme.Motion.standard) {
-          draft.flags.removeAll { $0.id == id }
-        }
+        draft.flags.removeAll { $0.id == flag.wrappedValue.id }
       }
     }
     // Several controls share this Form row. Borderless buttons take only
@@ -1007,10 +1004,7 @@ struct RewardCardEditorView: View {
         TextField("Override maximum", text: $override.maximumSpend)
           .keyboardType(.decimalPad)
         Button("Remove override", role: .destructive) {
-          let id = override.id
-          withAnimation(Theme.Motion.standard) {
-            tier.wrappedValue.overrides.removeAll { $0.id == id }
-          }
+          tier.wrappedValue.overrides.removeAll { $0.id == override.id }
         }
       }
       Button("Add flag override") {
@@ -1021,10 +1015,7 @@ struct RewardCardEditorView: View {
         }
       }
       Button("Remove tier", role: .destructive) {
-        let id = tier.wrappedValue.id
-        withAnimation(Theme.Motion.standard) {
-          draft.tiers.removeAll { $0.id == id }
-        }
+        draft.tiers.removeAll { $0.id == tier.wrappedValue.id }
       }
     }
     // Remove override, Add flag override and Remove tier share one Form row;

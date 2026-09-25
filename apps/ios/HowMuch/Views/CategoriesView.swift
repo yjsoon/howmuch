@@ -20,7 +20,7 @@ struct CategoriesView: View {
         if let planMonth {
           // Stepping months keeps the last month on screen until the next
           // arrives; dim it so its figures never read as the new month's.
-          let isOtherMonth = phase == .loading && !planMonth.month.hasPrefix(monthKey)
+          let isOtherMonth = phase != .loaded && !planMonth.month.hasPrefix(monthKey)
           VStack(alignment: .leading, spacing: 16) {
             summary(for: planMonth)
 

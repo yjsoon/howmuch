@@ -277,7 +277,6 @@ struct CaptureAssistantReply: View {
               .animation(Theme.Motion.standard, value: item.included)
               .frame(width: 44, height: 44)
           }
-          .sensoryFeedback(.selection, trigger: item.included)
           .tint(Theme.accent)
           .disabled(isMutatingLocked)
           .accessibilityLabel(item.included ? "Include this transaction" : "Excluded transaction")

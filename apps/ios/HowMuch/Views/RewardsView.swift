@@ -337,7 +337,7 @@ struct RewardsView: View {
     } label: {
       RewardFilledRow(projection: projection, icon: icon(for: projection.accountID), currencyFormat: model.currencyFormat)
     }
-    .buttonStyle(.pressable)
+    .buttonStyle(.plain)
     .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
     .listRowBackground(Color.clear)
     .listRowSeparator(.hidden)

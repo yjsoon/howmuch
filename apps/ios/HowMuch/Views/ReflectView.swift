@@ -285,6 +285,7 @@ enum ReflectMaths {
   }
 
   /// Shared empty state for a report window with nothing to show.
+  @MainActor
   static func emptyRange(title: String, systemImage: String) -> some View {
     ContentUnavailableView(
       title,

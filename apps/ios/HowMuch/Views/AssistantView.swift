@@ -6,6 +6,7 @@ struct AssistantView: View {
   @State private var brief: LedgerQueryResult?
   @State private var briefError: String?
   @State private var isLoadingBrief = false
+  @State private var briefScopeKey: String?
   @State private var pendingDiscardID: UUID?
   @State private var isConfirmingClear = false
   @State private var briefDay: String?
@@ -238,6 +239,14 @@ struct AssistantView: View {
     let settingsScope = model.settings.viewPrefsScopeKey
     let workspaceScope = workspace.activeScopeKey
     let planID = model.settings.planID
+    // A refresh keeps the last brief visible, but never one from another
+    // plan or scope.
+    let scopeKey = "\(planID)|\(settingsScope ?? "")|\(workspaceScope ?? "")"
+    if briefScopeKey != scopeKey {
+      brief = nil
+      briefError = nil
+      briefScopeKey = scopeKey
+    }
     isLoadingBrief = true
     func stillCurrent() -> Bool {
       generation == briefGeneration

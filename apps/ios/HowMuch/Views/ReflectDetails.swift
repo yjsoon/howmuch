@@ -673,6 +673,8 @@ struct SpendingBreakdownDetailView: View {
         accountIDs: Array(scope.accountIDs),
         categoryIDs: Array(scope.categoryIDs)
       )
+      // A superseded request must not overwrite the current filter's data.
+      guard !Task.isCancelled else { return }
       withAnimation(Theme.Motion.arrive) {
         report = next
         phase = .loaded
@@ -720,7 +722,7 @@ struct NetWorthDetailView: View {
             .foregroundStyle(Theme.textPrimary)
             .padding(.horizontal, 4)
           historyCard(report: report)
-        } else if report != nil {
+        } else if report != nil, phase != .loading {
           ReflectMaths.emptyRange(title: "No Net Worth History", systemImage: "chart.bar")
         } else {
           PhasePlaceholder(phase: phase) {
@@ -861,6 +863,8 @@ struct NetWorthDetailView: View {
         interval: interval,
         accountIDs: Array(scope.accountIDs)
       )
+      // A superseded request must not overwrite the current filter's data.
+      guard !Task.isCancelled else { return }
       withAnimation(Theme.Motion.arrive) {
         report = next
         phase = .loaded
@@ -903,7 +907,7 @@ struct IncomeVsSpendingDetailView: View {
         if let report, !report.periods.isEmpty {
           totalsCard(report: report)
           periodsCard(report: report)
-        } else if report != nil {
+        } else if report != nil, phase != .loading {
           ReflectMaths.emptyRange(title: "No Income or Spending", systemImage: "chart.bar")
         } else {
           PhasePlaceholder(phase: phase) {
@@ -1035,6 +1039,8 @@ struct IncomeVsSpendingDetailView: View {
         accountIDs: Array(scope.accountIDs),
         categoryIDs: Array(scope.categoryIDs)
       )
+      // A superseded request must not overwrite the current filter's data.
+      guard !Task.isCancelled else { return }
       withAnimation(Theme.Motion.arrive) {
         report = next
         phase = .loaded
@@ -1185,6 +1191,8 @@ struct AgeOfMoneyDetailView: View {
         interval: interval,
         accountIDs: Array(scope.accountIDs)
       )
+      // A superseded request must not overwrite the current filter's data.
+      guard !Task.isCancelled else { return }
       withAnimation(Theme.Motion.arrive) {
         report = next
         phase = .loaded

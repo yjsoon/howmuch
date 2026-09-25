@@ -72,7 +72,7 @@ struct DisclosureValueRow: View {
 
 /// Tappable cards and tiles sink slightly under the finger, so a tap that
 /// pushes a screen or opens a sheet has visible touch-down feedback.
-/// Use outside `List`/`Form` rows, which draw their own highlight.
+/// Avoid it on whole `List`/`Form` rows, which draw their own highlight.
 struct PressableButtonStyle: ButtonStyle {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
