@@ -577,10 +577,16 @@ Snapshot format, version 1. Every section is an array and may be omitted. Amount
 - `categories`: `id`, `category_group_id`, `name`, `hidden`, `internal`, `deleted`
 - `payees`: `id`, `name`, `transfer_account_id`, `deleted`
 - `accounts`: `id`, `name`, `icon`, `type`, `on_budget`, `closed`, `opening_balance`, `transfer_payee_id`
-- `transactions`: `id`, `account_id`, `date`, `amount`, `memo`, `cleared`, `approved`, `flag_color`, `flag_name`, `payee_id`, `category_id`, `transfer_account_id`, `transfer_transaction_id`, `matched_transaction_id`, `import_id`, `import_payee_name`, `import_payee_name_original`, `subtransactions` (`id`, `amount`, `memo`, `payee_id`, `category_id`, `transfer_account_id`, `transfer_transaction_id`)
+- `transactions`: `id`, `account_id`, `date`, `amount`, `memo`, `cleared`, `approved`, `flag_color`, `flag_name`, `payee_id`, `payee_name`, `category_id`, `transfer_account_id`, `transfer_transaction_id`, `matched_transaction_id`, `import_id`, `import_payee_name`, `import_payee_name_original`, `subtransactions` (`id`, `amount`, `memo`, `payee_id`, `payee_name`, `category_id`, `transfer_account_id`, `transfer_transaction_id`)
 - `scheduled_transactions`: `id`, `account_id`, `date_first`, `date_next`, `frequency`, `amount`, `memo`, `flag_color`, `payee_id`, `category_id`, `transfer_account_id`, `subtransactions` (`id`, `amount`, `memo`, `payee_id`, `category_id`, `transfer_account_id`)
 
-Export writes live accounts, transactions and schedules, and every group, category and payee (tombstones included, because live transactions may still name them). An account's `opening_balance` is exported as the value that reproduces its displayed balance from its live transactions. Budgeting data, YNAB raw objects, account preferences (per user) and Rewards Tracker configuration are not included; set preferences and rewards cards through their own endpoints after importing.
+`payee_name` (optional, at most 500 characters) is the free-text payee of a row or split line that has no payee row. Export sets it only when `payee_id` is null; import ignores it when `payee_id` is set and takes the name from that payee, as reads do. It was added without a version bump: the parser rejects unknown top-level sections but not unknown fields inside a row, so a server that predates it accepts a snapshot carrying it and simply drops the name, as before.
+
+Export writes live accounts, transactions and schedules, and every group, category and payee (tombstones included, because live transactions may still name them). An account's `opening_balance` is exported as the value that reproduces its displayed balance from its live transactions. Budgeting data, YNAB raw objects, account preferences (per user) and Rewards Tracker configuration are not included; set preferences and rewards cards through their own endpoints after importing. Some derived or server-side state is also not carried:
+
+- `last_reconciled_date` on an account comes from the reconciliation history, which is not exported. After import it is the date of the latest reconciled transaction, which is earlier than the original when the last statement date fell after that transaction.
+- `direct_import_linked` and `direct_import_in_error` are YNAB bank-link flags; imported accounts read `false`.
+- Imported transactions are stamped `source_kind: snapshot-import` with no `source_ref`. A materialised schedule occurrence therefore loses its link to the schedule, so replaying an already-entered occurrence on the new server is refused rather than replayed. The schedule's `date_next` travels, so future occurrences are unaffected.
 
 Import rules:
 

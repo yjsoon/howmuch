@@ -354,6 +354,131 @@ for (const backend of BACKENDS) {
   });
 }
 
+/**
+ * Every user-visible column set to a non-default value. The free-text payees
+ * are forced with SQL: SQLite's write path turns a typed payee name into a
+ * payee row, D1's keeps it only in `payee_name_snapshot`, and the snapshot
+ * must carry the latter shape on both.
+ */
+async function seedEveryColumn(harness: NativeHarness): Promise<void> {
+  const { request, repo, db } = harness;
+  const post = async (path: string, body: unknown) => {
+    const response = await request(path, { method: "POST", body });
+    if (response.status >= 300) throw new Error(`${path} ${response.status} ${await response.text()}`);
+    return (await response.json()).data;
+  };
+  await post("/v1/plans/p/category_groups", { category_group: { id: "grp-home", name: "Home" } });
+  await post("/v1/plans/p/category_groups", { category_group: { id: "grp-hidden", name: "Stashed", hidden: true } });
+  await post("/v1/plans/p/categories", { category: { id: "cat-food", category_group_id: "grp-home", name: "Food" } });
+  await post("/v1/plans/p/categories", { category: { id: "cat-secret", category_group_id: "grp-hidden", name: "Secret", hidden: true } });
+  await post("/v1/plans/p/categories", { category: { id: "cat-retired", category_group_id: "grp-home", name: "Retired" } });
+  expect((await request("/v1/plans/p/categories/cat-retired", { method: "DELETE" })).status).toBeLessThan(300);
+  await repo.createAccount("p", { id: "acct-main", name: "Main", icon: "🐷", type: "checking", opening_balance: 250000 });
+  await repo.createAccount("p", { id: "acct-car", name: "Car", icon: "🚗", type: "otherAsset", on_budget: false, closed: true, opening_balance: 9000000, balance: 9000000, cleared_balance: 9000000 });
+  const card = await repo.createAccount("p", { id: "acct-card", name: "Card", type: "creditCard", opening_balance: -4000 });
+  await post("/v1/plans/p/payees", { payee: { name: "Grocer" } });
+  await post("/v1/plans/p/payees", { payee: { name: "Gone Shop" } });
+  const payees = (await (await request("/v1/plans/p/payees")).json()).data.payees;
+  const grocer = payees.find((payee: any) => payee.name === "Grocer");
+  const gone = payees.find((payee: any) => payee.name === "Gone Shop");
+
+  await repo.createTransaction("p", {
+    id: "t-full", account_id: "acct-main", date: "2026-03-01", amount: -12340, payee_id: grocer.id, category_id: "cat-secret",
+    memo: "Everything set", cleared: "cleared", approved: true, flag_color: "purple", flag_name: "Check",
+    matched_transaction_id: "bank-match-1", import_id: "YNAB:-12340:2026-03-01:1", import_payee_name: "GROCER 42", import_payee_name_original: "GROCER #42 SINGAPORE",
+  });
+  await repo.createTransaction("p", { id: "t-typed", account_id: "acct-main", date: "2026-03-02", amount: -800, payee_name: "Street stall", memo: "typed" });
+  await repo.createTransaction("p", { id: "t-old-payee", account_id: "acct-main", date: "2026-03-02", amount: -100, payee_id: gone.id });
+  await repo.createTransaction("p", {
+    id: "t-split", account_id: "acct-main", date: "2026-03-03", amount: -9000, payee_id: grocer.id, approved: true, cleared: "cleared",
+    subtransactions: [
+      { id: "s-a-food", amount: -4000, category_id: "cat-food", memo: "groceries" },
+      { id: "s-b-typed", amount: -3000, payee_name: "Market", category_id: "cat-food", memo: "fruit" },
+      { id: "s-c-card", amount: -2000, payee_id: card.transfer_payee_id, memo: "to card" },
+    ],
+  });
+  await repo.createTransaction("p", { id: "t-pay-card", account_id: "acct-main", date: "2026-03-04", amount: -5000, payee_id: card.transfer_payee_id, cleared: "cleared" });
+  await repo.createTransaction("p", { id: "t-uncleared", account_id: "acct-card", date: "2026-03-05", amount: -700, category_id: "cat-food", cleared: "uncleared" });
+  db.run("UPDATE transactions SET payee_id = NULL, payee_name_snapshot = 'Street stall' WHERE id = 't-typed'");
+  db.run("UPDATE subtransactions SET payee_id = NULL, payee_name_snapshot = 'Market' WHERE id = 's-b-typed'");
+  db.run("UPDATE payees SET deleted = 1 WHERE id = ?", gone.id);
+  expect(db.query("SELECT payee_id, payee_name_snapshot FROM transactions WHERE id = 't-typed'").get()).toEqual({ payee_id: null, payee_name_snapshot: "Street stall" });
+  expect(db.query("SELECT payee_id, payee_name_snapshot FROM subtransactions WHERE id = 's-b-typed'").get()).toEqual({ payee_id: null, payee_name_snapshot: "Market" });
+
+  // Reconcile at the last cleared date: a later statement date is not carried (see the contract).
+  const main = await repo.getAccount("p", "acct-main");
+  await repo.reconcileAccount("p", "acct-main", "2026-03-04", main.cleared_balance, { operationId: "reconcile-main-1" });
+  expect((await repo.getTransaction("p", "t-full")).cleared).toBe("reconciled");
+
+  await repo.createScheduledTransaction("p", {
+    id: "sched-full", account_id: "acct-main", date_first: "2026-01-15", date_next: "2026-05-15", frequency: "everyOtherMonth", amount: -6000,
+    payee_id: grocer.id, memo: "Bi-monthly", flag_color: "blue",
+    subtransactions: [{ id: "ss-1", amount: -2500, category_id: "cat-food", memo: "part one" }, { id: "ss-2", amount: -3500, category_id: "cat-secret", memo: "part two" }],
+  });
+  await repo.createScheduledTransaction("p", { id: "sched-transfer", account_id: "acct-main", date_first: "2026-04-01", frequency: "monthly", amount: -1000, payee_id: card.transfer_payee_id, transfer_account_id: "acct-card" });
+}
+
+async function readEach(harness: NativeHarness, kind: "transactions" | "accounts", ids: string[]): Promise<unknown[]> {
+  const strip = (value: any): any => JSON.parse(JSON.stringify(value, (key, entry) => key === "server_knowledge" ? undefined : entry));
+  const single = kind === "transactions" ? "transaction" : "account";
+  // One at a time: a D1 account read may run a write batch of its own.
+  const records: unknown[] = [];
+  for (const id of ids) {
+    const response = await harness.request(`/v1/plans/p/${kind}/${id}`);
+    expect(response.status).toBe(200);
+    records.push(strip((await response.json()).data[single]));
+  }
+  return records;
+}
+
+async function expectSameRecords(source: NativeHarness, target: NativeHarness, exported: any): Promise<void> {
+  const transactionIds = exported.transactions.map((row: any) => row.id);
+  const accountIds = exported.accounts.map((row: any) => row.id);
+  expect(await readEach(target, "transactions", transactionIds)).toEqual(await readEach(source, "transactions", transactionIds));
+  expect(await readEach(target, "accounts", accountIds)).toEqual(await readEach(source, "accounts", accountIds));
+  expect(await clientView(target)).toEqual(await clientView(source));
+}
+
+for (const backend of BACKENDS) {
+  describe(`${backend} snapshots keep every column`, () => {
+    test("export, import, export is lossless and reads the same", async () => {
+      const source = await open(backend);
+      await seedEveryColumn(source);
+      const exported = await exportSnapshot(source);
+      const byId = Object.fromEntries(exported.transactions.map((row: any) => [row.id, row]));
+      expect(byId["t-typed"]).toMatchObject({ payee_id: null, payee_name: "Street stall" });
+      expect(byId["t-full"].payee_name).toBeNull();
+      expect(byId["t-split"].subtransactions.find((sub: any) => sub.id === "s-b-typed")).toMatchObject({ payee_id: null, payee_name: "Market" });
+
+      const target = await open(backend);
+      expect((await importSnapshot(target, exported)).status).toBe(201);
+      expect(await exportSnapshot(target)).toEqual(exported);
+      await expectSameRecords(source, target, exported);
+      const typed = (await readEach(target, "transactions", ["t-typed"]))[0] as any;
+      expect(typed).toMatchObject({ payee_id: null, payee_name: "Street stall", memo: "typed" });
+      const car = (await readEach(target, "accounts", ["acct-car"]))[0] as any;
+      expect(car).toMatchObject({ icon: "🚗", closed: true, on_budget: false, balance: 9000000 });
+    });
+
+    test("payee_name is ignored when payee_id is set, and length-checked", async () => {
+      const rows = parsePlanSnapshot({
+        format: SNAPSHOT_FORMAT, version: 1,
+        payees: [{ id: "pay", name: "Grocer" }],
+        accounts: [{ id: "a", name: "A" }],
+        transactions: [
+          { id: "t1", account_id: "a", date: "2026-01-01", amount: -1, payee_id: "pay", payee_name: "Stale" },
+          { id: "t2", account_id: "a", date: "2026-01-01", amount: -1, payee_name: "Typed" },
+        ],
+      }, "p");
+      expect(rows.transactions.map((row) => row.payee_name_snapshot)).toEqual(["Grocer", "Typed"]);
+      expect(() => parsePlanSnapshot({
+        format: SNAPSHOT_FORMAT, version: 1, accounts: [{ id: "a", name: "A" }],
+        transactions: [{ id: "t", account_id: "a", date: "2026-01-01", amount: -1, payee_name: "x".repeat(501) }],
+      }, "p")).toThrow("transactions[0].payee_name must be a string of at most 500 characters");
+    });
+  });
+}
+
 describe("snapshot request size", () => {
   test("bodies over 8 MiB are 413 and write nothing", async () => {
     const target = await open("SQLite");
@@ -378,6 +503,20 @@ describe("snapshots cross backends", () => {
     expect((await importSnapshot(sqliteAgain, await exportSnapshot(d1))).status).toBe(201);
     expect(await exportSnapshot(sqliteAgain)).toEqual(fromSqlite);
     expect(await clientView(sqliteAgain)).toEqual(await clientView(d1));
+  });
+
+  test("every column survives SQLite to D1 and back", async () => {
+    const sqlite = await open("SQLite");
+    await seedEveryColumn(sqlite);
+    const fromSqlite = await exportSnapshot(sqlite);
+    const d1 = await open("D1");
+    expect((await importSnapshot(d1, fromSqlite)).status).toBe(201);
+    expect(await exportSnapshot(d1)).toEqual(fromSqlite);
+    await expectSameRecords(sqlite, d1, fromSqlite);
+    const sqliteAgain = await open("SQLite");
+    expect((await importSnapshot(sqliteAgain, await exportSnapshot(d1))).status).toBe(201);
+    expect(await exportSnapshot(sqliteAgain)).toEqual(fromSqlite);
+    await expectSameRecords(sqlite, sqliteAgain, fromSqlite);
   });
 });
 

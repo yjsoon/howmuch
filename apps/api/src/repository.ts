@@ -970,13 +970,13 @@ export class LedgerRepository {
         values: [planId],
       },
       {
-        sql: `SELECT id, account_id, date, amount_milli, memo, cleared, approved, flag_color, flag_name, payee_id, category_id,
+        sql: `SELECT id, account_id, date, amount_milli, memo, cleared, approved, flag_color, flag_name, payee_id, payee_name_snapshot, category_id,
                 transfer_account_id, transfer_transaction_id, matched_transaction_id, import_id, import_payee_name, import_payee_name_original
               FROM transactions WHERE plan_id = ? AND deleted = 0 ORDER BY id`,
         values: [planId],
       },
       {
-        sql: `SELECT s.id, s.transaction_id, s.amount_milli, s.memo, s.payee_id, s.category_id, s.transfer_account_id, s.transfer_transaction_id
+        sql: `SELECT s.id, s.transaction_id, s.amount_milli, s.memo, s.payee_id, s.payee_name_snapshot, s.category_id, s.transfer_account_id, s.transfer_transaction_id
               FROM subtransactions s JOIN transactions t ON t.id = s.transaction_id
               WHERE t.plan_id = ? AND t.deleted = 0 AND s.deleted = 0 ORDER BY s.transaction_id, s.id`,
         values: [planId],

@@ -74,6 +74,8 @@ export type SnapshotSubtransaction = {
   amount: number;
   memo: string | null;
   payee_id: string | null;
+  /** Free-text payee of a line with no payee row; null whenever `payee_id` is set. */
+  payee_name: string | null;
   category_id: string | null;
   transfer_account_id: string | null;
   transfer_transaction_id: string | null;
@@ -89,6 +91,8 @@ export type SnapshotTransaction = {
   flag_color: string | null;
   flag_name: string | null;
   payee_id: string | null;
+  /** Free-text payee of a row with no payee row; null whenever `payee_id` is set. */
+  payee_name: string | null;
   category_id: string | null;
   transfer_account_id: string | null;
   transfer_transaction_id: string | null;
@@ -350,7 +354,7 @@ export function parsePlanSnapshot(value: unknown, planId: string): SnapshotRows 
       flag_color: nullableText(input.flag_color, `${path}.flag_color`, 32),
       flag_name: nullableText(input.flag_name, `${path}.flag_name`, 200),
       payee_id: payeeId,
-      payee_name_snapshot: payeeId ? payees.get(payeeId)!.name : null,
+      payee_name_snapshot: payeeId ? payees.get(payeeId)!.name : nullableText(input.payee_name, `${path}.payee_name`, 500),
       category_id: categoryId,
       category_name_snapshot: categoryId ? categories.get(categoryId)!.name : null,
       transfer_account_id: accountRef(input.transfer_account_id, `${path}.transfer_account_id`),
@@ -370,7 +374,7 @@ export function parsePlanSnapshot(value: unknown, planId: string): SnapshotRows 
         amount_milli: milliunits(sub.amount, `${subPath}.amount`),
         memo: nullableText(sub.memo, `${subPath}.memo`, 2000),
         payee_id: subPayee,
-        payee_name_snapshot: subPayee ? payees.get(subPayee)!.name : null,
+        payee_name_snapshot: subPayee ? payees.get(subPayee)!.name : nullableText(sub.payee_name, `${subPath}.payee_name`, 500),
         category_id: subCategory,
         category_name_snapshot: subCategory ? categories.get(subCategory)!.name : null,
         transfer_account_id: accountRef(sub.transfer_account_id, `${subPath}.transfer_account_id`),
@@ -624,6 +628,7 @@ export function projectPlanSnapshot(source: SnapshotSource): PlanSnapshot {
       amount: Number(sub.amount_milli),
       memo: sub.memo ?? null,
       payee_id: sub.payee_id ?? null,
+      payee_name: freeTextPayee(sub),
       category_id: sub.category_id ?? null,
       transfer_account_id: sub.transfer_account_id ?? null,
       transfer_transaction_id: sub.transfer_transaction_id ?? null,
@@ -669,6 +674,7 @@ export function projectPlanSnapshot(source: SnapshotSource): PlanSnapshot {
       flag_color: row.flag_color ?? null,
       flag_name: row.flag_name ?? null,
       payee_id: row.payee_id ?? null,
+      payee_name: freeTextPayee(row),
       category_id: row.category_id ?? null,
       transfer_account_id: row.transfer_account_id ?? null,
       transfer_transaction_id: row.transfer_transaction_id ?? null,
@@ -753,6 +759,14 @@ function validateTransferGraph(transactions: Row[], subtransactions: Row[], path
       throw new SnapshotValidationError(`${where}: counterpart ${counterpartId} must name account ${side.accountId} as its transfer_account_id`);
     }
   }
+}
+
+/**
+ * A row's payee name travels only when no payee row carries it. With a
+ * `payee_id` the import re-derives the name from that payee, as reads do.
+ */
+function freeTextPayee(row: Row): string | null {
+  return row.payee_id ? null : (row.payee_name_snapshot ?? null);
 }
 
 function present(input: Row, keys: readonly string[]): Row {
