@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OSLog
 
 enum LoadPhase: Equatable {
   case idle
@@ -39,6 +40,8 @@ private struct LedgerDelete {
 @MainActor
 @Observable
 final class AppModel {
+  private static let logger = Logger(subsystem: "sg.soon.howmuch", category: "AppModel")
+
   var settings: APISettings
   let captureAI: CaptureAISettings
   var planSettings: PlanSettings?
@@ -121,6 +124,8 @@ final class AppModel {
   var isSubmitting = false
   var lastSaveMessage: SaveMessage?
   var isShowingSettings = false
+  /// First run: choose between this iPhone and a server.
+  var isShowingWelcome = false
   /// Account registers currently on a navigation stack, deepest last.
   /// Horizon fill uses this stack. Capture origin uses `visibleRegisterAccountID`.
   private(set) var focusedRegisterAccountIDs: [String] = []
@@ -243,7 +248,8 @@ final class AppModel {
     settings: APISettings = .load(),
     viewPrefs: ViewPrefs = .load(),
     captureAI: CaptureAISettings? = nil,
-    snapshotStore: SnapshotStore = .shared
+    snapshotStore: SnapshotStore = .shared,
+    hasSavedSettings: Bool = APISettings.hasSavedSettings()
   ) {
     self.snapshotStore = snapshotStore
     var scopedStore = ScopedViewPrefsStore.load()
@@ -259,8 +265,16 @@ final class AppModel {
     self.viewPrefs = scope.map { scopedStore.activate(scope: $0, legacy: viewPrefs) } ?? ViewPrefs()
     self.scopedViewPrefsStore = scopedStore
     // A revoked session is persisted as signed out. Do not let a cold launch
-    // fall back to tabs that can only render tokenless API errors.
-    self.isShowingSettings = !settings.isAuthenticated
+    // fall back to tabs that can only render tokenless API errors. Only an
+    // install that has never saved settings sees the welcome screen.
+    switch LaunchRoute.resolve(hasSavedSettings: hasSavedSettings, isAuthenticated: settings.isAuthenticated) {
+    case .welcome:
+      self.isShowingWelcome = true
+    case .connection:
+      self.isShowingSettings = true
+    case .main:
+      break
+    }
     NotificationCenter.default.addObserver(
       forName: .howMuchAuthenticationExpired,
       object: nil,
@@ -396,6 +410,12 @@ final class AppModel {
   /// "Invalid credentials" is misleading and can invite writes with a dead
   /// session, so the connection screen is made the single next step.
   private func handleAuthenticationExpiry(expiredSessionToken: String) {
+    // The on-device engine has no session to revoke. Signing it out would
+    // leave local mode on a server sign-in screen with no way back.
+    guard !settings.isLocal else {
+      Self.logger.notice("Ignored an authentication expiry in local mode")
+      return
+    }
     guard settings.isAuthenticated, settings.sessionToken == expiredSessionToken else {
       return
     }
@@ -1478,6 +1498,71 @@ final class AppModel {
     if !launchIdentityChanged {
       await refreshAll()
     }
+  }
+
+  // MARK: - Local mode
+
+  /// "Start on this iPhone": creates the on-device plan, gives it starter
+  /// categories, then switches to it. Nothing is saved until the engine has
+  /// answered, so a failure leaves the welcome screen as it was.
+  func startOnThisDevice() async throws {
+    // Read before `prepare`, which creates the plan it is configured with:
+    // an install that lost its preferences keeps the ledger already on disk.
+    let local = APISettings.local(livePlanIDs: try await LocalEngine.shared.livePlanIDs())
+    try await LocalEngine.shared.prepare(config: local.localEngineConfig)
+    await completeStarterCategories(settings: local)
+    isShowingWelcome = false
+    isShowingSettings = false
+    await applySettings(local)
+  }
+
+  /// Starter categories are a convenience: an empty list is still a working
+  /// plan. A seed cut short finishes on a later launch.
+  func completeStarterCategories(settings: APISettings? = nil) async {
+    let settings = settings ?? self.settings
+    guard settings.isLocal, settings.isAuthenticated else {
+      return
+    }
+    do {
+      try await StarterCategories.seedIfNeeded(client: APIClient(settings: settings), planID: settings.planID)
+    } catch {
+      Self.logger.error("Starter categories incomplete: \(error.localizedDescription, privacy: .public)")
+    }
+  }
+
+  /// "Connect to a server" on the welcome screen: today's sign-in.
+  func showConnectionFromWelcome() {
+    isShowingWelcome = false
+    isShowingSettings = true
+  }
+
+  /// Sign-in started from the welcome screen can go back to it until a
+  /// connection has been saved.
+  var canReturnToWelcome: Bool {
+    LaunchRoute.resolve(
+      hasSavedSettings: APISettings.hasSavedSettings(),
+      isAuthenticated: settings.isAuthenticated
+    ) == .welcome
+  }
+
+  func returnToWelcome() {
+    isShowingSettings = false
+    isShowingWelcome = true
+  }
+
+  /// Local mode has no cron, so the daily schedule catch-up runs on launch
+  /// and whenever the app returns to the foreground.
+  func runLocalScheduledTransactions(refreshAfter: Bool = true) async {
+    guard settings.isLocal, settings.isAuthenticated else {
+      return
+    }
+    guard let summary = try? await LocalEngine.shared.runScheduledMaterialization(config: settings.localEngineConfig),
+          summary.occurrenceCount > 0,
+          refreshAfter
+    else {
+      return
+    }
+    await refresh(slices: [.accounts, .payees, .ledger, .schedules])
   }
 
   /// True while a `refreshAll()` run is in flight, including the plan

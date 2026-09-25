@@ -45,6 +45,21 @@ struct APISettings: Codable, Equatable {
   /// a fresh install prevents requests from accidentally targeting the old
   /// development-only `local-plan` identifier.
   var planID = ""
+  /// Where requests go. Settings saved before local mode existed have no
+  /// value here and decode as `.server`, so an existing install keeps its
+  /// connection exactly as it was.
+  var mode: Mode = .server
+
+  enum Mode: String, Codable {
+    /// A HowMuch server, reached over the network.
+    case server
+    /// The embedded engine and on-device database (`LocalEngine`).
+    case local
+  }
+
+  var isLocal: Bool {
+    mode == .local
+  }
 
   var trimmedBaseURL: String {
     baseURLString.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -259,6 +274,24 @@ struct APISettings: Codable, Equatable {
       return APISettings()
     }
     var settings = decoded
+    if settings.isLocal {
+      // The engine token only has to match between the app and its own
+      // engine, so a Keychain that lost it is repaired rather than signed out.
+      if let normalizedBaseURL = settings.normalizedBaseURLString,
+         let token = CredentialStore.load(for: normalizedBaseURL) {
+        settings.sessionToken = token
+      } else {
+        settings.sessionToken = randomEngineToken()
+        settings.save(to: defaults)
+      }
+      // Local mode has one principal. An install whose user id was cleared
+      // (an earlier build signed local mode out) is restored, not stranded.
+      if settings.authenticatedUserID.isEmpty {
+        settings.authenticatedUserID = localUserID
+        settings.save(to: defaults)
+      }
+      return settings
+    }
     if settings.normalizedBaseURLString == normalizedBaseURLString(from: legacyDevelopmentBaseURL) {
       settings.baseURLString = productionBaseURL
       settings.sessionToken = ""
@@ -348,6 +381,113 @@ struct APISettings: Codable, Equatable {
     CredentialStore.useService(name)
   }
 #endif
+}
+
+// MARK: - Local mode
+
+extension APISettings {
+  /// Local requests are addressed as though to this server, so endpoint-scoped
+  /// state (the Keychain token, view preferences, snapshots) needs no special case.
+  static let localBaseURL = LocalEngine.origin
+  /// The id the engine reports for its API-token principal (`GET /v1/user`).
+  static let localUserID = "local-user"
+  static let localPlanIDKey = "HowMuch.LocalPlanID"
+
+  /// Local-mode settings for this install. The plan id is created once and
+  /// kept, so the on-device ledger stays addressable after any later change
+  /// of mode; the engine token is new each time and saved to the Keychain by `save`.
+  /// `livePlanIDs` are the plans already in the on-device database, read
+  /// before the engine starts (see `LocalEngine.livePlanIDs()`).
+  static func local(in defaults: UserDefaults = .standard, livePlanIDs: [String] = []) -> APISettings {
+    APISettings(
+      baseURLString: localBaseURL,
+      sessionToken: randomEngineToken(),
+      authenticatedUserID: localUserID,
+      planID: localPlanID(in: defaults, livePlanIDs: livePlanIDs),
+      mode: .local
+    )
+  }
+
+  static func localPlanID(in defaults: UserDefaults = .standard, livePlanIDs: [String] = []) -> String {
+    let saved = defaults.string(forKey: localPlanIDKey)
+    let planID = LocalPlanRecovery.planID(saved: saved, livePlanIDs: livePlanIDs)
+      ?? "plan_" + UUID().uuidString.lowercased()
+    if planID != saved {
+      defaults.set(planID, forKey: localPlanIDKey)
+    }
+    return planID
+  }
+
+  static func randomEngineToken() -> String {
+    var bytes = [UInt8](repeating: 0, count: 32)
+    if SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) != errSecSuccess {
+      return UUID().uuidString + UUID().uuidString
+    }
+    return bytes.map { String(format: "%02x", $0) }.joined()
+  }
+
+  /// Whether this install has ever saved a connection. A fresh install has
+  /// not; an install that signed out or lost its session still has.
+  static func hasSavedSettings(in defaults: UserDefaults = .standard) -> Bool {
+    defaults.data(forKey: userDefaultsKey) != nil
+  }
+
+  var localEngineConfig: LocalEngineConfig {
+    LocalEngineConfig(
+      apiToken: sessionToken,
+      defaultPlanId: planID,
+      timeZone: TimeZone.current.identifier
+    )
+  }
+}
+
+extension APISettings {
+  /// Written by hand only so that a missing `mode` decodes as `.server`; every
+  /// other key decodes exactly as the synthesised conformance did.
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.init(
+      baseURLString: try container.decode(String.self, forKey: .baseURLString),
+      username: try container.decode(String.self, forKey: .username),
+      sessionToken: try container.decode(String.self, forKey: .sessionToken),
+      authenticatedUserID: try container.decode(String.self, forKey: .authenticatedUserID),
+      planID: try container.decode(String.self, forKey: .planID),
+      mode: try container.decodeIfPresent(Mode.self, forKey: .mode) ?? .server
+    )
+  }
+}
+
+/// Which plan the on-device ledger uses when local mode starts.
+enum LocalPlanRecovery {
+  /// The saved id wins. Without one (lost preferences, a restored backup),
+  /// a database holding exactly one live plan is adopted, so the ledger on
+  /// the device is not orphaned behind a new, empty plan. Otherwise `nil`:
+  /// the caller creates a plan.
+  static func planID(saved: String?, livePlanIDs: [String]) -> String? {
+    if let saved, !saved.isEmpty {
+      return saved
+    }
+    return livePlanIDs.count == 1 ? livePlanIDs[0] : nil
+  }
+}
+
+/// Where a launch starts: first use, a connection that needs signing in, or
+/// the app itself.
+enum LaunchRoute: Equatable {
+  case welcome
+  case connection
+  case main
+
+  /// Only an install that has never saved settings is offered the welcome
+  /// screen. A saved but signed-out connection (a revoked session, a restore
+  /// without its Keychain) returns to Connection, as it always has, so an
+  /// existing server user is never moved into local mode.
+  static func resolve(hasSavedSettings: Bool, isAuthenticated: Bool) -> LaunchRoute {
+    if isAuthenticated {
+      return .main
+    }
+    return hasSavedSettings ? .connection : .welcome
+  }
 }
 
 private enum CredentialStore {

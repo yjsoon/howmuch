@@ -25,6 +25,9 @@ enum APIClientError: LocalizedError {
   case invalidBaseURL
   case invalidResponse
   case server(String)
+  /// 409 `conflict`: the entity already exists or changed underneath the
+  /// request. Its message is the server's, exactly as `.server` would show it.
+  case conflict(String)
   case reconciliationMismatch(ReconciliationMismatchDetail)
   case accountPreferencesConflict
   case endpointUnsupported
@@ -39,7 +42,7 @@ enum APIClientError: LocalizedError {
       return "Enter a valid API base URL."
     case .invalidResponse:
       return "The API returned an invalid response."
-    case .server(let message):
+    case .server(let message), .conflict(let message):
       return message
     case .reconciliationMismatch(let detail):
       return detail.message
@@ -154,6 +157,12 @@ struct APIClient {
   }
 
   func fetchAccountPreferences(planID: String) async throws -> SyncedAccountPreferences? {
+    // Account preferences sync between a user's devices. The on-device engine
+    // has one device and no user principal (it answers 403), and the app
+    // already keeps the same preferences locally.
+    guard !settings.isLocal else {
+      return nil
+    }
     do {
       let response: APIEnvelope<AccountPreferencesPayload> = try await request(
         path: "/v1/plans/\(planID)/account_preferences"
@@ -173,6 +182,9 @@ struct APIClient {
     preferences: AccountPresentationPreferences,
     expectedRevision: Int
   ) async throws -> SyncedAccountPreferences {
+    guard !settings.isLocal else {
+      throw APIClientError.endpointUnsupported
+    }
     let response: APIEnvelope<AccountPreferencesPayload> = try await request(
       path: "/v1/plans/\(planID)/account_preferences",
       method: "PUT",
@@ -193,6 +205,26 @@ struct APIClient {
   func fetchCategories(planID: String) async throws -> [CategoryGroup] {
     let response: APIEnvelope<CategoriesPayload> = try await request(path: "/v1/plans/\(planID)/categories")
     return response.data.categoryGroups.filter { !$0.deleted }
+  }
+
+  /// Creates a category group on a HowMuch-native plan. The id is chosen here,
+  /// so a retried create cannot make a second group.
+  func createCategoryGroup(planID: String, id: String, name: String) async throws {
+    let _: APIEnvelope<IgnoredPayload> = try await request(
+      path: "/v1/plans/\(planID)/category_groups",
+      method: "POST",
+      headers: ["Idempotency-Key": id],
+      body: CategoryGroupCreateRequest(categoryGroup: .init(id: id, name: name))
+    )
+  }
+
+  func createCategory(planID: String, id: String, groupID: String, name: String) async throws {
+    let _: APIEnvelope<IgnoredPayload> = try await request(
+      path: "/v1/plans/\(planID)/categories",
+      method: "POST",
+      headers: ["Idempotency-Key": id],
+      body: CategoryCreateRequest(category: .init(id: id, categoryGroupId: groupID, name: name))
+    )
   }
 
   func fetchPayees(planID: String) async throws -> [Payee] {
@@ -666,7 +698,7 @@ struct APIClient {
       request.httpBody = bodyData
     }
 
-    let (data, response) = try await URLSession.shared.data(for: request)
+    let (data, response) = try await send(request)
     guard let httpResponse = response as? HTTPURLResponse else {
       throw APIClientError.invalidResponse
     }
@@ -684,7 +716,7 @@ struct APIClient {
           (httpResponse.statusCode == 401 ||
            (httpResponse.statusCode == 403 && serverError.error.name == "not_authorized"))
         if authFailure {
-          NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: trimmedToken)
+          postAuthenticationExpiry(token: trimmedToken)
           throw APIClientError.authenticationExpired
         }
         if serverError.error.name == "reconciliation_mismatch",
@@ -705,10 +737,13 @@ struct APIClient {
         if serverError.error.name == "account_preferences_conflict" {
           throw APIClientError.accountPreferencesConflict
         }
+        if httpResponse.statusCode == 409, serverError.error.name == "conflict" {
+          throw APIClientError.conflict(serverError.error.detail)
+        }
         throw APIClientError.server(serverError.error.detail)
       }
       if requestHasSession && httpResponse.statusCode == 401 {
-        NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: trimmedToken)
+        postAuthenticationExpiry(token: trimmedToken)
         throw APIClientError.authenticationExpired
       }
       throw APIClientError.httpStatus(httpResponse.statusCode)
@@ -719,6 +754,49 @@ struct APIClient {
     } catch {
       throw APIClientError.decoding(error.localizedDescription)
     }
+  }
+
+  /// Signs every surface out of a server session the server stopped
+  /// accepting. The on-device engine has no session to lose: its token is
+  /// repaired on load, so local mode never signs out here.
+  private func postAuthenticationExpiry(token: String) {
+    guard !settings.isLocal else {
+      return
+    }
+    NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: token)
+  }
+
+  /// The one transport seam. Local mode hands the same request to the
+  /// embedded engine; the response goes through the same decoding and error
+  /// mapping either way. Engine failures are not `URLError`s, so they are
+  /// never mistaken for offline writes and queued for replay.
+  private func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+    guard settings.isLocal else {
+      return try await URLSession.shared.data(for: request)
+    }
+    guard
+      let url = request.url,
+      let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+    else {
+      throw APIClientError.invalidBaseURL
+    }
+    let result = try await LocalEngine.shared.handle(
+      config: settings.localEngineConfig,
+      method: request.httpMethod ?? "GET",
+      path: components.percentEncodedPath,
+      query: components.percentEncodedQuery,
+      headers: request.allHTTPHeaderFields ?? [:],
+      body: request.httpBody
+    )
+    guard let response = HTTPURLResponse(
+      url: url,
+      statusCode: result.status,
+      httpVersion: "HTTP/1.1",
+      headerFields: result.headers
+    ) else {
+      throw APIClientError.invalidResponse
+    }
+    return (result.body, response)
   }
 
   private func makeURL(path: String, appendedPathSegments: [String], queryItems: [URLQueryItem]) throws -> URL {
@@ -783,6 +861,28 @@ private struct LoginRequest: Encodable {
 }
 
 private struct EmptyRequest: Encodable {}
+
+/// A response whose payload the caller does not read.
+private struct IgnoredPayload: Decodable {}
+
+private struct CategoryGroupCreateRequest: Encodable {
+  struct Group: Encodable {
+    let id: String
+    let name: String
+  }
+
+  let categoryGroup: Group
+}
+
+private struct CategoryCreateRequest: Encodable {
+  struct NewCategory: Encodable {
+    let id: String
+    let categoryGroupId: String
+    let name: String
+  }
+
+  let category: NewCategory
+}
 
 private struct LogoutPayload: Decodable {
   let ok: Bool

@@ -174,8 +174,20 @@ private struct RootView: View {
       }
     }
     .task(id: model.launchRefreshTaskID) {
+      // Local mode: finish any starter categories and enter due schedules
+      // first, so the launch refresh shows them.
+      await model.completeStarterCategories()
+      await model.runLocalScheduledTransactions(refreshAfter: false)
       await model.refreshAll()
     }
+    .overlay {
+      if model.isShowingWelcome {
+        WelcomeView()
+          .accessibilityAddTraits(.isModal)
+          .transition(.opacity)
+      }
+    }
+    .animation(.default, value: model.isShowingWelcome)
     .sheet(isPresented: $model.isShowingSettings) {
       SettingsView(settings: model.settings) { nextSettings in
         await model.applySettings(nextSettings)
@@ -204,6 +216,7 @@ private struct RootView: View {
         enqueueInboxIfNeeded(force: false)
         consumePendingCapture()
         ScreenshotOfferController.shared.startIfNeeded()
+        Task { await model.runLocalScheduledTransactions() }
       } else if phase == .background {
         CaptureWorkspace.shared.persistCurrentIfNeeded()
       }

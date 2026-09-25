@@ -1,4 +1,23 @@
 import SwiftUI
+import UIKit
+
+/// Placeholder for moving an on-device ledger to a server.
+private struct LocalServerConnectionView: View {
+  private let device = UIDevice.current.model
+
+  var body: some View {
+    Form {
+      Section {
+        Text("You will be able to move your records from this \(device) to a HowMuch server in a later update. Until then, they stay on this \(device).")
+          .foregroundStyle(Theme.textPrimary)
+      } footer: {
+        Text("A HowMuch server is one that you or your organisation runs. There is no public sign-up.")
+      }
+    }
+    .navigationTitle("Connect to a server")
+    .navigationBarTitleDisplayMode(.inline)
+  }
+}
 
 struct SettingsView: View {
   @Environment(AppModel.self) private var model
@@ -66,6 +85,85 @@ struct SettingsView: View {
   }
 
   var body: some View {
+    if draft.isLocal {
+      localBody
+    } else {
+      serverBody
+    }
+  }
+
+  private static let clipboardImagesFooter = "Offers only the image currently on your clipboard. iOS may ask for paste permission. Images are checked on this device; your Photos library is never read. Off by default."
+
+  private var clipboardImagesButton: some View {
+    Button {
+      let next = !screenshots.isEnabled
+      screenshots.applyEnabledPreference(next)
+      Task { await screenshots.refresh() }
+    } label: {
+      HStack {
+        Text("Offer clipboard images")
+          .foregroundStyle(Theme.textPrimary)
+        Spacer()
+        Text(screenshots.isEnabled ? "On" : "Off")
+          .foregroundStyle(screenshots.isEnabled ? Theme.accent : .secondary)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .contentShape(Rectangle())
+    }
+    .accessibilityIdentifier("offer-clipboard-images")
+    .accessibilityLabel("Offer clipboard images")
+    .accessibilityValue(screenshots.isEnabled ? "On" : "Off")
+  }
+
+  /// Local mode has no server session to manage: no sign-in, plan choice or
+  /// sign-out. Moving to a server is a later step.
+  private var localBody: some View {
+    NavigationStack {
+      Form {
+        Section {
+          Label("Records are kept on this \(UIDevice.current.model)", systemImage: "iphone")
+            .foregroundStyle(Theme.textPrimary)
+          NavigationLink("Connect to a server") {
+            LocalServerConnectionView()
+          }
+        } header: {
+          Text("Storage")
+        }
+        Section("Intelligence") {
+          NavigationLink("AI provider") {
+            CaptureAISettingsView(settings: model.captureAI)
+          }
+        }
+        Section {
+          NavigationLink {
+            RewardsImportView()
+          } label: {
+            Text("Rewards Import & Export")
+          }
+        } header: {
+          Text("Tools")
+        } footer: {
+          Text("Import or export Rewards Tracker settings. Does not connect to live YNAB.")
+        }
+        Section {
+          clipboardImagesButton
+        } footer: {
+          Text(Self.clipboardImagesFooter)
+        }
+      }
+      .navigationTitle("Settings")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+          Button("Done") {
+            dismiss()
+          }
+        }
+      }
+    }
+  }
+
+  private var serverBody: some View {
     NavigationStack {
       Form {
         Section {
@@ -185,24 +283,7 @@ struct SettingsView: View {
             .disabled(isSaving || isTesting)
           }
 
-          Button {
-            let next = !screenshots.isEnabled
-            screenshots.applyEnabledPreference(next)
-            Task { await screenshots.refresh() }
-          } label: {
-            HStack {
-              Text("Offer clipboard images")
-                .foregroundStyle(Theme.textPrimary)
-              Spacer()
-              Text(screenshots.isEnabled ? "On" : "Off")
-                .foregroundStyle(screenshots.isEnabled ? Theme.accent : .secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-          }
-          .accessibilityIdentifier("offer-clipboard-images")
-          .accessibilityLabel("Offer clipboard images")
-          .accessibilityValue(screenshots.isEnabled ? "On" : "Off")
+          clipboardImagesButton
         } footer: {
           VStack(alignment: .leading, spacing: 8) {
             if case .failure(let message) = testResult {
@@ -211,7 +292,7 @@ struct SettingsView: View {
             } else if testResult == .success {
               Text("Signed in successfully.")
             }
-            Text("Offers only the image currently on your clipboard. iOS may ask for paste permission. Images are checked on this device; your Photos library is never read. Off by default.")
+            Text(Self.clipboardImagesFooter)
           }
         }
       }
@@ -239,10 +320,16 @@ struct SettingsView: View {
       }
       .toolbar {
         ToolbarItem(placement: .topBarLeading) {
-          Button("Cancel") {
-            dismiss()
+          if !wasInitiallyAuthenticated && model.canReturnToWelcome {
+            Button("Back") {
+              model.returnToWelcome()
+            }
+          } else {
+            Button("Cancel") {
+              dismiss()
+            }
+            .disabled(!wasInitiallyAuthenticated || !draft.isAuthenticated)
           }
-          .disabled(!wasInitiallyAuthenticated || !draft.isAuthenticated)
         }
 
         ToolbarItem(placement: .topBarTrailing) {
