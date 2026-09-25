@@ -38,7 +38,7 @@ final class CaptureWorkspace {
       return
     }
     cancelOwnedConversationWork()
-    current?.cancelTurn()
+    current?.evict()
     persistCurrentIfNeeded()
     current = nil
     pendingAssistantSessionID = nil
@@ -48,7 +48,7 @@ final class CaptureWorkspace {
 
   func dropForScopeChange() {
     cancelOwnedConversationWork()
-    current?.cancelTurn()
+    current?.evict()
     persistCurrentIfNeeded()
     cancelDeferredPersist()
     current = nil
@@ -93,7 +93,7 @@ final class CaptureWorkspace {
       return current
     }
     cancelOwnedConversationWork()
-    current?.cancelTurn()
+    current?.evict()
     persistCurrentIfNeeded()
     let presetAccountID: String?
     if case .draft(let draft) = request.kind {
@@ -132,7 +132,7 @@ final class CaptureWorkspace {
       return nil
     }
     cancelOwnedConversationWork()
-    current?.cancelTurn()
+    current?.evict()
     persistCurrentIfNeeded()
     let attachments = store.loadAttachments(snapshot: snapshot, scope: activeScopeKey)
     let session = CaptureSession.restore(snapshot, attachments: attachments)
@@ -144,7 +144,7 @@ final class CaptureWorkspace {
   func discardCurrent() {
     cancelDeferredPersist()
     cancelOwnedConversationWork()
-    current?.cancelTurn()
+    current?.evict()
     if let current {
       store.remove(id: current.id, scope: activeScopeKey)
       recents.removeAll { $0.id == current.id }
@@ -157,7 +157,7 @@ final class CaptureWorkspace {
     if current?.id == id {
       cancelDeferredPersist()
       cancelOwnedConversationWork()
-      current?.cancelTurn()
+      current?.evict()
     }
     store.remove(id: id, scope: activeScopeKey)
     recents.removeAll { $0.id == id }
@@ -172,7 +172,7 @@ final class CaptureWorkspace {
   func discardAll() {
     cancelDeferredPersist()
     cancelOwnedConversationWork()
-    current?.cancelTurn()
+    current?.evict()
     store.removeAll(scope: activeScopeKey)
     recents = []
     current = nil
