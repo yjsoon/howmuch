@@ -8,7 +8,10 @@ final class RewardsAccountImportTests: XCTestCase {
   private let file = Data(#"{"format":"rewards-account-config","version":1,"card":{"name":"Synthetic Miles Card","issuer":"Example Bank","type":"miles","minimumSpend":null,"futureRule":{"value":17,"limit":null},"subcategories":[{"id":"dining","minimumSpend":null}]}}"#.utf8)
 
   func testFilePreflightRejectsWrongFlowAndMalformedEnvelopes() throws {
-    XCTAssertEqual(try RewardsImportFile.accountConfig(file), "Synthetic Miles Card")
+    let summary = try RewardsImportFile.accountConfig(file)
+    XCTAssertEqual(summary.name, "Synthetic Miles Card")
+    XCTAssertEqual(summary.issuer, "Example Bank")
+    XCTAssertEqual(summary.type, "miles")
     XCTAssertThrowsError(try RewardsImportFile.wholeSettings(file))
     XCTAssertNotNil(try RewardsImportFile.wholeSettings(Data(#"{"cards":[],"settings":{}}"#.utf8)))
     for json in ["not JSON", "[]", "null", #"{"cards":[]}"#,
@@ -28,6 +31,22 @@ final class RewardsAccountImportTests: XCTestCase {
     selection.reset()
     XCTAssertEqual(selection.accountID, "")
     XCTAssertNil(selection.success)
+  }
+
+  func testPasteAcceptsPaddedCurlyQuotedJSONAndRejectsNonJSON() throws {
+    let curly = "  \u{201C}format\u{201D}"
+    let padded = "\n\t {\(curly): \u{201C}rewards-account-config\u{201D}, \u{201C}version\u{201D}: 1, "
+      + "\u{201C}card\u{201D}: {\u{201C}name\u{201D}: \u{201C}Ann\u{2019}s Card\u{201D}, "
+      + "\u{201C}issuer\u{201D}: \u{201C}Example Bank\u{201D}, \u{201C}type\u{201D}: \u{201C}cashback\u{201D}}}\n  "
+    let selection = RewardsAccountImportSelection()
+    try selection.choose(text: padded)
+    XCTAssertEqual(selection.fileName, "Pasted JSON")
+    XCTAssertEqual(selection.summary?.name, "Ann\u{2019}s Card", "Apostrophes inside values survive")
+    XCTAssertEqual(selection.summary?.type, "cashback")
+
+    let other = RewardsAccountImportSelection()
+    XCTAssertThrowsError(try other.choose(text: "not JSON"))
+    XCTAssertNil(other.data)
   }
 
   func testPUTPreservesRawConfigurationAndDecodesCard() async throws {
@@ -51,42 +70,41 @@ final class RewardsAccountImportTests: XCTestCase {
     selection.accountID = "acct-travel"
     try selection.choose(data: file, fileName: "synthetic-miles.json")
     let surface = try XCTUnwrap(SnapshotSurface(
-      root: NavigationStack { RewardsImportView(accountImport: selection) }.environment(harness.model),
+      root: NavigationStack { RewardsAccountImportView(selection: selection) }.environment(harness.model),
       size: CGSize(width: 430, height: 1100)))
     defer { surface.detach() }
-    var rendered = await surface.captureUntilOCR(contains: ["Import into one account", "Travel", "synthetic-miles.json", "Review account import"])
+    var rendered = await surface.captureUntilOCR(contains: ["Import into One Account", "Travel", "Synthetic Miles Card", "Paste JSON"])
     attach(rendered.image, "account-import-selected")
-    XCTAssertTrue(rendered.text.contains("synthetic-miles.json"), rendered.text)
+    XCTAssertTrue(rendered.text.contains("synthetic miles card"), rendered.text)
     await surface.settleNavigation()
-    let review = try XCTUnwrap(surface.firstControl(label: "Review account import"))
-    XCTAssertTrue(surface.activate(review))
-    rendered = await surface.captureUntilOCR(contains: ["Replace rewards configuration?", "Synthetic Miles Card", "Travel", "Replace account configuration"])
+    let importButton = try XCTUnwrap(surface.firstControl(label: "Import"))
+    XCTAssertTrue(surface.activate(importButton))
+    let confirmed = await surface.waitUntil { selection.confirmation != nil }
+    XCTAssertTrue(confirmed, "Tapping Import must stage a confirmation before replacing anything")
+    let confirmation = try XCTUnwrap(selection.confirmation)
+    XCTAssertEqual(confirmation.accountID, "acct-travel")
+    XCTAssertEqual(confirmation.planID, "fixture-plan")
+    await surface.settleNavigation()
+    rendered = await surface.captureUntilOCR(contains: ["Replace Rewards Configuration?", "Synthetic Miles Card", "Travel"])
     attach(rendered.image, "account-import-confirmation")
-    XCTAssertEqual(selection.confirmation?.accountID, "acct-travel")
-    XCTAssertEqual(selection.confirmation?.planID, "fixture-plan")
     XCTAssertTrue(rendered.text.contains("clearing omitted fields"), rendered.text)
-    // Exercise the real button and API success path, including the refresh generation.
+    // Drive the import directly: a system confirmationDialog is presented outside
+    // the hosted view hierarchy, so the harness cannot reliably reach its buttons.
     let generation = harness.model.rewardsRefreshGeneration
-    let replace = try XCTUnwrap(surface.firstControl(label: "Replace account configuration"))
-    XCTAssertTrue(surface.activate(replace))
-    let completed = await surface.waitUntil(timeoutNanoseconds: 5_000_000_000) {
-      selection.success != nil || selection.error != nil
-    }
-    XCTAssertTrue(completed, "Import must settle before inspecting its result")
+    await selection.importAccount(confirmation, model: harness.model)
     rendered = await surface.captureUntilOCR(contains: ["Imported Synthetic Miles Card into Travel."])
     attach(rendered.image, "account-import-success")
     XCTAssertTrue(rendered.text.contains("imported synthetic miles card into travel"), rendered.text)
     XCTAssertGreaterThan(harness.model.rewardsRefreshGeneration, generation)
     XCTAssertNil(selection.data)
-    // Exercise a synthetic server rejection through the same controls.
+    // Exercise a synthetic server rejection through the same entry point.
     selection.accountID = "acct-everyday"
     try selection.choose(data: file, fileName: "synthetic-miles.json")
-    _ = await surface.captureUntilOCR(contains: ["Everyday", "Review account import"])
-    XCTAssertTrue(surface.activate(try XCTUnwrap(surface.firstControl(label: "Review account import"))))
-    _ = await surface.captureUntilOCR(contains: ["Replace account configuration"])
-    XCTAssertTrue(surface.activate(try XCTUnwrap(surface.firstControl(label: "Replace account configuration"))))
-    let rejected = await surface.waitUntil(timeoutNanoseconds: 5_000_000_000) { selection.error != nil }
-    XCTAssertTrue(rejected)
+    _ = await surface.captureUntilOCR(contains: ["Everyday", "Import"])
+    let rejection = RewardsAccountImportSelection.Confirmation(
+      planID: harness.model.settings.planID, accountID: "acct-everyday", accountName: "Everyday",
+      sourceName: "Synthetic Miles Card", data: file)
+    await selection.importAccount(rejection, model: harness.model)
     rendered = await surface.captureUntilOCR(contains: ["multiple rewards cards"])
     attach(rendered.image, "account-import-error")
     XCTAssertTrue(rendered.text.contains("multiple rewards cards"), rendered.text)
