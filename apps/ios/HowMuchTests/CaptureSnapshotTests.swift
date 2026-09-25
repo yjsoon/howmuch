@@ -1071,6 +1071,7 @@ final class CaptureSnapshotTests: XCTestCase {
     XCTAssertFalse(field.isFirstResponder, "Manual should resign the describe composer")
     XCTAssertNotNil(surface.firstDescendant(PasteAwareTextView.self), "the conversation dock stays mounted")
 
+    await surface.settleNavigation()
     guard let cancel = surface.firstControl(label: "Cancel") else {
       return XCTFail("manual form must expose Cancel")
     }
