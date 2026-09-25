@@ -45,8 +45,10 @@ enum RegisterApproval {
   }
 
   static func eligibleIDs(in rows: [Row], session: Session = .empty) -> [String] {
-    rows.compactMap { row in
-      if looksApproved(row, session: session) || row.deleted {
+    // Same test as `looksApproved`, with the union taken once, not per row.
+    let resolved = resolvedIDs(session)
+    return rows.compactMap { row in
+      if row.approved || resolved.contains(row.id) || row.deleted {
         return nil
       }
       return row.id

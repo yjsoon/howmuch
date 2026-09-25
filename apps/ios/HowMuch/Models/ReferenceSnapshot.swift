@@ -196,10 +196,19 @@ final class SnapshotStore: @unchecked Sendable {
   private let lock = NSLock()
   private let ioQueue = DispatchQueue(label: "sg.soon.howmuch.reference-snapshot")
   private let encoder: JSONEncoder
+  /// Used only on `ioQueue`, so the synchronous `save` never shares an encoder
+  /// with a background drain.
+  private let backgroundEncoder: JSONEncoder
   private let decoder: JSONDecoder
   /// Bumped by `delete()`, so a write already queued behind a sign-out cannot
   /// land after it and resurrect the file.
   private var generation = 0
+  /// The latest snapshot waiting for `ioQueue`, with the generation it was
+  /// scheduled under. Guarded by `lock`. A newer schedule replaces an older
+  /// one that has not been encoded yet, so a burst of refresh slices costs one
+  /// encode and one write rather than one each.
+  private var pendingWrite: (snapshot: ReferenceSnapshot, generation: Int)?
+  private var isDrainQueued = false
 
   init(directory: URL, fileManager: FileManager = .default) {
     self.directory = directory
@@ -207,6 +216,9 @@ final class SnapshotStore: @unchecked Sendable {
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
     self.encoder = encoder
+    let backgroundEncoder = JSONEncoder()
+    backgroundEncoder.dateEncodingStrategy = .iso8601
+    self.backgroundEncoder = backgroundEncoder
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
     self.decoder = decoder
@@ -239,19 +251,33 @@ final class SnapshotStore: @unchecked Sendable {
     return snapshot
   }
 
-  /// Encodes on the caller's thread (the main actor, where the models live)
-  /// and hands only `Data` to the writer, so no model type has to be
-  /// `Sendable` to be persisted.
+  /// Encodes and writes on `ioQueue`, off the main actor that calls this after
+  /// every refresh slice and save. `ReferenceSnapshot` is a tree of plain
+  /// values, so the copy handed over cannot change underneath the encoder.
   func scheduleWrite(_ snapshot: ReferenceSnapshot) {
-    guard let data = try? encoder.encode(snapshot) else {
+    lock.lock()
+    pendingWrite = (snapshot: snapshot, generation: generation)
+    let needsDrain = !isDrainQueued
+    isDrainQueued = true
+    lock.unlock()
+    guard needsDrain else {
       return
     }
-    lock.lock()
-    let generation = self.generation
-    lock.unlock()
     ioQueue.async { [weak self] in
-      self?.write(data, ifGeneration: generation)
+      self?.drainPendingWrite()
     }
+  }
+
+  private func drainPendingWrite() {
+    lock.lock()
+    let pending = pendingWrite
+    pendingWrite = nil
+    isDrainQueued = false
+    lock.unlock()
+    guard let pending, let data = try? backgroundEncoder.encode(pending.snapshot) else {
+      return
+    }
+    write(data, ifGeneration: pending.generation)
   }
 
   /// Same write, synchronously — used by tests and by any caller that needs
@@ -271,6 +297,7 @@ final class SnapshotStore: @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
     generation &+= 1
+    pendingWrite = nil
     deleteLocked()
   }
 

@@ -11,16 +11,19 @@ struct PayeePickerView: View {
   @State private var isSearchPresented = true
 
   var body: some View {
-    let recents = recentPayees
+    let query = trimmedSearch
+    let recents = recentPayees(query: query)
+    let payees = filteredPayees(query: query)
+    let transferPayees = filteredTransferPayees(query: query)
     List {
-      if !trimmedSearch.isEmpty, !hasExactMatch {
+      if !query.isEmpty, !hasExactMatch(query) {
         Button {
           draft.payeeID = nil
-          draft.payeeName = trimmedSearch
+          draft.payeeName = query
           draft.transferAccountID = nil
           dismiss()
         } label: {
-          Label("Create payee “\(trimmedSearch)”", systemImage: "plus.circle.fill")
+          Label("Create payee “\(query)”", systemImage: "plus.circle.fill")
             .foregroundStyle(Theme.accent)
         }
       }
@@ -33,17 +36,17 @@ struct PayeePickerView: View {
         }
       }
 
-      if !filteredPayees.isEmpty {
+      if !payees.isEmpty {
         Section("Payees") {
-          ForEach(filteredPayees) { payee in
+          ForEach(payees) { payee in
             payeeRow(payee)
           }
         }
       }
 
-      if !filteredTransferPayees.isEmpty {
+      if !transferPayees.isEmpty {
         Section("Transfers") {
-          ForEach(filteredTransferPayees) { payee in
+          ForEach(transferPayees) { payee in
             payeeRow(payee)
           }
         }
@@ -64,8 +67,8 @@ struct PayeePickerView: View {
 
   /// The payees most recently used in the ledger — most expenses repeat, so
   /// the last few merchants outrank the alphabet. Hidden while searching.
-  private var recentPayees: [Payee] {
-    guard trimmedSearch.isEmpty else {
+  private func recentPayees(query: String) -> [Payee] {
+    guard query.isEmpty else {
       return []
     }
     let payeesByID = Dictionary(model.payees.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -108,21 +111,20 @@ struct PayeePickerView: View {
     searchText.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
-  private var filteredPayees: [Payee] {
-    model.payees
-      .filter { !$0.isTransferPayee }
-      .filter { trimmedSearch.isEmpty || $0.name.localizedStandardContains(trimmedSearch) }
-      .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+  private func filteredPayees(query: String) -> [Payee] {
+    model.payeesSortedByName.filter { payee in
+      !payee.isTransferPayee && (query.isEmpty || payee.name.localizedStandardContains(query))
+    }
   }
 
   /// Other accounts' transfer payees; picking one records a transfer and the
   /// API creates the mirrored side (YNAB behaviour). A split parent cannot
   /// itself be a transfer, so splits get no Transfers section.
-  private var filteredTransferPayees: [Payee] {
+  private func filteredTransferPayees(query: String) -> [Payee] {
     guard !draft.isSplit else {
       return []
     }
-    return model.payees
+    return model.payeesSortedByName
       .filter { payee in
         guard let targetAccountID = payee.transferAccountId, targetAccountID != draft.accountID else {
           return false
@@ -132,12 +134,11 @@ struct PayeePickerView: View {
         }
         return !account.closed
       }
-      .filter { trimmedSearch.isEmpty || $0.name.localizedStandardContains(trimmedSearch) }
-      .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+      .filter { query.isEmpty || $0.name.localizedStandardContains(query) }
   }
 
-  private var hasExactMatch: Bool {
-    model.payees.contains { $0.name.localizedCaseInsensitiveCompare(trimmedSearch) == .orderedSame }
+  private func hasExactMatch(_ query: String) -> Bool {
+    model.payees.contains { $0.name.localizedCaseInsensitiveCompare(query) == .orderedSame }
   }
 
   private func select(_ payee: Payee) {

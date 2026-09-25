@@ -491,8 +491,9 @@ struct SpendingBreakdownDetailView: View {
               description: Text("Adjust the dates or clear filters to show more transactions.")
             )
           } else {
+            let maxAmount = rows.map { abs($0.amount) }.max() ?? 1
             ForEach(ReflectMaths.groupSections(rows)) { section in
-              groupSection(section, total: total, maxAmount: rows.map { abs($0.amount) }.max() ?? 1)
+              groupSection(section, total: total, maxAmount: maxAmount)
             }
           }
         } else {

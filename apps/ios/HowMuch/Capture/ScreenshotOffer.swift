@@ -240,6 +240,7 @@ struct ScreenshotOfferToast: View {
   var onAdd: () -> Void
   var onDismiss: () -> Void
   @State private var dragOffset = CGSize.zero
+  @Environment(\.displayScale) private var displayScale
 
   private let dismissDistance: CGFloat = 72
 
@@ -312,7 +313,7 @@ struct ScreenshotOfferToast: View {
   private var thumbnail: some View {
     let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
     Group {
-      if let image = UIImage(data: offer.imageData) {
+      if let image = CaptureThumbnail.image(data: offer.imageData, id: offer.id, side: 56, displayScale: displayScale) {
         Image(uiImage: image)
           .resizable()
           .scaledToFill()

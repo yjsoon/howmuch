@@ -203,6 +203,25 @@ final class ReferenceSnapshotStoreTests: XCTestCase {
     XCTAssertEqual(store.load()?.planID, settings.planID)
   }
 
+  func testBackToBackScheduledWritesLeaveTheLatestSnapshot() {
+    let settings = SnapshotFixture.settings()
+    store.scheduleWrite(SnapshotFixture.snapshot(settings: settings, serverKnowledge: 1))
+    store.scheduleWrite(SnapshotFixture.snapshot(settings: settings, serverKnowledge: 2))
+    store.waitForPendingWrites()
+
+    XCTAssertEqual(store.load()?.serverKnowledge, 2, "coalesced writes must keep the newest snapshot")
+  }
+
+  func testAWriteScheduledAfterADeleteStillLands() {
+    let settings = SnapshotFixture.settings()
+    store.scheduleWrite(SnapshotFixture.snapshot(settings: settings))
+    store.delete()
+    store.scheduleWrite(SnapshotFixture.snapshot(settings: settings))
+    store.waitForPendingWrites()
+
+    XCTAssertEqual(store.load()?.planID, settings.planID, "only writes queued before the delete are dropped")
+  }
+
   func testDeleteBeatsAWriteQueuedBeforeIt() {
     let settings = SnapshotFixture.settings()
     XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: settings)))

@@ -305,7 +305,9 @@ struct TransactionFormView: View {
         isPresented: $isConfirmingDelete,
         confirm: .destructive("Delete Transaction"),
         message: {
-          if let deleteConfirmationDetail {
+          // The message builder runs with every body pass, including each
+          // keypad tap, so only look the row up while the alert is showing.
+          if isConfirmingDelete, let deleteConfirmationDetail {
             Text(deleteConfirmationDetail)
           }
         }
@@ -843,7 +845,8 @@ struct TransactionFormView: View {
 
   private var deleteConfirmationDetail: String? {
     guard let id = draft.id,
-          let transaction = (model.transactions + model.unapprovedTransactions).first(where: { $0.id == id }) else {
+          let transaction = model.transactions.first(where: { $0.id == id })
+            ?? model.unapprovedTransactions.first(where: { $0.id == id }) else {
       return nil
     }
     return transaction.deleteConfirmationDetail(
@@ -1051,9 +1054,10 @@ private struct TransactionSplitPayeePicker: View {
         }
       }
 
-      if !matchingPayees.isEmpty {
+      let payees = matchingPayees
+      if !payees.isEmpty {
         Section("Payees") {
-          ForEach(matchingPayees) { payee in
+          ForEach(payees) { payee in
             Button {
               line.payeeID = payee.id
               line.payeeName = payee.name
@@ -1095,10 +1099,10 @@ private struct TransactionSplitPayeePicker: View {
   }
 
   private var matchingPayees: [Payee] {
-    model.payees
-      .filter { !$0.isTransferPayee }
-      .filter { trimmedSearch.isEmpty || $0.name.localizedStandardContains(trimmedSearch) }
-      .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    let query = trimmedSearch
+    return model.payeesSortedByName.filter { payee in
+      !payee.isTransferPayee && (query.isEmpty || payee.name.localizedStandardContains(query))
+    }
   }
 
   private var matchingTransferAccounts: [Account] {
@@ -1109,7 +1113,8 @@ private struct TransactionSplitPayeePicker: View {
   }
 
   private var hasExactMatch: Bool {
-    model.payees.contains { !$0.isTransferPayee && $0.name.localizedCaseInsensitiveCompare(trimmedSearch) == .orderedSame }
+    let query = trimmedSearch
+    return model.payees.contains { !$0.isTransferPayee && $0.name.localizedCaseInsensitiveCompare(query) == .orderedSame }
   }
 
   private func selectionRow(_ title: String, selected: Bool, secondary: Bool = false) -> some View {
