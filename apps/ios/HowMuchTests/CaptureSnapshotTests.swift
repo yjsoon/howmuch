@@ -103,7 +103,11 @@ final class CaptureSnapshotTests: XCTestCase {
       let ready = await surface.waitUntil { surface.firstControl(label: "Save") != nil }
       XCTAssertTrue(ready, "\(size) Save missing after payee selection: \(surface.accessibilityLabels())")
       await surface.settleNavigation()
-      let rendered = await surface.captureUntilOCR(contains: ["Add Transaction", "Lunch Shop", "Save"])
+      // One Vision pass can outlast the default ceiling on a loaded machine.
+      let rendered = await surface.captureUntilOCR(
+        contains: ["Add Transaction", "Lunch Shop", "Save"],
+        timeoutNanoseconds: 3_000_000_000
+      )
       XCTAssertTrue(rendered.text.contains(Self.normalizedOCR("Add Transaction")), "manual form title missing in OCR [\(rendered.text)]")
       XCTAssertTrue(rendered.text.contains(Self.normalizedOCR("Save")), "manual Save missing in OCR [\(rendered.text)]")
       attachImage(rendered.image, name: "manual-entry-ready-\(size)")
@@ -3236,15 +3240,54 @@ final class SnapshotSurface {
   func settleNavigation(file: StaticString = #filePath, line: UInt = #line) async {
     // AX nodes can exist while UIKit is still presenting/pushing their screen.
     // Synthetic activation must wait until a real user could interact with it.
-    func isTransitioning(_ controller: UIViewController) -> Bool {
-      controller.transitionCoordinator != nil
-        || controller.isBeingPresented
-        || controller.isBeingDismissed
-        || controller.children.contains(where: isTransitioning)
-        || controller.presentedViewController.map(isTransitioning) == true
+    // The transition coordinator clears before the pushed screen's own
+    // animations finish (search activation, layout springs). Popping inside
+    // that window can leave UIKit's pop coordinator stuck for good, so also
+    // wait for finite Core Animation work to drain. The first push in a fresh
+    // test process is the slow one, hence the generous ceiling.
+    func transitioning(_ controller: UIViewController) -> UIViewController? {
+      if controller.transitionCoordinator != nil || controller.isBeingPresented || controller.isBeingDismissed {
+        return controller
+      }
+      for child in controller.children {
+        if let found = transitioning(child) {
+          return found
+        }
+      }
+      return controller.presentedViewController.flatMap(transitioning)
     }
-    let settled = await waitUntil { !isTransitioning(host) }
-    XCTAssertTrue(settled, "UIKit navigation must settle before activation", file: file, line: line)
+    let settled = await waitUntil(timeoutNanoseconds: 8_000_000_000) {
+      transitioning(host) == nil && transientAnimationCount() == 0
+    }
+    let stuck = transitioning(host).map { controller in
+      "\(type(of: controller)) coordinator=\(controller.transitionCoordinator != nil) "
+        + "presenting=\(controller.isBeingPresented) dismissing=\(controller.isBeingDismissed)"
+    } ?? "none"
+    XCTAssertTrue(
+      settled,
+      "UIKit navigation must settle before activation; transitioning: \(stuck), animations: \(transientAnimationCount())",
+      file: file,
+      line: line
+    )
+  }
+
+  /// Finite Core Animation work still running in the window: layout springs,
+  /// search-bar activation, scroll indicators. Perpetual effects (glass
+  /// match-move, repeat-forever) never finish, so they do not count.
+  func transientAnimationCount() -> Int {
+    func count(_ layer: CALayer) -> Int {
+      // Hidden or paused layers (an idle refresh spinner) keep animations
+      // attached that never run to completion.
+      guard !layer.isHidden, layer.opacity > 0.01, layer.speed != 0 else { return 0 }
+      let own = (layer.animationKeys() ?? []).reduce(0) { total, key in
+        guard let animation = layer.animation(forKey: key) else { return total }
+        let span = Double(animation.duration) * Double(max(1, animation.repeatCount))
+        let finite = span.isFinite && span < 60 && animation.repeatDuration.isFinite && animation.repeatDuration < 60
+        return total + (finite ? 1 : 0)
+      }
+      return (layer.sublayers ?? []).reduce(own) { $0 + count($1) }
+    }
+    return count(window.layer)
   }
 
   func keyboardFrameInWindow() -> CGRect? {
