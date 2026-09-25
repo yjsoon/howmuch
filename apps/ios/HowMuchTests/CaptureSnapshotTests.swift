@@ -2297,10 +2297,14 @@ final class CaptureSnapshotTests: XCTestCase {
     }
   }
 
+  private static let ocrBulletGlyphs = CharacterSet(charactersIn: "•●·∙◦○‣⁃")
+
   fileprivate static func normalizedOCR(_ text: String) -> String {
+    // Vision reads a small list dot beside wrapped text as a bullet glyph and
+    // may put it mid-phrase ("quarterly •groceries"). Treat it as a separator.
     text
       .lowercased()
-      .components(separatedBy: .whitespacesAndNewlines)
+      .components(separatedBy: CharacterSet.whitespacesAndNewlines.union(ocrBulletGlyphs))
       .filter { !$0.isEmpty }
       .joined(separator: " ")
   }
