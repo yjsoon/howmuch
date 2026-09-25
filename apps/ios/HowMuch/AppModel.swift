@@ -2252,9 +2252,9 @@ final class AppModel {
       accounts[index] = result.account
       rebuildLookups()
     }
-    // The account is applied above; the rows' reconciled state follows from the
-    // queued read without holding the sheet open for it.
-    scheduleRefresh(after: .accountReconciled)
+    // Waits, unlike the other saves: until the read lands, rows would still
+    // show as merely cleared (and tappable) and any adjustment would be missing.
+    await refresh(after: .accountReconciled)
 
     let accountName = result.account.name
     let count = result.reconciledTransactionCount
