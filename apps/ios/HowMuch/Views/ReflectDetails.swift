@@ -526,6 +526,8 @@ struct SpendingBreakdownDetailView: View {
       Text(MoneyCodec.displayString(for: total, currencyFormat: model.currencyFormat))
         .font(.largeTitle.weight(.bold))
         .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.5)
         .foregroundStyle(Theme.textPrimary)
         .rollingNumber(total)
       StackedShareBar(segments: ReflectMaths.shareSegments(rows, limit: 6))
@@ -753,6 +755,8 @@ struct NetWorthDetailView: View {
       Text(MoneyCodec.displayString(for: latest.netWorth, currencyFormat: model.currencyFormat))
         .font(.largeTitle.weight(.bold))
         .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.5)
         .foregroundStyle(Theme.textPrimary)
         .rollingNumber(latest.netWorth)
       if let change {
@@ -1091,6 +1095,8 @@ struct AgeOfMoneyDetailView: View {
               Text(ReflectMaths.daysLabel(days, capitalised: true))
                 .font(.largeTitle.weight(.bold))
                 .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
                 .foregroundStyle(Theme.textPrimary)
                 .rollingNumber(days)
               if let previous {

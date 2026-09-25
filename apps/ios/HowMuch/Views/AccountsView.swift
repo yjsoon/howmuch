@@ -122,7 +122,7 @@ struct AccountsView: View {
         .transition(.move(edge: .bottom).combined(with: .opacity))
       }
     }
-    .animation(Theme.Motion.standard, value: screenshots.offer?.id)
+    .animation(Theme.Motion.arrive, value: screenshots.offer?.id)
     .onAppear {
       reconcilePane()
     }
@@ -266,7 +266,6 @@ struct AccountsView: View {
       }
       .padding(.horizontal, 16)
       .padding(.bottom, 24)
-      .animation(Theme.Motion.arrive, value: model.referencePhase)
       .animation(Theme.Motion.standard, value: model.pendingRows.isEmpty)
     }
     .background(Theme.canvas)

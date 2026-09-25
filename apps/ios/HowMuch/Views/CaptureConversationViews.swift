@@ -51,7 +51,7 @@ struct CaptureUserBubble: View {
         .resizable()
         .scaledToFill()
         .frame(width: 96, height: 96)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.inset, style: .continuous))
     }
   }
 }
@@ -764,9 +764,9 @@ struct CaptureComposerDock: View {
           .resizable()
           .scaledToFill()
           .frame(width: 64, height: 64)
-          .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+          .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.inset, style: .continuous))
       } else {
-        RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+        RoundedRectangle(cornerRadius: Theme.Radius.inset, style: .continuous)
           .fill(Theme.surfaceMuted)
           .frame(width: 64, height: 64)
       }

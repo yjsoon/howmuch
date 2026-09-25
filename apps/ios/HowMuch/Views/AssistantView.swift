@@ -160,7 +160,6 @@ struct AssistantView: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(16)
     .ynabCard()
-    .animation(Theme.Motion.arrive, value: isLoadingBrief)
   }
 
   private func recentRow(_ snapshot: CaptureSessionSnapshot) -> some View {
@@ -240,8 +239,8 @@ struct AssistantView: View {
     let workspaceScope = workspace.activeScopeKey
     let planID = model.settings.planID
     // A refresh keeps the last brief visible, but never one from another
-    // plan or scope.
-    let scopeKey = "\(planID)|\(settingsScope ?? "")|\(workspaceScope ?? "")"
+    // plan, scope or day (yesterday's "today" figure must not linger).
+    let scopeKey = "\(planID)|\(settingsScope ?? "")|\(workspaceScope ?? "")|\(Date.now.isoDateString)"
     if briefScopeKey != scopeKey {
       brief = nil
       briefError = nil

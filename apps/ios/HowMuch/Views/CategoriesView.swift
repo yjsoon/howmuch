@@ -18,35 +18,26 @@ struct CategoriesView: View {
         MonthStepper(monthAnchor: $monthAnchor)
 
         if let planMonth {
-          // Stepping months keeps the last month on screen until the next
-          // arrives; dim it so its figures never read as the new month's.
-          let isOtherMonth = phase != .loaded && !planMonth.month.hasPrefix(monthKey)
-          VStack(alignment: .leading, spacing: 16) {
-            summary(for: planMonth)
+          summary(for: planMonth)
 
-            if let message = phase.errorMessage {
-              Label(message, systemImage: "wifi.exclamationmark")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            }
+          if let message = phase.errorMessage {
+            Label(message, systemImage: "wifi.exclamationmark")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+          }
 
-            ForEach(primaryGroups) { group in
-              groupSection(group)
-            }
+          ForEach(primaryGroups) { group in
+            groupSection(group)
+          }
 
-            if !quietGroups.isEmpty {
-              quietGroupsToggle
-              if showsQuietGroups {
-                ForEach(quietGroups) { group in
-                  groupSection(group)
-                    .transition(Self.groupCardTransition)
-                }
+          if !quietGroups.isEmpty {
+            quietGroupsToggle
+            if showsQuietGroups {
+              ForEach(quietGroups) { group in
+                groupSection(group)
               }
             }
           }
-          .opacity(isOtherMonth ? 0.45 : 1)
-          .allowsHitTesting(!isOtherMonth)
-          .animation(Theme.Motion.standard, value: isOtherMonth)
         } else {
           PhasePlaceholder(phase: phase) {
             await fetch()
@@ -131,14 +122,13 @@ struct CategoriesView: View {
         .foregroundStyle(colour)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
-        .rollingNumber(amount)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var quietGroupsToggle: some View {
     Button {
-      withAnimation(Theme.Motion.standard) {
+      withAnimation(.snappy) {
         showsQuietGroups.toggle()
       }
     } label: {
@@ -153,11 +143,10 @@ struct CategoriesView: View {
           .rotationEffect(.degrees(showsQuietGroups ? 180 : 0))
       }
       .padding(.horizontal, 16)
-      .padding(.vertical, 13)
+      .padding(.vertical, 12)
       .ynabCard()
-      .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
     }
-    .buttonStyle(.pressable)
+    .buttonStyle(.plain)
   }
 
   // MARK: Data
@@ -212,10 +201,8 @@ struct CategoriesView: View {
       guard month == monthKey, generation == model.planRefreshGeneration else {
         return
       }
-      withAnimation(Theme.Motion.arrive) {
-        planMonth = snapshot
-        phase = .loaded
-      }
+      planMonth = snapshot
+      phase = .loaded
     } catch {
       if error is CancellationError || (error as? URLError)?.code == .cancelled {
         return
@@ -235,7 +222,7 @@ struct CategoriesView: View {
 
     return VStack(alignment: .leading, spacing: 8) {
       Button {
-        withAnimation(Theme.Motion.standard) {
+        withAnimation(.snappy) {
           if isCollapsed { collapsedGroups.remove(group.id) } else { collapsedGroups.insert(group.id) }
         }
       } label: {
@@ -252,13 +239,11 @@ struct CategoriesView: View {
             .font(.subheadline.weight(.semibold))
             .monospacedDigit()
             .foregroundStyle(Theme.amountColour(available))
-            .rollingNumber(available)
         }
         .padding(.horizontal, 4)
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
-      .accessibilityValue(isCollapsed ? "Collapsed" : "Expanded")
 
       if !isCollapsed {
         VStack(spacing: 0) {
@@ -270,14 +255,9 @@ struct CategoriesView: View {
           }
         }
         .ynabCard()
-        .transition(Self.groupCardTransition)
       }
     }
   }
-
-  /// Collapsing a group folds its card up under the header, as on Accounts.
-  private static let groupCardTransition = AnyTransition.opacity
-    .combined(with: .scale(scale: 0.96, anchor: .top))
 
   private func categoryRow(_ category: PlanMonthCategory) -> some View {
     HStack(alignment: .top, spacing: 8) {
@@ -307,7 +287,6 @@ struct CategoriesView: View {
         if let progress = category.targetProgress {
           ProgressView(value: progress)
             .tint(progress >= 1 ? Theme.inflow : Theme.accent)
-            .animation(Theme.Motion.chart, value: progress)
             .accessibilityLabel("Target progress")
             .accessibilityValue("\(Int((progress * 100).rounded())) percent")
         }
@@ -325,9 +304,8 @@ struct CategoriesView: View {
           .foregroundStyle(Theme.accent)
           .padding(7)
           .background(Theme.surfaceMuted, in: Circle())
-          .contentShape(Circle())
       }
-      .buttonStyle(.pressable)
+      .buttonStyle(.plain)
       .accessibilityLabel("Edit assigned amount for \(category.name)")
 
       Button {
@@ -339,9 +317,8 @@ struct CategoriesView: View {
           .foregroundStyle(Theme.accent)
           .padding(7)
           .background(Theme.surfaceMuted, in: Circle())
-          .contentShape(Circle())
       }
-      .buttonStyle(.pressable)
+      .buttonStyle(.plain)
       .accessibilityLabel("Edit target for \(category.name)")
     }
     .padding(.horizontal, 16)
@@ -359,7 +336,6 @@ struct CategoriesView: View {
         .foregroundStyle(colour)
         .lineLimit(1)
         .minimumScaleFactor(0.7)
-        .rollingNumber(amount)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }

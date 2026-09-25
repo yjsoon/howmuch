@@ -151,7 +151,8 @@ extension Theme {
     static let control: CGFloat = 12
     /// Opaque content cards: account groups, report cards, capture drafts.
     static let card: CGFloat = 16
-    /// Large floating glass panels such as the keypad and reading sheet.
+    /// Large floating glass panels such as the keypad, and the hero preview
+    /// on the inbox reading screen.
     static let panel: CGFloat = 28
   }
 

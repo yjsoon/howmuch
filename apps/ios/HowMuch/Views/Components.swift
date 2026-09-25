@@ -464,7 +464,7 @@ struct RootSaveToastOverlay: View {
         )
       }
     }
-    .animation(Theme.Motion.standard, value: model.lastSaveMessage?.id)
+    .animation(Theme.Motion.arrive, value: model.lastSaveMessage?.id)
   }
 }
 
@@ -1306,6 +1306,7 @@ struct ShareMeter: View {
   let fraction: Double
   var colour: Color = Theme.accent
   @State private var progress: CGFloat = 0
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     GeometryReader { proxy in
@@ -1317,7 +1318,7 @@ struct ShareMeter: View {
             .frame(width: max(4, proxy.size.width * min(max(fraction, 0), 1) * progress))
         }
     }
-    .animation(Theme.Motion.chart, value: fraction)
+    .animation(reduceMotion ? nil : Theme.Motion.chart, value: fraction)
     .chartReveal($progress)
     .accessibilityHidden(true)
   }
@@ -1328,6 +1329,7 @@ struct StackedShareBar: View {
   let segments: [(colour: Color, fraction: Double)]
   var height: CGFloat = 14
   @State private var progress: CGFloat = 0
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     GeometryReader { proxy in
@@ -1345,7 +1347,7 @@ struct StackedShareBar: View {
     }
     .frame(height: height)
     .clipShape(RoundedRectangle(cornerRadius: height / 2, style: .continuous))
-    .animation(Theme.Motion.chart, value: segments.map { $0.fraction })
+    .animation(reduceMotion ? nil : Theme.Motion.chart, value: segments.map { $0.fraction })
     .chartReveal($progress)
   }
 }
@@ -1406,6 +1408,7 @@ struct ColumnChart: View {
   var height: CGFloat = 90
 
   @State private var progress: CGFloat = 0
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   /// Weekly ranges carry fifty-odd bars; tighter gaps keep them readable
   /// instead of spending the card's width on spacing.
@@ -1432,7 +1435,7 @@ struct ColumnChart: View {
         }
       }
       .frame(height: height)
-      .animation(Theme.Motion.chart, value: values)
+      .animation(reduceMotion ? nil : Theme.Motion.chart, value: values)
       .chartReveal($progress)
 
       if labels.count == values.count, !labels.isEmpty {
@@ -1449,6 +1452,7 @@ struct PairedColumnChart: View {
   var height: CGFloat = 90
 
   @State private var progress: CGFloat = 0
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   /// Paired columns need more room per period, so they tighten sooner.
   private var monthSpacing: CGFloat {
@@ -1481,7 +1485,7 @@ struct PairedColumnChart: View {
         }
       }
       .frame(height: height)
-      .animation(Theme.Motion.chart, value: pairs.flatMap { [$0.income, $0.spending] })
+      .animation(reduceMotion ? nil : Theme.Motion.chart, value: pairs.flatMap { [$0.income, $0.spending] })
       .chartReveal($progress)
 
       if labels.count == pairs.count, !labels.isEmpty {

@@ -905,7 +905,7 @@ struct RewardFilledRow: View {
             .fill(palette.fill)
         }
       }
-      .animation(reduceMotion ? nil : .smooth, value: projection.fill)
+      .animation(reduceMotion ? nil : Theme.Motion.chart, value: projection.fill)
     }
     .clipShape(.rect(cornerRadius: Self.cornerRadius, style: .continuous))
     .overlay {
@@ -1307,7 +1307,7 @@ struct RewardCategoryBreakdown: View {
           }
         }
         .frame(height: 16)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.inset / 2, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
         .accessibilityHidden(true)
         .padding(.bottom, 4)
       }
