@@ -2,11 +2,12 @@ import { createId } from "./ids";
 import { createHash } from "node:crypto";
 import { parseAccountIcon } from "./account-icon";
 import { applyAccountUpdate, type AccountUpdatePatch } from "./account-kind";
-import { LedgerRepository, NotFoundError, ReconciliationMismatchError, TransactionStateConflictError, ValidationError, type CategoryWriteOptions, type TransactionWriteOptions } from "./repository";
+import { LedgerRepository, NotFoundError, ReconciliationMismatchError, TransactionStateConflictError, ValidationError, type CategoryWriteOptions, type SnapshotImportResult, type TransactionWriteOptions } from "./repository";
 import {
   EntityConflictError,
   categoryCommandStatements,
   categoryInUseGuard,
+  conditionalAbort,
   isPreconditionFailure,
   isUniqueViolation,
   type CategoryCommand,
@@ -17,6 +18,7 @@ import {
   type PlannedSql,
 } from "./category-management";
 import { requestHash } from "./d1-guarded-command";
+import { PLAN_NOT_EMPTY_CONDITION, parsePlanSnapshot, planNotEmptyValues, snapshotImportStatements } from "./plan-snapshot";
 import type { LedgerStore } from "./storage";
 import type { AccountReconciliationOptions, AccountReconciliationPreview, AccountReconciliationResult, ScheduledTransactionInput, ScheduledWriteOptions, TransactionBatchResult, TransactionBatchUpdate, TransactionInput } from "./types";
 import { D1Database } from "./d1";
@@ -241,6 +243,38 @@ export class D1LedgerRepository extends LedgerRepository {
       throw error;
     }
     return read();
+  }
+
+  override async importPlanSnapshot(planId: string, input: unknown, options: { operationId: string }): Promise<SnapshotImportResult> {
+    const rows = parsePlanSnapshot(input, planId);
+    const hash = requestHash({ action: "plan.snapshot.import", planId, snapshot: input });
+    const context = this.context("plan.snapshot.import", planId, planId, options.operationId);
+    const payload = { request_hash: hash };
+    const receipt = await this.d1.get("SELECT 1 FROM write_commands WHERE id=?", [context.operationId]);
+    let statements: PlannedSql[] = [];
+    if (!receipt) {
+      await this.requireNativePlan(planId);
+      await this.requireEmptyPlan(planId);
+      const auditId = `audit_${createHash("sha256").update(context.operationId).digest("hex").slice(0, 24)}`;
+      statements = [
+        conditionalAbort(context.operationId, planId, "plan-not-empty", PLAN_NOT_EMPTY_CONDITION, planNotEmptyValues(planId)),
+        ...snapshotImportStatements(planId, rows, auditId, hash),
+      ];
+    }
+    try {
+      await this.metadata.applyNativeCommand("plan.snapshot.import", planId, planId, payload, statements, context);
+    } catch (error) {
+      if (isPreconditionFailure(error)) {
+        await this.requireNativePlan(planId);
+        await this.requireEmptyPlan(planId);
+        throw new EntityConflictError("The plan changed while the snapshot was being imported; refresh and try again");
+      }
+      if (isUniqueViolation(error) || String(error).includes("ownership failed")) {
+        throw new EntityConflictError("The snapshot reuses ids that already exist on this server");
+      }
+      throw error;
+    }
+    return { imported: rows.counts, replayed: Boolean(receipt), server_knowledge: await this.getServerKnowledge(planId) };
   }
 
   override async createScheduledTransaction(planId: string, input: ScheduledTransactionInput, options: ScheduledWriteOptions = {}): Promise<any> {

@@ -233,7 +233,7 @@ describe("D1 category commands re-check their preconditions inside the batch", (
 });
 
 describe("transition read-only lock", () => {
-  test("blocks category management writes, but not reads", async () => {
+  test("blocks category management writes and snapshot import, but not reads", async () => {
     const db = new Database(":memory:", { strict: true });
     applyMigrations(db);
     await new LedgerRepository(db, "p").ensurePlan("p");
@@ -253,6 +253,7 @@ describe("transition read-only lock", () => {
         ["/v1/plans/p/categories", "POST"],
         ["/v1/plans/p/categories/cat", "PATCH"],
         ["/v1/plans/p/categories/cat", "DELETE"],
+        ["/v1/plans/p/import_snapshot", "POST"],
       ];
       for (const [path, method] of locked) {
         const response = await send(path, method);

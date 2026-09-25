@@ -932,6 +932,7 @@ describe("YNAB-compatible API", () => {
       ["/v1/plans/plan-test/scheduled_transactions/scheduled-1", "PATCH"],
       ["/v1/plans/plan-test/scheduled_transactions/scheduled-1", "DELETE"],
       ["/v1/plans/plan-test/scheduled_transactions/scheduled-1/materialize", "POST"],
+      ["/v1/plans/plan-test/import_snapshot", "POST"],
       ["/api/mobile/quick-entry", "POST"],
       ["/api/import/csv", "POST"],
       ["/api/import/ynab", "POST"],

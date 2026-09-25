@@ -61,8 +61,20 @@ import {
   type CategoryRow,
 } from "./category-management";
 import { requestHash } from "./d1-guarded-command";
+import {
+  PLAN_NOT_EMPTY_CONDITION,
+  PlanNotEmptyError,
+  parsePlanSnapshot,
+  planNotEmptyValues,
+  projectPlanSnapshot,
+  snapshotImportStatements,
+  type PlanSnapshot,
+  type SnapshotCounts,
+} from "./plan-snapshot";
 
 type Row = Record<string, any>;
+
+export type SnapshotImportResult = { imported: SnapshotCounts; replayed: boolean; server_knowledge: number };
 
 export type CategoryWriteOptions = { operationId?: string };
 
@@ -940,6 +952,81 @@ export class LedgerRepository {
     const row = await this.db.query("SELECT * FROM categories WHERE id = ? AND plan_id = ?").get(categoryId, planId) as Row | null;
     if (!row) throw new NotFoundError("Category not found");
     return formatCategory(row);
+  }
+
+  /** The plan's ledger in `howmuch-plan-snapshot` form, read in one consistent batch. */
+  async exportPlanSnapshot(planId: string): Promise<{ snapshot: PlanSnapshot; server_knowledge: number }> {
+    const [groups, categories, payees, accounts, transactions, subtransactions, rawParents, rawSubs, editRows, editSubRows, knowledge] = await this.db.batchRead([
+      { sql: "SELECT id, name, hidden, internal, deleted FROM category_groups WHERE plan_id = ? ORDER BY id", values: [planId] },
+      { sql: "SELECT id, category_group_id, name, hidden, internal, deleted FROM categories WHERE plan_id = ? ORDER BY id", values: [planId] },
+      { sql: "SELECT id, name, transfer_account_id, deleted FROM payees WHERE plan_id = ? ORDER BY id", values: [planId] },
+      {
+        // Opening balance is whatever makes the live ledger reproduce the
+        // displayed balance, so an import recomputes exactly what was shown
+        // even where the stored opening balance was never set.
+        sql: `SELECT id, name, icon, type, on_budget, closed, transfer_payee_id,
+                balance_milli - COALESCE((SELECT SUM(t.amount_milli) FROM transactions t WHERE t.account_id = accounts.id AND t.deleted = 0), 0) AS opening_balance_milli
+              FROM accounts WHERE plan_id = ? AND deleted = 0 ORDER BY id`,
+        values: [planId],
+      },
+      {
+        sql: `SELECT id, account_id, date, amount_milli, memo, cleared, approved, flag_color, flag_name, payee_id, category_id,
+                transfer_account_id, transfer_transaction_id, matched_transaction_id, import_id, import_payee_name, import_payee_name_original
+              FROM transactions WHERE plan_id = ? AND deleted = 0 ORDER BY id`,
+        values: [planId],
+      },
+      {
+        sql: `SELECT s.id, s.transaction_id, s.amount_milli, s.memo, s.payee_id, s.category_id, s.transfer_account_id, s.transfer_transaction_id
+              FROM subtransactions s JOIN transactions t ON t.id = s.transaction_id
+              WHERE t.plan_id = ? AND t.deleted = 0 AND s.deleted = 0 ORDER BY s.transaction_id, s.id`,
+        values: [planId],
+      },
+      ...SCHEDULED_SQL.map((sql) => ({ sql, values: [planId] })),
+      { sql: SERVER_KNOWLEDGE_SQL, values: [planId] },
+    ]);
+    return {
+      snapshot: projectPlanSnapshot({
+        categoryGroups: groups ?? [],
+        categories: categories ?? [],
+        payees: payees ?? [],
+        accounts: accounts ?? [],
+        transactions: transactions ?? [],
+        subtransactions: subtransactions ?? [],
+        scheduledTransactions: assembleScheduledTransactions(rawParents ?? [], rawSubs ?? [], editRows ?? [], editSubRows ?? []),
+      }),
+      server_knowledge: knowledgeFrom(knowledge),
+    };
+  }
+
+  /**
+   * Loads a whole snapshot into an empty native plan as one atomic write.
+   * An exact retry with the same Idempotency-Key replays; the plan is never
+   * left partly imported.
+   */
+  async importPlanSnapshot(planId: string, input: unknown, options: { operationId: string }): Promise<SnapshotImportResult> {
+    const rows = parsePlanSnapshot(input, planId);
+    const hash = requestHash({ action: "plan.snapshot.import", planId, snapshot: input });
+    const replayed = await this.db.transaction(async () => {
+      if (await this.replayedScheduleMutation(planId, planId, "plan.snapshot.import", options.operationId, hash)) return true;
+      await this.requireNativePlan(planId);
+      await this.requireEmptyPlan(planId);
+      const auditId = `audit_${scheduleDigest(options.operationId).slice(0, 24)}`;
+      try {
+        for (const planned of snapshotImportStatements(planId, rows, auditId, hash)) {
+          await this.db.query(planned.sql).run(...planned.values);
+        }
+      } catch (error) {
+        if (isUniqueViolation(error)) throw new EntityConflictError("The snapshot reuses ids that already exist on this server");
+        throw error;
+      }
+      return false;
+    })();
+    return { imported: rows.counts, replayed, server_knowledge: await this.getServerKnowledge(planId) };
+  }
+
+  protected async requireEmptyPlan(planId: string): Promise<void> {
+    const row = await this.db.query(`SELECT ${PLAN_NOT_EMPTY_CONDITION} AS not_empty`).get(...planNotEmptyValues(planId)) as Row | null;
+    if (toBoolean(row?.not_empty)) throw new PlanNotEmptyError();
   }
 
   async createTransaction(planId: string, input: TransactionInput, options: TransactionWriteOptions = {}): Promise<any> {

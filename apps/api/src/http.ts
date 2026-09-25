@@ -47,6 +47,7 @@ import {
   parseCategoryGroupPatch,
   parseCategoryPatch,
 } from "./category-management";
+import { MAX_SNAPSHOT_BYTES, PlanNotEmptyError, SnapshotValidationError } from "./plan-snapshot";
 
 type HandlerOptions = {
   db?: Database;
@@ -136,6 +137,12 @@ export function createHandler(options: HandlerOptions): (request: Request) => Pr
       }
       if (error instanceof CategoryValidationError) {
         return apiError(400, "bad_request", error.message);
+      }
+      if (error instanceof SnapshotValidationError) {
+        return apiError(400, "bad_request", error.message);
+      }
+      if (error instanceof PlanNotEmptyError) {
+        return apiError(409, "plan_not_empty", error.message);
       }
       if (error instanceof YnabMirrorPlanError) {
         return apiError(409, "ynab_mirror_plan", error.message);
@@ -325,6 +332,33 @@ async function handleV1(
     if (segments.length === 7 && segments[5] === "transactions" && segments[6] === "unapproved_count" && method === "GET") {
       return unapprovedCountResponse(repo, planId, countFilters(url, { accountId }));
     }
+  }
+
+  if (resource === "export_snapshot" && segments.length === 4 && method === "GET") {
+    if (principal.kind !== "api-token" && principal.roles[planId] === "viewer") {
+      return apiError(403, "forbidden", "Plan owner or editor access is required");
+    }
+    return json({ data: await repo.exportPlanSnapshot(planId) });
+  }
+
+  if (resource === "import_snapshot" && segments.length === 4 && method === "POST") {
+    const administrationDenied = authorizePlanAdministration(principal, planId);
+    if (administrationDenied) return administrationDenied;
+    const operationId = requireIdempotencyKey(request);
+    const text = await request.text();
+    if (new TextEncoder().encode(text).byteLength > MAX_SNAPSHOT_BYTES) {
+      return apiError(413, "payload_too_large", `Snapshots are limited to ${MAX_SNAPSHOT_BYTES / (1024 * 1024)} MiB`);
+    }
+    let body: any;
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch {
+      throw new ValidationError("Request body is not valid JSON");
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body) || body.snapshot === undefined) {
+      throw new ValidationError("snapshot is required");
+    }
+    return json({ data: await repo.importPlanSnapshot(planId, body.snapshot, { operationId }) }, 201);
   }
 
   if (resource === "category_groups") {
@@ -1206,6 +1240,9 @@ function isTransitionFinancialWrite(methodValue: string, segments: string[]): bo
 
   const resource = segments[3];
   if ((resource === "accounts" || resource === "payees") && segments.length === 4) {
+    return method === "POST";
+  }
+  if (resource === "import_snapshot" && segments.length === 4) {
     return method === "POST";
   }
   if (resource === "category_groups" || resource === "categories") {
