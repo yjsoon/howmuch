@@ -740,9 +740,12 @@ Jev's distribution was, not whether the answer is correct.
 
 Jev chooses only among the plan's live, visible categories (plus inflow
 categories; credit card payment categories are excluded), so payee or memo text
-cannot make it return anything else. The request sends payee names, memos,
-amounts, dates, account names, category names and each payee's recent category
-counts to TypeSafe. Errors: `503 categoriser_not_configured` without a key,
+cannot make it return anything else. As evidence, each item carries the category
+counts from that payee's last 50 transactions and up to eight distinct categorised
+past transactions whose payee or memo contains the payee's most distinctive word
+(so "GRAB*RIDES 1234" finds earlier "Grab" rows). Jev judges which examples are
+relevant. The request sends payee names, memos, amounts, dates, account names,
+category names and those past examples to TypeSafe. Errors: `503 categoriser_not_configured` without a key,
 `502 categoriser_unavailable` when TypeSafe fails or rejects the key,
 `429 categoriser_rate_limited`.
 

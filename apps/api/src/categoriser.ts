@@ -25,6 +25,14 @@ import { ValidationError } from "./repository";
 export const MAX_CATEGORISE_BATCH = 25;
 const PAYEE_HISTORY_LIMIT = 50;
 const PAYEE_HISTORY_CATEGORIES = 5;
+const SIMILAR_SEARCH_LIMIT = 60;
+const SIMILAR_EXAMPLES = 8;
+/** Words that say nothing about what a merchant sells, so they make poor search terms. */
+const GENERIC_PAYEE_WORDS = new Set([
+  "the", "and", "pte", "ltd", "limited", "inc", "llc", "company", "group", "holdings", "singapore", "sgp",
+  "www", "com", "http", "https", "payment", "payments", "pay", "paynow", "card", "visa", "mastercard",
+  "purchase", "pos", "nets", "transfer", "online", "debit", "credit", "ref",
+]);
 const ALTERNATIVES = 3;
 const NO_MATCH = "None of these";
 
@@ -142,7 +150,10 @@ export async function suggestCategories(
   const criteria: Record<string, string | null> = Object.fromEntries([...byLabel.keys()].map((label) => [label, null]));
   criteria[NO_MATCH] = "No listed category fits this transaction, or it needs a person to decide (for example a refund or reimbursement of unclear purpose).";
 
-  const histories = await payeeHistories(repo, planId, items, labelFor);
+  const [histories, similar] = await Promise.all([
+    payeeHistories(repo, planId, items, labelFor),
+    similarTransactions(repo, planId, items, labelFor),
+  ]);
   const state = {
     transactions: items.map((item) => ({
       payee: item.payee_name,
@@ -152,6 +163,7 @@ export async function suggestCategories(
       date: item.date,
       account: item.account_name,
       payee_history: item.payee_id ? histories.get(item.payee_id) ?? [] : [],
+      similar_past_transactions: similar.get(item.key) ?? [],
     })),
   };
   const questions: Record<string, ChoiceQuestion<typeof criteria>> = {};
@@ -159,8 +171,11 @@ export async function suggestCategories(
     const path = `transactions[${index}]`;
     questions[`t${index}`] = choice(
       `Which budget category does the transaction \`${path}\` belong to? Use its payee, memo, direction, amount and account. `
-        + `\`${path}.payee_history\` lists categories this payee was given before and how many times; treat it as strong evidence, `
-        + `but not binding when the memo or amount points elsewhere. Inflows are usually income unless they look like a refund.`,
+        + `\`${path}.payee_history\` counts the categories this exact payee was given before; treat it as strong evidence, `
+        + `but not binding when the memo or amount points elsewhere. \`${path}.similar_past_transactions\` are earlier `
+        + `transactions whose payee or memo shares a word with this payee, with the category each was given. Some may be `
+        + `unrelated merchants that happen to share the word: follow the ones that are clearly the same merchant or the same `
+        + `kind of purchase. Inflows are usually income unless they look like a refund.`,
       criteria,
     );
   });
@@ -220,6 +235,63 @@ async function payeeHistories(
     return [payeeId, history] as const;
   }));
   return new Map(entries);
+}
+
+/**
+ * The most distinctive word of a payee name, for finding its past transactions
+ * under other spellings ("GRAB*RIDES 8812" and "Grab" share "grab").
+ */
+export function payeeSearchTerm(name: string | null): string | null {
+  if (!name) return null;
+  const words = name.toLowerCase().replace(/[^a-z]+/g, " ").split(" ");
+  return words.find((word) => word.length >= 3 && !GENERIC_PAYEE_WORDS.has(word)) ?? null;
+}
+
+/**
+ * Categorised past transactions whose payee or memo contains the item's payee
+ * search term, newest first. Code retrieves the candidates; Jev judges which
+ * of them are relevant.
+ */
+async function similarTransactions(
+  repo: LedgerStore,
+  planId: string,
+  items: CategoriseItem[],
+  labelFor: Map<string, string>,
+): Promise<Map<string, Array<Record<string, string | null>>>> {
+  const excluded = new Set(items.map((item) => item.key));
+  const terms = [...new Set(items.map((item) => payeeSearchTerm(item.payee_name)).filter((term): term is string => Boolean(term)))];
+  const byTerm = new Map(await Promise.all(terms.map(async (term) => {
+    const page = await repo.listTransactionsPage(planId, { q: term, limit: SIMILAR_SEARCH_LIMIT });
+    const seen = new Set<string>();
+    const examples: Array<Record<string, string | null>> = [];
+    for (const transaction of page.transactions) {
+      if (examples.length >= SIMILAR_EXAMPLES) break;
+      const category = transaction.category_id ? labelFor.get(transaction.category_id) : undefined;
+      if (!category || excluded.has(transaction.id) || transaction.transfer_account_id || transaction.subtransactions?.length) continue;
+      const payee = transaction.payee_name ?? null;
+      const memo = transaction.memo ?? null;
+      if (!`${payee ?? ""} ${memo ?? ""}`.toLowerCase().includes(term)) continue;
+      // Repeats of one purchase teach nothing new; keep the variety.
+      const signature = `${payee}|${memo}|${category}`.toLowerCase();
+      if (seen.has(signature)) continue;
+      seen.add(signature);
+      examples.push({
+        payee,
+        memo,
+        direction: transaction.amount < 0 ? "outflow" : "inflow",
+        amount: (Math.abs(transaction.amount) / 1000).toFixed(2),
+        date: transaction.date ?? null,
+        category,
+      });
+    }
+    return [term, examples] as const;
+  })));
+  const result = new Map<string, Array<Record<string, string | null>>>();
+  for (const item of items) {
+    const term = payeeSearchTerm(item.payee_name);
+    if (term) result.set(item.key, byTerm.get(term) ?? []);
+  }
+  return result;
 }
 
 function unavailable(error: unknown): CategoriserUnavailableError {

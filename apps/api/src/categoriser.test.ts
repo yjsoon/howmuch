@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { applyMigrations } from "./db";
 import { createHandler } from "./http";
 import { LedgerRepository } from "./repository";
-import { categoryOptions } from "./categoriser";
+import { categoryOptions, payeeSearchTerm } from "./categoriser";
 
 const config = { dbPath: ":memory:", port: 0, apiToken: "test-token", defaultPlanId: "test-plan", transitionReadOnly: false };
 
@@ -111,4 +111,34 @@ test("keeps inflow categories from hidden groups but drops hidden spending categ
     { id: "g", name: "Bills", categories: [{ id: "rent", name: "Rent" }, { id: "gone", name: "Gone", deleted: true }] },
   ]);
   expect(options.map((option) => option.category_id)).toEqual(["rta", "rent"]);
+});
+
+test("finds past transactions under other spellings of the payee", async () => {
+  const db = await seeded();
+  const repo = new LedgerRepository(db, "test-plan");
+  await repo.upsertPayee("test-plan", { id: "grabfood", name: "GRABFOOD*ORDER 8812" });
+  await repo.createTransaction("test-plan", { id: "t4", account_id: "card", date: "2026-09-05", amount: -25_000, payee_id: "grabfood", memo: "dinner", category_id: "food" });
+  await repo.createTransaction("test-plan", { id: "t5", account_id: "card", date: "2026-09-06", amount: -9_000, payee_id: "grabfood", memo: "dinner", category_id: "food" });
+  await repo.createTransaction("test-plan", { id: "pending", account_id: "card", date: "2026-09-07", amount: -4_000, payee_id: "grabfood" });
+  const sent: any[] = [];
+  const handler = createHandler({ db, config: { ...config, typesafeApiKey: "ts-key" }, typesafeFetch: fakeJev(sent) });
+  try {
+    const response = await post(handler, { transactions: [{ key: "pending", payee_name: "GRAB*RIDES SG 1234", amount: -4_000 }] });
+    expect(response.status).toBe(200);
+    const similar = sent[0].body.state.transactions[0].similar_past_transactions;
+    // Newest first, one row per distinct payee/memo/category, without the row being classified.
+    expect(similar.map((row: any) => [row.payee, row.memo, row.category])).toEqual([
+      ["GRABFOOD*ORDER 8812", "dinner", "Living: Food"],
+      ["Grab", null, "Living: Food"],
+      ["Grab", null, "Living: Transport"],
+    ]);
+    expect(sent[0].body.state.transactions[0].payee_history).toEqual([]);
+  } finally { db.close(); }
+});
+
+test("picks a distinctive payee word to search by", () => {
+  expect(payeeSearchTerm("GRAB*RIDES SG 1234")).toBe("grab");
+  expect(payeeSearchTerm("The Coffee Bean Pte Ltd")).toBe("coffee");
+  expect(payeeSearchTerm("SP Group")).toBeNull();
+  expect(payeeSearchTerm(null)).toBeNull();
 });

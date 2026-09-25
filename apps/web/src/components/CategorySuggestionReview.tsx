@@ -27,7 +27,7 @@ export function CategorySuggestionReview({
       <div className="category-suggestions-head">
         <h2 id="category-suggestions-heading">Suggested categories</h2>
         <p>
-          Suggested by Jev from each payee, memo, amount and the payee’s past categories. Ticked rows are confident
+          Suggested by Jev from each payee, memo and amount, and how similar past transactions were categorised. Ticked rows are confident
           suggestions; check them and change any before applying.
         </p>
       </div>
