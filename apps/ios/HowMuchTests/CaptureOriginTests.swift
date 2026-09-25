@@ -147,6 +147,18 @@ final class CaptureOriginTests: XCTestCase {
     XCTAssertEqual(CaptureAdmissionGate.referenceWait(referencePhase: .idle, isRefreshingAll: false), .stalled)
   }
 
+  /// An offline warm launch turns the reference phase `.failed` over accounts
+  /// the snapshot already put on screen. Those are enough to capture against.
+  func testFailedRefreshBlocksAdmissionOnlyWithoutAccounts() {
+    XCTAssertNil(CaptureAdmissionGate.blockingError(referencePhase: .failed("offline"), hasAccounts: true))
+    XCTAssertEqual(
+      CaptureAdmissionGate.blockingError(referencePhase: .failed("offline"), hasAccounts: false),
+      "offline"
+    )
+    XCTAssertNil(CaptureAdmissionGate.blockingError(referencePhase: .loaded, hasAccounts: false))
+    XCTAssertNil(CaptureAdmissionGate.blockingError(referencePhase: .loaded, hasAccounts: true))
+  }
+
   func testAdmissionAfterRefreshRequiresCurrentRequestAndMatchingScope() {
     let request = CaptureRequest(kind: .blank, connectionFingerprint: "plan-a")
     let other = CaptureRequest(kind: .blank, connectionFingerprint: "plan-a")

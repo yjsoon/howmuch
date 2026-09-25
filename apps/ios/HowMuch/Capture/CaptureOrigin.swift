@@ -93,6 +93,17 @@ enum CaptureAdmissionGate {
     }
   }
 
+  /// The message that stops admission, or `nil` to admit. A failed refresh
+  /// only blocks capture when it left nothing to pick from: accounts already
+  /// on screen (a warm launch's snapshot, or an earlier load) are enough to
+  /// file a spend against while the server is out of reach.
+  static func blockingError(referencePhase: LoadPhase, hasAccounts: Bool) -> String? {
+    guard !hasAccounts, case .failed(let message) = referencePhase else {
+      return nil
+    }
+    return message
+  }
+
   static func shouldRefreshReference(phase: LoadPhase, explicitRetry: Bool) -> Bool {
     if explicitRetry {
       return true

@@ -409,7 +409,10 @@ struct CaptureIntakeHost: View {
     if Task.isCancelled {
       return
     }
-    if case .failed(let message) = model.referencePhase {
+    if let message = CaptureAdmissionGate.blockingError(
+      referencePhase: model.referencePhase,
+      hasAccounts: !model.accounts.isEmpty
+    ) {
       admissionError = message
       return
     }
