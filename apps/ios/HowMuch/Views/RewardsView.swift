@@ -998,6 +998,7 @@ struct LeadingFill: Shape {
 
 struct RewardCardDetailSheet: View {
   @Environment(\.dismiss) private var dismiss
+  @State private var contentHeight: CGFloat = 0
   let row: RewardsCardRow
   let asOf: String?
   let icon: String?
@@ -1041,6 +1042,13 @@ struct RewardCardDetailSheet: View {
         periodsSection
       }
       .listStyle(.insetGrouped)
+      .onScrollGeometryChange(for: CGFloat.self) { geometry in
+        // Measure every visible section at the current width and text size.
+        // The detent adds the bottom safe area; the top inset includes navigation.
+        ceil(geometry.contentSize.height + geometry.contentInsets.top)
+      } action: { _, height in
+        if height > 0 { contentHeight = height }
+      }
       .navigationTitle(row.card.name)
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -1052,7 +1060,7 @@ struct RewardCardDetailSheet: View {
         }
       }
     }
-    .presentationDetents([.medium, .large])
+    .presentationDetents([contentHeight > 0 ? .height(contentHeight) : .large])
     .presentationDragIndicator(.visible)
     // Financial figures stay on an opaque surface, not the glass sheet.
     .presentationBackground(Color(.systemGroupedBackground))
@@ -1175,40 +1183,9 @@ struct RewardCardDetailSheet: View {
   private var categoriesSection: some View {
     if !calc.flags.isEmpty {
       Section("Categories") {
-        ForEach(calc.flags) { flag in
-          VStack(alignment: .leading, spacing: 4) {
-            HStack {
-              Circle()
-                .fill(Theme.flagColour(named: flag.flagColor) ?? Color.secondary.opacity(0.4))
-                .frame(width: 8, height: 8)
-                .accessibilityHidden(true)
-              Text(flag.name)
-              if let rate = flag.rewardRate {
-                Text(rateText(rate))
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-              }
-              Spacer()
-              Text(RewardRowText.reward(flag.rewardEarned, calc.rewardType, currencyFormat: currencyFormat))
-                .monospacedDigit()
-            }
-            if let maximum = flag.maximumSpend, maximum > 0 {
-              labelledUsage(
-                flag.maximumSpendExceeded == true ? "Category cap reached" : "Category cap",
-                spend: flag.countedSpend ?? flag.totalSpend ?? flag.eligibleSpend,
-                target: maximum
-              )
-            }
-            if let minimum = flag.minimumSpend, minimum > 0 {
-              labelledUsage(
-                flag.minimumSpendMet == true ? "Category minimum met" : "Category minimum",
-                spend: flag.totalSpend ?? flag.eligibleSpend,
-                target: minimum
-              )
-            }
-          }
-          .accessibilityElement(children: .combine)
-        }
+        RewardCategoryBreakdown(row: row, currencyFormat: currencyFormat)
+          .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
+          .listRowBackground(Color.clear)
       }
     }
   }
@@ -1250,17 +1227,6 @@ struct RewardCardDetailSheet: View {
     .accessibilityElement(children: .combine)
   }
 
-  private func labelledUsage(_ title: String, spend: Double, target: Double) -> some View {
-    HStack {
-      Text(title)
-      Spacer()
-      Text("\(money(spend)) / \(money(target))")
-        .monospacedDigit()
-    }
-    .font(.caption)
-    .foregroundStyle(.secondary)
-  }
-
   private func tierDetail(_ tier: CardSpendingTier) -> String {
     var parts: [String] = []
     if let rate = tier.earningRate {
@@ -1290,6 +1256,151 @@ struct RewardCardDetailSheet: View {
 
   private func short(_ iso: String) -> String {
     RewardsCalendar.shortLabel(iso, referenceISO: RewardsCalendar.today())
+  }
+}
+
+// MARK: - Category spending
+
+/// Actual spend is distinct from the rounded/capped amount eligible for rewards.
+struct RewardCategoryUsage: Identifiable {
+  let flag: RewardsFlagRow
+  let excluded: Bool
+  var id: String { flag.id }
+  var spend: Double { flag.totalSpend ?? flag.eligibleSpend }
+  var cap: Double? { excluded ? nil : flag.maximumSpend.flatMap { $0 > 0 ? $0 : nil } }
+  var ratio: Double? { cap.map { max(0, spend / $0) } }
+  var fill: Double { ratio.map { min(1, $0) } ?? (spend > 0 ? 1 : 0) }
+  var warning: Bool { (ratio ?? 0) >= 0.9 }
+
+  static func make(row: RewardsCardRow) -> [Self] {
+    let excludedIDs = Set((row.card.subcategories ?? []).filter { $0.excludeFromRewards == true }.map(\.id))
+    return row.calculation.flags.map { Self(flag: $0, excluded: excludedIDs.contains($0.id)) }
+      .sorted { lhs, rhs in
+        if lhs.excluded != rhs.excluded { return !lhs.excluded }
+        if lhs.spend != rhs.spend { return lhs.spend > rhs.spend }
+        return lhs.id < rhs.id
+      }
+  }
+}
+
+struct RewardCategoryBreakdown: View {
+  @Environment(\.layoutDirection) private var layoutDirection
+  let row: RewardsCardRow
+  let currencyFormat: CurrencyFormat?
+
+  var body: some View {
+    let categories = RewardCategoryUsage.make(row: row)
+    let total = categories.reduce(0) { $0 + max(0, $1.spend) }
+    VStack(spacing: 6) {
+      if total > 0 {
+        GeometryReader { geometry in
+          HStack(spacing: 0) {
+            ForEach(categories) { category in
+              colour(category)
+                .frame(width: geometry.size.width * max(0, category.spend) / total)
+            }
+          }
+        }
+        .frame(height: 16)
+        .clipShape(.rect(cornerRadius: 5))
+        .accessibilityHidden(true)
+        .padding(.bottom, 4)
+      }
+      ForEach(categories) { category in
+        categoryRow(category)
+      }
+    }
+  }
+
+  private func categoryRow(_ category: RewardCategoryUsage) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      ViewThatFits(in: .horizontal) {
+        HStack(spacing: 8) {
+          categoryName(category)
+            .fixedSize(horizontal: true, vertical: true)
+          Spacer(minLength: 0)
+          amounts(category)
+            .fixedSize(horizontal: true, vertical: true)
+        }
+        VStack(alignment: .leading, spacing: 4) {
+          categoryName(category)
+          amounts(category)
+        }
+      }
+      if !category.excluded, let minimum = category.flag.minimumSpend, minimum > 0 {
+        Text("\(category.flag.minimumSpendMet == true ? "Minimum met" : "Minimum"): \(money(minimum))")
+          .font(.caption)
+          .foregroundStyle(Theme.rowSecondary)
+      }
+    }
+    .padding(.horizontal, 10)
+    .padding(.vertical, 9)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background {
+      LeadingFill(fraction: category.fill, rightToLeft: layoutDirection == .rightToLeft)
+        .fill(colour(category).opacity(0.19))
+    }
+    .clipShape(.rect(cornerRadius: 8))
+    .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(colour(category).opacity(0.45), lineWidth: 1) }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("\(category.flag.name), \(money(category.spend)) spent")
+    .accessibilityValue(accessibilityDetail(category))
+  }
+
+  private func categoryName(_ category: RewardCategoryUsage) -> some View {
+    HStack(spacing: 6) {
+      Circle().fill(colour(category)).frame(width: 8, height: 8)
+      Text(category.flag.name).fixedSize(horizontal: false, vertical: true)
+    }
+  }
+
+  private func amounts(_ category: RewardCategoryUsage) -> some View {
+    ViewThatFits(in: .horizontal) {
+      HStack(spacing: 5) {
+        amountParts(category)
+      }
+      .fixedSize(horizontal: true, vertical: true)
+      VStack(alignment: .leading, spacing: 4) {
+        amountParts(category)
+      }
+    }
+    .font(.subheadline)
+    .monospacedDigit()
+  }
+
+  @ViewBuilder
+  private func amountParts(_ category: RewardCategoryUsage) -> some View {
+    Text(money(category.spend)).fontWeight(.semibold)
+    if let cap = category.cap, let ratio = category.ratio {
+      Text("/\(money(cap))").foregroundStyle(Theme.rowSecondary)
+      Text("\(Int((ratio * 100).rounded()))%")
+        // Darker than system red on the light tinted fills (normal-text contrast).
+        .foregroundStyle(category.warning ? Color(light: 0xA82B24, dark: 0xFF6961) : Theme.rowSecondary)
+    } else if !category.excluded {
+      Text("No cap").foregroundStyle(Theme.rowSecondary)
+    }
+  }
+
+  private func colour(_ category: RewardCategoryUsage) -> Color {
+    Theme.flagColour(named: category.flag.flagColor) ?? .secondary
+  }
+
+  private func money(_ value: Double) -> String {
+    MoneyCodec.displayString(forCurrencyUnits: value, currencyFormat: currencyFormat)
+  }
+
+  private func accessibilityDetail(_ category: RewardCategoryUsage) -> String {
+    if category.excluded { return "Excluded from rewards" }
+    var parts: [String] = []
+    if let cap = category.cap, let ratio = category.ratio {
+      parts.append("Cap \(money(cap)), \(Int((ratio * 100).rounded())) percent used")
+    } else {
+      parts.append("No cap")
+    }
+    if let minimum = category.flag.minimumSpend, minimum > 0 {
+      parts.append("\(category.flag.minimumSpendMet == true ? "Minimum met" : "Minimum not met"), \(money(minimum))")
+    }
+    return parts.joined(separator: ". ")
   }
 }
 

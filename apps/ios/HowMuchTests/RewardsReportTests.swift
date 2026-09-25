@@ -565,6 +565,160 @@ final class RewardsBoardPreferencesTests: XCTestCase {
 
 @MainActor
 final class RewardsSnapshotTests: XCTestCase {
+  private func categoryFixture(values: [(String, String, Double, Double)]? = nil, minimumSpend: Double = 0) throws -> RewardsCardRow {
+    let values = values ?? [
+      ("Telcos", "blue", 60.51, 375), ("Groceries", "gray", 695.63, 500),
+      ("Gas", "green", 105.15, 375), ("Food", "yellow", 343.94, 375),
+      ("Transport", "purple", 234.46, 375), ("MYRIDR", "orange", 203.79, 375),
+      ("Excluded", "red", 21, 375),
+    ]
+    let flags = values.map { name, colour, spend, cap in
+      ["subcategoryId": name, "name": name, "flagColor": colour, "totalSpend": spend,
+       "countedSpend": min(spend, cap), "eligibleSpend": min(spend, cap),
+       "maximumSpend": cap, "rewardEarned": 0] as [String: Any]
+    }
+    let json: [String: Any] = [
+      "card": ["id": "maybank", "name": "Maybank Mine 8008", "issuer": "Demo", "type": "cashback",
+        "subcategories": [["id": "Excluded", "name": "Excluded", "flagColor": "red", "rewardValue": 0,
+          "priority": 0, "active": true, "excludeFromRewards": true, "createdAt": "", "updatedAt": ""]]],
+      "account_id": "demo", "account_name": "Maybank",
+      "calculation": ["period": "2026-09", "total_spend": 1643.48, "counted_spend": 1447.85,
+        "eligible_spend": 1447.85, "reward_earned": 105.83, "reward_earned_dollars": 105.83,
+        "reward_type": "cashback", "minimum_spend": minimumSpend, "minimum_spend_met": true,
+        "maximum_spend_exceeded": false, "flags": flags],
+    ]
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    return try decoder.decode(RewardsCardRow.self, from: JSONSerialization.data(withJSONObject: json))
+  }
+
+  func testCategoryUsageUsesActualSpendAndClampsOnlyFill() throws {
+    let categories = RewardCategoryUsage.make(row: try categoryFixture())
+    XCTAssertEqual(categories.map(\.id), ["Groceries", "Food", "Transport", "MYRIDR", "Gas", "Telcos", "Excluded"])
+    XCTAssertEqual(categories[0].spend, 695.63)
+    XCTAssertEqual(try XCTUnwrap(categories[0].ratio), 1.39126, accuracy: 0.00001)
+    XCTAssertEqual(categories[0].fill, 1)
+    XCTAssertTrue(categories[0].warning)
+    XCTAssertTrue(categories[1].warning)
+    XCTAssertFalse(categories[2].warning)
+    XCTAssertEqual(categories[2].fill, 234.46 / 375, accuracy: 0.00001)
+    XCTAssertTrue(categories[6].excluded)
+    XCTAssertNil(categories[6].cap)
+    XCTAssertNil(categories[6].ratio)
+    XCTAssertFalse(categories[6].warning)
+    XCTAssertEqual(categories[6].fill, 1)
+    XCTAssertEqual(categories[6].spend, 21)
+    var uncappedFlag = categories[6].flag
+    uncappedFlag.maximumSpend = nil
+    let uncapped = RewardCategoryUsage(flag: uncappedFlag, excluded: false)
+    XCTAssertNil(uncapped.cap)
+    XCTAssertFalse(uncapped.warning)
+    let boundaries = RewardCategoryUsage.make(row: try categoryFixture(values: [
+      ("Below", "blue", 89.99, 100), ("At", "blue", 90, 100),
+    ]))
+    XCTAssertTrue(boundaries[0].warning)
+    XCTAssertFalse(boundaries[1].warning)
+    let refunded = RewardsFlagRow(subcategoryId: "refund", name: "Refund", flagColor: "blue",
+      totalSpend: -20, eligibleSpend: 0, rewardEarned: 0, rewardEarnedDollars: nil, rewardRate: nil,
+      maximumSpend: 100)
+    XCTAssertEqual(RewardCategoryUsage(flag: refunded, excluded: false).fill, 0)
+  }
+
+  func testCategorySheetRendersDarkLightAndLargeText() async throws {
+    let harness = SnapshotHarness.make(baseURLString: "https://rewards-snapshot.test")
+    let row = try categoryFixture()
+    for (name, scheme, size) in [("dark", ColorScheme.dark, DynamicTypeSize.large),
+      ("light", .light, .large), ("large-text", .dark, .accessibility1)] {
+      let surface = try XCTUnwrap(SnapshotSurface(
+        root: RewardCardDetailSheet(row: row, asOf: nil, icon: "🟣", currencyFormat: harness.model.currencyFormat,
+          canOpenAccount: false, onEdit: {}, onOpenAccount: {})
+          .environment(harness.model).environment(\.dynamicTypeSize, size).preferredColorScheme(scheme),
+        size: CGSize(width: 430, height: size.isAccessibilitySize ? 1500 : 932)
+      ))
+      let expected = ["Groceries", "$695.63", "139%", "Food", "92%", "MYRIDR", "Excluded", "$21.00"]
+      let rendered = await surface.captureUntilOCR(contains: expected, timeoutNanoseconds: 5_000_000_000)
+      attach(rendered.image, "reward-categories-\(name)")
+      for text in expected { XCTAssertTrue(rendered.text.contains(text.lowercased()), "Missing \(text): \(rendered.text)") }
+      surface.detach()
+    }
+  }
+
+  func testCategoryDetailFitsContentAndScrollsOnlyWhenNecessary() async throws {
+    XCTAssertTrue(URLProtocol.registerClass(RewardsSnapshotProtocol.self))
+    defer { URLProtocol.unregisterClass(RewardsSnapshotProtocol.self) }
+    let harness = SnapshotHarness.make(baseURLString: "https://rewards-snapshot.test")
+    let row = try categoryFixture()
+    let short = try categoryFixture(values: [("Groceries", "gray", 695.63, 500)])
+    let targets = try categoryFixture(minimumSpend: 800)
+    var heights: [String: CGFloat] = [:]
+    for (name, fixture, textSize, width) in [
+      ("short", short, DynamicTypeSize.large, CGFloat(430)),
+      ("seven", row, .large, 430), ("targets", targets, .large, 430),
+      ("narrow", row, .large, 320), ("overflow", row, .accessibility3, 430),
+    ] {
+      let surface = try XCTUnwrap(SnapshotSurface(
+        root: NavigationStack { RewardsView() }
+          .sheet(isPresented: .constant(true)) {
+            RewardCardDetailSheet(row: fixture, asOf: nil, icon: "🟣", currencyFormat: harness.model.currencyFormat,
+              canOpenAccount: true, onEdit: {}, onOpenAccount: {})
+              .environment(\.dynamicTypeSize, textSize)
+          }
+          .environment(harness.model).environment(RootChromeState())
+          .environment(\.dynamicTypeSize, textSize).preferredColorScheme(.dark),
+        size: CGSize(width: width, height: 932)
+      ))
+      defer { surface.detach() }
+      // Let presentation and content-driven detent layout settle before measuring.
+      _ = await surface.captureUntilOCR(contains: ["Done", "Edit"])
+      try await Task.sleep(nanoseconds: 600_000_000)
+      let frame = try XCTUnwrap(surface.presentedSheetFrame())
+      let scroll = try XCTUnwrap(surface.presentedContentScrollView())
+      let visible = scroll.bounds.height - scroll.adjustedContentInset.top - scroll.adjustedContentInset.bottom
+      heights[name] = frame.height
+      print("Adaptive reward sheet \(name): frame=\(frame), content=\(scroll.contentSize.height), visible=\(visible)")
+      XCTAssertLessThanOrEqual(frame.height, surface.windowBounds.height)
+      if name == "overflow" {
+        XCTAssertGreaterThan(frame.height, surface.windowBounds.height * 0.85)
+        XCTAssertGreaterThan(scroll.contentSize.height, visible + 100)
+        attach(surface.captureVisible(), "reward-adaptive-overflow")
+        scroll.setContentOffset(CGPoint(x: 0, y: scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom), animated: false)
+        let bottom = await surface.captureUntilOCR(contains: ["Excluded", "$21.00"], timeoutNanoseconds: 3_000_000_000)
+        attach(bottom.image, "reward-adaptive-overflow-scrolled")
+        XCTAssertTrue(bottom.text.contains("excluded"), bottom.text)
+        XCTAssertTrue(bottom.text.contains("$21.00"), bottom.text)
+      } else {
+        XCTAssertLessThanOrEqual(scroll.contentSize.height, visible + 2, "\(name) must fit without scrolling")
+        var expected = ["Done", "Edit", "Groceries", "$695.63", "139%"]
+        if name != "short" { expected += ["Food", "Transport", "MYRIDR", "Gas", "Telcos", "Excluded", "$21.00"] }
+        if name == "targets" { expected += ["Targets", "Minimum met"] }
+        let rendered = await surface.captureUntilOCR(contains: expected, timeoutNanoseconds: 3_000_000_000)
+        attach(rendered.image, "reward-adaptive-\(name)")
+        for text in expected { XCTAssertTrue(rendered.text.contains(text.lowercased()), "\(name) missing \(text): \(rendered.text)") }
+      }
+    }
+    XCTAssertLessThan(try XCTUnwrap(heights["short"]), 600)
+    XCTAssertGreaterThan(try XCTUnwrap(heights["seven"]), try XCTUnwrap(heights["short"]) + 150)
+    XCTAssertGreaterThan(try XCTUnwrap(heights["targets"]), try XCTUnwrap(heights["seven"]) + 40)
+    XCTAssertGreaterThan(try XCTUnwrap(heights["narrow"]), try XCTUnwrap(heights["seven"]))
+  }
+
+  func testNarrowCategoryRowsKeepLargeAmountsWhole() async throws {
+    let harness = SnapshotHarness.make(baseURLString: "https://rewards-snapshot.test")
+    let row = try categoryFixture(values: [("Quarterly groceries and dining", "purple", 12345.67, 10000)])
+    for (name, size) in [("xxxlarge", DynamicTypeSize.xxxLarge), ("ax3", .accessibility3)] {
+      let surface = try XCTUnwrap(SnapshotSurface(
+        root: RewardCategoryBreakdown(row: row, currencyFormat: harness.model.currencyFormat)
+          .padding(32).environment(\.dynamicTypeSize, size).preferredColorScheme(.light),
+        size: CGSize(width: 375, height: 932)
+      ))
+      let expected = ["Quarterly groceries and dining", "$12,345.67", "/$10,000.00", "123%"]
+      let rendered = await surface.captureUntilOCR(contains: expected, timeoutNanoseconds: 3_000_000_000)
+      attach(rendered.image, "reward-categories-narrow-\(name)")
+      for text in expected { XCTAssertTrue(rendered.text.contains(text.lowercased()), "Missing \(text): \(rendered.text)") }
+      surface.detach()
+    }
+  }
+
   func testHistoricalAccountFilteredBoardShowsFullPeriodMinimum() async throws {
     XCTAssertTrue(URLProtocol.registerClass(RewardsSnapshotProtocol.self))
     defer { URLProtocol.unregisterClass(RewardsSnapshotProtocol.self) }
@@ -671,7 +825,7 @@ final class RewardsSnapshotTests: XCTestCase {
     defer { surface.detach() }
     let expected = ["Travel Fixture", "Dining over cap", "Edit", "View Transactions", "Targets",
       "This month's minimum", "Next tier", "Tiers", "From $500.00", "Active", "Qualification", "Categories",
-      "Category cap reached", "$250.00 / $200.00"]
+      "$250.00", "/$200.00", "125%"]
     let rendered = await surface.captureUntilOCR(contains: expected, timeoutNanoseconds: 5_000_000_000)
     attach(rendered.image, "rewards-card-detail")
     for text in expected { XCTAssertTrue(rendered.text.contains(text.lowercased()), "Missing \(text): \(rendered.text)") }

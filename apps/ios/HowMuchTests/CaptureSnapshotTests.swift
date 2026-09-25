@@ -2949,6 +2949,13 @@ final class SnapshotSurface {
     return frame.height > 1 ? frame : nil
   }
 
+  func presentedContentScrollView() -> UIScrollView? {
+    guard let root = presentedController()?.view else { return nil }
+    var scrolls: [UIScrollView] = []
+    Self.collect(root, UIScrollView.self, into: &scrolls)
+    return scrolls.max { $0.contentSize.height < $1.contentSize.height }
+  }
+
   func presentedCalendarFrame() -> CGRect? {
     guard let calendar = firstCalendarView() else {
       return nil
