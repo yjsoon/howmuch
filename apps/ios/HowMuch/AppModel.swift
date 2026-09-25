@@ -1550,6 +1550,76 @@ final class AppModel {
     isShowingWelcome = true
   }
 
+  // MARK: - Connecting a local install to a server
+
+  /// Moves this install to a signed-in server. The on-device database stays
+  /// where it is, untouched, and is recorded as an archive.
+  func adoptServerConnection(_ server: APISettings) async {
+    guard settings.isLocal, !server.isLocal, server.isAuthenticated else {
+      return
+    }
+    let adoption = ConnectionSwitch.adoptServer(server, leaving: settings, databaseURL: LocalEngine.shared.databaseURL)
+    isShowingSettings = false
+    await applySettings(adoption.settings)
+    if let supersededToken = adoption.supersededToken {
+      var previous = server
+      previous.sessionToken = supersededToken
+      try? await APIClient(settings: previous).logout()
+    }
+  }
+
+  /// True while the connect flow waits on the network. Settings cannot be
+  /// swiped away then, so a result never lands after the flow has gone.
+  var isConnectingToServer = false
+
+  /// "Keep using this iPhone only": ends the server session the connect flow
+  /// opened. Local mode is untouched.
+  func discardServerSession(_ server: APISettings) async {
+    APISettings.forgetSavedSession(forBaseURL: server.baseURLString)
+    try? await APIClient(settings: server).logout()
+  }
+
+  /// The ledger this install used before it connected to a server, if its
+  /// database is still on the device.
+  var localArchive: LocalArchive? {
+    LocalArchive.existing()
+  }
+
+  /// Returns to the archived on-device ledger and signs out of the server.
+  /// Refused while offline changes still wait to be sent: local mode would
+  /// hide them.
+  func switchToLocalArchive() async throws {
+    guard !settings.isLocal, let archive = localArchive else {
+      return
+    }
+    if let reason = ConnectionSwitch.blockReason(pending: pendingTransactions, settings: settings) {
+      throw APIClientError.validation(reason)
+    }
+    let server = settings
+    // Local mode always runs on the shared engine's database, so only an
+    // archive of that file can become live again.
+    guard archive.databaseURL.standardizedFileURL == LocalEngine.shared.databaseURL.standardizedFileURL else {
+      throw APIClientError.validation("The records from before you connected are not where HowMuch expects them.")
+    }
+    // Opens the database before anything is saved, so a failure leaves
+    // server mode exactly as it was.
+    try await LocalEngine.shared.prepare(config: archive.engineSettings.localEngineConfig)
+    guard let local = ConnectionSwitch.returnToArchive(leaving: server) else {
+      return
+    }
+    isShowingSettings = false
+    await applySettings(local)
+    try? await APIClient(settings: server).logout()
+  }
+
+  /// The archived ledger as a `howmuch-plan-snapshot` JSON file.
+  func exportLocalArchive() async throws -> Data {
+    guard let archive = localArchive else {
+      throw APIClientError.validation("The records from before you connected are no longer on this device.")
+    }
+    return try await ServerConnector.exportArchive(archive)
+  }
+
   /// Local mode has no cron, so the daily schedule catch-up runs on launch
   /// and whenever the app returns to the foreground.
   func runLocalScheduledTransactions(refreshAfter: Bool = true) async {

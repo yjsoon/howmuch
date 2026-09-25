@@ -193,7 +193,7 @@ private struct RootView: View {
         await model.applySettings(nextSettings)
       }
       .environment(model)
-      .interactiveDismissDisabled(!model.settings.isAuthenticated)
+      .interactiveDismissDisabled(!model.settings.isAuthenticated || model.isConnectingToServer)
       .blocksCapturePresentation()
     }
     .sheet(item: $capture.presented) { request in

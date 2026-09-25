@@ -35,6 +35,15 @@ enum APIClientError: LocalizedError {
   case authenticationExpired
   case decoding(String)
   case validation(String)
+  /// 409 `plan_not_empty` from `import_snapshot`: the plan already holds a
+  /// ledger, so a snapshot cannot be imported into it.
+  case planNotEmpty(String)
+  /// 409 `ynab_mirror_plan` from `import_snapshot`: the plan mirrors YNAB.
+  case ynabMirrorPlan(String)
+  /// 403 from `import_snapshot`: only the plan's owner may import.
+  case ownerRequired(String)
+  /// 413 `payload_too_large`.
+  case payloadTooLarge
 
   var errorDescription: String? {
     switch self {
@@ -56,8 +65,10 @@ enum APIClientError: LocalizedError {
       return "Your session has expired. Sign in again."
     case .decoding(let message):
       return "Could not decode API data: \(message)"
-    case .validation(let message):
+    case .validation(let message), .planNotEmpty(let message), .ynabMirrorPlan(let message), .ownerRequired(let message):
       return message
+    case .payloadTooLarge:
+      return "This is too much to send in one go."
     }
   }
 }
@@ -65,6 +76,8 @@ enum APIClientError: LocalizedError {
 struct APIClient {
   let settings: APISettings
   private static let transactionPageSize = 100
+  /// The largest request body `import_snapshot` accepts.
+  static let snapshotByteLimit = 8 * 1024 * 1024
 
   func fetchAuthStatus() async throws -> AuthStatusPayload {
     let response: APIEnvelope<AuthStatusPayload> = try await request(path: "/api/auth/status")
@@ -239,10 +252,11 @@ struct APIClient {
     sinceDate: String? = nil,
     untilDate: String? = nil,
     type: String? = nil,
-    q: String? = nil
+    q: String? = nil,
+    limit: Int = transactionPageSize
   ) async throws -> TransactionPage {
     var queryItems = [
-      URLQueryItem(name: "limit", value: String(Self.transactionPageSize)),
+      URLQueryItem(name: "limit", value: String(limit)),
       URLQueryItem(name: "offset", value: String(offset)),
     ]
     if let sinceDate {
@@ -616,6 +630,32 @@ struct APIClient {
     return response.data.transaction
   }
 
+  /// The plan's whole ledger in the `howmuch-plan-snapshot` format, as JSON
+  /// bytes. The snapshot object is re-serialised with `JSONSerialization`
+  /// (sorted keys, so the same ledger always gives the same bytes), never
+  /// through models: this client's snake-case coding would rename its keys.
+  func exportSnapshot(planID: String) async throws -> Data {
+    let data = try await executeRawRequest(path: "/v1/plans/\(planID)/export_snapshot", bodyData: nil)
+    return try SnapshotImport.snapshot(fromExportResponse: data)
+  }
+
+  /// Imports snapshot bytes (from `exportSnapshot`) into an empty plan.
+  /// Returns whether the server replayed an earlier import with this key.
+  @discardableResult
+  func importSnapshot(planID: String, idempotencyKey: String, snapshot: Data) async throws -> Bool {
+    let data = try await executeRawRequest(
+      path: "/v1/plans/\(planID)/import_snapshot",
+      method: "POST",
+      headers: ["Idempotency-Key": idempotencyKey],
+      bodyData: SnapshotImport.requestBody(snapshot: snapshot)
+    )
+    do {
+      return try decoder.decode(APIEnvelope<SnapshotImportPayload>.self, from: data).data.replayed
+    } catch {
+      throw APIClientError.decoding(error.localizedDescription)
+    }
+  }
+
   private func report<Payload: Decodable>(
     path: String,
     planID: String,
@@ -679,6 +719,31 @@ struct APIClient {
     headers: [String: String] = [:],
     bodyData: Data?
   ) async throws -> Payload {
+    let data = try await executeRawRequest(
+      path: path,
+      appendedPathSegments: appendedPathSegments,
+      queryItems: queryItems,
+      method: method,
+      headers: headers,
+      bodyData: bodyData
+    )
+    do {
+      return try decoder.decode(Payload.self, from: data)
+    } catch {
+      throw APIClientError.decoding(error.localizedDescription)
+    }
+  }
+
+  /// Sends one request and maps a failure status to `APIClientError`.
+  /// Returns a successful response's body undecoded.
+  private func executeRawRequest(
+    path: String,
+    appendedPathSegments: [String] = [],
+    queryItems: [URLQueryItem] = [],
+    method: String = "GET",
+    headers: [String: String] = [:],
+    bodyData: Data?
+  ) async throws -> Data {
     let url = try makeURL(path: path, appendedPathSegments: appendedPathSegments, queryItems: queryItems)
     var request = URLRequest(url: url)
     request.httpMethod = method
@@ -740,20 +805,33 @@ struct APIClient {
         if httpResponse.statusCode == 409, serverError.error.name == "conflict" {
           throw APIClientError.conflict(serverError.error.detail)
         }
+        if path.hasSuffix("/import_snapshot") {
+          switch (httpResponse.statusCode, serverError.error.name) {
+          case (409, "plan_not_empty"):
+            throw APIClientError.planNotEmpty(serverError.error.detail)
+          case (409, "ynab_mirror_plan"):
+            throw APIClientError.ynabMirrorPlan(serverError.error.detail)
+          case (403, _):
+            throw APIClientError.ownerRequired(serverError.error.detail)
+          default:
+            break
+          }
+        }
+        if httpResponse.statusCode == 413 {
+          throw APIClientError.payloadTooLarge
+        }
         throw APIClientError.server(serverError.error.detail)
       }
       if requestHasSession && httpResponse.statusCode == 401 {
         postAuthenticationExpiry(token: trimmedToken)
         throw APIClientError.authenticationExpired
       }
+      if httpResponse.statusCode == 413 {
+        throw APIClientError.payloadTooLarge
+      }
       throw APIClientError.httpStatus(httpResponse.statusCode)
     }
-
-    do {
-      return try decoder.decode(Payload.self, from: data)
-    } catch {
-      throw APIClientError.decoding(error.localizedDescription)
-    }
+    return data
   }
 
   /// Signs every surface out of a server session the server stopped
@@ -886,6 +964,10 @@ private struct CategoryCreateRequest: Encodable {
 
 private struct LogoutPayload: Decodable {
   let ok: Bool
+}
+
+private struct SnapshotImportPayload: Decodable {
+  let replayed: Bool
 }
 
 extension Error {

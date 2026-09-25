@@ -372,6 +372,19 @@ struct APISettings: Codable, Equatable {
     defaults.set(data, forKey: Self.userDefaultsKey)
   }
 
+  /// The session saved in the Keychain for a server, if any.
+  static func savedSessionToken(forBaseURL baseURLString: String) -> String? {
+    normalizedBaseURLString(from: baseURLString).flatMap(CredentialStore.load(for:))
+  }
+
+  /// Drops the session saved in the Keychain for a server.
+  static func forgetSavedSession(forBaseURL baseURLString: String) {
+    guard let normalized = normalizedBaseURLString(from: baseURLString) else {
+      return
+    }
+    CredentialStore.remove(for: normalized)
+  }
+
 #if DEBUG
   /// Points credential storage at a service the caller owns, so a test never
   /// reads or migrates the token the installed app keeps for a real server.
