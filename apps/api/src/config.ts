@@ -14,6 +14,10 @@ export type ApiConfig = {
   ynabPlanId?: string;
   ynabSyncIntervalMs?: number;
   ynabMinSimilarity?: number;
+  /** TypeSafe API key for Jev category suggestions; the feature is off without it. */
+  typesafeApiKey?: string;
+  /** TypeSafe model override; the SDK defaults to `jev-latest`. */
+  typesafeModel?: string;
 };
 
 export function loadConfig(env: Record<string, string | undefined> = Bun.env): ApiConfig {
@@ -30,6 +34,8 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env): A
       MIN_YNAB_SYNC_INTERVAL_MS,
     ),
     ynabMinSimilarity: ratio(env.HOWMUCH_YNAB_MIN_SIMILARITY) ?? DEFAULT_YNAB_MIN_SIMILARITY,
+    typesafeApiKey: emptyToUndefined(env.TYPESAFE_API_KEY),
+    typesafeModel: emptyToUndefined(env.TYPESAFE_MODEL),
   };
 }
 

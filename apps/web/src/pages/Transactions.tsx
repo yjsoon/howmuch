@@ -15,9 +15,11 @@ import { colourNamesByAccount, ledgerFlagNames, namedFlagLabel } from "../lib/re
 import { FilterRail } from "../components/FilterRail";
 import { FlagTag } from "../components/FlagTag";
 import { CategorySelect } from "../components/CategorySelect";
+import { CategorySuggestionReview } from "../components/CategorySuggestionReview";
 import { RegisterComposeRow } from "../components/RegisterComposeRow";
 import { RegisterEditableRow, type RowEditSurface } from "../components/RegisterEditableRow";
 import { splitCategoryGroups, UNCATEGORISED_CATEGORY_ID } from "../lib/categories";
+import { appliedReviewItems, reviewRows, suggestionRequestItems, suggestionTargets, type SuggestionReviewRow } from "../lib/category-suggestions";
 import { formatDate, todayIso, trailingMonthsRange } from "../lib/dates";
 import { stableHash } from "../lib/hash";
 import { formatAmount, formatMoney, parseMilliunits } from "../lib/money";
@@ -203,6 +205,8 @@ export function TransactionsPage() {
   const searchVersionRef = useRef(0);
   const [pendingDeletion, setPendingDeletion] = useState<Transaction | null>(null);
   const [pendingBulkDeletion, setPendingBulkDeletion] = useState<readonly Transaction[] | null>(null);
+  const [suggestionReview, setSuggestionReview] = useState<SuggestionReviewRow[] | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
   const [reconcileDraft, setReconcileDraft] = useState<ReconcileDraft | null>(null);
   const [reconciliationPreviewGeneration, setReconciliationPreviewGeneration] = useState(0);
   const [mutationError, setMutationError] = useState<string | null>(null);
@@ -1242,9 +1246,34 @@ export function TransactionsPage() {
     }
   };
 
-  const categoriseMany = async (targets: readonly Transaction[], categoryId: string) => {
-    const editable = categorisableRows(targets);
-    if (mutationLockRef.current || editable.length === 0) return;
+  const categoriseMany = (targets: readonly Transaction[], categoryId: string) =>
+    categoriseItems(categorisableRows(targets).map((txn) => ({ id: txn.id, category_id: categoryId || null })));
+
+  const suggestCategories = async (targets: readonly Transaction[]) => {
+    const rows = suggestionTargets(targets);
+    if (suggesting || rows.length === 0) return;
+    setSuggesting(true);
+    setMutationError(null);
+    setMutationSuccess(null);
+    try {
+      const suggestions = await api.suggestCategories(planId, suggestionRequestItems(rows));
+      setSuggestionReview(reviewRows(rows, suggestions));
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  const applySuggestions = async (review: readonly SuggestionReviewRow[]) => {
+    const items = appliedReviewItems(review);
+    if (items.length === 0) return;
+    const applied = await categoriseItems(items);
+    if (applied) setSuggestionReview(null);
+  };
+
+  const categoriseItems = async (items: ReadonlyArray<{ id: string; category_id: string | null }>): Promise<boolean> => {
+    if (mutationLockRef.current || items.length === 0) return false;
     if (rowEditRef.current.status !== "idle") {
       replaceRowEdit(idleRowEdit());
     }
@@ -1253,19 +1282,18 @@ export function TransactionsPage() {
     setMutationError(null);
     setMutationSuccess(null);
     try {
-      const summary = await api.categoriseTransactions(
-        planId,
-        editable.map((txn) => ({ id: txn.id, category_id: categoryId || null })),
-      );
+      const summary = await api.categoriseTransactions(planId, items);
       if (bulkOutcomeIsComplete(summary)) {
         dispatchSelection({ kind: "none" });
         setMutationSuccess(bulkOutcomeToast("Categorised", summary));
-      } else {
-        dispatchSelection({ kind: "only", ids: remainingWorkIds(summary) });
-        setMutationError(bulkOutcomeToast("Categorised", summary));
+        return true;
       }
+      dispatchSelection({ kind: "only", ids: remainingWorkIds(summary) });
+      setMutationError(bulkOutcomeToast("Categorised", summary));
+      return false;
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause.message : String(cause));
+      return false;
     } finally {
       mutationLockRef.current = false;
       setWriteLocked(false);
@@ -1578,6 +1606,15 @@ export function TransactionsPage() {
             emptyLabel="Categorise…"
             disabled={mutationBusy}
           />
+          <button
+            type="button"
+            className="register-bulk-action"
+            onClick={() => void suggestCategories(selectedRows)}
+            disabled={mutationBusy || suggesting || suggestionTargets(selectedRows).length === 0}
+            title="Ask Jev to suggest a category for each selected transaction. You review before anything changes."
+          >
+            {suggesting ? "Suggesting…" : "Suggest categories"}
+          </button>
           <span className="register-bulk-sep" aria-hidden="true" />
           <button type="button" className="register-bulk-action" onClick={() => void setClearedMany(selectedRows, "cleared")} disabled={mutationBusy}>Mark cleared</button>
           <button type="button" className="register-bulk-action" onClick={() => void setClearedMany(selectedRows, "uncleared")} disabled={mutationBusy}>Mark uncleared</button>
@@ -1795,6 +1832,16 @@ export function TransactionsPage() {
             </button>
           </div>
         </section>
+      )}
+      {suggestionReview && (
+        <CategorySuggestionReview
+          rows={suggestionReview}
+          groups={orderedGroups}
+          busy={mutationBusy}
+          onChange={setSuggestionReview}
+          onApply={() => void applySuggestions(suggestionReview)}
+          onCancel={() => setSuggestionReview(null)}
+        />
       )}
       {pendingBulkDeletion && (
         <section className="transaction-delete-confirm" role="region" aria-labelledby="delete-many-heading">

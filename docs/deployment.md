@@ -57,6 +57,11 @@ environment `tk` in `wrangler.jsonc`:
   transactions; it catches up overdue occurrences (25 per run, idempotent via
   deterministic operation IDs). No YNAB configuration. Keep
   `HOWMUCH_API_TOKEN` as an encrypted secret on this Worker.
+- Optional: `TYPESAFE_API_KEY` (encrypted secret) turns on Jev category
+  suggestions (`POST /api/tools/categorise`); without it the route returns 503.
+  Set it from `apps/worker` with
+  `bunx wrangler secret put TYPESAFE_API_KEY --env tk --profile tinkertanker`.
+  `TYPESAFE_MODEL` (plain var) overrides the SDK default, `jev-latest`.
 - Do not add `HOWMUCH_REDIRECT_TARGET` to the `tk` env; the redirect belongs to
   the legacy YJ env only, and setting it here would loop production onto itself.
 - Deploy from `apps/worker` with `bun run deploy:tk`, which pins

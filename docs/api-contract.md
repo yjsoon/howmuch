@@ -718,6 +718,34 @@ Accepts rows shaped like:
 }
 ```
 
+### Category suggestions (Jev)
+
+`POST /api/tools/categorise?plan_id=...`
+
+Suggests a category per transaction using TypeSafe's Jev model. Requires
+authentication and write access to `plan_id`; cookie sessions also pass the usual
+same-origin check, and bearer clients (iOS, personal tokens) may call it. The
+TypeSafe key is the server's `TYPESAFE_API_KEY` secret and never reaches clients.
+Nothing is written: apply accepted suggestions through the transaction PATCH.
+
+Body: `{ transactions: [{ key?, payee_id?, payee_name?, memo?, amount, date?,
+account_name? }] }`, 1 to 25 items, `amount` in signed milliunits, each with a
+payee name or memo. `key` defaults to the item's index.
+
+Returns `{ data: { model, usage, suggestions: [{ key, suggestion, confidence,
+alternatives }] } }`. `suggestion` is `{ category_id, category_name, group_name,
+probability }`, or `null` when Jev chose "none of these". `alternatives` lists up
+to three other categories by probability. `confidence` describes how concentrated
+Jev's distribution was, not whether the answer is correct.
+
+Jev chooses only among the plan's live, visible categories (plus inflow
+categories; credit card payment categories are excluded), so payee or memo text
+cannot make it return anything else. The request sends payee names, memos,
+amounts, dates, account names, category names and each payee's recent category
+counts to TypeSafe. Errors: `503 categoriser_not_configured` without a key,
+`502 categoriser_unavailable` when TypeSafe fails or rejects the key,
+`429 categoriser_rate_limited`.
+
 ### AI-assisted reward tools
 
 Both routes require authentication, same-origin CSRF validation and write access to
