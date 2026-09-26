@@ -22,6 +22,13 @@ xcrun simctl install "$UDID" "$(scripts/ios-xcodebuild.sh app-path)"
 
 That is `build-for-testing` then `test-without-building` with the same destination and simulator cache. A quiet console is not a hang: watch the heartbeat, inspect `actool` / `ibtoold` / `AssetCatalogSimulatorAgent` / `swift-frontend`, and allow 15 minutes on a cold medium build before terminating. Parent CPU near zero is not sufficient. Do not redirect `xcodebuild` to `/dev/null`. Do not clear DerivedData as a first response.
 
+The snapshot harness (`SnapshotSurface` in `CaptureSnapshotTests.swift`) reads SwiftUI accessibility elements, which a newly created simulator does not expose: every lookup comes back empty and the Capture suites fail with `accessibilityLabels() == []`. Enable accessibility once per simulator:
+
+```sh
+xcrun simctl spawn "$UDID" defaults write com.apple.Accessibility AccessibilityEnabled -bool true
+xcrun simctl spawn "$UDID" defaults write com.apple.Accessibility ApplicationAccessibilityEnabled -bool true
+```
+
 When device-architecture coverage is relevant, use this unsigned Debug build and separate device cache. It does not sign, install, or prove physical-device behavior:
 
 ```sh
