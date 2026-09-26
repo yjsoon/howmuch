@@ -636,19 +636,19 @@ struct RewardCardEditorView: View {
   var body: some View {
     NavigationStack(path: $path) {
       Group {
-        if loadPhase == .loading, draft.ynabAccountId.isEmpty, draft.name.isEmpty {
-          ProgressView(isEditing ? "Loading card…" : "Loading accounts…")
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if cardID != nil, case .failed(let message) = loadPhase, draft.name.isEmpty {
+        if originalDraft != nil {
+          editorForm
+        } else if case .failed(let message) = loadPhase {
           ContentUnavailableView {
-            Label("Card not found", systemImage: "creditcard")
+            Label("Could not load rewards", systemImage: "creditcard")
           } description: {
             Text(message)
           } actions: {
             Button("Retry loading") { Task { await loadCard() } }
           }
         } else {
-          editorForm
+          ProgressView(isEditing ? "Loading card…" : "Loading accounts…")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
       }
       .background(Theme.canvas)
