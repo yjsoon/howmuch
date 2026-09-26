@@ -489,6 +489,36 @@ describe("snapshot request size", () => {
     expect((await response.json()).error.name).toBe("payload_too_large");
     expect(tableCounts(target)).toEqual(Object.fromEntries(LEDGER_TABLES.map((table) => [table, 0])));
   });
+
+  // Failure mode: a body under the 8 MiB cap can still carry one field over
+  // D1's 2,000,000-byte limit on a single bound value. D1 then fails the
+  // batch with a generic error rather than a 400 naming the field.
+  test("a schedule memo too long for one stored value is a 400 naming it, and writes nothing", async () => {
+    const target = await open("SQLite");
+    const memo = "m".repeat(2_100_000);
+    const snapshot = {
+      format: SNAPSHOT_FORMAT,
+      version: 1,
+      accounts: [{ id: "a", name: "A" }],
+      scheduled_transactions: [{ id: "s", account_id: "a", date_first: "2026-02-01", frequency: "monthly", amount: -1, memo }],
+    };
+    const body = JSON.stringify({ snapshot });
+    expect(body.length).toBeLessThan(MAX_SNAPSHOT_BYTES);
+    const response = await target.request("/v1/plans/p/import_snapshot", { method: "POST", key: "long-memo-1", body });
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.detail).toContain("scheduled_transactions[0].memo");
+    expect(tableCounts(target)).toEqual(Object.fromEntries(LEDGER_TABLES.map((table) => [table, 0])));
+
+    const lineMemo = { ...snapshot, scheduled_transactions: [{ ...snapshot.scheduled_transactions[0], memo: undefined, subtransactions: [{ id: "ss", amount: -1, memo }] }] };
+    expect(() => parsePlanSnapshot(lineMemo, "p")).toThrow("scheduled_transactions[0].subtransactions[0].memo");
+  });
+
+  test("no chunk binds a value D1 would refuse", () => {
+    expect(() => chunkRows([{ id: "huge", payload: "z".repeat(1_950_000) }])).toThrow("too large");
+    for (const chunk of chunkRows(Array.from({ length: 40 }, (_, index) => ({ id: `r${index}`, payload: "z".repeat(100_000) })))) {
+      expect(new TextEncoder().encode(chunk).length).toBeLessThanOrEqual(1_900_000);
+    }
+  });
 });
 
 describe("snapshots cross backends", () => {

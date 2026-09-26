@@ -25,6 +25,13 @@ export const SNAPSHOT_VERSION = 1;
 export const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
 /** Upper bound for one JSON value bound into a statement. */
 export const SNAPSHOT_CHUNK_BYTES = 512 * 1024;
+/**
+ * D1 refuses any single bound value over 2,000,000 bytes. A chunk is one
+ * bound value, so no chunk may exceed this, even a lone row.
+ */
+export const MAX_BOUND_VALUE_BYTES = 1_900_000;
+/** Longest memo a snapshot row (transaction, schedule, or either's line) may carry. */
+export const MAX_MEMO_LENGTH = 2000;
 
 export class SnapshotValidationError extends Error {}
 
@@ -348,7 +355,7 @@ export function parsePlanSnapshot(value: unknown, planId: string): SnapshotRows 
       account_id: accountId,
       date: isoDate(input.date, `${path}.date`),
       amount_milli: amount,
-      memo: nullableText(input.memo, `${path}.memo`, 2000),
+      memo: nullableText(input.memo, `${path}.memo`, MAX_MEMO_LENGTH),
       cleared,
       approved: flag(input.approved, `${path}.approved`),
       flag_color: nullableText(input.flag_color, `${path}.flag_color`, 32),
@@ -372,7 +379,7 @@ export function parsePlanSnapshot(value: unknown, planId: string): SnapshotRows 
         id: String(sub.id),
         transaction_id: id,
         amount_milli: milliunits(sub.amount, `${subPath}.amount`),
-        memo: nullableText(sub.memo, `${subPath}.memo`, 2000),
+        memo: nullableText(sub.memo, `${subPath}.memo`, MAX_MEMO_LENGTH),
         payee_id: subPayee,
         payee_name_snapshot: subPayee ? payees.get(subPayee)!.name : nullableText(sub.payee_name, `${subPath}.payee_name`, 500),
         category_id: subCategory,
@@ -412,7 +419,12 @@ export function parsePlanSnapshot(value: unknown, planId: string): SnapshotRows 
       const subId = id_(sub.id, `${subPath}.id`);
       if (scheduleSubIds.has(subId)) throw new SnapshotValidationError(`${subPath}.id is duplicated`);
       scheduleSubIds.add(subId);
+      nullableText(sub.memo, `${subPath}.memo`, MAX_MEMO_LENGTH);
     }
+    // The schedule rules do not bound free text; the snapshot does, with the
+    // same limits as its transactions.
+    nullableText(input.memo, `${path}.memo`, MAX_MEMO_LENGTH);
+    nullableText(input.flag_color, `${path}.flag_color`, 32);
     let schedule;
     try {
       // Optional fields are passed only when set, so the stored payload has
@@ -546,16 +558,23 @@ function insertSql(plan: TablePlan): { sql: string; bindsPlan: boolean } {
   };
 }
 
-/** Splits rows into JSON arrays no larger than `maxBytes` (one oversized row stands alone). */
+/**
+ * Splits rows into JSON arrays no larger than `maxBytes`. A row over
+ * `maxBytes` stands alone, but a row too large to bind at all is refused.
+ */
 export function chunkRows(rows: readonly Row[], maxBytes = SNAPSHOT_CHUNK_BYTES): string[] {
   const encoder = new TextEncoder();
   const chunks: string[] = [];
   let current: string[] = [];
   let size = 2;
+  const limit = Math.min(maxBytes, MAX_BOUND_VALUE_BYTES);
   for (const row of rows) {
     const json = JSON.stringify(row);
     const bytes = encoder.encode(json).length + 1;
-    if (current.length > 0 && size + bytes > maxBytes) {
+    if (bytes + 2 > MAX_BOUND_VALUE_BYTES) {
+      throw new SnapshotValidationError(`row ${String(row.id ?? "")} is too large to store (${bytes} bytes)`);
+    }
+    if (current.length > 0 && size + bytes > limit) {
       chunks.push(`[${current.join(",")}]`);
       current = [];
       size = 2;
