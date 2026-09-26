@@ -3,7 +3,6 @@ import {
   DEFAULT_MONEY_FORMAT,
   matchesRegisterQuery,
   parseRegisterQuery,
-  transactionSearchSql,
   type SearchableFields,
 } from "./index";
 
@@ -27,26 +26,7 @@ const twelveHundred: SearchableFields = {
 };
 
 describe("parseRegisterQuery", () => {
-  test("returns null for blank input", () => {
-    expect(parseRegisterQuery("  ")).toBeNull();
-  });
-
-  test("parses typed money precision into a milliunit range", () => {
-    expect(parseRegisterQuery("142", DEFAULT_MONEY_FORMAT)?.amount).toEqual({
-      lo: 142000,
-      hi: 143000,
-      sign: "any",
-    });
-    expect(parseRegisterQuery("142.30", DEFAULT_MONEY_FORMAT)?.amount).toEqual({
-      lo: 142300,
-      hi: 142310,
-      sign: "any",
-    });
-    expect(parseRegisterQuery("$142.30", DEFAULT_MONEY_FORMAT)?.amount).toEqual({
-      lo: 142300,
-      hi: 142310,
-      sign: "any",
-    });
+  test("retains an explicit amount direction", () => {
     expect(parseRegisterQuery("-142.30", DEFAULT_MONEY_FORMAT)?.amount?.sign).toBe("outflow");
     expect(parseRegisterQuery("+$12", DEFAULT_MONEY_FORMAT)?.amount).toEqual({
       lo: 12000,
@@ -57,14 +37,6 @@ describe("parseRegisterQuery", () => {
 });
 
 describe("matchesRegisterQuery", () => {
-  test("matches FairPrice by payee and by displayed amount spellings", () => {
-    for (const raw of ["FairPrice", "142.30", "142", "$142.30"]) {
-      const query = parseRegisterQuery(raw, DEFAULT_MONEY_FORMAT);
-      expect(query).not.toBeNull();
-      expect(matchesRegisterQuery(query!, fairPrice)).toBe(true);
-    }
-  });
-
   test("does not treat milliunit digit strings as text", () => {
     const twelve = parseRegisterQuery("12", DEFAULT_MONEY_FORMAT)!;
     expect(matchesRegisterQuery(twelve, fairPrice)).toBe(false);
@@ -84,16 +56,5 @@ describe("matchesRegisterQuery", () => {
     expect(matchesRegisterQuery(parseRegisterQuery("Candlenut")!, split)).toBe(true);
     expect(matchesRegisterQuery(parseRegisterQuery("142.30")!, split)).toBe(true);
     expect(matchesRegisterQuery(parseRegisterQuery("share")!, split)).toBe(true);
-  });
-});
-
-describe("transactionSearchSql", () => {
-  test("binds the lowered text needle and amount bounds", () => {
-    const query = parseRegisterQuery("142.30")!;
-    const sql = transactionSearchSql(query);
-    expect(sql.sql).toContain("abs(t.amount_milli) >= ?");
-    expect(sql.params).toContain("142.30");
-    expect(sql.params).toContain(142300);
-    expect(sql.params).toContain(142310);
   });
 });

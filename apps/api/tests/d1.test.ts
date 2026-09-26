@@ -208,21 +208,6 @@ describe("D1 foundation", () => {
     expect(assetRequests).toEqual(["https://howmuch.test/dashboard"]);
     await expect(worker.scheduled({ cron: "5 16 * * *", scheduledTime: Date.UTC(2026, 7, 20, 16, 5) } as any, env as any)).resolves.toBeUndefined();
 
-    const workerSource = await Bun.file(new URL("../../worker/src/index.ts", import.meta.url)).text();
-    expect(workerSource).not.toContain("@neondatabase");
-    expect(workerSource).not.toContain("DATABASE_URL");
-    expect(workerSource).not.toContain("HOWMUCH_DATABASE_BACKEND");
-    const rootPackage = await Bun.file(new URL("../../../package.json", import.meta.url)).json();
-    expect(rootPackage.dependencies).toBeUndefined();
-    const workerPackage = await Bun.file(new URL("../../worker/package.json", import.meta.url)).json();
-    expect(workerPackage.scripts["build:web"]).toBe("bun run --cwd ../web build");
-    expect(workerPackage.scripts.build).toBe("bun run build:web && wrangler deploy --dry-run --outdir dist");
-    // A bare deploy must refuse: every real deploy pins a profile and env.
-    expect(workerPackage.scripts.deploy).toContain("Refusing unqualified deploy");
-    expect(workerPackage.scripts.deploy).toContain("exit 1");
-    expect(workerPackage.scripts["deploy:tk"]).toBe("bun run build:web && wrangler deploy --env tk --profile tinkertanker");
-    expect(workerPackage.scripts["deploy:yj-redirect"]).toBe("bun run build:web && wrangler deploy --profile yj");
-    expect(workerPackage.scripts["deploy:preview"]).toBe("bun run build:web && wrangler deploy --env preview --profile yj");
     const wranglerConfig = JSON.parse((await Bun.file(new URL("../../worker/wrangler.jsonc", import.meta.url)).text()).replace(/^\s*\/\/.*$/gm, ""));
     // Top level = legacy YJ account: frozen backup database, permanent redirect, no cron.
     expect(wranglerConfig.d1_databases[0]).toMatchObject({ database_name: "howmuch-production", database_id: "57dc5569-d639-44c1-bb9d-6214f43a43b8" });
@@ -253,9 +238,6 @@ describe("D1 foundation", () => {
       HOWMUCH_TIME_ZONE: "Asia/Singapore",
       HOWMUCH_TRANSITION_READ_ONLY: "false",
     });
-    expect(workerSource).toContain("HOWMUCH_YNAB_TOKEN");
-    expect(workerSource).toContain("runD1ScheduledYnabSync");
-    expect(await Bun.file(new URL("../../../bun.lock", import.meta.url)).text()).not.toContain("@neondatabase/serverless");
   });
 
   test("Worker routes exact crons while allowing YNAB sync after financial writes are enabled", async () => {

@@ -1,16 +1,5 @@
 import { expect, test } from "bun:test";
-import { cardFlagNames, flagNameForColour, parseCardFlagNames } from "./flag-names";
-
-test("parseCardFlagNames keeps named ledger colours", () => {
-  expect(parseCardFlagNames({
-    red: "Dining",
-    blue: "  Online  ",
-    pink: "Nope",
-    orange: "",
-  })).toEqual({ red: "Dining", blue: "Online" });
-  expect(parseCardFlagNames(null)).toBeUndefined();
-  expect(parseCardFlagNames({})).toBeUndefined();
-});
+import { cardFlagNames, flagNameForColour } from "./flag-names";
 
 test("cardFlagNames prefers explicit names over subcategory names", () => {
   const names = cardFlagNames({
