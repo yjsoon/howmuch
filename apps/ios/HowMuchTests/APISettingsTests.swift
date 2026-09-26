@@ -19,6 +19,12 @@ final class APISettingsTests: XCTestCase {
     super.tearDown()
   }
 
+  func testLegacyHostedDefaultFollowsProduction() {
+    APISettings(baseURLString: "https://howmuch.soon.sg").save(to: defaults)
+
+    XCTAssertEqual(APISettings.load(from: defaults).baseURLString, APISettings.productionBaseURL)
+  }
+
   func testLegacyHostedSessionMovesWithTheHost() throws {
     try requireUsableKeychain()
 
