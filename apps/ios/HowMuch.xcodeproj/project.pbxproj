@@ -42,12 +42,14 @@
 		A50000000000000000000015 /* RewardCardEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000014 /* RewardCardEditorView.swift */; };
 		A50000000000000000000021 /* RewardsReportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000020 /* RewardsReportTests.swift */; };
 		A50000000000000000000023 /* RewardCardEditorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000022 /* RewardCardEditorTests.swift */; };
+		A50000000000000000000025 /* RewardDraftPeriodTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000024 /* RewardDraftPeriodTests.swift */; };
 		A60000000000000000000011 /* IPadLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000000000000000000010 /* IPadLayoutTests.swift */; };
 		A10000000000000000000068 /* ScheduledTransactionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000078 /* ScheduledTransactionsView.swift */; };
 		A10000000000000000000069 /* ScheduledTransactionEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000079 /* ScheduledTransactionEditorView.swift */; };
 		A10000000000000000000028 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* SettingsView.swift */; };
 		A10000000000000000000029 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000019 /* Theme.swift */; };
 		A50000000000000000000031 /* RewardRowProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000030 /* RewardRowProjection.swift */; };
+		A50000000000000000000033 /* RewardDraftPeriod.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000032 /* RewardDraftPeriod.swift */; };
 		A1000000000000000000002A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001A /* Assets.xcassets */; };
 		A10000000000000000000092 /* EmojiKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000091 /* EmojiKit */; };
 		A20000000000000000000011 /* CaptureRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* CaptureRequest.swift */; };
@@ -167,6 +169,7 @@
 		A200000000000000000000F4 /* AccountGroupOrderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountGroupOrderTests.swift; sourceTree = "<group>"; };
 		A50000000000000000000020 /* RewardsReportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardsReportTests.swift; sourceTree = "<group>"; };
 		A50000000000000000000022 /* RewardCardEditorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardCardEditorTests.swift; sourceTree = "<group>"; };
+		A50000000000000000000024 /* RewardDraftPeriodTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardDraftPeriodTests.swift; sourceTree = "<group>"; };
 		A60000000000000000000010 /* IPadLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPadLayoutTests.swift; sourceTree = "<group>"; };
 		A30000000000000000000001 /* HowMuchShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HowMuchShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A30000000000000000000002 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
@@ -205,6 +208,7 @@
 		A10000000000000000000018 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A10000000000000000000019 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		A50000000000000000000030 /* RewardRowProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardRowProjection.swift; sourceTree = "<group>"; };
+		A50000000000000000000032 /* RewardDraftPeriod.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardDraftPeriod.swift; sourceTree = "<group>"; };
 		A1000000000000000000001A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000000000000000000001B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -332,6 +336,7 @@
 				A1000000000000000000001D /* RegisterQuery.swift */,
 				A200000000000000000000C0 /* RegisterApproval.swift */,
 				A50000000000000000000030 /* RewardRowProjection.swift */,
+				A50000000000000000000032 /* RewardDraftPeriod.swift */,
 				A10000000000000000000019 /* Theme.swift */,
 			);
 			path = Support;
@@ -431,6 +436,7 @@
 				A200000000000000000000C4 /* APISettingsTests.swift */,
 				A50000000000000000000020 /* RewardsReportTests.swift */,
 				A50000000000000000000022 /* RewardCardEditorTests.swift */,
+				A50000000000000000000024 /* RewardDraftPeriodTests.swift */,
 				A60000000000000000000010 /* IPadLayoutTests.swift */,
 				A200000000000000000000D0 /* LaunchRefreshTests.swift */,
 				A200000000000000000000E0 /* NarrowRefreshTests.swift */,
@@ -594,6 +600,7 @@
 				A200000000000000000000C1 /* RegisterApproval.swift in Sources */,
 				A10000000000000000000029 /* Theme.swift in Sources */,
 				A50000000000000000000031 /* RewardRowProjection.swift in Sources */,
+				A50000000000000000000033 /* RewardDraftPeriod.swift in Sources */,
 				A10000000000000000000060 /* Components.swift in Sources */,
 				A1000000000000000000006A /* Confirm.swift in Sources */,
 				A1000000000000000000006B /* AccountIconPicker.swift in Sources */,
@@ -671,6 +678,7 @@
 				A200000000000000000000C5 /* APISettingsTests.swift in Sources */,
 				A50000000000000000000021 /* RewardsReportTests.swift in Sources */,
 				A50000000000000000000023 /* RewardCardEditorTests.swift in Sources */,
+				A50000000000000000000025 /* RewardDraftPeriodTests.swift in Sources */,
 				A60000000000000000000011 /* IPadLayoutTests.swift in Sources */,
 				A200000000000000000000D1 /* LaunchRefreshTests.swift in Sources */,
 				A200000000000000000000E1 /* NarrowRefreshTests.swift in Sources */,

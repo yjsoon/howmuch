@@ -231,9 +231,9 @@ struct RewardsView: View {
         emptyState(
           "No Reward Cards",
           systemImage: "creditcard",
-          description: "Add a card to track minimums and caps, or import your Rewards Tracker configuration."
+          description: "Set up rewards on an existing account to track minimums and caps, or import your Rewards Tracker configuration."
         ) {
-          Button("Add Card") { sheet = .editor(.create) }
+          Button("Set Up Rewards") { sheet = .editor(.create) }
             .buttonStyle(.borderedProminent)
             .tint(Theme.accent)
           Button("Import Rewards") { sheet = .importExport }
@@ -358,7 +358,7 @@ struct RewardsView: View {
       Button {
         sheet = .editor(.edit(projection.cardID))
       } label: {
-        Label("Edit Card", systemImage: "pencil")
+        Label("Edit Rewards", systemImage: "pencil")
       }
       if let chrome {
         Button {
@@ -376,7 +376,7 @@ struct RewardsView: View {
     .accessibilityLabel(projection.title)
     .accessibilityValue(text.accessibilityValue)
     .accessibilityHint("Shows details.")
-    .accessibilityAction(named: "Edit Card") {
+    .accessibilityAction(named: "Edit Rewards") {
       sheet = .editor(.edit(projection.cardID))
     }
     .accessibilityAction(named: "Hide") {
@@ -579,7 +579,7 @@ struct RewardsView: View {
     Button {
       sheet = .editor(.create)
     } label: {
-      Label("Add Card", systemImage: "plus.rectangle.on.rectangle")
+      Label("Set Up Rewards", systemImage: "plus.rectangle.on.rectangle")
     }
     Button {
       sheet = .customise
@@ -1075,7 +1075,7 @@ struct RewardCardDetailSheet: View {
           Button("Done") { dismiss() }
         }
         ToolbarItem(placement: .primaryAction) {
-          Button("Edit") { onEdit() }
+          Button("Edit Rewards") { onEdit() }
         }
       }
     }
