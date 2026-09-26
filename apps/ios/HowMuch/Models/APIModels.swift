@@ -454,7 +454,8 @@ struct ViewPrefs: Codable, Equatable {
   var accountOrder: [String] = []
   /// Manual order is now specific to the displayed group. This lets, for
   /// example, a favourite account sit first in Favourites without moving the
-  /// same account within Cash.
+  /// same account within Cash. Only manual reordering writes here, so a group
+  /// keeps its arrangement while it is temporarily sorted another way.
   var accountOrderByGroup: [String: [String]] = [:]
   var accountGroupSorts: [String: AccountGroupSort] = [:]
   var customAccountGroups: [CustomAccountGroup] = []

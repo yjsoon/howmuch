@@ -797,7 +797,7 @@ final class AppModel {
       // Every ledger refresh drops the counts and rescans them. Until they are
       // back, rank by the last counts this plan and scope loaded rather than
       // flashing the group into name order and back. Never the manual drag
-      // order, which shares `accountOrderByGroup`.
+      // order in `accountOrderByGroup`.
       let usage = accountUsagePhase == .loaded ? accountUsageLast30Days : lastLoadedAccountUsageForCurrentScope
       return source.sorted { first, second in
         let firstUsage = usage[first.id, default: 0]
@@ -1045,10 +1045,7 @@ final class AppModel {
       }
       accountUsageLast30Days = counts
       lastLoadedAccountUsage = (planID: planID, scope: scope, counts: counts)
-      // Loaded before the snapshot, so the order it records comes from these
-      // counts through `accountUsageLast30Days`.
       accountUsagePhase = .loaded
-      snapshotMostUsedAccountOrders()
     } catch {
       guard
         planID == settings.planID,
@@ -1058,21 +1055,6 @@ final class AppModel {
         return
       }
       accountUsagePhase = .failed(error.localizedDescription)
-    }
-  }
-
-  private func snapshotMostUsedAccountOrders() {
-    var changed = false
-    for group in accountListGroups(includeEmptySystemGroups: true, includeEmptyCustomGroups: true)
-    where sortForAccountGroup(group.id) == .mostUsedLast30Days {
-      let order = group.accounts.map(\.id)
-      if viewPrefs.accountOrderByGroup[group.id] != order {
-        viewPrefs.accountOrderByGroup[group.id] = order
-        changed = true
-      }
-    }
-    if changed {
-      saveViewPrefs()
     }
   }
 
