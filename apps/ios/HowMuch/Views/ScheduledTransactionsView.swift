@@ -18,7 +18,7 @@ struct ScheduledTransactionsView: View {
             systemImage: "calendar",
             description: Text("Recurring and scheduled transactions will appear here.")
           )
-          .padding(.top, 72)
+          .padding(.top, 48)
         } else {
           Text("Upcoming transactions")
             .font(.footnote)
@@ -31,6 +31,7 @@ struct ScheduledTransactionsView: View {
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
+                .accessibilityAddTraits(.isHeader)
 
               VStack(spacing: 0) {
                 ForEach(section.schedules.enumerated(), id: \.element.id) { index, schedule in
@@ -38,8 +39,9 @@ struct ScheduledTransactionsView: View {
                     editingSchedule = schedule
                   } label: {
                     ScheduledTransactionRow(schedule: schedule, showsAccount: true)
+                      .contentShape(Rectangle())
                   }
-                  .buttonStyle(.plain)
+                  .buttonStyle(.cardRow)
                   if index < section.schedules.count - 1 {
                     Divider().padding(.leading, 16)
                   }
@@ -52,6 +54,8 @@ struct ScheduledTransactionsView: View {
       }
       .padding(.horizontal, 16)
       .padding(.bottom, 24)
+      .animation(Theme.Motion.arrive, value: model.scheduledTransactionsPhase)
+      .animation(Theme.Motion.standard, value: model.scheduledTransactions.map(\.id))
     }
     .background(Theme.canvas)
     .navigationTitle("Scheduled")

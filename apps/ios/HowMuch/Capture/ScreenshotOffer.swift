@@ -240,6 +240,7 @@ struct ScreenshotOfferToast: View {
   var onAdd: () -> Void
   var onDismiss: () -> Void
   @State private var dragOffset = CGSize.zero
+  @Environment(\.displayScale) private var displayScale
 
   private let dismissDistance: CGFloat = 72
 
@@ -281,6 +282,8 @@ struct ScreenshotOfferToast: View {
     .padding(.vertical, 10)
     .padding(.trailing, 6)
     .ynabCard()
+    // Lifted off the list it floats over, like the save toast.
+    .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
     .offset(x: dragOffset.width, y: max(0, dragOffset.height))
     .opacity(swipeOpacity)
     .simultaneousGesture(swipeToDismiss)
@@ -303,16 +306,18 @@ struct ScreenshotOfferToast: View {
         if away {
           onDismiss()
         } else {
-          dragOffset = .zero
+          withAnimation(Theme.Motion.standard) {
+            dragOffset = .zero
+          }
         }
       }
   }
 
   @ViewBuilder
   private var thumbnail: some View {
-    let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+    let shape = RoundedRectangle(cornerRadius: Theme.Radius.inset, style: .continuous)
     Group {
-      if let image = UIImage(data: offer.imageData) {
+      if let image = CaptureThumbnail.image(data: offer.imageData, id: offer.id, side: 56, displayScale: displayScale) {
         Image(uiImage: image)
           .resizable()
           .scaledToFill()

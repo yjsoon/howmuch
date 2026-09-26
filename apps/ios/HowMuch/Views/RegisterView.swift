@@ -83,7 +83,14 @@ struct RegisterSnapshot {
   }
 }
 
-private struct RegisterSearchPage {
+/// Row counts behind the register's filter menu, taken once per render.
+private struct RegisterFilterCounts {
+  let unapproved: Int
+  let uncleared: Int
+  let uncategorised: Int
+}
+
+private struct RegisterSearchPage: Equatable {
   var query = ""
   var transactions: [Transaction] = []
   var hasMore = false
@@ -130,7 +137,14 @@ struct RegisterView: View {
   }
 
   var body: some View {
-    let transactions = visibleTransactions
+    // Everything below derives from these once per render. `model.transactions`
+    // is an overlay computed on each read, and the counts feed several menu
+    // items and titles, so reading them lazily repeated whole-ledger passes.
+    let ledger = model.transactions
+    let scopedLedger = scoped(ledger)
+    let approvalScoped = needsApprovalRows ? scoped(model.unapprovedTransactions) : []
+    let counts = filterCounts(scopedLedger: scopedLedger, approvalScoped: approvalScoped)
+    let transactions = visibleTransactions(scopedLedger: scopedLedger, approvalScoped: approvalScoped)
     let snapshot = RegisterSnapshot(
       transactions: transactions,
       pending: visiblePendingRows,
@@ -139,8 +153,8 @@ struct RegisterView: View {
       mode: showingUnapprovedQueue ? .inbox : .ledger
     )
     List {
-      workingBalanceSection
-      loadingOrFilterSections(snapshot)
+      workingBalanceSection(ledger: ledger)
+      loadingOrFilterSections(snapshot, ledgerIsEmpty: ledger.isEmpty)
       scheduledDisclosureSection(snapshot)
       ForEach(snapshot.currentDateSections) { section in
         dateSection(section)
@@ -183,7 +197,7 @@ struct RegisterView: View {
       if showingUnapprovedQueue, let approveAllTitle = model.approveAllTitle(for: transactions) {
         ToolbarItem(placement: .topBarTrailing) {
           Button(approveAllTitle) {
-            withAnimation(.snappy) {
+            withAnimation(Theme.Motion.standard) {
               model.approveEligible(from: transactions)
             }
           }
@@ -191,7 +205,7 @@ struct RegisterView: View {
         }
       }
       ToolbarItemGroup(placement: .topBarTrailing) {
-        registerOverflowMenu
+        registerOverflowMenu(counts)
       }
     }
     .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search transactions or amounts")
@@ -312,7 +326,7 @@ struct RegisterView: View {
   }
 
   @ViewBuilder
-  private var registerOverflowMenu: some View {
+  private func registerOverflowMenu(_ counts: RegisterFilterCounts) -> some View {
     if let account = scopedAccount {
       Menu {
         Button {
@@ -335,9 +349,9 @@ struct RegisterView: View {
         } label: {
           Label("Groups…", systemImage: "folder")
         }
-        if showsRegisterFilterMenu {
+        if showsRegisterFilterMenu(counts) {
           Divider()
-          registerFilterMenuItems
+          registerFilterMenuItems(counts)
         }
         Divider()
         reconcileMenuButton
@@ -345,11 +359,11 @@ struct RegisterView: View {
         Image(systemName: "ellipsis.circle")
       }
       .accessibilityLabel("Actions for \(account.name)")
-      .accessibilityHint(accountOverflowHint(account))
+      .accessibilityHint(accountOverflowHint(account, counts: counts))
     } else {
-      if showsRegisterFilterMenu {
+      if showsRegisterFilterMenu(counts) {
         Menu {
-          registerFilterMenuItems
+          registerFilterMenuItems(counts)
         } label: {
           Image(systemName: "line.3.horizontal.decrease.circle")
         }
@@ -375,33 +389,33 @@ struct RegisterView: View {
   }
 
   @ViewBuilder
-  private var registerFilterMenuItems: some View {
-    if scope != .unapproved, (unapprovedCount > 0 || unapprovedOnly) {
-      Toggle(isOn: $unapprovedOnly) {
-        Label(reviewNewMenuTitle, systemImage: "tray")
+  private func registerFilterMenuItems(_ counts: RegisterFilterCounts) -> some View {
+    if scope != .unapproved, (counts.unapproved > 0 || unapprovedOnly) {
+      Toggle(isOn: $unapprovedOnly.animation(Theme.Motion.standard)) {
+        Label(reviewNewMenuTitle(counts.unapproved), systemImage: "tray")
       }
       .menuActionDismissBehavior(.disabled)
     }
-    if unclearedCount > 0 || unclearedOnly {
-      Toggle(isOn: $unclearedOnly) {
-        Label(unclearedMenuTitle, systemImage: "circle")
+    if counts.uncleared > 0 || unclearedOnly {
+      Toggle(isOn: $unclearedOnly.animation(Theme.Motion.standard)) {
+        Label(unclearedMenuTitle(counts.uncleared), systemImage: "circle")
       }
       .menuActionDismissBehavior(.disabled)
     }
-    if uncategorisedCount > 0 || uncategorisedOnly {
-      Toggle(isOn: $uncategorisedOnly) {
-        Label(uncategorisedMenuTitle, systemImage: "tag.slash")
+    if counts.uncategorised > 0 || uncategorisedOnly {
+      Toggle(isOn: $uncategorisedOnly.animation(Theme.Motion.standard)) {
+        Label(uncategorisedMenuTitle(counts.uncategorised), systemImage: "tag.slash")
       }
       .menuActionDismissBehavior(.disabled)
     }
   }
 
-  private func accountOverflowHint(_ account: Account) -> String {
+  private func accountOverflowHint(_ account: Account, counts: RegisterFilterCounts) -> String {
     var parts = ["Edit Account"]
     if !account.closed {
       parts.append("favourites")
     }
-    if showsRegisterFilterMenu {
+    if showsRegisterFilterMenu(counts) {
       parts.append("filters")
     }
     parts.append("groups")
@@ -411,17 +425,17 @@ struct RegisterView: View {
   }
 
   @ViewBuilder
-  private var workingBalanceSection: some View {
+  private func workingBalanceSection(ledger: [Transaction]) -> some View {
     if let account = scopedAccount {
       let working = account.balance
-      let current = currentBalance(for: account)
+      let current = currentBalance(for: account, ledger: ledger)
+      let reconciledSubtitle = lastReconciledSubtitle(ledger: ledger)
       Section {
         VStack(alignment: .leading, spacing: 2) {
           Text(MoneyCodec.displayString(for: current, currencyFormat: model.currencyFormat))
             .font(.title2.weight(.bold))
             .monospacedDigit()
-            .contentTransition(.numericText(value: Double(current)))
-            .animation(.snappy, value: current)
+            .rollingNumber(current)
             .foregroundStyle(Theme.textPrimary)
             .accessibilityLabel(headlineAccessibilityLabel(current: current, working: working))
           if current != working {
@@ -433,13 +447,13 @@ struct RegisterView: View {
           Button {
             isShowingReconciliation = true
           } label: {
-            Text(lastReconciledSubtitle)
+            Text(reconciledSubtitle)
               .font(.caption)
               .foregroundStyle(.secondary)
               .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
           }
           .buttonStyle(.plain)
-          .accessibilityLabel(lastReconciledSubtitle)
+          .accessibilityLabel(reconciledSubtitle)
           .accessibilityHint("Opens reconcile.")
           // Reward minimum/cap for this account's card, in view while adding.
           RegisterRewardsStrip(accountID: account.id)
@@ -455,8 +469,8 @@ struct RegisterView: View {
   }
 
   @ViewBuilder
-  private func loadingOrFilterSections(_ snapshot: RegisterSnapshot) -> some View {
-    if model.transactions.isEmpty, model.ledgerPhase != .loaded {
+  private func loadingOrFilterSections(_ snapshot: RegisterSnapshot, ledgerIsEmpty: Bool) -> some View {
+    if ledgerIsEmpty, model.ledgerPhase != .loaded {
       Section {
         PhasePlaceholder(phase: model.ledgerPhase) {
           await model.refreshLedger()
@@ -473,7 +487,7 @@ struct RegisterView: View {
               .foregroundStyle(Theme.textPrimary)
             Spacer(minLength: 8)
             Button("Clear") {
-              withAnimation(.snappy) {
+              withAnimation(Theme.Motion.standard) {
                 clearRegisterFilters()
               }
             }
@@ -781,7 +795,7 @@ struct RegisterView: View {
   }
 
   private func approve(_ transaction: Transaction) {
-    withAnimation(.snappy) {
+    withAnimation(Theme.Motion.standard) {
       model.approveTransaction(transaction)
     }
   }
@@ -838,8 +852,8 @@ struct RegisterView: View {
     return model.account(withID: id)
   }
 
-  private var lastReconciledSubtitle: String {
-    if let date = lastReconciledISODate {
+  private func lastReconciledSubtitle(ledger: [Transaction]) -> String {
+    if let date = lastReconciledISODate(ledger: ledger) {
       return "Last reconciled: \(LedgerDate.friendlyString(fromISO: date))"
     }
     if model.ledgerPhase != .loaded || model.isFillingHorizon {
@@ -848,10 +862,10 @@ struct RegisterView: View {
     return "Not reconciled yet"
   }
 
-  private func currentBalance(for account: Account) -> Int {
+  private func currentBalance(for account: Account, ledger: [Transaction]) -> Int {
     RegisterCurrent.asOfTodayBalance(
       working: account.balance,
-      transactions: model.transactions,
+      transactions: ledger,
       accountID: account.id,
       today: Date.now.isoDateString
     )
@@ -869,17 +883,17 @@ struct RegisterView: View {
   /// Prefer `last_reconciled_date` from the accounts payload. If that field is
   /// missing (older Worker) or null, use the newest loaded reconciled row so
   /// a YNAB import still shows a date.
-  private var lastReconciledISODate: String? {
+  private func lastReconciledISODate(ledger: [Transaction]) -> String? {
     if let date = scopedAccount?.lastReconciledDate, !date.isEmpty {
       return date
     }
     guard let accountID = scope.accountID else {
       return nil
     }
-    return (model.transactions + model.unapprovedTransactions)
-      .filter { $0.accountID == accountID && $0.cleared == .reconciled }
-      .map(\.date)
-      .max()
+    let reconciledHere: (Transaction) -> Bool = { $0.accountID == accountID && $0.cleared == .reconciled }
+    let loaded = ledger.lazy.filter(reconciledHere).map(\.date).max()
+    let queued = model.unapprovedTransactions.lazy.filter(reconciledHere).map(\.date).max()
+    return [loaded, queued].compactMap { $0 }.max()
   }
 
   @ViewBuilder
@@ -924,7 +938,7 @@ struct RegisterView: View {
     } else if !showingUnapprovedQueue, snapshot.scheduledDisclosureCount > 0 {
       Section {
         Button {
-          withAnimation(.snappy) {
+          withAnimation(Theme.Motion.standard) {
             toggleScheduledExpanded()
           }
         } label: {
@@ -1013,6 +1027,7 @@ struct RegisterView: View {
     if showingUnapprovedQueue || unclearedOnly || uncategorisedOnly {
       return []
     }
+    let query = searchQuery
     return accountSchedules.filter { schedule in
       if let categoryID,
          schedule.categoryID != categoryID,
@@ -1022,7 +1037,7 @@ struct RegisterView: View {
       if let dateRange, !dateRange.contains(schedule.dateNext) {
         return false
       }
-      return scheduleMatchesSearch(schedule, query: searchQuery)
+      return scheduleMatchesSearch(schedule, query: query)
     }
   }
 
@@ -1052,14 +1067,6 @@ struct RegisterView: View {
       }
     }
     return query.matches(fields)
-  }
-
-  private var scopedTransactions: [Transaction] {
-    scoped(model.transactions)
-  }
-
-  private var approvalScopedTransactions: [Transaction] {
-    scoped(model.unapprovedTransactions)
   }
 
   private func scoped(_ transactions: [Transaction]) -> [Transaction] {
@@ -1102,11 +1109,11 @@ struct RegisterView: View {
         .font(.caption)
         .foregroundStyle(.secondary)
       HStack {
-        summaryColumn("Money In", MoneyCodec.displayString(for: inflow, currencyFormat: model.currencyFormat), colour: Theme.inflow)
+        summaryColumn("Money In", amount: inflow, MoneyCodec.displayString(for: inflow, currencyFormat: model.currencyFormat), colour: Theme.inflow)
         Spacer()
-        summaryColumn("Money Out", MoneyCodec.displayString(for: outflow, currencyFormat: model.currencyFormat), colour: Theme.outflow)
+        summaryColumn("Money Out", amount: outflow, MoneyCodec.displayString(for: outflow, currencyFormat: model.currencyFormat), colour: Theme.outflow)
         Spacer()
-        summaryColumn("Net", MoneyCodec.signedDisplayString(for: net, currencyFormat: model.currencyFormat), colour: Theme.amountColour(net))
+        summaryColumn("Net", amount: net, MoneyCodec.signedDisplayString(for: net, currencyFormat: model.currencyFormat), colour: Theme.amountColour(net))
       }
     }
     .padding(.horizontal, 16)
@@ -1115,7 +1122,7 @@ struct RegisterView: View {
     .ynabCard()
   }
 
-  private func summaryColumn(_ label: String, _ value: String, colour: Color) -> some View {
+  private func summaryColumn(_ label: String, amount: Int, _ value: String, colour: Color) -> some View {
     VStack(spacing: 2) {
       Text(label)
         .font(.caption)
@@ -1124,13 +1131,14 @@ struct RegisterView: View {
         .font(.footnote.weight(.semibold))
         .monospacedDigit()
         .foregroundStyle(colour)
+        .rollingNumber(amount)
     }
   }
 
-  private var showsRegisterFilterMenu: Bool {
-    (scope != .unapproved && (unapprovedCount > 0 || unapprovedOnly))
-      || unclearedCount > 0 || unclearedOnly
-      || uncategorisedCount > 0 || uncategorisedOnly
+  private func showsRegisterFilterMenu(_ counts: RegisterFilterCounts) -> Bool {
+    (scope != .unapproved && (counts.unapproved > 0 || unapprovedOnly))
+      || counts.uncleared > 0 || unclearedOnly
+      || counts.uncategorised > 0 || uncategorisedOnly
   }
 
   private var showingUnapprovedQueue: Bool {
@@ -1146,19 +1154,19 @@ struct RegisterView: View {
     }
   }
 
-  private var reviewNewMenuTitle: String {
+  private func reviewNewMenuTitle(_ unapprovedCount: Int) -> String {
     unapprovedCount == 0
       ? "Review new transactions"
       : "Review \(unapprovedCount) new transaction\(unapprovedCount == 1 ? "" : "s")"
   }
 
-  private var unclearedMenuTitle: String {
+  private func unclearedMenuTitle(_ unclearedCount: Int) -> String {
     unclearedCount == 0
       ? "Show uncleared"
       : "Show \(unclearedCount) uncleared"
   }
 
-  private var uncategorisedMenuTitle: String {
+  private func uncategorisedMenuTitle(_ uncategorisedCount: Int) -> String {
     uncategorisedCount == 0
       ? "Show uncategorised"
       : "Show \(uncategorisedCount) uncategorised"
@@ -1188,15 +1196,22 @@ struct RegisterView: View {
     uncategorisedOnly = false
   }
 
-  private var unclearedCount: Int {
-    scopedTransactions.count { $0.cleared == .uncleared }
+  private func filterCounts(scopedLedger: [Transaction], approvalScoped: [Transaction]) -> RegisterFilterCounts {
+    var uncleared = 0
+    var uncategorised = 0
+    for transaction in scopedLedger {
+      if transaction.cleared == .uncleared { uncleared += 1 }
+      if transaction.isUncategorised { uncategorised += 1 }
+    }
+    return RegisterFilterCounts(
+      // The New register has no "Review new" filter, so it never reads this.
+      unapproved: scope == .unapproved ? 0 : unapprovedCount(approvalScoped: approvalScoped),
+      uncleared: uncleared,
+      uncategorised: uncategorised
+    )
   }
 
-  private var uncategorisedCount: Int {
-    scopedTransactions.count(where: \.isUncategorised)
-  }
-
-  private var unapprovedCount: Int {
+  private func unapprovedCount(approvalScoped: [Transaction]) -> Int {
     // The queue is fetched only when this flow opens, so until then the register
     // has no rows to count and stands the matching server count in instead --
     // otherwise the way into the flow would be hidden behind a count of zero.
@@ -1206,7 +1221,13 @@ struct RegisterView: View {
     if model.unapprovedQueuePhase != .loaded, !loadsQueueEagerly {
       return model.unapprovedBadgeCount(forAccountID: countableAccountID)
     }
-    return approvalScopedTransactions.count
+    return approvalScoped.count
+  }
+
+  /// Whether this render reads the queue's rows at all: for the list itself,
+  /// or for a count that the server's number can't stand in for.
+  private var needsApprovalRows: Bool {
+    showingUnapprovedQueue || model.unapprovedQueuePhase == .loaded || loadsQueueEagerly
   }
 
   /// Identifies this register to the model's queue ownership set. Derived from
@@ -1245,8 +1266,9 @@ struct RegisterView: View {
     return accountIDs.first
   }
 
-  private var visibleTransactions: [Transaction] {
-    let source = showingUnapprovedQueue ? approvalScopedTransactions : scopedTransactions
+  private func visibleTransactions(scopedLedger: [Transaction], approvalScoped: [Transaction]) -> [Transaction] {
+    let query = searchQuery
+    let source = showingUnapprovedQueue ? approvalScoped : scopedLedger
     let local = source.filter { transaction in
       if unclearedOnly, transaction.cleared != .uncleared {
         return false
@@ -1257,12 +1279,12 @@ struct RegisterView: View {
       if showingUnapprovedQueue, transaction.approved {
         return false
       }
-      guard let query = searchQuery else {
+      guard let query else {
         return true
       }
       return query.matches(transaction.registerSearchFields)
     }
-    guard let query = searchQuery, !showingUnapprovedQueue else {
+    guard let query, !showingUnapprovedQueue else {
       return local
     }
     var merged: [String: Transaction] = Dictionary(uniqueKeysWithValues: local.map { ($0.id, $0) })
@@ -1303,6 +1325,7 @@ struct RegisterView: View {
   }
 
   private var visiblePendingRows: [PendingRow] {
+    let query = searchQuery
     return scopedPendingRows.filter { row in
       if showingUnapprovedQueue {
         return false
@@ -1313,7 +1336,7 @@ struct RegisterView: View {
       if uncategorisedOnly, row.categoryID != nil || row.splitLineCount > 0 {
         return false
       }
-      guard let query = searchQuery else {
+      guard let query else {
         return true
       }
       return query.matches(row.registerSearchFields)
@@ -1322,7 +1345,10 @@ struct RegisterView: View {
 
   private func runRegisterSearch() async {
     guard let query = searchQuery, !showingUnapprovedQueue else {
-      searchPage = RegisterSearchPage()
+      // Every appearance runs this; skip the write (and re-render) when idle.
+      if searchPage != RegisterSearchPage() {
+        searchPage = RegisterSearchPage()
+      }
       return
     }
     try? await Task.sleep(nanoseconds: 300_000_000)
@@ -1951,26 +1977,24 @@ struct TransactionRow: View {
       .frame(width: 44, height: 44)
   }
 
-  @ViewBuilder
+  /// One Image across states, so approving or clearing morphs the symbol
+  /// in place instead of swapping views.
   private func statusGlyph(_ status: RegisterStatus) -> some View {
-    switch status {
+    let glyph: (name: String, font: Font, style: AnyShapeStyle) = switch status {
     case .new:
-      Image(systemName: "circle.fill")
-        .font(.title3)
-        .foregroundStyle(Theme.newStatus)
+      ("circle.fill", .title3, AnyShapeStyle(Theme.newStatus))
     case .uncleared:
-      Image(systemName: "checkmark.circle")
-        .font(.title3)
-        .foregroundStyle(.tertiary)
+      ("checkmark.circle", .title3, AnyShapeStyle(.tertiary))
     case .cleared:
-      Image(systemName: "checkmark.circle.fill")
-        .font(.title3)
-        .foregroundStyle(Theme.inflow)
+      ("checkmark.circle.fill", .title3, AnyShapeStyle(Theme.inflow))
     case .reconciled:
-      Image(systemName: "lock.fill")
-        .font(.caption)
-        .foregroundStyle(Theme.inflow)
+      ("lock.fill", .caption, AnyShapeStyle(Theme.inflow))
     }
+    return Image(systemName: glyph.name)
+      .font(glyph.font)
+      .foregroundStyle(glyph.style)
+      .contentTransition(.symbolEffect(.replace))
+      .animation(Theme.Motion.standard, value: glyph.name)
   }
 
   private func statusAccessibilityLabel(_ status: RegisterStatus) -> String {

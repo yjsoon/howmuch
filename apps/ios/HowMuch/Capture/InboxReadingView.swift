@@ -64,7 +64,7 @@ struct InboxReadingView: View {
 
   @ViewBuilder
   private var sourcePreview: some View {
-    let shape = RoundedRectangle(cornerRadius: 28, style: .continuous)
+    let shape = RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
     ZStack {
       IntelligenceHalo()
         .blur(radius: 18)
@@ -81,6 +81,7 @@ struct InboxReadingView: View {
               .mask(shape.stroke(lineWidth: 3))
           }
           .shadow(color: Color(red: 0.45, green: 0.38, blue: 0.95).opacity(0.35), radius: 24)
+          .transition(.scale(scale: 0.9).combined(with: .opacity))
       } else {
         Circle()
           .fill(.ultraThinMaterial)
@@ -95,8 +96,10 @@ struct InboxReadingView: View {
               .foregroundStyle(Theme.textPrimary.opacity(0.78))
           }
           .shadow(color: Color(red: 0.45, green: 0.38, blue: 0.95).opacity(0.4), radius: 28)
+          .transition(.scale(scale: 0.9).combined(with: .opacity))
       }
     }
+    .animation(Theme.Motion.arrive, value: thumbnail != nil)
     .accessibilityHidden(true)
   }
 

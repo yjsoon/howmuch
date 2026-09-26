@@ -40,6 +40,7 @@ struct ReflectView: View {
       }
       .padding(.horizontal, 16)
       .padding(.bottom, 24)
+      .animation(Theme.Motion.arrive, value: model.reportsPhase)
     }
     .background(Theme.canvas)
     .navigationTitle("Reflect")
@@ -74,6 +75,7 @@ struct ReflectView: View {
           .font(.title.weight(.bold))
           .monospacedDigit()
           .foregroundStyle(Theme.textPrimary)
+          .rollingNumber(total)
 
         if !rows.isEmpty {
           StackedShareBar(segments: ReflectMaths.shareSegments(rows, limit: 6))
@@ -139,6 +141,7 @@ struct ReflectView: View {
           .font(.title.weight(.bold))
           .monospacedDigit()
           .foregroundStyle(Theme.textPrimary)
+          .rollingNumber(latest.netWorth)
 
         HStack {
           Text("Assets")
@@ -178,6 +181,7 @@ struct ReflectView: View {
           .font(.title.weight(.bold))
           .monospacedDigit()
           .foregroundStyle(Theme.amountColour(latest.net))
+          .rollingNumber(latest.net)
 
         PairedColumnChart(
           pairs: report.periods.map { (Double($0.income), Double(abs($0.spending))) },
@@ -198,9 +202,11 @@ struct ReflectView: View {
       let ages = report.periods.compactMap(\.ageOfMoneyDays)
       VStack(alignment: .leading, spacing: 10) {
         if let latest = ages.last {
-          Text("\(Int(latest.rounded())) Days")
+          Text(ReflectMaths.daysLabel(Int(latest.rounded()), capitalised: true))
             .font(.title.weight(.bold))
+            .monospacedDigit()
             .foregroundStyle(Theme.textPrimary)
+            .rollingNumber(Int(latest.rounded()))
         } else {
           Text("Not enough data yet")
             .font(.subheadline)
@@ -245,7 +251,7 @@ struct ReflectCard<Destination: View, Content: View>: View {
               .font(.subheadline)
           }
           Spacer()
-          Image(systemName: "chevron.right")
+          Image(systemName: "chevron.forward")
             .font(.footnote.weight(.semibold))
             .foregroundStyle(.tertiary)
             .accessibilityHidden(true)
@@ -257,8 +263,28 @@ struct ReflectCard<Destination: View, Content: View>: View {
       .padding(16)
       .frame(maxWidth: .infinity, alignment: .leading)
       .ynabCard()
+      .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.pressable)
+  }
+}
+
+/// Orders a Reflect detail screen's report fetches so only the latest may
+/// commit. `.task(id:)` cancels a fetch superseded by a filter change, but
+/// Retry runs in its own `Task` that nothing cancels, so cancellation alone
+/// cannot tell an obsolete request from the current one. A generation rather
+/// than a filter key also rejects the first of two requests for the same
+/// filter (A → B → A).
+struct ReportFetchGate {
+  private(set) var generation = 0
+
+  mutating func begin() -> Int {
+    generation += 1
+    return generation
+  }
+
+  func isCurrent(_ token: Int) -> Bool {
+    token == generation
   }
 }
 
@@ -270,6 +296,23 @@ struct SpendingGroupSection: Identifiable {
 }
 
 enum ReflectMaths {
+  /// "1 day" / "12 days", or "1 Day" / "12 Days" for headlines.
+  static func daysLabel(_ days: Int, capitalised: Bool = false) -> String {
+    let singular = abs(days) == 1
+    let unit = capitalised ? (singular ? "Day" : "Days") : (singular ? "day" : "days")
+    return "\(days) \(unit)"
+  }
+
+  /// Shared empty state for a report window with nothing to show.
+  @MainActor
+  static func emptyRange(title: String, systemImage: String) -> some View {
+    ContentUnavailableView(
+      title,
+      systemImage: systemImage,
+      description: Text("Adjust the dates or clear filters to show more transactions.")
+    )
+  }
+
   static func split(_ groups: [SpendingBreakdownGroup]) -> (primary: [SpendingBreakdownGroup], quiet: [SpendingBreakdownGroup]) {
     let primary = groups.filter { !CategoryGroup.isQuietName($0.categoryGroupName) }
     let quiet = groups.filter { CategoryGroup.isQuietName($0.categoryGroupName) }

@@ -100,6 +100,7 @@ final class RewardsAccountImportSelection {
   func importAccount(_ confirmation: Confirmation, model: AppModel) async {
     guard !isImporting, confirmation.planID == model.settings.planID else { return }
     isImporting = true
+    self.confirmation = nil
     error = nil
     defer { isImporting = false }
     do {
@@ -345,21 +346,15 @@ struct RewardsAccountImportView: View {
       guard pickerPlanID == model.settings.planID, !selection.isImporting else { return }
       choose(outcome)
     }
-    .confirmationDialog(
+    .binaryConfirm(
       "Replace Rewards Configuration?",
-      isPresented: Binding(
-        get: { selection.confirmation != nil },
-        set: { newValue in if !newValue { selection.confirmation = nil } }
-      ),
-      titleVisibility: .visible,
-      presenting: selection.confirmation
-    ) { confirmation in
-      Button("Replace Configuration", role: .destructive) {
-        Task { await selection.importAccount(confirmation, model: model) }
+      presenting: $selection.confirmation,
+      confirm: .destructive("Replace Configuration"),
+      message: { confirmation in
+        Text("Import \(confirmation.sourceName) into \(confirmation.accountName). Existing limits, categories and tiers will be replaced, including clearing omitted fields. The account's name and featured setting stay unchanged.")
       }
-      Button("Cancel", role: .cancel) {}
-    } message: { confirmation in
-      Text("Import \(confirmation.sourceName) into \(confirmation.accountName). Existing limits, categories and tiers will be replaced, including clearing omitted fields. The account's name and featured setting stay unchanged.")
+    ) { confirmation in
+      Task { await selection.importAccount(confirmation, model: model) }
     }
     .onChange(of: model.settings.planID) {
       selection.reset()
@@ -450,13 +445,13 @@ struct RewardsBackupImportView: View {
         .disabled(busy || payloadJSON == nil)
       }
     }
-    .confirmationDialog("Replace All Rewards Cards?", isPresented: $confirming, titleVisibility: .visible) {
-      Button("Replace All Cards", role: .destructive) {
-        Task { await importChosen() }
-      }
-      Button("Cancel", role: .cancel) {}
-    } message: {
-      Text("Cards missing from the backup are removed. Miles valuation is replaced when the backup sets one.")
+    .binaryConfirm(
+      "Replace All Rewards Cards?",
+      isPresented: $confirming,
+      confirm: .destructive("Replace All Cards"),
+      message: { Text("Cards missing from the backup are removed. Miles valuation is replaced when the backup sets one.") }
+    ) {
+      Task { await importChosen() }
     }
     .fileImporter(isPresented: $isPicking, allowedContentTypes: [.json], allowsMultipleSelection: false) { outcome in
       guard pickerPlanID == model.settings.planID, !busy else { return }

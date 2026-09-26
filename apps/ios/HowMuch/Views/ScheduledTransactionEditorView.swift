@@ -64,7 +64,7 @@ struct ScheduledSubtransactionDraft {
 
   init(subtransaction: ScheduledSubtransaction) {
     id = subtransaction.id
-    amountText = MoneyCodec.displayString(for: subtransaction.amount, currencyFormat: nil)
+    amountText = MoneyCodec.editableString(for: subtransaction.amount)
     payeeID = subtransaction.payeeID
     categoryID = subtransaction.categoryID
     transferAccountID = subtransaction.transferAccountID
@@ -118,7 +118,7 @@ struct ScheduledTransactionDraft {
     dateNext = Date(isoDateString: schedule.dateNext) ?? dateFirst
     frequency = ScheduleFrequency(rawValue: schedule.frequency) ?? .monthly
     direction = schedule.amount < 0 ? .outflow : .inflow
-    amountText = MoneyCodec.displayString(for: abs(schedule.amount), currencyFormat: nil)
+    amountText = MoneyCodec.editableString(for: abs(schedule.amount))
     payeeID = schedule.payeeID
     // A split parent cannot also be a transfer. Do not offer or preserve that
     // invalid hybrid when saving an imported split schedule.
@@ -165,7 +165,7 @@ struct ScheduledTransactionDraft {
     guard !isSplit else { return }
     let currentAmount = signedAmount ?? 0
     subtransactions = [
-      ScheduledSubtransactionDraft(amountText: MoneyCodec.displayString(for: currentAmount, currencyFormat: nil)),
+      ScheduledSubtransactionDraft(amountText: MoneyCodec.editableString(for: currentAmount)),
       ScheduledSubtransactionDraft(),
     ]
     categoryID = nil
@@ -177,7 +177,7 @@ struct ScheduledTransactionDraft {
     if total != 0 {
       direction = total < 0 ? .outflow : .inflow
     }
-    amountText = MoneyCodec.displayString(for: abs(total), currencyFormat: nil)
+    amountText = MoneyCodec.editableString(for: abs(total))
     subtransactions = []
   }
 
@@ -691,7 +691,7 @@ private struct ScheduledSplitPayeePicker: View {
         }
       }
       Section("Payees") {
-        ForEach(model.payees.filter { !$0.isTransferPayee }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) { payee in
+        ForEach(model.payeesSortedByName.filter { !$0.isTransferPayee }) { payee in
           Button {
             line.payeeID = payee.id
             line.transferAccountID = nil
@@ -788,7 +788,7 @@ private struct ScheduledPayeePicker: View {
         }
       }
       Section("Payees") {
-        ForEach(model.payees.filter { !$0.isTransferPayee }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) { payee in
+        ForEach(model.payeesSortedByName.filter { !$0.isTransferPayee }) { payee in
           Button {
             draft.payeeID = payee.id
             draft.transferAccountID = nil

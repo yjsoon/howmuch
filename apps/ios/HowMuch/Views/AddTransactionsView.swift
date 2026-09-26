@@ -310,26 +310,31 @@ struct AddTransactionsView: View {
       }
       .onChange(of: jumpToMessage) { _, id in
         if let id {
-          withAnimation {
+          withAnimation(Theme.Motion.standard) {
             proxy.scrollTo(id, anchor: .top)
           }
           jumpToMessage = nil
         }
       }
       .overlay(alignment: .bottom) {
-        if showJumpToLatest, !isNearBottom {
-          Button("New response") {
-            showJumpToLatest = false
-            isNearBottom = true
-            revealLatest(proxy)
+        // Animate only the pill; the transcript underneath keeps its own timing.
+        VStack {
+          if showJumpToLatest, !isNearBottom {
+            Button("New response") {
+              showJumpToLatest = false
+              isNearBottom = true
+              revealLatest(proxy)
+            }
+            .font(.subheadline.weight(.semibold))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .glassEffect(.regular.interactive(), in: .capsule)
+            .padding(.bottom, 8)
+            .accessibilityLabel("Jump to latest response")
+            .transition(.move(edge: .bottom).combined(with: .opacity))
           }
-          .font(.subheadline.weight(.semibold))
-          .padding(.horizontal, 14)
-          .padding(.vertical, 8)
-          .background(Theme.card, in: Capsule())
-          .padding(.bottom, 8)
-          .accessibilityLabel("Jump to latest response")
         }
+        .animation(Theme.Motion.standard, value: showJumpToLatest && !isNearBottom)
       }
     }
   }
@@ -498,7 +503,7 @@ struct AddTransactionsView: View {
   }
 
   private func revealLatest(_ proxy: ScrollViewProxy) {
-    withAnimation {
+    withAnimation(Theme.Motion.standard) {
       proxy.scrollTo("conversation-end", anchor: .bottom)
     }
   }
@@ -547,11 +552,19 @@ struct AddTransactionsView: View {
     if Calendar.current.isDateInToday(draft.date) {
       return "Today"
     }
+    return Self.draftDateFormatter.string(from: draft.date)
+  }
+
+  /// Shared rather than built per draft row on every render. Autoupdating
+  /// locale and zone keep it matching a freshly made formatter.
+  private static let draftDateFormatter: DateFormatter = {
     let formatter = DateFormatter()
+    formatter.locale = .autoupdatingCurrent
+    formatter.timeZone = .autoupdatingCurrent
     formatter.dateStyle = .medium
     formatter.timeStyle = .none
-    return formatter.string(from: draft.date)
-  }
+    return formatter
+  }()
 
   private func seededManualDraft() -> TransactionDraft {
     var draft = TransactionDraft()
@@ -600,11 +613,21 @@ struct AddTransactionsView: View {
       return
     }
     errorMessage = nil
-    if session.isWaitingOnAttachmentOCR {
+    if isWaitingOnAttachments {
       waitForReadableAttachmentsThenSend()
       return
     }
     commitComposerTurn()
+  }
+
+  /// OCR still running on an attachment, or a photo in the current image batch
+  /// that is still loading or encoding (no bytes yet). Sending then would
+  /// freeze the turn without it. Bounded by the batch: ingestion always clears
+  /// `isTransferringImages` when it ends, so a stale placeholder cannot hold
+  /// the send forever.
+  private var isWaitingOnAttachments: Bool {
+    session.isWaitingOnAttachmentOCR
+      || (session.isTransferringImages && session.attachments.contains { $0.isReading && $0.data.isEmpty })
   }
 
   private func waitForReadableAttachmentsThenSend() {
@@ -612,7 +635,7 @@ struct AddTransactionsView: View {
     let turnScope = capturedTurnScope()
     Task { @MainActor in
       defer { isWaitingToSend = false }
-      while self.isCurrent(turnScope), self.session.isWaitingOnAttachmentOCR {
+      while self.isCurrent(turnScope), self.isWaitingOnAttachments {
         try? await Task.sleep(for: .milliseconds(50))
       }
       guard self.isCurrent(turnScope), self.session.canFreezeComposer else {
@@ -1327,7 +1350,19 @@ struct AddTransactionsView: View {
     guard isCurrent(turnScope) else {
       return
     }
-    guard let data = image.jpegData(compressionQuality: 0.8) else {
+    let encoded = await Self.jpegData(from: image)
+    guard isCurrent(turnScope) else {
+      // The turn moved on during the encode. Settle the placeholder, as a late
+      // OCR result would, so its spinner cannot hold the session busy.
+      if session.id == turnScope.sessionID,
+         var placeholder = session.attachments.first(where: { $0.id == attachment.id }) {
+        placeholder.isReading = false
+        placeholder.errorMessage = "I could not keep that image on this device."
+        session.updateAttachment(placeholder)
+      }
+      return
+    }
+    guard let data = encoded else {
       attachment.isReading = false
       attachment.errorMessage = "I could not keep that image on this device."
       session.updateAttachment(attachment)
@@ -1345,6 +1380,14 @@ struct AddTransactionsView: View {
     session.updateAttachment(attachment)
     let text = await SlipImageText.recognize(data)
     applyOCRCompletion(text, attachmentID: attachment.id, turnScope: turnScope)
+  }
+
+  /// JPEG-encodes off the main actor: a full-resolution camera frame takes
+  /// long enough to hitch the camera's dismissal and the composer.
+  private static func jpegData(from image: UIImage) async -> Data? {
+    await Task.detached(priority: .userInitiated) {
+      image.jpegData(compressionQuality: 0.8)
+    }.value
   }
 
   private func retryReadingImage(_ id: UUID) {

@@ -1,11 +1,74 @@
+import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
+
+/// Downsampled, orientation-correct thumbnails for attachment bubbles, the
+/// composer tray and the clipboard toast. Decoding the full photo inside `body`
+/// repeated a multi-megapixel decode on every keystroke or drag frame; this
+/// decodes each image once per size. Synchronous so the first render already
+/// shows the image. `NSCache` is thread-safe, so no actor is needed.
+enum CaptureThumbnail {
+  private static let cache: NSCache<NSString, UIImage> = {
+    let cache = NSCache<NSString, UIImage>()
+    cache.countLimit = 48
+    return cache
+  }()
+
+  static func image(for attachment: CaptureAttachment, side: CGFloat, displayScale: CGFloat) -> UIImage? {
+    image(data: attachment.data, id: attachment.id.uuidString, side: side, displayScale: displayScale)
+  }
+
+  static func image(data: Data, id: String, side: CGFloat, displayScale: CGFloat) -> UIImage? {
+    guard !data.isEmpty else {
+      return nil
+    }
+    let scale = displayScale.isFinite ? max(1, displayScale) : 1
+    // An attachment's bytes only go from empty to filled, but the key still
+    // covers length and trailing bytes so replaced bytes never reuse a stale image.
+    var tail = Hasher()
+    tail.combine(data.suffix(64))
+    let key = "\(id)|\(data.count)|\(tail.finalize())|\(side)|\(scale)" as NSString
+    if let cached = cache.object(forKey: key) {
+      return cached
+    }
+    guard let image = downsample(data, side: side, scale: scale) ?? UIImage(data: data) else {
+      return nil
+    }
+    cache.setObject(image, forKey: key)
+    return image
+  }
+
+  /// Sized so the short edge still covers a `side`-point square at `scale`,
+  /// since the thumbnails are drawn `scaledToFill`.
+  private static func downsample(_ data: Data, side: CGFloat, scale: CGFloat) -> UIImage? {
+    guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+          let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+          let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+          let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue,
+          width > 0, height > 0
+    else {
+      return nil
+    }
+    let longEdge = max(width, height)
+    let needed = ceil(Double(side * scale) * longEdge / min(width, height))
+    guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceCreateThumbnailWithTransform: true,
+      kCGImageSourceThumbnailMaxPixelSize: min(needed, longEdge),
+      kCGImageSourceShouldCacheImmediately: true,
+    ] as CFDictionary) else {
+      return nil
+    }
+    return UIImage(cgImage: thumbnail, scale: scale, orientation: .up)
+  }
+}
 
 struct CaptureUserBubble: View {
   let message: CaptureMessage
   let attachments: [CaptureAttachment]
   let inspect: (CaptureAttachment) -> Void
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.displayScale) private var displayScale
 
   var body: some View {
     HStack {
@@ -46,12 +109,12 @@ struct CaptureUserBubble: View {
 
   @ViewBuilder
   private func sentImage(_ attachment: CaptureAttachment) -> some View {
-    if let image = UIImage(data: attachment.data) {
+    if let image = CaptureThumbnail.image(for: attachment, side: 96, displayScale: displayScale) {
       Image(uiImage: image)
         .resizable()
         .scaledToFill()
         .frame(width: 96, height: 96)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.inset, style: .continuous))
     }
   }
 }
@@ -259,7 +322,7 @@ struct CaptureAssistantReply: View {
       }
     }
     .padding(14)
-    .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
   }
 
   @ViewBuilder
@@ -273,6 +336,8 @@ struct CaptureAssistantReply: View {
           } label: {
             Image(systemName: item.included ? "checkmark.circle.fill" : "circle")
               .foregroundStyle(Theme.accent)
+              .contentTransition(.symbolEffect(.replace))
+              .animation(Theme.Motion.standard, value: item.included)
               .frame(width: 44, height: 44)
           }
           .tint(Theme.accent)
@@ -359,9 +424,12 @@ struct CaptureAssistantReply: View {
     }
     .overlay {
       if highlightID == item.id {
-        RoundedRectangle(cornerRadius: 12).stroke(Theme.accent, lineWidth: 2)
+        RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+          .stroke(Theme.accent, lineWidth: 2)
+          .transition(.opacity)
       }
     }
+    .animation(Theme.Motion.arrive, value: highlightID == item.id)
   }
 
   private func statusText(_ item: CaptureDraftItem, saved: Bool) -> String {
@@ -579,7 +647,7 @@ struct CaptureAssistantReply: View {
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(14)
-    .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
   }
 }
 
@@ -604,6 +672,7 @@ struct CaptureComposerDock: View {
   var onRetry: (UUID) -> Void
   var onAddManually: () -> Void
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.displayScale) private var displayScale
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -695,6 +764,8 @@ struct CaptureComposerDock: View {
               Image(systemName: canSend ? "arrow.up.circle.fill" : "arrow.up.circle")
                 .font(.title2)
                 .foregroundStyle(Theme.accent)
+                .contentTransition(.symbolEffect(.replace))
+                .animation(Theme.Motion.standard, value: canSend)
                 .frame(width: 44, height: 44)
             }
             .disabled(!canSend)
@@ -752,14 +823,14 @@ struct CaptureComposerDock: View {
 
   private func pendingThumb(_ attachment: CaptureAttachment) -> some View {
     ZStack(alignment: .topTrailing) {
-      if let image = UIImage(data: attachment.data), !attachment.data.isEmpty {
+      if let image = CaptureThumbnail.image(for: attachment, side: 64, displayScale: displayScale) {
         Image(uiImage: image)
           .resizable()
           .scaledToFill()
           .frame(width: 64, height: 64)
-          .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+          .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.inset, style: .continuous))
       } else {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
+        RoundedRectangle(cornerRadius: Theme.Radius.inset, style: .continuous)
           .fill(Theme.surfaceMuted)
           .frame(width: 64, height: 64)
       }
@@ -862,6 +933,7 @@ private struct CaptureQuietSaveStyle: ButtonStyle {
       }
       .frame(minWidth: 44, minHeight: 44, alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .center)
       .contentShape(Rectangle())
+      .animation(Theme.Motion.press, value: configuration.isPressed)
   }
 
   private func fillOpacity(pressed: Bool) -> Double {

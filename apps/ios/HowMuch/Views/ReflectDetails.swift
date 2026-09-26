@@ -132,18 +132,28 @@ struct ReportFilterBar: View {
           }
         }
         if scope.isActive {
-          Button("Clear") {
+          Button {
             scope = ReportScope()
+          } label: {
+            Label("Clear", systemImage: "xmark.circle.fill")
+              .font(.footnote.weight(.medium))
+              .foregroundStyle(Theme.accent)
+              .padding(.horizontal, 6)
+              .padding(.vertical, 7)
+              .contentShape(Capsule())
           }
-          .font(.footnote.weight(.medium))
-          .foregroundStyle(Theme.accent)
+          .buttonStyle(.pressable)
+          .transition(.opacity.combined(with: .scale(scale: 0.8)))
         }
       }
 
       if let range, range.wrappedValue.mode != .preset {
         ReportRangeAccessory(range: range)
+          .transition(.opacity.combined(with: .move(edge: .top)))
       }
     }
+    .animation(Theme.Motion.standard, value: range?.wrappedValue.mode)
+    .animation(Theme.Motion.standard, value: scope.isActive)
     .sheet(isPresented: $isPickingAccounts) {
       AccountScopePicker(selection: $scope.accountIDs)
         .blocksCapturePresentation()
@@ -170,7 +180,7 @@ struct ReportFilterBar: View {
     Button(action: action) {
       FilterChip(label: label, isActive: isActive)
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.pressable)
     .accessibilityLabel(label)
   }
 }
@@ -462,6 +472,7 @@ struct SpendingBreakdownDetailView: View {
   @State private var scope = ReportScope()
   @State private var report: SpendingBreakdownReport?
   @State private var phase: LoadPhase = .idle
+  @State private var fetchGate = ReportFetchGate()
 
   var body: some View {
     ScrollView {
@@ -485,14 +496,11 @@ struct SpendingBreakdownDetailView: View {
           }
 
           if rows.isEmpty {
-            ContentUnavailableView(
-              "No Spending",
-              systemImage: "chart.pie",
-              description: Text("Adjust the dates or clear filters to show more transactions.")
-            )
+            ReflectMaths.emptyRange(title: "No Spending", systemImage: "chart.pie")
           } else {
+            let maxAmount = rows.map { abs($0.amount) }.max() ?? 1
             ForEach(ReflectMaths.groupSections(rows)) { section in
-              groupSection(section, total: total, maxAmount: rows.map { abs($0.amount) }.max() ?? 1)
+              groupSection(section, total: total, maxAmount: maxAmount)
             }
           }
         } else {
@@ -518,9 +526,12 @@ struct SpendingBreakdownDetailView: View {
         .font(.subheadline)
         .foregroundStyle(.secondary)
       Text(MoneyCodec.displayString(for: total, currencyFormat: model.currencyFormat))
-        .font(.system(size: 34, weight: .bold))
+        .font(.largeTitle.weight(.bold))
         .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.5)
         .foregroundStyle(Theme.textPrimary)
+        .rollingNumber(total)
       StackedShareBar(segments: ReflectMaths.shareSegments(rows, limit: 6))
 
       HStack {
@@ -565,7 +576,9 @@ struct SpendingBreakdownDetailView: View {
       .font(.footnote)
       .foregroundStyle(.secondary)
       Button(model.includeQuietSpending ? "Exclude" : "Include") {
-        model.setIncludeQuietSpending(!model.includeQuietSpending)
+        withAnimation(Theme.Motion.standard) {
+          model.setIncludeQuietSpending(!model.includeQuietSpending)
+        }
       }
       .font(.footnote.weight(.semibold))
       .foregroundStyle(Theme.accent)
@@ -584,6 +597,7 @@ struct SpendingBreakdownDetailView: View {
           .font(.subheadline.weight(.semibold))
           .monospacedDigit()
           .foregroundStyle(Theme.textPrimary)
+          .rollingNumber(section.amount)
         Text(total > 0 ? shareLabel(Double(section.amount) / Double(total)) : "—")
           .font(.caption)
           .foregroundStyle(.secondary)
@@ -603,7 +617,7 @@ struct SpendingBreakdownDetailView: View {
           } label: {
             categoryRow(group, total: total, maxAmount: maxAmount)
           }
-          .buttonStyle(.plain)
+          .buttonStyle(.cardRow)
           if index < section.rows.count - 1 {
             Divider().padding(.leading, 16)
           }
@@ -622,16 +636,8 @@ struct SpendingBreakdownDetailView: View {
           .font(.subheadline)
           .foregroundStyle(Theme.textPrimary)
         HStack(spacing: 8) {
-          GeometryReader { proxy in
-            Capsule()
-              .fill(Theme.surfaceMuted)
-              .overlay(alignment: .leading) {
-                Capsule()
-                  .fill(Theme.accent)
-                  .frame(width: max(4, proxy.size.width * min(Double(amount) / Double(max(maxAmount, 1)), 1)))
-              }
-          }
-          .frame(width: 120, height: 6)
+          ShareMeter(fraction: Double(amount) / Double(max(maxAmount, 1)))
+            .frame(width: 120, height: 6)
           Text(shareLabel(share))
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -645,7 +651,8 @@ struct SpendingBreakdownDetailView: View {
         .font(.subheadline)
         .monospacedDigit()
         .foregroundStyle(Theme.textPrimary)
-      Image(systemName: "chevron.right")
+        .rollingNumber(amount)
+      Image(systemName: "chevron.forward")
         .font(.footnote.weight(.semibold))
         .foregroundStyle(.tertiary)
         .accessibilityHidden(true)
@@ -661,18 +668,33 @@ struct SpendingBreakdownDetailView: View {
   }
 
   private func fetch() async {
+    let token = fetchGate.begin()
     phase = .loading
     do {
-      report = try await model.apiClient.fetchSpendingBreakdown(
+      let next = try await model.apiClient.fetchSpendingBreakdown(
         planID: model.settings.planID,
         from: range.fromISO,
         to: range.toISO,
         accountIDs: Array(scope.accountIDs),
         categoryIDs: Array(scope.categoryIDs)
       )
-      phase = .loaded
+      // A superseded request (a filter change or a newer Retry) must not
+      // overwrite the current one.
+      guard fetchGate.isCurrent(token), !Task.isCancelled else { return }
+      withAnimation(Theme.Motion.arrive) {
+        report = next
+        phase = .loaded
+      }
     } catch {
-      phase = .failed(error.localizedDescription)
+      // Neither a cancelled filter fetch nor a stale Retry (which runs in
+      // its own Task) may flash an error or clear a newer report.
+      guard fetchGate.isCurrent(token), !Task.isCancelled else { return }
+      // Drop the previous window's figures so they never sit under the new
+      // filter chips; the placeholder offers Retry instead.
+      withAnimation(Theme.Motion.arrive) {
+        report = nil
+        phase = .failed(error.localizedDescription)
+      }
     }
   }
 }
@@ -686,6 +708,7 @@ struct NetWorthDetailView: View {
   @State private var interval: ReportInterval = .month
   @State private var report: NetWorthReport?
   @State private var phase: LoadPhase = .idle
+  @State private var fetchGate = ReportFetchGate()
 
   var body: some View {
     ScrollView {
@@ -706,6 +729,8 @@ struct NetWorthDetailView: View {
             .foregroundStyle(Theme.textPrimary)
             .padding(.horizontal, 4)
           historyCard(report: report)
+        } else if report != nil, phase != .loading {
+          ReflectMaths.emptyRange(title: "No Net Worth History", systemImage: "chart.bar")
         } else {
           PhasePlaceholder(phase: phase) {
             await fetch()
@@ -733,14 +758,18 @@ struct NetWorthDetailView: View {
         .font(.subheadline)
         .foregroundStyle(.secondary)
       Text(MoneyCodec.displayString(for: latest.netWorth, currencyFormat: model.currencyFormat))
-        .font(.system(size: 34, weight: .bold))
+        .font(.largeTitle.weight(.bold))
         .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.5)
         .foregroundStyle(Theme.textPrimary)
+        .rollingNumber(latest.netWorth)
       if let change {
         Text("\(MoneyCodec.signedDisplayString(for: change, currencyFormat: model.currencyFormat)) on previous period")
           .font(.footnote.weight(.medium))
           .monospacedDigit()
           .foregroundStyle(Theme.amountColour(change))
+          .rollingNumber(change)
       }
       HStack(spacing: 24) {
         VStack(spacing: 2) {
@@ -750,6 +779,8 @@ struct NetWorthDetailView: View {
           Text(MoneyCodec.displayString(for: assets, currencyFormat: model.currencyFormat))
             .font(.subheadline.weight(.semibold))
             .monospacedDigit()
+            .foregroundStyle(Theme.textPrimary)
+            .rollingNumber(assets)
         }
         VStack(spacing: 2) {
           Text("Debts")
@@ -758,6 +789,8 @@ struct NetWorthDetailView: View {
           Text(MoneyCodec.displayString(for: debts, currencyFormat: model.currencyFormat))
             .font(.subheadline.weight(.semibold))
             .monospacedDigit()
+            .foregroundStyle(Theme.textPrimary)
+            .rollingNumber(debts)
         }
       }
       ColumnChart(
@@ -820,7 +853,7 @@ struct NetWorthDetailView: View {
           }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 9)
+        .padding(.vertical, 11)
         if index < periods.count - 1 {
           Divider().padding(.leading, 16)
         }
@@ -830,18 +863,33 @@ struct NetWorthDetailView: View {
   }
 
   private func fetch() async {
+    let token = fetchGate.begin()
     phase = .loading
     do {
-      report = try await model.apiClient.fetchNetWorth(
+      let next = try await model.apiClient.fetchNetWorth(
         planID: model.settings.planID,
         from: range.fromISO,
         to: range.toISO,
         interval: interval,
         accountIDs: Array(scope.accountIDs)
       )
-      phase = .loaded
+      // A superseded request (a filter change or a newer Retry) must not
+      // overwrite the current one.
+      guard fetchGate.isCurrent(token), !Task.isCancelled else { return }
+      withAnimation(Theme.Motion.arrive) {
+        report = next
+        phase = .loaded
+      }
     } catch {
-      phase = .failed(error.localizedDescription)
+      // Neither a cancelled filter fetch nor a stale Retry (which runs in
+      // its own Task) may flash an error or clear a newer report.
+      guard fetchGate.isCurrent(token), !Task.isCancelled else { return }
+      // Drop the previous window's figures so they never sit under the new
+      // filter chips; the placeholder offers Retry instead.
+      withAnimation(Theme.Motion.arrive) {
+        report = nil
+        phase = .failed(error.localizedDescription)
+      }
     }
   }
 }
@@ -855,6 +903,7 @@ struct IncomeVsSpendingDetailView: View {
   @State private var interval: ReportInterval = .month
   @State private var report: IncomeVsSpendingReport?
   @State private var phase: LoadPhase = .idle
+  @State private var fetchGate = ReportFetchGate()
 
   var body: some View {
     ScrollView {
@@ -870,6 +919,8 @@ struct IncomeVsSpendingDetailView: View {
         if let report, !report.periods.isEmpty {
           totalsCard(report: report)
           periodsCard(report: report)
+        } else if report != nil, phase != .loading {
+          ReflectMaths.emptyRange(title: "No Income or Spending", systemImage: "chart.bar")
         } else {
           PhasePlaceholder(phase: phase) {
             await fetch()
@@ -927,7 +978,7 @@ struct IncomeVsSpendingDetailView: View {
           HStack {
             amountColumn("Income", MoneyCodec.displayString(for: period.income, currencyFormat: model.currencyFormat), colour: Theme.inflow)
             Spacer()
-            amountColumn("Spending", MoneyCodec.displayString(for: period.spending, currencyFormat: model.currencyFormat), colour: Theme.outflow)
+            amountColumn("Spending", MoneyCodec.displayString(for: abs(period.spending), currencyFormat: model.currencyFormat), colour: Theme.outflow)
             Spacer()
             amountColumn("Net", MoneyCodec.signedDisplayString(for: period.net, currencyFormat: model.currencyFormat), colour: Theme.amountColour(period.net))
             Spacer()
@@ -990,9 +1041,10 @@ struct IncomeVsSpendingDetailView: View {
   }
 
   private func fetch() async {
+    let token = fetchGate.begin()
     phase = .loading
     do {
-      report = try await model.apiClient.fetchIncomeVsSpending(
+      let next = try await model.apiClient.fetchIncomeVsSpending(
         planID: model.settings.planID,
         from: range.fromISO,
         to: range.toISO,
@@ -1000,9 +1052,23 @@ struct IncomeVsSpendingDetailView: View {
         accountIDs: Array(scope.accountIDs),
         categoryIDs: Array(scope.categoryIDs)
       )
-      phase = .loaded
+      // A superseded request (a filter change or a newer Retry) must not
+      // overwrite the current one.
+      guard fetchGate.isCurrent(token), !Task.isCancelled else { return }
+      withAnimation(Theme.Motion.arrive) {
+        report = next
+        phase = .loaded
+      }
     } catch {
-      phase = .failed(error.localizedDescription)
+      // Neither a cancelled filter fetch nor a stale Retry (which runs in
+      // its own Task) may flash an error or clear a newer report.
+      guard fetchGate.isCurrent(token), !Task.isCancelled else { return }
+      // Drop the previous window's figures so they never sit under the new
+      // filter chips; the placeholder offers Retry instead.
+      withAnimation(Theme.Motion.arrive) {
+        report = nil
+        phase = .failed(error.localizedDescription)
+      }
     }
   }
 }
@@ -1015,6 +1081,7 @@ struct AgeOfMoneyDetailView: View {
   @State private var interval: ReportInterval = .month
   @State private var report: AgeOfMoneyReport?
   @State private var phase: LoadPhase = .idle
+  @State private var fetchGate = ReportFetchGate()
 
   var body: some View {
     ScrollView {
@@ -1035,14 +1102,21 @@ struct AgeOfMoneyDetailView: View {
               .font(.subheadline)
               .foregroundStyle(.secondary)
             if let latest {
-              Text("\(Int(latest.rounded())) Days")
-                .font(.system(size: 34, weight: .bold))
+              let days = Int(latest.rounded())
+              Text(ReflectMaths.daysLabel(days, capitalised: true))
+                .font(.largeTitle.weight(.bold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
                 .foregroundStyle(Theme.textPrimary)
+                .rollingNumber(days)
               if let previous {
-                let delta = Int(latest.rounded()) - Int(previous.rounded())
-                Text("\(delta > 0 ? "+" : "")\(delta) days on previous period")
+                let delta = days - Int(previous.rounded())
+                Text("\(delta > 0 ? "+" : "")\(ReflectMaths.daysLabel(delta)) on previous period")
                   .font(.footnote.weight(.medium))
-                  .foregroundStyle(delta >= 0 ? Theme.inflow : Theme.outflow)
+                  .monospacedDigit()
+                  .foregroundStyle(delta == 0 ? Color.secondary : Theme.amountColour(delta))
+                  .rollingNumber(delta)
               }
             } else {
               Text("Not enough matched income yet")
@@ -1103,7 +1177,7 @@ struct AgeOfMoneyDetailView: View {
           .foregroundStyle(Theme.textPrimary)
         Spacer()
         if let age = period.ageOfMoneyDays {
-          Text("\(Int(age.rounded())) days")
+          Text(ReflectMaths.daysLabel(Int(age.rounded())))
             .font(.subheadline.weight(.medium))
             .monospacedDigit()
             .foregroundStyle(Theme.textPrimary)
@@ -1123,20 +1197,35 @@ struct AgeOfMoneyDetailView: View {
       .foregroundStyle(.secondary)
     }
     .padding(.horizontal, 16)
-    .padding(.vertical, 9)
+    .padding(.vertical, 11)
   }
 
   private func fetch() async {
+    let token = fetchGate.begin()
     phase = .loading
     do {
-      report = try await model.apiClient.fetchAgeOfMoney(
+      let next = try await model.apiClient.fetchAgeOfMoney(
         planID: model.settings.planID,
         interval: interval,
         accountIDs: Array(scope.accountIDs)
       )
-      phase = .loaded
+      // A superseded request (a filter change or a newer Retry) must not
+      // overwrite the current one.
+      guard fetchGate.isCurrent(token), !Task.isCancelled else { return }
+      withAnimation(Theme.Motion.arrive) {
+        report = next
+        phase = .loaded
+      }
     } catch {
-      phase = .failed(error.localizedDescription)
+      // Neither a cancelled filter fetch nor a stale Retry (which runs in
+      // its own Task) may flash an error or clear a newer report.
+      guard fetchGate.isCurrent(token), !Task.isCancelled else { return }
+      // Drop the previous window's figures so they never sit under the new
+      // filter chips; the placeholder offers Retry instead.
+      withAnimation(Theme.Motion.arrive) {
+        report = nil
+        phase = .failed(error.localizedDescription)
+      }
     }
   }
 }

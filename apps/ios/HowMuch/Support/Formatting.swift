@@ -45,6 +45,17 @@ enum MoneyCodec {
     return total.partialValue
   }
 
+  static func editableString(for milliunits: Int) -> String {
+    let magnitude = milliunits.magnitude
+    let whole = magnitude / 1_000
+    var fraction = String(magnitude % 1_000 + 1_000).dropFirst()
+    if fraction.last == "0" {
+      fraction.removeLast()
+    }
+    let sign = milliunits < 0 ? "-" : ""
+    return "\(sign)\(whole).\(fraction)"
+  }
+
   /// Model extractions may include `$`, `S$`, grouping commas, currency codes, or trailing words.
   /// Typed fields still go through `milliunits(from:)` and reject that junk.
   static func milliunits(fromExtraction input: String) -> Int? {

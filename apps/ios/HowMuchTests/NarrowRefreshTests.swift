@@ -28,9 +28,13 @@ final class NarrowRefreshTests: XCTestCase {
     UserDefaults.standard.removeObject(forKey: OutboxStore.userDefaultsKey)
     XCTAssertTrue(URLProtocol.registerClass(NarrowRefreshProtocol.self))
     NarrowRefreshProtocol.reset()
+    XCTAssertTrue(URLProtocol.registerClass(HorizonRefreshProtocol.self))
+    HorizonRefreshProtocol.state.reset()
   }
 
   override func tearDown() {
+    HorizonRefreshProtocol.state.release()
+    URLProtocol.unregisterClass(HorizonRefreshProtocol.self)
     URLProtocol.unregisterClass(NarrowRefreshProtocol.self)
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
@@ -247,6 +251,88 @@ final class NarrowRefreshTests: XCTestCase {
       generationBefore,
       "ReflectView's only trigger is this generation; a plan switch must restart it"
     )
+  }
+
+  // MARK: - Account refresh invalidates completed register coverage
+
+  func testAccountsRefreshInvalidatesCompletedHorizon() async throws {
+    try await assertHorizonRefresh(slices: [.accounts], offsetting: false)
+  }
+
+  func testReferenceRefreshInvalidatesCompletedHorizon() async throws {
+    try await assertHorizonRefresh(slices: [.referenceData], offsetting: false)
+  }
+
+  func testUnchangedBalanceDoesNotProveHorizonIsCurrent() async throws {
+    try await assertHorizonRefresh(slices: [.accounts], offsetting: true)
+  }
+
+  private func assertHorizonRefresh(slices: Set<RefreshSlice>, offsetting: Bool) async throws {
+    let state = HorizonRefreshProtocol.state
+    let model = makeHorizonModel()
+    await model.refreshAccounts()
+    model.beginFocusedRegisterAccount("a")
+    let loaded = await waitUntil { state.reads == 1 && !model.isFillingHorizon }
+    XCTAssertTrue(loaded)
+    XCTAssertEqual(model.transactions.map(\.id), ["initial"])
+    model.endFocusedRegisterAccount("a")
+
+    // Reappearing without a refresh still benefits from the memoized fill.
+    model.beginFocusedRegisterAccount("a")
+    try await Task.sleep(for: .milliseconds(100))
+    XCTAssertEqual(state.reads, 1)
+    model.endFocusedRegisterAccount("a")
+
+    state.addExternalRows(offsetting: offsetting)
+    await model.refresh(slices: slices)
+    XCTAssertEqual(model.accounts.first?.balance, offsetting ? 10_000 : 8_000)
+    XCTAssertEqual(state.reads, 1, "the Accounts pull itself must remain narrow")
+    model.beginFocusedRegisterAccount("a")
+    let refreshed = await waitUntil { state.reads == 2 && !model.isFillingHorizon }
+    XCTAssertTrue(refreshed, "reopening must refetch after the account-list refresh")
+    XCTAssertTrue(model.transactions.contains { $0.id == "future" })
+    XCTAssertEqual(
+      RegisterCurrent.asOfTodayBalance(
+        working: try XCTUnwrap(model.accounts.first).balance,
+        transactions: model.transactions, accountID: "a", today: Date.now.isoDateString
+      ),
+      offsetting ? 12_000 : 10_000
+    )
+    model.endFocusedRegisterAccount("a")
+  }
+
+  func testPreRefreshFillCannotRestoreCompletedHorizonAfterEitherAccountRefresh() async {
+    for slices: Set<RefreshSlice> in [[.accounts], [.referenceData]] {
+      let state = HorizonRefreshProtocol.state
+      state.reset()
+      let model = makeHorizonModel()
+      await model.refreshAccounts()
+      state.holdNext()
+      model.beginFocusedRegisterAccount("a")
+      let parked = await waitUntil { state.isHeld }
+      XCTAssertTrue(parked)
+      state.addExternalRows(offsetting: false)
+      await model.refresh(slices: slices)
+      state.release()
+      let settled = await waitUntil { !model.isFillingHorizon }
+      XCTAssertTrue(settled)
+      XCTAssertEqual(model.transactions.map(\.id), ["initial"], "the parked response must contain the old rows")
+      model.endFocusedRegisterAccount("a")
+      model.beginFocusedRegisterAccount("a")
+      let refetched = await waitUntil { state.reads == 2 && !model.isFillingHorizon }
+      XCTAssertTrue(refetched, "the pre-refresh fill must not reauthorize the cache")
+      XCTAssertTrue(model.transactions.contains { $0.id == "future" })
+      model.endFocusedRegisterAccount("a")
+    }
+  }
+
+  private func makeHorizonModel() -> AppModel {
+    var settings = APISettings()
+    settings.baseURLString = "https://horizon-refresh.test"
+    settings.authenticatedUserID = UUID().uuidString
+    settings.sessionToken = "fixture"
+    settings.planID = "p"
+    return AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
   }
 
   // MARK: - Helpers
@@ -748,6 +834,93 @@ private final class ClearedEditorProtocol: URLProtocol {
   override func startLoading() {
     Self.state.respond(to: request) { [self] data, status in
       let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+      client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocol(self, didLoad: data)
+      client?.urlProtocolDidFinishLoading(self)
+    }
+  }
+  override func stopLoading() {}
+}
+
+private final class HorizonRefreshState: @unchecked Sendable {
+  private let lock = NSLock()
+  private var changed = false
+  private var offsetting = false
+  private var shouldHold = false
+  private var pending: (() -> Void)?
+  private var readCount = 0
+
+  var reads: Int { lock.lock(); defer { lock.unlock() }; return readCount }
+  var isHeld: Bool { lock.lock(); defer { lock.unlock() }; return pending != nil }
+  func reset() {
+    release()
+    lock.lock(); defer { lock.unlock() }
+    changed = false; offsetting = false; shouldHold = false; readCount = 0
+  }
+  func holdNext() { lock.lock(); shouldHold = true; lock.unlock() }
+  func addExternalRows(offsetting: Bool) {
+    lock.lock(); defer { lock.unlock() }
+    changed = true; self.offsetting = offsetting
+  }
+  func release() {
+    lock.lock(); let send = pending; pending = nil; lock.unlock()
+    send?()
+  }
+
+  func respond(to request: URLRequest, send: @escaping (Data) -> Void) {
+    lock.lock()
+    let path = request.url!.path
+    let payload: [String: Any]
+    if path.hasSuffix("/accounts/a/transactions") {
+      readCount += 1
+      var rows = [row("initial", amount: -1_000, date: Date.now)]
+      if changed {
+        rows.append(row("future", amount: -2_000, date: Calendar.current.date(byAdding: .day, value: 1, to: .now)!))
+        if offsetting { rows.append(row("current", amount: 2_000, date: .now)) }
+      }
+      payload = ["transactions": rows, "has_more": false, "server_knowledge": 1]
+    } else if path.hasSuffix("/accounts") {
+      let balance = changed && !offsetting ? 8_000 : 10_000
+      payload = ["accounts": [["id": "a", "name": "Account", "type": "cash", "on_budget": true,
+        "closed": false, "deleted": false, "balance": balance, "cleared_balance": balance, "uncleared_balance": 0]]]
+    } else if path.hasSuffix("/settings") {
+      payload = ["settings": [:]]
+    } else if path.hasSuffix("/categories") {
+      payload = ["category_groups": []]
+    } else if path.hasSuffix("/payees") {
+      payload = ["payees": []]
+    } else if path.hasSuffix("/account_preferences") {
+      payload = ["account_preferences": NSNull(), "account_preferences_revision": 0]
+    } else {
+      payload = ["count": 0, "server_knowledge": 1]
+    }
+    let data = try! JSONSerialization.data(withJSONObject: ["data": payload])
+    if path.hasSuffix("/accounts/a/transactions"), shouldHold {
+      shouldHold = false
+      pending = { send(data) }
+      lock.unlock()
+    } else {
+      lock.unlock()
+      send(data)
+    }
+  }
+
+  private func row(_ id: String, amount: Int, date: Date) -> [String: Any] {
+    ["id": id, "date": date.isoDateString, "amount": amount, "cleared": "cleared", "approved": true,
+     "account_id": "a", "account_name": "Account", "deleted": false, "subtransactions": []]
+  }
+}
+
+private final class HorizonRefreshProtocol: URLProtocol {
+  static let state = HorizonRefreshState()
+  override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "horizon-refresh.test" }
+  override class func canInit(with task: URLSessionTask) -> Bool {
+    (task.currentRequest ?? task.originalRequest).map { canInit(with: $0) } ?? false
+  }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    Self.state.respond(to: request) { [self] data in
+      let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
       client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
       client?.urlProtocol(self, didLoad: data)
       client?.urlProtocolDidFinishLoading(self)

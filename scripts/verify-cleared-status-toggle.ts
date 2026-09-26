@@ -9,7 +9,7 @@ function memberSpan(source: string, marker: string, file: string): string {
   if (start < 0) {
     throw new Error(`Could not find ${marker} in ${file}`);
   }
-  const brace = source.indexOf("{", start);
+  const brace = source.indexOf("{", start + marker.length);
   if (brace < 0) {
     throw new Error(`Could not find opening brace after ${marker}`);
   }
@@ -43,12 +43,17 @@ if (iosAwait < 0) {
 if (iosToggle.includes("isSubmitting = true")) {
   failures.push("iOS toggleTransactionCleared must not take the global isSubmitting lock; that freezes every status icon.");
 }
-if (!iosModel.includes("overlayingClearedToggles(on: overlayingPendingEdits(on: serverTransactions))")) {
+const iosOverlay = memberSpan(iosModel, "func overlaying(_ rows: [Transaction]) -> [Transaction]", "AppModel.swift");
+if (
+  !iosOverlay.includes("overlayingClearedToggles(on: overlayingPendingEdits(on: rows))")
+  || !iosModel.includes("overlaying(serverTransactions)")
+) {
   failures.push(
     "iOS must overlay in-flight cleared flips on top of serverTransactions so refreshLedger cannot snap the icon back.",
   );
 }
-if (!iosModel.includes("reconcileClearedToggleOverlays()")) {
+const iosRefresh = memberSpan(iosModel, "func refreshLedger(quiet: Bool = false)", "AppModel.swift");
+if (!iosRefresh.includes("reconcileClearedToggleOverlays(")) {
   failures.push("iOS must reconcile cleared overlays after a ledger fetch so a stale snapshot cannot stick forever.");
 }
 
@@ -64,7 +69,11 @@ if (rowStart < 0) {
 }
 
 const webPage = readFileSync(join(root, "apps/web/src/pages/Transactions.tsx"), "utf8");
-const webToggle = memberSpan(webPage, "const toggleCleared = async (transaction: Transaction)", "Transactions.tsx");
+const webToggle = memberSpan(
+  webPage,
+  "const toggleCleared = async (transaction: Transaction, options: { refresh?: boolean } = {}): Promise<boolean> =>",
+  "Transactions.tsx",
+);
 const webAwait = webToggle.indexOf("await api.updateTransactionCleared");
 if (webAwait < 0) {
   failures.push("Web toggleCleared must still PATCH via api.updateTransactionCleared.");

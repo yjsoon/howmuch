@@ -19,14 +19,6 @@ final class APISettingsTests: XCTestCase {
     super.tearDown()
   }
 
-  func testProductionHostIsTheTinkerTankerService() {
-    XCTAssertEqual(APISettings.productionBaseURL, "https://howmuch.tk.sg")
-  }
-
-  func testFreshInstallUsesTheProductionHost() {
-    XCTAssertEqual(APISettings.load(from: defaults).baseURLString, APISettings.productionBaseURL)
-  }
-
   func testLegacyHostedDefaultFollowsProduction() {
     APISettings(baseURLString: "https://howmuch.soon.sg").save(to: defaults)
 

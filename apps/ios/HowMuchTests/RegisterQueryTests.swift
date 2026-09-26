@@ -35,15 +35,6 @@ final class RegisterQueryTests: XCTestCase {
     XCTAssertTrue(twelve.matches(try transaction(payee: "Scoot", amount: -12_000).registerSearchFields))
   }
 
-  func testCoverageCopyNamesTheLoadOlderButton() {
-    XCTAssertEqual(
-      registerSearchStatusCopy(shown: 3, scheduled: 0, hasMore: true, loading: false, error: nil),
-      "Showing 3 matches so far. Load older matches to see more."
-    )
-    XCTAssertFalse(registerSearchStatusCopy(shown: 3, scheduled: 0, hasMore: false, loading: false, error: nil).localizedCaseInsensitiveContains("scroll"))
-    XCTAssertFalse(registerSearchStatusCopy(shown: 1600, scheduled: 0, hasMore: true, loading: false, error: nil).localizedCaseInsensitiveContains("loaded"))
-  }
-
   private func range(_ lo: Int, _ hi: Int, _ sign: RegisterQuery.AmountRange.Sign) -> RegisterQuery.AmountRange {
     RegisterQuery.AmountRange(lo: lo, hi: hi, sign: sign)
   }

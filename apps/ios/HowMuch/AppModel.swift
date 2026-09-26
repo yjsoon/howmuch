@@ -88,6 +88,20 @@ final class AppModel {
   /// This is separate from `transactions`, which is intentionally paged for
   /// the register and may not contain every transaction in that window.
   private(set) var accountUsageLast30Days: [String: Int] = [:]
+  /// The last counts a scan loaded, kept across `invalidateAccountUsage()` so
+  /// "Most used" groups hold their order while the next scan runs. Read only
+  /// alongside observed usage state, which changes whenever this does.
+  @ObservationIgnored private var lastLoadedAccountUsage: (planID: String, scope: String?, counts: [String: Int])?
+
+  private var lastLoadedAccountUsageForCurrentScope: [String: Int] {
+    guard let last = lastLoadedAccountUsage,
+          last.planID == settings.planID,
+          last.scope == activeViewPrefsScope
+    else {
+      return [:]
+    }
+    return last.counts
+  }
   private(set) var accountUsagePhase: LoadPhase = .idle
   /// Invalidates the Accounts view's usage task after a ledger or connection
   /// refresh, so a loaded 30-day ranking never survives changed source data.
@@ -165,6 +179,13 @@ final class AppModel {
   /// than becoming a session-long blacklist.
   @ObservationIgnored private var inFlightLedgerReads: [Int: Int] = [:]
   @ObservationIgnored private var ledgerDeletes: [LedgerDelete] = []
+  /// Account ID → the `generation|planID|startDate` its horizon fill last
+  /// completed against. See `fillFocusedAccountHorizon(generation:planID:)`.
+  @ObservationIgnored private var completedAccountHorizonFills: [String: String] = [:]
+  /// A refreshed account list or replaced ledger invalidates coverage, even
+  /// when offsetting external transactions leave balances unchanged. A fill
+  /// already in flight must not restore its completion after that refresh.
+  @ObservationIgnored private var accountHorizonCompletionEpoch = 0
   /// Latest plan cursor seen on a ledger fetch. Changes made on another
   /// device advance it, which is how the reports cache (#180) notices them.
   private(set) var serverKnowledge: Int?
@@ -176,6 +197,16 @@ final class AppModel {
   /// single queued request that runs once the in-flight one finishes.
   @ObservationIgnored private var inFlightRefresh: Task<Void, Never>?
   @ObservationIgnored private var queuedRefresh = RefreshRequest.none
+  /// The full `refreshAll()` run in flight, keyed on the connection it
+  /// started for. A second call that opts in to joining (`joinInFlight: true`)
+  /// for the same connection (the capture sheet opening while the launch
+  /// refresh is still resolving the plan) awaits it rather than repeating the
+  /// whole waterfall. The run is unstructured, so a caller's cancellation
+  /// never reaches it: a joiner must not inherit a dead run. A superseded run
+  /// finishes, and its writes are discarded by the same fingerprint,
+  /// generation, planID and scope guards a plan switch relies on.
+  @ObservationIgnored private var inFlightRefreshAll: (fingerprint: String, generation: Int, task: Task<Void, Never>)?
+  @ObservationIgnored private var refreshAllGeneration = 0
   /// Serialises preference writes so a slower earlier request cannot overwrite
   /// a newer reorder on the server.
   @ObservationIgnored private var accountPreferencesSyncTask: Task<Void, Never>?
@@ -301,7 +332,7 @@ final class AppModel {
 
   /// Writes the current reference set, tagged with the cursor the last ledger
   /// fetch observed. Called from every slice's success path; the store
-  /// coalesces and encodes off the main actor.
+  /// coalesces queued writes and encodes off the main actor.
   private func persistSnapshot() {
     guard settings.isAuthenticated,
           !settings.planID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -551,7 +582,9 @@ final class AppModel {
       accounts.append(created)
       rebuildLookups()
     }
-    await refresh(after: .accountCreated)
+    // The new account is already applied, so the sheet need not wait for the
+    // follow-up read (as with `updateAccount`).
+    scheduleRefresh(after: .accountCreated)
     showSaveMessage("Added \(created.name)")
     return created
   }
@@ -761,9 +794,14 @@ final class AppModel {
     case .alphabetical:
       return source.sorted(by: accountNameOrder)
     case .mostUsedLast30Days:
+      // Every ledger refresh drops the counts and rescans them. Until they are
+      // back, rank by the last counts this plan and scope loaded rather than
+      // flashing the group into name order and back. Never the manual drag
+      // order in `accountOrderByGroup`.
+      let usage = accountUsagePhase == .loaded ? accountUsageLast30Days : lastLoadedAccountUsageForCurrentScope
       return source.sorted { first, second in
-        let firstUsage = accountUsageLast30Days[first.id, default: 0]
-        let secondUsage = accountUsageLast30Days[second.id, default: 0]
+        let firstUsage = usage[first.id, default: 0]
+        let secondUsage = usage[second.id, default: 0]
         if firstUsage != secondUsage {
           return firstUsage > secondUsage
         }
@@ -1006,6 +1044,7 @@ final class AppModel {
         return
       }
       accountUsageLast30Days = counts
+      lastLoadedAccountUsage = (planID: planID, scope: scope, counts: counts)
       accountUsagePhase = .loaded
     } catch {
       guard
@@ -1123,6 +1162,23 @@ final class AppModel {
     payeesByID[id]
   }
 
+  @ObservationIgnored private var payeesSortedByNameCache: (source: [Payee], locale: String, sorted: [Payee])?
+
+  /// `payees` in picker order, sorted once per change rather than on every
+  /// picker render and keystroke. Reading `payees` keeps observation intact,
+  /// and an unchanged array compares equal by identity without a scan. The
+  /// comparison is locale-aware, so a language or region change re-sorts.
+  var payeesSortedByName: [Payee] {
+    let source = payees
+    let locale = Locale.current.identifier
+    if let cache = payeesSortedByNameCache, cache.locale == locale, cache.source == source {
+      return cache.sorted
+    }
+    let sorted = source.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    payeesSortedByNameCache = (source: source, locale: locale, sorted: sorted)
+    return sorted
+  }
+
   func overlaying(_ rows: [Transaction]) -> [Transaction] {
     overlayingApproval(on: overlayingClearedToggles(on: overlayingPendingEdits(on: rows)))
   }
@@ -1156,14 +1212,23 @@ final class AppModel {
     // the next count of this scope reconciles it.
     let since = locallyResolvedUnapprovedIDs.subtracting(confirmedWhenCounted[countScopeKey(accountID)] ?? [])
     guard let accountID else { return since.count }
+    guard !since.isEmpty else { return 0 }
+    // One pass over the rows instead of a linear search per resolved ID. The
+    // ledger's row wins over the queue's, as the old `first ?? first` did.
+    var accountByID: [String: String] = [:]
+    for row in serverUnapprovedTransactions where since.contains(row.id) {
+      accountByID[row.id] = accountByID[row.id] ?? row.accountID
+    }
+    var ledgerSeen = Set<String>()
+    for row in serverTransactions where since.contains(row.id) && ledgerSeen.insert(row.id).inserted {
+      accountByID[row.id] = row.accountID
+    }
     return since.count { id in
       // A rejected row is gone from both arrays, so its account was recorded.
       if let rejectedFrom = rejectedUnapprovedAccounts[id] {
         return rejectedFrom == accountID
       }
-      let row = serverTransactions.first { $0.id == id }
-        ?? serverUnapprovedTransactions.first { $0.id == id }
-      return row?.accountID == accountID
+      return accountByID[id] == accountID
     }
   }
 
@@ -1301,11 +1366,19 @@ final class AppModel {
     }
   }
 
+  /// `RegisterApproval.looksApproved` per row, with the session's union taken once.
+  /// Rows the server already reports approved need no copy, so once they all
+  /// do, reads return the array as is.
   private func overlayingApproval(on rows: [Transaction]) -> [Transaction] {
-    guard !RegisterApproval.resolvedIDs(approvalSession).isEmpty else {
+    let resolved = RegisterApproval.resolvedIDs(approvalSession)
+    guard !resolved.isEmpty,
+          rows.contains(where: { !$0.approved && resolved.contains($0.id) })
+    else {
       return rows
     }
-    return rows.map { $0.applyingApproval(session: approvalSession) }
+    return rows.map { row in
+      !row.approved && resolved.contains(row.id) ? row.withApproved(true) : row
+    }
   }
 
   /// Editor overrides belong to the pre-save read generation, not a value:
@@ -1410,7 +1483,46 @@ final class AppModel {
     }
   }
 
-  func refreshAll(quiet: Bool = false) async {
+  /// True while a `refreshAll()` run is in flight, including the plan
+  /// resolution that precedes any phase change. Not observable: poll it.
+  var isRefreshingAll: Bool {
+    inFlightRefreshAll != nil
+  }
+
+  /// Runs the whole launch waterfall: plan resolution, then reference data,
+  /// ledger and schedules.
+  ///
+  /// - Parameter joinInFlight: when true, a run already in flight for the same
+  ///   connection fingerprint is awaited instead of starting a second
+  ///   waterfall. Only the capture-admission path opts in: it just needs the
+  ///   reference data another path is already loading. Callers that have
+  ///   changed server state (a rewards import, a settings save) must start a
+  ///   fresh run, because a run that began before their write finished would
+  ///   not see it.
+  func refreshAll(quiet: Bool = false, joinInFlight: Bool = false) async {
+    let fingerprint = settings.connectionFingerprint
+    if joinInFlight, let inFlight = inFlightRefreshAll, inFlight.fingerprint == fingerprint {
+      await inFlight.task.value
+      return
+    }
+    refreshAllGeneration &+= 1
+    let generation = refreshAllGeneration
+    let task = Task { @MainActor [weak self] () -> Void in
+      await self?.performRefreshAll(quiet: quiet)
+      // The run clears its own record as its last step, so a caller that
+      // arrives once the work finished but before the starting caller's
+      // `await task.value` resumes never waits on an already-finished task.
+      // A plan switch may have started a newer run meanwhile; the generation
+      // guard keeps this run from clearing the newer run's record.
+      if let self, self.inFlightRefreshAll?.generation == generation {
+        self.inFlightRefreshAll = nil
+      }
+    }
+    inFlightRefreshAll = (fingerprint, generation, task)
+    await task.value
+  }
+
+  private func performRefreshAll(quiet: Bool) async {
     guard await resolvePlanSelection() else {
       return
     }
@@ -1556,6 +1668,7 @@ final class AppModel {
         invalidateAccountUsage()
         pruneViewPrefs(using: fetched)
       }
+      invalidateAccountHorizonFills()
       accounts = fetched
       rebuildLookups()
       persistSnapshot()
@@ -1682,6 +1795,7 @@ final class AppModel {
       if Set(accounts.map(\.id)) != Set(reference.accounts.map(\.id)) {
         invalidateAccountUsage()
       }
+      invalidateAccountHorizonFills()
       planSettings = reference.planSettings
       accounts = reference.accounts
       categoryGroups = reference.categoryGroups
@@ -1772,6 +1886,9 @@ final class AppModel {
         responseRowIDs: fetchedFirstPage.map(\.id)
       )
       if !applyIsRedundant {
+        // Rows are replaced below, so a fill that completed (or is still
+        // running) under this generation no longer describes them.
+        invalidateAccountHorizonFills()
         // Mutation refreshes must not drop already-loaded rows; List would clamp to top.
         // Provisional rows are the exception, in both directions: the response
         // must displace every row the snapshot put up (merging would keep rows
@@ -2024,6 +2141,8 @@ final class AppModel {
 
   func noteRewardsImport() async {
     noteRewardsBoardChanged()
+    // The import has just written server state, so it must not join a run
+    // that started before the import finished and would miss it.
     await refreshAll(quiet: true)
   }
 
@@ -2140,7 +2259,8 @@ final class AppModel {
       scheduledTransactions.append(result.scheduledTransaction)
       scheduledTransactions.sort { ($0.dateNext, $0.id) < ($1.dateNext, $1.id) }
     }
-    await refresh(after: .scheduledOccurrenceEntered(isTransfer: isTransfer(result.transaction)))
+    // Both halves are applied above; the follow-up read runs behind the dismissal.
+    scheduleRefresh(after: .scheduledOccurrenceEntered(isTransfer: isTransfer(result.transaction)))
     showSaveMessage(result.completed ? "Entered final scheduled transaction" : "Entered scheduled transaction")
     return result
   }
@@ -2167,6 +2287,8 @@ final class AppModel {
       accounts[index] = result.account
       rebuildLookups()
     }
+    // Waits, unlike the other saves: until the read lands, rows would still
+    // show as merely cleared (and tappable) and any adjustment would be missing.
     await refresh(after: .accountReconciled)
 
     let accountName = result.account.name
@@ -2191,6 +2313,11 @@ final class AppModel {
     await fillFocusedAccountHorizon(generation: ledgerPageGeneration, planID: settings.planID)
   }
 
+  private func invalidateAccountHorizonFills() {
+    completedAccountHorizonFills.removeAll()
+    accountHorizonCompletionEpoch &+= 1
+  }
+
   func retryIncompleteRegisterFill() async {
     olderTransactionsError = nil
     if focusedRegisterAccountIDs.last != nil {
@@ -2206,6 +2333,19 @@ final class AppModel {
     guard let accountID = focusedRegisterAccountIDs.last else {
       return
     }
+    let horizon = RegisterHorizon.standard
+    let startDate = horizon.startDate()
+    // A quiet account's rows all sit inside the horizon, so the loop below
+    // would refetch it on every appearance. Reuse its completed fill until a
+    // ledger or account-list refresh invalidates it; new balances may include
+    // external transactions that the register has not loaded yet.
+    let fillKey = "\(generation)|\(planID)|\(startDate)"
+    if completedAccountHorizonFills[accountID] == fillKey {
+      // Reappearing still clears a stale error, as a fresh fill would.
+      olderTransactionsError = nil
+      return
+    }
+    let completionEpochAtStart = accountHorizonCompletionEpoch
     let ownsFill = horizonFillCount == 0
     if ownsFill {
       pushHorizonFill()
@@ -2218,8 +2358,6 @@ final class AppModel {
 
     olderTransactionsError = nil
 
-    let horizon = RegisterHorizon.standard
-    let startDate = horizon.startDate()
     var loaded = serverTransactions.filter { $0.accountID == accountID }
     var offset = 0
     var hasMore = true
@@ -2255,6 +2393,11 @@ final class AppModel {
         olderTransactionsError = error.localizedDescription
         return
       }
+    }
+    if generation == ledgerPageGeneration,
+       planID == settings.planID,
+       completionEpochAtStart == accountHorizonCompletionEpoch {
+      completedAccountHorizonFills[accountID] = fillKey
     }
   }
 

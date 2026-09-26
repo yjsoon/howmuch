@@ -470,7 +470,7 @@ struct RewardsView: View {
       }
     }
     .padding(.horizontal, 6)
-    .background(Theme.card, in: .rect(cornerRadius: 16, style: .continuous))
+    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 0, trailing: 16))
     .listRowBackground(Color.clear)
     .listRowSeparator(.hidden)
@@ -749,7 +749,10 @@ struct RewardsView: View {
     let planID = model.settings.planID
     var next = preferences
     change(&next)
-    preferencesByPlan[planID] = next
+    // Hiding, collapsing and filtering move rows rather than redrawing the board.
+    withAnimation(Theme.Motion.standard) {
+      preferencesByPlan[planID] = next
+    }
     next.save(planID: planID)
   }
 
@@ -797,9 +800,11 @@ struct RewardsView: View {
       guard key == fetchKey, planID == model.settings.planID else {
         return
       }
-      report = next
-      reportPlanID = planID
-      phase = .loaded
+      withAnimation(Theme.Motion.arrive) {
+        report = next
+        reportPlanID = planID
+        phase = .loaded
+      }
       if filter.accountIDs.isEmpty {
         rewardAccountIDsByPlan[planID] = Set(next.cards.map(\.accountId))
       }
@@ -900,7 +905,7 @@ struct RewardFilledRow: View {
             .fill(palette.fill)
         }
       }
-      .animation(reduceMotion ? nil : .smooth, value: projection.fill)
+      .animation(reduceMotion ? nil : Theme.Motion.chart, value: projection.fill)
     }
     .clipShape(.rect(cornerRadius: Self.cornerRadius, style: .continuous))
     .overlay {
@@ -1285,6 +1290,7 @@ struct RewardCategoryUsage: Identifiable {
 
 struct RewardCategoryBreakdown: View {
   @Environment(\.layoutDirection) private var layoutDirection
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   let row: RewardsCardRow
   let currencyFormat: CurrencyFormat?
 
@@ -1302,12 +1308,18 @@ struct RewardCategoryBreakdown: View {
           }
         }
         .frame(height: 16)
-        .clipShape(.rect(cornerRadius: 5))
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
         .accessibilityHidden(true)
         .padding(.bottom, 4)
       }
       ForEach(categories) { category in
         categoryRow(category)
+      }
+    }
+    // Report swaps animate; under Reduce Motion the bar and fills just change.
+    .transaction { transaction in
+      if reduceMotion {
+        transaction.animation = nil
       }
     }
   }
@@ -1340,8 +1352,11 @@ struct RewardCategoryBreakdown: View {
       LeadingFill(fraction: category.fill, rightToLeft: layoutDirection == .rightToLeft)
         .fill(colour(category).opacity(0.19))
     }
-    .clipShape(.rect(cornerRadius: 8))
-    .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(colour(category).opacity(0.45), lineWidth: 1) }
+    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.inset, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: Theme.Radius.inset, style: .continuous)
+        .strokeBorder(colour(category).opacity(0.45), lineWidth: 1)
+    }
     .accessibilityElement(children: .ignore)
     .accessibilityLabel("\(category.flag.name), \(money(category.spend)) spent")
     .accessibilityValue(accessibilityDetail(category))
@@ -1563,9 +1578,11 @@ struct RewardsReportScreen: View {
         group: group
       )
       guard key == fetchKey, planID == model.settings.planID else { return }
-      report = next
-      reportPlanID = planID
-      phase = .loaded
+      withAnimation(Theme.Motion.arrive) {
+        report = next
+        reportPlanID = planID
+        phase = .loaded
+      }
     } catch {
       guard key == fetchKey, planID == model.settings.planID else { return }
       if error is CancellationError || (error as? URLError)?.code == .cancelled {

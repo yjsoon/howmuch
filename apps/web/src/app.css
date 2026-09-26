@@ -1701,6 +1701,50 @@ a.page-eyebrow:hover {
   gap: 12px;
 }
 
+.category-suggestions {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  background: var(--paper-raised);
+}
+
+.category-suggestions-head h2 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.category-suggestions-head p {
+  margin: 2px 0 10px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.category-suggestions-table select {
+  width: 100%;
+  max-width: 280px;
+  height: 28px;
+  padding: 0 24px 0 5px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--paper-raised) url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%235d5a52' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 8px center / 10px 6px;
+  appearance: none;
+  font: inherit;
+}
+
+.category-suggestions-table select:focus {
+  border-color: var(--plan-accent);
+  outline: 2px solid var(--plan-accent-wash);
+  outline-offset: 0;
+}
+
+.category-suggestions-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
 .transaction-delete-button {
   padding: 6px 9px;
   border: 1px solid var(--red);

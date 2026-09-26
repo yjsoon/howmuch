@@ -136,6 +136,17 @@ final class CaptureOriginTests: XCTestCase {
     XCTAssertFalse(CaptureAdmissionGate.canAdmit(referencePhase: .loading))
   }
 
+  func testReferenceWaitStopsOnlyWhenNothingWillLoadTheReference() {
+    XCTAssertEqual(CaptureAdmissionGate.referenceWait(referencePhase: .loaded, isRefreshingAll: false), .admit)
+    XCTAssertEqual(CaptureAdmissionGate.referenceWait(referencePhase: .loaded, isRefreshingAll: true), .admit)
+    XCTAssertEqual(CaptureAdmissionGate.referenceWait(referencePhase: .failed("offline"), isRefreshingAll: false), .admit)
+    XCTAssertEqual(CaptureAdmissionGate.referenceWait(referencePhase: .failed("offline"), isRefreshingAll: true), .admit)
+    XCTAssertEqual(CaptureAdmissionGate.referenceWait(referencePhase: .loading, isRefreshingAll: false), .wait)
+    XCTAssertEqual(CaptureAdmissionGate.referenceWait(referencePhase: .loading, isRefreshingAll: true), .wait)
+    XCTAssertEqual(CaptureAdmissionGate.referenceWait(referencePhase: .idle, isRefreshingAll: true), .wait)
+    XCTAssertEqual(CaptureAdmissionGate.referenceWait(referencePhase: .idle, isRefreshingAll: false), .stalled)
+  }
+
   func testAdmissionAfterRefreshRequiresCurrentRequestAndMatchingScope() {
     let request = CaptureRequest(kind: .blank, connectionFingerprint: "plan-a")
     let other = CaptureRequest(kind: .blank, connectionFingerprint: "plan-a")

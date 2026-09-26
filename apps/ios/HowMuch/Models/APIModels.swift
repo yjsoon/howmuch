@@ -1286,12 +1286,17 @@ struct CategoryGroup: Codable, Identifiable, Hashable {
     hidden || CategoryGroup.isQuietName(name)
   }
 
+  /// Compiled once: reports and pickers test every group on each render.
+  private static let quietNamePattern = try! NSRegularExpression(
+    pattern: "hidden|non.personal|don.t summari[sz]e|inflow|credit card payments|internal",
+    options: [.caseInsensitive]
+  )
+
   static func isQuietName(_ name: String?) -> Bool {
     guard let name else {
       return false
     }
-    let pattern = "hidden|non.personal|don.t summari[sz]e|inflow|credit card payments|internal"
-    return name.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+    return quietNamePattern.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)) != nil
   }
 }
 
@@ -3046,7 +3051,7 @@ struct TransactionSubtransactionDraft: Equatable, Codable {
 
   init(subtransaction: Subtransaction, preserveID: Bool = true) {
     id = preserveID ? subtransaction.id : nil
-    amountText = MoneyCodec.displayString(for: subtransaction.amount, currencyFormat: nil)
+    amountText = MoneyCodec.editableString(for: subtransaction.amount)
     payeeID = subtransaction.payeeID
     payeeName = subtransaction.payeeName ?? ""
     categoryID = subtransaction.categoryID
@@ -3196,7 +3201,7 @@ struct TransactionDraft: Equatable, Codable {
   mutating func enableSplit() {
     guard !isSplit else { return }
     subtransactions = [
-      TransactionSubtransactionDraft(amountText: MoneyCodec.displayString(for: signedMilliunits, currencyFormat: nil)),
+      TransactionSubtransactionDraft(amountText: MoneyCodec.editableString(for: signedMilliunits)),
       TransactionSubtransactionDraft(),
     ]
     categoryID = nil

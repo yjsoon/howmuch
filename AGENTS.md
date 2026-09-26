@@ -7,6 +7,14 @@
 - Commit only when requested, honoring the requested scope and message. Commit permission does not imply push permission. Do not infer permission to merge, change an exact requested revision, sign/provision, publish builds, deploy, or install/publish external skills.
 - Read-only requests stay read-only. Exact-revision validation must report failures on that revision, not silently include fixes or substitute newer code.
 
+## Testing policy
+
+- Never write unit tests after writing the implementation. Do not backfill tests that merely describe the code you just wrote. Verify existing code through E2E flows; for a regression that genuinely needs isolation, write the failing test before the fix.
+- Strongly prefer E2E tests as the sole testing mechanism, including for complex features. Exercise the real user flow and persisted result using the browser or iOS Simulator recipes in `.cursor/skills/verify-howmuch/features/`, with an isolated local stack and synthetic data. A mocked client test or source-text assertion is not E2E coverage.
+- End each E2E run with a verifiable, repeatable artifact: record the revision, fixture/setup, exact commands or interaction steps, expected outcomes, and observed results, alongside relevant screenshots, accessibility output, or API/database output. Use a recording when timing matters. Store review artifacts under `.amp/in/artifacts/`, overriding older recipe artifact and cleanup paths; exclude secrets and production data. A screenshot alone is not proof of a persisted write or a passing flow.
+- If isolation is necessary, first write down the system's plausible failure modes and which ones existing E2E checks miss. Then write the smallest failing tests for those gaps, and only then write the implementation. State the failure modes beside the tests or in the task discussion; do not add a separate report by default.
+- An isolated test must catch a concrete bug the E2E checks would miss, such as a race, partial failure, unsafe migration, or malformed external input. Derive expectations independently of the implementation. Do not add tests for constants, getters, mock call shapes, source spelling, or happy paths already proven end to end. When pruning, verify actual coverage: a recipe that delegates a check to a unit test does not replace that test, and an unexecuted recipe is not passing evidence.
+
 ## Cloudflare deployments
 
 HowMuch's primary stack runs in the Tinkertanker Cloudflare account at
@@ -20,7 +28,7 @@ Cloudflare Email Routing) stays in the YJ account — do not move it.
 - Wrangler profile `tinkertanker`, Cloudflare account `Tinkertanker` (`b8b1032c61d9475cd00229c74db7ec72`). Deploy with `bun run deploy:tk` from `apps/worker`, which pins `--env tk --profile tinkertanker`.
 - The expected resources are Worker `howmuch` (env `tk` in `wrangler.jsonc`) and D1 database `howmuch-production-sg` (`d13295f9-10d4-4ac0-bf62-b3e8c78cbf29`, primary in SIN since the 2026-09-12 #183 cutover), serving `https://howmuch.tk.sg` (web front-end and API on one hostname).
 - The pre-cutover KIX database `howmuch-production` (`df039dbc-6dda-4150-9dc3-5854a8ca6818`) is kept frozen in this account as an instant-rollback snapshot of the 2026-09-12 state; never write to it. Rollback is: point the `tk` env back at it, `deploy:tk`. Delete it only after an explicit decision.
-- The `tk` environment has one cron, `5 16 * * *` (00:05 Asia/Singapore), which materialises due scheduled transactions. It has no YNAB configuration. `HOWMUCH_API_TOKEN` is an encrypted secret on this Worker.
+- The `tk` environment has one cron, `5 16 * * *` (00:05 Asia/Singapore), which materialises due scheduled transactions. It has no YNAB configuration. `HOWMUCH_API_TOKEN` is an encrypted secret on this Worker. `TYPESAFE_API_KEY` (optional encrypted secret) enables Jev category suggestions; never put it in `wrangler.jsonc` or the repo.
 - Do not add `HOWMUCH_REDIRECT_TARGET` to the `tk` env. Wrangler warns that top-level vars are not inherited; that warning is expected, and setting the var here would make production redirect to itself.
 - Production deploys automatically when a `v*` tag is pushed (`.github/workflows/deploy.yml`), using the `CLOUDFLARE_API_TOKEN` repo secret pinned to this account. The workflow deploys only and never applies D1 migrations; migrations follow the order in `docs/deployment.md` and are run manually before tagging.
 - This is the only environment that accepts writes. The iOS app's `productionBaseURL` points at `howmuch.tk.sg`; installs still carrying the former `howmuch.soon.sg` default migrate on launch, and the legacy `soon.sg` host stays reachable as a redirect.

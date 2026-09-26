@@ -196,9 +196,12 @@ struct RewardCardDraft: Equatable {
   var subcategoriesEnabled = false
   private var originalCard: CreditCard?
 
+  /// Read on every edit keystroke, so the formatter is built once.
   static var nowISO: String {
-    ISO8601DateFormatter().string(from: Date())
+    isoFormatter.string(from: Date())
   }
+
+  private static let isoFormatter = ISO8601DateFormatter()
 
   static func numberText(_ value: Double?) -> String {
     guard let value else {
@@ -800,7 +803,9 @@ struct RewardCardEditorView: View {
           flagEditor($flag)
         }
         Button("Add flag") {
-          draft.addFlag()
+          withAnimation(Theme.Motion.standard) {
+            draft.addFlag()
+          }
         }
       } header: {
         Text("Flag subcategories")
@@ -813,7 +818,9 @@ struct RewardCardEditorView: View {
           tierEditor($tier)
         }
         Button("Add spending tier") {
-          draft.addTier()
+          withAnimation(Theme.Motion.standard) {
+            draft.addTier()
+          }
         }
       }
 
@@ -973,6 +980,10 @@ struct RewardCardEditorView: View {
         draft.flags.removeAll { $0.id == flag.wrappedValue.id }
       }
     }
+    // Several controls share this Form row. Borderless buttons take only
+    // their own taps; the default style would fire Remove from anywhere in
+    // the row.
+    .buttonStyle(.borderless)
   }
 
   @ViewBuilder
@@ -1000,14 +1011,19 @@ struct RewardCardEditorView: View {
         }
       }
       Button("Add flag override") {
-        tier.wrappedValue.overrides.append(
-          RewardTierOverrideDraft(subcategoryId: draft.flags.first?.id ?? "")
-        )
+        withAnimation(Theme.Motion.standard) {
+          tier.wrappedValue.overrides.append(
+            RewardTierOverrideDraft(subcategoryId: draft.flags.first?.id ?? "")
+          )
+        }
       }
       Button("Remove tier", role: .destructive) {
         draft.tiers.removeAll { $0.id == tier.wrappedValue.id }
       }
     }
+    // Remove override, Add flag override and Remove tier share one Form row;
+    // borderless keeps each tap on its own button.
+    .buttonStyle(.borderless)
   }
 
   @ViewBuilder

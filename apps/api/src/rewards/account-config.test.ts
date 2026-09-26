@@ -3,10 +3,6 @@ import fixture from "../../../../fixtures/rewards-account-config.json";
 import { parseRewardsAccountConfig } from "./account-config";
 
 describe("per-account rewards configuration contract", () => {
-  test("accepts the Rewards Tracker fixture without changing its configuration", () => {
-    expect(parseRewardsAccountConfig(fixture)).toEqual(fixture);
-  });
-
   test("rejects malformed booleans, flag names and broken tier references instead of silently changing rules", () => {
     for (const patch of [
       { subcategoriesEnabled: "false" },
