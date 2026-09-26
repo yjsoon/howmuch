@@ -35,7 +35,7 @@ import { randomBytes } from "node:crypto";
 import { ScheduledTransactionValidationError } from "./scheduled-transactions";
 import { ACCOUNT_KINDS, parseAccountKind, type AccountUpdatePatch } from "./account-kind";
 import { handleRewardTool } from "./reward-tools";
-import { autoCategorise, CategoriserUnavailableError, parseCategoriseItems, suggestCategories, type CategoriserConfig } from "./categoriser";
+import { autoCategorise, CategoriserUnavailableError, parseCategoriseExclusions, parseCategoriseItems, suggestCategories, type CategoriserConfig } from "./categoriser";
 import type { Fetch } from "@typesafe-ai/sdk";
 
 type HandlerOptions = {
@@ -664,8 +664,10 @@ async function handleNative(
   if (segments[1] === "tools" && segments[2] === "categorise" && segments.length === 3 && method === "POST") {
     const denied = authorizePlan(principal, planId, defaultPlanId, method);
     if (denied) return denied;
-    const items = parseCategoriseItems(await readJson(request));
-    return json({ data: await suggestCategories(repo, planId, items, categoriser) });
+    const body = await readJson(request);
+    const items = parseCategoriseItems(body);
+    const excluded = parseCategoriseExclusions(body);
+    return json({ data: await suggestCategories(repo, planId, items, categoriser, undefined, excluded) });
   }
 
   if (segments[1] === "tools" && segments.length === 3 && method === "POST"

@@ -547,10 +547,15 @@ export const api = {
    */
   suggestCategories: async (planId: string, items: readonly CategorySuggestionRequestItem[]) => {
     const suggestions: CategorySuggestion[] = [];
+    // Other chunks in this same review are targets, not independent history.
+    const excludeTransactionIds = items.map((item) => item.key);
     for (let start = 0; start < items.length; start += CATEGORY_SUGGESTION_BATCH) {
       const result = await request<{ suggestions: CategorySuggestion[] }>(
         `/api/tools/categorise${query({ plan_id: planId })}`,
-        { method: "POST", body: JSON.stringify({ transactions: items.slice(start, start + CATEGORY_SUGGESTION_BATCH) }) },
+        { method: "POST", body: JSON.stringify({
+          transactions: items.slice(start, start + CATEGORY_SUGGESTION_BATCH),
+          exclude_transaction_ids: excludeTransactionIds,
+        }) },
         { readOnly: true },
       );
       suggestions.push(...result.suggestions);
