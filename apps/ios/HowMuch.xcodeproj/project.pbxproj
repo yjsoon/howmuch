@@ -103,6 +103,7 @@
 		A30000000000000000000003 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000002 /* ShareViewController.swift */; };
 		A30000000000000000000006 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
 		A3000000000000000000000B /* HowMuchShare.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* HowMuchShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A90000000000000000000003 /* PayeePickerRealTapUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000002 /* PayeePickerRealTapUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -205,6 +206,8 @@
 		A50000000000000000000030 /* RewardRowProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardRowProjection.swift; sourceTree = "<group>"; };
 		A1000000000000000000001A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000000000000000000001B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A90000000000000000000001 /* HowMuchUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HowMuchUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A90000000000000000000002 /* PayeePickerRealTapUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayeePickerRealTapUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXContainerItemProxy section */
@@ -221,6 +224,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = A30000000000000000000007;
 			remoteInfo = HowMuchShare;
+		};
+		A90000000000000000000004 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A1000000000000000000000A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000009;
+			remoteInfo = HowMuch;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -261,6 +271,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A90000000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -270,6 +287,7 @@
 				A10000000000000000000003 /* HowMuch */,
 				A30000000000000000000013 /* HowMuchShare */,
 				A2000000000000000000002B /* HowMuchTests */,
+				A90000000000000000000006 /* HowMuchUITests */,
 				A10000000000000000000004 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -297,6 +315,7 @@
 				A10000000000000000000001 /* HowMuch.app */,
 				A30000000000000000000001 /* HowMuchShare.appex */,
 				A20000000000000000000022 /* HowMuchTests.xctest */,
+				A90000000000000000000001 /* HowMuchUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -449,6 +468,14 @@
 			path = HowMuchShare;
 			sourceTree = "<group>";
 		};
+		A90000000000000000000006 /* HowMuchUITests */ = {
+			isa = PBXGroup;
+			children = (
+				A90000000000000000000002 /* PayeePickerRealTapUITests.swift */,
+			);
+			path = HowMuchUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -508,6 +535,23 @@
 			productReference = A30000000000000000000001 /* HowMuchShare.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		A90000000000000000000007 /* HowMuchUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A9000000000000000000000A /* Build configuration list for PBXNativeTarget "HowMuchUITests" */;
+			buildPhases = (
+				A90000000000000000000008 /* Sources */,
+				A90000000000000000000005 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A90000000000000000000009 /* PBXTargetDependency */,
+			);
+			name = HowMuchUITests;
+			productName = HowMuchUITests;
+			productReference = A90000000000000000000001 /* HowMuchUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -527,6 +571,10 @@
 					};
 					A30000000000000000000007 = {
 						CreatedOnToolsVersion = 16.0;
+					};
+					A90000000000000000000007 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = A10000000000000000000009;
 					};
 				};
 			};
@@ -549,6 +597,7 @@
 				A10000000000000000000009 /* HowMuch */,
 				A30000000000000000000007 /* HowMuchShare */,
 				A20000000000000000000025 /* HowMuchTests */,
+				A90000000000000000000007 /* HowMuchUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -686,6 +735,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A90000000000000000000008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A90000000000000000000003 /* PayeePickerRealTapUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -698,6 +755,11 @@
 			isa = PBXTargetDependency;
 			target = A30000000000000000000007 /* HowMuchShare */;
 			targetProxy = A30000000000000000000008 /* PBXContainerItemProxy */;
+		};
+		A90000000000000000000009 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000009 /* HowMuch */;
+			targetProxy = A90000000000000000000004 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -918,6 +980,44 @@
 			};
 			name = Release;
 		};
+		A9000000000000000000000B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = PQ6U5ESLN2;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = sg.soon.howmuch.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = HowMuch;
+			};
+			name = Debug;
+		};
+		A9000000000000000000000C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = PQ6U5ESLN2;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = sg.soon.howmuch.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = HowMuch;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -953,6 +1053,15 @@
 			buildConfigurations = (
 				A30000000000000000000010 /* Debug */,
 				A30000000000000000000011 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A9000000000000000000000A /* Build configuration list for PBXNativeTarget "HowMuchUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A9000000000000000000000B /* Debug */,
+				A9000000000000000000000C /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
