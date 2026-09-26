@@ -1731,14 +1731,26 @@ struct RewardsValuationSheet: View {
 // MARK: - Register strip
 
 /// The reward rows for one account, shown in its register so the limit is in
-/// view while adding transactions. Tapping opens the card in Rewards.
+/// view while adding transactions. Details and editing stay over the register.
 struct RegisterRewardsStrip: View {
   @Environment(AppModel.self) private var model
-  @Environment(RootChromeState.self) private var chrome: RootChromeState?
   let accountID: String
   @State private var rows: [RewardsCardRow] = []
   @State private var asOf: String?
   @State private var loadedPlanID: String?
+  @State private var sheet: Sheet?
+
+  private enum Sheet: Identifiable {
+    case detail(String)
+    case editor(String)
+
+    var id: String {
+      switch self {
+      case .detail(let cardID): return "detail-\(cardID)"
+      case .editor(let cardID): return "editor-\(cardID)"
+      }
+    }
+  }
 
   var body: some View {
     VStack(spacing: 8) {
@@ -1746,19 +1758,49 @@ struct RegisterRewardsStrip: View {
         ForEach(rows) { row in
           let projection = RewardRowProjection.make(row: row, asOf: asOf, isRange: false)
           Button {
-            chrome?.showRewardsCard(row.id)
+            sheet = .detail(row.id)
           } label: {
-            RewardFilledRow(projection: projection, currencyFormat: model.currencyFormat, showsChevron: chrome != nil)
+            RewardFilledRow(projection: projection, currencyFormat: model.currencyFormat)
           }
           .buttonStyle(.plain)
-          .disabled(chrome == nil)
           .accessibilityLabel("Rewards, \(projection.title)")
           .accessibilityValue(RewardRowText(projection, currencyFormat: model.currencyFormat).accessibilityValue)
-          .accessibilityHint("Opens this card in Rewards.")
+          .accessibilityHint("Shows reward details for this account.")
         }
       }
     }
     .padding(.top, rows.isEmpty ? 0 : 6)
+    .sheet(item: $sheet) { destination in
+      Group {
+        switch destination {
+        case .detail(let cardID):
+          if loadedPlanID == model.settings.planID,
+             let row = rows.first(where: { $0.id == cardID }) {
+            RewardCardDetailSheet(
+              row: row,
+              asOf: asOf,
+              icon: model.accounts.first { $0.id == accountID }?.displayIcon,
+              currencyFormat: model.currencyFormat,
+              canOpenAccount: false,
+              onEdit: { sheet = .editor(cardID) },
+              onOpenAccount: {}
+            )
+          } else {
+            ContentUnavailableView(
+              "Card Unavailable",
+              systemImage: "creditcard",
+              description: Text("This card is no longer in the report.")
+            )
+          }
+        case .editor(let cardID):
+          RewardCardEditorView(cardID: cardID)
+        }
+      }
+      .blocksCapturePresentation()
+    }
+    .onChange(of: model.settings.planID) { _, _ in
+      sheet = nil
+    }
     .task(id: fetchKey) {
       await load()
     }
