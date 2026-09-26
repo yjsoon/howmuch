@@ -269,6 +269,7 @@ struct ScheduledTransactionEditorView: View {
   @State private var deleteOperationID = UUID().uuidString
   @State private var enterNowOperationID = UUID().uuidString
   @State private var entryDate: String?
+  @State private var rewardCards: [CreditCard] = []
   private let scheduledOccurrenceDate: String?
 
   init(schedule: ScheduledTransaction? = nil) {
@@ -420,7 +421,7 @@ struct ScheduledTransactionEditorView: View {
         Section("Details") {
           Picker("Flag", selection: $draft.flag) {
             ForEach(FlagColour.allCases) { flag in
-              Text(flag.title).tag(flag)
+              Text(flagNames[RewardFlagColour(ledgerColour: flag)] ?? flag.title).tag(flag)
             }
           }
           TextField("Memo", text: $draft.memo, axis: .vertical)
@@ -483,14 +484,23 @@ struct ScheduledTransactionEditorView: View {
       ) {
         enterNow()
       }
-      .task {
+      .task(id: model.settings.planID) {
         if draft.accountID.isEmpty {
           draft.accountID = model.lastUsedAccountID.flatMap { id in model.openAccounts.contains(where: { $0.id == id }) ? id : nil }
             ?? model.openAccounts.first?.id
             ?? ""
         }
+        rewardCards = []
+        if let snapshot = try? await model.apiClient.fetchRewardsTrackerSnapshot(planID: model.settings.planID) {
+          rewardCards = snapshot.cards
+        }
       }
     }
+  }
+
+  private var flagNames: [RewardFlagColour: String] {
+    guard let card = rewardCards.first(where: { $0.ynabAccountId == draft.accountID }) else { return [:] }
+    return RewardCardDraft.colourNames(from: card)
   }
 
   private var payeeLabel: String? {
