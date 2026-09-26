@@ -592,6 +592,7 @@ struct RewardCardDraft: Equatable {
 struct RewardCardEditorView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
   let cardID: String?
 
@@ -904,29 +905,12 @@ struct RewardCardEditorView: View {
       case .flags:
         Section {
           ForEach(RewardFlagColour.allCases) { colour in
-            HStack {
-              if colour == .unflagged {
-                Text("None")
-                  .frame(width: 72, alignment: .leading)
-              } else {
-                Image(systemName: "flag.fill")
-                  .foregroundStyle(Theme.flagColour(named: colour.rawValue) ?? .secondary)
-                  .frame(width: 24)
-                Text(colour.title)
-                  .frame(width: 48, alignment: .leading)
-              }
-              TextField(
-                colour == .unflagged ? "None" : colour.title, text: colourNameBinding(for: colour)
-              )
-              .accessibilityLabel("\(colour == .unflagged ? "None" : colour.title) name")
-            }
+            colourNameRow(colour)
           }
         } header: {
           Text("Colour names")
         } footer: {
-          Text(
-            "These names show on this account’s flags. Everyday Account and other untracked accounts keep the plain colour tags."
-          )
+          Text("Names apply only to this account.")
         }
 
         Section {
@@ -981,6 +965,51 @@ struct RewardCardEditorView: View {
     }
     .navigationTitle(rule.rawValue)
     .navigationBarTitleDisplayMode(.inline)
+  }
+
+  @ViewBuilder
+  private func colourNameRow(_ colour: RewardFlagColour) -> some View {
+    if dynamicTypeSize.isAccessibilitySize {
+      VStack(alignment: .leading, spacing: 5) {
+        colourNameLabel(colour)
+        colourNameField(colour)
+      }
+    } else {
+      HStack {
+        if colour == .unflagged {
+          Text("None")
+            .frame(width: 104, alignment: .leading)
+        } else {
+          Image(systemName: "flag.fill")
+            .foregroundStyle(Theme.flagColour(named: colour.rawValue) ?? .secondary)
+            .frame(width: 24)
+          Text(colour.title)
+            .frame(width: 72, alignment: .leading)
+        }
+        colourNameField(colour)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func colourNameLabel(_ colour: RewardFlagColour) -> some View {
+    if colour == .unflagged {
+      Text("None")
+    } else {
+      Label {
+        Text(colour.title)
+      } icon: {
+        Image(systemName: "flag.fill")
+          .foregroundStyle(Theme.flagColour(named: colour.rawValue) ?? .secondary)
+      }
+    }
+  }
+
+  private func colourNameField(_ colour: RewardFlagColour) -> some View {
+    TextField(
+      colour == .unflagged ? "None" : colour.title, text: colourNameBinding(for: colour)
+    )
+    .accessibilityLabel("\(colour == .unflagged ? "None" : colour.title) name")
   }
 
   private func dateLabel(_ iso: String) -> String {
