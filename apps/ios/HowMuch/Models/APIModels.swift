@@ -3050,7 +3050,7 @@ struct TransactionSubtransactionDraft: Equatable, Codable {
 
   init(subtransaction: Subtransaction, preserveID: Bool = true) {
     id = preserveID ? subtransaction.id : nil
-    amountText = MoneyCodec.displayString(for: subtransaction.amount, currencyFormat: nil)
+    amountText = MoneyCodec.editableString(for: subtransaction.amount)
     payeeID = subtransaction.payeeID
     payeeName = subtransaction.payeeName ?? ""
     categoryID = subtransaction.categoryID
@@ -3200,7 +3200,7 @@ struct TransactionDraft: Equatable, Codable {
   mutating func enableSplit() {
     guard !isSplit else { return }
     subtransactions = [
-      TransactionSubtransactionDraft(amountText: MoneyCodec.displayString(for: signedMilliunits, currencyFormat: nil)),
+      TransactionSubtransactionDraft(amountText: MoneyCodec.editableString(for: signedMilliunits)),
       TransactionSubtransactionDraft(),
     ]
     categoryID = nil

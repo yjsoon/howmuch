@@ -31,15 +31,15 @@ const appModel = readFileSync(join(root, "apps/ios/HowMuch/AppModel.swift"), "ut
 const refresh = memberSpan(appModel, "func refreshLedger(quiet: Bool = false)", "AppModel.swift");
 
 if (
-  /serverTransactions = sortedUniqueTransactions\(\s*page\.transactions\s*\)/.test(refresh)
-  && !refresh.includes("page.transactions + serverTransactions")
+  /serverTransactions = sortedUniqueTransactions\(\s*(?:page\.transactions|fetchedFirstPage)\s*\)/.test(refresh)
+  && !refresh.includes("fetchedFirstPage + serverTransactions")
 ) {
   failures.push(
     "refreshLedger still replaces serverTransactions with the first page. A quiet refresh after approve or save then drops already-loaded rows, the List shrinks, and iOS clamps scroll to the top.",
   );
 }
 
-if (!refresh.includes("page.transactions + serverTransactions")) {
+if (!refresh.includes("fetchedFirstPage + serverTransactions")) {
   failures.push(
     "Quiet refreshLedger must merge the first page into serverTransactions so a focused account's already-loaded rows stay on screen.",
   );
@@ -62,17 +62,19 @@ if (
   );
 }
 
-if (!rootView.includes(".animation(.snappy, value: model.lastSaveMessage?.id)")) {
-  failures.push("Toast appearance still needs a scoped .animation(.snappy, value: model.lastSaveMessage?.id) on the overlay content, not the TabView.");
+const components = readFileSync(join(root, "apps/ios/HowMuch/Views/Components.swift"), "utf8");
+const toastOverlay = memberSpan(components, "struct RootSaveToastOverlay: View {", "Components.swift");
+if (!toastOverlay.includes(".animation(Theme.Motion.arrive, value: model.lastSaveMessage?.id)")) {
+  failures.push("RootSaveToastOverlay still needs .animation(Theme.Motion.arrive, value: model.lastSaveMessage?.id) on the overlay content, not the TabView.");
 }
 
 const register = readFileSync(join(root, "apps/ios/HowMuch/Views/RegisterView.swift"), "utf8");
-if (register.includes('displayMode: .automatic), prompt: "Search Transactions"')) {
+if (register.includes('displayMode: .automatic), prompt: "Search transactions or amounts"')) {
   failures.push(
     "RegisterView searchable still uses displayMode: .automatic. Dismissing the editor sheet restores the search drawer and jumps the List to the top. Other HowMuch lists already use .always.",
   );
 }
-if (!register.includes('displayMode: .always), prompt: "Search Transactions"')) {
+if (!register.includes('displayMode: .always), prompt: "Search transactions or amounts"')) {
   failures.push("RegisterView searchable must use displayMode: .always so sheet dismiss cannot retarget the search drawer.");
 }
 
