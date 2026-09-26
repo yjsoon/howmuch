@@ -32,6 +32,15 @@ Preconditions:
 - **HTTP match.** `control-howmuch http GET "/api/reports/rewards?plan_id=local-plan&group=payee"` returns `data.cards` with `card-travel` and `data.groups` containing Candlenut. Do not POST the import from `control-howmuch http` and call the tab verified.
 - **Proof.** Screenshot the empty tab (`artifacts/ios-rewards/empty.png`), the Travel Card tile after import (`artifacts/ios-rewards/travel-card.png`), the payee groups table (`artifacts/ios-rewards/group-payee.png`), and save the GET JSON (`artifacts/ios-rewards/report.json`).
 
+## Account-register details stay in context
+
+- From **Accounts → Travel Card**, tap the rewards bar. The card-detail sheet opens over the register, with **Edit** and without **View Transactions**. The app must not select the Rewards tab.
+- Dismiss with **Done**, then repeat and swipe down to dismiss. Both paths return to the same account register with its search/filter state intact.
+- Open the bar again and choose **Edit**. The editor replaces the details sheet. Cancel returns directly to the account, not to another sheet or the Rewards tab.
+- Edit again, change the card name to `Travel Card Edited`, and save. The account's rewards bar updates. Reopen it and check the detail title. Confirm the stored name through `GET /api/import/rewards-tracker?plan_id=local-plan`.
+- Explicitly select **Rewards** and open the same card. Its existing details and **View Transactions** link still work.
+- Save the revision, patch hash, fixture setup, executed steps, expected/observed outcomes, accessibility output showing the selected tab and register, screenshots, and persisted API result under `.amp/in/artifacts/ios-register-rewards/`.
+
 ## Gotchas
 
 - Demo rows are dated 2026-03-01 through 2026-05-24. `This Month` is empty unless today falls in that span. Stay on `All Time`.
