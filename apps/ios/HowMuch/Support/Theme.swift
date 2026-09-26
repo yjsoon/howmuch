@@ -127,14 +127,12 @@ struct RewardTonePalette {
         fill: Color(light: 0xCBEBD7, dark: 0x1F4631, increasedLight: 0xA9DDBD, increasedDark: 0x2A5E42),
         ink: Color(light: 0x1A6E44, dark: 0x6BC78C)
       )
-    case .complete:
+    case .complete, .failed:
       return RewardTonePalette(
-        track: Color(light: 0xF5F4FB, dark: 0x1F1E33),
-        fill: Color(light: 0xE2E0F5, dark: 0x322F58, increasedLight: 0xCBC7EE, increasedDark: 0x45407A),
-        ink: Color(light: 0x5A578F, dark: 0xB9B6F0)
+        track: Color(light: 0xFBE5E5, dark: 0x402326, increasedLight: 0xF4CDCD, increasedDark: 0x542B30),
+        fill: Color(light: 0xFBE5E5, dark: 0x402326, increasedLight: 0xF4CDCD, increasedDark: 0x542B30),
+        ink: Color(light: 0x9D292F, dark: 0xFFABAE, increasedDark: 0xFFD1D3)
       )
-    case .failed:
-      return RewardTonePalette(track: Theme.card, fill: .clear, ink: Theme.outflow)
     case .neutral:
       return RewardTonePalette(track: Theme.card, fill: .clear, ink: Theme.accent)
     }
