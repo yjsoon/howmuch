@@ -136,7 +136,7 @@ final class CaptureSnapshotTests: XCTestCase {
       for row in harness.model.pendingRows { harness.model.discardPending(row.id) }
       XCTAssertTrue(harness.model.pendingRows.isEmpty)
       XCTAssertFalse(
-        OutboxStore.load().contains { $0.connectionFingerprint == harness.model.settings.connectionFingerprint },
+        harness.model.outboxStorePeek()?.contains { $0.connectionFingerprint == harness.model.settings.connectionFingerprint } == true,
         "manual Save fixture must leave no persisted outbox residue"
       )
     }
@@ -2408,7 +2408,7 @@ final class SnapshotHarness {
       var preferences = ScopedViewPrefsStore.load()
       preferences.set(ViewPrefs(lastUsedAccountID: lastUsedAccountID), for: scope)
     }
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), captureAI: CaptureAISettings(
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), captureAI: CaptureAISettings(
       defaults: UserDefaults(suiteName: "howmuch.tests.ai.\(UUID().uuidString)")!, keys: CaptureAIMemoryKeys()
     ), snapshotStore: SnapshotStore(
       // Every harness shares one fingerprint, so a report cached by one render
@@ -2449,6 +2449,9 @@ final class SnapshotHarness {
       display: DisplaySettings()
     )
     model.referencePhase = .loaded
+    // Send at once, as the create-only queue did, so a Save's offline attempt
+    // lands inside these tests' short waits.
+    model.outboxDebounce = .zero
     model.rebuildLookups()
 
     let workspace = CaptureWorkspace(

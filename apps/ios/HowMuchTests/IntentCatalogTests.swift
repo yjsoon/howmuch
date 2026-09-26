@@ -22,7 +22,7 @@ final class IntentCatalogTests: XCTestCase {
     settings.authenticatedUserID = "user-1"
     settings.sessionToken = "token"
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs())
     model.accounts = [
       Self.account(id: "acct-everyday", name: "Everyday Account", closed: false),
       Self.account(id: "acct-rainy", name: "Rainy Day Saver", closed: false),
@@ -45,7 +45,7 @@ final class IntentCatalogTests: XCTestCase {
     settings.authenticatedUserID = "user-1"
     settings.sessionToken = "token"
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs())
     model.payees = [
       Payee(id: "payee-banana", name: "banana", transferAccountId: nil, deleted: false),
       Payee(id: "payee-apple", name: "Apple", transferAccountId: nil, deleted: false),
@@ -84,7 +84,7 @@ final class IntentCatalogTests: XCTestCase {
     settings.authenticatedUserID = "user-1"
     settings.sessionToken = "token"
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs())
     model.accounts = [
       Self.account(id: "acct-everyday", name: "Everyday Account", closed: false),
       Self.account(id: "acct-closed", name: "Old Card", closed: true),
@@ -150,7 +150,7 @@ final class IntentCatalogTests: XCTestCase {
     settings.authenticatedUserID = "user-1"
     settings.sessionToken = "token"
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs())
     model.accounts = [Self.account(id: "acct-everyday", name: "Everyday Account", closed: false)]
     model.publishIntentCatalog(using: store)
     store.waitForPendingWrites()

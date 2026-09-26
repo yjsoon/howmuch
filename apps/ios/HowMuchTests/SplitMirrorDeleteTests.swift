@@ -93,8 +93,8 @@ final class SplitMirrorDeleteTests: XCTestCase {
     previousScopedViewPrefs = UserDefaults.standard.object(
       forKey: ScopedViewPrefsStore.userDefaultsKey
     )
-    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
-    UserDefaults.standard.removeObject(forKey: OutboxStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.legacyDefaultsKey)
+    UserDefaults.standard.removeObject(forKey: OutboxStore.legacyDefaultsKey)
     XCTAssertTrue(URLProtocol.registerClass(SplitMirrorFixtureProtocol.self))
     SplitMirrorFixtureProtocol.reset()
     store = SnapshotStore(
@@ -108,7 +108,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
     UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
-    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.legacyDefaultsKey)
     super.tearDown()
   }
 
@@ -120,6 +120,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     let mirror = try XCTUnwrap(loadedMirror(in: model))
 
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
 
     let parent = try XCTUnwrap(
       model.transactions.first { $0.id == SplitMirrorFixtureProtocol.parentID },
@@ -194,13 +195,14 @@ final class SplitMirrorDeleteTests: XCTestCase {
 
     // Delete from a warm launch, before its provisional references have been
     // refreshed. Simply calling persistSnapshot would refuse to write here.
-    let model = AppModel(settings: initial.settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: initial.settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     XCTAssertTrue(model.ledgerIsProvisional)
     let mirror = try XCTUnwrap(loadedMirror(in: model))
     SplitMirrorFixtureProtocol.failReadsAfterDelete()
     // A queued pre-delete write must not recreate the invalidated file either.
     store.scheduleWrite(snapshot)
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
     await model.refresh(slices: [.accounts])
     assertMirrorGoneAndParentUnlinked(model)
     let requests = SplitMirrorFixtureProtocol.requests()
@@ -211,7 +213,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     store.waitForPendingWrites()
 
     // No network refresh runs on this new model: this is the offline first frame.
-    let restored = AppModel(settings: model.settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let restored = AppModel(outboxStore: .temporary(), settings: model.settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     XCTAssertFalse(restored.transactions.contains { $0.id == SplitMirrorFixtureProtocol.mirrorID })
     XCTAssertFalse(restored.transactions.flatMap(\.subtransactions).contains {
       $0.transferTransactionID == SplitMirrorFixtureProtocol.mirrorID
@@ -232,6 +234,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     XCTAssertTrue(parked, "the first page must be in flight before the delete lands")
 
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
     SplitMirrorFixtureProtocol.releaseParked()
     await refresh.value
 
@@ -257,6 +260,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     XCTAssertTrue(parked, "the older page must be in flight before the delete lands")
 
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
     SplitMirrorFixtureProtocol.releaseParked()
     await older.value
 
@@ -293,6 +297,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     XCTAssertTrue(parked, "the walk's first page must be in flight before the delete lands")
 
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
     SplitMirrorFixtureProtocol.clearHold()
     SplitMirrorFixtureProtocol.releaseParked()
     await walk.value
@@ -355,6 +360,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     XCTAssertTrue(parked, "the queue must be in flight before the delete lands")
 
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
     SplitMirrorFixtureProtocol.releaseParked()
     await queue.value
 
@@ -390,6 +396,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     XCTAssertTrue(parked, "the focused account page must be in flight before the delete lands")
 
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
     SplitMirrorFixtureProtocol.releaseParked()
 
     let landed = await waitUntil {
@@ -406,6 +413,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     await loadLedger(model)
     let mirror = try XCTUnwrap(loadedMirror(in: model))
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
 
     await model.refresh(slices: [.ledger], quiet: false)
 
@@ -429,6 +437,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     XCTAssertNil(mirror.parentTransactionID, "this test needs the row in hand to omit the parent")
 
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
 
     assertMirrorGoneAndParentUnlinked(model)
   }
@@ -445,6 +454,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     let parked = await waitUntil { SplitMirrorFixtureProtocol.parkedCount == 1 }
     XCTAssertTrue(parked, "the plan-one page must be in flight before the delete lands")
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
     SplitMirrorFixtureProtocol.clearHold()
 
     var switched = model.settings
@@ -476,7 +486,9 @@ final class SplitMirrorDeleteTests: XCTestCase {
     settings.authenticatedUserID = "split-mirror-\(UUID().uuidString)"
     settings.sessionToken = "token"
     settings.planID = SplitMirrorFixtureProtocol.planID
-    return AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    model.outboxDebounce = .zero
+    return model
   }
 
   private func loadLedger(_ model: AppModel) async {

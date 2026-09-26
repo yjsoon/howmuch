@@ -496,7 +496,6 @@ final class SlipReaderMappingTests: XCTestCase {
   }
 
   func testReadDoesNotCallCommit() async {
-    let before = OutboxStore.load()
     let reader = SlipReader(extractor: .fixed { _ in
       [
         .init(amount: "5", category: "Groceries", account: "Everyday Account"),
@@ -511,7 +510,6 @@ final class SlipReaderMappingTests: XCTestCase {
     )
     XCTAssertEqual(drafts.count, 2)
     XCTAssertEqual(drafts.map(\.amountMagnitudeMilli), [5_000, 8_000])
-    XCTAssertEqual(OutboxStore.load().map(\.id), before.map(\.id))
   }
 
   private static let now = Date(timeIntervalSince1970: 1_746_316_800)

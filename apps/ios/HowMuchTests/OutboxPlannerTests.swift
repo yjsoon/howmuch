@@ -1,5 +1,3 @@
-// Not wired in yet — see docs/plans/offline-writes.md P1.
-
 import XCTest
 @testable import HowMuch
 
@@ -68,6 +66,7 @@ final class OutboxPlannerTests: XCTestCase {
     payeeID: String? = nil,
     transferAccountID: String? = nil,
     transferTransactionID: String? = nil,
+    parentTransactionID: String? = nil,
     subtransactions: [Subtransaction] = []
   ) -> Transaction {
     Transaction(
@@ -87,7 +86,7 @@ final class OutboxPlannerTests: XCTestCase {
       categoryName: nil,
       transferAccountID: transferAccountID,
       transferTransactionID: transferTransactionID,
-      parentTransactionID: nil,
+      parentTransactionID: parentTransactionID,
       matchedTransactionID: nil,
       importID: nil,
       importPayeeName: nil,
@@ -498,6 +497,25 @@ final class OutboxPlannerTests: XCTestCase {
     )
   }
 
+  func testDeletingASplitMirrorLeavesTheParentAccountAlone() {
+    // The mirrored side of a split line names the parent's account as its
+    // transfer, but the server keeps the parent line when the mirror goes.
+    let mirror = row(
+      "m1", account: "savings", amount: 60_000, cleared: .cleared,
+      transferAccountID: "everyday", transferTransactionID: "line-savings",
+      parentTransactionID: "parent"
+    )
+    let deltas = OutboxPlanner.balanceDeltas(
+      [command(.delete(expectedApproved: nil), id: "m1", base: mirror)],
+      rowsByID: ["m1": mirror]
+    )
+    XCTAssertEqual(deltas, ["savings": delta(balance: -60_000, cleared: -60_000)])
+    XCTAssertEqual(
+      deltas,
+      DeleteBalanceDelta.deltas(deleted: mirror, removedIDs: ["m1"], knownRows: ["m1": mirror])
+    )
+  }
+
   func testUpdateMovingAccountsShiftsTheWholeAmount() {
     let existing = row(account: "a1", amount: -10_000, cleared: .cleared)
     let deltas = OutboxPlanner.balanceDeltas(
@@ -580,6 +598,92 @@ final class OutboxPlannerTests: XCTestCase {
       onto: [command(.create(request()), state: .inFlight)]
     )
     XCTAssertEqual(OutboxPlanner.balanceDeltas(queue, rowsByID: [:]), [:])
+  }
+
+  // MARK: - Attempted commands
+
+  private func attempted(_ command: OutboxCommand) -> OutboxCommand {
+    var command = command
+    command.attempted = true
+    command.seq = 1
+    return command
+  }
+
+  func testNothingFoldsIntoAnAttemptedCreate() {
+    // The server may hold it: a replay is answered from the import-id
+    // dedupe with the row as first created, so a folded change would be lost.
+    let create = attempted(command(.create(request(importID: "imp"))))
+    for kind: OutboxCommand.Kind in [
+      .update(request(amount: -2_000)),
+      .cleared(expected: .uncleared, cleared: .cleared, approve: false),
+      .approve,
+    ] {
+      let queue = OutboxPlanner.enqueue(command(kind), onto: [create])
+      XCTAssertEqual(queue.count, 2, "\(kind) must queue behind the attempted create")
+      XCTAssertEqual(queue[0], create)
+      XCTAssertEqual(queue[1].kind, kind)
+    }
+  }
+
+  func testAnAttemptedCreateIsNeverCancelledLocally() {
+    let create = attempted(command(.create(request())))
+    let queue = OutboxPlanner.enqueue(command(.delete(expectedApproved: nil)), onto: [create])
+    XCTAssertEqual(queue.map(\.kind), [.create(request()), .delete(expectedApproved: nil)])
+  }
+
+  func testLaterChangesFoldTogetherBehindAnAttemptedCommand() {
+    let create = attempted(command(.create(request())))
+    let queue = enqueueAll([
+      command(.update(request(amount: -2_000))),
+      command(.update(request(amount: -3_000))),
+      command(.approve),
+    ], onto: [create])
+    XCTAssertEqual(queue.count, 2)
+    XCTAssertEqual(queue[1].kind, .update(request(amount: -3_000)))
+  }
+
+  func testAttemptedStatusChangesAreNotUndoneLocally() {
+    let toggle = attempted(command(.cleared(expected: .uncleared, cleared: .cleared, approve: false)))
+    let queue = OutboxPlanner.enqueue(
+      command(.cleared(expected: .cleared, cleared: .uncleared, approve: false)),
+      onto: [toggle]
+    )
+    XCTAssertEqual(queue.count, 2, "the first toggle may have landed, so toggling back is its own change")
+    let edit = attempted(command(.update(request(amount: -1_000))))
+    XCTAssertEqual(OutboxPlanner.enqueue(command(.update(request(amount: -2_000))), onto: [edit]).count, 2)
+  }
+
+  func testARowSendsOneCommandPerPassOldestFirst() {
+    let create = attempted(command(.create(request())))
+    let queue = OutboxPlanner.enqueue(command(.update(request(amount: -2_000))), onto: [create])
+    let plan = OutboxPlanner.plan(queue)
+    XCTAssertEqual(plan.batches.map(\.stage), [.create])
+    XCTAssertEqual(plan.deferred.map(\.kind), [.update(request(amount: -2_000))])
+  }
+
+  func testARefusedCreateHoldsBackItsChangesButNotADelete() {
+    var refused = attempted(command(.create(request())))
+    refused.state = .rejected(message: "Gone", code: 410)
+    let withEdit = OutboxPlanner.enqueue(command(.update(request(amount: -2_000))), onto: [refused])
+    XCTAssertEqual(OutboxPlanner.plan(withEdit).batches, [])
+    let withDelete = OutboxPlanner.enqueue(command(.delete(expectedApproved: nil)), onto: [refused])
+    XCTAssertEqual(OutboxPlanner.plan(withDelete).batches.map(\.stage), [.delete])
+  }
+
+  func testAttemptFlagsSurviveJSONAndDefaultToFalse() throws {
+    var sent = command(.create(request()))
+    sent.attempted = true
+    sent.sentWithClientID = true
+    let decoded = try JSONDecoder().decode(OutboxCommand.self, from: JSONEncoder().encode(sent))
+    XCTAssertTrue(decoded.attempted)
+    XCTAssertTrue(decoded.sentWithClientID)
+
+    var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(sent)) as? [String: Any])
+    object["attempted"] = nil
+    object["sentWithClientID"] = nil
+    let older = try JSONDecoder().decode(OutboxCommand.self, from: JSONSerialization.data(withJSONObject: object))
+    XCTAssertFalse(older.attempted)
+    XCTAssertFalse(older.sentWithClientID)
   }
 
   // MARK: - Codable

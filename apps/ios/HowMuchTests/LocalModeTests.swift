@@ -180,6 +180,7 @@ final class LocalModeTests: XCTestCase {
   func testLocalModeIgnoresAuthenticationExpiry() async throws {
     let settings = APISettings.local(in: defaults)
     let model = AppModel(
+      outboxStore: .temporary(),
       settings: settings,
       viewPrefs: ViewPrefs(),
       snapshotStore: SnapshotStore(directory: directory.appending(path: "snapshots", directoryHint: .isDirectory)),
@@ -195,6 +196,53 @@ final class LocalModeTests: XCTestCase {
     XCTAssertTrue(model.settings.isAuthenticated)
     XCTAssertEqual(model.settings.authenticatedUserID, APISettings.localUserID)
     XCTAssertFalse(model.isShowingSettings)
+  }
+
+  /// Local mode writes land in the on-device engine straight away: the
+  /// outbox sends at once, the engine never refuses for want of a network,
+  /// and nothing is left waiting.
+  @MainActor
+  func testLocalWritesReachTheEngineAtOnce() async throws {
+    let settings = APISettings.local(in: defaults)
+    let client = APIClient(settings: settings)
+    try await LocalEngine.shared.prepare(config: settings.localEngineConfig)
+    let account = try await client.createAccount(
+      planID: settings.planID, name: "Everyday", type: "checking", balance: 100_000, icon: nil, onBudget: true
+    )
+    let model = AppModel(
+      outboxStore: .temporary(),
+      settings: settings,
+      viewPrefs: ViewPrefs(),
+      snapshotStore: SnapshotStore(directory: directory.appending(path: "snapshots", directoryHint: .isDirectory)),
+      hasSavedSettings: true
+    )
+    await model.refresh(slices: [.accounts, .ledger], quiet: false)
+
+    var draft = TransactionDraft()
+    draft.accountID = account.id
+    draft.amountMagnitudeMilli = 12_340
+    draft.payeeName = "Coffee"
+    try model.commit(draft)
+    await model.waitForOutboxDrain()
+
+    let page = try await client.fetchTransactions(planID: settings.planID)
+    let created = try XCTUnwrap(page.transactions.first)
+    XCTAssertTrue(created.id.hasPrefix("txn_"), "the engine keeps the id the device minted")
+    XCTAssertEqual(model.unsentChangeCount, 0)
+    XCTAssertEqual(model.transactions.map(\.id), [created.id])
+
+    try await model.toggleTransactionCleared(try XCTUnwrap(model.transactions.first))
+    await model.waitForOutboxDrain()
+    let toggled = try await client.fetchTransaction(planID: settings.planID, transactionID: created.id)
+    XCTAssertEqual(toggled.cleared, .cleared)
+
+    try await model.deleteTransaction(try XCTUnwrap(model.transactions.first))
+    await model.waitForOutboxDrain()
+    let afterDelete = try await client.fetchTransactions(planID: settings.planID)
+    XCTAssertTrue(afterDelete.transactions.isEmpty)
+    XCTAssertEqual(model.unsentChangeCount, 0)
+    await model.refresh(slices: [.accounts])
+    XCTAssertEqual(model.accounts.first?.balance, 100_000)
   }
 
   /// Lost preferences with the ledger still on disk: starting again adopts
@@ -233,6 +281,7 @@ final class LocalModeTests: XCTestCase {
     try await LocalEngine.shared.prepare(config: settings.localEngineConfig)
     try await StarterCategories.seedIfNeeded(client: client, planID: settings.planID, defaults: defaults)
     let model = AppModel(
+      outboxStore: .temporary(),
       settings: settings,
       viewPrefs: ViewPrefs(),
       snapshotStore: SnapshotStore(directory: directory.appending(path: "snapshots", directoryHint: .isDirectory)),

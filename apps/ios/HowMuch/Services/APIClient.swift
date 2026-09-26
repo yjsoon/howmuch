@@ -928,6 +928,127 @@ struct APIClient {
   }
 }
 
+// MARK: - Outbox transport
+
+/// One answer to an outbox write. Unlike the rest of the client, a refusal is
+/// returned rather than thrown, with its status, so the outbox can tell "the
+/// server has it", "try again later" and "the server said no" apart. Only a
+/// transport failure throws.
+struct OutboxReply {
+  let status: Int
+  let data: Data
+  /// The server's `detail`, or a generic line when the body carried none.
+  let message: String
+
+  var isSuccess: Bool {
+    (200 ..< 300).contains(status)
+  }
+}
+
+extension APIClient {
+  func outboxCreate(planID: String, request body: TransactionWriteRequest) async throws -> OutboxReply {
+    try await outboxSend(
+      path: "/v1/plans/\(planID)/transactions",
+      method: "POST",
+      body: try encoder.encode(TransactionWriteEnvelope(transaction: body))
+    )
+  }
+
+  func outboxUpdate(planID: String, transactionID: String, request body: TransactionWriteRequest) async throws -> OutboxReply {
+    try await outboxSend(
+      path: "/v1/plans/\(planID)/transactions/\(transactionID)",
+      method: "PUT",
+      body: try encoder.encode(TransactionWriteEnvelope(transaction: body))
+    )
+  }
+
+  func outboxCleared(
+    planID: String,
+    transactionID: String,
+    expectedCleared: ClearedState,
+    cleared: ClearedState
+  ) async throws -> OutboxReply {
+    try await outboxSend(
+      path: "/v1/plans/\(planID)/transactions/\(transactionID)/cleared",
+      method: "PATCH",
+      body: try encoder.encode(ClearedUpdateRequest(expectedCleared: expectedCleared, cleared: cleared))
+    )
+  }
+
+  func outboxApprove(planID: String, transactionIDs: [String]) async throws -> OutboxReply {
+    try await outboxSend(
+      path: "/v1/plans/\(planID)/transactions",
+      method: "PATCH",
+      body: try encoder.encode(
+        TransactionCollectionApprovalEnvelope(transactions: transactionIDs.map { .init(id: $0, approved: true) })
+      )
+    )
+  }
+
+  func outboxDelete(planID: String, transactionID: String, expectedApproved: Bool?) async throws -> OutboxReply {
+    var queryItems: [URLQueryItem] = []
+    if let expectedApproved {
+      queryItems.append(URLQueryItem(name: "expected_approved", value: expectedApproved ? "true" : "false"))
+    }
+    return try await outboxSend(
+      path: "/v1/plans/\(planID)/transactions/\(transactionID)",
+      method: "DELETE",
+      queryItems: queryItems
+    )
+  }
+
+  func outboxFetch(planID: String, transactionID: String) async throws -> OutboxReply {
+    try await outboxSend(path: "/v1/plans/\(planID)/transactions/\(transactionID)", method: "GET")
+  }
+
+  /// The row in a single-transaction reply, or nil when the body is not one.
+  func outboxTransaction(in reply: OutboxReply) -> Transaction? {
+    (try? decoder.decode(APIEnvelope<TransactionPayload>.self, from: reply.data))?.data.transaction
+  }
+
+  /// The rows in a collection reply.
+  func outboxTransactions(in reply: OutboxReply) -> [Transaction]? {
+    (try? decoder.decode(APIEnvelope<TransactionCollectionPayload>.self, from: reply.data))?.data.transactions
+  }
+
+  private func outboxSend(
+    path: String,
+    method: String,
+    queryItems: [URLQueryItem] = [],
+    body: Data? = nil
+  ) async throws -> OutboxReply {
+    let url = try makeURL(path: path, appendedPathSegments: [], queryItems: queryItems)
+    var request = URLRequest(url: url)
+    request.httpMethod = method
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    let token = settings.sessionToken.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !token.isEmpty {
+      request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
+    if let body {
+      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      request.httpBody = body
+    }
+    let (data, response) = try await send(request)
+    guard let http = response as? HTTPURLResponse else {
+      throw APIClientError.invalidResponse
+    }
+    let serverError = (try? decoder.decode(ServerErrorEnvelope.self, from: data))?.error
+    if !token.isEmpty,
+       http.statusCode == 401 || (http.statusCode == 403 && serverError?.name == "not_authorized") {
+      // Signed out everywhere, exactly as any other request would be. The
+      // outbox keeps the command for when this connection signs in again.
+      postAuthenticationExpiry(token: token)
+      return OutboxReply(status: 401, data: data, message: APIClientError.authenticationExpired.localizedDescription)
+    }
+    return OutboxReply(
+      status: http.statusCode,
+      data: data,
+      message: serverError?.detail ?? APIClientError.httpStatus(http.statusCode).localizedDescription
+    )
+  }
+}
+
 private struct ClearedUpdateRequest: Encodable {
   let expectedCleared: ClearedState
   let cleared: ClearedState

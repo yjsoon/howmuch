@@ -2721,6 +2721,10 @@ struct TransactionWriteRequest: Codable, Equatable {
   /// Client-minted create identity. The server returns the existing row when
   /// this value is replayed, so a lost response cannot double-post money.
   var importID: String?
+  /// Client-minted transaction id (`txn_<uuid>`), sent only on a create. The
+  /// outbox keeps it on the command and stamps it here at send time, so a
+  /// queued create has its real id before the server has seen it.
+  var id: String?
 
   private enum CodingKeys: String, CodingKey {
     case accountID
@@ -2735,6 +2739,7 @@ struct TransactionWriteRequest: Codable, Equatable {
     case flagColor
     case subtransactions
     case importID
+    case id
   }
 
   init(
@@ -2749,7 +2754,8 @@ struct TransactionWriteRequest: Codable, Equatable {
     approved: Bool,
     flagColor: String?,
     subtransactions: [TransactionSubtransactionWriteRequest],
-    importID: String? = nil
+    importID: String? = nil,
+    id: String? = nil
   ) {
     self.accountID = accountID
     self.date = date
@@ -2763,6 +2769,7 @@ struct TransactionWriteRequest: Codable, Equatable {
     self.flagColor = flagColor
     self.subtransactions = subtransactions
     self.importID = importID
+    self.id = id
   }
 
   func encode(to encoder: Encoder) throws {
@@ -2779,6 +2786,7 @@ struct TransactionWriteRequest: Codable, Equatable {
     try container.encode(flagColor, forKey: .flagColor)
     try container.encode(subtransactions, forKey: .subtransactions)
     try container.encodeIfPresent(importID, forKey: .importID)
+    try container.encodeIfPresent(id, forKey: .id)
   }
 
   /// Captures made before split support did not persist this key. Keep those
@@ -2798,9 +2806,12 @@ struct TransactionWriteRequest: Codable, Equatable {
     flagColor = try container.decodeIfPresent(String.self, forKey: .flagColor)
     subtransactions = try container.decodeIfPresent([TransactionSubtransactionWriteRequest].self, forKey: .subtransactions) ?? []
     importID = try container.decodeIfPresent(String.self, forKey: .importID)
+    id = try container.decodeIfPresent(String.self, forKey: .id)
   }
 }
 
+/// The create-only queue item from before the outbox moved to a file. Kept
+/// only so `OutboxStore` can read and migrate what is still in UserDefaults.
 struct PendingTransaction: Codable, Equatable, Identifiable {
   let id: UUID
   let request: TransactionWriteRequest
@@ -2849,72 +2860,6 @@ struct PendingTransaction: Codable, Equatable, Identifiable {
   }
 }
 
-enum OutboxStore {
-  static let userDefaultsKey = "HowMuch.Outbox"
-
-  static func load(from defaults: UserDefaults = .standard) -> [PendingTransaction] {
-    guard
-      let data = defaults.data(forKey: userDefaultsKey),
-      let decoded = try? JSONDecoder().decode([PendingTransaction].self, from: data)
-    else {
-      return []
-    }
-    return decoded
-  }
-
-  static func save(_ pending: [PendingTransaction], to defaults: UserDefaults = .standard) throws {
-    let data = try JSONEncoder().encode(pending)
-    defaults.set(data, forKey: userDefaultsKey)
-  }
-}
-
-enum OutboxBatch {
-  static func appending(
-    _ drafts: [TransactionDraft],
-    onto existing: [PendingTransaction],
-    fingerprint: String,
-    isCurrentConnection: (String) -> Bool
-  ) -> [PendingTransaction] {
-    var next = existing
-    for draft in drafts {
-      let request = draft.writeRequest(includeCleared: draft.shouldWriteCleared)
-      let importID = request.importID
-      let alreadyQueued = next.contains { pending in
-        pending.request.importID == importID
-          && importID != nil
-          && isCurrentConnection(pending.connectionFingerprint)
-      }
-      if !alreadyQueued {
-        next.append(
-          PendingTransaction(request: request, connectionFingerprint: fingerprint)
-        )
-      }
-    }
-    return next
-  }
-}
-
-enum CaptureOutboxRevision {
-  enum Action: Equatable {
-    case replaceOutbox(index: Int)
-    case queueUntilCreateSettles
-  }
-
-  static func action(
-    importID: String,
-    pending: [PendingTransaction],
-    inFlightIDs: Set<UUID>
-  ) -> Action {
-    guard let index = pending.firstIndex(where: { $0.request.importID == importID }) else {
-      return .queueUntilCreateSettles
-    }
-    if inFlightIDs.contains(pending[index].id) {
-      return .queueUntilCreateSettles
-    }
-    return .replaceOutbox(index: index)
-  }
-}
-
 struct SaveMessage: Equatable, Identifiable {
   enum Kind: Equatable {
     case success
@@ -2959,9 +2904,12 @@ struct PendingRow: Identifiable, Equatable {
     case rejected(String)
   }
 
+  /// The outbox command's id.
   typealias ID = UUID
 
   let id: ID
+  /// The client-minted id the row will have on the server.
+  let transactionID: String
   let accountID: String
   let accountName: String
   let isoDate: String
@@ -2977,14 +2925,16 @@ struct PendingRow: Identifiable, Equatable {
   let status: Status
 
   init(
-    pending: PendingTransaction,
+    id: ID,
+    transactionID: String,
+    request: TransactionWriteRequest,
     status: Status,
     accountName: String,
     categoryName: String?,
     payeeName: String?
   ) {
-    let request = pending.request
-    id = pending.id
+    self.id = id
+    self.transactionID = transactionID
     accountID = request.accountID
     self.accountName = accountName
     isoDate = request.date
@@ -3005,71 +2955,16 @@ struct PendingRow: Identifiable, Equatable {
   }
 }
 
-struct PendingEdit: Equatable {
+/// One unsent change as the outbox card lists it.
+struct OutboxItem: Identifiable, Equatable {
+  let id: UUID
   let transactionID: String
-  let isoDate: String
-  let amount: Int
-  let accountID: String
-  let accountName: String
-  let payeeID: String?
+  /// "New", "Edit", "Cleared", "Approve" or "Delete".
+  let action: String
   let payeeName: String?
-  let categoryID: String?
-  let categoryName: String?
-  let memo: String?
-  let flagColor: String?
-  let cleared: ClearedState?
-
-  init?(
-    draft: TransactionDraft,
-    existing: Transaction,
-    accountName: String,
-    categoryName: String?,
-    payeeName: String?
-  ) {
-    guard draft.isSplit == existing.isSplit else {
-      return nil
-    }
-    transactionID = existing.id
-    isoDate = draft.date.isoDateString
-    amount = draft.signedMilliunits
-    accountID = draft.accountID
-    self.accountName = accountName
-    payeeID = draft.payeeID
-    self.payeeName = payeeName
-    categoryID = draft.isSplit ? existing.categoryID : draft.categoryID
-    self.categoryName = draft.isSplit ? existing.categoryName : categoryName
-    memo = draft.memo.trimmedNil
-    flagColor = draft.flag.rawValue.isEmpty ? nil : draft.flag.rawValue
-    cleared = draft.shouldWriteCleared ? draft.clearedState : nil
-  }
-
-  func applied(to transaction: Transaction) -> Transaction {
-    Transaction(
-      id: transaction.id,
-      date: isoDate,
-      amount: amount,
-      memo: memo,
-      cleared: cleared ?? transaction.cleared,
-      approved: transaction.approved,
-      flagColor: flagColor,
-      flagName: transaction.flagName,
-      accountID: accountID,
-      accountName: accountName,
-      payeeID: payeeID,
-      payeeName: payeeName,
-      categoryID: categoryID,
-      categoryName: categoryName,
-      transferAccountID: transaction.transferAccountID,
-      transferTransactionID: transaction.transferTransactionID,
-      parentTransactionID: transaction.parentTransactionID,
-      matchedTransactionID: transaction.matchedTransactionID,
-      importID: transaction.importID,
-      importPayeeName: transaction.importPayeeName,
-      importPayeeNameOriginal: transaction.importPayeeNameOriginal,
-      deleted: transaction.deleted,
-      subtransactions: transaction.subtransactions
-    )
-  }
+  let isoDate: String?
+  let signedAmount: Int?
+  let status: PendingRow.Status
 }
 
 enum OutboxDrainTrigger: Equatable {
@@ -3077,6 +2972,7 @@ enum OutboxDrainTrigger: Equatable {
   case refresh
   case manual
 }
+
 
 enum EntryDirection: String, Codable, CaseIterable, Identifiable {
   case outflow

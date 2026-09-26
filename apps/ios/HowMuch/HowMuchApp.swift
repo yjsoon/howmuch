@@ -217,6 +217,7 @@ private struct RootView: View {
         consumePendingCapture()
         ScreenshotOfferController.shared.startIfNeeded()
         Task { await model.runLocalScheduledTransactions() }
+        model.sceneDidBecomeActive()
       } else if phase == .background {
         CaptureWorkspace.shared.persistCurrentIfNeeded()
       }

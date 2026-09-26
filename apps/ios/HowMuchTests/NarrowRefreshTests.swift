@@ -24,8 +24,8 @@ final class NarrowRefreshTests: XCTestCase {
     previousScopedViewPrefs = UserDefaults.standard.object(
       forKey: ScopedViewPrefsStore.userDefaultsKey
     )
-    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
-    UserDefaults.standard.removeObject(forKey: OutboxStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.legacyDefaultsKey)
+    UserDefaults.standard.removeObject(forKey: OutboxStore.legacyDefaultsKey)
     XCTAssertTrue(URLProtocol.registerClass(NarrowRefreshProtocol.self))
     NarrowRefreshProtocol.reset()
     XCTAssertTrue(URLProtocol.registerClass(HorizonRefreshProtocol.self))
@@ -39,7 +39,7 @@ final class NarrowRefreshTests: XCTestCase {
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
     UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
-    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.legacyDefaultsKey)
     super.tearDown()
   }
 
@@ -332,7 +332,7 @@ final class NarrowRefreshTests: XCTestCase {
     settings.authenticatedUserID = UUID().uuidString
     settings.sessionToken = "fixture"
     settings.planID = "p"
-    return AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
+    return AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
   }
 
   // MARK: - Helpers
@@ -360,8 +360,18 @@ final class NarrowRefreshTests: XCTestCase {
       request: request,
       connectionFingerprint: settings.connectionFingerprint
     )
-    try? OutboxStore.save([pending])
-    return AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
+    // Queued by the previous build, in UserDefaults: the model moves it into
+    // its outbox file on launch.
+    let defaults = UserDefaults(suiteName: "howmuch.tests.narrow.\(UUID().uuidString)")!
+    defaults.set(try? JSONEncoder().encode([pending]), forKey: OutboxStore.legacyDefaultsKey)
+    let model = AppModel(
+      outboxStore: .temporary(defaults: defaults),
+      settings: settings,
+      viewPrefs: ViewPrefs(),
+      snapshotStore: temporarySnapshotStore()
+    )
+    model.outboxDebounce = .zero
+    return model
   }
 
   private func makeModel() -> AppModel {
@@ -370,7 +380,9 @@ final class NarrowRefreshTests: XCTestCase {
     settings.authenticatedUserID = "narrow-refresh-\(UUID().uuidString)"
     settings.sessionToken = "token"
     settings.planID = NarrowRefreshProtocol.planID
-    return AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
+    model.outboxDebounce = .zero
+    return model
   }
 
   /// Polls a main-actor condition; the follow-up refresh after a write is
@@ -594,7 +606,7 @@ private final class NarrowRefreshProtocol: URLProtocol {
 final class ClearedEditorTests: XCTestCase {
   private var credentialService = ""
   private var defaults: [String: Any] = [:]
-  private let keys = [APISettings.userDefaultsKey, ScopedViewPrefsStore.userDefaultsKey, OutboxStore.userDefaultsKey]
+  private let keys = [APISettings.userDefaultsKey, ScopedViewPrefsStore.userDefaultsKey, OutboxStore.legacyDefaultsKey]
 
   override func setUp() {
     super.setUp()
@@ -621,6 +633,7 @@ final class ClearedEditorTests: XCTestCase {
     await model.refreshLedger(quiet: false)
     try await model.toggleTransactionCleared(try row(in: model))
     XCTAssertEqual(try row(in: model).cleared, .cleared)
+    await model.waitForOutboxDrain()
     await model.refresh(slices: [.accounts])
 
     state.holdNext("first")
@@ -634,6 +647,7 @@ final class ClearedEditorTests: XCTestCase {
     try model.commit(draft)
     await eventually { model.lastSaveMessage?.text.hasPrefix("Saved ") == true }
     XCTAssertEqual(try row(in: model).cleared, .uncleared)
+    await model.waitForOutboxDrain()
 
     // The older-page merge keeps the saved row. It must not use that cached
     // match to retire the overlay before the pre-edit first page arrives.
@@ -650,6 +664,7 @@ final class ClearedEditorTests: XCTestCase {
     await model.refresh(slices: [.ledger])
     XCTAssertEqual(try row(in: model).cleared, .cleared, "a post-save first page must retire the editor overlay")
     try await model.toggleTransactionCleared(try row(in: model))
+    await model.waitForOutboxDrain()
     XCTAssertEqual(state.lastExpectedCleared, "cleared", "the next CAS must use the fresh rendered value")
     await model.refresh(slices: [.accounts])
   }
@@ -663,6 +678,7 @@ final class ClearedEditorTests: XCTestCase {
     draft.isCleared = false
     try model.commit(draft)
     await eventually { model.lastSaveMessage?.text.hasPrefix("Saved ") == true }
+    await model.waitForOutboxDrain()
     state.setCleared("cleared")
     state.omitRowFromFirstPage()
     await model.refresh(slices: [.ledger])
@@ -670,6 +686,7 @@ final class ClearedEditorTests: XCTestCase {
     await model.loadOlderTransactions()
     XCTAssertEqual(try row(in: model).cleared, .cleared, "a fresh older page must retire the saved override")
     try await model.toggleTransactionCleared(try row(in: model))
+    await model.waitForOutboxDrain()
     XCTAssertEqual(state.lastExpectedCleared, "cleared")
     await model.refresh(slices: [.accounts])
   }
@@ -683,32 +700,39 @@ final class ClearedEditorTests: XCTestCase {
     draft.isCleared = false
     try model.commit(draft)
     await eventually { model.lastSaveMessage?.text.hasPrefix("Saved ") == true }
+    await model.waitForOutboxDrain()
 
     state.holdNext("first")
     let refresh = Task { await model.refreshLedger(quiet: true) }
     await eventually { state.isHeld("first") }
     try await model.toggleTransactionCleared(try row(in: model))
     XCTAssertEqual(try row(in: model).cleared, .cleared)
+    await model.waitForOutboxDrain()
     state.release("first")
     await refresh.value
-    XCTAssertEqual(try row(in: model).cleared, .cleared, "a pre-toggle read must not use the superseded editor retirement rule")
+    XCTAssertEqual(try row(in: model).cleared, .cleared, "a pre-toggle read must not put the old status back")
     try await model.toggleTransactionCleared(try row(in: model))
+    await model.waitForOutboxDrain()
     XCTAssertEqual(state.lastExpectedCleared, "cleared")
     await model.refresh(slices: [.accounts])
   }
 
-  func testFailedEditorSaveDoesNotOwnClearedState() async throws {
+  func testARefusedEditorSaveOwnsNothingOnceDiscarded() async throws {
     let model = makeModel()
     let state = ClearedEditorProtocol.state
     await model.refreshLedger(quiet: false)
     try await model.toggleTransactionCleared(try row(in: model))
+    await model.waitForOutboxDrain()
     state.rejectEditor()
     var draft = TransactionDraft(transaction: try row(in: model))
     draft.isCleared = false
     try model.commit(draft)
     await eventually { model.lastSaveMessage?.kind == .failure }
     await model.refresh(slices: [.ledger, .accounts])
-    XCTAssertEqual(try row(in: model).cleared, .cleared)
+    XCTAssertEqual(try row(in: model).cleared, .uncleared, "a refused change still shows until it is discarded")
+    let refused = try XCTUnwrap(model.outboxItems.first)
+    model.discardPending(refused.id)
+    XCTAssertEqual(try row(in: model).cleared, .cleared, "discarding it shows the server's status again")
     state.setCleared("uncleared")
     await model.refresh(slices: [.ledger])
     XCTAssertEqual(try row(in: model).cleared, .uncleared)
@@ -724,7 +748,9 @@ final class ClearedEditorTests: XCTestCase {
     settings.authenticatedUserID = UUID().uuidString
     settings.sessionToken = "fixture"
     settings.planID = "p"
-    return AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
+    model.outboxDebounce = .zero
+    return model
   }
 
   private func eventually(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
@@ -772,7 +798,7 @@ private final class ClearedEditorState: @unchecked Sendable {
     var kind = "other"
     let payload: [String: Any]
     if request.httpMethod == "PUT" {
-      if rejectsEditor { status = 500 }
+      if rejectsEditor { status = 400 }
       else { cleared = (body["transaction"] as? [String: Any])?["cleared"] as? String ?? cleared }
       payload = ["transaction": row()]
     } else if request.httpMethod == "PATCH" {

@@ -95,13 +95,16 @@ final class ServerConnectionRulesTests: XCTestCase {
     XCTAssertEqual(SnapshotImport.failure(for: APIClientError.ownerRequired("owner")), .refused(SnapshotImport.ownerRequiredMessage))
   }
 
-  private func pending(_ fingerprint: String) -> PendingTransaction {
-    PendingTransaction(
-      request: TransactionWriteRequest(
+  private func pending(_ fingerprint: String) -> OutboxCommand {
+    OutboxCommand(
+      id: UUID(),
+      transactionID: OutboxCommand.mintTransactionID(),
+      connectionFingerprint: fingerprint,
+      createdAt: .now,
+      kind: .create(TransactionWriteRequest(
         accountID: "a", date: "2026-09-01", amount: -1_000, payeeID: nil, payeeName: "Shop", categoryID: nil,
         memo: nil, cleared: .uncleared, approved: true, flagColor: nil, subtransactions: []
-      ),
-      connectionFingerprint: fingerprint
+      ))
     )
   }
 
@@ -109,16 +112,22 @@ final class ServerConnectionRulesTests: XCTestCase {
     let server = APISettings(baseURLString: "https://ledger.example.test", sessionToken: "t", authenticatedUserID: "u", planID: "p")
     let other = APISettings(baseURLString: "https://other.example.test", sessionToken: "t", authenticatedUserID: "u", planID: "p")
 
-    XCTAssertNil(ConnectionSwitch.blockReason(pending: [], settings: server))
-    XCTAssertNil(ConnectionSwitch.blockReason(pending: [pending(other.connectionFingerprint)], settings: server))
+    XCTAssertNil(ConnectionSwitch.blockReason(outbox: [], settings: server))
+    XCTAssertNil(ConnectionSwitch.blockReason(outbox: [pending(other.connectionFingerprint)], settings: server))
     XCTAssertEqual(
-      ConnectionSwitch.blockReason(pending: [pending(server.connectionFingerprint)], settings: server),
+      ConnectionSwitch.blockReason(outbox: [pending(server.connectionFingerprint)], settings: server),
       "1 change hasn’t reached the server yet. Connect to the internet and try again."
     )
     XCTAssertEqual(
-      ConnectionSwitch.blockReason(pending: [pending(server.connectionFingerprint), pending(server.connectionFingerprint)], settings: server),
+      ConnectionSwitch.blockReason(outbox: [pending(server.connectionFingerprint), pending(server.connectionFingerprint)], settings: server),
       "2 changes haven’t reached the server yet. Connect to the internet and try again."
     )
+    // A session that expired still owns its changes: they wait for this
+    // server, whoever signs in next.
+    var signedOut = server
+    signedOut.sessionToken = ""
+    signedOut.authenticatedUserID = ""
+    XCTAssertNotNil(ConnectionSwitch.blockReason(outbox: [pending(server.connectionFingerprint)], settings: signedOut))
   }
 
   @MainActor

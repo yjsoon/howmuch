@@ -1,4 +1,4 @@
-// Not wired in yet — see docs/plans/offline-writes.md P1.
+// See docs/plans/offline-writes.md P1.
 //
 // The functional core of the offline outbox: how a new change folds into the
 // queue, what a replay pass sends and in which order, what each server answer
@@ -26,8 +26,10 @@ enum OutboxPlanner {
     }
 
     var next = queue
+    // An attempted command may already be on the server, so it is treated
+    // like one on the wire: never rewritten, never cancelled.
     guard let index = next.lastIndex(where: {
-      $0.transactionID == incoming.transactionID && !$0.isInFlight
+      $0.transactionID == incoming.transactionID && !$0.isInFlight && !$0.attempted
     }) else {
       var appended = incoming
       appended.seq = (queue.map(\.seq).max() ?? 0) + 1
@@ -129,15 +131,33 @@ enum OutboxPlanner {
   }
 
   /// What one replay pass sends. In-flight commands are already on the
-  /// wire and rejected ones wait for Retry, so neither is planned.
+  /// wire and rejected ones wait for Retry, so neither is planned. A row
+  /// sends one command per pass, oldest first, so its changes land in the
+  /// order they were made; nothing for a row goes ahead of a create that
+  /// the server refused.
   static func plan(_ queue: [OutboxCommand]) -> Plan {
-    let busy = Set(queue.filter(\.isInFlight).map(\.transactionID))
+    var busy = Set(queue.filter(\.isInFlight).map(\.transactionID))
+    var refusedCreates: Set<String> = []
+    for command in queue {
+      if case .create = command.kind, case .rejected = command.state {
+        refusedCreates.insert(command.transactionID)
+      }
+    }
     var ready: [Stage: [OutboxCommand]] = [:]
     var deferred: [OutboxCommand] = []
     for command in queue.sorted(by: { $0.seq < $1.seq }) where command.state == .queued {
-      if busy.contains(command.transactionID) {
+      // A delete may still go: if the row exists it should not, and if it
+      // does not, the 404 settles the refused create too.
+      let waitsForCreate: Bool
+      if case .delete = command.kind {
+        waitsForCreate = false
+      } else {
+        waitsForCreate = refusedCreates.contains(command.transactionID)
+      }
+      if busy.contains(command.transactionID) || waitsForCreate {
         deferred.append(command)
       } else {
+        busy.insert(command.transactionID)
         ready[stage(of: command.kind), default: []].append(command)
       }
     }
@@ -302,7 +322,10 @@ enum OutboxPlanner {
       amount = row.amount
       cleared = row.cleared
       payeeID = row.payeeID
-      transfer = row.transferAccountID.map {
+      // The mirrored side of a split line: its far side is a line on the
+      // parent, which survives a delete of this row (the server only unlinks
+      // it) and cannot be edited from here. Only this row's own posting moves.
+      transfer = row.parentTransactionID != nil ? nil : row.transferAccountID.map {
         Mirror(
           accountID: $0,
           transactionID: row.transferTransactionID,

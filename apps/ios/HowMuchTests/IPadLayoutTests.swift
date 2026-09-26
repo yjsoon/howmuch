@@ -146,7 +146,7 @@ final class IPadLayoutTests: XCTestCase {
   }
 
   func testReflectSurfaceDoesNotLeakFocusedRegister() {
-    let model = AppModel()
+    let model = AppModel(outboxStore: .temporary())
     model.activeCaptureSurface = .accounts
     model.beginFocusedRegisterAccount("acct-everyday")
     XCTAssertEqual(model.visibleRegisterAccountID, "acct-everyday")
@@ -332,7 +332,7 @@ final class IPadLayoutTests: XCTestCase {
   }
 
   func testOpenMoreAssistantFromAccountsDoesNotLeakFocusedRegister() {
-    let model = AppModel()
+    let model = AppModel(outboxStore: .temporary())
     let chrome = RootChromeState()
     chrome.tab = .accounts
     model.activeCaptureSurface = chrome.captureSurface

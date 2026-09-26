@@ -27,14 +27,14 @@ final class LaunchRefreshTests: XCTestCase {
     // construct `AppModel()` from `APISettings.load()`) or the installed app.
     previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
     previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
-    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.legacyDefaultsKey)
   }
 
   override func tearDown() {
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
     UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
-    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.legacyDefaultsKey)
     super.tearDown()
   }
 
@@ -91,7 +91,7 @@ final class LaunchRefreshTests: XCTestCase {
     settings.sessionToken = "token"
     settings.planID = "" // fresh sign-in: no saved plan yet
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
 
     guard let surface = SnapshotSurface(
       root: LaunchProbe(model: model, taskID: taskID),
@@ -263,7 +263,7 @@ final class RefreshAllDedupeTests: XCTestCase {
     // `UserDefaults` keys; keep this fixture host out of other tests.
     previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
     previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
-    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.legacyDefaultsKey)
     XCTAssertTrue(URLProtocol.registerClass(RefreshAllProbeProtocol.self))
     RefreshAllProbeProtocol.reset()
   }
@@ -274,7 +274,7 @@ final class RefreshAllDedupeTests: XCTestCase {
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
     UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
-    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.legacyDefaultsKey)
     super.tearDown()
   }
 
@@ -416,7 +416,7 @@ final class RefreshAllDedupeTests: XCTestCase {
     settings.authenticatedUserID = "refresh-all-probe-\(UUID().uuidString)"
     settings.sessionToken = "token"
     settings.planID = ""
-    return AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
+    return AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
   }
 
   private func waitUntil(
@@ -616,14 +616,14 @@ final class ApplySettingsRefreshTests: XCTestCase {
     // other tests or the installed app.
     previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
     previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
-    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.legacyDefaultsKey)
   }
 
   override func tearDown() {
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
     UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
-    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.legacyDefaultsKey)
     super.tearDown()
   }
 
@@ -632,7 +632,7 @@ final class ApplySettingsRefreshTests: XCTestCase {
     defer { URLProtocol.unregisterClass(ApplySettingsProbeProtocol.self) }
     ApplySettingsProbeProtocol.reset()
 
-    let model = AppModel(settings: APISettings(), viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
+    let model = AppModel(outboxStore: .temporary(), settings: APISettings(), viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
     XCTAssertNotEqual(model.settings.launchFingerprint, "")
 
     var signedIn = APISettings()
@@ -664,7 +664,7 @@ final class ApplySettingsRefreshTests: XCTestCase {
     initial.sessionToken = "token"
     initial.planID = ApplySettingsProbeProtocol.planA
 
-    let model = AppModel(settings: initial, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
+    let model = AppModel(outboxStore: .temporary(), settings: initial, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
 
     var switched = initial
     switched.planID = ApplySettingsProbeProtocol.planB
@@ -780,14 +780,14 @@ final class UnapprovedCountLaunchTests: XCTestCase {
     previousCredentialService = APISettings.useCredentialService("HowMuch.UnapprovedCountLaunchTests.\(UUID().uuidString)")
     previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
     previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
-    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.legacyDefaultsKey)
   }
 
   override func tearDown() {
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
     UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
-    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.legacyDefaultsKey)
     super.tearDown()
   }
 
@@ -838,7 +838,7 @@ final class UnapprovedCountLaunchTests: XCTestCase {
     settings.sessionToken = "token"
     settings.planID = UnapprovedProbeProtocol.planID
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs())
 
     guard let surface = SnapshotSurface(
       root: RegisterView(scope: .account(UnapprovedProbeProtocol.fixtureAccountID))
@@ -894,7 +894,7 @@ final class UnapprovedCountLaunchTests: XCTestCase {
     // four-minute timeout instead of asserting on viewer bookkeeping.
     UnapprovedProbeProtocol.answerUnapprovedPageSlowly()
 
-    let model = AppModel(settings: Self.fixtureSettings("queue-siblings"), viewPrefs: ViewPrefs())
+    let model = AppModel(outboxStore: .temporary(), settings: Self.fixtureSettings("queue-siblings"), viewPrefs: ViewPrefs())
     // Viewer tokens are the registers' own scope identities, not fresh UUIDs:
     // a rebuilt view must reclaim the token it had before.
     let first = "account(\"acct-1\")||"
@@ -948,7 +948,7 @@ final class UnapprovedCountLaunchTests: XCTestCase {
     settings.sessionToken = "token"
     settings.planID = UnapprovedProbeProtocol.planID
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs())
 
     guard let surface = SnapshotSurface(
       root: LaunchProbe(model: model, taskID: { $0.launchRefreshTaskID }),
@@ -1001,7 +1001,7 @@ final class UnapprovedCountLaunchTests: XCTestCase {
     settings.sessionToken = "token"
     settings.planID = UnapprovedProbeProtocol.planID
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs())
 
     guard let surface = SnapshotSurface(
       root: RegisterView(scope: .all, categoryID: "cat-1")
@@ -1040,7 +1040,7 @@ final class UnapprovedCountLaunchTests: XCTestCase {
     settings.sessionToken = "token"
     settings.planID = UnapprovedProbeProtocol.planID
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs())
 
     guard let surface = SnapshotSurface(
       root: LaunchProbe(model: model, taskID: { $0.launchRefreshTaskID }),
@@ -1088,7 +1088,7 @@ final class UnapprovedCountLaunchTests: XCTestCase {
     }
     UnapprovedProbeProtocol.serveUnapprovedFixtures(rows.map(\.id))
 
-    let model = AppModel(settings: Self.fixtureSettings("approve-hang-success"), viewPrefs: ViewPrefs())
+    let model = AppModel(outboxStore: .temporary(), settings: Self.fixtureSettings("approve-hang-success"), viewPrefs: ViewPrefs())
     guard let surface = SnapshotSurface(
       root: LaunchProbe(model: model, taskID: { _ in "static" }),
       size: CGSize(width: 10, height: 10)
@@ -1133,7 +1133,7 @@ final class UnapprovedCountLaunchTests: XCTestCase {
     XCTAssertTrue(model.unapprovedTransactions.isEmpty)
   }
 
-  func testApproveFailureRestoresRowsAndReplacesSuccessToast() async {
+  func testAnApprovalThatCannotBeSentWaitsAndCanBeDiscarded() async {
     XCTAssertTrue(URLProtocol.registerClass(UnapprovedProbeProtocol.self))
     defer { URLProtocol.unregisterClass(UnapprovedProbeProtocol.self) }
     UnapprovedProbeProtocol.reset()
@@ -1144,7 +1144,7 @@ final class UnapprovedCountLaunchTests: XCTestCase {
     }
     UnapprovedProbeProtocol.serveUnapprovedFixtures(rows.map(\.id))
 
-    let model = AppModel(settings: Self.fixtureSettings("approve-hang-fail"), viewPrefs: ViewPrefs())
+    let model = AppModel(outboxStore: .temporary(), settings: Self.fixtureSettings("approve-hang-fail"), viewPrefs: ViewPrefs())
     guard let surface = SnapshotSurface(
       root: LaunchProbe(model: model, taskID: { _ in "static" }),
       size: CGSize(width: 10, height: 10)
@@ -1175,17 +1175,22 @@ final class UnapprovedCountLaunchTests: XCTestCase {
     XCTAssertTrue(optimistic, "the success toast and badge drop must land before the hung PATCH fails")
 
     UnapprovedProbeProtocol.releaseApprovePatch()
-    let restored = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
-      model.lastSaveMessage?.kind == .failure
-        && model.unapprovedTransactions.map(\.id).sorted() == rows.map(\.id).sorted()
-        && model.unapprovedBadgeCount == rows.count
-        && !model.isApprovalInFlight
+    // The server could not be reached: the approvals stay queued and keep
+    // showing, because the outbox will send them later.
+    let waiting = await surface.waitUntil(timeoutNanoseconds: 4_000_000_000) {
+      !model.isApprovalInFlight && !model.isSyncingOutbox
     }
-    XCTAssertTrue(
-      restored,
-      "a 0-count PATCH error must restore rows and replace the success toast; saw toast \(String(describing: model.lastSaveMessage)), "
-        + "rows \(model.unapprovedTransactions.map(\.id)), badge \(model.unapprovedBadgeCount)"
-    )
+    XCTAssertTrue(waiting, "the pass must end once the PATCH fails")
+    XCTAssertEqual(model.unsentChangeCount, rows.count)
+    XCTAssertTrue(model.unapprovedTransactions.isEmpty)
+    XCTAssertEqual(model.unapprovedBadgeCount, 0)
+
+    // Discarding them puts the rows and the badge back.
+    for item in model.outboxItems {
+      model.discardPending(item.id)
+    }
+    XCTAssertEqual(model.unapprovedTransactions.map(\.id).sorted(), rows.map(\.id).sorted())
+    XCTAssertEqual(model.unapprovedBadgeCount, rows.count)
   }
 
   /// Closing the flow while its load is in flight must not leave the queue
@@ -1198,7 +1203,7 @@ final class UnapprovedCountLaunchTests: XCTestCase {
     // Let the walk finish, but slowly enough to close the flow underneath it.
     UnapprovedProbeProtocol.answerUnapprovedPageSlowly()
 
-    let model = AppModel(settings: Self.fixtureSettings("queue-midload"), viewPrefs: ViewPrefs())
+    let model = AppModel(outboxStore: .temporary(), settings: Self.fixtureSettings("queue-midload"), viewPrefs: ViewPrefs())
 
     guard let surface = SnapshotSurface(
       root: LaunchProbe(model: model, taskID: { _ in "static" }),
@@ -1261,7 +1266,7 @@ final class UnapprovedCountLaunchTests: XCTestCase {
     settings.sessionToken = "token"
     settings.planID = UnapprovedProbeProtocol.planID
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs())
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs())
 
     guard let surface = SnapshotSurface(
       root: LaunchProbe(model: model, taskID: { $0.launchRefreshTaskID }),

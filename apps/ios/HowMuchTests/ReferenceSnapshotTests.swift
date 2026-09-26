@@ -421,8 +421,8 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     // into another test or the installed app.
     previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
     previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
-    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
-    UserDefaults.standard.removeObject(forKey: OutboxStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.legacyDefaultsKey)
+    UserDefaults.standard.removeObject(forKey: OutboxStore.legacyDefaultsKey)
     store = SnapshotFixture.temporaryStore()
     XCTAssertTrue(URLProtocol.registerClass(SnapshotRefreshProtocol.self))
     SnapshotRefreshProtocol.reset()
@@ -434,7 +434,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
     UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
-    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.legacyDefaultsKey)
     try? FileManager.default.removeItem(at: store.directory)
     super.tearDown()
   }
@@ -460,7 +460,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     )
     SnapshotRefreshProtocol.holdResponses()
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
 
     XCTAssertEqual(model.referencePhase, .loaded, "the snapshot must render without a request")
     XCTAssertEqual(model.ledgerPhase, .loaded)
@@ -538,7 +538,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
       )
     )
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     await model.refreshAll()
 
     XCTAssertEqual(model.transactions.map(\.id), [SnapshotRefreshProtocol.networkTransactionID])
@@ -565,7 +565,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
       )
     )
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     await model.refreshAll()
 
     XCTAssertEqual(
@@ -588,7 +588,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
       )
     )
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     await model.refreshAll()
 
     XCTAssertEqual(
@@ -607,7 +607,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: settings)))
     SnapshotRefreshProtocol.goOffline()
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     await model.refreshAll()
 
     XCTAssertNotNil(
@@ -641,7 +641,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
 
     let settings = fixtureSettings()
     XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: settings)))
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     XCTAssertTrue(model.referenceIsProvisional)
 
     await model.refresh(
@@ -676,7 +676,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
       )
     )
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     await model.loadOlderTransactions()
     XCTAssertEqual(
       model.transactions.map(\.id),
@@ -698,7 +698,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
   func testSessionRevocationDeletesTheSnapshot() async {
     let settings = fixtureSettings()
     XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: settings)))
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     XCTAssertTrue(model.isProvisional)
 
     NotificationCenter.default.post(
@@ -729,7 +729,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
       )
     )
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     XCTAssertEqual(
       model.unapprovedBadgeCount,
       9,
@@ -755,6 +755,8 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
   /// gone from it, and a row rejected from the "New" queue is off the stored
   /// count, even when every follow-up read fails.
   func testDeletePersistsTheRepairedSnapshotWhenFollowUpReadsFail() async throws {
+    // The row rejected below is one the server has awaiting approval.
+    SnapshotRefreshProtocol.serveNetworkRowUnapproved()
     let settings = fixtureSettings()
     XCTAssertTrue(
       store.save(
@@ -764,7 +766,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
         )
       )
     )
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     await model.refreshAll()
     let counted = await waitUntil {
       model.unapprovedBadgeCount == SnapshotRefreshProtocol.networkUnapprovedCount
@@ -782,6 +784,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
       approved: false
     )
     try await model.deleteTransaction(row)
+    await model.waitForOutboxDrain()
     XCTAssertEqual(model.unapprovedBadgeCount, SnapshotRefreshProtocol.networkUnapprovedCount - 1)
     await model.refresh(slices: [.accounts, .ledger])
 
@@ -799,7 +802,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
       "the rejected row must not come back on the tile at the next launch"
     )
 
-    let relaunched = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let relaunched = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     XCTAssertEqual(relaunched.referencePhase, .loaded)
     XCTAssertEqual(relaunched.accounts.map(\.id), [SnapshotRefreshProtocol.networkAccountID])
     XCTAssertTrue(relaunched.transactions.isEmpty)
@@ -810,7 +813,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     let settings = fixtureSettings()
     XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: settings)))
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     XCTAssertTrue(model.isProvisional)
 
     var signedOut = settings
@@ -834,7 +837,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     )
     XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: other)))
 
-    let model = AppModel(settings: fixtureSettings(), viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: fixtureSettings(), viewPrefs: ViewPrefs(), snapshotStore: store)
 
     XCTAssertEqual(model.referencePhase, .idle)
     XCTAssertTrue(model.accounts.isEmpty)
@@ -877,8 +880,8 @@ final class ReportsSnapshotTests: XCTestCase {
     )
     previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
     previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
-    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
-    UserDefaults.standard.removeObject(forKey: OutboxStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.legacyDefaultsKey)
+    UserDefaults.standard.removeObject(forKey: OutboxStore.legacyDefaultsKey)
     store = SnapshotFixture.temporaryStore()
     XCTAssertTrue(URLProtocol.registerClass(SnapshotRefreshProtocol.self))
     SnapshotRefreshProtocol.reset()
@@ -890,7 +893,7 @@ final class ReportsSnapshotTests: XCTestCase {
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
     UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
-    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.legacyDefaultsKey)
     try? FileManager.default.removeItem(at: store.directory)
     super.tearDown()
   }
@@ -928,7 +931,7 @@ final class ReportsSnapshotTests: XCTestCase {
     let settings = fixtureSettings()
     XCTAssertTrue(reportsStore.save(try Self.snapshot(settings: settings)))
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
 
     XCTAssertEqual(model.reportsPhase, .loaded, "Reflect must render from the cache without a request")
     XCTAssertEqual(model.spendingBreakdown?.total, 45_600)
@@ -957,7 +960,7 @@ final class ReportsSnapshotTests: XCTestCase {
     )
     XCTAssertTrue(reportsStore.save(try Self.snapshot(settings: other)))
 
-    let model = AppModel(settings: fixtureSettings(), viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: fixtureSettings(), viewPrefs: ViewPrefs(), snapshotStore: store)
 
     XCTAssertEqual(model.reportsPhase, .idle)
     XCTAssertNil(model.spendingBreakdown)
@@ -971,7 +974,7 @@ final class ReportsSnapshotTests: XCTestCase {
   func testRestoredReflectRevalidatesQuietly() async throws {
     let settings = fixtureSettings()
     XCTAssertTrue(reportsStore.save(try Self.snapshot(settings: settings)))
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     SnapshotRefreshProtocol.holdResponses()
 
     let refresh = Task { await model.refreshReportsIfNeeded() }
@@ -996,7 +999,7 @@ final class ReportsSnapshotTests: XCTestCase {
     let settings = fixtureSettings()
     XCTAssertTrue(reportsStore.save(try Self.snapshot(settings: settings, reflectMonth: "2000-01")))
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
 
     XCTAssertEqual(model.reportsPhase, .idle)
     XCTAssertNil(model.spendingBreakdown)
@@ -1015,7 +1018,7 @@ final class ReportsSnapshotTests: XCTestCase {
   func testSignOutDeletesTheReportsCache() async throws {
     let settings = fixtureSettings()
     XCTAssertTrue(reportsStore.save(try Self.snapshot(settings: settings)))
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     XCTAssertEqual(model.reportsPhase, .loaded)
 
     var signedOut = settings
@@ -1034,7 +1037,7 @@ final class ReportsSnapshotTests: XCTestCase {
   func testSessionRevocationDeletesTheReportsCache() async throws {
     let settings = fixtureSettings()
     XCTAssertTrue(reportsStore.save(try Self.snapshot(settings: settings)))
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
 
     NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: settings.sessionToken)
     let cleared = await waitUntil { !model.settings.isAuthenticated }
@@ -1172,6 +1175,7 @@ private final class SnapshotRefreshLog: @unchecked Sendable {
   private var held = false
   private var offline = false
   private var offlineAfterDelete = false
+  private var networkRowUnapproved = false
   private var pending: [SnapshotRefreshProtocol] = []
 
   func reset() {
@@ -1180,6 +1184,7 @@ private final class SnapshotRefreshLog: @unchecked Sendable {
     held = false
     offline = false
     offlineAfterDelete = false
+    networkRowUnapproved = false
     pending = []
     lock.unlock()
   }
@@ -1209,6 +1214,18 @@ private final class SnapshotRefreshLog: @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
     return offline
+  }
+
+  func serveNetworkRowUnapproved() {
+    lock.lock()
+    networkRowUnapproved = true
+    lock.unlock()
+  }
+
+  var servesNetworkRowUnapproved: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return networkRowUnapproved
   }
 
   func record(_ path: String) {
@@ -1298,6 +1315,17 @@ private final class SnapshotRefreshProtocol: URLProtocol {
   /// network does.
   static func goOffline() {
     SnapshotRefreshLog.shared.goOffline()
+  }
+
+  static func serveNetworkRowUnapproved() {
+    SnapshotRefreshLog.shared.serveNetworkRowUnapproved()
+  }
+
+  /// The network row as served, approved unless a test asked otherwise.
+  private static var networkRowJSON: String {
+    SnapshotRefreshLog.shared.servesNetworkRowUnapproved
+      ? transactionJSON.replacingOccurrences(of: "\"approved\": true", with: "\"approved\": false")
+      : transactionJSON
   }
 
   /// Answers the next DELETE, then fails every request after it.
@@ -1465,7 +1493,7 @@ private final class SnapshotRefreshProtocol: URLProtocol {
     switch path {
     case "\(plan)/transactions/\(networkTransactionID)":
       // Only DELETE reaches this path in these tests.
-      return #"{"data":{"transaction":\#(transactionJSON),"server_knowledge":\#(serverKnowledge + 1)}}"#
+      return #"{"data":{"transaction":\#(networkRowJSON),"server_knowledge":\#(serverKnowledge + 1)}}"#
     case "/v1/plans":
       return #"{"data":{"plans":[{"id":"\#(planID)","name":"Fixture Plan"}]}}"#
     case "\(plan)/settings":
@@ -1479,7 +1507,7 @@ private final class SnapshotRefreshProtocol: URLProtocol {
     case "\(plan)/account_preferences":
       return #"{"data":{"account_preferences":null,"account_preferences_revision":0}}"#
     case "\(plan)/transactions":
-      return #"{"data":{"transactions":[\#(transactionJSON)],"has_more":false,"server_knowledge":\#(serverKnowledge)}}"#
+      return #"{"data":{"transactions":[\#(networkRowJSON)],"has_more":false,"server_knowledge":\#(serverKnowledge)}}"#
     case "\(plan)/transactions/unapproved_count":
       return #"{"data":{"count":\#(networkUnapprovedCount),"server_knowledge":\#(serverKnowledge)}}"#
     case "\(plan)/scheduled_transactions":

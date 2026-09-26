@@ -111,7 +111,7 @@ final class RegisterSnapshotTests: XCTestCase {
       categoryID: nil, memo: nil, cleared: .uncleared, approved: true, flagColor: nil, subtransactions: []
     )
     return PendingRow(
-      pending: PendingTransaction(request: request, connectionFingerprint: "demo"),
+      id: UUID(), transactionID: "txn_\(date)", request: request,
       status: .waitingForConnection, accountName: "Demo", categoryName: nil, payeeName: "Demo"
     )
   }

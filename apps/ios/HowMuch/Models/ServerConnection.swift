@@ -229,8 +229,18 @@ enum ConnectionSwitch {
 
   /// Why the app cannot leave this server yet, if it can't: changes saved
   /// while offline are still waiting to be sent, and local mode would hide them.
-  static func blockReason(pending: [PendingTransaction], settings: APISettings) -> String? {
-    let unsent = pending.filter { settings.matchesCurrentOrLegacyOutboxStamp($0.connectionFingerprint) }.count
+  /// Counts every command for this server, whichever user or plan stamped
+  /// it: a session that expired changes the fingerprint, but its changes still
+  /// wait for this server and local mode would hide them just the same.
+  static func blockReason(outbox: [OutboxCommand], settings: APISettings) -> String? {
+    let endpoints = [settings.normalizedBaseURLString, settings.trimmedBaseURL]
+      .compactMap { $0 }
+      .filter { !$0.isEmpty }
+      .map { $0 + "|" }
+    let unsent = outbox.filter { command in
+      settings.matchesCurrentOrLegacyOutboxStamp(command.connectionFingerprint)
+        || endpoints.contains { command.connectionFingerprint.hasPrefix($0) }
+    }.count
     guard unsent > 0 else {
       return nil
     }

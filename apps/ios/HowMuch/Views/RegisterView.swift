@@ -567,9 +567,10 @@ struct RegisterView: View {
       transaction: transaction,
       showsAccount: showsAccount,
       currencyFormat: model.currencyFormat,
-      isBusy: model.isSubmitting || model.isApprovalPending(transaction.id),
+      isBusy: false,
       onOpen: { editingTransaction = transaction },
-      onChangeStatus: { changeStatus(transaction) }
+      onChangeStatus: { changeStatus(transaction) },
+      syncStatus: model.syncStatus(forTransactionID: transaction.id)
     )
     .swipeActions(edge: .leading, allowsFullSwipe: true) {
       if !transaction.approved {
@@ -588,7 +589,6 @@ struct RegisterView: View {
         Label("Delete", systemImage: "trash")
       }
       .tint(Theme.cancellation)
-      .disabled(model.isSubmitting)
     }
     .contextMenu {
       if !transaction.approved {
@@ -1541,7 +1541,11 @@ private struct AccountReconciliationSheet: View {
           Button(model.isSubmitting ? "Reconciling…" : "Confirm reconciliation") {
             Task { await confirm() }
           }
-          .disabled(model.isSubmitting || !confirmationChecked || !isPreviewExact)
+          .disabled(model.isSubmitting || !confirmationChecked || !isPreviewExact || outboxBlockReason != nil)
+        } footer: {
+          if let outboxBlockReason {
+            Text(outboxBlockReason)
+          }
         }
       }
       .navigationTitle("Reconcile")
@@ -1662,6 +1666,11 @@ private struct AccountReconciliationSheet: View {
       preview = nil
       previewError = error.localizedDescription
     }
+  }
+
+  /// Reconcile waits for this account's unsent changes.
+  private var outboxBlockReason: String? {
+    accountID.isEmpty ? nil : model.reconcileBlockReason(accountID: accountID)
   }
 
   private func confirm() async {
@@ -1798,7 +1807,8 @@ private struct PendingTransactionRow: View {
       .contentShape(Rectangle())
       .frame(maxWidth: .infinity, alignment: .leading)
       .onTapGesture {
-        if case .rejected = row.status {
+        // Waiting or refused, an unsent row can be retried or discarded.
+        if row.status != .sending {
           onRejectedTap()
         }
       }
@@ -1883,6 +1893,8 @@ struct TransactionRow: View {
   let isBusy: Bool
   let onOpen: () -> Void
   let onChangeStatus: () -> Void
+  /// Set while the row has changes the server has not acknowledged.
+  var syncStatus: PendingRow.Status? = nil
 
   var body: some View {
     HStack(alignment: .center, spacing: 4) {
@@ -1907,10 +1919,13 @@ struct TransactionRow: View {
 
           Spacer()
 
-          Text(MoneyCodec.signedDisplayString(for: transaction.amount, currencyFormat: currencyFormat))
-            .font(.subheadline.weight(.medium))
-            .monospacedDigit()
-            .foregroundStyle(Theme.registerAmountColour(transaction.amount))
+          HStack(spacing: 4) {
+            syncGlyph
+            Text(MoneyCodec.signedDisplayString(for: transaction.amount, currencyFormat: currencyFormat))
+              .font(.subheadline.weight(.medium))
+              .monospacedDigit()
+              .foregroundStyle(Theme.registerAmountColour(transaction.amount))
+          }
         }
         .contentShape(Rectangle())
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1932,6 +1947,24 @@ struct TransactionRow: View {
       return payee
     }
     return transaction.transferAccountID != nil ? "Transfer" : "(No payee)"
+  }
+
+  @ViewBuilder
+  private var syncGlyph: some View {
+    switch syncStatus {
+    case nil:
+      EmptyView()
+    case .sending?, .waitingForConnection?:
+      Image(systemName: "icloud.and.arrow.up")
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+        .accessibilityLabel("Not sent yet")
+    case .rejected?:
+      Image(systemName: "exclamationmark.icloud")
+        .font(.caption2)
+        .foregroundStyle(Theme.outflow)
+        .accessibilityLabel("The server refused this change")
+    }
   }
 
   private var detailLine: String {

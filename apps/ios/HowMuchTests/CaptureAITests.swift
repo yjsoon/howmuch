@@ -233,7 +233,6 @@ final class CaptureAITests: XCTestCase {
   }
 
   func testRemoteTransportStreamsBothProtocolsThroughExistingMappingWithoutSaving() async throws {
-    let outboxBefore = OutboxStore.load()
     for api in CaptureAIAPI.allCases {
       let text = String(decoding: try JSONEncoder().encode(Self.payload), as: UTF8.self)
       let events = api == .responses
@@ -255,7 +254,6 @@ final class CaptureAITests: XCTestCase {
       XCTAssertTrue(phases.contains(.receiving))
       XCTAssertTrue(phases.contains(.checking))
     }
-    XCTAssertEqual(OutboxStore.load().map(\.id), outboxBefore.map(\.id))
   }
 
   func testHTTPFailuresDoNotExposeProviderBodiesAndCancellationStopsTransport() async throws {

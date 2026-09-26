@@ -112,7 +112,7 @@ final class CaptureOriginTests: XCTestCase {
 
   @MainActor
   func testVisibleRegisterOnCurrentSurfaceDoesNotLeakWhenDestinationChanges() {
-    let model = AppModel()
+    let model = AppModel(outboxStore: .temporary())
     model.activeCaptureSurface = .accounts
     model.beginFocusedRegisterAccount("acct-everyday")
     XCTAssertEqual(model.visibleRegisterAccountID, "acct-everyday")

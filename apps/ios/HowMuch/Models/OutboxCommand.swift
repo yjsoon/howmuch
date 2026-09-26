@@ -1,4 +1,4 @@
-// Not wired in yet — see docs/plans/offline-writes.md P1.
+// See docs/plans/offline-writes.md P1.
 //
 // One durable write waiting to reach the server. The outbox holds at most one
 // command per transaction that is not in flight; `OutboxPlanner.enqueue`
@@ -35,7 +35,7 @@ struct OutboxCommand: Codable, Equatable, Identifiable {
 
   let id: UUID
   var seq: Int
-  let transactionID: String
+  var transactionID: String
   let connectionFingerprint: String
   let createdAt: Date
   var kind: Kind
@@ -43,6 +43,17 @@ struct OutboxCommand: Codable, Equatable, Identifiable {
   /// The row as it was before the first queued change. Discard reverts to
   /// it; nil for a create, or for a command queued behind an in-flight create.
   var baseSnapshot: Transaction?
+  /// Set, and written to disk, before the command is first sent, and cleared
+  /// again only when the answer proves the server did not apply it. The
+  /// server may already hold an attempted command, so nothing is folded into
+  /// it or cancelled against it: a replayed create is answered from the
+  /// import-id dedupe with the row as first created, and would drop anything
+  /// folded in after the first send.
+  var attempted: Bool
+  /// True when an attempted create went out carrying this command's client
+  /// id, so the row can be looked up by that id before it is sent again.
+  /// Creates moved from the old UserDefaults queue never carried one.
+  var sentWithClientID: Bool
 
   init(
     id: UUID,
@@ -52,7 +63,9 @@ struct OutboxCommand: Codable, Equatable, Identifiable {
     createdAt: Date,
     kind: Kind,
     state: State = .queued,
-    baseSnapshot: Transaction? = nil
+    baseSnapshot: Transaction? = nil,
+    attempted: Bool = false,
+    sentWithClientID: Bool = false
   ) {
     self.id = id
     self.seq = seq
@@ -62,6 +75,27 @@ struct OutboxCommand: Codable, Equatable, Identifiable {
     self.kind = kind
     self.state = state
     self.baseSnapshot = baseSnapshot
+    self.attempted = attempted
+    self.sentWithClientID = sentWithClientID
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case id, seq, transactionID, connectionFingerprint, createdAt, kind, state, baseSnapshot
+    case attempted, sentWithClientID
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(UUID.self, forKey: .id)
+    seq = try container.decode(Int.self, forKey: .seq)
+    transactionID = try container.decode(String.self, forKey: .transactionID)
+    connectionFingerprint = try container.decode(String.self, forKey: .connectionFingerprint)
+    createdAt = try container.decode(Date.self, forKey: .createdAt)
+    kind = try container.decode(Kind.self, forKey: .kind)
+    state = try container.decode(State.self, forKey: .state)
+    baseSnapshot = try container.decodeIfPresent(Transaction.self, forKey: .baseSnapshot)
+    attempted = try container.decodeIfPresent(Bool.self, forKey: .attempted) ?? false
+    sentWithClientID = try container.decodeIfPresent(Bool.self, forKey: .sentWithClientID) ?? false
   }
 
   var isInFlight: Bool {
@@ -89,7 +123,8 @@ extension TransactionWriteRequest {
       approved: approved ?? self.approved,
       flagColor: flagColor,
       subtransactions: subtransactions,
-      importID: importID ?? self.importID
+      importID: importID ?? self.importID,
+      id: id
     )
   }
 }
