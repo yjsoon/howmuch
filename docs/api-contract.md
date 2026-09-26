@@ -718,6 +718,59 @@ Accepts rows shaped like:
 }
 ```
 
+### Category suggestions (Jev)
+
+`POST /api/tools/categorise?plan_id=...`
+
+Suggests a category per transaction using TypeSafe's Jev model. Requires
+authentication and write access to `plan_id`; cookie sessions also pass the usual
+same-origin check, and bearer clients (iOS, personal tokens) may call it. The
+TypeSafe key is the server's `TYPESAFE_API_KEY` secret and never reaches clients.
+Nothing is written: apply accepted suggestions through the transaction PATCH.
+
+Body: `{ transactions: [{ key?, payee_id?, payee_name?, memo?, amount, date?,
+account_name? }] }`, 1 to 25 items, `amount` in signed milliunits, each with a
+payee name or memo. `key` defaults to the item's index.
+
+Returns `{ data: { model, usage, suggestions: [{ key, suggestion, confidence,
+alternatives }] } }`. `suggestion` is `{ category_id, category_name, group_name,
+probability }`, or `null` when Jev chose "none of these". `alternatives` lists up
+to three other categories by probability. `confidence` describes how concentrated
+Jev's distribution was, not whether the answer is correct.
+
+Jev chooses only among the plan's live, visible categories (plus inflow
+categories; credit card payment categories are excluded), so payee or memo text
+cannot make it return anything else. Bank payee names are cleaned before
+matching: reference codes, card numbers, anything containing a digit, payment
+words (NETS, PayNow, FAST, POS), processor prefixes (`SQ *`, `TST*`, `PAYPAL *`),
+company suffixes and common place names are dropped, so "GRAB*A-5X7K9 SINGAPORE
+SG" reads as "grab". Jev receives that cleaned name, the category counts from the
+exact payee's last 50 transactions, and up to eight categorised past examples with
+similar cleaned names. The first merchant words of both names must match, a word
+that only starts the other ("Grab" in "Grabfood") counts half, and names that run
+together are also compared joined up ("DIANXIAOERGROUPPTELTD" and "Dian Xiao Er").
+Common spellings such as "7-11" and "7-Eleven", HTML entities and PayNow "(Mobile
+ending …)" suffixes are normalised first. Examples that differ
+only in codes are grouped with a count and a `name_similarity` score.
+Each suggestion reports `evidence: { same_payee, similar_names }`, the number of
+past transactions behind it. The request sends payee names, memos, amounts, dates, account names,
+category names and those past examples to TypeSafe. Errors: `503 categoriser_not_configured` without a key,
+`502 categoriser_unavailable` when TypeSafe fails or rejects the key,
+`429 categoriser_rate_limited`.
+
+**Automatic categorisation on create.** When `TYPESAFE_API_KEY` is set,
+`POST /v1/plans/{plan_id}/transactions` (single and batch) and
+`POST /api/mobile/quick-entry` ask Jev for a category for each new transaction
+that names a payee (`payee_name` or `payee_id`) but no `category_id`. Jev's pick is
+stored only when it is not "none of these" and its confidence is at least 0.6,
+or at least 0.85 when there is no past evidence (no history for the payee and no
+similarly named transactions); otherwise the transaction is created uncategorised. Transfers, splits and rows with
+an explicit category are never changed. The step is best effort: it has a 5-second
+budget with no retries, and a slow or failing TypeSafe never fails the create.
+A create that repeats an existing transaction id (a retry) keeps that row's stored
+category and does not call Jev again. Imports, CSV uploads and scheduled
+materialisation are not auto-categorised.
+
 ### AI-assisted reward tools
 
 Both routes require authentication, same-origin CSRF validation and write access to

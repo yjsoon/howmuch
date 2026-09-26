@@ -8,7 +8,8 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@howmuch/register-query": "workspace:*"
+    "@howmuch/register-query": "workspace:*",
+    "@typesafe-ai/sdk": "0.6.0"
   }
 }
 

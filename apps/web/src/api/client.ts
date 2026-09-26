@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { CATEGORY_SUGGESTION_BATCH, type CategorySuggestion, type CategorySuggestionRequestItem } from "../lib/category-suggestions";
 import type {
   Account,
   AccountPreferences,
@@ -231,6 +232,8 @@ export interface ApiRequestOptions {
    * their failures are decided by the caller instead of tearing down state.
    */
   handleUnauthorized?: boolean;
+  /** A POST that reads only, such as a suggestion request: it must not invalidate cached data. */
+  readOnly?: boolean;
 }
 
 async function request<T>(path: string, init?: RequestInit, options?: ApiRequestOptions): Promise<T> {
@@ -240,7 +243,7 @@ async function request<T>(path: string, init?: RequestInit, options?: ApiRequest
   // network can go away mid-flight. The cache cannot tell those apart from a
   // write that never landed, and only one of the two answers is safe, so every
   // completed write invalidates regardless of how it ended.
-  const write = isWriteRequest(init?.method);
+  const write = isWriteRequest(init?.method) && !options?.readOnly;
   try {
     const response = await fetch(path, {
       ...init,
@@ -536,6 +539,23 @@ export const api = {
         return { id: item.id, status: "applied" as const };
       });
     });
+  },
+  /**
+   * Jev category suggestions for up to MAX_CATEGORY_SUGGESTIONS rows, sent in
+   * server-sized batches. Read-only: applying them goes through
+   * `categoriseTransactions`.
+   */
+  suggestCategories: async (planId: string, items: readonly CategorySuggestionRequestItem[]) => {
+    const suggestions: CategorySuggestion[] = [];
+    for (let start = 0; start < items.length; start += CATEGORY_SUGGESTION_BATCH) {
+      const result = await request<{ suggestions: CategorySuggestion[] }>(
+        `/api/tools/categorise${query({ plan_id: planId })}`,
+        { method: "POST", body: JSON.stringify({ transactions: items.slice(start, start + CATEGORY_SUGGESTION_BATCH) }) },
+        { readOnly: true },
+      );
+      suggestions.push(...result.suggestions);
+    }
+    return suggestions;
   },
   /** Bulk cleared with a per-row compare-and-set, in bounded chunks. */
   bulkClearedTransactions: (planId: string, items: readonly TransactionClearedBulkItem[]) => {

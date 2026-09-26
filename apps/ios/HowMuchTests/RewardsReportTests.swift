@@ -1031,7 +1031,7 @@ final class RewardRowProjectionTests: XCTestCase {
 
   func testExactlyAtMinimumIsNotAmber() throws {
     let projection = try project(["minimum_spend": 800, "total_spend": 800, "minimum_spend_met": true])
-    XCTAssertEqual(projection.action, .noTarget)
+    XCTAssertEqual(projection.action, .noTarget(categoryCaps: false))
     XCTAssertNotEqual(projection.tone, .needsMinimum)
     XCTAssertNil(projection.fill)
   }
@@ -1099,6 +1099,41 @@ final class RewardRowProjectionTests: XCTestCase {
     XCTAssertEqual(text.basisLine, "$2,000.00 / $2,000.00 · $80.00 earned · $150.00 beyond cap")
   }
 
+  func testTopTierWithoutCardCapIsEarningAndFull() throws {
+    // $800 base minimum, $1,600 top tier, caps only on categories with room left.
+    let projection = try project([
+      "minimum_spend": 1600, "total_spend": 1650, "counted_spend": 1650, "reward_earned": 90,
+      "active_spending_tier_id": "level-1600", "has_next_spending_tier": false,
+      "flags": [flag("Dining", total: 300, maximum: 375), flag("Everywhere else", total: 1350)],
+    ], card: ["minimumSpend": 800, "spendingTiers": [["id": "level-1600", "spendThreshold": 1600]]])
+    XCTAssertEqual(projection.action, .topTier)
+    XCTAssertEqual(projection.tone, .earning)
+    XCTAssertEqual(projection.fill, 1)
+    XCTAssertNil(projection.basis)
+    XCTAssertEqual(projection.deadline?.kind, .resets)
+    XCTAssertTrue(projection.exceptions.isEmpty)
+    XCTAssertFalse(projection.isTerminalCap)
+    let text = RewardRowText(projection, currencyFormat: sgd)
+    XCTAssertEqual(text.actionLabel, "Top tier reached")
+    XCTAssertNil(text.amount)
+    XCTAssertEqual(text.basisLine, "$1,650.00 spent · $90.00 earned")
+  }
+
+  func testTopTierWithCardCapStillShowsHeadroom() throws {
+    let projection = try project([
+      "minimum_spend": 1600, "maximum_spend": 2000, "total_spend": 1650, "counted_spend": 1650,
+      "has_next_spending_tier": false,
+    ], card: ["spendingTiers": [["id": "level-1600", "spendThreshold": 1600]]])
+    XCTAssertEqual(projection.action, .capHeadroom(remaining: 350))
+  }
+
+  func testUntieredCardWithOnlyCategoryCapsSaysNoCardCap() throws {
+    let projection = try project(["total_spend": 400, "flags": [flag("Dining", total: 100, maximum: 500)]])
+    XCTAssertEqual(projection.action, .noTarget(categoryCaps: true))
+    XCTAssertEqual(projection.tone, .neutral)
+    XCTAssertEqual(RewardRowText(projection, currencyFormat: sgd).actionLabel, "No card cap")
+  }
+
   func testOlderServerWithoutStopFlagTreatsExceededCapAsTerminal() throws {
     let projection = try project(["total_spend": 1000, "counted_spend": 1000, "maximum_spend": 1000, "maximum_spend_exceeded": true])
     XCTAssertEqual(projection.action, .capReached(beyond: 0, terminal: true))
@@ -1118,7 +1153,7 @@ final class RewardRowProjectionTests: XCTestCase {
     let extras: [[String: Any]] = [[:], ["minimum_spend": 0, "maximum_spend": 0]]
     for extra in extras {
       let projection = try project(extra.merging(["total_spend": 420, "reward_earned": 8.4]) { $1 })
-      XCTAssertEqual(projection.action, .noTarget)
+      XCTAssertEqual(projection.action, .noTarget(categoryCaps: false))
       XCTAssertNil(projection.fill)
       XCTAssertNil(projection.basis)
       XCTAssertNotEqual(projection.tone, .complete)
@@ -1151,7 +1186,7 @@ final class RewardRowProjectionTests: XCTestCase {
         ["start": "2026-10-01", "end": "2026-10-31", "spend": 0, "minimumSpend": 300, "status": "pending"],
       ],
     ], period: ("2026-09-01", "2026-10-31"))
-    XCTAssertEqual(projection.action, .noTarget)
+    XCTAssertEqual(projection.action, .noTarget(categoryCaps: false))
     XCTAssertEqual(projection.exceptions, [.rewardsLocked(until: "2026-10-31")])
     XCTAssertEqual(RewardRowText(projection, currencyFormat: sgd).exceptionLines, ["Rewards unlock after 31 Oct"])
   }
@@ -1170,7 +1205,7 @@ final class RewardRowProjectionTests: XCTestCase {
   func testServerMinimumUnmetWithoutARawGapIsFlagged() throws {
     // Spend reached the figure, but a tier minimum still withholds rewards.
     let projection = try project(["minimum_spend": 500, "total_spend": 600, "minimum_spend_met": false])
-    XCTAssertEqual(projection.action, .noTarget)
+    XCTAssertEqual(projection.action, .noTarget(categoryCaps: false))
     XCTAssertEqual(projection.exceptions, [.minimumNotMet])
   }
 
@@ -1324,7 +1359,8 @@ final class RewardRowProjectionTests: XCTestCase {
     id: String = "card",
     period: (String, String) = ("2026-09-01", "2026-09-30"),
     asOf: String? = "2026-09-23",
-    isRange: Bool = false
+    isRange: Bool = false,
+    card: [String: Any] = [:]
   ) throws -> RewardRowProjection {
     var calc: [String: Any] = [
       "period": "\(period.0)/\(period.1)", "total_spend": 0, "counted_spend": calculation["total_spend"] ?? 0,
@@ -1335,7 +1371,9 @@ final class RewardRowProjectionTests: XCTestCase {
     var withPeriod = calc
     withPeriod["periods"] = [["start": period.0, "end": period.1, "calculation": calc]]
     let json: [String: Any] = [
-      "card": ["id": id, "name": name, "issuer": "Demo", "type": calc["reward_type"] ?? "cashback", "ynabAccountId": "acct-\(id)", "featured": true],
+      "card": ([
+        "id": id, "name": name, "issuer": "Demo", "type": calc["reward_type"] ?? "cashback", "ynabAccountId": "acct-\(id)", "featured": true,
+      ] as [String: Any]).merging(card) { $1 },
       "account_id": "acct-\(id)", "account_name": name, "calculation": withPeriod,
     ]
     let row = try decoder.decode(RewardsCardRow.self, from: JSONSerialization.data(withJSONObject: json))
