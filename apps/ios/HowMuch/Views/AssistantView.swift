@@ -44,6 +44,13 @@ struct AssistantView: View {
       workspace.activate(scopeKey: model.settings.viewPrefsScopeKey)
       await loadBrief()
     }
+    .task {
+      // Keep Today honest across midnight, including an app left open.
+      // iOS posts this on wake if the device slept through the change.
+      for await _ in NotificationCenter.default.notifications(named: .NSCalendarDayChanged) {
+        await loadBrief()
+      }
+    }
     .onChange(of: workspace.pendingAssistantSessionID) { _, id in
       if let id {
         _ = workspace.resume(id)
@@ -258,6 +265,20 @@ struct AssistantView: View {
         isLoadingBrief = false
       }
     }
+    // A request that straddles midnight must not publish yesterday's
+    // "today"; the day-change reload fetches the new day instead.
+    let startDay = Date.now.isoDateString
+    func canCommit() -> Bool {
+      guard stillCurrent() else {
+        return false
+      }
+      if Date.now.isoDateString != startDay {
+        brief = nil
+        briefError = nil
+        return false
+      }
+      return true
+    }
     let spec = LedgerQuerySpec(
       kind: .today,
       category: "",
@@ -272,7 +293,7 @@ struct AssistantView: View {
       categoryGroups: model.categoryGroups
     ) {
     case .failure(let error):
-      guard stillCurrent() else {
+      guard canCommit() else {
         return
       }
       briefError = error.localizedDescription
@@ -286,7 +307,7 @@ struct AssistantView: View {
           accountIDs: resolution.accountIDs,
           categoryIDs: resolution.categoryIDs
         )
-        guard stillCurrent() else {
+        guard canCommit() else {
           return
         }
         let total = LedgerQueryPlanner.recordedSpendingTotal(
@@ -302,7 +323,7 @@ struct AssistantView: View {
           planID: planID,
           generation: generation
         )
-        guard stillCurrent() else {
+        guard canCommit() else {
           return
         }
         brief = LedgerQueryResult(
@@ -323,7 +344,7 @@ struct AssistantView: View {
         briefDay = resolution.from
         briefError = nil
       } catch {
-        guard stillCurrent() else {
+        guard canCommit() else {
           return
         }
         brief = nil
