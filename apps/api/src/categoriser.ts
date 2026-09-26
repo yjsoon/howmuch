@@ -28,6 +28,7 @@ export const MAX_CATEGORISE_BATCH = 25;
 const PAYEE_HISTORY_LIMIT = 50;
 const PAYEE_HISTORY_CATEGORIES = 5;
 const SIMILAR_SEARCH_LIMIT = 150;
+const SIMILAR_PAYEES = 8;
 const SIMILAR_EXAMPLES = 8;
 /** Past names scoring below this are a different merchant sharing a word. */
 const MIN_NAME_SIMILARITY = 0.6;
@@ -133,6 +134,17 @@ export function parseCategoriseItems(body: any): CategoriseItem[] {
   });
 }
 
+/** A web review spans several requests; none of its targets is past evidence. */
+export function parseCategoriseExclusions(body: any): string[] {
+  const ids = body?.exclude_transaction_ids;
+  if (ids === undefined) return [];
+  if (!Array.isArray(ids) || ids.length > 100
+    || ids.some((id) => typeof id !== "string" || !id.trim())) {
+    throw new ValidationError("exclude_transaction_ids must be an array of at most 100 non-blank transaction IDs");
+  }
+  return ids;
+}
+
 /**
  * Categories Jev may choose from: live, visible budget categories, plus inflow
  * categories so income can be recognised. Credit card payment categories are
@@ -158,6 +170,7 @@ export async function suggestCategories(
   items: CategoriseItem[],
   config: CategoriserConfig,
   budget: CallBudget = REVIEW_BUDGET,
+  excludeTransactionIds: readonly string[] = [],
 ): Promise<CategoriseResult> {
   if (!config.apiKey) {
     throw new CategoriserUnavailableError(503, "categoriser_not_configured", "Category suggestions are not configured on this server");
@@ -179,9 +192,10 @@ export async function suggestCategories(
   const criteria: Record<string, string | null> = Object.fromEntries([...byLabel.keys()].map((label) => [label, null]));
   criteria[NO_MATCH] = "No listed category fits this transaction, or it needs a person to decide (for example a refund or reimbursement of unclear purpose).";
 
+  const excluded = new Set([...items.map((item) => item.key), ...excludeTransactionIds]);
   const [histories, similar] = await Promise.all([
-    payeeHistories(repo, planId, items, labelFor),
-    similarTransactions(repo, planId, items, labelFor),
+    payeeHistories(repo, planId, items, labelFor, excluded),
+    similarTransactions(repo, planId, items, labelFor, excluded),
   ]);
   const state = {
     transactions: items.map((item) => ({
@@ -353,13 +367,14 @@ async function payeeHistories(
   planId: string,
   items: CategoriseItem[],
   labelFor: Map<string, string>,
+  excluded: ReadonlySet<string>,
 ): Promise<Map<string, Array<{ category: string; times: number }>>> {
   const payeeIds = [...new Set(items.map((item) => item.payee_id).filter((id): id is string => Boolean(id)))];
   const entries = await Promise.all(payeeIds.map(async (payeeId) => {
     const page = await repo.listTransactionsPage(planId, { payeeId, limit: PAYEE_HISTORY_LIMIT });
     const counts = new Map<string, number>();
     for (const transaction of page.transactions) {
-      if (transaction.subtransactions?.length) continue;
+      if (excluded.has(transaction.id) || transaction.subtransactions?.length) continue;
       const label = transaction.category_id ? labelFor.get(transaction.category_id) : undefined;
       if (label) counts.set(label, (counts.get(label) ?? 0) + 1);
     }
@@ -374,27 +389,38 @@ async function payeeHistories(
 
 /**
  * Categorised past transactions with similar merchant names, most similar
- * first. A short stem of the merchant word finds candidates in SQL; code then
- * scores each by cleaned-name similarity and drops different merchants that
- * merely share letters. Rows differing only in reference codes collapse into
- * one example with a count, so eight slots show eight different things.
+ * first. Search raw names by stem and known payees by normalised similarity:
+ * SQL cannot find "7-11" using its cleaned token "seveneleven". Both sources
+ * are bounded, and rows found through both count only once. Rows differing
+ * only in reference codes collapse into one example with a count.
  */
 async function similarTransactions(
   repo: LedgerStore,
   planId: string,
   items: CategoriseItem[],
   labelFor: Map<string, string>,
+  excluded: ReadonlySet<string>,
 ): Promise<Map<string, SimilarExample[]>> {
-  const excluded = new Set(items.map((item) => item.key));
   const tokensFor = new Map(items.map((item) => [item.key, payeeTokens(item.payee_name)]));
   const stems = [...new Set([...tokensFor.values()].map(payeeSearchStem).filter((stem): stem is string => Boolean(stem)))];
   const pools = new Map(await Promise.all(stems.map(async (stem) => {
     const page = await repo.listTransactionsPage(planId, { q: stem, limit: SIMILAR_SEARCH_LIMIT });
-    const usable = page.transactions.filter((transaction: any) => !excluded.has(transaction.id)
-      && !transaction.transfer_account_id
-      && !transaction.subtransactions?.length
-      && transaction.category_id && labelFor.has(transaction.category_id));
-    return [stem, usable] as const;
+    return [stem, page.transactions] as const;
+  })));
+  const payees = (await repo.listPayees(planId))
+    .filter((payee: any) => !payee.deleted && !payee.transfer_account_id)
+    .map((payee: any) => ({ id: String(payee.id), tokens: payeeTokens(payee.name) }));
+  const payeesFor = new Map(items.map((item) => [item.key, payees
+    .map((payee) => ({ id: payee.id, similarity: nameSimilarity(tokensFor.get(item.key)!, payee.tokens) }))
+    .filter((payee) => payee.similarity >= MIN_NAME_SIMILARITY)
+    .sort((a, b) => b.similarity - a.similarity || a.id.localeCompare(b.id))
+    .slice(0, SIMILAR_PAYEES)
+    .map((payee) => payee.id)]));
+  // Fetch each selected payee only once even when a batch names it repeatedly.
+  const payeeIds = [...new Set([...payeesFor.values()].flat())];
+  const payeePools = new Map(await Promise.all(payeeIds.map(async (payeeId) => {
+    const page = await repo.listTransactionsPage(planId, { payeeId, limit: PAYEE_HISTORY_LIMIT });
+    return [payeeId, page.transactions] as const;
   })));
 
   const result = new Map<string, SimilarExample[]>();
@@ -403,7 +429,15 @@ async function similarTransactions(
     const stem = payeeSearchStem(tokens);
     if (!stem) continue;
     const grouped = new Map<string, SimilarExample>();
-    for (const transaction of pools.get(stem) ?? []) {
+    const candidates = [
+      ...(pools.get(stem) ?? []),
+      ...(payeesFor.get(item.key) ?? []).flatMap((id) => payeePools.get(id) ?? []),
+    ];
+    const unique = [...new Map(candidates.map((row) => [row.id, row])).values()]
+      .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+    for (const transaction of unique) {
+      if (excluded.has(transaction.id) || transaction.transfer_account_id || transaction.subtransactions?.length
+        || !transaction.category_id || !labelFor.has(transaction.category_id)) continue;
       const candidateTokens = payeeTokens(transaction.payee_name);
       const similarity = nameSimilarity(tokens, candidateTokens);
       if (similarity < MIN_NAME_SIMILARITY) continue;

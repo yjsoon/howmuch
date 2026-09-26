@@ -729,8 +729,14 @@ TypeSafe key is the server's `TYPESAFE_API_KEY` secret and never reaches clients
 Nothing is written: apply accepted suggestions through the transaction PATCH.
 
 Body: `{ transactions: [{ key?, payee_id?, payee_name?, memo?, amount, date?,
-account_name? }] }`, 1 to 25 items, `amount` in signed milliunits, each with a
-payee name or memo. `key` defaults to the item's index.
+account_name? }], exclude_transaction_ids?: string[] }`, 1 to 25 items, `amount`
+in signed milliunits, each with a payee name or memo. `key` defaults to the item's
+index; use the transaction ID for existing rows so they cannot count as their
+own history. For a review spanning multiple requests, send all reviewed IDs in
+`exclude_transaction_ids` on every request (at most 100 nonblank strings).
+These IDs and the current request's keys are excluded from both history sources
+before counting evidence or sending it to Jev. The optional field defaults to
+empty; clients omitting it receive only request-local exclusion.
 
 Returns `{ data: { model, usage, suggestions: [{ key, suggestion, confidence,
 alternatives }] } }`. `suggestion` is `{ category_id, category_name, group_name,
@@ -752,6 +758,9 @@ together are also compared joined up ("DIANXIAOERGROUPPTELTD" and "Dian Xiao Er"
 Common spellings such as "7-11" and "7-Eleven", HTML entities and PayNow "(Mobile
 ending …)" suffixes are normalised first. Examples that differ
 only in codes are grouped with a count and a `name_similarity` score.
+Candidate retrieval combines a raw-name stem search (150 rows) with the latest
+50 transactions for each of up to eight matching normalised payees per item.
+Payee reads are shared across items, and overlapping transactions count once.
 Each suggestion reports `evidence: { same_payee, similar_names }`, the number of
 past transactions behind it. The request sends payee names, memos, amounts, dates, account names,
 category names and those past examples to TypeSafe. Errors: `503 categoriser_not_configured` without a key,

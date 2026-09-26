@@ -182,9 +182,10 @@ final class AppModel {
   /// Account ID → the `generation|planID|startDate` its horizon fill last
   /// completed against. See `fillFocusedAccountHorizon(generation:planID:)`.
   @ObservationIgnored private var completedAccountHorizonFills: [String: String] = [:]
-  /// Bumped when a ledger refresh replaces the loaded rows, so a fill that was
-  /// running across the replacement does not record itself as complete.
-  @ObservationIgnored private var ledgerRowsReplacedCount = 0
+  /// A refreshed account list or replaced ledger invalidates coverage, even
+  /// when offsetting external transactions leave balances unchanged. A fill
+  /// already in flight must not restore its completion after that refresh.
+  @ObservationIgnored private var accountHorizonCompletionEpoch = 0
   /// Latest plan cursor seen on a ledger fetch. Changes made on another
   /// device advance it, which is how the reports cache (#180) notices them.
   private(set) var serverKnowledge: Int?
@@ -1685,6 +1686,7 @@ final class AppModel {
         invalidateAccountUsage()
         pruneViewPrefs(using: fetched)
       }
+      invalidateAccountHorizonFills()
       accounts = fetched
       rebuildLookups()
       persistSnapshot()
@@ -1811,6 +1813,7 @@ final class AppModel {
       if Set(accounts.map(\.id)) != Set(reference.accounts.map(\.id)) {
         invalidateAccountUsage()
       }
+      invalidateAccountHorizonFills()
       planSettings = reference.planSettings
       accounts = reference.accounts
       categoryGroups = reference.categoryGroups
@@ -1903,8 +1906,7 @@ final class AppModel {
       if !applyIsRedundant {
         // Rows are replaced below, so a fill that completed (or is still
         // running) under this generation no longer describes them.
-        completedAccountHorizonFills.removeAll()
-        ledgerRowsReplacedCount &+= 1
+        invalidateAccountHorizonFills()
         // Mutation refreshes must not drop already-loaded rows; List would clamp to top.
         // Provisional rows are the exception, in both directions: the response
         // must displace every row the snapshot put up (merging would keep rows
@@ -2329,6 +2331,11 @@ final class AppModel {
     await fillFocusedAccountHorizon(generation: ledgerPageGeneration, planID: settings.planID)
   }
 
+  private func invalidateAccountHorizonFills() {
+    completedAccountHorizonFills.removeAll()
+    accountHorizonCompletionEpoch &+= 1
+  }
+
   func retryIncompleteRegisterFill() async {
     olderTransactionsError = nil
     if focusedRegisterAccountIDs.last != nil {
@@ -2347,16 +2354,16 @@ final class AppModel {
     let horizon = RegisterHorizon.standard
     let startDate = horizon.startDate()
     // A quiet account's rows all sit inside the horizon, so the loop below
-    // would refetch it on every appearance. Once a fill has completed against
-    // this ledger generation, nothing it could fetch has changed: a refresh
-    // that replaces the rows bumps the generation first.
+    // would refetch it on every appearance. Reuse its completed fill until a
+    // ledger or account-list refresh invalidates it; new balances may include
+    // external transactions that the register has not loaded yet.
     let fillKey = "\(generation)|\(planID)|\(startDate)"
     if completedAccountHorizonFills[accountID] == fillKey {
       // Reappearing still clears a stale error, as a fresh fill would.
       olderTransactionsError = nil
       return
     }
-    let replacedCountAtStart = ledgerRowsReplacedCount
+    let completionEpochAtStart = accountHorizonCompletionEpoch
     let ownsFill = horizonFillCount == 0
     if ownsFill {
       pushHorizonFill()
@@ -2407,7 +2414,7 @@ final class AppModel {
     }
     if generation == ledgerPageGeneration,
        planID == settings.planID,
-       replacedCountAtStart == ledgerRowsReplacedCount {
+       completionEpochAtStart == accountHorizonCompletionEpoch {
       completedAccountHorizonFills[accountID] = fillKey
     }
   }

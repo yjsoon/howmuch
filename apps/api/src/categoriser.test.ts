@@ -1,9 +1,11 @@
 import { Database } from "bun:sqlite";
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { applyMigrations } from "./db";
 import { createHandler } from "./http";
 import { LedgerRepository } from "./repository";
-import { categoryOptions } from "./categoriser";
+import { categoryOptions, suggestCategories } from "./categoriser";
+import { reviewRows, suggestionRequestItems } from "../../web/src/lib/category-suggestions";
+import { api } from "../../web/src/api/client";
 
 const config = { dbPath: ":memory:", port: 0, apiToken: "test-token", defaultPlanId: "test-plan", transitionReadOnly: false };
 
@@ -258,5 +260,145 @@ test("coded names of one merchant count as evidence; an unrecognisable name need
     const unknown = await (await createOne(handler, { payee_name: "QXZ*8812 MERCHANT 00" })).json();
     expect(unknown.data.transaction.category_id).toBeNull();
     expect(sent[1].state.transactions[0].similar_past_transactions).toEqual([]);
+  } finally { db.close(); }
+});
+
+test.each([1, 2])("a review of %i target rows cannot use those targets as independent history", async (count) => {
+  const db = await seeded();
+  const repo = new LedgerRepository(db, "test-plan");
+  await repo.upsertPayee("test-plan", { id: "only", name: "Only Merchant" });
+  const rows = await Promise.all(Array.from({ length: count }, (_, index) => repo.createTransaction("test-plan", {
+    id: `target-${index}`, account_id: "card", date: "2026-09-25", amount: -2_000, payee_id: "only", category_id: "food",
+  })));
+  const sent: any[] = [];
+  const handler = createHandler({ db, config: { ...config, typesafeApiKey: "ts-key" }, typesafeFetch: scriptedJev(sent, 0.7) });
+  const body = { transactions: rows.map((row) => ({ key: row.id, payee_id: row.payee_id, payee_name: row.payee_name, amount: row.amount })) };
+  try {
+    const response = await post(handler, body);
+    expect(response.status).toBe(200);
+    const { data } = await response.json();
+    expect(sent[0].state.transactions.map((item: any) => item.payee_history)).toEqual(rows.map(() => []));
+    expect(data.suggestions.map((item: any) => item.evidence)).toEqual(rows.map(() => ({ same_payee: 0, similar_names: 0 })));
+    expect(reviewRows(rows, data.suggestions).map((row) => row.include)).toEqual(rows.map(() => false));
+
+    // A different transaction for the very same payee is genuine evidence.
+    await repo.createTransaction("test-plan", { id: "independent", account_id: "card", date: "2026-09-01", amount: -3_000, payee_id: "only", category_id: "transport" });
+    const next = await (await post(handler, body)).json();
+    expect(sent[1].state.transactions[0].payee_history).toEqual([{ category: "Living: Transport", times: 1 }]);
+    expect(next.data.suggestions[0].evidence).toEqual({ same_payee: 1, similar_names: 1 });
+    expect(reviewRows(rows, next.data.suggestions).every((row) => row.include)).toBe(true);
+  } finally { db.close(); }
+});
+
+test.each([
+  ["7-11", "7 ELEVEN-TAMPINES CENTR"],
+  ["7 ELEVEN-TAMPINES CENTR", "7-11"],
+  ["4FINGERS CRISPY CHICKE", "4FINGERS"],
+  ["4FINGERS", "4FINGERS CRISPY CHICKE"],
+  ["Café Nero", "Cafe Nero"],
+  ["Cafe Nero", "Café Nero"],
+])("retrieves old normalised merchant history: %s → %s", async (historicalName, newName) => {
+  const db = await seeded();
+  const repo = new LedgerRepository(db, "test-plan");
+  await repo.upsertPayee("test-plan", { id: "merchant", name: historicalName });
+  await repo.createTransaction("test-plan", { id: "history", account_id: "card", date: "2020-01-01", amount: -2_000, payee_id: "merchant", category_id: "food" });
+  // A recent-plan fallback alone cannot find the older known merchant.
+  for (let index = 0; index < 151; index++) {
+    await repo.createTransaction("test-plan", { id: `noise-${index}`, account_id: "card", date: "2026-09-24", amount: -1_000, payee_id: "grab", category_id: "transport" });
+  }
+  const sent: any[] = [];
+  const handler = createHandler({ db, config: { ...config, typesafeApiKey: "ts-key" }, typesafeFetch: scriptedJev(sent, 0.7, "Living: Food") });
+  try {
+    const response = await createOne(handler, { payee_name: newName });
+    expect(response.status).toBe(201);
+    expect((await response.json()).data.transaction.category_id).toBe("food");
+    expect(sent[0].state.transactions[0].payee_history).toEqual([]);
+    expect(sent[0].state.transactions[0].similar_past_transactions).toMatchObject([{ payee: historicalName, category: "Living: Food", times: 1 }]);
+    const unrelated = await createOne(handler, { payee_name: "Unrelated Bookshop" });
+    expect((await unrelated.json()).data.transaction.category_id).toBeNull();
+  } finally { db.close(); }
+});
+
+test("normalised payee retrieval is bounded and shared by all targets in a batch", async () => {
+  const db = await seeded();
+  const repo = new LedgerRepository(db, "test-plan");
+  for (let index = 0; index < 10; index++) {
+    await repo.upsertPayee("test-plan", { id: `merchant-${index}`, name: `7-11 ${1000 + index}` });
+    await repo.createTransaction("test-plan", { id: `history-${index}`, account_id: "card", date: "2020-01-01", amount: -2_000, payee_id: `merchant-${index}`, category_id: "food" });
+  }
+  const reads = spyOn(repo, "listTransactionsPage");
+  const payees = spyOn(repo, "listPayees");
+  try {
+    const result = await suggestCategories(repo, "test-plan", ["draft-a", "draft-b"].map((key) => ({
+      key, payee_id: null, payee_name: "7-11", memo: null, amount: -1_000, date: null, account_name: null,
+    })), { apiKey: "test", fetch: scriptedJev([], 0.7, "Living: Food") });
+    expect(payees).toHaveBeenCalledTimes(1);
+    expect(reads.mock.calls.map(([, filters]) => filters)).toEqual([
+      { q: "seve", limit: 150 },
+      ...Array.from({ length: 8 }, (_, index) => ({ payeeId: `merchant-${index}`, limit: 50 })),
+    ]);
+    expect(result.suggestions.map((item) => item.evidence)).toEqual([
+      { same_payee: 0, similar_names: 8 }, { same_payee: 0, similar_names: 8 },
+    ]);
+  } finally { reads.mockRestore(); payees.mockRestore(); db.close(); }
+});
+
+test.each([26, 100])("all %i web review targets are excluded across request batches", async (count) => {
+  const db = await seeded();
+  const repo = new LedgerRepository(db, "test-plan");
+  await repo.upsertPayee("test-plan", { id: "review-payee", name: "Review Merchant" });
+  const rows = [];
+  for (let index = 0; index < count; index++) {
+    rows.push(await repo.createTransaction("test-plan", { id: `review-${index}`, account_id: "card", date: "2026-09-25", amount: -1_000, payee_id: "review-payee", category_id: "food" }));
+  }
+  const sent: any[] = [];
+  const handler = createHandler({ db, config: { ...config, typesafeApiKey: "ts-key" }, typesafeFetch: async (_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    sent.push(body);
+    return Response.json({ model: "jev-test", usage: { input_tokens: 1, output_tokens: 1 }, answers: Object.fromEntries(
+      Object.keys(body.questions).map((key) => [key, { type: "choice", choice: "Living: Transport", confidence: 0.7,
+        probabilities: { "Living: Transport": 0.7, "Living: Food": 0.25, "None of these": 0.05 } }]),
+    ) });
+  } });
+  const originalFetch = globalThis.fetch;
+  const requests: any[] = [];
+  globalThis.fetch = (async (path: string | URL | Request, init?: RequestInit) => {
+    requests.push(JSON.parse(String(init?.body)));
+    const headers = new Headers(init?.headers);
+    headers.set("authorization", "Bearer test-token");
+    return handler(new Request(new URL(String(path), "https://howmuch.test"), { ...init, headers }));
+  }) as typeof fetch;
+  try {
+    const suggestions = await api.suggestCategories("test-plan", suggestionRequestItems(rows));
+    expect(suggestions.every((item) => item.evidence.same_payee === 0 && item.evidence.similar_names === 0)).toBe(true);
+    expect(reviewRows(rows, suggestions).every((row) => !row.include)).toBe(true);
+    expect(requests.map((request) => request.transactions.length)).toEqual(count === 26 ? [25, 1] : [25, 25, 25, 25]);
+    expect(requests.every((request) => JSON.stringify(request.exclude_transaction_ids) === JSON.stringify(rows.map((row) => row.id)))).toBe(true);
+    expect(sent.flatMap((body) => body.state.transactions).every((item: any) => item.payee_history.length === 0 && item.similar_past_transactions.length === 0)).toBe(true);
+
+    await repo.createTransaction("test-plan", { id: "outside-review", account_id: "card", date: "2026-09-26", amount: -2_000, payee_id: "review-payee", category_id: "transport" });
+    const next = await api.suggestCategories("test-plan", suggestionRequestItems(rows));
+    expect(next.every((item) => item.evidence.same_payee === 1 && item.evidence.similar_names === 1)).toBe(true);
+    expect(reviewRows(rows, next).every((row) => row.include)).toBe(true);
+    for (const row of rows) expect((await repo.getTransaction("test-plan", row.id)).category_id).toBe("food");
+  } finally { globalThis.fetch = originalFetch; db.close(); }
+});
+
+test("review exclusions are bounded, validated, and cannot replace local target exclusions", async () => {
+  const db = await seeded();
+  const sent: any[] = [];
+  const handler = createHandler({ db, config: { ...config, typesafeApiKey: "ts-key" }, typesafeFetch: fakeJev(sent) });
+  const transactions = [{ key: "t1", payee_id: "grab", payee_name: "Grab", amount: -1_000 }];
+  try {
+    for (const exclude_transaction_ids of [null, "t1", {}, [1], [null], [""], [" "], Array(101).fill("t1")]) {
+      expect((await post(handler, { transactions, exclude_transaction_ids })).status).toBe(400);
+    }
+    expect(sent).toHaveLength(0);
+    for (const exclude_transaction_ids of [[], ["t2"], Array.from({ length: 100 }, (_, i) => `unknown-${i}`)]) {
+      const response = await post(handler, { transactions, exclude_transaction_ids });
+      expect(response.status).toBe(200);
+      const { data } = await response.json();
+      expect(data.suggestions[0].evidence).toEqual({ same_payee: exclude_transaction_ids[0] === "t2" ? 1 : 2, similar_names: exclude_transaction_ids[0] === "t2" ? 1 : 2 });
+    }
   } finally { db.close(); }
 });
