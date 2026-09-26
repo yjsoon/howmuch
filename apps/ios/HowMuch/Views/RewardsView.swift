@@ -881,15 +881,15 @@ struct RewardFilledRow: View {
           .foregroundStyle(Theme.rowSecondary)
           .fixedSize(horizontal: false, vertical: true)
       }
-      ForEach(text.exceptionLines, id: \.self) { line in
+      ForEach(Array(text.exceptionLines.enumerated()), id: \.element) { index, line in
         HStack(alignment: .firstTextBaseline, spacing: 6) {
           Image(systemName: "exclamationmark.triangle.fill")
-            .foregroundStyle(palette.ink)
             .accessibilityHidden(true)
           Text(line)
-            .foregroundStyle(Theme.textPrimary)
+            .foregroundStyle(exceptionInk(at: index, forText: true))
             .fixedSize(horizontal: false, vertical: true)
         }
+        .foregroundStyle(exceptionInk(at: index))
         .font(.footnote.weight(.medium))
         .padding(.top, 2)
       }
@@ -918,6 +918,20 @@ struct RewardFilledRow: View {
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(projection.title)
     .accessibilityValue(text.accessibilityValue)
+  }
+
+  private func exceptionInk(at index: Int, forText: Bool = false) -> Color {
+    guard index < RewardRowText.visibleExceptionLimit, index < projection.exceptions.count else {
+      return Theme.rowSecondary
+    }
+    switch projection.exceptions[index] {
+    case .categoriesAtCap, .tierCapReached:
+      return RewardTonePalette.palette(for: .complete).ink
+    case .categoriesBelowMinimum, .minimumNotMet:
+      return forText ? Theme.textPrimary : RewardTonePalette.palette(for: .needsMinimum).ink
+    case .rewardsLocked:
+      return Theme.rowSecondary
+    }
   }
 
   private var titleLine: some View {
@@ -978,7 +992,7 @@ struct RewardFilledRow: View {
     }
     return Text(text.actionLabel)
       .font(.title3.weight(.semibold))
-      .foregroundStyle(projection.tone == .failed ? Theme.outflow : Theme.textPrimary)
+      .foregroundStyle(projection.tone == .failed ? RewardTonePalette.palette(for: .failed).ink : Theme.textPrimary)
   }
 }
 
