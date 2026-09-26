@@ -164,6 +164,7 @@ struct TransactionFormView: View {
   @State private var showAccountPrompt = false
   @State private var showCategoryPrompt = false
   @State private var isShowingDate = false
+  @State private var rewardCards: [CreditCard] = []
   private let isEditing: Bool
   private let allowsDeletion: Bool
   private let chrome: TransactionFormChrome
@@ -350,6 +351,12 @@ struct TransactionFormView: View {
       }
       .onAppear {
         commitHook?.keypad = keypad
+      }
+      .task(id: model.settings.planID) {
+        rewardCards = []
+        if let snapshot = try? await model.apiClient.fetchRewardsTrackerSnapshot(planID: model.settings.planID) {
+          rewardCards = snapshot.cards
+        }
       }
       .onChange(of: draft.accountID) { _, _ in
         if !draft.accountID.isEmpty {
@@ -786,6 +793,11 @@ struct TransactionFormView: View {
     draft.subtransactions.remove(at: index)
   }
 
+  private var flagNames: [RewardFlagColour: String] {
+    guard let card = rewardCards.first(where: { $0.ynabAccountId == draft.accountID }) else { return [:] }
+    return RewardCardDraft.colourNames(from: card)
+  }
+
   private var extrasCard: some View {
     VStack(spacing: 0) {
       clearedRow
@@ -800,7 +812,7 @@ struct TransactionFormView: View {
         Spacer()
         Picker("Flag", selection: $draft.flag) {
           ForEach(FlagColour.allCases) { flag in
-            Text(flag.title).tag(flag)
+            Text(flagNames[RewardFlagColour(ledgerColour: flag)] ?? flag.title).tag(flag)
           }
         }
         .tint(.secondary)

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { api } from "../api/client";
+import { api, useApi } from "../api/client";
 import type { Account, CategoryGroup, Payee, ScheduledSubtransaction, ScheduledTransaction, ScheduledTransactionInput } from "../api/types";
 import { CategorySelect } from "../components/CategorySelect";
 import { FlagPicker, FlagTag } from "../components/FlagTag";
@@ -8,6 +8,7 @@ import { formatDate, todayIso } from "../lib/dates";
 import { stableHash } from "../lib/hash";
 import { formatMilliunitsInput, formatMoney, parseMilliunits } from "../lib/money";
 import { scheduleRecurrence } from "../lib/schedules";
+import { colourNamesByAccount, ledgerFlagNames } from "../lib/reward-flag-names";
 import { usePlan } from "../state/plan";
 import { isCachedPayees, isCachedScheduled } from "../state/cache-shapes";
 import { useCachedApi } from "../state/use-cached-api";
@@ -232,6 +233,9 @@ function SplitScheduleRow({ line, accounts, categories, payees }: { line: Schedu
 }
 
 function ScheduleEditor({ schedule, accounts, categoryGroups, payees, saving, onCancel, onSave }: { schedule?: ScheduledTransaction; accounts: Account[]; categoryGroups: CategoryGroup[]; payees: Payee[]; saving: boolean; onCancel: () => void; onSave: (input: ScheduledTransactionInput, idempotencyKey: string) => Promise<void> }) {
+  const { planId } = usePlan();
+  const rewardsSnapshot = useApi(`${planId}:reward-flag-names`, () => api.rewardsTrackerSnapshot(planId));
+  const namesByAccount = useMemo(() => colourNamesByAccount(rewardsSnapshot.data?.cards), [rewardsSnapshot.data]);
   const [accountId, setAccountId] = useState(schedule?.account_id ?? accounts.find((account) => !account.closed)?.id ?? "");
   const [firstDate, setFirstDate] = useState(schedule?.date_first ?? schedule?.date_next ?? todayIso());
   const [nextDate, setNextDate] = useState(schedule?.date_next ?? schedule?.date_first ?? todayIso());
@@ -287,7 +291,7 @@ function ScheduleEditor({ schedule, accounts, categoryGroups, payees, saving, on
       <label className="transaction-editor-checkbox"><input type="checkbox" checked={isSplit} onChange={toggleSplit} /> Split this schedule</label>
       {isSplit && <fieldset className="transaction-editor-splits"><legend>Split lines</legend><p className="split-remainder split-remainder-ok">The schedule total is {formatMoney(splitTotal, { sign: splitTotal > 0 })}.</p>{splitLines.map((line, index) => <div key={line.key} className="transaction-editor-split-line"><label><span className="sr-only">Split line {index + 1} amount</span><input type="text" inputMode="decimal" value={line.amount} onChange={(event) => setSplit(line.key, { amount: event.target.value })} /></label><label><span className="sr-only">Split line {index + 1} transfer</span><select value={line.transferAccountId} onChange={(event) => setSplit(line.key, { transferAccountId: event.target.value, ...(event.target.value ? { categoryId: "", payeeId: "" } : {}) })}><option value="">Not a transfer</option>{accounts.filter((account) => account.id !== accountId).map((account) => <option key={account.id} value={account.id}>To {account.name}</option>)}</select></label>{!line.transferAccountId && <><label><span className="sr-only">Split line {index + 1} payee</span><select value={line.payeeId} onChange={(event) => setSplit(line.key, { payeeId: event.target.value })}><option value="">No payee</option>{payees.filter((payee) => !payee.deleted && !payee.transfer_account_id).map((payee) => <option key={payee.id} value={payee.id}>{payee.name}</option>)}</select></label><label><span className="sr-only">Split line {index + 1} category</span><CategorySelect value={line.categoryId} onChange={(value) => setSplit(line.key, { categoryId: value })} groups={groups} /></label></>}<label><span className="sr-only">Split line {index + 1} memo</span><input value={line.memo} onChange={(event) => setSplit(line.key, { memo: event.target.value })} placeholder="Line memo" /></label>{splitLines.length > 2 && <button type="button" className="text-button" onClick={() => setSplitLines((lines) => lines.filter((item) => item.key !== line.key))}>Remove</button>}</div>)}<button type="button" className="text-button" onClick={() => setSplitLines((lines) => [...lines, { key: draftKey(), amount: "0", payeeId: "", categoryId: "", transferAccountId: "", memo: "" }])}>Add split line</button></fieldset>}
       <label className="field"><span className="field-label">Memo</span><input value={memo} onChange={(event) => setMemo(event.target.value)} placeholder="Note" /></label>
-      <div className="field"><span className="field-label" id="schedule-flag-label">Flag</span><FlagPicker labelledBy="schedule-flag-label" value={flagColor} onChange={setFlagColor} disabled={saving} /></div>
+      <div className="field"><span className="field-label" id="schedule-flag-label">Flag</span><FlagPicker labelledBy="schedule-flag-label" value={flagColor} onChange={setFlagColor} disabled={saving} names={ledgerFlagNames(namesByAccount.get(accountId) ?? {})} /></div>
       {validationError && <p className="transaction-editor-error" role="alert">{validationError}</p>}
       <div className="transaction-editor-actions"><button type="button" className="text-button" onClick={onCancel} disabled={saving}>Cancel</button><button type="submit" className="save-button" disabled={saving}>{saving ? "Saving…" : schedule ? "Save changes" : "Add schedule"}</button></div>
     </form>

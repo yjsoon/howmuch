@@ -81,6 +81,8 @@ export function colourNamesByAccount(
 ): Map<string, Partial<Record<RewardFlagColour, string>>> {
   const mapped = new Map<string, Partial<Record<RewardFlagColour, string>>>();
   for (const card of cards ?? []) {
+    // Match the first card used by transaction flag-name stamping and iOS.
+    if (mapped.has(card.ynabAccountId)) continue;
     mapped.set(card.ynabAccountId, colourNamesForCard(card));
   }
   return mapped;
