@@ -406,6 +406,53 @@ final class OutboxSyncTests: XCTestCase {
     XCTAssertEqual(store.peek(), [foreign], "kept for its own connection")
   }
 
+  // Failure mode: another connection's command for a row with the same id is
+  // dropped when this connection's delete lands or its create is discarded.
+  func testSettlingARowLeavesAnotherConnectionsCommandsForTheSameIDAlone() async throws {
+    let store = OutboxStore.temporary()
+    _ = try store.load()
+    let settings = fixtureSettings()
+    let foreignEdit = OutboxCommand(
+      id: UUID(), seq: 1, transactionID: "row-1",
+      connectionFingerprint: "https://other.test|plan-1|someone-else", createdAt: .now,
+      kind: .update(TransactionWriteRequest(
+        accountID: "acct-a", date: "2026-09-20", amount: -9_000, payeeID: nil, payeeName: "Elsewhere",
+        categoryID: nil, memo: nil, cleared: nil, approved: true, flagColor: nil, subtransactions: []
+      ))
+    )
+    let foreignApproval = OutboxCommand(
+      id: UUID(), seq: 2, transactionID: "txn_shared",
+      connectionFingerprint: "https://other.test|plan-1|someone-else", createdAt: .now, kind: .approve
+    )
+    let localDelete = OutboxCommand(
+      id: UUID(), seq: 3, transactionID: "row-1",
+      connectionFingerprint: settings.connectionFingerprint, createdAt: .now,
+      kind: .delete(expectedApproved: nil)
+    )
+    let localCreate = OutboxCommand(
+      id: UUID(), seq: 4, transactionID: "txn_shared",
+      connectionFingerprint: settings.connectionFingerprint, createdAt: .now,
+      kind: .create(TransactionWriteRequest(
+        accountID: "acct-a", date: "2026-09-20", amount: -1_000, payeeID: nil, payeeName: "Here",
+        categoryID: nil, memo: nil, cleared: nil, approved: true, flagColor: nil, subtransactions: [],
+        importID: "imp-here"
+      )),
+      state: .rejected(message: "No", code: 400)
+    )
+    try store.save([foreignEdit, foreignApproval, localDelete, localCreate])
+    server.seed(row(id: "row-1"))
+    server.offline = true
+    let model = makeModel(store: store, settings: settings)
+
+    model.discardPending(localCreate.id)
+    XCTAssertEqual(store.peek()?.map(\.id), [foreignEdit.id, foreignApproval.id, localDelete.id])
+
+    server.offline = false
+    await model.drainOutbox(trigger: .manual)
+    XCTAssertEqual(server.row("row-1")?["deleted"] as? Bool, true)
+    XCTAssertEqual(store.peek(), [foreignEdit, foreignApproval], "the other connection's changes are still waiting")
+  }
+
   func testSignedOutCommandsWaitOnDiskForTheSameConnection() async throws {
     server.seed(row(id: "row-1"))
     let store = OutboxStore.temporary()

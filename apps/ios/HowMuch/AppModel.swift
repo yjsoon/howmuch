@@ -3231,9 +3231,9 @@ final class AppModel {
         // The user chose to add it again. The old id may belong to a row
         // deleted on another device, so the new row gets a new one, and the
         // changes queued behind it follow.
-        let oldID = outbox[index].transactionID
+        let oldKey = outbox[index].rowKey
         let newID = OutboxCommand.mintTransactionID()
-        for other in next.indices where next[other].transactionID == oldID && !next[other].isInFlight {
+        for other in next.indices where next[other].rowKey == oldKey && !next[other].isInFlight {
           next[other].transactionID = newID
         }
         next[index].attempted = false
@@ -3264,7 +3264,7 @@ final class AppModel {
     // have nothing to apply to.
     let next = outbox.filter { other in
       if other.id == id { return false }
-      return !(command.kind.isCreate && other.transactionID == command.transactionID && !other.isInFlight)
+      return !(command.kind.isCreate && other.rowKey == command.rowKey && !other.isInFlight)
     }
     do {
       try outboxStore.save(next)
@@ -3310,10 +3310,39 @@ final class AppModel {
     do {
       outbox = try outboxStore.load()
       outboxLoadFailure = nil
+      adoptLegacyOutboxStamps()
     } catch {
       outboxLoadFailure = error.localizedDescription
       Self.logger.error("Outbox unreadable: \(error.localizedDescription, privacy: .public)")
     }
+  }
+
+  /// Commands are matched to a row by connection and id, so a create moved
+  /// from the old queue under this connection's older stamp is restamped
+  /// with the current one before anything is folded into it or sent.
+  private func adoptLegacyOutboxStamps() {
+    let current = settings.connectionFingerprint
+    guard outbox.contains(where: {
+      $0.connectionFingerprint != current && settings.matchesCurrentOrLegacyOutboxStamp($0.connectionFingerprint)
+    }) else {
+      return
+    }
+    let next = outbox.map { command -> OutboxCommand in
+      guard command.connectionFingerprint != current,
+            settings.matchesCurrentOrLegacyOutboxStamp(command.connectionFingerprint) else {
+        return command
+      }
+      return OutboxCommand(
+        id: command.id, seq: command.seq, transactionID: command.transactionID,
+        connectionFingerprint: current, createdAt: command.createdAt, kind: command.kind,
+        state: command.state, baseSnapshot: command.baseSnapshot, attempted: command.attempted,
+        sentWithClientID: command.sentWithClientID
+      )
+    }
+    // Only the stamp changes, and a later write carries it; the old stamp
+    // still matches this connection if this write fails.
+    outbox = next
+    try? outboxStore.save(next)
   }
 
   /// Folds `commands` into the outbox and writes it, before anything is
@@ -3328,6 +3357,7 @@ final class AppModel {
         throw OutboxStoreError.unreadable(failure)
       }
     }
+    adoptLegacyOutboxStamps()
     // The planner ignores a change to a row that is on its way out. Say so
     // rather than show "Saved" for something that will never be sent.
     let deleting = Set(currentOutbox.filter { command in
@@ -3494,6 +3524,7 @@ final class AppModel {
     }
     isSyncingOutbox = true
     defer { isSyncingOutbox = false }
+    adoptLegacyOutboxStamps()
 
     let fingerprint = settings.connectionFingerprint
     let planID = settings.planID
@@ -3785,7 +3816,7 @@ final class AppModel {
       // A replayed create can come back as a row the server made earlier
       // under another id. Later changes follow the row the server has.
       if let row, row.id != command.transactionID {
-        for other in queue.indices where queue[other].transactionID == command.transactionID {
+        for other in queue.indices where queue[other].rowKey == command.rowKey {
           queue[other].transactionID = row.id
           if queue[other].baseSnapshot == nil {
             queue[other].baseSnapshot = row
@@ -3849,7 +3880,7 @@ final class AppModel {
     // a refused create or edit included -- must not be sent again, or Sync
     // Now could bring the row back.
     updateOutbox { queue in
-      queue.removeAll { $0.id == command.id || ($0.transactionID == command.transactionID && !$0.isInFlight) }
+      queue.removeAll { $0.id == command.id || ($0.rowKey == command.rowKey && !$0.isInFlight) }
     }
     let fallback = serverRow(command.transactionID) ?? command.baseSnapshot ?? deleted
     guard let fallback else {

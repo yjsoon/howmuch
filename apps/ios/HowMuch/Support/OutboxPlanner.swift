@@ -8,6 +8,17 @@
 import Foundation
 
 enum OutboxPlanner {
+  /// A row is its id within one connection: two servers, plans or users can
+  /// each hold a row with the same id, and their commands never meet.
+  struct RowKey: Hashable, Comparable {
+    let connection: String
+    let transactionID: String
+
+    static func < (lhs: RowKey, rhs: RowKey) -> Bool {
+      (lhs.connection, lhs.transactionID) < (rhs.connection, rhs.transactionID)
+    }
+  }
+
   // MARK: - Coalescing
 
   /// Adds `incoming` to `queue`, folding it into the transaction's queued
@@ -15,7 +26,7 @@ enum OutboxPlanner {
   /// that is not in flight, and never rewrites an in-flight command: a change
   /// made while one is on the wire queues behind it as a dependent.
   static func enqueue(_ incoming: OutboxCommand, onto queue: [OutboxCommand]) -> [OutboxCommand] {
-    let sameRow = queue.filter { $0.transactionID == incoming.transactionID }
+    let sameRow = queue.filter { $0.rowKey == incoming.rowKey }
     // A row on its way out takes no further changes, and a create for an id
     // already in the outbox is a replay of the same capture.
     if sameRow.contains(where: { if case .delete = $0.kind { return true }; return false }) {
@@ -29,7 +40,7 @@ enum OutboxPlanner {
     // An attempted command may already be on the server, so it is treated
     // like one on the wire: never rewritten, never cancelled.
     guard let index = next.lastIndex(where: {
-      $0.transactionID == incoming.transactionID && !$0.isInFlight && !$0.attempted
+      $0.rowKey == incoming.rowKey && !$0.isInFlight && !$0.attempted
     }) else {
       var appended = incoming
       appended.seq = (queue.map(\.seq).max() ?? 0) + 1
@@ -136,11 +147,11 @@ enum OutboxPlanner {
   /// order they were made; nothing for a row goes ahead of a create that
   /// the server refused.
   static func plan(_ queue: [OutboxCommand]) -> Plan {
-    var busy = Set(queue.filter(\.isInFlight).map(\.transactionID))
-    var refusedCreates: Set<String> = []
+    var busy = Set(queue.filter(\.isInFlight).map(\.rowKey))
+    var refusedCreates: Set<RowKey> = []
     for command in queue {
       if case .create = command.kind, case .rejected = command.state {
-        refusedCreates.insert(command.transactionID)
+        refusedCreates.insert(command.rowKey)
       }
     }
     var ready: [Stage: [OutboxCommand]] = [:]
@@ -152,12 +163,12 @@ enum OutboxPlanner {
       if case .delete = command.kind {
         waitsForCreate = false
       } else {
-        waitsForCreate = refusedCreates.contains(command.transactionID)
+        waitsForCreate = refusedCreates.contains(command.rowKey)
       }
-      if busy.contains(command.transactionID) || waitsForCreate {
+      if busy.contains(command.rowKey) || waitsForCreate {
         deferred.append(command)
       } else {
-        busy.insert(command.transactionID)
+        busy.insert(command.rowKey)
         ready[stage(of: command.kind), default: []].append(command)
       }
     }
@@ -259,9 +270,10 @@ enum OutboxPlanner {
       }
     }
 
-    let byRow = Dictionary(grouping: commands.sorted { $0.seq < $1.seq }, by: \.transactionID)
-    for id in byRow.keys.sorted() {
-      let rowCommands = byRow[id] ?? []
+    let byRow = Dictionary(grouping: commands.sorted { $0.seq < $1.seq }, by: \.rowKey)
+    for key in byRow.keys.sorted() {
+      let rowCommands = byRow[key] ?? []
+      let id = key.transactionID
       let known = rowsByID[id] ?? rowCommands.lazy.compactMap(\.baseSnapshot).first
       let before = known.flatMap { Shape(row: $0, rowsByID: rowsByID) }
       var after = before

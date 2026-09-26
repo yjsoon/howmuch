@@ -101,6 +101,11 @@ struct OutboxCommand: Codable, Equatable, Identifiable {
   var isInFlight: Bool {
     state == .inFlight
   }
+
+  /// The row this command is for: its id within its own connection.
+  var rowKey: OutboxPlanner.RowKey {
+    OutboxPlanner.RowKey(connection: connectionFingerprint, transactionID: transactionID)
+  }
 }
 
 extension TransactionWriteRequest {

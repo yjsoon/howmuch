@@ -18,12 +18,13 @@ final class OutboxPlannerTests: XCTestCase {
     _ kind: OutboxCommand.Kind,
     id transactionID: String = "t1",
     base: Transaction? = nil,
-    state: OutboxCommand.State = .queued
+    state: OutboxCommand.State = .queued,
+    connection: String = "fp"
   ) -> OutboxCommand {
     OutboxCommand(
       id: uuid(),
       transactionID: transactionID,
-      connectionFingerprint: "fp",
+      connectionFingerprint: connection,
       createdAt: epoch,
       kind: kind,
       state: state,
@@ -399,6 +400,59 @@ final class OutboxPlannerTests: XCTestCase {
 
   func testEmptyQueuePlansNothing() {
     XCTAssertEqual(OutboxPlanner.plan([]), OutboxPlanner.Plan(batches: [], deferred: []))
+  }
+
+  // MARK: - Connections
+
+  // Failure mode: two connections (servers, plans or users) can hold a row
+  // with the same id -- server ids are only unique per database. Matching on
+  // the id alone folds one connection's change into the other's command,
+  // cancels it, or holds it behind a command it does not depend on.
+
+  func testTheSameIDOnAnotherConnectionIsAnotherRow() {
+    let otherCreate = command(.create(request(amount: -1_000)), connection: "fp-other")
+    let edit = command(.update(request(amount: -2_000)))
+    let queue = OutboxPlanner.enqueue(edit, onto: [otherCreate])
+    XCTAssertEqual(queue.count, 2, "an edit here does not fold into another connection's create")
+    XCTAssertEqual(queue.first?.kind, .create(request(amount: -1_000)))
+
+    let deleting = [command(.delete(expectedApproved: nil), connection: "fp-other")]
+    XCTAssertEqual(
+      OutboxPlanner.enqueue(command(.approve), onto: deleting).count,
+      2,
+      "another connection's delete does not swallow this connection's change"
+    )
+    XCTAssertEqual(
+      OutboxPlanner.enqueue(command(.create(request())), onto: [otherCreate]).count,
+      2,
+      "a create here is not a replay of another connection's create"
+    )
+    let cancelled = OutboxPlanner.enqueue(command(.delete(expectedApproved: nil)), onto: [otherCreate])
+    XCTAssertEqual(cancelled.map(\.connectionFingerprint), ["fp-other", "fp"], "a delete here cancels nothing there")
+  }
+
+  func testPlanDoesNotHoldARowBehindAnotherConnection() {
+    var inFlight = command(.update(request()), connection: "fp-other")
+    inFlight.state = .inFlight
+    inFlight.seq = 1
+    var refused = attempted(command(.create(request()), id: "t2", connection: "fp-other"))
+    refused.state = .rejected(message: "Gone", code: 410)
+    refused.seq = 2
+    var here = command(.update(request()))
+    here.seq = 3
+    var hereToo = command(.approve, id: "t2")
+    hereToo.seq = 4
+    let plan = OutboxPlanner.plan([inFlight, refused, here, hereToo])
+    XCTAssertEqual(plan.batches.flatMap(\.commands).map(\.id), [here.id, hereToo.id])
+    XCTAssertEqual(plan.deferred, [])
+  }
+
+  func testBalanceDeltasCountEachConnectionsRowSeparately() {
+    let here = command(.create(request(account: "a1", amount: -1_000)))
+    let there = command(.create(request(account: "a2", amount: -3_000)), connection: "fp-other")
+    let deltas = OutboxPlanner.balanceDeltas([here, there], rowsByID: [:])
+    XCTAssertEqual(deltas["a1"], delta(balance: -1_000, uncleared: -1_000))
+    XCTAssertEqual(deltas["a2"], delta(balance: -3_000, uncleared: -3_000))
   }
 
   // MARK: - Outcomes
