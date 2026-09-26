@@ -194,7 +194,9 @@ final class SnapshotStore: @unchecked Sendable {
 
   private let fileManager: FileManager
   private let lock = NSLock()
-  private let ioQueue = DispatchQueue(label: "sg.soon.howmuch.reference-snapshot")
+  /// Internal rather than private so tests can hold the writer while they
+  /// queue several snapshots.
+  let ioQueue = DispatchQueue(label: "sg.soon.howmuch.reference-snapshot")
   private let encoder: JSONEncoder
   /// Used only on `ioQueue`, so the synchronous `save` never shares an encoder
   /// with a background drain.
@@ -209,6 +211,8 @@ final class SnapshotStore: @unchecked Sendable {
   /// encode and one write rather than one each.
   private var pendingWrite: (snapshot: ReferenceSnapshot, generation: Int)?
   private var isDrainQueued = false
+  /// Files written, guarded by `lock`; lets tests see that queued writes coalesce.
+  private var writtenCount = 0
 
   init(directory: URL, fileManager: FileManager = .default) {
     self.directory = directory
@@ -305,6 +309,12 @@ final class SnapshotStore: @unchecked Sendable {
     ioQueue.sync {}
   }
 
+  var completedWriteCount: Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return writtenCount
+  }
+
   /// Byte size of the snapshot on disk, or `nil` when there is none. Used to
   /// keep an eye on the cost of the cache.
   func fileSize() -> Int? {
@@ -328,6 +338,7 @@ final class SnapshotStore: @unchecked Sendable {
       // launch reading while this runs sees either the whole previous
       // snapshot or the whole new one, never a half-written file.
       try data.write(to: fileURL, options: .atomic)
+      writtenCount += 1
       return true
     } catch {
       return false

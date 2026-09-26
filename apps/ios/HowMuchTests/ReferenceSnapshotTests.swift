@@ -212,6 +212,21 @@ final class ReferenceSnapshotStoreTests: XCTestCase {
     XCTAssertEqual(store.load()?.serverKnowledge, 2, "coalesced writes must keep the newest snapshot")
   }
 
+  func testWritesQueuedBehindABusyWriterCoalesceIntoOne() {
+    let settings = SnapshotFixture.settings()
+    let release = DispatchSemaphore(value: 0)
+    store.ioQueue.async { release.wait() }
+
+    for knowledge in 1 ... 3 {
+      store.scheduleWrite(SnapshotFixture.snapshot(settings: settings, serverKnowledge: knowledge))
+    }
+    release.signal()
+    store.waitForPendingWrites()
+
+    XCTAssertEqual(store.completedWriteCount, 1, "snapshots queued behind one drain must be encoded and written once")
+    XCTAssertEqual(store.load()?.serverKnowledge, 3, "the one write must carry the newest snapshot")
+  }
+
   func testAWriteScheduledAfterADeleteStillLands() {
     let settings = SnapshotFixture.settings()
     store.scheduleWrite(SnapshotFixture.snapshot(settings: settings))

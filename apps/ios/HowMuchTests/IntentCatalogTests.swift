@@ -59,6 +59,22 @@ final class IntentCatalogTests: XCTestCase {
       ["payee-apple", "payee-avocado", "payee-banana"],
       "changing payees must re-sort, not serve the cached order"
     )
+
+    // Same IDs and count, new name: only a value-based check re-sorts this.
+    model.payees = model.payees.map { payee in
+      payee.id == "payee-banana"
+        ? Payee(id: payee.id, name: "Aardvark", transferAccountId: nil, deleted: false)
+        : payee
+    }
+    XCTAssertEqual(
+      model.payeesSortedByName.map(\.id),
+      ["payee-banana", "payee-apple", "payee-avocado"],
+      "a rename that moves a payee must re-sort"
+    )
+    XCTAssertEqual(model.payeesSortedByName.first?.name, "Aardvark", "the cached rows must carry the new name")
+
+    model.payees.removeAll { $0.id == "payee-apple" }
+    XCTAssertEqual(model.payeesSortedByName.map(\.id), ["payee-banana", "payee-avocado"])
   }
 
   func testPublishThenLoadMatchesOpenAccounts() {
