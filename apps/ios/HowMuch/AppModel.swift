@@ -1034,8 +1034,8 @@ final class AppModel {
       }
       accountUsageLast30Days = counts
       lastLoadedAccountUsage = (planID: planID, scope: scope, counts: counts)
-      // Loaded before the snapshot: `orderedAccounts` ranks by the previous
-      // counts until then, and the snapshot must record the order these give.
+      // Loaded before the snapshot, so the order it records comes from these
+      // counts through `accountUsageLast30Days`.
       accountUsagePhase = .loaded
       snapshotMostUsedAccountOrders()
     } catch {
