@@ -1006,7 +1006,6 @@ final class AppModel {
         return
       }
       accountUsageLast30Days = counts
-      snapshotMostUsedAccountOrders()
       accountUsagePhase = .loaded
     } catch {
       guard
@@ -1017,21 +1016,6 @@ final class AppModel {
         return
       }
       accountUsagePhase = .failed(error.localizedDescription)
-    }
-  }
-
-  private func snapshotMostUsedAccountOrders() {
-    var changed = false
-    for group in accountListGroups(includeEmptySystemGroups: true, includeEmptyCustomGroups: true)
-    where sortForAccountGroup(group.id) == .mostUsedLast30Days {
-      let order = group.accounts.map(\.id)
-      if viewPrefs.accountOrderByGroup[group.id] != order {
-        viewPrefs.accountOrderByGroup[group.id] = order
-        changed = true
-      }
-    }
-    if changed {
-      saveViewPrefs()
     }
   }
 
