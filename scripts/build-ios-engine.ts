@@ -91,6 +91,17 @@ function staleOutputs(expected: string, actual: string): string[] {
   return stale;
 }
 
+// The minifier's output changes between Bun releases, so the committed
+// bundle only reproduces with the version that built it.
+const ENGINE_BUN_VERSION = "1.4.0";
+if (Bun.version !== ENGINE_BUN_VERSION) {
+  console.error(
+    `The iOS engine must be built with Bun ${ENGINE_BUN_VERSION}; this is Bun ${Bun.version}.\n` +
+      `Install it with \`curl -fsSL https://bun.sh/install | bash -s bun-v${ENGINE_BUN_VERSION}\`.`,
+  );
+  process.exit(1);
+}
+
 const mode = process.argv[2] ?? "build";
 if (mode === "build") {
   await writeOutputs(outputRoot);
