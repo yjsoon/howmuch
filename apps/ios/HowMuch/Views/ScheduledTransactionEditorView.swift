@@ -691,7 +691,7 @@ private struct ScheduledSplitPayeePicker: View {
         }
       }
       Section("Payees") {
-        ForEach(model.payees.filter { !$0.isTransferPayee }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) { payee in
+        ForEach(model.payeesSortedByName.filter { !$0.isTransferPayee }) { payee in
           Button {
             line.payeeID = payee.id
             line.transferAccountID = nil
@@ -788,7 +788,7 @@ private struct ScheduledPayeePicker: View {
         }
       }
       Section("Payees") {
-        ForEach(model.payees.filter { !$0.isTransferPayee }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) { payee in
+        ForEach(model.payeesSortedByName.filter { !$0.isTransferPayee }) { payee in
           Button {
             draft.payeeID = payee.id
             draft.transferAccountID = nil

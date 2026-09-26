@@ -196,9 +196,12 @@ struct RewardCardDraft: Equatable {
   var subcategoriesEnabled = false
   private var originalCard: CreditCard?
 
+  /// Read on every edit keystroke, so the formatter is built once.
   static var nowISO: String {
-    ISO8601DateFormatter().string(from: Date())
+    isoFormatter.string(from: Date())
   }
+
+  private static let isoFormatter = ISO8601DateFormatter()
 
   static func numberText(_ value: Double?) -> String {
     guard let value else {

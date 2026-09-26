@@ -21,6 +21,8 @@ interface Env {
   HOWMUCH_YNAB_PLAN_ID?: string;
   HOWMUCH_TRANSITION_READ_ONLY?: string;
   HOWMUCH_REDIRECT_TARGET?: string;
+  TYPESAFE_API_KEY?: string;
+  TYPESAFE_MODEL?: string;
 }
 
 const APP_SITE_ASSOCIATION = JSON.stringify({
@@ -107,6 +109,8 @@ function workerConfig(env: Env): ApiConfig & { timeZone: string } {
     transitionReadOnly: env.HOWMUCH_TRANSITION_READ_ONLY === "true",
     ynabToken: optional(env.HOWMUCH_YNAB_TOKEN),
     ynabPlanId: optional(env.HOWMUCH_YNAB_PLAN_ID),
+    typesafeApiKey: optional(env.TYPESAFE_API_KEY),
+    typesafeModel: optional(env.TYPESAFE_MODEL),
     timeZone: required(env.HOWMUCH_TIME_ZONE, "HOWMUCH_TIME_ZONE"),
   };
 }

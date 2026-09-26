@@ -5,22 +5,27 @@ struct PayeePickerView: View {
   @Environment(\.dismiss) private var dismiss
   @Binding var draft: TransactionDraft
   @State private var searchText = ""
-  /// Arriving with search already presented focuses the field declaratively —
-  /// typing is the primary gesture here, and an imperative focus request
-  /// would race the navigation push.
-  @State private var isSearchPresented = true
+  /// Typing is the primary gesture here, so the field takes focus on arrival.
+  /// It is an ordinary inline field, not system search: `.searchable` with
+  /// `isPresented` presents a UISearchController as the picker arrives, and a
+  /// payee tapped while that presentation is in flight either did nothing or
+  /// popped the picker and left its search stranded over the form.
+  @FocusState private var isSearchFocused: Bool
 
   var body: some View {
-    let recents = recentPayees
+    let query = trimmedSearch
+    let recents = recentPayees(query: query)
+    let payees = filteredPayees(query: query)
+    let transferPayees = filteredTransferPayees(query: query)
     List {
-      if !trimmedSearch.isEmpty, !hasExactMatch {
+      if !query.isEmpty, !hasExactMatch(query) {
         Button {
           draft.payeeID = nil
-          draft.payeeName = trimmedSearch
+          draft.payeeName = query
           draft.transferAccountID = nil
           dismiss()
         } label: {
-          Label("Create payee “\(trimmedSearch)”", systemImage: "plus.circle.fill")
+          Label("Create payee “\(query)”", systemImage: "plus.circle.fill")
             .foregroundStyle(Theme.accent)
         }
       }
@@ -33,17 +38,17 @@ struct PayeePickerView: View {
         }
       }
 
-      if !filteredPayees.isEmpty {
+      if !payees.isEmpty {
         Section("Payees") {
-          ForEach(filteredPayees) { payee in
+          ForEach(payees) { payee in
             payeeRow(payee)
           }
         }
       }
 
-      if !filteredTransferPayees.isEmpty {
+      if !transferPayees.isEmpty {
         Section("Transfers") {
-          ForEach(filteredTransferPayees) { payee in
+          ForEach(transferPayees) { payee in
             payeeRow(payee)
           }
         }
@@ -52,20 +57,20 @@ struct PayeePickerView: View {
     .listStyle(.insetGrouped)
     .scrollContentBackground(.hidden)
     .background(Theme.canvas)
-    .searchable(
-      text: $searchText,
-      isPresented: $isSearchPresented,
-      placement: .navigationBarDrawer(displayMode: .always),
-      prompt: "Search or add a payee"
-    )
+    .safeAreaInset(edge: .top, spacing: 0) {
+      PickerSearchField(prompt: "Search or add a payee", text: $searchText, isFocused: $isSearchFocused)
+    }
     .navigationTitle("Payee")
     .navigationBarTitleDisplayMode(.inline)
+    .onAppear {
+      isSearchFocused = true
+    }
   }
 
   /// The payees most recently used in the ledger — most expenses repeat, so
   /// the last few merchants outrank the alphabet. Hidden while searching.
-  private var recentPayees: [Payee] {
-    guard trimmedSearch.isEmpty else {
+  private func recentPayees(query: String) -> [Payee] {
+    guard query.isEmpty else {
       return []
     }
     let payeesByID = Dictionary(model.payees.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -108,21 +113,20 @@ struct PayeePickerView: View {
     searchText.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
-  private var filteredPayees: [Payee] {
-    model.payees
-      .filter { !$0.isTransferPayee }
-      .filter { trimmedSearch.isEmpty || $0.name.localizedStandardContains(trimmedSearch) }
-      .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+  private func filteredPayees(query: String) -> [Payee] {
+    model.payeesSortedByName.filter { payee in
+      !payee.isTransferPayee && (query.isEmpty || payee.name.localizedStandardContains(query))
+    }
   }
 
   /// Other accounts' transfer payees; picking one records a transfer and the
   /// API creates the mirrored side (YNAB behaviour). A split parent cannot
   /// itself be a transfer, so splits get no Transfers section.
-  private var filteredTransferPayees: [Payee] {
+  private func filteredTransferPayees(query: String) -> [Payee] {
     guard !draft.isSplit else {
       return []
     }
-    return model.payees
+    return model.payeesSortedByName
       .filter { payee in
         guard let targetAccountID = payee.transferAccountId, targetAccountID != draft.accountID else {
           return false
@@ -132,12 +136,11 @@ struct PayeePickerView: View {
         }
         return !account.closed
       }
-      .filter { trimmedSearch.isEmpty || $0.name.localizedStandardContains(trimmedSearch) }
-      .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+      .filter { query.isEmpty || $0.name.localizedStandardContains(query) }
   }
 
-  private var hasExactMatch: Bool {
-    model.payees.contains { $0.name.localizedCaseInsensitiveCompare(trimmedSearch) == .orderedSame }
+  private func hasExactMatch(_ query: String) -> Bool {
+    model.payees.contains { $0.name.localizedCaseInsensitiveCompare(query) == .orderedSame }
   }
 
   private func select(_ payee: Payee) {
@@ -254,6 +257,48 @@ struct AccountPickerView: View {
   }
 }
 
+/// Inline search field pinned above a picker list: magnifying glass, rounded
+/// field and a clear button, as the HIG describes for a search field. Unlike
+/// `.searchable`, focusing it presents nothing, so a row tapped while the
+/// picker is still arriving cannot race a search presentation.
+struct PickerSearchField: View {
+  let prompt: String
+  @Binding var text: String
+  var isFocused: FocusState<Bool>.Binding
+
+  var body: some View {
+    HStack(spacing: 8) {
+      Image(systemName: "magnifyingglass")
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+      TextField(prompt, text: $text)
+        .focused(isFocused)
+        .submitLabel(.search)
+        .foregroundStyle(Theme.textPrimary)
+        .accessibilityAddTraits(.isSearchField)
+      if !text.isEmpty {
+        Button {
+          text = ""
+        } label: {
+          Image(systemName: "xmark.circle.fill")
+            .foregroundStyle(.secondary)
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Clear text")
+      }
+    }
+    .padding(.leading, 14)
+    .padding(.trailing, text.isEmpty ? 14 : 0)
+    .frame(minHeight: 44)
+    .background(Theme.surfaceMuted, in: Capsule())
+    .padding(.horizontal, 16)
+    .padding(.vertical, 8)
+    .background(Theme.canvas)
+  }
+}
+
 /// Checkmark row shared by the searchable grouped pickers.
 struct PickerCheckRow: View {
   let title: String
@@ -286,7 +331,8 @@ struct CategorisedPickerList<Group: Identifiable, Item: Identifiable, Header: Vi
   var title: String
   let onSelect: (Item) -> Void
   let header: () -> Header
-  @State private var isSearchPresented: Bool
+  let presentsSearchOnAppear: Bool
+  @FocusState private var isSearchFocused: Bool
 
   init(
     groups: [Group],
@@ -313,7 +359,7 @@ struct CategorisedPickerList<Group: Identifiable, Item: Identifiable, Header: Vi
     self.title = title
     self.onSelect = onSelect
     self.header = header
-    _isSearchPresented = State(initialValue: presentsSearchOnAppear)
+    self.presentsSearchOnAppear = presentsSearchOnAppear
   }
 
   var body: some View {
@@ -336,14 +382,17 @@ struct CategorisedPickerList<Group: Identifiable, Item: Identifiable, Header: Vi
     .listStyle(.insetGrouped)
     .scrollContentBackground(.hidden)
     .background(Theme.canvas)
-    .searchable(
-      text: $searchText,
-      isPresented: $isSearchPresented,
-      placement: .navigationBarDrawer(displayMode: .always),
-      prompt: searchPrompt
-    )
+    .safeAreaInset(edge: .top, spacing: 0) {
+      PickerSearchField(prompt: searchPrompt, text: $searchText, isFocused: $isSearchFocused)
+    }
     .navigationTitle(title)
     .navigationBarTitleDisplayMode(.inline)
+    .onAppear {
+      // Inline focus, not a presented search controller; see PayeePickerView.
+      if presentsSearchOnAppear {
+        isSearchFocused = true
+      }
+    }
   }
 }
 

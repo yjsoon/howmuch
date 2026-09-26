@@ -882,7 +882,10 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
       let frame: CGRect
     }
 
+    /// Runs on every display tick, so only the labels `addPinFrame` reads pay
+    /// for the frame and exposure checks; each exposure check walks the window.
     private func accessibilityPins(in window: UIWindow) -> [AccessibilityPin] {
+      let pinLabels: Set<String> = [AppTab.accounts.title, CompactRootBar.action.title]
       var pins: [AccessibilityPin] = []
       var seen = Set<ObjectIdentifier>()
       func collect(_ object: NSObject) {
@@ -898,7 +901,7 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
           return
         }
         let label = object.accessibilityLabel ?? ""
-        if !label.isEmpty,
+        if pinLabels.contains(label),
            let frame = accessibilityFrame(of: object, in: window),
            frame.width > 1 || frame.height > 1,
            isExposed(object, frame: frame, in: window)

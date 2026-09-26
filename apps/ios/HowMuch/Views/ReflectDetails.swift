@@ -498,8 +498,9 @@ struct SpendingBreakdownDetailView: View {
           if rows.isEmpty {
             ReflectMaths.emptyRange(title: "No Spending", systemImage: "chart.pie")
           } else {
+            let maxAmount = rows.map { abs($0.amount) }.max() ?? 1
             ForEach(ReflectMaths.groupSections(rows)) { section in
-              groupSection(section, total: total, maxAmount: rows.map { abs($0.amount) }.max() ?? 1)
+              groupSection(section, total: total, maxAmount: maxAmount)
             }
           }
         } else {

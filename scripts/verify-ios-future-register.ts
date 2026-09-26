@@ -39,8 +39,25 @@ if (!appModel.includes("olderTransactionsError = error.localizedDescription")
   failures.push("Focused account fill still swallows fetch errors with no Try Again path.");
 }
 
-if (!appModel.includes("olderTransactionsError = nil\n\n    let horizon = RegisterHorizon.standard")
-  && !appModel.includes("olderTransactionsError = nil\n    let horizon = RegisterHorizon.standard")) {
+// The focused-account fill must clear a stale load error both when it fetches
+// and when a completed fill for the same ledger generation lets it skip the
+// fetch. Checked within the function rather than against exact neighbouring
+// lines, so moving a declaration cannot break it.
+const fillSignature = "private func fillFocusedAccountHorizon(generation: Int, planID: String) async {";
+const fillStart = appModel.indexOf(fillSignature);
+const fillEnd = fillStart < 0 ? -1 : appModel.indexOf("\n  }\n", fillStart);
+const fillBody = fillStart < 0 || fillEnd < 0 ? "" : appModel.slice(fillStart, fillEnd);
+const fetchLoop = fillBody.indexOf("while horizon.shouldFetchMore(");
+const pushFill = fillBody.indexOf("pushHorizonFill()");
+const memoHit = fillBody.indexOf("completedAccountHorizonFills[accountID] == fillKey");
+const memoReturn = memoHit < 0 ? -1 : fillBody.indexOf("return", memoHit);
+if (
+  fetchLoop < 0
+  || pushFill < 0
+  || pushFill > fetchLoop
+  || !fillBody.slice(pushFill, fetchLoop).includes("olderTransactionsError = nil")
+  || (memoHit >= 0 && !fillBody.slice(memoHit, memoReturn).includes("olderTransactionsError = nil"))
+) {
   failures.push("Focused account fill never clears a stale load error after a later successful fill.");
 }
 

@@ -88,6 +88,20 @@ final class AppModel {
   /// This is separate from `transactions`, which is intentionally paged for
   /// the register and may not contain every transaction in that window.
   private(set) var accountUsageLast30Days: [String: Int] = [:]
+  /// The last counts a scan loaded, kept across `invalidateAccountUsage()` so
+  /// "Most used" groups hold their order while the next scan runs. Read only
+  /// alongside observed usage state, which changes whenever this does.
+  @ObservationIgnored private var lastLoadedAccountUsage: (planID: String, scope: String?, counts: [String: Int])?
+
+  private var lastLoadedAccountUsageForCurrentScope: [String: Int] {
+    guard let last = lastLoadedAccountUsage,
+          last.planID == settings.planID,
+          last.scope == activeViewPrefsScope
+    else {
+      return [:]
+    }
+    return last.counts
+  }
   private(set) var accountUsagePhase: LoadPhase = .idle
   /// Invalidates the Accounts view's usage task after a ledger or connection
   /// refresh, so a loaded 30-day ranking never survives changed source data.
@@ -165,6 +179,12 @@ final class AppModel {
   /// than becoming a session-long blacklist.
   @ObservationIgnored private var inFlightLedgerReads: [Int: Int] = [:]
   @ObservationIgnored private var ledgerDeletes: [LedgerDelete] = []
+  /// Account ID → the `generation|planID|startDate` its horizon fill last
+  /// completed against. See `fillFocusedAccountHorizon(generation:planID:)`.
+  @ObservationIgnored private var completedAccountHorizonFills: [String: String] = [:]
+  /// Bumped when a ledger refresh replaces the loaded rows, so a fill that was
+  /// running across the replacement does not record itself as complete.
+  @ObservationIgnored private var ledgerRowsReplacedCount = 0
   /// Latest plan cursor seen on a ledger fetch. Changes made on another
   /// device advance it, which is how the reports cache (#180) notices them.
   private(set) var serverKnowledge: Int?
@@ -301,7 +321,7 @@ final class AppModel {
 
   /// Writes the current reference set, tagged with the cursor the last ledger
   /// fetch observed. Called from every slice's success path; the store
-  /// coalesces and encodes off the main actor.
+  /// coalesces queued writes and encodes off the main actor.
   private func persistSnapshot() {
     guard settings.isAuthenticated,
           !settings.planID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -551,7 +571,9 @@ final class AppModel {
       accounts.append(created)
       rebuildLookups()
     }
-    await refresh(after: .accountCreated)
+    // The new account is already applied, so the sheet need not wait for the
+    // follow-up read (as with `updateAccount`).
+    scheduleRefresh(after: .accountCreated)
     showSaveMessage("Added \(created.name)")
     return created
   }
@@ -761,9 +783,14 @@ final class AppModel {
     case .alphabetical:
       return source.sorted(by: accountNameOrder)
     case .mostUsedLast30Days:
+      // Every ledger refresh drops the counts and rescans them. Until they are
+      // back, rank by the last counts this plan and scope loaded rather than
+      // flashing the group into name order and back. Never the manual drag
+      // order, which shares `accountOrderByGroup`.
+      let usage = accountUsagePhase == .loaded ? accountUsageLast30Days : lastLoadedAccountUsageForCurrentScope
       return source.sorted { first, second in
-        let firstUsage = accountUsageLast30Days[first.id, default: 0]
-        let secondUsage = accountUsageLast30Days[second.id, default: 0]
+        let firstUsage = usage[first.id, default: 0]
+        let secondUsage = usage[second.id, default: 0]
         if firstUsage != secondUsage {
           return firstUsage > secondUsage
         }
@@ -1006,8 +1033,11 @@ final class AppModel {
         return
       }
       accountUsageLast30Days = counts
-      snapshotMostUsedAccountOrders()
+      lastLoadedAccountUsage = (planID: planID, scope: scope, counts: counts)
+      // Loaded before the snapshot, so the order it records comes from these
+      // counts through `accountUsageLast30Days`.
       accountUsagePhase = .loaded
+      snapshotMostUsedAccountOrders()
     } catch {
       guard
         planID == settings.planID,
@@ -1139,6 +1169,23 @@ final class AppModel {
     payeesByID[id]
   }
 
+  @ObservationIgnored private var payeesSortedByNameCache: (source: [Payee], locale: String, sorted: [Payee])?
+
+  /// `payees` in picker order, sorted once per change rather than on every
+  /// picker render and keystroke. Reading `payees` keeps observation intact,
+  /// and an unchanged array compares equal by identity without a scan. The
+  /// comparison is locale-aware, so a language or region change re-sorts.
+  var payeesSortedByName: [Payee] {
+    let source = payees
+    let locale = Locale.current.identifier
+    if let cache = payeesSortedByNameCache, cache.locale == locale, cache.source == source {
+      return cache.sorted
+    }
+    let sorted = source.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    payeesSortedByNameCache = (source: source, locale: locale, sorted: sorted)
+    return sorted
+  }
+
   func overlaying(_ rows: [Transaction]) -> [Transaction] {
     overlayingApproval(on: overlayingClearedToggles(on: overlayingPendingEdits(on: rows)))
   }
@@ -1172,14 +1219,23 @@ final class AppModel {
     // the next count of this scope reconciles it.
     let since = locallyResolvedUnapprovedIDs.subtracting(confirmedWhenCounted[countScopeKey(accountID)] ?? [])
     guard let accountID else { return since.count }
+    guard !since.isEmpty else { return 0 }
+    // One pass over the rows instead of a linear search per resolved ID. The
+    // ledger's row wins over the queue's, as the old `first ?? first` did.
+    var accountByID: [String: String] = [:]
+    for row in serverUnapprovedTransactions where since.contains(row.id) {
+      accountByID[row.id] = accountByID[row.id] ?? row.accountID
+    }
+    var ledgerSeen = Set<String>()
+    for row in serverTransactions where since.contains(row.id) && ledgerSeen.insert(row.id).inserted {
+      accountByID[row.id] = row.accountID
+    }
     return since.count { id in
       // A rejected row is gone from both arrays, so its account was recorded.
       if let rejectedFrom = rejectedUnapprovedAccounts[id] {
         return rejectedFrom == accountID
       }
-      let row = serverTransactions.first { $0.id == id }
-        ?? serverUnapprovedTransactions.first { $0.id == id }
-      return row?.accountID == accountID
+      return accountByID[id] == accountID
     }
   }
 
@@ -1317,11 +1373,19 @@ final class AppModel {
     }
   }
 
+  /// `RegisterApproval.looksApproved` per row, with the session's union taken once.
+  /// Rows the server already reports approved need no copy, so once they all
+  /// do, reads return the array as is.
   private func overlayingApproval(on rows: [Transaction]) -> [Transaction] {
-    guard !RegisterApproval.resolvedIDs(approvalSession).isEmpty else {
+    let resolved = RegisterApproval.resolvedIDs(approvalSession)
+    guard !resolved.isEmpty,
+          rows.contains(where: { !$0.approved && resolved.contains($0.id) })
+    else {
       return rows
     }
-    return rows.map { $0.applyingApproval(session: approvalSession) }
+    return rows.map { row in
+      !row.approved && resolved.contains(row.id) ? row.withApproved(true) : row
+    }
   }
 
   /// Editor overrides belong to the pre-save read generation, not a value:
@@ -1788,6 +1852,10 @@ final class AppModel {
         responseRowIDs: fetchedFirstPage.map(\.id)
       )
       if !applyIsRedundant {
+        // Rows are replaced below, so a fill that completed (or is still
+        // running) under this generation no longer describes them.
+        completedAccountHorizonFills.removeAll()
+        ledgerRowsReplacedCount &+= 1
         // Mutation refreshes must not drop already-loaded rows; List would clamp to top.
         // Provisional rows are the exception, in both directions: the response
         // must displace every row the snapshot put up (merging would keep rows
@@ -2156,7 +2224,8 @@ final class AppModel {
       scheduledTransactions.append(result.scheduledTransaction)
       scheduledTransactions.sort { ($0.dateNext, $0.id) < ($1.dateNext, $1.id) }
     }
-    await refresh(after: .scheduledOccurrenceEntered(isTransfer: isTransfer(result.transaction)))
+    // Both halves are applied above; the follow-up read runs behind the dismissal.
+    scheduleRefresh(after: .scheduledOccurrenceEntered(isTransfer: isTransfer(result.transaction)))
     showSaveMessage(result.completed ? "Entered final scheduled transaction" : "Entered scheduled transaction")
     return result
   }
@@ -2183,6 +2252,8 @@ final class AppModel {
       accounts[index] = result.account
       rebuildLookups()
     }
+    // Waits, unlike the other saves: until the read lands, rows would still
+    // show as merely cleared (and tappable) and any adjustment would be missing.
     await refresh(after: .accountReconciled)
 
     let accountName = result.account.name
@@ -2222,6 +2293,19 @@ final class AppModel {
     guard let accountID = focusedRegisterAccountIDs.last else {
       return
     }
+    let horizon = RegisterHorizon.standard
+    let startDate = horizon.startDate()
+    // A quiet account's rows all sit inside the horizon, so the loop below
+    // would refetch it on every appearance. Once a fill has completed against
+    // this ledger generation, nothing it could fetch has changed: a refresh
+    // that replaces the rows bumps the generation first.
+    let fillKey = "\(generation)|\(planID)|\(startDate)"
+    if completedAccountHorizonFills[accountID] == fillKey {
+      // Reappearing still clears a stale error, as a fresh fill would.
+      olderTransactionsError = nil
+      return
+    }
+    let replacedCountAtStart = ledgerRowsReplacedCount
     let ownsFill = horizonFillCount == 0
     if ownsFill {
       pushHorizonFill()
@@ -2234,8 +2318,6 @@ final class AppModel {
 
     olderTransactionsError = nil
 
-    let horizon = RegisterHorizon.standard
-    let startDate = horizon.startDate()
     var loaded = serverTransactions.filter { $0.accountID == accountID }
     var offset = 0
     var hasMore = true
@@ -2271,6 +2353,11 @@ final class AppModel {
         olderTransactionsError = error.localizedDescription
         return
       }
+    }
+    if generation == ledgerPageGeneration,
+       planID == settings.planID,
+       replacedCountAtStart == ledgerRowsReplacedCount {
+      completedAccountHorizonFills[accountID] = fillKey
     }
   }
 
