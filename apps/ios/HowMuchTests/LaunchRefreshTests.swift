@@ -295,7 +295,7 @@ final class RefreshAllDedupeTests: XCTestCase {
 
     var captureFinished = false
     let capture = Task {
-      await model.refreshAll()
+      await model.refreshAll(joinInFlight: true)
       captureFinished = true
     }
     // Give the joiner every chance to issue its own request before releasing.
@@ -315,8 +315,79 @@ final class RefreshAllDedupeTests: XCTestCase {
     XCTAssertEqual(model.settings.planID, RefreshAllProbeProtocol.solePlanID)
 
     // Only an in-flight run is shared: a later call is a fresh refresh.
-    await model.refreshAll()
+    await model.refreshAll(joinInFlight: true)
     XCTAssertEqual(RefreshAllProbeProtocol.plansRequestCount(), 2)
+  }
+
+  /// Joining is opt-in. A caller that has just changed server state (an
+  /// import, a settings save) must start its own run even while another is in
+  /// flight, and the superseded run must not clear the newer run's record.
+  func testRefreshAllWithoutJoinStartsAFreshRunWhileOneIsInFlight() async {
+    RefreshAllProbeProtocol.holdPlans()
+    let model = coldModel()
+
+    let launch = Task { await model.refreshAll() }
+    let launchAsked = await waitUntil { RefreshAllProbeProtocol.plansRequestCount() == 1 }
+    XCTAssertTrue(launchAsked, "the launch refresh must be waiting on GET /v1/plans")
+
+    let fresh = Task { await model.refreshAll() }
+    let freshAsked = await waitUntil { RefreshAllProbeProtocol.plansRequestCount() == 2 }
+    XCTAssertTrue(
+      freshAsked,
+      "a refreshAll() without joinInFlight must start its own run, not wait on the one already in flight"
+    )
+
+    // Answer only the launch run's plans request: it finishes while the fresh
+    // run is still parked, so a run that cleared a newer run's record would
+    // show up here.
+    RefreshAllProbeProtocol.releaseOldest()
+    await launch.value
+    XCTAssertTrue(
+      model.isRefreshingAll,
+      "the superseded launch run must not clear the in-flight record the newer run owns"
+    )
+    XCTAssertEqual(
+      RefreshAllProbeProtocol.plansRequestCount(),
+      2,
+      "the fresh run must still be waiting on its own GET /v1/plans"
+    )
+
+    RefreshAllProbeProtocol.release()
+    await fresh.value
+    XCTAssertFalse(model.isRefreshingAll)
+    XCTAssertEqual(RefreshAllProbeProtocol.plansRequestCount(), 2)
+  }
+
+  /// The run clears its own in-flight record as its last step, so a caller
+  /// resuming from a join never observes a stale record: its next call starts
+  /// a fresh run instead of waiting on an already-finished task.
+  func testInFlightRecordClearsBeforeTheStartingCallerResumes() async {
+    RefreshAllProbeProtocol.holdPlans()
+    let model = coldModel()
+
+    let launch = Task { await model.refreshAll() }
+    let launchAsked = await waitUntil { RefreshAllProbeProtocol.plansRequestCount() == 1 }
+    XCTAssertTrue(launchAsked, "the launch refresh must be waiting on GET /v1/plans")
+
+    // The capture path joins the launch run. It resumes the instant that run
+    // finishes, before the starting caller's `await task.value` continuation.
+    let capture = Task { @MainActor in
+      await model.refreshAll(joinInFlight: true)
+      await model.refreshAll(joinInFlight: true)
+    }
+    // Let the capture call park on the launch run before it is released.
+    try? await Task.sleep(nanoseconds: 300_000_000)
+
+    RefreshAllProbeProtocol.release()
+    await launch.value
+    await capture.value
+
+    XCTAssertEqual(
+      RefreshAllProbeProtocol.plansRequestCount(),
+      2,
+      "once the joined run finished, the next refreshAll() must start a fresh run, not wait on a finished task"
+    )
+    XCTAssertFalse(model.isRefreshingAll)
   }
 
   func testFailedPlanResolutionStopsTheCaptureWait() async {
@@ -420,6 +491,17 @@ private final class RefreshAllProbeLog: @unchecked Sendable {
     return released
   }
 
+  /// Removes and returns the oldest parked request, leaving the rest held
+  /// (`holdingPlans` stays set, so later requests keep parking).
+  func releaseOldest() -> RefreshAllProbeProtocol? {
+    lock.lock()
+    defer { lock.unlock() }
+    guard !parked.isEmpty else {
+      return nil
+    }
+    return parked.removeFirst()
+  }
+
   func plansRequestCount() -> Int {
     lock.lock()
     defer { lock.unlock() }
@@ -451,6 +533,11 @@ private final class RefreshAllProbeProtocol: URLProtocol {
     for request in RefreshAllProbeLog.shared.release() {
       request.answerPlans()
     }
+  }
+
+  /// Answers only the oldest parked plans request, leaving the rest held.
+  static func releaseOldest() {
+    RefreshAllProbeLog.shared.releaseOldest()?.answerPlans()
   }
 
   static func plansRequestCount() -> Int {
