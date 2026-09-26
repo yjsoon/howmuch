@@ -310,26 +310,31 @@ struct AddTransactionsView: View {
       }
       .onChange(of: jumpToMessage) { _, id in
         if let id {
-          withAnimation {
+          withAnimation(Theme.Motion.standard) {
             proxy.scrollTo(id, anchor: .top)
           }
           jumpToMessage = nil
         }
       }
       .overlay(alignment: .bottom) {
-        if showJumpToLatest, !isNearBottom {
-          Button("New response") {
-            showJumpToLatest = false
-            isNearBottom = true
-            revealLatest(proxy)
+        // Animate only the pill; the transcript underneath keeps its own timing.
+        VStack {
+          if showJumpToLatest, !isNearBottom {
+            Button("New response") {
+              showJumpToLatest = false
+              isNearBottom = true
+              revealLatest(proxy)
+            }
+            .font(.subheadline.weight(.semibold))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .glassEffect(.regular.interactive(), in: .capsule)
+            .padding(.bottom, 8)
+            .accessibilityLabel("Jump to latest response")
+            .transition(.move(edge: .bottom).combined(with: .opacity))
           }
-          .font(.subheadline.weight(.semibold))
-          .padding(.horizontal, 14)
-          .padding(.vertical, 8)
-          .background(Theme.card, in: Capsule())
-          .padding(.bottom, 8)
-          .accessibilityLabel("Jump to latest response")
         }
+        .animation(Theme.Motion.standard, value: showJumpToLatest && !isNearBottom)
       }
     }
   }
@@ -498,7 +503,7 @@ struct AddTransactionsView: View {
   }
 
   private func revealLatest(_ proxy: ScrollViewProxy) {
-    withAnimation {
+    withAnimation(Theme.Motion.standard) {
       proxy.scrollTo("conversation-end", anchor: .bottom)
     }
   }

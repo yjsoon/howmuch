@@ -6,6 +6,7 @@ struct AssistantView: View {
   @State private var brief: LedgerQueryResult?
   @State private var briefError: String?
   @State private var isLoadingBrief = false
+  @State private var briefScopeKey: String?
   @State private var pendingDiscardID: UUID?
   @State private var isConfirmingClear = false
   @State private var briefDay: String?
@@ -42,6 +43,13 @@ struct AssistantView: View {
     )) {
       workspace.activate(scopeKey: model.settings.viewPrefsScopeKey)
       await loadBrief()
+    }
+    .task {
+      // Keep Today honest across midnight, including an app left open.
+      // iOS posts this on wake if the device slept through the change.
+      for await _ in NotificationCenter.default.notifications(named: .NSCalendarDayChanged) {
+        await loadBrief()
+      }
     }
     .onChange(of: workspace.pendingAssistantSessionID) { _, id in
       if let id {
@@ -110,6 +118,7 @@ struct AssistantView: View {
         }
       }
       .padding(16)
+      .animation(Theme.Motion.standard, value: workspace.recents.map(\.id))
     }
   }
 
@@ -117,7 +126,9 @@ struct AssistantView: View {
     VStack(alignment: .leading, spacing: 8) {
       Text("Today")
         .font(.headline)
-      if isLoadingBrief {
+      // A refresh keeps the last brief on screen rather than flashing the
+      // loading line every time the Assistant reappears.
+      if isLoadingBrief, brief == nil {
         Text("Loading recorded spending…")
           .font(.subheadline)
           .foregroundStyle(.secondary)
@@ -180,10 +191,14 @@ struct AssistantView: View {
       } label: {
         Image(systemName: "trash")
           .foregroundStyle(Theme.outflow)
+          .frame(width: 44, height: 44)
+          .contentShape(Rectangle())
       }
       .accessibilityLabel("Discard this conversation")
     }
-    .padding(12)
+    .padding(.leading, 16)
+    .padding(.trailing, 4)
+    .padding(.vertical, 8)
     .ynabCard()
   }
 
@@ -230,6 +245,14 @@ struct AssistantView: View {
     let settingsScope = model.settings.viewPrefsScopeKey
     let workspaceScope = workspace.activeScopeKey
     let planID = model.settings.planID
+    // A refresh keeps the last brief visible, but never one from another
+    // plan, scope or day (yesterday's "today" figure must not linger).
+    let scopeKey = "\(planID)|\(settingsScope ?? "")|\(workspaceScope ?? "")|\(Date.now.isoDateString)"
+    if briefScopeKey != scopeKey {
+      brief = nil
+      briefError = nil
+      briefScopeKey = scopeKey
+    }
     isLoadingBrief = true
     func stillCurrent() -> Bool {
       generation == briefGeneration
@@ -241,6 +264,20 @@ struct AssistantView: View {
       if stillCurrent() {
         isLoadingBrief = false
       }
+    }
+    // A request that straddles midnight must not publish yesterday's
+    // "today"; the day-change reload fetches the new day instead.
+    let startDay = Date.now.isoDateString
+    func canCommit() -> Bool {
+      guard stillCurrent() else {
+        return false
+      }
+      if Date.now.isoDateString != startDay {
+        brief = nil
+        briefError = nil
+        return false
+      }
+      return true
     }
     let spec = LedgerQuerySpec(
       kind: .today,
@@ -256,7 +293,7 @@ struct AssistantView: View {
       categoryGroups: model.categoryGroups
     ) {
     case .failure(let error):
-      guard stillCurrent() else {
+      guard canCommit() else {
         return
       }
       briefError = error.localizedDescription
@@ -270,7 +307,7 @@ struct AssistantView: View {
           accountIDs: resolution.accountIDs,
           categoryIDs: resolution.categoryIDs
         )
-        guard stillCurrent() else {
+        guard canCommit() else {
           return
         }
         let total = LedgerQueryPlanner.recordedSpendingTotal(
@@ -286,7 +323,7 @@ struct AssistantView: View {
           planID: planID,
           generation: generation
         )
-        guard stillCurrent() else {
+        guard canCommit() else {
           return
         }
         brief = LedgerQueryResult(
@@ -307,7 +344,7 @@ struct AssistantView: View {
         briefDay = resolution.from
         briefError = nil
       } catch {
-        guard stillCurrent() else {
+        guard canCommit() else {
           return
         }
         brief = nil

@@ -4,8 +4,14 @@ import UIKit
 extension View {
   /// White rounded card, the basic YNAB surface.
   func ynabCard() -> some View {
-    background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-      .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+      .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+  }
+
+  /// Numbers that roll digit by digit when `value` changes. Under Reduce
+  /// Motion the new figure simply replaces the old one.
+  func rollingNumber(_ value: Int) -> some View {
+    modifier(RollingNumber(value: value))
   }
 
   func flagRail(_ colour: Color?) -> some View {
@@ -62,6 +68,53 @@ struct DisclosureValueRow: View {
     .padding(.vertical, showsChevron ? 13 : 0)
     .contentShape(Rectangle())
   }
+}
+
+private struct RollingNumber: ViewModifier {
+  let value: Int
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  func body(content: Content) -> some View {
+    content
+      .contentTransition(reduceMotion ? .identity : .numericText(value: Double(value)))
+      .animation(reduceMotion ? nil : Theme.Motion.standard, value: value)
+  }
+}
+
+/// Tappable cards and tiles sink slightly under the finger, so a tap that
+/// pushes a screen or opens a sheet has visible touch-down feedback.
+/// Avoid it on whole `List`/`Form` rows, which draw their own highlight.
+struct PressableButtonStyle: ButtonStyle {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+      .opacity(configuration.isPressed ? 0.85 : 1)
+      .animation(Theme.Motion.press, value: configuration.isPressed)
+  }
+}
+
+extension ButtonStyle where Self == PressableButtonStyle {
+  static var pressable: PressableButtonStyle { PressableButtonStyle() }
+}
+
+/// Rows stacked inside a `ynabCard()` highlight in place, like a List row,
+/// instead of shrinking away from their neighbours.
+struct CardRowButtonStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .background {
+        if configuration.isPressed {
+          Theme.surfaceMuted
+        }
+      }
+      .animation(Theme.Motion.press, value: configuration.isPressed)
+  }
+}
+
+extension ButtonStyle where Self == CardRowButtonStyle {
+  static var cardRow: CardRowButtonStyle { CardRowButtonStyle() }
 }
 
 /// Divider aligned past the leading icon column of `DisclosureValueRow`.
@@ -134,12 +187,17 @@ struct FilterChip: View {
     .padding(.horizontal, 12)
     .padding(.vertical, 7)
     .background(isActive ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Theme.surfaceMuted), in: Capsule())
+    .animation(Theme.Motion.standard, value: isActive)
+    .animation(Theme.Motion.standard, value: label)
   }
 }
 
 /// `‹ June 2026 ›` month stepper, clamped to the current month.
 struct MonthStepper: View {
   @Binding var monthAnchor: Date
+  /// Direction of the last step, so the label rolls the way the user moved.
+  @State private var steppedBack = false
+  @State private var steps = 0
 
   var body: some View {
     HStack {
@@ -148,12 +206,16 @@ struct MonthStepper: View {
       Text(monthAnchor.monthYearLabel)
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(Theme.accent)
+        .contentTransition(.numericText(countsDown: steppedBack))
+        .animation(Theme.Motion.standard, value: monthAnchor)
       Spacer()
       stepButton(systemName: "chevron.right", monthDelta: 1)
         .disabled(isCurrentMonth)
         .opacity(isCurrentMonth ? 0.3 : 1)
+        .animation(Theme.Motion.standard, value: isCurrentMonth)
     }
     .padding(.horizontal, 8)
+    .sensoryFeedback(.selection, trigger: steps)
   }
 
   private var isCurrentMonth: Bool {
@@ -163,6 +225,8 @@ struct MonthStepper: View {
   private func stepButton(systemName: String, monthDelta: Int) -> some View {
     Button {
       if let next = Calendar.current.date(byAdding: .month, value: monthDelta, to: monthAnchor) {
+        steppedBack = monthDelta < 0
+        steps += 1
         monthAnchor = next
       }
     } label: {
@@ -171,8 +235,9 @@ struct MonthStepper: View {
         .foregroundStyle(Theme.accent)
         .padding(8)
         .background(Theme.surfaceMuted, in: Circle())
+        .contentShape(Circle())
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.pressable)
   }
 }
 
@@ -389,17 +454,28 @@ struct RootSaveToastOverlay: View {
   var body: some View {
     Group {
       if let message = model.lastSaveMessage {
-        Text(message.text)
-          .font(.footnote.weight(.medium))
-          .foregroundStyle(message.kind == .failure ? Theme.outflow : Theme.textPrimary)
-          .padding(.horizontal, 16)
-          .padding(.vertical, 10)
-          .glassEffect(.regular, in: .capsule)
-          .padding(.bottom, bottomPadding)
-          .transition(.move(edge: .bottom).combined(with: .opacity))
+        HStack(spacing: 8) {
+          Image(systemName: message.kind == .failure ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+            .foregroundStyle(message.kind == .failure ? Theme.outflow : Theme.inflow)
+            .contentTransition(.symbolEffect(.replace))
+            .accessibilityHidden(true)
+          Text(message.text)
+            .foregroundStyle(message.kind == .failure ? Theme.outflow : Theme.textPrimary)
+        }
+        .font(.footnote.weight(.medium))
+        .accessibilityElement(children: .combine)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .glassEffect(.regular, in: .capsule)
+        .padding(.bottom, bottomPadding)
+        .transition(
+          .move(edge: .bottom)
+            .combined(with: .opacity)
+            .combined(with: .scale(scale: 0.9, anchor: .bottom))
+        )
       }
     }
-    .animation(.snappy, value: model.lastSaveMessage?.id)
+    .animation(Theme.Motion.arrive, value: model.lastSaveMessage?.id)
   }
 }
 
@@ -1018,7 +1094,7 @@ struct RootTabHost<Content: View>: View {
         }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .animation(.snappy, value: overflow)
+      .animation(Theme.Motion.standard, value: overflow)
       .safeAreaInset(edge: .bottom, spacing: 0) {
         if !usesSidebar,
            !router.hidesTabRowOverlay,
@@ -1209,6 +1285,56 @@ struct PhasePlaceholder: View {
     }
     .frame(maxWidth: .infinity)
     .padding(.vertical, 40)
+    .animation(Theme.Motion.arrive, value: phase)
+  }
+}
+
+/// Grows a chart from nothing the first time it appears. Reduce Motion shows
+/// the finished chart straight away.
+private struct ChartReveal: ViewModifier {
+  @Binding var progress: CGFloat
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  func body(content: Content) -> some View {
+    content.onAppear {
+      guard progress < 1 else { return }
+      if reduceMotion {
+        progress = 1
+      } else {
+        withAnimation(Theme.Motion.chart) {
+          progress = 1
+        }
+      }
+    }
+  }
+}
+
+private extension View {
+  func chartReveal(_ progress: Binding<CGFloat>) -> some View {
+    modifier(ChartReveal(progress: progress))
+  }
+}
+
+/// Thin capsule meter for one row's share of the largest row.
+struct ShareMeter: View {
+  let fraction: Double
+  var colour: Color = Theme.accent
+  @State private var progress: CGFloat = 0
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  var body: some View {
+    GeometryReader { proxy in
+      Capsule()
+        .fill(Theme.surfaceMuted)
+        .overlay(alignment: .leading) {
+          Capsule()
+            .fill(colour)
+            .frame(width: max(4, proxy.size.width * min(max(fraction, 0), 1) * progress))
+        }
+    }
+    .animation(reduceMotion ? nil : Theme.Motion.chart, value: fraction)
+    .chartReveal($progress)
+    .accessibilityHidden(true)
   }
 }
 
@@ -1216,6 +1342,8 @@ struct PhasePlaceholder: View {
 struct StackedShareBar: View {
   let segments: [(colour: Color, fraction: Double)]
   var height: CGFloat = 14
+  @State private var progress: CGFloat = 0
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     GeometryReader { proxy in
@@ -1226,9 +1354,15 @@ struct StackedShareBar: View {
             .frame(width: max(4, proxy.size.width * segment.fraction))
         }
       }
+      .mask(alignment: .leading) {
+        Rectangle()
+          .frame(width: proxy.size.width * progress)
+      }
     }
     .frame(height: height)
     .clipShape(RoundedRectangle(cornerRadius: height / 2, style: .continuous))
+    .animation(reduceMotion ? nil : Theme.Motion.chart, value: segments.map { $0.fraction })
+    .chartReveal($progress)
   }
 }
 
@@ -1287,7 +1421,18 @@ struct ColumnChart: View {
   var negativeColour: Color = Theme.outflow
   var height: CGFloat = 90
 
-  private let monthSpacing: CGFloat = 6
+  @State private var progress: CGFloat = 0
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  /// Weekly ranges carry fifty-odd bars; tighter gaps keep them readable
+  /// instead of spending the card's width on spacing.
+  private var monthSpacing: CGFloat {
+    switch values.count {
+    case ..<19: 6
+    case ..<37: 3
+    default: 1
+    }
+  }
 
   var body: some View {
     let magnitude = max(values.map(abs).max() ?? 1, 1)
@@ -1298,12 +1443,14 @@ struct ColumnChart: View {
             Spacer(minLength: 0)
             Capsule()
               .fill(value < 0 ? negativeColour : positiveColour)
-              .frame(height: max(3, height * abs(value) / magnitude))
+              .frame(height: max(3, height * abs(value) / magnitude * progress))
           }
           .frame(maxWidth: .infinity)
         }
       }
       .frame(height: height)
+      .animation(reduceMotion ? nil : Theme.Motion.chart, value: values)
+      .chartReveal($progress)
 
       if labels.count == values.count, !labels.isEmpty {
         ChartAxisLabels(labels: labels, spacing: monthSpacing)
@@ -1318,7 +1465,21 @@ struct PairedColumnChart: View {
   var labels: [String] = []
   var height: CGFloat = 90
 
-  private let monthSpacing: CGFloat = 10
+  @State private var progress: CGFloat = 0
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  /// Paired columns need more room per period, so they tighten sooner.
+  private var monthSpacing: CGFloat {
+    switch pairs.count {
+    case ..<13: 10
+    case ..<25: 5
+    default: 2
+    }
+  }
+
+  private var pairSpacing: CGFloat {
+    pairs.count < 25 ? 2 : 1
+  }
 
   var body: some View {
     let magnitude = max(pairs.flatMap { [$0.income, $0.spending] }.max() ?? 1, 1)
@@ -1326,18 +1487,20 @@ struct PairedColumnChart: View {
     VStack(spacing: 6) {
       HStack(alignment: .bottom, spacing: monthSpacing) {
         ForEach(pairs.enumerated(), id: \.offset) { _, pair in
-          HStack(alignment: .bottom, spacing: 2) {
+          HStack(alignment: .bottom, spacing: pairSpacing) {
             Capsule()
               .fill(Theme.inflow)
-              .frame(height: max(3, height * pair.income / magnitude))
+              .frame(height: max(3, height * pair.income / magnitude * progress))
             Capsule()
               .fill(Theme.outflow)
-              .frame(height: max(3, height * pair.spending / magnitude))
+              .frame(height: max(3, height * pair.spending / magnitude * progress))
           }
           .frame(maxWidth: .infinity)
         }
       }
       .frame(height: height)
+      .animation(reduceMotion ? nil : Theme.Motion.chart, value: pairs.flatMap { [$0.income, $0.spending] })
+      .chartReveal($progress)
 
       if labels.count == pairs.count, !labels.isEmpty {
         ChartAxisLabels(labels: labels, spacing: monthSpacing)
@@ -1351,6 +1514,7 @@ struct Sparkline: View {
   let values: [Double]
   var colour: Color = Theme.accent
   var height: CGFloat = 56
+  @State private var progress: CGFloat = 0
 
   var body: some View {
     GeometryReader { proxy in
@@ -1371,16 +1535,20 @@ struct Sparkline: View {
             path.addLine(to: point)
           }
         }
+        .trim(from: 0, to: progress)
         .stroke(colour, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
 
         if let last = points.last {
           Circle()
             .fill(colour)
             .frame(width: 6, height: 6)
+            .scaleEffect(progress)
+            .opacity(Double(progress))
             .position(last)
         }
       }
     }
     .frame(height: height)
+    .chartReveal($progress)
   }
 }

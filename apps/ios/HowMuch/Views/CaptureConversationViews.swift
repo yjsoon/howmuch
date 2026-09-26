@@ -114,7 +114,7 @@ struct CaptureUserBubble: View {
         .resizable()
         .scaledToFill()
         .frame(width: 96, height: 96)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.inset, style: .continuous))
     }
   }
 }
@@ -322,7 +322,7 @@ struct CaptureAssistantReply: View {
       }
     }
     .padding(14)
-    .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
   }
 
   @ViewBuilder
@@ -336,6 +336,8 @@ struct CaptureAssistantReply: View {
           } label: {
             Image(systemName: item.included ? "checkmark.circle.fill" : "circle")
               .foregroundStyle(Theme.accent)
+              .contentTransition(.symbolEffect(.replace))
+              .animation(Theme.Motion.standard, value: item.included)
               .frame(width: 44, height: 44)
           }
           .tint(Theme.accent)
@@ -422,9 +424,12 @@ struct CaptureAssistantReply: View {
     }
     .overlay {
       if highlightID == item.id {
-        RoundedRectangle(cornerRadius: 12).stroke(Theme.accent, lineWidth: 2)
+        RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+          .stroke(Theme.accent, lineWidth: 2)
+          .transition(.opacity)
       }
     }
+    .animation(Theme.Motion.arrive, value: highlightID == item.id)
   }
 
   private func statusText(_ item: CaptureDraftItem, saved: Bool) -> String {
@@ -642,7 +647,7 @@ struct CaptureAssistantReply: View {
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(14)
-    .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
   }
 }
 
@@ -759,6 +764,8 @@ struct CaptureComposerDock: View {
               Image(systemName: canSend ? "arrow.up.circle.fill" : "arrow.up.circle")
                 .font(.title2)
                 .foregroundStyle(Theme.accent)
+                .contentTransition(.symbolEffect(.replace))
+                .animation(Theme.Motion.standard, value: canSend)
                 .frame(width: 44, height: 44)
             }
             .disabled(!canSend)
@@ -821,9 +828,9 @@ struct CaptureComposerDock: View {
           .resizable()
           .scaledToFill()
           .frame(width: 64, height: 64)
-          .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+          .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.inset, style: .continuous))
       } else {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
+        RoundedRectangle(cornerRadius: Theme.Radius.inset, style: .continuous)
           .fill(Theme.surfaceMuted)
           .frame(width: 64, height: 64)
       }
@@ -926,6 +933,7 @@ private struct CaptureQuietSaveStyle: ButtonStyle {
       }
       .frame(minWidth: 44, minHeight: 44, alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .center)
       .contentShape(Rectangle())
+      .animation(Theme.Motion.press, value: configuration.isPressed)
   }
 
   private func fillOpacity(pressed: Bool) -> Double {

@@ -306,4 +306,29 @@ final class RefreshPlanTests: XCTestCase {
       )
     )
   }
+
+  // MARK: - Reflect detail fetch ordering
+
+  func testReportFetchGateRejectsAStaleRetryAfterANewerFilterFetch() {
+    var gate = ReportFetchGate()
+    let retryA = gate.begin()
+    let filterB = gate.begin()
+    XCTAssertTrue(gate.isCurrent(filterB), "filter B's fetch is the one allowed to commit")
+    XCTAssertFalse(
+      gate.isCurrent(retryA),
+      "a Retry for filter A that settles after B, success or failure, must not replace or clear B's report"
+    )
+  }
+
+  func testReportFetchGateRejectsTheEarlierOfTwoRequestsForTheSameFilter() {
+    var gate = ReportFetchGate()
+    let firstA = gate.begin()
+    _ = gate.begin()
+    let secondA = gate.begin()
+    XCTAssertFalse(
+      gate.isCurrent(firstA),
+      "A → B → A: the first A request is obsolete even though its filter is current again"
+    )
+    XCTAssertTrue(gate.isCurrent(secondA))
+  }
 }

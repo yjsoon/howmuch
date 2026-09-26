@@ -142,6 +142,34 @@ struct RewardTonePalette {
 }
 
 extension Theme {
+  /// Corner radii, all drawn with continuous corners. Nest smaller radii
+  /// inside larger ones so inner shapes stay concentric with their card.
+  enum Radius {
+    /// Swatches, thumbnails and tags that sit inside a card.
+    static let inset: CGFloat = 8
+    /// Buttons, fields and bubbles inside a card.
+    static let control: CGFloat = 12
+    /// Opaque content cards: account groups, report cards, capture drafts.
+    static let card: CGFloat = 16
+    /// Large floating glass panels such as the keypad, and the hero preview
+    /// on the inbox reading screen.
+    static let panel: CGFloat = 28
+  }
+
+  /// Shared motion vocabulary so every surface moves the same way.
+  enum Motion {
+    /// State changes the user asked for: expand, collapse, select, filter.
+    static let standard: Animation = .snappy(duration: 0.32)
+    /// Content that arrives on its own: loaded data, toasts, new rows.
+    static let arrive: Animation = .smooth(duration: 0.4)
+    /// Charts and progress fills growing into place.
+    static let chart: Animation = .smooth(duration: 0.6)
+    /// Touch-down feedback on pressable cards and tiles.
+    static let press: Animation = .snappy(duration: 0.18)
+  }
+}
+
+extension Theme {
   /// Secondary text on tinted Rewards rows. `.secondary` drops to about 2.7:1
   /// on the amber fill; this stays above 5.4:1 on every track and fill.
   static let rowSecondary = Color(light: 0x4E5468, dark: 0xB3B8C9)

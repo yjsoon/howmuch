@@ -122,7 +122,7 @@ struct AccountsView: View {
         .transition(.move(edge: .bottom).combined(with: .opacity))
       }
     }
-    .animation(.snappy, value: screenshots.offer?.id)
+    .animation(Theme.Motion.arrive, value: screenshots.offer?.id)
     .onAppear {
       reconcilePane()
     }
@@ -228,6 +228,7 @@ struct AccountsView: View {
       VStack(alignment: .leading, spacing: 16) {
         if !model.pendingRows.isEmpty {
           OutboxCard()
+            .transition(.move(edge: .top).combined(with: .opacity))
         }
 
         if model.accounts.isEmpty, model.referencePhase != .loaded {
@@ -265,6 +266,7 @@ struct AccountsView: View {
       }
       .padding(.horizontal, 16)
       .padding(.bottom, 24)
+      .animation(Theme.Motion.standard, value: model.pendingRows.isEmpty)
     }
     .background(Theme.canvas)
     .navigationTitle("Accounts")
@@ -381,7 +383,7 @@ struct AccountsView: View {
     return VStack(alignment: .leading, spacing: 8) {
       HStack(spacing: 8) {
         Button {
-          withAnimation(.snappy) {
+          withAnimation(Theme.Motion.standard) {
             if isCollapsed {
               collapsedGroups.remove(group.id)
             } else {
@@ -402,6 +404,7 @@ struct AccountsView: View {
               .font(.subheadline.weight(.semibold))
               .monospacedDigit()
               .foregroundStyle(.secondary)
+              .rollingNumber(group.total)
           }
           .padding(.horizontal, 4)
           .contentShape(Rectangle())
@@ -493,6 +496,7 @@ struct AccountsView: View {
           .frame(maxWidth: .infinity, alignment: .leading)
           .padding(16)
           .ynabCard()
+          .transition(Self.groupCardTransition)
         } else {
           VStack(spacing: 0) {
             ForEach(group.accounts.enumerated(), id: \.element.id) { index, account in
@@ -504,10 +508,15 @@ struct AccountsView: View {
             }
           }
           .ynabCard()
+          .transition(Self.groupCardTransition)
         }
       }
     }
   }
+
+  /// Collapsing a group folds its card up under the header.
+  private static let groupCardTransition = AnyTransition.opacity
+    .combined(with: .scale(scale: 0.96, anchor: .top))
 
   private func accountRow(_ account: Account) -> some View {
     let selected = isShowing(.account(account.id))
@@ -544,15 +553,18 @@ struct AccountsView: View {
       .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
       .contentShape(Rectangle())
       .background(selected ? Theme.accent.opacity(0.12) : Color.clear)
+      .animation(Theme.Motion.standard, value: selected)
     }
-    .buttonStyle(.plain)
+    .buttonStyle(.cardRow)
     .accessibilityLabel("\(account.displayIcon) \(account.name)")
     .accessibilityAddTraits(selected ? .isSelected : [])
     .accessibilityValue(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
     .accessibilityActions {
       if !account.closed {
         Button(model.isAccountFavourite(account.id) ? "Remove from Favourites" : "Add to Favourites") {
-          model.toggleAccountFavourite(account.id)
+          withAnimation(Theme.Motion.standard) {
+            model.toggleAccountFavourite(account.id)
+          }
         }
       }
       Button("Groups") {
@@ -565,7 +577,9 @@ struct AccountsView: View {
     .contextMenu {
       if !account.closed {
         Button(model.isAccountFavourite(account.id) ? "Remove from Favourites" : "Add to Favourites") {
-          model.toggleAccountFavourite(account.id)
+          withAnimation(Theme.Motion.standard) {
+            model.toggleAccountFavourite(account.id)
+          }
         }
       }
       Button("Groups") {
@@ -581,6 +595,7 @@ struct AccountsView: View {
     Text(MoneyCodec.displayString(for: account.balance, currencyFormat: model.currencyFormat))
       .monospacedDigit()
       .foregroundStyle(account.balance == 0 ? .secondary : Theme.amountColour(account.balance))
+      .rollingNumber(account.balance)
       .fixedSize(horizontal: true, vertical: false)
   }
 
@@ -661,17 +676,18 @@ struct AccountsView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         .ynabCard()
         .overlay {
-          RoundedRectangle(cornerRadius: 12, style: .continuous)
+          RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
             .strokeBorder(isSelected ? Theme.accent : Color.clear, lineWidth: 2)
         }
+        .animation(Theme.Motion.standard, value: isSelected)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityValue(status.detail ?? "")
       }
-      .buttonStyle(.plain)
+      .buttonStyle(.pressable)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
   }
