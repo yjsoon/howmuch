@@ -51,7 +51,7 @@ The P0 items from `offline-writes.md` shipped:
 - account create doesn't wait;
 - reports are stale-while-revalidate.
 
-P1, a durable command outbox that makes delete, cleared and edits optimistic and batched, is designed, and its pure core is committed but **not wired in** (`8562265`: `OutboxCommand`, `OutboxPlanner`, 37 tests). The disk store, the move from UserDefaults and the wiring into `AppModel` are still to do. It is the one change that puts your real data at risk, so it should be built and reviewed in daylight.
+P1 is also wired in. In server mode, every transaction write (create, edit, delete, cleared, approve) is saved to `Application Support/HowMuch/Outbox/outbox.json`, shows at once and is sent in batches. Unsent items from the old UserDefaults queue move across on first launch. Refused changes show on the Accounts card with Retry and Discard. Reconcile waits until that account has nothing queued. Nothing sends when the network comes back; it waits for foreground, pull-to-refresh or the next write.
 
 Known limits:
 
