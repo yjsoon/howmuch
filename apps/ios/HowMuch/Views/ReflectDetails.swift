@@ -472,6 +472,7 @@ struct SpendingBreakdownDetailView: View {
   @State private var scope = ReportScope()
   @State private var report: SpendingBreakdownReport?
   @State private var phase: LoadPhase = .idle
+  @State private var fetchGate = ReportFetchGate()
 
   var body: some View {
     ScrollView {
@@ -666,6 +667,7 @@ struct SpendingBreakdownDetailView: View {
   }
 
   private func fetch() async {
+    let token = fetchGate.begin()
     phase = .loading
     do {
       let next = try await model.apiClient.fetchSpendingBreakdown(
@@ -675,16 +677,17 @@ struct SpendingBreakdownDetailView: View {
         accountIDs: Array(scope.accountIDs),
         categoryIDs: Array(scope.categoryIDs)
       )
-      // A superseded request must not overwrite the current filter's data.
-      guard !Task.isCancelled else { return }
+      // A superseded request (a filter change or a newer Retry) must not
+      // overwrite the current one.
+      guard fetchGate.isCurrent(token), !Task.isCancelled else { return }
       withAnimation(Theme.Motion.arrive) {
         report = next
         phase = .loaded
       }
     } catch {
-      // A filter change restarts `.task(id:)`; the cancelled request must
-      // not flash an error over the new one.
-      guard !Task.isCancelled else { return }
+      // Neither a cancelled filter fetch nor a stale Retry (which runs in
+      // its own Task) may flash an error or clear a newer report.
+      guard fetchGate.isCurrent(token), !Task.isCancelled else { return }
       // Drop the previous window's figures so they never sit under the new
       // filter chips; the placeholder offers Retry instead.
       withAnimation(Theme.Motion.arrive) {
@@ -704,6 +707,7 @@ struct NetWorthDetailView: View {
   @State private var interval: ReportInterval = .month
   @State private var report: NetWorthReport?
   @State private var phase: LoadPhase = .idle
+  @State private var fetchGate = ReportFetchGate()
 
   var body: some View {
     ScrollView {
@@ -858,6 +862,7 @@ struct NetWorthDetailView: View {
   }
 
   private func fetch() async {
+    let token = fetchGate.begin()
     phase = .loading
     do {
       let next = try await model.apiClient.fetchNetWorth(
@@ -867,16 +872,17 @@ struct NetWorthDetailView: View {
         interval: interval,
         accountIDs: Array(scope.accountIDs)
       )
-      // A superseded request must not overwrite the current filter's data.
-      guard !Task.isCancelled else { return }
+      // A superseded request (a filter change or a newer Retry) must not
+      // overwrite the current one.
+      guard fetchGate.isCurrent(token), !Task.isCancelled else { return }
       withAnimation(Theme.Motion.arrive) {
         report = next
         phase = .loaded
       }
     } catch {
-      // A filter change restarts `.task(id:)`; the cancelled request must
-      // not flash an error over the new one.
-      guard !Task.isCancelled else { return }
+      // Neither a cancelled filter fetch nor a stale Retry (which runs in
+      // its own Task) may flash an error or clear a newer report.
+      guard fetchGate.isCurrent(token), !Task.isCancelled else { return }
       // Drop the previous window's figures so they never sit under the new
       // filter chips; the placeholder offers Retry instead.
       withAnimation(Theme.Motion.arrive) {
@@ -896,6 +902,7 @@ struct IncomeVsSpendingDetailView: View {
   @State private var interval: ReportInterval = .month
   @State private var report: IncomeVsSpendingReport?
   @State private var phase: LoadPhase = .idle
+  @State private var fetchGate = ReportFetchGate()
 
   var body: some View {
     ScrollView {
@@ -1033,6 +1040,7 @@ struct IncomeVsSpendingDetailView: View {
   }
 
   private func fetch() async {
+    let token = fetchGate.begin()
     phase = .loading
     do {
       let next = try await model.apiClient.fetchIncomeVsSpending(
@@ -1043,16 +1051,17 @@ struct IncomeVsSpendingDetailView: View {
         accountIDs: Array(scope.accountIDs),
         categoryIDs: Array(scope.categoryIDs)
       )
-      // A superseded request must not overwrite the current filter's data.
-      guard !Task.isCancelled else { return }
+      // A superseded request (a filter change or a newer Retry) must not
+      // overwrite the current one.
+      guard fetchGate.isCurrent(token), !Task.isCancelled else { return }
       withAnimation(Theme.Motion.arrive) {
         report = next
         phase = .loaded
       }
     } catch {
-      // A filter change restarts `.task(id:)`; the cancelled request must
-      // not flash an error over the new one.
-      guard !Task.isCancelled else { return }
+      // Neither a cancelled filter fetch nor a stale Retry (which runs in
+      // its own Task) may flash an error or clear a newer report.
+      guard fetchGate.isCurrent(token), !Task.isCancelled else { return }
       // Drop the previous window's figures so they never sit under the new
       // filter chips; the placeholder offers Retry instead.
       withAnimation(Theme.Motion.arrive) {
@@ -1071,6 +1080,7 @@ struct AgeOfMoneyDetailView: View {
   @State private var interval: ReportInterval = .month
   @State private var report: AgeOfMoneyReport?
   @State private var phase: LoadPhase = .idle
+  @State private var fetchGate = ReportFetchGate()
 
   var body: some View {
     ScrollView {
@@ -1190,6 +1200,7 @@ struct AgeOfMoneyDetailView: View {
   }
 
   private func fetch() async {
+    let token = fetchGate.begin()
     phase = .loading
     do {
       let next = try await model.apiClient.fetchAgeOfMoney(
@@ -1197,16 +1208,17 @@ struct AgeOfMoneyDetailView: View {
         interval: interval,
         accountIDs: Array(scope.accountIDs)
       )
-      // A superseded request must not overwrite the current filter's data.
-      guard !Task.isCancelled else { return }
+      // A superseded request (a filter change or a newer Retry) must not
+      // overwrite the current one.
+      guard fetchGate.isCurrent(token), !Task.isCancelled else { return }
       withAnimation(Theme.Motion.arrive) {
         report = next
         phase = .loaded
       }
     } catch {
-      // A filter change restarts `.task(id:)`; the cancelled request must
-      // not flash an error over the new one.
-      guard !Task.isCancelled else { return }
+      // Neither a cancelled filter fetch nor a stale Retry (which runs in
+      // its own Task) may flash an error or clear a newer report.
+      guard fetchGate.isCurrent(token), !Task.isCancelled else { return }
       // Drop the previous window's figures so they never sit under the new
       // filter chips; the placeholder offers Retry instead.
       withAnimation(Theme.Motion.arrive) {

@@ -269,6 +269,25 @@ struct ReflectCard<Destination: View, Content: View>: View {
   }
 }
 
+/// Orders a Reflect detail screen's report fetches so only the latest may
+/// commit. `.task(id:)` cancels a fetch superseded by a filter change, but
+/// Retry runs in its own `Task` that nothing cancels, so cancellation alone
+/// cannot tell an obsolete request from the current one. A generation rather
+/// than a filter key also rejects the first of two requests for the same
+/// filter (A → B → A).
+struct ReportFetchGate {
+  private(set) var generation = 0
+
+  mutating func begin() -> Int {
+    generation += 1
+    return generation
+  }
+
+  func isCurrent(_ token: Int) -> Bool {
+    token == generation
+  }
+}
+
 struct SpendingGroupSection: Identifiable {
   let id: String
   let name: String
