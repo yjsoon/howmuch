@@ -245,6 +245,354 @@ private final class LaunchProbeProtocol: URLProtocol {
   override func stopLoading() {}
 }
 
+/// A capture opened on a cold launch calls `refreshAll()` while the launch
+/// refresh is still waiting on `GET /v1/plans`. The second call must join the
+/// first rather than repeat the whole waterfall, and when plan resolution
+/// fails the capture sheet must stop waiting instead of spinning forever.
+@MainActor
+final class RefreshAllDedupeTests: XCTestCase {
+  private var previousCredentialService = ""
+  private var previousAPISettings: Any?
+  private var previousScopedViewPrefs: Any?
+  private var previousOutbox: Any?
+
+  override func setUp() {
+    super.setUp()
+    previousCredentialService = APISettings.useCredentialService("HowMuch.RefreshAllDedupeTests.\(UUID().uuidString)")
+    // `resolvePlanSelection` saves the adopted plan into the app's real
+    // `UserDefaults` keys; keep this fixture host out of other tests.
+    previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
+    previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
+    XCTAssertTrue(URLProtocol.registerClass(RefreshAllProbeProtocol.self))
+    RefreshAllProbeProtocol.reset()
+  }
+
+  override func tearDown() {
+    RefreshAllProbeProtocol.release()
+    URLProtocol.unregisterClass(RefreshAllProbeProtocol.self)
+    APISettings.useCredentialService(previousCredentialService)
+    UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
+    UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
+    super.tearDown()
+  }
+
+  func testSecondRefreshAllForSameConnectionJoinsTheInFlightRun() async {
+    RefreshAllProbeProtocol.holdPlans()
+    let model = coldModel()
+
+    let launch = Task { await model.refreshAll() }
+    let launchAsked = await waitUntil { RefreshAllProbeProtocol.plansRequestCount() == 1 }
+    XCTAssertTrue(launchAsked, "the launch refresh must be waiting on GET /v1/plans")
+    XCTAssertTrue(model.isRefreshingAll)
+    XCTAssertEqual(model.referencePhase, .idle, "the reference phase only moves once the plan resolves")
+    XCTAssertEqual(
+      CaptureAdmissionGate.referenceWait(referencePhase: model.referencePhase, isRefreshingAll: model.isRefreshingAll),
+      .wait,
+      "a capture opened now must wait for the launch refresh, not give up"
+    )
+
+    var captureFinished = false
+    let capture = Task {
+      await model.refreshAll(joinInFlight: true)
+      captureFinished = true
+    }
+    // Give the joiner every chance to issue its own request before releasing.
+    let secondRequest = await waitUntil(timeoutNanoseconds: 300_000_000) {
+      RefreshAllProbeProtocol.plansRequestCount() > 1
+    }
+    XCTAssertFalse(secondRequest, "a second refreshAll() for the same connection must not fetch the plans again")
+    XCTAssertFalse(captureFinished, "the joiner must wait for the launch run, not return early")
+
+    RefreshAllProbeProtocol.release()
+    await launch.value
+    await capture.value
+
+    XCTAssertTrue(captureFinished)
+    XCTAssertEqual(RefreshAllProbeProtocol.plansRequestCount(), 1)
+    XCTAssertFalse(model.isRefreshingAll)
+    XCTAssertEqual(model.settings.planID, RefreshAllProbeProtocol.solePlanID)
+
+    // Only an in-flight run is shared: a later call is a fresh refresh.
+    await model.refreshAll(joinInFlight: true)
+    XCTAssertEqual(RefreshAllProbeProtocol.plansRequestCount(), 2)
+  }
+
+  /// Joining is opt-in. A caller that has just changed server state (an
+  /// import, a settings save) must start its own run even while another is in
+  /// flight, and the superseded run must not clear the newer run's record.
+  func testRefreshAllWithoutJoinStartsAFreshRunWhileOneIsInFlight() async {
+    RefreshAllProbeProtocol.holdPlans()
+    let model = coldModel()
+
+    let launch = Task { await model.refreshAll() }
+    let launchAsked = await waitUntil { RefreshAllProbeProtocol.plansRequestCount() == 1 }
+    XCTAssertTrue(launchAsked, "the launch refresh must be waiting on GET /v1/plans")
+
+    let fresh = Task { await model.refreshAll() }
+    let freshAsked = await waitUntil { RefreshAllProbeProtocol.plansRequestCount() == 2 }
+    XCTAssertTrue(
+      freshAsked,
+      "a refreshAll() without joinInFlight must start its own run, not wait on the one already in flight"
+    )
+
+    // Answer only the launch run's plans request: it finishes while the fresh
+    // run is still parked, so a run that cleared a newer run's record would
+    // show up here.
+    RefreshAllProbeProtocol.releaseOldest()
+    await launch.value
+    XCTAssertTrue(
+      model.isRefreshingAll,
+      "the superseded launch run must not clear the in-flight record the newer run owns"
+    )
+    XCTAssertEqual(
+      RefreshAllProbeProtocol.plansRequestCount(),
+      2,
+      "the fresh run must still be waiting on its own GET /v1/plans"
+    )
+
+    RefreshAllProbeProtocol.release()
+    await fresh.value
+    XCTAssertFalse(model.isRefreshingAll)
+    XCTAssertEqual(RefreshAllProbeProtocol.plansRequestCount(), 2)
+  }
+
+  /// The run clears its own in-flight record as its last step, so a caller
+  /// resuming from a join never observes a stale record: its next call starts
+  /// a fresh run instead of waiting on an already-finished task.
+  func testInFlightRecordClearsBeforeTheStartingCallerResumes() async {
+    RefreshAllProbeProtocol.holdPlans()
+    let model = coldModel()
+
+    let launch = Task { await model.refreshAll() }
+    let launchAsked = await waitUntil { RefreshAllProbeProtocol.plansRequestCount() == 1 }
+    XCTAssertTrue(launchAsked, "the launch refresh must be waiting on GET /v1/plans")
+
+    // The capture path joins the launch run. It resumes the instant that run
+    // finishes, before the starting caller's `await task.value` continuation.
+    let capture = Task { @MainActor in
+      await model.refreshAll(joinInFlight: true)
+      await model.refreshAll(joinInFlight: true)
+    }
+    // Let the capture call park on the launch run before it is released.
+    try? await Task.sleep(nanoseconds: 300_000_000)
+
+    RefreshAllProbeProtocol.release()
+    await launch.value
+    await capture.value
+
+    XCTAssertEqual(
+      RefreshAllProbeProtocol.plansRequestCount(),
+      2,
+      "once the joined run finished, the next refreshAll() must start a fresh run, not wait on a finished task"
+    )
+    XCTAssertFalse(model.isRefreshingAll)
+  }
+
+  func testFailedPlanResolutionStopsTheCaptureWait() async {
+    RefreshAllProbeProtocol.failPlans()
+    let model = coldModel()
+
+    await model.refreshAll()
+
+    XCTAssertEqual(RefreshAllProbeProtocol.plansRequestCount(), 1)
+    XCTAssertFalse(model.isRefreshingAll)
+    XCTAssertEqual(
+      model.referencePhase,
+      .idle,
+      "with no snapshot, a failed plan fetch leaves the reference phase idle"
+    )
+    XCTAssertEqual(
+      CaptureAdmissionGate.referenceWait(referencePhase: model.referencePhase, isRefreshingAll: model.isRefreshingAll),
+      .stalled,
+      "nothing will ever load the reference data, so the capture sheet must stop waiting"
+    )
+  }
+
+  private func coldModel() -> AppModel {
+    var settings = APISettings()
+    settings.baseURLString = RefreshAllProbeProtocol.fixtureBaseURL
+    settings.authenticatedUserID = "refresh-all-probe-\(UUID().uuidString)"
+    settings.sessionToken = "token"
+    settings.planID = ""
+    return AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: temporarySnapshotStore())
+  }
+
+  private func waitUntil(
+    timeoutNanoseconds: UInt64 = 3_000_000_000,
+    _ condition: @MainActor () -> Bool
+  ) async -> Bool {
+    let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+    while DispatchTime.now().uptimeNanoseconds < deadline {
+      if condition() {
+        return true
+      }
+      try? await Task.sleep(nanoseconds: 20_000_000)
+    }
+    return condition()
+  }
+}
+
+private final class RefreshAllProbeLog: @unchecked Sendable {
+  static let shared = RefreshAllProbeLog()
+  private let lock = NSLock()
+  private var plansCount = 0
+  private var holdingPlans = false
+  private var failingPlans = false
+  private var parked: [RefreshAllProbeProtocol] = []
+
+  func reset() {
+    lock.lock()
+    plansCount = 0
+    holdingPlans = false
+    failingPlans = false
+    parked = []
+    lock.unlock()
+  }
+
+  func holdPlans() {
+    lock.lock()
+    holdingPlans = true
+    lock.unlock()
+  }
+
+  func failPlans() {
+    lock.lock()
+    failingPlans = true
+    lock.unlock()
+  }
+
+  func isFailingPlans() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return failingPlans
+  }
+
+  /// Counts the request and parks it when plans are being held. Returns
+  /// false when the caller should answer immediately.
+  func recordPlans(_ request: RefreshAllProbeProtocol) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    plansCount += 1
+    guard holdingPlans else {
+      return false
+    }
+    parked.append(request)
+    return true
+  }
+
+  func release() -> [RefreshAllProbeProtocol] {
+    lock.lock()
+    defer { lock.unlock() }
+    holdingPlans = false
+    let released = parked
+    parked = []
+    return released
+  }
+
+  /// Removes and returns the oldest parked request, leaving the rest held
+  /// (`holdingPlans` stays set, so later requests keep parking).
+  func releaseOldest() -> RefreshAllProbeProtocol? {
+    lock.lock()
+    defer { lock.unlock() }
+    guard !parked.isEmpty else {
+      return nil
+    }
+    return parked.removeFirst()
+  }
+
+  func plansRequestCount() -> Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return plansCount
+  }
+}
+
+/// Serves a single plan for `GET /v1/plans`, optionally held back or failed,
+/// and fails every other request immediately so the waterfall settles fast.
+private final class RefreshAllProbeProtocol: URLProtocol {
+  static let fixtureHost = "howmuch-refresh-all-probe.test"
+  static let fixtureBaseURL = "https://howmuch-refresh-all-probe.test"
+  static let solePlanID = "plan-1"
+
+  static func reset() {
+    RefreshAllProbeLog.shared.reset()
+  }
+
+  static func holdPlans() {
+    RefreshAllProbeLog.shared.holdPlans()
+  }
+
+  static func failPlans() {
+    RefreshAllProbeLog.shared.failPlans()
+  }
+
+  /// Answers every parked plans request. Safe to call from the test's thread.
+  static func release() {
+    for request in RefreshAllProbeLog.shared.release() {
+      request.answerPlans()
+    }
+  }
+
+  /// Answers only the oldest parked plans request, leaving the rest held.
+  static func releaseOldest() {
+    RefreshAllProbeLog.shared.releaseOldest()?.answerPlans()
+  }
+
+  static func plansRequestCount() -> Int {
+    RefreshAllProbeLog.shared.plansRequestCount()
+  }
+
+  override class func canInit(with request: URLRequest) -> Bool {
+    request.url?.host?.lowercased() == fixtureHost
+  }
+
+  override class func canInit(with task: URLSessionTask) -> Bool {
+    guard let request = task.currentRequest ?? task.originalRequest else {
+      return false
+    }
+    return canInit(with: request)
+  }
+
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+    request
+  }
+
+  override func startLoading() {
+    guard let url = request.url, url.path.hasSuffix("/v1/plans") else {
+      client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
+      return
+    }
+    if RefreshAllProbeLog.shared.recordPlans(self) {
+      return
+    }
+    answerPlans()
+  }
+
+  func answerPlans() {
+    guard let url = request.url, !RefreshAllProbeLog.shared.isFailingPlans() else {
+      client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+      return
+    }
+    let body = Data(#"{"data":{"plans":[{"id":"\#(Self.solePlanID)","name":"Only Plan"}]}}"#.utf8)
+    guard let response = HTTPURLResponse(
+      url: url,
+      statusCode: 200,
+      httpVersion: "HTTP/1.1",
+      headerFields: ["Content-Type": "application/json"]
+    ) else {
+      client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+      return
+    }
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: body)
+    client?.urlProtocolDidFinishLoading(self)
+  }
+
+  override func stopLoading() {}
+}
+
 /// Regression tests for the `applySettings()` half of #178: an interactive
 /// sign-in (a new `launchFingerprint`) is already followed by
 /// `HowMuchApp`'s launch `.task` restarting and calling `refreshAll()` on its

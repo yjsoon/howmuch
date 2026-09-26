@@ -366,12 +366,31 @@ struct CaptureIntakeHost: View {
   private func admitWhenReady(explicitRetry: Bool = false) async {
     admissionError = nil
     if CaptureAdmissionGate.shouldRefreshReference(phase: model.referencePhase, explicitRetry: explicitRetry) {
-      await model.refreshAll()
+      // Only this path joins a run already in flight: it is a read of state
+      // another path is already loading. A caller that just changed server
+      // state (an import, a settings save) starts a fresh run instead.
+      await model.refreshAll(joinInFlight: true)
     }
-    while !CaptureAdmissionGate.canAdmit(referencePhase: model.referencePhase) {
-      try? await Task.sleep(for: .milliseconds(50))
-      if Task.isCancelled {
+    // `refreshAll(joinInFlight: true)` joins the launch refresh when one is in
+    // flight, so this wait only covers reference loads another path owns.
+    waiting: while true {
+      switch CaptureAdmissionGate.referenceWait(
+        referencePhase: model.referencePhase,
+        isRefreshingAll: model.isRefreshingAll
+      ) {
+      case .admit:
+        break waiting
+      case .stalled:
+        guard !Task.isCancelled else {
+          return
+        }
+        admissionError = CaptureAdmissionGate.stalledMessage
         return
+      case .wait:
+        try? await Task.sleep(for: .milliseconds(50))
+        if Task.isCancelled {
+          return
+        }
       }
     }
     if Task.isCancelled {

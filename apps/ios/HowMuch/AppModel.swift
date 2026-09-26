@@ -196,6 +196,16 @@ final class AppModel {
   /// single queued request that runs once the in-flight one finishes.
   @ObservationIgnored private var inFlightRefresh: Task<Void, Never>?
   @ObservationIgnored private var queuedRefresh = RefreshRequest.none
+  /// The full `refreshAll()` run in flight, keyed on the connection it
+  /// started for. A second call that opts in to joining (`joinInFlight: true`)
+  /// for the same connection (the capture sheet opening while the launch
+  /// refresh is still resolving the plan) awaits it rather than repeating the
+  /// whole waterfall. The run is unstructured, so a caller's cancellation
+  /// never reaches it: a joiner must not inherit a dead run. A superseded run
+  /// finishes, and its writes are discarded by the same fingerprint,
+  /// generation, planID and scope guards a plan switch relies on.
+  @ObservationIgnored private var inFlightRefreshAll: (fingerprint: String, generation: Int, task: Task<Void, Never>)?
+  @ObservationIgnored private var refreshAllGeneration = 0
   /// Serialises preference writes so a slower earlier request cannot overwrite
   /// a newer reorder on the server.
   @ObservationIgnored private var accountPreferencesSyncTask: Task<Void, Never>?
@@ -1490,7 +1500,46 @@ final class AppModel {
     }
   }
 
-  func refreshAll(quiet: Bool = false) async {
+  /// True while a `refreshAll()` run is in flight, including the plan
+  /// resolution that precedes any phase change. Not observable: poll it.
+  var isRefreshingAll: Bool {
+    inFlightRefreshAll != nil
+  }
+
+  /// Runs the whole launch waterfall: plan resolution, then reference data,
+  /// ledger and schedules.
+  ///
+  /// - Parameter joinInFlight: when true, a run already in flight for the same
+  ///   connection fingerprint is awaited instead of starting a second
+  ///   waterfall. Only the capture-admission path opts in: it just needs the
+  ///   reference data another path is already loading. Callers that have
+  ///   changed server state (a rewards import, a settings save) must start a
+  ///   fresh run, because a run that began before their write finished would
+  ///   not see it.
+  func refreshAll(quiet: Bool = false, joinInFlight: Bool = false) async {
+    let fingerprint = settings.connectionFingerprint
+    if joinInFlight, let inFlight = inFlightRefreshAll, inFlight.fingerprint == fingerprint {
+      await inFlight.task.value
+      return
+    }
+    refreshAllGeneration &+= 1
+    let generation = refreshAllGeneration
+    let task = Task { @MainActor [weak self] () -> Void in
+      await self?.performRefreshAll(quiet: quiet)
+      // The run clears its own record as its last step, so a caller that
+      // arrives once the work finished but before the starting caller's
+      // `await task.value` resumes never waits on an already-finished task.
+      // A plan switch may have started a newer run meanwhile; the generation
+      // guard keeps this run from clearing the newer run's record.
+      if let self, self.inFlightRefreshAll?.generation == generation {
+        self.inFlightRefreshAll = nil
+      }
+    }
+    inFlightRefreshAll = (fingerprint, generation, task)
+    await task.value
+  }
+
+  private func performRefreshAll(quiet: Bool) async {
     guard await resolvePlanSelection() else {
       return
     }
@@ -2108,6 +2157,8 @@ final class AppModel {
 
   func noteRewardsImport() async {
     noteRewardsBoardChanged()
+    // The import has just written server state, so it must not join a run
+    // that started before the import finished and would miss it.
     await refreshAll(quiet: true)
   }
 
