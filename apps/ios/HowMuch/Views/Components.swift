@@ -8,10 +8,10 @@ extension View {
       .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
   }
 
-  /// Numbers that roll digit by digit when `value` changes.
+  /// Numbers that roll digit by digit when `value` changes. Under Reduce
+  /// Motion the new figure simply replaces the old one.
   func rollingNumber(_ value: Int) -> some View {
-    contentTransition(.numericText(value: Double(value)))
-      .animation(Theme.Motion.standard, value: value)
+    modifier(RollingNumber(value: value))
   }
 
   func flagRail(_ colour: Color?) -> some View {
@@ -67,6 +67,17 @@ struct DisclosureValueRow: View {
     .padding(.horizontal, showsChevron ? 16 : 0)
     .padding(.vertical, showsChevron ? 13 : 0)
     .contentShape(Rectangle())
+  }
+}
+
+private struct RollingNumber: ViewModifier {
+  let value: Int
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  func body(content: Content) -> some View {
+    content
+      .contentTransition(reduceMotion ? .identity : .numericText(value: Double(value)))
+      .animation(reduceMotion ? nil : Theme.Motion.standard, value: value)
   }
 }
 

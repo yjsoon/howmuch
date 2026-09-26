@@ -1290,6 +1290,7 @@ struct RewardCategoryUsage: Identifiable {
 
 struct RewardCategoryBreakdown: View {
   @Environment(\.layoutDirection) private var layoutDirection
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   let row: RewardsCardRow
   let currencyFormat: CurrencyFormat?
 
@@ -1313,6 +1314,12 @@ struct RewardCategoryBreakdown: View {
       }
       ForEach(categories) { category in
         categoryRow(category)
+      }
+    }
+    // Report swaps animate; under Reduce Motion the bar and fills just change.
+    .transaction { transaction in
+      if reduceMotion {
+        transaction.animation = nil
       }
     }
   }
