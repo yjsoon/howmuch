@@ -886,6 +886,7 @@ struct RewardFilledRow: View {
           Image(systemName: "exclamationmark.triangle.fill")
             .accessibilityHidden(true)
           Text(line)
+            .foregroundStyle(exceptionInk(at: index, forText: true))
             .fixedSize(horizontal: false, vertical: true)
         }
         .foregroundStyle(exceptionInk(at: index))
@@ -919,7 +920,7 @@ struct RewardFilledRow: View {
     .accessibilityValue(text.accessibilityValue)
   }
 
-  private func exceptionInk(at index: Int) -> Color {
+  private func exceptionInk(at index: Int, forText: Bool = false) -> Color {
     guard index < RewardRowText.visibleExceptionLimit, index < projection.exceptions.count else {
       return Theme.rowSecondary
     }
@@ -927,7 +928,7 @@ struct RewardFilledRow: View {
     case .categoriesAtCap, .tierCapReached:
       return RewardTonePalette.palette(for: .complete).ink
     case .categoriesBelowMinimum, .minimumNotMet:
-      return RewardTonePalette.palette(for: .needsMinimum).ink
+      return forText ? Theme.textPrimary : RewardTonePalette.palette(for: .needsMinimum).ink
     case .rewardsLocked:
       return Theme.rowSecondary
     }

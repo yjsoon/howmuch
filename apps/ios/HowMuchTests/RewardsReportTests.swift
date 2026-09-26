@@ -1449,6 +1449,13 @@ final class RewardRowProjectionTests: XCTestCase {
       "flags": [flag("Online", total: 450, maximum: 416, exceeded: true),
         flag("Travel", total: 20, minimum: 100, minimumMet: false)],
     ], name: "Mixed warnings", id: "mixed")
+    // Unlike the mixed row, this warning is visible on a full green surface.
+    // Amber footnote text failed contrast on increased-contrast mint fills.
+    let categoryMinimum = try project([
+      "minimum_spend": 600, "total_spend": 800,
+      "flags": [flag("Dining", total: 120, minimum: 200, minimumMet: false),
+        flag("Uncapped", total: 680)],
+    ], name: "Category minimum outstanding", id: "category-minimum")
     let july = RewardsCalendar.today().hasPrefix("2026-") ? "July minimum missed" : "July 2026 minimum missed"
     let groups: [(String, [RewardRowProjection], [String])] = [
       ("main", [dcs, maybank, unmet, capped, failed],
@@ -1456,6 +1463,7 @@ final class RewardRowProjectionTests: XCTestCase {
       ("boundaries", [next, headroom, pending, unlimited, range, withheld, mixed],
         ["to next tier", "left before bonus cap", "Rewards unlock after", "No cap", "Historical aggregate",
           "Minimum not yet met", "+1 more"]),
+      ("category-minimum", [categoryMinimum], ["Minimum met", "Dining below its minimum"]),
     ]
     for (group, rows, expected) in groups {
       for (appearance, scheme, size) in [("light", ColorScheme.light, DynamicTypeSize.large),
