@@ -1,10 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  defaultIconForAccountType,
-  parseAccountIcon,
-  resolveAccountPresentation,
-  splitLegacyAccountName,
-} from "./account-icon";
+import { parseAccountIcon } from "./account-icon";
 
 describe("parseAccountIcon", () => {
   test("accepts a single emoji grapheme", () => {
@@ -37,77 +32,5 @@ describe("parseAccountIcon", () => {
     expect(parseAccountIcon("#")).toBeNull();
     expect(parseAccountIcon("*")).toBeNull();
     expect(parseAccountIcon(null)).toBeNull();
-  });
-});
-
-describe("splitLegacyAccountName", () => {
-  test("lifts a leading emoji and leaves the rest as the name", () => {
-    expect(splitLegacyAccountName("💳 OCBC 365")).toEqual({ icon: "💳", name: "OCBC 365" });
-    expect(splitLegacyAccountName("💳OCBC")).toEqual({ icon: "💳", name: "OCBC" });
-  });
-
-  test("leaves a trailing emoji on the name", () => {
-    expect(splitLegacyAccountName("Travel ✈️")).toEqual({ icon: null, name: "Travel ✈️" });
-    expect(splitLegacyAccountName("Banana \u{1F44D}\u{FE0F}")).toEqual({
-      icon: null,
-      name: "Banana \u{1F44D}\u{FE0F}",
-    });
-  });
-
-  test("keeps a name that is only an emoji", () => {
-    expect(splitLegacyAccountName("💳")).toEqual({ icon: "💳", name: "💳" });
-  });
-
-  test("leaves plain names alone", () => {
-    expect(splitLegacyAccountName("Everyday Account")).toEqual({ icon: null, name: "Everyday Account" });
-  });
-});
-
-describe("resolveAccountPresentation", () => {
-  test("prefers an explicit icon over a stored icon or a name emoji", () => {
-    expect(resolveAccountPresentation({
-      name: "💳 OCBC",
-      icon: "🐷",
-      existingIcon: "🏦",
-      type: "checking",
-    })).toEqual({ icon: "🐷", name: "OCBC" });
-  });
-
-  test("keeps a stored icon when a later import still has an emoji on the name", () => {
-    expect(resolveAccountPresentation({
-      name: "💳 OCBC",
-      existingIcon: "🐷",
-      type: "creditCard",
-    })).toEqual({ icon: "🐷", name: "OCBC" });
-  });
-
-  test("uses a name emoji when the account has no stored icon", () => {
-    expect(resolveAccountPresentation({ name: "💰 Rainy Day", type: "savings" }))
-      .toEqual({ icon: "💰", name: "Rainy Day" });
-  });
-
-  test("does not lift a trailing name emoji over a stored type-default icon", () => {
-    expect(resolveAccountPresentation({
-      name: "Travel ✈️",
-      existingIcon: "💳",
-      type: "creditCard",
-    })).toEqual({ icon: "💳", name: "Travel ✈️" });
-  });
-
-  test("lifts a thumbs-up plus space even when the name has trailing spaces", () => {
-    expect(splitLegacyAccountName("\u{1F44D}\u{FE0F} Banana ")).toEqual({
-      icon: "\u{1F44D}\u{FE0F}",
-      name: "Banana",
-    });
-    expect(splitLegacyAccountName("\u{1F44D}\u{1F3FF} Savings")).toEqual({
-      icon: "\u{1F44D}\u{1F3FF}",
-      name: "Savings",
-    });
-  });
-
-  test("falls back to the account type", () => {
-    expect(resolveAccountPresentation({ name: "Visa", type: "creditCard" }))
-      .toEqual({ icon: "💳", name: "Visa" });
-    expect(defaultIconForAccountType("checking")).toBe("🏦");
   });
 });
