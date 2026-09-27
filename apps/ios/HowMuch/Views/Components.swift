@@ -618,6 +618,9 @@ struct RootTabView: View {
       .tabBarMinimizeBehavior(.onScrollDown)
       .overlay {
         RootTabBarFloatingAssistant(
+          // The button lives on the window, above every SwiftUI overlay, so
+          // onboarding (Welcome, and sign-in opened from it) hides it.
+          isSuppressed: model.isShowingWelcome || (model.isShowingSettings && model.canReturnToWelcome),
           openAssistant: { chrome.openMore(.assistant) }
         )
         .allowsHitTesting(false)
@@ -702,16 +705,19 @@ struct RootCaptureTab: TabContent {
 }
 
 struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
+  var isSuppressed = false
   var openAssistant: () -> Void
 
   func makeUIViewController(context: Context) -> Controller {
     let controller = Controller()
     controller.openAssistant = openAssistant
+    controller.isSuppressed = isSuppressed
     return controller
   }
 
   func updateUIViewController(_ controller: Controller, context: Context) {
     controller.openAssistant = openAssistant
+    controller.isSuppressed = isSuppressed
     controller.startTracking()
     controller.install()
   }
@@ -723,6 +729,7 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
 
   final class Controller: UIViewController {
     var openAssistant: () -> Void = {}
+    var isSuppressed = false
     private var assistantButton: UIButton?
     private var displayLink: CADisplayLink?
 
@@ -751,7 +758,7 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
     }
 
     func install() {
-      if CaptureRouter.shared.hidesTabRowOverlay {
+      if isSuppressed || CaptureRouter.shared.hidesTabRowOverlay {
         hideAssistant()
         return
       }
@@ -781,7 +788,7 @@ struct RootTabBarFloatingAssistant: UIViewControllerRepresentable {
     private func layoutAssistant(relativeTo pin: CGRect, in window: UIWindow) {
       let button = assistantButton ?? makeAssistantButton()
       assistantButton = button
-      if CaptureRouter.shared.hidesTabRowOverlay {
+      if isSuppressed || CaptureRouter.shared.hidesTabRowOverlay {
         hideAssistant()
         return
       }
