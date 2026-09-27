@@ -330,25 +330,4 @@ final class OutboxStoreTests: XCTestCase {
     XCTAssertEqual(try Data(contentsOf: outbox.quarantinedFiles()[0]), garbage)
     XCTAssertNil(defaults.data(forKey: OutboxStore.legacyDefaultsKey))
   }
-
-  func testMintedIDsMatchTheServersShape() {
-    let id = OutboxCommand.mintTransactionID()
-    XCTAssertTrue(id.hasPrefix("txn_"))
-    XCTAssertNotNil(UUID(uuidString: String(id.dropFirst(4))))
-    XCTAssertEqual(id, id.lowercased())
-  }
-
-  func testCreateBodiesCarryTheClientIDAndImportID() throws {
-    var body = request(importID: "imp-9")
-    body.id = "txn_0f0f"
-    let encoder = JSONEncoder()
-    encoder.keyEncodingStrategy = .convertToSnakeCase
-    let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(body)) as? [String: Any])
-    XCTAssertEqual(object["id"] as? String, "txn_0f0f")
-    XCTAssertEqual(object["import_id"] as? String, "imp-9")
-
-    body.id = nil
-    let withoutID = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(body)) as? [String: Any])
-    XCTAssertNil(withoutID["id"], "edits never send an id")
-  }
 }

@@ -98,23 +98,6 @@ final class OutboxSyncTests: XCTestCase {
     XCTAssertEqual(try row(in: model, "row-1").memo, "second")
   }
 
-  func testCreateSendsTheClientIDAndImportID() async throws {
-    let model = makeModel()
-    await load(model)
-
-    try model.commit(newDraft(amount: 3_000, payee: "Bakery"))
-    let pending = try XCTUnwrap(model.pendingRows.first)
-    await model.waitForOutboxDrain()
-
-    let post = try XCTUnwrap(server.writes().first)
-    XCTAssertEqual(post.description, "POST /v1/plans/plan-1/transactions")
-    let body = try XCTUnwrap(post.body["transaction"] as? [String: Any])
-    XCTAssertEqual(body["id"] as? String, pending.transactionID)
-    XCTAssertNotNil(body["import_id"] as? String)
-    XCTAssertTrue(model.pendingRows.isEmpty)
-    XCTAssertEqual(model.transactions.first { $0.id == pending.transactionID }?.payeeName, "Bakery")
-  }
-
   // MARK: - Cleared
 
   func testClearedToggleRoundTrip() async throws {

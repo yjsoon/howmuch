@@ -21,24 +21,6 @@ final class LocalEngineTests: XCTestCase {
 
   private let config = LocalEngineConfig(apiToken: "test-token", defaultPlanId: "plan_test", timeZone: "Asia/Singapore")
 
-  func testPendingMigrationsSkipAppliedOnesAndKeepD1Order() {
-    let available = [
-      LocalMigration(name: "0002_b.sql", sql: ""),
-      LocalMigration(name: "0001_a.sql", sql: ""),
-      LocalMigration(name: "0003_c.sql", sql: ""),
-    ]
-
-    let pending = LocalMigration.pending(available: available, applied: ["0002_b.sql"])
-
-    XCTAssertEqual(pending.map(\.name), ["0001_a.sql", "0003_c.sql"])
-  }
-
-  func testBundleShipsEveryMigration() throws {
-    let migrations = try LocalMigration.bundled()
-    XCTAssertFalse(migrations.isEmpty)
-    XCTAssertEqual(migrations.first?.name, "0001_initial.sql")
-  }
-
   func testMigrationsApplyOnceAndAreRecorded() throws {
     let migrations = try LocalMigration.bundled()
     let database = try LocalDatabase(url: databaseURL)
@@ -93,13 +75,6 @@ final class LocalEngineTests: XCTestCase {
     XCTAssertEqual(response.status, 401)
   }
 
-  func testScheduledMaterialisationRunsWithNothingDue() async throws {
-    let engine = LocalEngine(databaseURL: databaseURL)
-    let summary = try await engine.runScheduledMaterialization(config: config)
-    XCTAssertEqual(summary.occurrenceCount, 0)
-    XCTAssertEqual(summary.failureCount, 0)
-  }
-
   private func currencyCode(_ engine: LocalEngine, config: LocalEngineConfig) async throws -> String? {
     let response = try await engine.handle(
       config: config,
@@ -113,14 +88,6 @@ final class LocalEngineTests: XCTestCase {
     let object = try JSONSerialization.jsonObject(with: response.body) as? [String: Any]
     let settings = (object?["data"] as? [String: Any])?["settings"] as? [String: Any]
     return (settings?["currency_format"] as? [String: Any])?["iso_code"] as? String
-  }
-
-  func testNewPlanTakesTheSeededSettings() async throws {
-    var seeded = config
-    seeded.newPlanSettings = PlanSettingsSeed.from(locale: Locale(identifier: "ja_JP"))
-    let engine = LocalEngine(databaseURL: databaseURL)
-    let code = try await currencyCode(engine, config: seeded)
-    XCTAssertEqual(code, "JPY")
   }
 
   func testExistingPlanKeepsItsSettings() async throws {

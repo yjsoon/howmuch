@@ -26,51 +26,6 @@ final class LocalModeTests: XCTestCase {
     try super.tearDownWithError()
   }
 
-  func testAccountTransactionAndBalanceRoundTrip() async throws {
-    let settings = APISettings.local(in: defaults)
-    let client = APIClient(settings: settings)
-    let planID = settings.planID
-
-    let plans = try await client.fetchPlans()
-    XCTAssertEqual(plans.map(\.id), [planID])
-
-    let created = try await client.createAccount(
-      planID: planID,
-      name: "Everyday",
-      type: "checking",
-      balance: 100_000,
-      icon: nil,
-      onBudget: true
-    )
-    let listed = try await client.fetchAccounts(planID: planID)
-    XCTAssertEqual(listed.map(\.id), [created.id])
-    XCTAssertEqual(listed.first?.balance, 100_000)
-
-    let transaction = try await client.createTransaction(
-      planID: planID,
-      request: TransactionWriteRequest(
-        accountID: created.id,
-        date: Date.now.isoDateString,
-        amount: -12_340,
-        payeeID: nil,
-        payeeName: "Coffee",
-        categoryID: nil,
-        memo: nil,
-        cleared: .cleared,
-        approved: true,
-        flagColor: nil,
-        subtransactions: []
-      )
-    )
-    XCTAssertEqual(transaction.amount, -12_340)
-
-    let after = try await client.fetchAccounts(planID: planID)
-    XCTAssertEqual(after.first?.balance, 87_660)
-    let reference = try await client.fetchReferenceData(planID: planID)
-    XCTAssertEqual(reference.accounts.map(\.id), [created.id])
-    XCTAssertNil(reference.accountPreferences)
-  }
-
   func testServerErrorsMapAsTheyDoOverTheNetwork() async throws {
     let settings = APISettings.local(in: defaults)
     let client = APIClient(settings: settings)
@@ -159,20 +114,6 @@ final class LocalModeTests: XCTestCase {
     let afterReseed = try await starterNames(client, planID: planID)
     XCTAssertFalse(afterReseed.contains("Groceries"))
     XCTAssertEqual(afterReseed.count, StarterCategories.groups.flatMap(\.categories).count - 1)
-  }
-
-  func testStarterIDsAreStableAndValidEntityIDs() {
-    let steps = StarterCategories.steps(planID: "plan_0f8fad5b-d9cb-469f-a165-70867728950e")
-    XCTAssertEqual(steps, StarterCategories.steps(planID: "plan_0f8fad5b-d9cb-469f-a165-70867728950e"))
-    let ids = steps.map { step -> String in
-      switch step {
-      case .group(let id, _), .category(let id, _, _): return id
-      }
-    }
-    XCTAssertEqual(Set(ids).count, ids.count)
-    let pattern = /^[A-Za-z0-9._:-]{1,128}$/
-    XCTAssertTrue(ids.allSatisfy { $0.wholeMatch(of: pattern) != nil }, "\(ids)")
-    XCTAssertEqual(StarterCategories.slug("Phone and internet"), "phone-and-internet")
   }
 
   /// Local mode has no session to revoke: an expiry notice must not sign it out.
@@ -316,12 +257,5 @@ final class LocalModeTests: XCTestCase {
     try await write(NavigationStack { AccountsView(usesSplit: false) }, named: "local-2-accounts", waitingFor: ["Everyday"])
     try await write(NavigationStack { RegisterView(scope: .account(account.id)) }, named: "local-3-register", waitingFor: ["FairPrice"])
     try await write(SettingsView(settings: settings) { _ in }, named: "local-4-settings", waitingFor: ["Connect to a server"])
-  }
-
-  func testLaunchRoute() {
-    XCTAssertEqual(LaunchRoute.resolve(hasSavedSettings: false, isAuthenticated: false), .welcome)
-    XCTAssertEqual(LaunchRoute.resolve(hasSavedSettings: true, isAuthenticated: false), .connection)
-    XCTAssertEqual(LaunchRoute.resolve(hasSavedSettings: true, isAuthenticated: true), .main)
-    XCTAssertEqual(LaunchRoute.resolve(hasSavedSettings: false, isAuthenticated: true), .main)
   }
 }

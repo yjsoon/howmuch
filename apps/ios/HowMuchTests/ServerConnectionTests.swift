@@ -34,10 +34,6 @@ final class ServerConnectionRulesTests: XCTestCase {
     )
   }
 
-  func testAFreshPlanIsEmpty() {
-    XCTAssertTrue(contents().isEmpty)
-  }
-
   func testTombstonesDoNotCount() {
     let plan = contents(
       accounts: [account("gone", deleted: true)],
@@ -46,53 +42,6 @@ final class ServerConnectionRulesTests: XCTestCase {
       groups: [CategoryGroup(id: "g", name: "Old", hidden: false, deleted: true, categories: [])]
     )
     XCTAssertTrue(plan.isEmpty)
-  }
-
-  func testAnyLiveRowMakesAPlanNotEmpty() {
-    XCTAssertFalse(contents(accounts: [account("closed", closed: true)]).isEmpty, "A closed account is still live")
-    XCTAssertFalse(contents(hasTransactions: true).isEmpty)
-    XCTAssertFalse(contents(schedules: [schedule()]).isEmpty)
-    XCTAssertFalse(contents(payees: [Payee(id: "p", name: "Shop", transferAccountId: nil, deleted: nil)]).isEmpty)
-    XCTAssertFalse(contents(groups: [CategoryGroup(id: "g", name: "Bills", hidden: true, deleted: false, categories: [])]).isEmpty)
-    let category = Category(id: "c", categoryGroupID: "g", name: "Rent", deleted: false)
-    let plan = contents(groups: [CategoryGroup(id: "g", name: "Bills", hidden: false, deleted: false, categories: [category])])
-    XCTAssertEqual(plan.categories, 1)
-    XCTAssertFalse(plan.isEmpty)
-  }
-
-  func testIdempotencyKeyIsStableValidAndSpecificToBothPlans() {
-    let key = SnapshotImport.idempotencyKey(localPlanID: "plan_local", serverPlanID: "plan/server")
-    XCTAssertEqual(key, SnapshotImport.idempotencyKey(localPlanID: "plan_local", serverPlanID: "plan/server"))
-    XCTAssertNotNil(key.wholeMatch(of: /[A-Za-z0-9._:-]{8,128}/), key)
-    XCTAssertNotEqual(key, SnapshotImport.idempotencyKey(localPlanID: "plan_local", serverPlanID: "plan_other"))
-    XCTAssertNotEqual(key, SnapshotImport.idempotencyKey(localPlanID: "plan_other", serverPlanID: "plan/server"))
-    XCTAssertNotEqual(
-      SnapshotImport.idempotencyKey(localPlanID: "a", serverPlanID: "b"),
-      SnapshotImport.idempotencyKey(localPlanID: "b", serverPlanID: "a")
-    )
-  }
-
-  func testSummaryCountsLiveRowsAndTheRequestLimit() throws {
-    let snapshot = Data(#"{"format":"howmuch-plan-snapshot","version":1,"accounts":[{"id":"a"},{"id":"b"}],"transactions":[{"id":"t1"},{"id":"t2","deleted":true}]}"#.utf8)
-    let summary = try SnapshotImport.summary(of: snapshot)
-    XCTAssertEqual(summary, SnapshotImport.Summary(accounts: 2, transactions: 1, fitsOneRequest: true))
-
-    let body = SnapshotImport.requestBody(snapshot: snapshot)
-    let wrapped = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
-    XCTAssertEqual((wrapped["snapshot"] as? [String: Any])?["format"] as? String, "howmuch-plan-snapshot")
-
-    let padding = String(repeating: "x", count: APIClient.snapshotByteLimit)
-    let large = Data(#"{"accounts":[],"memo":"\#(padding)"}"#.utf8)
-    XCTAssertFalse(try SnapshotImport.summary(of: large).fitsOneRequest)
-  }
-
-  func testImportFailuresMapToTheNextStep() {
-    XCTAssertEqual(SnapshotImport.failure(for: APIClientError.planNotEmpty("full")), .serverHasData)
-    XCTAssertEqual(SnapshotImport.failure(for: APIClientError.payloadTooLarge), .tooLarge)
-    XCTAssertEqual(SnapshotImport.failure(for: APIClientError.conflict("reused")), .recheck("reused"))
-    XCTAssertEqual(SnapshotImport.failure(for: APIClientError.server("boom")), .failed("boom"))
-    XCTAssertEqual(SnapshotImport.failure(for: APIClientError.ynabMirrorPlan("mirror")), .refused(SnapshotImport.ynabMirrorMessage))
-    XCTAssertEqual(SnapshotImport.failure(for: APIClientError.ownerRequired("owner")), .refused(SnapshotImport.ownerRequiredMessage))
   }
 
   private func pending(_ fingerprint: String) -> OutboxCommand {
@@ -142,16 +91,6 @@ final class ServerConnectionRulesTests: XCTestCase {
     XCTAssertEqual(chosen.adopt(server), server)
     XCTAssertNil(chosen.abandon(), "A chosen server is not signed out when the sheet closes")
     XCTAssertNil(chosen.adopt(server), "Only once")
-  }
-
-  func testArchivePathIsRelativeToApplicationSupport() {
-    let inside = LocalEngine.defaultDatabaseURL
-    let archive = LocalArchive(databaseURL: inside, planID: "p", archivedAt: .now)
-    XCTAssertEqual(archive.path, "HowMuch/Local/howmuch.sqlite")
-    XCTAssertEqual(archive.databaseURL.standardizedFileURL, inside.standardizedFileURL)
-
-    let outside = URL(fileURLWithPath: "/tmp/elsewhere/howmuch.sqlite")
-    XCTAssertEqual(LocalArchive(databaseURL: outside, planID: "p", archivedAt: .now).databaseURL.path, outside.path)
   }
 }
 

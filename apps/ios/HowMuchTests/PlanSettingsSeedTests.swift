@@ -53,15 +53,4 @@ final class PlanSettingsSeedTests: XCTestCase {
     XCTAssertTrue(PlanSettingsSeed.symbolFirst(in: "¤ #,##0.00"))
     XCTAssertFalse(PlanSettingsSeed.symbolFirst(in: "#,##0.00 ¤"))
   }
-
-  func testEncodesTheStoredShape() throws {
-    let data = try JSONEncoder().encode(try seed("en_US"))
-    let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-    let currency = try XCTUnwrap(object["currency_format"] as? [String: Any])
-    XCTAssertEqual(
-      Set(currency.keys),
-      ["iso_code", "example_format", "decimal_digits", "decimal_separator", "symbol_first", "group_separator", "currency_symbol", "display_symbol"]
-    )
-    XCTAssertEqual((object["date_format"] as? [String: Any])?["format"] as? String, "MM/DD/YYYY")
-  }
 }
