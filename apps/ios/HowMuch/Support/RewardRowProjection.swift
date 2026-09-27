@@ -51,6 +51,18 @@ enum RewardsCalendar {
 
   private static let dayMonth = formatter("d MMM")
   private static let dayMonthYear = formatter("d MMM yyyy")
+
+  static func qualificationLabel(_ period: ClosedRange<String>) -> String {
+    if let start = date(period.lowerBound), let end = date(period.upperBound),
+      calendar.component(.day, from: start) == 1,
+      let month = calendar.dateInterval(of: .month, for: start),
+      let lastDay = calendar.date(byAdding: .day, value: -1, to: month.end),
+      calendar.isDate(end, inSameDayAs: lastDay)
+    {
+      return formatter(period.lowerBound.prefix(4) == today().prefix(4) ? "MMMM" : "MMMM yyyy").string(from: start)
+    }
+    return "\(shortLabel(period.lowerBound, referenceISO: today()))–\(shortLabel(period.upperBound, referenceISO: today()))"
+  }
 }
 
 /// What one Rewards row says, derived only from the report. Semantic values;
@@ -61,9 +73,9 @@ struct RewardRowProjection: Equatable {
     case needsMinimum
     /// Earning, heading for a tier or cap: mint.
     case earning
-    /// Terminal cap reached: subdued.
+    /// Terminal bonus cap reached: soft red.
     case complete
-    /// Monthly qualification failed: neutral surface, warning line.
+    /// Closed monthly qualification failed: soft red.
     case failed
     /// No target, or an aggregate range.
     case neutral
@@ -75,6 +87,7 @@ struct RewardRowProjection: Equatable {
     case minimum(remaining: Double)
     case nextTier(remaining: Double)
     case capHeadroom(remaining: Double)
+    case minimumMet
     /// Past the last spend tier with no card-wide cap; categories may still cap.
     case topTier
     /// `terminal` is false for an intermediate cap with no reachable tier left.
@@ -123,6 +136,7 @@ struct RewardRowProjection: Equatable {
   let totalSpend: Double
   let earned: Double
   let exceptions: [Exception]
+  let missedMinimumPeriod: ClosedRange<String>?
 
   var isBelowMinimum: Bool {
     switch action {
@@ -144,7 +158,8 @@ struct RewardRowProjection: Equatable {
       basis: Basis? = nil,
       fill: Double? = nil,
       deadline: Deadline? = nil,
-      exceptions: [Exception] = []
+      exceptions: [Exception] = [],
+      missedMinimumPeriod: ClosedRange<String>? = nil
     ) -> Self {
       Self(
         cardID: row.card.id,
@@ -158,7 +173,8 @@ struct RewardRowProjection: Equatable {
         deadline: deadline,
         totalSpend: calc.totalSpend,
         earned: calc.rewardEarned,
-        exceptions: exceptions
+        exceptions: exceptions,
+        missedMinimumPeriod: missedMinimumPeriod
       )
     }
 
@@ -180,6 +196,14 @@ struct RewardRowProjection: Equatable {
     let activeMonth = asOf.flatMap { day in
       calc.monthlyQualifications?.first(where: { $0.start <= day && day <= $0.end })
     }
+    let qualificationDay = asOf ?? RewardsCalendar.today()
+    let failedMonth = calc.monthlyQualifications?.first {
+      $0.status == "failed" && ($0.end < qualificationDay
+        || ($0.end == qualificationDay && qualificationDay < RewardsCalendar.today()))
+    }
+    // Older reports may have only the authoritative status, with no breakdown.
+    let failed = status == "failed" && (failedMonth != nil || calc.monthlyQualifications?.isEmpty != false)
+    let qualified = calc.minimumSpendMet && status != "pending" && status != "failed"
 
     var action: Action
     var tone: Tone
@@ -188,11 +212,11 @@ struct RewardRowProjection: Equatable {
     var due: Deadline?
     var exceptions: [Exception] = []
 
-    if status == "failed" {
+    if failed {
       action = .qualificationFailed
       tone = .failed
       due = deadline(periodEnd, .resets)
-    } else if status == "pending", let month = activeMonth, month.spend < month.minimumSpend {
+    } else if status == "pending" || status == "failed", let month = activeMonth, month.spend < month.minimumSpend {
       action = .monthlyMinimum(remaining: month.minimumSpend - month.spend)
       tone = .needsMinimum
       basis = Basis(spend: month.spend, target: month.minimumSpend)
@@ -230,7 +254,7 @@ struct RewardRowProjection: Equatable {
       }
       fill = 1
       due = deadline(periodEnd, .resets)
-    } else if row.card.spendingTiers?.isEmpty == false, calc.hasNextSpendingTier == false,
+    } else if qualified, row.card.spendingTiers?.isEmpty == false, calc.hasNextSpendingTier == false,
       (calc.minimumSpend ?? 0) > 0
     {
       // Every threshold is behind: the minimum branch above has passed and
@@ -239,10 +263,20 @@ struct RewardRowProjection: Equatable {
       tone = .earning
       fill = 1
       due = deadline(periodEnd, .resets)
+    } else if qualified, let minimum = calc.minimumSpend, minimum > 0 {
+      action = .minimumMet
+      tone = .earning
+      basis = Basis(spend: calc.totalSpend, target: minimum)
+      due = deadline(periodEnd, .resets)
     } else {
       action = .noTarget(categoryCaps: calc.flags.contains { ($0.maximumSpend ?? 0) > 0 })
       tone = .neutral
       due = deadline(periodEnd, .resets)
+    }
+
+    // A reachable tier or cap is not proof that qualification unlocked rewards.
+    if tone == .earning, !qualified {
+      tone = .neutral
     }
 
     if status == "pending", !isMonthly(action) {
@@ -270,7 +304,8 @@ struct RewardRowProjection: Equatable {
       }
     }
 
-    return build(action, tone, basis: basis, fill: fill, deadline: due, exceptions: exceptions)
+    return build(action, tone, basis: basis, fill: fill, deadline: due, exceptions: exceptions,
+      missedMinimumPeriod: failedMonth.map { $0.start...$0.end })
   }
 
   private static func isMonthly(_ action: Action) -> Bool {
@@ -307,7 +342,8 @@ struct RewardRowText {
     switch projection.action {
     case .qualificationFailed:
       amount = nil
-      actionLabel = "Monthly minimum missed"
+      actionLabel = projection.missedMinimumPeriod.map { "\(RewardsCalendar.qualificationLabel($0)) minimum missed" }
+        ?? "Monthly minimum missed"
     case .monthlyMinimum(let remaining):
       amount = money(Self.roundedUpToCent(remaining))
       actionLabel = "to monthly minimum"
@@ -319,13 +355,16 @@ struct RewardRowText {
       actionLabel = "to next tier"
     case .capHeadroom(let remaining):
       amount = money(remaining)
-      actionLabel = "left before cap"
+      actionLabel = "left before bonus cap"
     case .capReached:
       amount = nil
-      actionLabel = "Cap reached"
+      actionLabel = "Bonus cap reached"
     case .topTier:
       amount = nil
-      actionLabel = "Top tier reached"
+      actionLabel = "Highest tier active"
+    case .minimumMet:
+      amount = nil
+      actionLabel = "Minimum met"
     case .noTarget(let categoryCaps):
       amount = nil
       actionLabel = categoryCaps ? "No card cap" : "No cap"

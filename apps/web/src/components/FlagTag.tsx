@@ -114,6 +114,7 @@ function FlagSwatch({
   onSelect: () => void;
 }) {
   const label = flagTitle(colour, name);
+  const named = Boolean(name?.trim());
   return (
     <button
       type="button"
@@ -122,9 +123,11 @@ function FlagSwatch({
       aria-checked={selected}
       aria-label={label}
       title={label}
-      className={selected ? `flag-picker-swatch flag-colour-${colour} is-selected` : `flag-picker-swatch flag-colour-${colour}`}
+      className={`${named ? "flag-picker-none" : `flag-picker-swatch flag-colour-${colour}`}${selected ? " is-selected" : ""}`}
       onClick={onSelect}
       disabled={disabled}
-    />
+    >
+      {named ? label : null}
+    </button>
   );
 }

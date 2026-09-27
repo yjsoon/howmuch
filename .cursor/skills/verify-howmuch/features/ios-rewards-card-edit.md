@@ -1,48 +1,39 @@
-# iOS Rewards card edit
+# iOS Edit Rewards
 
-Rewards cards are stored on the plan and edited on the Rewards tab. **Add card** opens an editor that picks an existing HowMuch credit card. A tile opens that card. The board hides a card whose calculation reports that maximum spend is exceeded. The editor still opens that card by id from Rewards import stored cards.
+Rewards settings belong to an existing account. **Edit Account** remains separate. The rewards editor owns one draft: child rule screens do not write to the API, and only its main **Save** applies changes. It contains no transaction ledger or transaction flag writes.
 
-## Sub-features
+## Local preparation
 
-- `ios-rewards-add-card` shows **Add card** on the empty tab and the filled board, and opens the Add card editor.
-- `ios-rewards-create` saves a native card mapped to **Travel Card** and returns to Rewards.
-- `ios-rewards-edit-delete` loads a stored card from a tile, then **Delete card** after the confirm.
-- `ios-rewards-capped-hidden` hides a capped tile on the board and still opens the same card from Rewards import → Travel Card.
+- Follow `apps/ios/AGENTS.md`; build with `scripts/ios-xcodebuild.sh` and install the successful product on its pinned Simulator.
+- Launch the disposable stack with `control-howmuch launch`, then `doctor`. Use a distinct `HOWMUCH_VERIFY_STATE_ROOT` when another verification stack is active.
+- Set up the synthetic owner and sign in through native Connection using the isolated localhost server, `verifier` / `howmuch-verify-15`. Never use production.
+- Use the demo Travel Card account (`acct-credit`). API writes may prepare advanced synthetic fixtures, but creation/edit/save checks below must use the native editor.
+- Store evidence under `.amp/in/artifacts/ios-edit-rewards/`: revision and diff, fixture, interaction steps, screenshots, accessibility output and persisted API values. Never put credentials in shared artifacts.
 
-## How to get to it (user POV)
+## Entry points
 
-- Choose **Rewards**, then **Add card**.
-- Choose a tile on Rewards.
-- After a tile is hidden, choose **More → Connection settings → Rewards import**, then the stored card name.
+- Empty Rewards: **Set Up Rewards**. Existing board: Rewards menu → **Set Up Rewards**.
+- Tap a rewards row to open details, then **Edit Rewards**. The row context menu also offers **Edit Rewards**.
+- Stored cards in Rewards import/export can still open their editor, including cards hidden on this device.
+- Setup selects one existing available on-budget account. Editing shows a fixed linked-account header, no account chooser. Do not confuse the rewards label with the account name.
 
-## Driving it with control-howmuch
+## Native checks
 
-Preconditions:
+1. **Set up.** Select Travel Card, Cashback, rate `1.5`. Calendar cycle has no day picker. Minimum qualifying spend shows `None`; reward-earning spend cap shows `No cap`, with currency units. Save, then GET `/api/import/rewards-tracker?plan_id=local-plan` and confirm the new card links to `acct-credit`. Reopen it from the board.
+2. **Cycle and persistence.** Select Billing, then **Cycle starts on → Day 15**. The picker contains integers 1–31, not `15.0`. Preview explains that the day starts the cycle. Save, reopen, verify both the picker and stored `billingCycle`. For as-of 2026-09-26 expect 2026-09-15–2026-10-14. Calendar with a retained day 15 instead gives 2026-09-01–2026-09-30. Inspect the report and board deadline after saving; calendar ignores the stored day.
+3. **Clamping.** Exercise days 29, 30 and 31. For 2026-09-26, day 31 gives 2026-08-31–2026-09-29. The focused `RewardDraftPeriodTests` cover both sides of February's boundary (live-date native UI cannot change today's date): on 2026-02-27, day 31 means Jan31–Feb27; on Feb28, Feb28–Mar30. Run these alongside existing `RewardCardEditorTests`.
+4. **Advanced draft.** Configured rules appear as summary navigation rows. Unconfigured rules are under **Add a rule…**. Exercise flag-based rewards (including colour names, category import, active/excluded rules, signed priorities and block sizes), spending tiers and per-flag overrides, multi-month qualification, promotion and spend rounding. Fields retain labels and units. Navigate back and reopen a child before Save; it must retain the draft. Save and compare all advanced values in the snapshot. Disabled rules must not disappear. Remove an individual tier and flag while its detail is open: return safely to the collection. For a flag referenced by a tier, removal must also remove that dependent override, preserving unrelated flags and tiers. Verify the saved snapshot has no reference to the deleted flag.
+5. **Precedence.** With billing15 and promotion Sep10–Oct10, a 3-month rule anchored Sep1 gives Sep1–Nov30 on Sep26. A future Oct1 anchor leaves the promotion in force. Removing that promotion leaves billing Sep15–Oct14. A promotion with no start uses the underlying current cycle start; an expired promotion falls back to that cycle. The preview is prospective dates, not recalculated earnings. With a pending monthly minimum, the board may count down to Sep30 even when the full period ends Nov30; verify the report's monthly qualification and full-period dates.
+6. **Saved metadata.** In **Display & saved details**, inspect rewards label, issuer and Featured. An imported issuer `Unknown` remains stored unless explicitly edited. An unrelated rate/cycle edit must preserve all advanced settings, absent optional configuration and legacy labels. Account name must not change.
+7. **Discard.** Change a main field and a child rule, then Cancel. Confirm discard offers a destructive action and retaining the draft. Retain, inspect the edits, then discard. Reopen and GET snapshot: saved values unchanged. Swipe-dismiss must not silently lose dirty edits.
+8. **Validation.** Enter a negative/non-number rate; Save stays in the editor with a visible error. Dates remain previewable. Create an incomplete qualification or promotion, return and Save: navigate to the responsible rule with its inline error and retain all input. For a bad rate in the second flag/tier, route to that individual item, not just the collection. Correct it and save successfully. Scroll away from an error and trigger the same error again: it must become visible again.
+9. **Network failure.** Stop only the disposable API before opening Set Up Rewards. Initial load failure must show a retry-only error state, with no editable fields and Save disabled. Restore the same API and Retry: the initialized form becomes editable. Separately, with an already loaded draft, stop the API and Save: disable edits during the request, then display an error explaining the draft is retained and Save retries. Restore this same API/database, retry Save, reopen and inspect persisted data. Do not use Cancel as if it undoes a write.
+10. **Remove.** **Remove Rewards…** asks for confirmation that the account and transactions remain. Cancel first. Confirm removal on a disposable card, then inspect rewards snapshot, account and transaction counts. It removes rewards settings only.
 
-- `control-howmuch doctor` passes.
-- [iOS connection](./ios-connection.md) signed in as `verifier` against this stack.
-- Demo ledger still contains Travel Card.
-- Stay on **All Time**. Demo spends are 2026-03-01 through 2026-05-24.
-- Xcode Simulator is running HowMuch (`sg.soon.howmuch`). If Simulator is missing, skip this whole file.
+## Proof and timing
 
-- **Open empty.** Choose tab `Rewards`. Navigation title `Rewards`. **Add card** is present. Status mentions Rewards import and **Add card**. **Rewards import** stays on the empty panel.
-- **Open editor.** Choose **Add card**. Sheet title `Add card`. Trailing `Save`. Section `Existing HowMuch card`. Fields include `HowMuch card`, `Name`, `Issuer`, `Type`. HowMuch card lists `Travel Card`, not Everyday Account.
-- **Create.** HowMuch card `Travel Card`. Name fills to `Travel Card`. Issuer `UOB`. Type `Cashback`. Featured stays on. Earning rate `1`. Choose `Save`. Rewards lists a Cashback tile named `Travel Card`.
-- **Edit.** Choose the `Travel Card` cashback tile. Title is `Edit card`. HowMuch card is `Travel Card`. The account ledger lists Travel Card rows. Choose `Delete card`. Confirm heading is `Delete this reward card?`. Choose `Delete card`. Rewards no longer lists that cashback `Travel Card`.
-- **Lane 5.** Import `fixtures/rewards-tracker-export.json` from Rewards import if Travel Card is not already stored. Open the `Travel Card` tile. Set Maximum spend to `1`. Choose `Save`. The Rewards board omits the Travel Card tile. Open Rewards import and choose stored `Travel Card`. The editor still opens with title `Edit card` and account `Travel Card`.
-- **HTTP match.** After create, `control-howmuch http GET /api/import/rewards-tracker?plan_id=local-plan` includes a card named `Travel Card` with `ynabAccountId` `acct-credit`. Do not POST the card from `control-howmuch http` and call the tab verified.
-- **Proof.** Screenshot empty Rewards with **Add card** (`artifacts/ios-rewards-card-edit/empty.png`), the Add card editor (`artifacts/ios-rewards-card-edit/new.png`), the board after create (`artifacts/ios-rewards-card-edit/created.png`), the board after the capped save (`artifacts/ios-rewards-card-edit/capped-hidden.png`), and the editor still open for Travel Card (`artifacts/ios-rewards-card-edit/capped-editor.png`).
-- **Save-to-tile clock.** Darwin only. Budget 800 ms median over three samples. Time from the Save tap until the Rewards board shows the `Travel Card` tile. Do **not** use `axe describe-ui` as t0 or as the wait; that call is about 1.6 s and is not the product clock. Fill Add card first. Then run `apps/ios/scripts/rewards-save-to-tile-clock.sh`:
-  1. `DIR=$(NEEDLE='travel card' apps/ios/scripts/rewards-save-to-tile-clock.sh begin)` then tap Save immediately (`cliclick` or a single `axe tap`, not a dump).
-  2. `apps/ios/scripts/rewards-save-to-tile-clock.sh capture "$DIR"` polls `xcrun simctl io booted screenshot` as fast as simctl returns. `score` OCRs those frames afterwards and prints the first elapsed ms whose pixels show `Travel Card` on Rewards and not the Add card `Existing HowMuch card` editor.
-  3. Repeat twice more (delete the card or use a distinct name, then create again). Write all three ms values and the median into `artifacts/ios-rewards-card-edit/NOTES.md`. Median over 800 ms fails.
-- **Review video.** Darwin only. `xcrun simctl io booted recordVideo /tmp/rewards-ios-manage-review.mp4`, then 30–60 s of add, edit flags, delete. Stop the recorder. Keep stills at `/tmp/rewards-ios-manage-review-add.png` and `/tmp/rewards-ios-manage-review-flags.png`.
+Capture and inspect native screenshots of the ordinary form, advanced summaries, a rule editor and an error/discard state. A web screenshot is not native proof; an editor screenshot is not persistence proof.
 
-## Gotchas
+Do not use `apps/ios/scripts/rewards-save-to-tile-clock.sh` for this editor until its OCR classifier is updated: its old editor-heading exclusion can mistake Set Up Rewards for the board. Any replacement timing check needs an editor-negative control and three samples, not the approximately 1.6-second `axe describe-ui` call as a clock. The historical recipe budget is 800 ms median; report separately from functional correctness. Use a recording when timing is under review.
 
-- Empty state is only when the rewards report returns no cards. An all-capped board still has stored cards, so the empty panel stays away.
-- **Add card** is the control on the empty panel and on the filled board. Both open the editor for an existing HowMuch credit card.
-- Flag colour on a subcategory uses the same colour tags as the ledger (None plus the six colours). None stores Unflagged and matches unflagged spend. Ledger None sends `null`.
-- Colour names live on the rewards-tracked account. Name Red Dining and Blue Online on Travel Card; the editor flag picker then shows those names. Untracked accounts keep Red/Blue titles.
-- Linux CI cannot run Simulator. Native `RewardCardEditorTests` plus `control-howmuch http` are the proof this VM can produce. The 800 ms save-to-tile median and the review video are Darwin-only; an `axe describe-ui` dump after Save is not that median.
-- Do not mark this recipe verified from web `/rewards/new`.
+When native tools are unavailable, report the native checks as blocked, not passed via API or unit tests.

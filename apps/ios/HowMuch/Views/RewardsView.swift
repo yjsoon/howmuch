@@ -242,9 +242,9 @@ struct RewardsView: View {
         emptyState(
           "No Reward Cards",
           systemImage: "creditcard",
-          description: "Add a card to track minimums and caps, or import your Rewards Tracker configuration."
+          description: "Set up rewards on an existing account to track minimums and caps, or import your Rewards Tracker configuration."
         ) {
-          Button("Add Card") { sheet = .editor(.create) }
+          Button("Set Up Rewards") { sheet = .editor(.create) }
             .buttonStyle(.borderedProminent)
             .tint(Theme.accent)
           Button("Import Rewards") { sheet = .importExport }
@@ -369,7 +369,7 @@ struct RewardsView: View {
       Button {
         sheet = .editor(.edit(projection.cardID))
       } label: {
-        Label("Edit Card", systemImage: "pencil")
+        Label("Edit Rewards", systemImage: "pencil")
       }
       if let chrome {
         Button {
@@ -387,7 +387,7 @@ struct RewardsView: View {
     .accessibilityLabel(projection.title)
     .accessibilityValue(text.accessibilityValue)
     .accessibilityHint("Shows details.")
-    .accessibilityAction(named: "Edit Card") {
+    .accessibilityAction(named: "Edit Rewards") {
       sheet = .editor(.edit(projection.cardID))
     }
     .accessibilityAction(named: "Hide") {
@@ -590,7 +590,7 @@ struct RewardsView: View {
     Button {
       sheet = .editor(.create)
     } label: {
-      Label("Add Card", systemImage: "plus.rectangle.on.rectangle")
+      Label("Set Up Rewards", systemImage: "plus.rectangle.on.rectangle")
     }
     Button {
       sheet = .customise
@@ -873,15 +873,15 @@ struct RewardFilledRow: View {
           .foregroundStyle(Theme.rowSecondary)
           .fixedSize(horizontal: false, vertical: true)
       }
-      ForEach(text.exceptionLines, id: \.self) { line in
+      ForEach(Array(text.exceptionLines.enumerated()), id: \.element) { index, line in
         HStack(alignment: .firstTextBaseline, spacing: 6) {
           Image(systemName: "exclamationmark.triangle.fill")
-            .foregroundStyle(palette.ink)
             .accessibilityHidden(true)
           Text(line)
-            .foregroundStyle(Theme.textPrimary)
+            .foregroundStyle(exceptionInk(at: index, forText: true))
             .fixedSize(horizontal: false, vertical: true)
         }
+        .foregroundStyle(exceptionInk(at: index))
         .font(.footnote.weight(.medium))
         .padding(.top, 2)
       }
@@ -910,6 +910,20 @@ struct RewardFilledRow: View {
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(projection.title)
     .accessibilityValue(text.accessibilityValue)
+  }
+
+  private func exceptionInk(at index: Int, forText: Bool = false) -> Color {
+    guard index < RewardRowText.visibleExceptionLimit, index < projection.exceptions.count else {
+      return Theme.rowSecondary
+    }
+    switch projection.exceptions[index] {
+    case .categoriesAtCap, .tierCapReached:
+      return RewardTonePalette.palette(for: .complete).ink
+    case .categoriesBelowMinimum, .minimumNotMet:
+      return forText ? Theme.textPrimary : RewardTonePalette.palette(for: .needsMinimum).ink
+    case .rewardsLocked:
+      return Theme.rowSecondary
+    }
   }
 
   private var titleLine: some View {
@@ -970,7 +984,7 @@ struct RewardFilledRow: View {
     }
     return Text(text.actionLabel)
       .font(.title3.weight(.semibold))
-      .foregroundStyle(projection.tone == .failed ? Theme.outflow : Theme.textPrimary)
+      .foregroundStyle(projection.tone == .failed ? RewardTonePalette.palette(for: .failed).ink : Theme.textPrimary)
   }
 }
 
@@ -1053,7 +1067,7 @@ struct RewardCardDetailSheet: View {
           Button("Done") { dismiss() }
         }
         ToolbarItem(placement: .primaryAction) {
-          Button("Edit") { onEdit() }
+          Button("Edit Rewards") { onEdit() }
         }
       }
     }
@@ -1709,14 +1723,26 @@ struct RewardsValuationSheet: View {
 // MARK: - Register strip
 
 /// The reward rows for one account, shown in its register so the limit is in
-/// view while adding transactions. Tapping opens the card in Rewards.
+/// view while adding transactions. Details and editing stay over the register.
 struct RegisterRewardsStrip: View {
   @Environment(AppModel.self) private var model
-  @Environment(RootChromeState.self) private var chrome: RootChromeState?
   let accountID: String
   @State private var rows: [RewardsCardRow] = []
   @State private var asOf: String?
   @State private var loadedPlanID: String?
+  @State private var sheet: Sheet?
+
+  private enum Sheet: Identifiable {
+    case detail(String)
+    case editor(String)
+
+    var id: String {
+      switch self {
+      case .detail(let cardID): return "detail-\(cardID)"
+      case .editor(let cardID): return "editor-\(cardID)"
+      }
+    }
+  }
 
   var body: some View {
     VStack(spacing: 8) {
@@ -1724,19 +1750,49 @@ struct RegisterRewardsStrip: View {
         ForEach(rows) { row in
           let projection = RewardRowProjection.make(row: row, asOf: asOf, isRange: false)
           Button {
-            chrome?.showRewardsCard(row.id)
+            sheet = .detail(row.id)
           } label: {
-            RewardFilledRow(projection: projection, currencyFormat: model.currencyFormat, showsChevron: chrome != nil)
+            RewardFilledRow(projection: projection, currencyFormat: model.currencyFormat)
           }
           .buttonStyle(.plain)
-          .disabled(chrome == nil)
           .accessibilityLabel("Rewards, \(projection.title)")
           .accessibilityValue(RewardRowText(projection, currencyFormat: model.currencyFormat).accessibilityValue)
-          .accessibilityHint("Opens this card in Rewards.")
+          .accessibilityHint("Shows reward details for this account.")
         }
       }
     }
     .padding(.top, rows.isEmpty ? 0 : 6)
+    .sheet(item: $sheet) { destination in
+      Group {
+        switch destination {
+        case .detail(let cardID):
+          if loadedPlanID == model.settings.planID,
+             let row = rows.first(where: { $0.id == cardID }) {
+            RewardCardDetailSheet(
+              row: row,
+              asOf: asOf,
+              icon: model.accounts.first { $0.id == accountID }?.displayIcon,
+              currencyFormat: model.currencyFormat,
+              canOpenAccount: false,
+              onEdit: { sheet = .editor(cardID) },
+              onOpenAccount: {}
+            )
+          } else {
+            ContentUnavailableView(
+              "Card Unavailable",
+              systemImage: "creditcard",
+              description: Text("This card is no longer in the report.")
+            )
+          }
+        case .editor(let cardID):
+          RewardCardEditorView(cardID: cardID)
+        }
+      }
+      .blocksCapturePresentation()
+    }
+    .onChange(of: model.settings.planID) { _, _ in
+      sheet = nil
+    }
     .task(id: fetchKey) {
       await load()
     }

@@ -207,7 +207,8 @@ struct RewardCardDraft: Equatable {
     guard let value else {
       return ""
     }
-    return String(value)
+    let text = String(value)
+    return text.hasSuffix(".0") ? String(text.dropLast(2)) : text
   }
 
   static func empty() -> RewardCardDraft {
@@ -364,7 +365,7 @@ struct RewardCardDraft: Equatable {
     }
     let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmedName.isEmpty {
-      throw RewardCardWriteError.message("Enter a card name.")
+      throw RewardCardWriteError.message("Enter a rewards label in Display & saved details.")
     }
 
     var card = CreditCard(
@@ -435,7 +436,7 @@ struct RewardCardDraft: Equatable {
     for (index, flag) in flags.enumerated() {
       let colourName = (flagNames[flag.flagColor] ?? flag.name).trimmingCharacters(in: .whitespacesAndNewlines)
       if colourName.isEmpty {
-        throw RewardCardWriteError.message("Name the \(flag.flagColor.ledgerColour.title) colour on this card.")
+        throw RewardCardWriteError.message("Flag \(index + 1): name the \(flag.flagColor.ledgerColour.title) colour.")
       }
       let rewardValue = try Self.requiredFinite(flag.rewardValue, label: "Flag \(index + 1) reward value")
       let priority = try Self.requiredFinite(flag.priority, label: "Flag \(index + 1) priority", nonnegative: false)
@@ -591,6 +592,7 @@ struct RewardCardDraft: Equatable {
 struct RewardCardEditorView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
   let cardID: String?
 
@@ -603,43 +605,74 @@ struct RewardCardEditorView: View {
   @State private var importCategoryId = ""
   @State private var importFlagColor: RewardFlagColour = .red
   @State private var importRate = ""
-  @State private var ledger: [Transaction] = []
-  @State private var ledgerPhase: LoadPhase = .idle
-  @State private var ledgerRange = ReportRange()
-  @State private var ledgerReport: RewardsReport?
-  @State private var flagOverrides: [String: String?] = [:]
-  @State private var pendingFlagID: String?
   @State private var takenAccountIDs: Set<String> = []
+  @State private var originalDraft: RewardCardDraft?
+  @State private var isConfirmingDiscard = false
+  @State private var path: [Destination] = []
+  @State private var errorRevision = 0
+
+  private enum Destination: Hashable {
+    case rule(Rule)
+    case flag(String)
+    case tier(String)
+  }
+
+  private enum Rule: String, CaseIterable, Identifiable {
+    case flags = "Flag-based rewards"
+    case tiers = "Spending tiers"
+    case qualification = "Multi-month qualification"
+    case promotion = "Promotion"
+    case rounding = "Spend rounding"
+    case display = "Display & saved details"
+    var id: Self { self }
+  }
 
   private var isEditing: Bool { cardID != nil }
+  private var isDirty: Bool { originalDraft.map { $0 != draft } ?? false }
+  private var currency: String {
+    model.currencyFormat?.isoCode ?? model.currencyFormat?.currencySymbol ?? "$"
+  }
+  private var rateUnit: String { draft.type == .cashback ? "%" : "miles / \(currency)" }
 
   var body: some View {
-    NavigationStack {
+    NavigationStack(path: $path) {
       Group {
-        if loadPhase == .loading, draft.ynabAccountId.isEmpty, draft.name.isEmpty {
-          ProgressView(isEditing ? "Loading card…" : "Loading accounts…")
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if cardID != nil, case .failed(let message) = loadPhase, draft.name.isEmpty {
+        if originalDraft != nil {
+          editorForm
+        } else if case .failed(let message) = loadPhase {
           ContentUnavailableView {
-            Label("Card not found", systemImage: "creditcard")
+            Label("Could not load rewards", systemImage: "creditcard")
           } description: {
             Text(message)
+          } actions: {
+            Button("Retry loading") { Task { await loadCard() } }
           }
         } else {
-          editorForm
+          ProgressView(isEditing ? "Loading card…" : "Loading accounts…")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
       }
       .background(Theme.canvas)
-      .navigationTitle(isEditing ? "Edit card" : "Add card")
+      .navigationTitle(isEditing ? "Edit Rewards" : "Set Up Rewards")
       .navigationBarTitleDisplayMode(.inline)
+      .navigationDestination(for: Destination.self) { destination in
+        switch destination {
+        case .rule(let rule): ruleForm(rule)
+        case .flag(let id):
+          if let flag = flagBinding(id) {
+            draftForm { flagEditor(flag) }.navigationTitle(
+              draft.displayName(for: flag.wrappedValue))
+          }
+        case .tier(let id):
+          if let tier = tierBinding(id) {
+            draftForm { tierEditor(tier) }.navigationTitle("Spending tier")
+          }
+        }
+      }
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
-          Button {
-            dismiss()
-          } label: {
-            Image(systemName: "xmark")
-              .font(.body.weight(.semibold))
-              .foregroundStyle(Theme.textPrimary)
+          Button("Cancel") {
+            if isDirty { isConfirmingDiscard = true } else { dismiss() }
           }
           .disabled(isSaving || isDeleting)
           .accessibilityLabel("Cancel")
@@ -649,352 +682,562 @@ struct RewardCardEditorView: View {
             ProgressView()
               .accessibilityLabel("Saving")
           } else {
-            Button {
+            Button("Save") {
               Task { await save() }
-            } label: {
-              Image(systemName: "checkmark")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(Theme.accent)
             }
-            .disabled(isDeleting)
+            .disabled(isDeleting || originalDraft == nil)
             .accessibilityLabel("Save")
           }
         }
       }
       .binaryConfirm(
-        "Delete this reward card?",
+        "Remove Rewards?",
         isPresented: $isConfirmingDelete,
-        confirm: .destructive("Delete card"),
+        confirm: .destructive("Remove Rewards"),
         message: {
-          Text("Ledger transactions stay. The card rules are removed.")
+          Text("Only the rewards settings are removed. Your account and transactions remain.")
         }
       ) {
         Task { await remove() }
       }
-      .interactiveDismissDisabled(isSaving || isDeleting)
+      .binaryConfirm(
+        "Discard reward changes?", isPresented: $isConfirmingDiscard,
+        confirm: .destructive("Discard changes"),
+        message: {
+          Text("Discard the unsaved changes in this draft?")
+        }
+      ) { dismiss() }
+      .interactiveDismissDisabled(isDirty || isSaving || isDeleting)
       .task(id: cardID ?? "new") {
         await loadCard()
-      }
-      .task(id: ledgerKey) {
-        await loadLedger()
       }
     }
   }
 
   private var editorForm: some View {
-    Form {
+    draftForm {
       Section {
-        if !isEditing, accountChoices.isEmpty {
-          Text("No available accounts. Add an open on-budget account, or edit an account already tracked for rewards.")
+        if isEditing {
+          Label {
+            VStack(alignment: .leading, spacing: 4) {
+              Text(model.accounts.first { $0.id == draft.ynabAccountId }?.name ?? draft.name)
+                .font(.headline)
+              Text("Rewards settings · linked account").font(.caption).foregroundStyle(.secondary)
+            }
+          } icon: {
+            Image(systemName: "creditcard").foregroundStyle(Theme.accent)
+          }
+        } else {
+          if accountChoices.isEmpty {
+            Text(
+              "No available accounts. Add an open on-budget account, or edit an account already tracked for rewards."
+            )
             .font(.footnote)
             .foregroundStyle(.secondary)
-        }
-        Picker("HowMuch account", selection: $draft.ynabAccountId) {
-          Text("Choose a HowMuch account").tag("")
-          ForEach(accountChoices) { account in
-            Text(account.closed ? "\(account.name) (closed)" : account.name).tag(account.id)
+          }
+          Picker("HowMuch account", selection: $draft.ynabAccountId) {
+            Text("Choose a HowMuch account").tag("")
+            ForEach(accountChoices) { account in
+              Text(account.closed ? "\(account.name) (closed)" : account.name).tag(account.id)
+            }
+          }
+          .onChange(of: draft.ynabAccountId) { oldValue, newValue in
+            guard oldValue != newValue else { return }
+            let previous = model.accounts.first { $0.id == oldValue }
+            let next = model.accounts.first { $0.id == newValue }
+            draft.name = RewardCardAccounts.syncedName(
+              name: draft.name,
+              previousAccountName: previous?.name,
+              nextAccountName: next?.name
+            )
           }
         }
-        .onChange(of: draft.ynabAccountId) { oldValue, newValue in
-          guard oldValue != newValue else { return }
-          let previous = model.accounts.first { $0.id == oldValue }
-          let next = model.accounts.first { $0.id == newValue }
-          draft.name = RewardCardAccounts.syncedName(
-            name: draft.name,
-            previousAccountName: previous?.name,
-            nextAccountName: next?.name
-          )
-        }
-        TextField("Name", text: $draft.name)
-        TextField("Issuer", text: $draft.issuer)
-        Picker("Type", selection: $draft.type) {
+      }
+      Section {
+        Picker("Reward type", selection: $draft.type) {
           Text("Cashback").tag(RewardKind.cashback)
           Text("Miles").tag(RewardKind.miles)
         }
-        Toggle("Featured", isOn: $draft.featured)
+        numberField(
+          draft.type == .cashback ? "Cashback rate" : "Earning rate", text: $draft.earningRate,
+          unit: rateUnit)
       } header: {
-        Text(isEditing ? "Card details" : "Existing HowMuch account")
+        Text("Earning")
       } footer: {
-        Text("Pick an open on-budget account, including checking or debit accounts. This does not create a new ledger account.")
+        if !draft.tiers.isEmpty
+          || (draft.subcategoriesEnabled && draft.flags.contains(where: \.active))
+        {
+          Text("Additional rules may override this base rate.")
+        }
       }
 
-      Section("Billing cycle") {
-        Picker("Billing cycle", selection: $draft.billingType) {
+      Section {
+        Picker("Cycle", selection: $draft.billingType) {
           ForEach(CardBillingType.allCases) { type in
             Text(type.title).tag(type)
           }
         }
-        TextField("Day of month", text: $draft.billingDay)
-          .keyboardType(.numberPad)
-      }
-
-      Section {
-        TextField("Reward period months", text: $draft.rewardMonthCount)
-          .keyboardType(.numberPad)
-        TextField("Anchor date", text: $draft.rewardAnchorDate)
-        TextField("Monthly minimum spend", text: $draft.rewardMonthlyMinimum)
-          .keyboardType(.decimalPad)
-      } header: {
-        Text("Reward period")
-      } footer: {
-        Text("Leave the reward period blank if this card has no qualifying window.")
-      }
-
-      Section("Promotional period") {
-        TextField("Promotional start", text: $draft.promoStart)
-        TextField("Promotional end", text: $draft.promoEnd)
-        TextField("Promotional description", text: $draft.promoDescription)
-      }
-
-      Section("Rates") {
-        TextField("Earning rate", text: $draft.earningRate)
-          .keyboardType(.decimalPad)
-        TextField("Block size", text: $draft.earningBlockSize)
-          .keyboardType(.decimalPad)
-        TextField("Minimum spend", text: $draft.minimumSpend)
-          .keyboardType(.decimalPad)
-        TextField("Maximum spend", text: $draft.maximumSpend)
-          .keyboardType(.decimalPad)
-      }
-
-      Section {
-        ForEach(RewardFlagColour.allCases) { colour in
-          HStack {
-            if colour == .unflagged {
-              Text("None")
-                .frame(width: 72, alignment: .leading)
-            } else {
-              Image(systemName: "flag.fill")
-                .foregroundStyle(Theme.flagColour(named: colour.rawValue) ?? .secondary)
-                .frame(width: 24)
-              Text(colour.title)
-                .frame(width: 48, alignment: .leading)
+        if draft.billingType == .billing {
+          Picker("Cycle starts on", selection: $draft.billingDay) {
+            Text("Choose day").tag("")
+            ForEach(1...31, id: \.self) { day in Text("Day \(day)").tag(String(day)) }
+          }
+        }
+        if let preview = RewardDraftPeriod.make(draft) {
+          VStack(alignment: .leading, spacing: 6) {
+            Text("Prospective period: \(dateLabel(preview.start)) – \(dateLabel(preview.end))")
+              .font(.subheadline)
+            Text(preview.rule).font(.caption).foregroundStyle(.secondary)
+            if let reset = preview.reset {
+              Text("Resets on \(dateLabel(reset)).").font(.caption).foregroundStyle(.secondary)
             }
-            TextField(colour == .unflagged ? "None" : colour.title, text: colourNameBinding(for: colour))
-              .accessibilityLabel("\(colour == .unflagged ? "None" : colour.title) name")
           }
+          .accessibilityElement(children: .combine)
+        } else {
+          Text("Complete the cycle rule to preview its dates.").foregroundStyle(.secondary)
         }
       } header: {
-        Text("Colour names")
+        Text("Reward cycle")
       } footer: {
-        Text("These names show on this account’s flags. Everyday Account and other untracked accounts keep the plain colour tags.")
-      }
-
-      Section {
-        Toggle("Enable flag subcategories", isOn: $draft.subcategoriesEnabled)
-        Picker("Import category", selection: $importCategoryId) {
-          Text("Choose category").tag("")
-          ForEach(importableCategories, id: \.id) { category in
-            Text(category.name).tag(category.id)
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Prospective dates for today in Singapore. Earnings recalculate after Save.")
+          if draft.billingType == .billing, (Int(draft.billingDay) ?? 0) >= 29 {
+            Text("Short months use their last day.")
           }
-        }
-        .accessibilityLabel("Import category")
-        Picker("Flag colour", selection: importLedgerFlag) {
-          ForEach(FlagColour.allCases) { colour in
-            ledgerFlagOption(colour)
-          }
-        }
-        TextField("Rate", text: $importRate)
-          .keyboardType(.decimalPad)
-        Button("Add flag from category") {
-          addImportedFlag()
-        }
-        ForEach($draft.flags) { $flag in
-          flagEditor($flag)
-        }
-        Button("Add flag") {
-          withAnimation(Theme.Motion.standard) {
-            draft.addFlag()
-          }
-        }
-      } header: {
-        Text("Flag subcategories")
-      } footer: {
-        Text("These are the same colour tags as the ledger. None is Unflagged spend. Name the colour above and it appears on this account.")
-      }
-
-      Section("Spending tiers") {
-        ForEach($draft.tiers) { $tier in
-          tierEditor($tier)
-        }
-        Button("Add spending tier") {
-          withAnimation(Theme.Motion.standard) {
-            draft.addTier()
+          if configured(.qualification) {
+            Text(
+              "The board may count down to a monthly qualification deadline instead of this full period."
+            )
           }
         }
       }
 
-      if let errorMessage {
-        Section {
-          Text(errorMessage)
-            .font(.footnote)
-            .foregroundStyle(Theme.outflow)
+      Section("Spending targets") {
+        numberField(
+          "Minimum qualifying spend", text: $draft.minimumSpend, unit: currency, empty: "None")
+        numberField(
+          "Reward-earning spend cap", text: $draft.maximumSpend, unit: currency, empty: "No cap")
+      }
+      Section("Additional rules") {
+        ForEach(Rule.allCases.filter { $0 != .display && configured($0) }) { rule in
+          NavigationLink(value: Destination.rule(rule)) {
+            VStack(alignment: .leading, spacing: 3) {
+              Text(rule.rawValue)
+              Text(summary(rule)).font(.caption).foregroundStyle(.secondary)
+            }
+          }
+        }
+        Menu("Add a rule…") {
+          ForEach(Rule.allCases.filter { $0 != .display && !configured($0) }) { rule in
+            Button(rule.rawValue) { path.append(.rule(rule)) }
+          }
         }
       }
-
+      Section { NavigationLink(Rule.display.rawValue, value: Destination.rule(.display)) }
       if isEditing {
         Section {
-          Button("Delete card", role: .destructive) {
-            isConfirmingDelete = true
-          }
-          .disabled(isSaving || isDeleting)
-          .accessibilityLabel("Delete card")
+          Button("Remove Rewards…", role: .destructive) { isConfirmingDelete = true }
         }
-      }
-
-      if !draft.ynabAccountId.isEmpty {
-        ledgerSection
       }
     }
-    .scrollContentBackground(.hidden)
   }
 
-  private var ledgerSection: some View {
-    Section {
-      ReportRangeMenu(range: $ledgerRange)
-      ReportRangeAccessory(range: $ledgerRange)
-      if let calculation = ledgerReport?.cards.first(where: { $0.id == cardID })?.calculation {
-        if let periods = calculation.periods, !periods.isEmpty {
-          ForEach(Array(periods.enumerated()), id: \.offset) { _, period in
-            VStack(alignment: .leading, spacing: 4) {
-              Text("Full period: \(period.start) – \(period.end)")
-              Text("Spend: \(MoneyCodec.displayString(forCurrencyUnits: period.calculation.totalSpend, currencyFormat: model.currencyFormat))")
-              if let status = period.calculation.qualificationStatus {
-                Text("Qualification: \(status.replacingOccurrences(of: "_", with: " "))")
-              }
-              ForEach(Array((period.calculation.monthlyQualifications ?? []).enumerated()), id: \.offset) { _, month in
-                Text("\(month.start): \(MoneyCodec.displayString(forCurrencyUnits: month.spend, currencyFormat: model.currencyFormat)) / \(MoneyCodec.displayString(forCurrencyUnits: month.minimumSpend, currencyFormat: model.currencyFormat)) · \(month.status)")
-              }
-            }
-            .font(.caption).foregroundStyle(.secondary)
+  private func ruleForm(_ rule: Rule) -> some View {
+    draftForm {
+      Section {
+        Text("Changes stay in this draft. Return to Edit Rewards and Save to apply them.")
+          .font(.footnote).foregroundStyle(.secondary)
+      }
+      switch rule {
+      case .display:
+        Section {
+          labelledField("Rewards label", text: $draft.name)
+          labelledField("Issuer", text: $draft.issuer)
+          Toggle("Featured", isOn: $draft.featured)
+        } footer: {
+          Text("Saved rewards metadata only. Edit Account separately to rename your account.")
+        }
+      case .qualification:
+        Section {
+          Picker("Period length", selection: $draft.rewardMonthCount) {
+            Text("Not set").tag("")
+            ForEach(2...24, id: \.self) { Text("\($0) months").tag(String($0)) }
           }
+          dateField("First period starts", text: $draft.rewardAnchorDate)
+          numberField("Minimum each month", text: $draft.rewardMonthlyMinimum, unit: currency)
+        } footer: {
+          Text(
+            "Repeats from this anchor date. Once active, this rule takes precedence over promotion and billing dates. Each month's minimum must qualify separately."
+          )
+        }
+        Section {
+          Button("Remove qualification rule", role: .destructive) {
+            draft.rewardMonthCount = ""; draft.rewardAnchorDate = "";
+            draft.rewardMonthlyMinimum = ""
+            path.removeLast()
+          }
+        }
+      case .promotion:
+        Section {
+          dateField("Start date", text: $draft.promoStart)
+          dateField("End date", text: $draft.promoEnd)
+          labelledField("Description", text: $draft.promoDescription)
+        } footer: {
+          Text(
+            "An unset start uses the current billing/calendar cycle start. A promotion overrides that cycle only within its dates; an active multi-month rule takes priority."
+          )
+        }
+        Section {
+          Button("Remove promotion", role: .destructive) {
+            draft.promoStart = ""; draft.promoEnd = ""; draft.promoDescription = ""
+            path.removeLast()
+          }
+        }
+      case .rounding:
+        Section {
+          numberField(
+            "Spend block size", text: $draft.earningBlockSize, unit: currency, empty: "None")
+        } footer: {
+          Text(
+            "Spend is rounded down to complete blocks before rewards are calculated. Clear to remove the rule."
+          )
+        }
+      case .flags:
+        Section {
+          ForEach(RewardFlagColour.allCases) { colour in
+            colourNameRow(colour)
+          }
+        } header: {
+          Text("Colour names")
+        } footer: {
+          Text("Names apply only to this account.")
+        }
+
+        Section {
+          Toggle("Enable flag subcategories", isOn: $draft.subcategoriesEnabled)
+          Picker("Import category", selection: $importCategoryId) {
+            Text("Choose category").tag("")
+            ForEach(importableCategories, id: \.id) { category in
+              Text(category.name).tag(category.id)
+            }
+          }
+          .accessibilityLabel("Import category")
+          Picker("Flag colour", selection: importLedgerFlag) {
+            ForEach(FlagColour.allCases) { colour in
+              ledgerFlagOption(colour)
+            }
+          }
+          numberField("Rate", text: $importRate, unit: rateUnit)
+          Button("Add flag from category") {
+            addImportedFlag()
+          }
+          ForEach(draft.flags) { flag in
+            NavigationLink(draft.displayName(for: flag), value: Destination.flag(flag.id))
+          }
+          Button("Add flag") {
+            withAnimation(Theme.Motion.standard) {
+              draft.addFlag()
+            }
+          }
+        } header: {
+          Text("Flag subcategories")
+        } footer: {
+          Text(
+            "These are the same colour tags as the ledger. None is Unflagged spend. Name the colour above and it appears on this account."
+          )
+        }
+
+      case .tiers:
+        Section("Spending tiers") {
+          ForEach(draft.tiers) { tier in
+            NavigationLink(
+              "From \(tier.spendThreshold.isEmpty ? "…" : tier.spendThreshold) \(currency)",
+              value: Destination.tier(tier.id))
+          }
+          Button("Add spending tier") {
+            withAnimation(Theme.Motion.standard) {
+              draft.addTier()
+            }
+          }
+        }
+
+      }
+    }
+    .navigationTitle(rule.rawValue)
+    .navigationBarTitleDisplayMode(.inline)
+  }
+
+  @ViewBuilder
+  private func colourNameRow(_ colour: RewardFlagColour) -> some View {
+    if dynamicTypeSize.isAccessibilitySize {
+      VStack(alignment: .leading, spacing: 5) {
+        colourNameLabel(colour)
+        colourNameField(colour)
+      }
+    } else {
+      HStack {
+        if colour == .unflagged {
+          Text("None")
+            .frame(width: 104, alignment: .leading)
         } else {
-          Text("Reward context: \(calculation.period)").font(.caption).foregroundStyle(.secondary)
+          Image(systemName: "flag.fill")
+            .foregroundStyle(Theme.flagColour(named: colour.rawValue) ?? .secondary)
+            .frame(width: 24)
+          Text(colour.title)
+            .frame(width: 72, alignment: .leading)
         }
+        colourNameField(colour)
       }
-      if ledgerPhase == .loading && ledger.isEmpty {
-        HStack {
-          Text("Loading transactions…")
-          Spacer()
-          ProgressView()
-        }
-      } else if let message = ledgerPhase.errorMessage {
-        Text(message)
+    }
+  }
+
+  @ViewBuilder
+  private func colourNameLabel(_ colour: RewardFlagColour) -> some View {
+    if colour == .unflagged {
+      Text("None")
+    } else {
+      Label {
+        Text(colour.title)
+      } icon: {
+        Image(systemName: "flag.fill")
+          .foregroundStyle(Theme.flagColour(named: colour.rawValue) ?? .secondary)
+      }
+    }
+  }
+
+  private func colourNameField(_ colour: RewardFlagColour) -> some View {
+    TextField(
+      colour == .unflagged ? "None" : colour.title, text: colourNameBinding(for: colour)
+    )
+    .accessibilityLabel("\(colour == .unflagged ? "None" : colour.title) name")
+  }
+
+  private func dateLabel(_ iso: String) -> String {
+    RewardsCalendar.shortLabel(iso, referenceISO: RewardsCalendar.today())
+  }
+
+  private func draftForm<Content: View>(@ViewBuilder content: @escaping () -> Content) -> some View {
+    ScrollViewReader { proxy in
+      Form {
+        errorSection
+        content()
+      }
+      .disabled(isSaving || isDeleting)
+      .scrollContentBackground(.hidden)
+      .onChange(of: errorRevision) { proxy.scrollTo("editor-error", anchor: .top) }
+      .onAppear { if errorMessage != nil { proxy.scrollTo("editor-error", anchor: .top) } }
+    }
+  }
+
+  private func flagBinding(_ id: String) -> Binding<RewardFlagDraft>? {
+    guard let initial = draft.flags.first(where: { $0.id == id }) else { return nil }
+    return Binding(
+      get: { draft.flags.first(where: { $0.id == id }) ?? initial },
+      set: { value in
+        if let index = draft.flags.firstIndex(where: { $0.id == id }) { draft.flags[index] = value }
+      })
+  }
+
+  private func tierBinding(_ id: String) -> Binding<RewardTierDraft>? {
+    guard let initial = draft.tiers.first(where: { $0.id == id }) else { return nil }
+    return Binding(
+      get: { draft.tiers.first(where: { $0.id == id }) ?? initial },
+      set: { value in
+        if let index = draft.tiers.firstIndex(where: { $0.id == id }) { draft.tiers[index] = value }
+      })
+  }
+
+  @ViewBuilder
+  private var errorSection: some View {
+    if let errorMessage {
+      Section {
+        Label(errorMessage, systemImage: "exclamationmark.triangle")
           .foregroundStyle(Theme.outflow)
-      } else if ledger.isEmpty {
-        Text("No transactions on this account.")
-          .foregroundStyle(.secondary)
-      } else {
-        ForEach(ledger) { transaction in
-          VStack(alignment: .leading, spacing: 6) {
-            HStack {
-              Text(transaction.date)
-              Spacer()
-              Text(MoneyCodec.signedDisplayString(for: transaction.amount, currencyFormat: model.currencyFormat))
-                .monospacedDigit()
-                .foregroundStyle(Theme.amountColour(transaction.amount))
-            }
-            Text(transaction.payeeName ?? "No payee")
-              .foregroundStyle(.secondary)
-            if let reward = ledgerReport?.transactionRewards?[transaction.id] {
-              Text("Reward: \(reward.reward.formatted())\(draft.type == .miles ? " miles" : " cashback") · \(MoneyCodec.displayString(forCurrencyUnits: reward.rewardDollars, currencyFormat: model.currencyFormat)) value")
-                .font(.caption).foregroundStyle(Theme.inflow)
-            } else {
-              Text("Reward attribution unavailable").font(.caption).foregroundStyle(.secondary)
-            }
-            Picker("Flag", selection: flagColourBinding(for: transaction)) {
-              ForEach(FlagColour.allCases) { colour in
-                ledgerFlagOption(colour)
-              }
-            }
-            .disabled(pendingFlagID == transaction.id)
-            .accessibilityLabel("Flag")
-          }
+        if originalDraft == nil {
+          Button("Retry loading") { Task { await loadCard() } }
+        }
+      }.id("editor-error")
+    }
+  }
+
+  private func configured(_ rule: Rule) -> Bool {
+    switch rule {
+    case .flags:
+      return !draft.flags.isEmpty || !draft.flagNames.isEmpty || draft.subcategoriesEnabled
+    case .tiers: return !draft.tiers.isEmpty
+    case .qualification:
+      return !draft.rewardMonthCount.isEmpty || !draft.rewardAnchorDate.isEmpty
+        || !draft.rewardMonthlyMinimum.isEmpty
+    case .promotion:
+      return !draft.promoStart.isEmpty || !draft.promoEnd.isEmpty || !draft.promoDescription.isEmpty
+    case .rounding: return !draft.earningBlockSize.isEmpty
+    case .display: return true
+    }
+  }
+
+  private func summary(_ rule: Rule) -> String {
+    switch rule {
+    case .flags:
+      return
+        "\(draft.flags.count) rules · \(draft.subcategoriesEnabled ? "Enabled" : "Disabled; rules retained")"
+    case .tiers: return "\(draft.tiers.count) tiers"
+    case .qualification: return "\(draft.rewardMonthCount) months · from \(draft.rewardAnchorDate)"
+    case .promotion: return "Until \(draft.promoEnd)"
+    case .rounding: return "Blocks of \(draft.earningBlockSize) \(currency)"
+    case .display: return draft.name
+    }
+  }
+
+  private func labelledField(_ label: String, text: Binding<String>) -> some View {
+    VStack(alignment: .leading, spacing: 5) {
+      Text(label).font(.subheadline).foregroundStyle(.secondary)
+      TextField(label, text: text).accessibilityLabel(label)
+    }
+  }
+
+  private func numberField(
+    _ label: String, text: Binding<String>, unit: String, empty: String = "Not set"
+  ) -> some View {
+    ViewThatFits(in: .horizontal) {
+      HStack {
+        Text(label).fixedSize(horizontal: true, vertical: false)
+        TextField(empty, text: text).multilineTextAlignment(.trailing)
+          .frame(minWidth: 70).keyboardType(.decimalPad).accessibilityLabel(label)
+        Text(unit).foregroundStyle(.secondary).fixedSize()
+      }
+      VStack(alignment: .leading, spacing: 5) {
+        Text(label).font(.subheadline)
+        HStack {
+          TextField(empty, text: text)
+            .keyboardType(.decimalPad).accessibilityLabel(label)
+          Text(unit).font(.subheadline).foregroundStyle(.secondary)
         }
       }
-    } header: {
-      Text("Account ledger")
-    } footer: {
-      Text("Newest first. Rewards use saved rules and full-period qualification, including spend outside these display dates.")
+    }
+  }
+
+  @ViewBuilder
+  private func dateField(_ label: String, text: Binding<String>) -> some View {
+    if text.wrappedValue.isEmpty {
+      Button("\(label): Not set") { text.wrappedValue = RewardsCalendar.today() }
+    } else {
+      DatePicker(
+        label,
+        selection: Binding(
+          get: { RewardsCalendar.date(text.wrappedValue) ?? Date() },
+          set: { text.wrappedValue = RewardsCalendar.isoString($0) }
+        ), displayedComponents: .date
+      )
+      .environment(\.calendar, RewardsCalendar.calendar)
+      .environment(\.timeZone, RewardsCalendar.timeZone)
+      Button("Clear \(label.lowercased())") { text.wrappedValue = "" }
     }
   }
 
   @ViewBuilder
   private func flagEditor(_ flag: Binding<RewardFlagDraft>) -> some View {
     let index = draft.flags.firstIndex(where: { $0.id == flag.wrappedValue.id }) ?? 0
-    VStack(alignment: .leading, spacing: 8) {
-      Text(draft.displayName(for: flag.wrappedValue))
-        .font(.headline)
-      Picker("Flag colour", selection: Binding(
-        get: { flag.wrappedValue.flagColor.ledgerColour },
-        set: { nextColour in
-          let next = RewardFlagColour(ledgerColour: nextColour)
-          if (draft.flagNames[next] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            draft.flagNames[next] = flag.wrappedValue.name
+    Section {
+      labelledField("Colour name", text: colourNameBinding(for: flag.wrappedValue.flagColor))
+      Picker(
+        "Flag colour",
+        selection: Binding(
+          get: { flag.wrappedValue.flagColor.ledgerColour },
+          set: { nextColour in
+            let next = RewardFlagColour(ledgerColour: nextColour)
+            if (draft.flagNames[next] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+              draft.flagNames[next] = flag.wrappedValue.name
+            }
+            flag.wrappedValue.flagColor = next
+            flag.wrappedValue.touch()
           }
-          flag.wrappedValue.flagColor = next
-          flag.wrappedValue.touch()
-        }
-      )) {
+        )
+      ) {
         ForEach(FlagColour.allCases) { colour in
           ledgerFlagOption(colour)
         }
       }
       .accessibilityLabel("Flag \(index + 1) colour")
-      TextField("Reward value", text: Binding(
-        get: { flag.wrappedValue.rewardValue },
-        set: { flag.wrappedValue.rewardValue = $0; flag.wrappedValue.touch() }
-      ))
-      .keyboardType(.decimalPad)
+      numberField(
+        "Reward value",
+        text: Binding(
+          get: { flag.wrappedValue.rewardValue },
+          set: {
+            flag.wrappedValue.rewardValue = $0; flag.wrappedValue.touch()
+          }
+        ), unit: rateUnit
+      )
       .accessibilityLabel("Flag \(index + 1) reward value")
-      TextField("Priority", text: Binding(
-        get: { flag.wrappedValue.priority },
-        set: { flag.wrappedValue.priority = $0; flag.wrappedValue.touch() }
-      ))
-      .keyboardType(.numberPad)
+      numberField(
+        "Priority",
+        text: Binding(
+          get: { flag.wrappedValue.priority },
+          set: {
+            flag.wrappedValue.priority = $0; flag.wrappedValue.touch()
+          }
+        ), unit: ""
+      )
       .accessibilityLabel("Flag \(index + 1) priority")
-      TextField("Minimum spend", text: Binding(
-        get: { flag.wrappedValue.minimumSpend },
-        set: { flag.wrappedValue.minimumSpend = $0; flag.wrappedValue.touch() }
-      ))
-      .keyboardType(.decimalPad)
-      TextField("Maximum spend", text: Binding(
-        get: { flag.wrappedValue.maximumSpend },
-        set: { flag.wrappedValue.maximumSpend = $0; flag.wrappedValue.touch() }
-      ))
-      .keyboardType(.decimalPad)
-      TextField("Miles block", text: Binding(
-        get: { flag.wrappedValue.milesBlockSize },
-        set: { flag.wrappedValue.milesBlockSize = $0; flag.wrappedValue.touch() }
-      ))
-      .keyboardType(.decimalPad)
-      Toggle("Active", isOn: Binding(
-        get: { flag.wrappedValue.active },
-        set: { flag.wrappedValue.active = $0; flag.wrappedValue.touch() }
-      ))
-      Toggle("Exclude from rewards", isOn: Binding(
-        get: { flag.wrappedValue.excludeFromRewards },
-        set: { flag.wrappedValue.excludeFromRewards = $0; flag.wrappedValue.touch() }
-      ))
+      numberField(
+        "Minimum spend",
+        text: Binding(
+          get: { flag.wrappedValue.minimumSpend },
+          set: {
+            flag.wrappedValue.minimumSpend = $0; flag.wrappedValue.touch()
+          }
+        ), unit: currency, empty: "None")
+      numberField(
+        "Maximum spend",
+        text: Binding(
+          get: { flag.wrappedValue.maximumSpend },
+          set: {
+            flag.wrappedValue.maximumSpend = $0; flag.wrappedValue.touch()
+          }
+        ), unit: currency, empty: "No cap")
+      numberField(
+        "Miles spend block",
+        text: Binding(
+          get: { flag.wrappedValue.milesBlockSize },
+          set: {
+            flag.wrappedValue.milesBlockSize = $0; flag.wrappedValue.touch()
+          }
+        ), unit: currency, empty: "None")
+      Toggle(
+        "Active",
+        isOn: Binding(
+          get: { flag.wrappedValue.active },
+          set: {
+            flag.wrappedValue.active = $0; flag.wrappedValue.touch()
+          }
+        ))
+      Toggle(
+        "Exclude from rewards",
+        isOn: Binding(
+          get: { flag.wrappedValue.excludeFromRewards },
+          set: {
+            flag.wrappedValue.excludeFromRewards = $0; flag.wrappedValue.touch()
+          }
+        ))
       Button("Remove", role: .destructive) {
-        draft.flags.removeAll { $0.id == flag.wrappedValue.id }
+        let id = flag.wrappedValue.id
+        path.removeLast()
+        draft.flags.removeAll { $0.id == id }
+        for index in draft.tiers.indices {
+          draft.tiers[index].overrides.removeAll { $0.subcategoryId == id }
+        }
       }
+    } footer: {
+      Text("Removing this flag also removes its overrides from spending tiers.")
     }
-    // Several controls share this Form row. Borderless buttons take only
-    // their own taps; the default style would fire Remove from anywhere in
-    // the row.
-    .buttonStyle(.borderless)
   }
 
   @ViewBuilder
   private func tierEditor(_ tier: Binding<RewardTierDraft>) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
-      TextField("Spend threshold", text: tier.spendThreshold)
-        .keyboardType(.decimalPad)
-      TextField("Earning rate", text: tier.earningRate)
-        .keyboardType(.decimalPad)
-      TextField("Maximum spend", text: tier.maximumSpend)
-        .keyboardType(.decimalPad)
+    Section {
+      numberField("Spend threshold", text: tier.spendThreshold, unit: currency)
+      numberField("Earning rate", text: tier.earningRate, unit: rateUnit)
+      numberField("Maximum spend", text: tier.maximumSpend, unit: currency, empty: "No cap")
       ForEach(tier.overrides) { $override in
         Picker("Flag override", selection: $override.subcategoryId) {
           Text("Choose flag").tag("")
@@ -1002,10 +1245,9 @@ struct RewardCardEditorView: View {
             Text(draft.displayName(for: flag)).tag(flag.id)
           }
         }
-        TextField("Override rate", text: $override.rewardValue)
-          .keyboardType(.decimalPad)
-        TextField("Override maximum", text: $override.maximumSpend)
-          .keyboardType(.decimalPad)
+        numberField("Override rate", text: $override.rewardValue, unit: rateUnit)
+        numberField(
+          "Override maximum", text: $override.maximumSpend, unit: currency, empty: "No cap")
         Button("Remove override", role: .destructive) {
           tier.wrappedValue.overrides.removeAll { $0.id == override.id }
         }
@@ -1018,12 +1260,11 @@ struct RewardCardEditorView: View {
         }
       }
       Button("Remove tier", role: .destructive) {
-        draft.tiers.removeAll { $0.id == tier.wrappedValue.id }
+        let id = tier.wrappedValue.id
+        path.removeLast()
+        draft.tiers.removeAll { $0.id == id }
       }
     }
-    // Remove override, Add flag override and Remove tier share one Form row;
-    // borderless keeps each tap on its own button.
-    .buttonStyle(.borderless)
   }
 
   @ViewBuilder
@@ -1072,22 +1313,10 @@ struct RewardCardEditorView: View {
       }
   }
 
-  private func flagColourBinding(for transaction: Transaction) -> Binding<FlagColour> {
-    Binding(
-      get: {
-        let raw = flagOverrides[transaction.id] ?? transaction.flagColor
-        return FlagColour(rawValue: raw ?? "") ?? .none
-      },
-      set: { colour in
-        Task { await setFlag(transaction, colour == .none ? nil : colour.rawValue) }
-      }
-    )
-  }
-
   private func addImportedFlag() {
     let name = model.categoryName(forID: importCategoryId) ?? ""
     guard !importCategoryId.isEmpty, !name.isEmpty else {
-      errorMessage = "Choose a category to add as a flag."
+      showError("Choose a category to add as a flag.")
       return
     }
     do {
@@ -1096,14 +1325,17 @@ struct RewardCardEditorView: View {
       importCategoryId = ""
       importRate = ""
     } catch {
-      errorMessage = error.localizedDescription
+      showError(error.localizedDescription)
     }
   }
 
   private func loadCard() async {
+    guard originalDraft == nil else { return }
     loadPhase = .loading
+    errorMessage = nil
     do {
-      let snapshot = try await model.apiClient.fetchRewardsTrackerSnapshot(planID: model.settings.planID)
+      let snapshot = try await model.apiClient.fetchRewardsTrackerSnapshot(
+        planID: model.settings.planID)
       takenAccountIDs = Set(
         snapshot.cards
           .filter { $0.id != cardID }
@@ -1119,90 +1351,12 @@ struct RewardCardEditorView: View {
       } else {
         draft = .empty()
       }
+      originalDraft = draft
       loadPhase = .loaded
     } catch {
-      if cardID != nil {
-        loadPhase = .failed(error.localizedDescription)
-      } else {
-        draft = .empty()
-        loadPhase = .loaded
-      }
+      loadPhase = .failed(error.localizedDescription)
+      showError(error.localizedDescription)
     }
-  }
-
-  private var ledgerKey: String {
-    "\(model.settings.planID)|\(draft.ynabAccountId)|\(ledgerRange.key)"
-  }
-
-  private func loadLedger() async {
-    let accountID = draft.ynabAccountId
-    let planID = model.settings.planID
-    let key = ledgerKey
-    let from = ledgerRange.fromISO
-    let to = ledgerRange.toISO
-    ledger = []
-    ledgerReport = nil
-    guard !accountID.isEmpty else {
-      ledger = []
-      ledgerPhase = .loaded
-      return
-    }
-    ledgerPhase = .loading
-    do {
-      var transactions: [Transaction] = []
-      var offset = 0
-      while true {
-        try Task.checkCancellation()
-        let page = try await model.apiClient.fetchTransactions(
-          planID: planID, accountID: accountID, offset: offset,
-          sinceDate: from, untilDate: to
-        )
-        transactions.append(contentsOf: page.transactions)
-        guard page.hasMore else { break }
-        guard let next = page.nextOffset, next > offset else {
-          throw RewardCardWriteError.message("Could not load the complete ledger: missing next page.")
-        }
-        offset = next
-      }
-      let rewards = try await model.apiClient.fetchRewards(
-        planID: planID,
-        from: from ?? transactions.map(\.date).min(),
-        to: to,
-        accountIDs: [accountID],
-        group: .flag
-      )
-      guard key == ledgerKey else {
-        return
-      }
-      ledger = transactions
-      ledgerReport = rewards
-      flagOverrides = [:]
-      ledgerPhase = .loaded
-    } catch {
-      guard key == ledgerKey else {
-        return
-      }
-      if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
-      ledgerPhase = .failed(error.localizedDescription)
-    }
-  }
-
-  private func setFlag(_ transaction: Transaction, _ value: String?) async {
-    pendingFlagID = transaction.id
-    errorMessage = nil
-    do {
-      _ = try await model.apiClient.updateTransaction(
-        planID: model.settings.planID,
-        transactionID: transaction.id,
-        request: transaction.rewardFlagWriteRequest(flagColor: value)
-      )
-      flagOverrides[transaction.id] = value
-      model.noteRewardsBoardChanged()
-      await loadLedger()
-    } catch {
-      errorMessage = error.localizedDescription
-    }
-    pendingFlagID = nil
   }
 
   private func save() async {
@@ -1210,7 +1364,34 @@ struct RewardCardEditorView: View {
     do {
       written = try draft.write()
     } catch {
-      errorMessage = error.localizedDescription
+      showError(error.localizedDescription)
+      let message = error.localizedDescription.lowercased()
+      let words = message.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+      if words.starts(with: ["spending", "tier"]), words.count > 2,
+        let number = Int(words[2]), draft.tiers.indices.contains(number - 1)
+      {
+        path = [.rule(.tiers), .tier(draft.tiers[number - 1].id)]
+        return
+      }
+      if words.first == "flag", words.count > 1,
+        let number = Int(words[1]), draft.flags.indices.contains(number - 1)
+      {
+        path = [.rule(.flags), .flag(draft.flags[number - 1].id)]
+        return
+      }
+      let rule: Rule? =
+        if message.contains("spending tier") {
+          .tiers
+        } else if message.contains("flag") || message.contains("colour") {
+          .flags
+        } else if message.contains("reward period") || message.contains("anchor")
+          || message.contains("monthly minimum")
+        { .qualification } else if message.contains("promotional") {
+          .promotion
+        } else if message.contains("block size") {
+          .rounding
+        } else if message.contains("rewards label") { .display } else { nil }
+      path = rule.map { [.rule($0)] } ?? []
       return
     }
     isSaving = true
@@ -1230,9 +1411,15 @@ struct RewardCardEditorView: View {
       }
       closeAfterWrite()
     } catch {
-      errorMessage = error.localizedDescription
+      showError(
+        "Could not save rewards. \(error.localizedDescription) Your draft is kept; try Save again.")
       isSaving = false
     }
+  }
+
+  private func showError(_ message: String) {
+    errorMessage = message
+    errorRevision += 1
   }
 
   private func closeAfterWrite() {
@@ -1254,38 +1441,8 @@ struct RewardCardEditorView: View {
       _ = try await model.apiClient.deleteRewardCard(planID: model.settings.planID, cardID: cardID)
       closeAfterWrite()
     } catch {
-      errorMessage = error.localizedDescription
+      showError(error.localizedDescription)
       isDeleting = false
     }
-  }
-}
-
-private extension Transaction {
-  func rewardFlagWriteRequest(flagColor: String?) -> TransactionWriteRequest {
-    TransactionWriteRequest(
-      accountID: accountID,
-      date: date,
-      amount: amount,
-      payeeID: payeeID,
-      payeeName: payeeName,
-      categoryID: categoryID,
-      memo: memo,
-      cleared: nil,
-      approved: approved,
-      flagColor: flagColor,
-      subtransactions: subtransactions.filter { !$0.deleted }.map {
-        TransactionSubtransactionWriteRequest(
-          id: $0.id,
-          amount: $0.amount,
-          payeeID: $0.payeeID,
-          payeeName: $0.payeeName,
-          categoryID: $0.categoryID,
-          memo: $0.memo,
-          transferAccountID: $0.transferAccountID,
-          transferTransactionID: $0.transferTransactionID
-        )
-      },
-      importID: importID
-    )
   }
 }
