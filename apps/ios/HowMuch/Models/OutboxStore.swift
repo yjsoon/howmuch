@@ -264,11 +264,14 @@ final class OutboxStore: @unchecked Sendable {
           connectionFingerprint: item.connectionFingerprint,
           createdAt: item.capturedAt,
           kind: .create(request),
-          // Retried like every other queued capture, as the old drain did on
-          // a refresh. The old build may already have sent it, without an
-          // id, so nothing is folded into it.
-          state: .queued,
-          attempted: true
+          // The old build kept every item until the server said yes, so any
+          // of them may be on the server already, under an id we never
+          // learned. Attempted without a client id: nothing is folded into
+          // it, and it is looked up by import id before it is sent. An item
+          // the server refused keeps that refusal until Retry or Discard.
+          state: item.lastSyncError.map { .rejected(message: $0, code: nil) } ?? .queued,
+          attempted: true,
+          sentWithClientID: false
         )
       )
     }

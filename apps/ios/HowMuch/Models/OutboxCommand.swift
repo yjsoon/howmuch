@@ -102,6 +102,14 @@ struct OutboxCommand: Codable, Equatable, Identifiable {
     state == .inFlight
   }
 
+  /// A create moved from the old UserDefaults queue and not yet settled:
+  /// the old build may have created it under a server id we never learned,
+  /// so it can only be found by its import id. (Every create this build
+  /// sends is stamped `sentWithClientID` when it is marked attempted.)
+  var isUnresolvedLegacyCreate: Bool {
+    kind.isCreate && attempted && !sentWithClientID
+  }
+
   /// The row this command is for: its id within its own connection.
   var rowKey: OutboxPlanner.RowKey {
     OutboxPlanner.RowKey(connection: connectionFingerprint, transactionID: transactionID)

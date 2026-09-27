@@ -1001,6 +1001,59 @@ extension APIClient {
     try await outboxSend(path: "/v1/plans/\(planID)/transactions/\(transactionID)", method: "GET")
   }
 
+  enum ImportIDLookup {
+    /// Every row with the import id, deleted ones included, from one
+    /// consistent read of the plan. Empty means it was never created.
+    case rows([Transaction])
+    /// No consistent answer: the plan kept changing, or the server refused
+    /// or sent something unreadable.
+    case unknown
+  }
+
+  /// Finds the rows carrying `importID`, deleted ones included. A delta
+  /// read from knowledge 0 is the only list the server answers with
+  /// tombstones, so this walks the whole plan; it is kept for creates from
+  /// the old queue, which carry no id of ours to fetch by. The walk must see
+  /// one knowledge value throughout, or a row could move between pages.
+  func outboxRows(importID: String, planID: String) async throws -> ImportIDLookup {
+    for _ in 0 ..< 3 {
+      var matches: [Transaction] = []
+      var knowledge: Int?
+      var offset = 0
+      var changed = false
+      while true {
+        let reply = try await outboxSend(
+          path: "/v1/plans/\(planID)/transactions",
+          method: "GET",
+          queryItems: [
+            URLQueryItem(name: "last_knowledge_of_server", value: "0"),
+            URLQueryItem(name: "limit", value: "250"),
+            URLQueryItem(name: "offset", value: String(offset)),
+          ]
+        )
+        guard reply.isSuccess,
+              let page = (try? decoder.decode(APIEnvelope<TransactionsPayload>.self, from: reply.data))?.data,
+              let pageKnowledge = page.serverKnowledge else {
+          return .unknown
+        }
+        if let knowledge, knowledge != pageKnowledge {
+          changed = true
+          break
+        }
+        knowledge = pageKnowledge
+        matches += page.transactions.filter { $0.importID == importID }
+        guard page.hasMore == true, !page.transactions.isEmpty else {
+          break
+        }
+        offset = page.nextOffset ?? offset + page.transactions.count
+      }
+      if !changed {
+        return .rows(matches)
+      }
+    }
+    return .unknown
+  }
+
   /// The row in a single-transaction reply, or nil when the body is not one.
   func outboxTransaction(in reply: OutboxReply) -> Transaction? {
     (try? decoder.decode(APIEnvelope<TransactionPayload>.self, from: reply.data))?.data.transaction

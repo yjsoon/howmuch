@@ -359,6 +359,87 @@ final class OutboxSyncTests: XCTestCase {
     XCTAssertEqual(model.unsentChangeCount, 0)
   }
 
+  // Failure mode: the old build kept a capture until the server said yes,
+  // so any legacy item may have been created already -- without our id,
+  // under a server id we never learned. If that row was later deleted on
+  // another device, a replayed POST passes the import-id check (it ignores
+  // deleted rows) and brings the capture back.
+  func testALegacyCaptureDeletedElsewhereIsNotBroughtBackOnUpgrade() async throws {
+    let (defaults, suite) = try legacyDefaults()
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let legacy = legacyCapture(payee: "Old capture", amount: -7_000)
+    defaults.set(try JSONEncoder().encode([legacy]), forKey: OutboxStore.legacyDefaultsKey)
+    var landed = row(id: "txn_server_7", amount: -7_000, payee: "Old capture")
+    landed["import_id"] = legacy.request.importID
+    landed["deleted"] = true
+    server.seed(landed)
+
+    let model = makeModel(store: .temporary(defaults: defaults))
+    await model.drainOutbox(trigger: .refresh)
+
+    XCTAssertEqual(server.writes(), [], "nothing is re-created")
+    XCTAssertEqual(
+      model.outboxItems.first?.status,
+      .rejected("This may have been deleted on another device. Retry to add it again, or Discard it.")
+    )
+  }
+
+  func testALegacyCaptureTheServerAlreadyHasIsNotSentAgain() async throws {
+    let (defaults, suite) = try legacyDefaults()
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let legacy = legacyCapture(payee: "Old capture", amount: -7_000)
+    defaults.set(try JSONEncoder().encode([legacy]), forKey: OutboxStore.legacyDefaultsKey)
+    var landed = row(id: "txn_server_7", amount: -7_000, payee: "Old capture")
+    landed["import_id"] = legacy.request.importID
+    server.seed(landed)
+
+    let model = makeModel(store: .temporary(defaults: defaults))
+    await model.drainOutbox(trigger: .refresh)
+
+    XCTAssertEqual(server.writes(), [])
+    XCTAssertEqual(model.unsentChangeCount, 0)
+    XCTAssertNotNil(model.transactions.first { $0.id == "txn_server_7" })
+  }
+
+  func testARefusedLegacyCaptureWaitsForRetryAndIsLookedUpFirst() async throws {
+    let (defaults, suite) = try legacyDefaults()
+    defer { defaults.removePersistentDomain(forName: suite) }
+    var legacy = legacyCapture(payee: "Refused", amount: -2_000)
+    legacy.lastSyncError = "Category not found"
+    defaults.set(try JSONEncoder().encode([legacy]), forKey: OutboxStore.legacyDefaultsKey)
+    var landed = row(id: "txn_server_2", amount: -2_000, payee: "Refused")
+    landed["import_id"] = legacy.request.importID
+    landed["deleted"] = true
+    server.seed(landed)
+
+    let model = makeModel(store: .temporary(defaults: defaults))
+    await model.drainOutbox(trigger: .refresh)
+    XCTAssertEqual(server.writes(), [], "a refused capture is not retried unasked")
+    XCTAssertEqual(model.outboxItems.first?.status, .rejected("Category not found"))
+
+    await model.drainOutbox(trigger: .manual)
+    XCTAssertEqual(server.writes(), [], "Sync Now looks it up before sending")
+    XCTAssertEqual(
+      model.outboxItems.first?.status,
+      .rejected("This may have been deleted on another device. Retry to add it again, or Discard it.")
+    )
+  }
+
+  private func legacyDefaults() throws -> (UserDefaults, String) {
+    let suite = "howmuch.tests.outbox-sync.\(UUID().uuidString)"
+    return (try XCTUnwrap(UserDefaults(suiteName: suite)), suite)
+  }
+
+  private func legacyCapture(payee: String, amount: Int) -> PendingTransaction {
+    PendingTransaction(
+      request: TransactionWriteRequest(
+        accountID: "acct-a", date: "2026-09-20", amount: amount, payeeID: nil, payeeName: payee,
+        categoryID: nil, memo: nil, cleared: .uncleared, approved: true, flagColor: nil, subtransactions: []
+      ),
+      connectionFingerprint: fixtureSettings().connectionFingerprint
+    )
+  }
+
   // MARK: - Balances
 
   func testBalancesCountQueuedChangesAndDoNotJumpWhenTheyLand() async throws {
@@ -958,6 +1039,10 @@ final class OutboxLedgerServer: @unchecked Sendable {
     case ("GET", ["transactions", "unapproved_count"]):
       let count = order.compactMap(live).filter { $0["approved"] as? Bool == false }.count
       return (200, ["data": ["count": count, "server_knowledge": knowledge]])
+    case ("GET", ["transactions"]) where query.contains(where: { $0.name == "last_knowledge_of_server" }):
+      // A delta read, as the server answers it: deleted rows included.
+      let list = order.compactMap { rows[$0] }
+      return (200, ["data": ["transactions": list, "has_more": false, "server_knowledge": knowledge]])
     case ("GET", ["transactions"]):
       var list = order.compactMap(live)
       if query.contains(where: { $0.name == "type" && $0.value == "unapproved" }) {

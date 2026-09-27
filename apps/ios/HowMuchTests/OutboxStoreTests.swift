@@ -228,7 +228,11 @@ final class OutboxStoreTests: XCTestCase {
     XCTAssertEqual(commands.map(\.seq), [1, 2, 3])
     XCTAssertEqual(commands.map(\.connectionFingerprint), legacy.map(\.connectionFingerprint))
     XCTAssertEqual(commands.map(\.createdAt), legacy.map(\.capturedAt))
-    XCTAssertEqual(commands.map(\.state), [.queued, .queued, .queued], "a failed item is retried, as the old drain did")
+    XCTAssertEqual(
+      commands.map(\.state),
+      [.queued, .rejected(message: "Category not found", code: nil), .queued],
+      "a refused item keeps its refusal and waits for Retry or Discard, as the old queue showed it"
+    )
     XCTAssertTrue(commands.allSatisfy(\.attempted), "the old build may have sent any of them")
     XCTAssertFalse(commands.contains(where: \.sentWithClientID), "none went out with an id")
     XCTAssertTrue(commands.allSatisfy { $0.transactionID.hasPrefix("txn_") && $0.transactionID.count == 40 })

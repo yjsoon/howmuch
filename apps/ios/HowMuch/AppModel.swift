@@ -3653,7 +3653,27 @@ final class AppModel {
     do {
       switch command.kind {
       case .create(let request):
-        if command.attempted, command.sentWithClientID {
+        if command.isUnresolvedLegacyCreate {
+          // From the old queue: it may be on the server under an id we never
+          // learned, and may since have been deleted there. Send it only
+          // once no row, live or deleted, carries its import id.
+          guard let importID = request.importID else {
+            return .refused(message: Self.deletedElsewhereMessage, code: Self.deletedElsewhereCode)
+          }
+          switch try await client.outboxRows(importID: importID, planID: planID) {
+          case .unknown:
+            // Nothing was sent; try again on a later pass.
+            return .notSent
+          case .rows(let rows) where !rows.isEmpty:
+            if let live = rows.first(where: { !$0.deleted && $0.accountID == request.accountID })
+              ?? rows.first(where: { !$0.deleted }) {
+              return .done(live)
+            }
+            return .refused(message: Self.deletedElsewhereMessage, code: Self.deletedElsewhereCode)
+          case .rows:
+            break
+          }
+        } else if command.attempted, command.sentWithClientID {
           // It may be on the server already. A replay would be answered by
           // the import-id check, which ignores deleted rows, so look it up
           // by id first rather than risk bringing back a deleted row.
