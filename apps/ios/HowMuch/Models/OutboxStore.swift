@@ -32,6 +32,10 @@ final class OutboxStore: @unchecked Sendable {
   private struct Envelope: Codable {
     let version: Int
     let commands: [OutboxCommand]
+    /// Every item of the old UserDefaults queue already moved into this
+    /// file. The old key's removal is not flushed at once and can come back,
+    /// so an item moved and then discarded is recognised and not moved again.
+    var migratedLegacyIDs: [UUID]?
   }
 
   private static let currentVersion = 1
@@ -48,6 +52,8 @@ final class OutboxStore: @unchecked Sendable {
   private var hasLoaded = false
   /// True when the last load set part of the outbox aside as unreadable.
   private(set) var quarantinedOnLastLoad = false
+  /// Written with every save; see `Envelope.migratedLegacyIDs`.
+  private var migratedLegacyIDs: Set<UUID> = []
 
   init(
     directory: URL,
@@ -88,9 +94,11 @@ final class OutboxStore: @unchecked Sendable {
     var commands: [OutboxCommand] = []
     var needsWrite = false
     quarantinedOnLastLoad = false
+    migratedLegacyIDs = []
     if let data = try readFileLocked() {
       if let envelope = try? decoder.decode(Envelope.self, from: data) {
         commands = envelope.commands
+        migratedLegacyIDs = Set(envelope.migratedLegacyIDs ?? [])
       } else {
         // Keep the bytes for a person to look at, and start empty. Never
         // delete what could not be read.
@@ -107,17 +115,30 @@ final class OutboxStore: @unchecked Sendable {
     }
 
     let legacy = legacyCommandsLocked(after: commands)
+    let previouslyMigrated = migratedLegacyIDs
     if legacy.migrated {
       commands += legacy.commands
+      migratedLegacyIDs.formUnion(legacy.itemIDs)
       needsWrite = true
     }
     if needsWrite {
       do {
         try writeLocked(commands)
       } catch {
-        // The legacy key stays until a later launch manages the write. The
-        // commands are still returned so they show and sync this session.
-        return commands
+        guard legacy.migrated else {
+          // Only in-flight commands were requeued. The file still says in
+          // flight, which the next load reads the same way.
+          return commands
+        }
+        // The move is not on disk, so nothing may act on it: a save now
+        // (a Discard, say) would leave the old key to move the item in
+        // again. The key stays and every write is refused until a load
+        // manages the move.
+        migratedLegacyIDs = previouslyMigrated
+        hasLoaded = false
+        throw OutboxStoreError.unreadable(
+          "Changes saved by the previous version couldn’t be moved: \(error.localizedDescription)"
+        )
       }
     }
     if legacy.migrated || legacy.quarantined {
@@ -181,7 +202,11 @@ final class OutboxStore: @unchecked Sendable {
   }
 
   private func writeLocked(_ commands: [OutboxCommand]) throws {
-    let data = try encoder.encode(Envelope(version: Self.currentVersion, commands: commands))
+    let data = try encoder.encode(Envelope(
+      version: Self.currentVersion,
+      commands: commands,
+      migratedLegacyIDs: migratedLegacyIDs.isEmpty ? nil : migratedLegacyIDs.sorted { $0.uuidString < $1.uuidString }
+    ))
     try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
     try writeData(data, fileURL)
   }
@@ -207,20 +232,20 @@ final class OutboxStore: @unchecked Sendable {
   /// (with the key left behind) is recognised rather than queued twice.
   private func legacyCommandsLocked(
     after existing: [OutboxCommand]
-  ) -> (commands: [OutboxCommand], migrated: Bool, quarantined: Bool) {
+  ) -> (commands: [OutboxCommand], itemIDs: [UUID], migrated: Bool, quarantined: Bool) {
     guard let data = defaults.data(forKey: Self.legacyDefaultsKey) else {
-      return ([], false, false)
+      return ([], [], false, false)
     }
     guard let pending = try? decoder.decode([PendingTransaction].self, from: data) else {
       do {
         try quarantineLocked(data, reason: "legacy-corrupt")
         quarantinedOnLastLoad = true
-        return ([], false, true)
+        return ([], [], false, true)
       } catch {
-        return ([], false, false)
+        return ([], [], false, false)
       }
     }
-    let knownIDs = Set(existing.map(\.id))
+    let knownIDs = Set(existing.map(\.id)).union(migratedLegacyIDs)
     var seq = existing.map(\.seq).max() ?? 0
     var commands: [OutboxCommand] = []
     for item in pending where !knownIDs.contains(item.id) {
@@ -247,7 +272,7 @@ final class OutboxStore: @unchecked Sendable {
         )
       )
     }
-    return (commands, true, false)
+    return (commands, pending.map(\.id), true, false)
   }
 }
 

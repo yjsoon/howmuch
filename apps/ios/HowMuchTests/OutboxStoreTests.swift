@@ -253,20 +253,44 @@ final class OutboxStoreTests: XCTestCase {
     XCTAssertEqual(store().peek(), commands)
   }
 
-  func testLegacyQueueStaysInUserDefaultsWhenTheFileWriteFails() throws {
+  // Failure mode: the move's file write fails, the migrated commands are
+  // used anyway while the old key stays, a later save (a Discard, say)
+  // succeeds without clearing it, and the next launch moves the discarded
+  // capture in again. Until the move is on disk the store takes no writes.
+  func testAMoveThatCannotBeWrittenRefusesWritesUntilItIs() throws {
     let payload = Data(Self.legacyPayload.utf8)
     defaults.set(payload, forKey: OutboxStore.legacyDefaultsKey)
     struct DiskFull: Error {}
+    let gate = WriteGate()
+    gate.fails = true
+    let outbox = store(writeData: { data, url in
+      if gate.fails { throw DiskFull() }
+      try data.write(to: url, options: .atomic)
+    })
 
-    let commands = try store(writeData: { _, _ in throw DiskFull() }).load()
-
-    XCTAssertEqual(commands.count, 3, "still shown and sent this session")
+    XCTAssertThrowsError(try outbox.load())
+    XCTAssertThrowsError(try outbox.save([]), "a Discard cannot land before the move has")
     XCTAssertEqual(defaults.data(forKey: OutboxStore.legacyDefaultsKey), payload, "nothing is lost")
 
-    // The next launch finishes the move.
-    let retried = try store().load()
-    XCTAssertEqual(retried.map(\.id), commands.map(\.id))
+    gate.fails = false
+    let moved = try outbox.load()
+    XCTAssertEqual(moved.count, 3)
     XCTAssertNil(defaults.data(forKey: OutboxStore.legacyDefaultsKey))
+  }
+
+  // Failure mode: removing a UserDefaults key is not flushed at once, so it
+  // can come back after the move reached the file. A capture discarded in
+  // between must not be moved in a second time.
+  func testADiscardedMovedCaptureIsNotMovedAgain() throws {
+    let payload = Data(Self.legacyPayload.utf8)
+    defaults.set(payload, forKey: OutboxStore.legacyDefaultsKey)
+    let first = store()
+    let moved = try first.load()
+    try first.save(Array(moved.dropFirst()))
+    defaults.set(payload, forKey: OutboxStore.legacyDefaultsKey)
+
+    let again = try store().load()
+    XCTAssertEqual(again.map(\.id), moved.dropFirst().map(\.id), "the discarded capture stays discarded")
   }
 
   func testMigrationThatRanBeforeIsNotRepeated() throws {
