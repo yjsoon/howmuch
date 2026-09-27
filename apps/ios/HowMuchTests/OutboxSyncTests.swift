@@ -302,6 +302,39 @@ final class OutboxSyncTests: XCTestCase {
     XCTAssertEqual(store.peek(), [])
   }
 
+  // Failure mode: the write marking a create as attempted fails, the create
+  // is sent anyway, the server commits it and the app dies. The disk then
+  // shows a create never sent, a later edit folds into it, and the replay
+  // is answered from the import-id dedupe with the first body: the edit is
+  // lost. Nothing may be sent until the attempt is on disk.
+  func testNothingIsSentUntilTheAttemptIsOnDisk() async throws {
+    let gate = WriteGate()
+    let store = OutboxStore.temporary(writeData: { data, url in
+      if gate.fails { throw CocoaError(.fileWriteOutOfSpace) }
+      try data.write(to: url, options: .atomic)
+    })
+    let model = makeModel(store: store)
+    await load(model)
+    server.offline = true
+    try model.commit(newDraft(amount: 19_000, payee: "Repair"))
+    await model.waitForOutboxDrain()
+
+    gate.fails = true
+    server.offline = false
+    await model.drainOutbox(trigger: .manual)
+    XCTAssertEqual(server.writes(), [], "a send whose attempt could not be recorded never leaves")
+    let onDisk = try XCTUnwrap(store.peek()?.first)
+    XCTAssertFalse(onDisk.attempted)
+    XCTAssertEqual(onDisk.state, .queued)
+    XCTAssertEqual(model.currentOutbox.first?.state, .queued, "not left looking as if on the wire")
+    XCTAssertFalse(try XCTUnwrap(model.currentOutbox.first).attempted)
+
+    gate.fails = false
+    await model.drainOutbox(trigger: .manual)
+    XCTAssertEqual(server.writes().map(\.description), ["POST /v1/plans/plan-1/transactions"])
+    XCTAssertEqual(model.unsentChangeCount, 0)
+  }
+
   func testTheLegacyUserDefaultsQueueIsSentAfterAnUpgrade() async throws {
     let suite = "howmuch.tests.outbox-sync.\(UUID().uuidString)"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -727,6 +760,11 @@ final class OutboxSyncTests: XCTestCase {
     }
     XCTAssertTrue(condition(), "condition did not settle", file: file, line: line)
   }
+}
+
+/// Makes every outbox write fail while `fails` is set.
+final class WriteGate: @unchecked Sendable {
+  var fails = false
 }
 
 extension AppModel {

@@ -3569,7 +3569,9 @@ final class AppModel {
             needsAnotherDrain = true
             continue
           }
-          markSending([command])
+          guard markSending([command]) else {
+            break passes
+          }
           let result = await send(command, client: client, planID: planID)
           if result.provesNotApplied {
             restoreAttempt(of: [command])
@@ -3603,18 +3605,29 @@ final class AppModel {
   }
 
   /// Marks commands as on the wire and as attempted, on disk, before any
-  /// byte is sent: from here on the server may hold them.
-  private func markSending(_ commands: [OutboxCommand]) {
+  /// byte is sent: from here on the server may hold them. Returns false,
+  /// changing nothing, when that write fails; the caller must not send.
+  /// Otherwise a create the server committed could look unsent after a
+  /// crash, take later edits folded into it, and lose them to the import-id
+  /// dedupe on replay.
+  private func markSending(_ commands: [OutboxCommand]) -> Bool {
     let ids = Set(commands.map(\.id))
-    updateOutbox { queue in
-      for index in queue.indices where ids.contains(queue[index].id) {
-        queue[index].state = .inFlight
-        queue[index].attempted = true
-        if queue[index].kind.isCreate {
-          queue[index].sentWithClientID = true
-        }
+    var next = outbox
+    for index in next.indices where ids.contains(next[index].id) {
+      next[index].state = .inFlight
+      next[index].attempted = true
+      if next[index].kind.isCreate {
+        next[index].sentWithClientID = true
       }
     }
+    do {
+      try outboxStore.save(next)
+    } catch {
+      Self.logger.error("Outbox write failed; not sending: \(error.localizedDescription, privacy: .public)")
+      return false
+    }
+    outbox = next
+    return true
   }
 
   /// Puts back the attempt flags a send set, once its answer proves the
@@ -3935,7 +3948,9 @@ final class AppModel {
       return .rejected
     }
     let ids = commands.map(\.transactionID)
-    markSending(commands)
+    guard markSending(commands) else {
+      return .stop
+    }
     let reply: OutboxReply
     do {
       reply = try await client.outboxApprove(planID: planID, transactionIDs: ids)
