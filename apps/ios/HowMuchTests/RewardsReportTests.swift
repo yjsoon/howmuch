@@ -893,11 +893,13 @@ final class RewardsSnapshotTests: XCTestCase {
       XCTAssertTrue(opened, "Could not open \(label): \(editor.accessibilityLabels())")
       _ = await editor.captureUntilOCR(contains: [label == "Flag-based rewards" ? "Colour names" : "Active"])
     }
-    let rule = await editor.captureUntilOCR(contains: ["Active", "Disabled Dining", "4.0"])
+    let rule = await editor.captureUntilOCR(contains: ["Active", "Disabled Dining", "Reward value", "miles / USD"])
     attach(rule.image, "rewards-disabled-editor-rule")
     XCTAssertTrue(rule.text.contains("disabled dining"), rule.text)
     XCTAssertTrue(rule.text.contains("active"), rule.text)
-    XCTAssertTrue(rule.text.contains("4.0"), rule.text)
+    XCTAssertTrue(editor.controls(labelContains: "reward value").contains {
+      $0.object.accessibilityValue == "4"
+    }, "The retained rule must still earn 4 miles: \(editor.accessibilityLabels())")
     // The retained disabled switch is visually inspected in this attachment;
     // navigating to it does not claim switch-toggle or save coverage.
   }
