@@ -177,6 +177,25 @@ final class ServerConnectionFlowTests: XCTestCase {
     return (accounts, transactions, payeeNames)
   }
 
+  // A sign-in captures its address before awaiting the network. A draft
+  // edited during that wait must never name another upload destination.
+  func testUploadConfirmationNamesTheAuthenticatedServerDespiteDraftChanges() async throws {
+    try await seedLocalLedger()
+    let flow = ServerConnectFlow(local: local, signedIn: server)
+    flow.draft.baseURLString = "https://different-server.invalid"
+    await flow.check()
+    guard case .confirmUpload = flow.step else {
+      return XCTFail("Expected upload confirmation")
+    }
+    XCTAssertEqual(flow.host, "connect-server.test")
+    let adopted = await flow.upload()
+    XCTAssertEqual(adopted?.baseURLString, server.baseURLString)
+    let source = try await ledger(local)
+    let destination = try await ledger(server)
+    XCTAssertEqual(destination.transactions, source.transactions)
+    XCTAssertEqual(ServerEngineProtocol.importCount, 1)
+  }
+
   func testAnEmptyServerReceivesTheLedgerAndTheDeviceKeepsIt() async throws {
     try await seedLocalLedger()
     let flow = ServerConnectFlow(local: local, signedIn: server)

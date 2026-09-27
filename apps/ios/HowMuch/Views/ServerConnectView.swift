@@ -169,7 +169,8 @@ final class ServerConnectFlow {
   }
 
   var host: String {
-    draft.baseURL?.host() ?? draft.trimmedBaseURL
+    let destination = server ?? draft
+    return destination.baseURL?.host() ?? destination.trimmedBaseURL
   }
 
   var canSignIn: Bool {
@@ -398,6 +399,7 @@ struct ServerConnectView: View {
       switch flow.step {
       case .signIn:
         signInSections
+          .disabled(flow.isSigningIn)
       case .choosePlan(let plans):
         Section {
           PlanChoiceRows(plans: plans, selection: $flow.selectedPlanID)

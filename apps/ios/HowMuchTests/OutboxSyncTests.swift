@@ -630,6 +630,37 @@ final class OutboxSyncTests: XCTestCase {
 
   // MARK: - Approvals
 
+  // Snapshot and outbox both survive a kill: pending approvals/deletes must
+  // reduce the restored badge once, not once per durable file.
+  func testSnapshotRelaunchDoesNotSubtractPendingApprovalOrDeleteTwice() async throws {
+    for deleting in [false, true] {
+      server.reset()
+      let prefix = deleting ? "delete" : "approve"
+      for index in 1...3 { server.seed(row(id: "\(prefix)-\(index)", approved: false)) }
+      let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+      defer { try? FileManager.default.removeItem(at: directory) }
+      let snapshots = SnapshotStore(directory: directory)
+      let outbox = OutboxStore.temporary()
+      let model = makeModel(store: outbox, snapshotStore: snapshots)
+      await load(model)
+      await eventually { model.unapprovedBadgeCount == 3 }
+      server.offline = true
+      let target = try row(in: model, "\(prefix)-1")
+      if deleting { try await model.deleteTransaction(target) }
+      else { model.approveTransaction(target) }
+      await model.waitForOutboxDrain()
+      XCTAssertEqual(model.unapprovedBadgeCount, 2)
+      server.offline = false
+      await model.refreshAccounts()
+      snapshots.waitForPendingWrites()
+      XCTAssertNotNil(snapshots.load())
+      server.offline = true
+      let relaunched = makeModel(store: outbox, snapshotStore: snapshots)
+      XCTAssertEqual(relaunched.unapprovedBadgeCount, 2)
+      XCTAssertEqual(relaunched.unsentChangeCount, 1)
+    }
+  }
+
   func testApprovalsQueueOfflineAndCountOnTheBadge() async throws {
     server.seed(row(id: "row-1", approved: false))
     server.seed(row(id: "row-2", approved: false))
@@ -811,12 +842,12 @@ final class OutboxSyncTests: XCTestCase {
     return settings
   }
 
-  private func makeModel(store: OutboxStore = .temporary(), settings: APISettings? = nil) -> AppModel {
+  private func makeModel(store: OutboxStore = .temporary(), settings: APISettings? = nil, snapshotStore: SnapshotStore? = nil) -> AppModel {
     let model = AppModel(
       outboxStore: store,
       settings: settings ?? fixtureSettings(),
       viewPrefs: ViewPrefs(),
-      snapshotStore: SnapshotStore(
+      snapshotStore: snapshotStore ?? SnapshotStore(
         directory: FileManager.default.temporaryDirectory
           .appendingPathComponent("HowMuchOutboxSyncTests/\(UUID().uuidString)", isDirectory: true)
       ),

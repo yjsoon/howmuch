@@ -874,25 +874,32 @@ final class RewardsSnapshotTests: XCTestCase {
       size: CGSize(width: 430, height: 932)
     ))
     defer { editor.detach() }
-    let header = await editor.captureUntilOCR(contains: ["Travel Fixture"], timeoutNanoseconds: 5_000_000_000)
-    XCTAssertTrue(header.text.contains("travel fixture"), header.text)
-    // Scroll the real form, rather than capturing only its category-add input.
-    var ruleText = ""
-    for offset in stride(from: 600, through: 2000, by: 200) {
-      let scrolled = await editor.setMainScrollOffsetY(CGFloat(offset))
-      XCTAssertTrue(scrolled, editor.scrollGeometryDiagnostics())
-      let rule = await editor.captureUntilOCR(contains: ["Active", "Disabled Dining", "4.0"])
-      ruleText = rule.text
-      if rule.text.contains("active") && rule.text.contains("disabled dining") {
-        attach(rule.image, "rewards-disabled-editor-rule")
-        break
-      }
+    let header = await editor.captureUntilOCR(contains: ["Edit Rewards", "Travel", "Rewards settings"], timeoutNanoseconds: 5_000_000_000)
+    for text in ["edit rewards", "travel", "rewards settings"] {
+      XCTAssertTrue(header.text.contains(text), header.text)
     }
-    XCTAssertTrue(ruleText.contains("disabled dining"), ruleText)
-    XCTAssertTrue(ruleText.contains("active"), ruleText)
-    XCTAssertTrue(ruleText.contains("4.0"), ruleText)
-    // The retained disabled switches are visually inspected in this attachment;
-    // this test does not claim tap interaction or AX traversal coverage.
+    // Main now keeps advanced rules on child screens. Exercise those links,
+    // rather than expecting the old inline editor below the main form.
+    for label in ["Flag-based rewards", "Disabled Dining"] {
+      var opened = false
+      for offset in stride(from: 0, through: 2000, by: 200) {
+        _ = await editor.setMainScrollOffsetY(CGFloat(offset))
+        _ = await editor.captureUntilOCR(contains: [label], timeoutNanoseconds: 300_000_000)
+        if let control = editor.firstControl(labelContains: label), editor.activate(control) {
+          opened = true
+          break
+        }
+      }
+      XCTAssertTrue(opened, "Could not open \(label): \(editor.accessibilityLabels())")
+      _ = await editor.captureUntilOCR(contains: [label == "Flag-based rewards" ? "Colour names" : "Active"])
+    }
+    let rule = await editor.captureUntilOCR(contains: ["Active", "Disabled Dining", "4.0"])
+    attach(rule.image, "rewards-disabled-editor-rule")
+    XCTAssertTrue(rule.text.contains("disabled dining"), rule.text)
+    XCTAssertTrue(rule.text.contains("active"), rule.text)
+    XCTAssertTrue(rule.text.contains("4.0"), rule.text)
+    // The retained disabled switch is visually inspected in this attachment;
+    // navigating to it does not claim switch-toggle or save coverage.
   }
 
   private func attach(_ image: UIImage, _ name: String) {

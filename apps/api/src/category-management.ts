@@ -197,9 +197,9 @@ export function updateCategoryGroupCommand(planId: string, current: CategoryGrou
     resourceType: "category_group",
     resourceId: current.id,
     statements: [sql(
-      `UPDATE category_groups SET name = ?, hidden = ?, updated_at = CURRENT_TIMESTAMP
+      `UPDATE category_groups SET name = COALESCE(?, name), hidden = COALESCE(?, hidden), updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND plan_id = ? AND deleted = 0 AND internal = 0`,
-      [patch.name ?? current.name, (patch.hidden ?? Boolean(current.hidden)) ? 1 : 0, current.id, planId],
+      [patch.name ?? null, patch.hidden === undefined ? null : patch.hidden ? 1 : 0, current.id, planId],
     )],
   };
 }
@@ -226,12 +226,12 @@ export function updateCategoryCommand(planId: string, current: CategoryRow, patc
     resourceType: "category",
     resourceId: current.id,
     statements: [sql(
-      `UPDATE categories SET name = ?, hidden = ?, category_group_id = ?, updated_at = CURRENT_TIMESTAMP
+      `UPDATE categories SET name = COALESCE(?, name), hidden = COALESCE(?, hidden), category_group_id = COALESCE(?, category_group_id), updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND plan_id = ? AND deleted = 0 AND internal = 0`,
       [
-        patch.name ?? current.name,
-        (patch.hidden ?? Boolean(current.hidden)) ? 1 : 0,
-        patch.category_group_id ?? current.category_group_id,
+        patch.name ?? null,
+        patch.hidden === undefined ? null : patch.hidden ? 1 : 0,
+        patch.category_group_id ?? null,
         current.id,
         planId,
       ],

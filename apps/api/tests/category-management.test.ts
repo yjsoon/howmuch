@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { applyMigrations } from "../src/db";
 import { createHandler } from "../src/http";
 import { LedgerRepository } from "../src/repository";
+import type { D1MetadataRepository } from "../src/d1-metadata-repository";
 import {
   parseCategoryCreate,
   parseCategoryGroupCreate,
@@ -46,6 +47,48 @@ describe("category input parsing", () => {
     expect(() => updateCategoryCommand("p", internal, { name: "x" }, null)).toThrow("Internal categories");
   });
 });
+
+// D1 plans commands before its atomic batch. Two disjoint PATCHes must not
+// copy stale values for fields omitted from the first request.
+for (const resource of ["category_group", "category"] as const) {
+  test(`D1 concurrent ${resource} patches preserve disjoint changes`, async () => {
+    const { request, db, repo } = await open("D1");
+    db.run("INSERT INTO category_groups (id, plan_id, name) VALUES ('g1', 'p', 'Original'), ('g2', 'p', 'Other')");
+    db.run("INSERT INTO categories (id, plan_id, category_group_id, name) VALUES ('c', 'p', 'g1', 'Original')");
+    const metadata = (repo as unknown as { metadata: D1MetadataRepository }).metadata;
+    const apply = metadata.applyNativeCommand.bind(metadata);
+    let release!: () => void;
+    let arrived!: () => void;
+    const held = new Promise<void>((resolve) => { arrived = resolve; });
+    const resume = new Promise<void>((resolve) => { release = resolve; });
+    let pauseNext = true;
+    metadata.applyNativeCommand = async (...args) => {
+      if (pauseNext && args[0] === `${resource}.update`) {
+        pauseNext = false;
+        arrived();
+        await resume;
+      }
+      return apply(...args);
+    };
+    const path = resource === "category" ? "/v1/plans/p/categories/c" : "/v1/plans/p/category_groups/g1";
+    const rename = request(path, { method: "PATCH", body: { [resource]: { name: "Renamed" } } });
+    await held;
+    try {
+      const other = await request(path, {
+        method: "PATCH",
+        body: { [resource]: { hidden: true, ...(resource === "category" ? { category_group_id: "g2" } : {}) } },
+      });
+      expect(other.status).toBe(200);
+    } finally {
+      release();
+    }
+    expect((await rename).status).toBe(200);
+    const actual = resource === "category"
+      ? db.query("SELECT name, hidden, category_group_id FROM categories WHERE id='c'").get()
+      : db.query("SELECT name, hidden FROM category_groups WHERE id='g1'").get();
+    expect(actual).toEqual({ name: "Renamed", hidden: 1, ...(resource === "category" ? { category_group_id: "g2" } : {}) });
+  });
+}
 
 for (const backend of BACKENDS) {
   describe(`${backend} category management`, () => {

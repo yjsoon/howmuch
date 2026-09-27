@@ -451,8 +451,8 @@ final class AppModel {
     snapshotKnowledge = snapshot.serverKnowledge
     // #181's badge: the tile shows the last count the server gave rather than
     // flashing 0 while `refreshUnapprovedCount` is in flight. It is a plain
-    // number with no rows behind it, and `unapprovedBadgeCount` already
-    // subtracts anything approved since — which, on a launch, is nothing.
+    // number with no rows behind it. The restored outbox supplies pending
+    // approvals/deletes, which `unapprovedBadgeCount` subtracts once.
     // Per-account counts are not restored: a narrowed register fetches its own
     // when it opens, and a stale per-account number has no tile to sit on.
     if let unapprovedCount = snapshot.unapprovedCount {
@@ -511,10 +511,9 @@ final class AppModel {
         accountPreferences: lastSyncedAccountPreferences,
         scheduledTransactions: scheduledTransactions,
         ledgerPage: lastLedgerFirstPage,
-        // What the tile shows, not the server's last raw number: a row
-        // approved or rejected here since that count was taken is already off
-        // the badge, and a restore has no record of it to subtract again.
-        unapprovedCount: unapprovedBadgeCount
+        // Keep acknowledged-only adjustments, but undo durable pending ones:
+        // the restored outbox will subtract those again on the first frame.
+        unapprovedCount: unapprovedBadgeCount + approvalSession.pending.union(queuedUnapprovedRejections.keys).count
       )
     )
     return true
