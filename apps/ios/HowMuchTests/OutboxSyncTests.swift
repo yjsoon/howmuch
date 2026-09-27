@@ -370,6 +370,9 @@ final class OutboxSyncTests: XCTestCase {
     server.offline = true
     try model.commit(newDraft(amount: 5_000, payee: "Snack"))
     XCTAssertEqual(model.accounts.first?.balance, -15_000, "a queued create moves the balance at once")
+    // Let the pass the commit scheduled finish offline, so it cannot still be
+    // running (and absorb the manual pass below) once the server is back.
+    await model.waitForOutboxDrain()
 
     // An accounts read that starts before the create lands answers with the
     // old balance after it has landed.
