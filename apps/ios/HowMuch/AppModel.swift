@@ -3569,7 +3569,7 @@ final class AppModel {
             needsAnotherDrain = true
             continue
           }
-          guard markSending([command]) else {
+          guard markSending([command], resolvingLegacyCreate: command.isUnresolvedLegacyCreate) else {
             break passes
           }
           let result = await send(command, client: client, planID: planID)
@@ -3610,13 +3610,15 @@ final class AppModel {
   /// Otherwise a create the server committed could look unsent after a
   /// crash, take later edits folded into it, and lose them to the import-id
   /// dedupe on replay.
-  private func markSending(_ commands: [OutboxCommand]) -> Bool {
+  private func markSending(_ commands: [OutboxCommand], resolvingLegacyCreate: Bool = false) -> Bool {
     let ids = Set(commands.map(\.id))
     var next = outbox
     for index in next.indices where ids.contains(next[index].id) {
       next[index].state = .inFlight
       next[index].attempted = true
-      if next[index].kind.isCreate {
+      // A legacy lookup is only a read. A crash or timeout during it must
+      // leave recovery looking for the old server id, not our new client id.
+      if next[index].kind.isCreate && !resolvingLegacyCreate {
         next[index].sentWithClientID = true
       }
     }
@@ -3671,7 +3673,13 @@ final class AppModel {
             }
             return .refused(message: Self.deletedElsewhereMessage, code: Self.deletedElsewhereCode)
           case .rows:
-            break
+            // Only now can a POST with our id occur. Recheck ownership after
+            // the awaited lookup and make that attempt durable before sending.
+            guard settings.connectionFingerprint == command.connectionFingerprint,
+                  outbox.contains(where: { $0.id == command.id && $0.isInFlight }),
+                  markSending([command]) else {
+              return .notSent
+            }
           }
         } else if command.attempted, command.sentWithClientID {
           // It may be on the server already. A replay would be answered by

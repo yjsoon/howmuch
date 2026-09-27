@@ -13,9 +13,11 @@ struct WelcomeView: View {
     VStack(spacing: 0) {
       Spacer()
       VStack(spacing: 12) {
-        Image(systemName: "dollarsign.circle.fill")
-          .font(.system(size: 64))
-          .foregroundStyle(Theme.accent)
+        Image("BrandIcon")
+          .resizable()
+          .scaledToFit()
+          .frame(width: 80, height: 80)
+          .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
           .accessibilityHidden(true)
         Text("HowMuch")
           .font(.largeTitle.bold())

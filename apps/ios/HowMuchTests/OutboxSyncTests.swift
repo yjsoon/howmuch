@@ -408,6 +408,62 @@ final class OutboxSyncTests: XCTestCase {
     )
   }
 
+  // A dropped lookup response is not an attempted POST. Keep resolving by
+  // import id, both in this process and after reopening the durable queue.
+  func testInterruptedLegacyLookupResumesWithoutRejectingOrReposting() async throws {
+    for relaunch in [false, true] {
+      server.reset()
+      let (defaults, suite) = try legacyDefaults()
+      defer { defaults.removePersistentDomain(forName: suite) }
+      let legacy = legacyCapture(payee: "Already saved", amount: -7_000)
+      defaults.set(try JSONEncoder().encode([legacy]), forKey: OutboxStore.legacyDefaultsKey)
+      var landed = row(id: "txn_server_old", amount: -7_000, payee: "Already saved")
+      landed["import_id"] = legacy.request.importID
+      server.seed(landed)
+      let store = OutboxStore.temporary(defaults: defaults)
+      let model = makeModel(store: store)
+      server.dropResponses("GET /v1/plans/plan-1/transactions")
+      await model.drainOutbox(trigger: .refresh)
+      server.stopDropping()
+
+      let resumed = relaunch ? makeModel(store: store) : model
+      await resumed.drainOutbox(trigger: .refresh)
+      XCTAssertEqual(resumed.unsentChangeCount, 0)
+      XCTAssertNotNil(resumed.transactions.first { $0.id == "txn_server_old" })
+      XCTAssertEqual(server.writes(), [], "An interrupted read must not repost the capture")
+    }
+  }
+
+  // Capture the file while the lookup is suspended: this is the state a
+  // killed process leaves, with no opportunity to restore attempt flags.
+  func testRelaunchDuringLegacyLookupStillResolvesTheOriginalServerID() async throws {
+    let (defaults, suite) = try legacyDefaults()
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let legacy = legacyCapture(payee: "Before upgrade", amount: -9_000)
+    defaults.set(try JSONEncoder().encode([legacy]), forKey: OutboxStore.legacyDefaultsKey)
+    var landed = row(id: "txn_preupgrade", amount: -9_000, payee: "Before upgrade")
+    landed["import_id"] = legacy.request.importID
+    server.seed(landed)
+    let store = OutboxStore.temporary(defaults: defaults)
+    let model = makeModel(store: store)
+    let route = "GET /v1/plans/plan-1/transactions"
+    server.hold(route)
+    let draining = Task { await model.drainOutbox(trigger: .refresh) }
+    await eventually { self.server.isHeld(route) }
+    let recovered = OutboxStore.temporary()
+    _ = try recovered.load()
+    try recovered.save(try XCTUnwrap(store.peek()))
+    server.stopHolding()
+    server.release(route)
+    await draining.value
+
+    let relaunched = makeModel(store: recovered)
+    await relaunched.drainOutbox(trigger: .refresh)
+    XCTAssertEqual(relaunched.unsentChangeCount, 0)
+    XCTAssertNotNil(relaunched.transactions.first { $0.id == "txn_preupgrade" })
+    XCTAssertEqual(server.writes(), [])
+  }
+
   private func legacyDefaults() throws -> (UserDefaults, String) {
     let suite = "howmuch.tests.outbox-sync.\(UUID().uuidString)"
     return (try XCTUnwrap(UserDefaults(suiteName: suite)), suite)
