@@ -75,7 +75,7 @@ struct AddTransactionsView: View {
           if embeddedInAssistant {
             ToolbarItem(placement: .topBarTrailing) {
               Menu {
-                Button("Connection settings") { model.isShowingSettings = true }
+                Button(model.settings.isLocal ? "Settings" : "Connection settings") { model.isShowingSettings = true }
                 Button("Discard this conversation", role: .destructive) {
                   isConfirmingDiscard = true
                 }

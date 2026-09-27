@@ -129,7 +129,10 @@ describe("YNAB similarity guard", () => {
     expect(db.query("SELECT id FROM categories WHERE plan_id='plan-test' ORDER BY id").all()).toEqual([{ id: "category-1" }]);
     expect(db.query("SELECT id FROM category_groups WHERE plan_id='plan-test' ORDER BY id").all()).toEqual([{ id: "group-1" }]);
     expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='transaction' AND object_id='transaction-1'").get()).toEqual({ payload_json: JSON.stringify(fullPlan.transactions[0]) });
-    expect(await repo.getMonth("plan-test", "2026-06")).toEqual(fullPlan.months[0]);
+    // The month mirror is kept losslessly even though HowMuch no longer serves it.
+    const { categories: monthCategories, ...month } = fullPlan.months[0]!;
+    expect(await repo.listYnabRawObjects("plan-test", "month")).toEqual([month]);
+    expect(await repo.listYnabRawObjects("plan-test", "month_category")).toEqual(monthCategories);
     expect(await repo.listYnabRawObjects("plan-test", "scheduled_subtransaction")).toEqual(fullPlan.scheduled_subtransactions);
   });
 

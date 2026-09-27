@@ -1,9 +1,110 @@
 import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
+
+/// The on-device ledger archive (JSON), saved with the file exporter.
+private struct LocalArchiveDocument: FileDocument {
+  static var readableContentTypes: [UTType] { [.json] }
+  var data: Data
+
+  init(data: Data) { self.data = data }
+
+  init(configuration: ReadConfiguration) throws {
+    guard let data = configuration.file.regularFileContents else {
+      throw CocoaError(.fileReadCorruptFile)
+    }
+    self.data = data
+  }
+
+  func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+    FileWrapper(regularFileWithContents: data)
+  }
+}
+
+/// The on-device ledger an install used before it connected to a server.
+/// It can be saved as a file or used again.
+private struct LocalArchiveSection: View {
+  let archive: LocalArchive
+  @Environment(AppModel.self) private var model
+  @State private var exportDocument: LocalArchiveDocument?
+  @State private var isExporting = false
+  @State private var isWorking = false
+  @State private var isConfirmingSwitch = false
+  @State private var errorMessage: String?
+  private let device = UIDevice.current.model
+
+  var body: some View {
+    Section {
+      Button("Export as file") {
+        export()
+      }
+      Button("Switch back to this \(device)’s data") {
+        isConfirmingSwitch = true
+      }
+      if let errorMessage {
+        Text(errorMessage)
+          .font(.caption)
+          .foregroundStyle(Theme.outflow)
+      }
+    } header: {
+      Text("Data from before you connected")
+    } footer: {
+      Text("Kept on this \(device) since \(archive.archivedAt.formatted(date: .abbreviated, time: .omitted)). Switching back signs you out of the server.")
+    }
+    .disabled(isWorking)
+    .fileExporter(
+      isPresented: $isExporting,
+      document: exportDocument,
+      contentType: .json,
+      defaultFilename: "howmuch-\(device.lowercased())-\(archive.archivedAt.isoDateString).json"
+    ) { outcome in
+      if case .failure(let error) = outcome {
+        errorMessage = error.localizedDescription
+      }
+      exportDocument = nil
+    }
+    .confirmationDialog(
+      "Use the records on this \(device) instead of the server?",
+      isPresented: $isConfirmingSwitch,
+      titleVisibility: .visible
+    ) {
+      Button("Switch back") {
+        switchBack()
+      }
+    }
+  }
+
+  private func export() {
+    isWorking = true
+    errorMessage = nil
+    Task {
+      do {
+        exportDocument = LocalArchiveDocument(data: try await model.exportLocalArchive())
+        isExporting = true
+      } catch {
+        errorMessage = error.localizedDescription
+      }
+      isWorking = false
+    }
+  }
+
+  private func switchBack() {
+    isWorking = true
+    errorMessage = nil
+    Task {
+      do {
+        try await model.switchToLocalArchive()
+      } catch {
+        errorMessage = error.localizedDescription
+      }
+      isWorking = false
+    }
+  }
+}
 
 struct SettingsView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
-  @Environment(\.openURL) private var openURL
   @State private var draft: APISettings
   @State private var password = ""
   @State private var authenticatedBaseURL: String
@@ -15,6 +116,9 @@ struct SettingsView: View {
   @State private var planState: PlanState = .idle
   @State private var planRequestID = UUID()
   private let wasInitiallyAuthenticated: Bool
+  /// Read once: an archive appears only when an install connects, which
+  /// happens outside this sheet.
+  @State private var localArchive: LocalArchive?
 
   let onSave: @MainActor (APISettings) async -> Void
   private let screenshots: ScreenshotOfferController
@@ -50,6 +154,7 @@ struct SettingsView: View {
     self.authenticatedBaseURL = settings.trimmedBaseURL
     self.authenticatedUsername = settings.username
     self.wasInitiallyAuthenticated = settings.isAuthenticated
+    self._localArchive = State(initialValue: settings.isLocal ? nil : LocalArchive.existing())
   }
 
   private var sessionMatchesDraft: Bool {
@@ -66,6 +171,85 @@ struct SettingsView: View {
   }
 
   var body: some View {
+    if draft.isLocal {
+      localBody
+    } else {
+      serverBody
+    }
+  }
+
+  private static let clipboardImagesFooter = "Offers only the image currently on your clipboard. iOS may ask for paste permission. Images are checked on this device; your Photos library is never read. Off by default."
+
+  private var clipboardImagesButton: some View {
+    Button {
+      let next = !screenshots.isEnabled
+      screenshots.applyEnabledPreference(next)
+      Task { await screenshots.refresh() }
+    } label: {
+      HStack {
+        Text("Offer clipboard images")
+          .foregroundStyle(Theme.textPrimary)
+        Spacer()
+        Text(screenshots.isEnabled ? "On" : "Off")
+          .foregroundStyle(screenshots.isEnabled ? Theme.accent : .secondary)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .contentShape(Rectangle())
+    }
+    .accessibilityIdentifier("offer-clipboard-images")
+    .accessibilityLabel("Offer clipboard images")
+    .accessibilityValue(screenshots.isEnabled ? "On" : "Off")
+  }
+
+  /// Local mode has no server session to manage: no sign-in, plan choice or
+  /// sign-out. "Connect to a server" signs in and moves the ledger there.
+  private var localBody: some View {
+    NavigationStack {
+      Form {
+        Section {
+          Label("Records are kept on this \(UIDevice.current.model)", systemImage: "iphone")
+            .foregroundStyle(Theme.textPrimary)
+          NavigationLink("Connect to a server") {
+            ServerConnectView(local: draft)
+          }
+        } header: {
+          Text("Storage")
+        }
+        Section("Intelligence") {
+          NavigationLink("AI provider") {
+            CaptureAISettingsView(settings: model.captureAI)
+          }
+        }
+        Section {
+          NavigationLink {
+            RewardsImportView()
+          } label: {
+            Text("Rewards Import & Export")
+          }
+        } header: {
+          Text("Tools")
+        } footer: {
+          Text("Import or export Rewards Tracker settings. Does not connect to live YNAB.")
+        }
+        Section {
+          clipboardImagesButton
+        } footer: {
+          Text(Self.clipboardImagesFooter)
+        }
+      }
+      .navigationTitle("Settings")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+          Button("Done") {
+            dismiss()
+          }
+        }
+      }
+    }
+  }
+
+  private var serverBody: some View {
     NavigationStack {
       Form {
         Section {
@@ -88,25 +272,8 @@ struct SettingsView: View {
         .disabled(isTesting)
 
         if setupState == .required {
-          Section {
-            Text("This HowMuch site does not have an account yet. Finish setup in the website, then return here and sign in.")
-
-            if let setupURL = draft.browserSetupURL {
-              Button {
-                openURL(setupURL)
-              } label: {
-                Label("Open HowMuch Setup in Browser", systemImage: "safari")
-              }
-            } else {
-              Text("Enter the HTTPS address above to open setup in your browser.")
-                .foregroundStyle(.secondary)
-            }
-
-            Button("Retry Setup Check") {
-              checkSetupStatus()
-            }
-          } header: {
-            Text("Setup required")
+          SetupRequiredSection(setupURL: draft.browserSetupURL) {
+            checkSetupStatus()
           }
         } else if case .failure(let message) = setupState {
           Section {
@@ -155,6 +322,10 @@ struct SettingsView: View {
           }
         }
 
+        if let localArchive {
+          LocalArchiveSection(archive: localArchive)
+        }
+
         Section {
           Button {
             signIn()
@@ -185,24 +356,7 @@ struct SettingsView: View {
             .disabled(isSaving || isTesting)
           }
 
-          Button {
-            let next = !screenshots.isEnabled
-            screenshots.applyEnabledPreference(next)
-            Task { await screenshots.refresh() }
-          } label: {
-            HStack {
-              Text("Offer clipboard images")
-                .foregroundStyle(Theme.textPrimary)
-              Spacer()
-              Text(screenshots.isEnabled ? "On" : "Off")
-                .foregroundStyle(screenshots.isEnabled ? Theme.accent : .secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-          }
-          .accessibilityIdentifier("offer-clipboard-images")
-          .accessibilityLabel("Offer clipboard images")
-          .accessibilityValue(screenshots.isEnabled ? "On" : "Off")
+          clipboardImagesButton
         } footer: {
           VStack(alignment: .leading, spacing: 8) {
             if case .failure(let message) = testResult {
@@ -211,7 +365,7 @@ struct SettingsView: View {
             } else if testResult == .success {
               Text("Signed in successfully.")
             }
-            Text("Offers only the image currently on your clipboard. iOS may ask for paste permission. Images are checked on this device; your Photos library is never read. Off by default.")
+            Text(Self.clipboardImagesFooter)
           }
         }
       }
@@ -239,10 +393,16 @@ struct SettingsView: View {
       }
       .toolbar {
         ToolbarItem(placement: .topBarLeading) {
-          Button("Cancel") {
-            dismiss()
+          if !wasInitiallyAuthenticated && model.canReturnToWelcome {
+            Button("Back") {
+              model.returnToWelcome()
+            }
+          } else {
+            Button("Cancel") {
+              dismiss()
+            }
+            .disabled(!wasInitiallyAuthenticated || !draft.isAuthenticated)
           }
-          .disabled(!wasInitiallyAuthenticated || !draft.isAuthenticated)
         }
 
         ToolbarItem(placement: .topBarTrailing) {
@@ -291,29 +451,7 @@ struct SettingsView: View {
       }
     case .loaded(let plans):
       Section {
-        ForEach(plans) { plan in
-          Button {
-            draft.planID = plan.id
-          } label: {
-            HStack {
-              VStack(alignment: .leading) {
-                Text(plan.name)
-                  .foregroundStyle(Theme.textPrimary)
-                if hasDuplicateName(plan, in: plans) {
-                  Text(plan.id)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-              }
-              Spacer()
-              if draft.planID == plan.id {
-                Image(systemName: "checkmark")
-              }
-            }
-          }
-          .accessibilityLabel(hasDuplicateName(plan, in: plans) ? "\(plan.name), plan ID \(plan.id)" : plan.name)
-          .accessibilityAddTraits(draft.planID == plan.id ? [.isSelected] : [])
-        }
+        PlanChoiceRows(plans: plans, selection: $draft.planID)
       } header: {
         Text("Choose a plan")
       } footer: {
@@ -338,10 +476,6 @@ struct SettingsView: View {
     }
   }
 
-  private func hasDuplicateName(_ plan: PlanSummary, in plans: [PlanSummary]) -> Bool {
-    plans.contains { $0.id != plan.id && $0.name == plan.name }
-  }
-
   private func signIn() {
     isTesting = true
     testResult = nil
@@ -349,22 +483,16 @@ struct SettingsView: View {
     planRequestID = UUID()
     Task {
       do {
-        var loginSettings = draft
-        loginSettings.sessionToken = ""
-        loginSettings.authenticatedUserID = ""
-        let client = APIClient(settings: loginSettings)
-        let status = try await client.fetchAuthStatus()
-        guard !status.setupRequired else {
+        guard case .signedIn(let signedIn) = try await ServerSignIn.signIn(draft, password: password) else {
           setupState = .required
           testResult = .failure("Finish setup in the website before signing in.")
           isTesting = false
           return
         }
         setupState = .ready
-        let session = try await client.login(username: draft.username, password: password)
-        draft.sessionToken = session.token
-        draft.authenticatedUserID = session.user.id
-        draft.username = session.user.username ?? draft.username
+        draft.sessionToken = signedIn.sessionToken
+        draft.authenticatedUserID = signedIn.authenticatedUserID
+        draft.username = signedIn.username
         authenticatedBaseURL = draft.trimmedBaseURL
         authenticatedUsername = draft.username
         password = ""

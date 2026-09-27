@@ -174,14 +174,26 @@ private struct RootView: View {
       }
     }
     .task(id: model.launchRefreshTaskID) {
+      // Local mode: finish any starter categories and enter due schedules
+      // first, so the launch refresh shows them.
+      await model.completeStarterCategories()
+      await model.runLocalScheduledTransactions(refreshAfter: false)
       await model.refreshAll()
     }
+    .overlay {
+      if model.isShowingWelcome {
+        WelcomeView()
+          .accessibilityAddTraits(.isModal)
+          .transition(.opacity)
+      }
+    }
+    .animation(.default, value: model.isShowingWelcome)
     .sheet(isPresented: $model.isShowingSettings) {
       SettingsView(settings: model.settings) { nextSettings in
         await model.applySettings(nextSettings)
       }
       .environment(model)
-      .interactiveDismissDisabled(!model.settings.isAuthenticated)
+      .interactiveDismissDisabled(!model.settings.isAuthenticated || model.isConnectingToServer)
       .blocksCapturePresentation()
     }
     .sheet(item: $capture.presented) { request in
@@ -204,6 +216,8 @@ private struct RootView: View {
         enqueueInboxIfNeeded(force: false)
         consumePendingCapture()
         ScreenshotOfferController.shared.startIfNeeded()
+        Task { await model.runLocalScheduledTransactions() }
+        model.sceneDidBecomeActive()
       } else if phase == .background {
         CaptureWorkspace.shared.persistCurrentIfNeeded()
       }
@@ -396,7 +410,10 @@ struct CaptureIntakeHost: View {
     if Task.isCancelled {
       return
     }
-    if case .failed(let message) = model.referencePhase {
+    if let message = CaptureAdmissionGate.blockingError(
+      referencePhase: model.referencePhase,
+      hasAccounts: !model.accounts.isEmpty
+    ) {
       admissionError = message
       return
     }

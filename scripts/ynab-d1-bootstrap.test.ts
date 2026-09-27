@@ -39,9 +39,6 @@ function fixture(dir: string): string {
       ('p','scheduled_transaction','scheduled-1','{"id":"scheduled-1","amount":-10,"date_next":"2026-02-01"}',0,50),
       ('p','transaction','split','{"id":"split"}',0,50),
       ('p','transaction','split-mirror','{"id":"split-mirror"}',0,50),
-      -- 'ta' and 'gone' carry a date, amount and category so the generated
-      -- bootstrap has something to materialise into ynab_source_month_activity.
-      -- 'gone' is deleted, so only 'ta' may contribute.
       ('p','transaction','ta','{"id":"ta","date":"2026-01-02","amount":-20,"category_id":"c"}',0,50),
       ('p','transaction','tb','{"id":"tb"}',0,50),
       ('p','transaction','gone','{"id":"gone","date":"2026-01-03","amount":-999,"category_id":"c","deleted":true}',1,50),
@@ -147,13 +144,6 @@ describe("offline YNAB D1 bootstrap", () => {
         { object_type: "plan", object_id: "p" },
         { object_type: "scheduled_transaction", object_id: "scheduled-1" },
       ]);
-      // A bootstrapped D1 applies the migrations to an empty database, so
-      // 0017's backfill sees nothing and the data statements must carry the
-      // month activity baseline themselves. Without that every month view on a
-      // bootstrapped database takes the unmaterialised fallback — the whole-plan
-      // raw scan #174 removes. The deleted 'gone' row must not appear.
-      expect(target.query("SELECT plan_id,month,category_id,activity FROM ynab_source_month_activity ORDER BY month,category_id").all())
-        .toEqual([{ plan_id: "p", month: "2026-01-01", category_id: "c", activity: -20 }]);
       expect(target.query("SELECT count(*) count FROM source_events").get()).toEqual({ count: 6 });
       expect(target.query("SELECT count(*) count FROM import_rows").get()).toEqual({ count: 6 });
       target.close();

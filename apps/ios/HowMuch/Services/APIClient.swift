@@ -25,6 +25,9 @@ enum APIClientError: LocalizedError {
   case invalidBaseURL
   case invalidResponse
   case server(String)
+  /// 409 `conflict`: the entity already exists or changed underneath the
+  /// request. Its message is the server's, exactly as `.server` would show it.
+  case conflict(String)
   case reconciliationMismatch(ReconciliationMismatchDetail)
   case accountPreferencesConflict
   case endpointUnsupported
@@ -32,6 +35,15 @@ enum APIClientError: LocalizedError {
   case authenticationExpired
   case decoding(String)
   case validation(String)
+  /// 409 `plan_not_empty` from `import_snapshot`: the plan already holds a
+  /// ledger, so a snapshot cannot be imported into it.
+  case planNotEmpty(String)
+  /// 409 `ynab_mirror_plan` from `import_snapshot`: the plan mirrors YNAB.
+  case ynabMirrorPlan(String)
+  /// 403 from `import_snapshot`: only the plan's owner may import.
+  case ownerRequired(String)
+  /// 413 `payload_too_large`.
+  case payloadTooLarge
 
   var errorDescription: String? {
     switch self {
@@ -39,7 +51,7 @@ enum APIClientError: LocalizedError {
       return "Enter a valid API base URL."
     case .invalidResponse:
       return "The API returned an invalid response."
-    case .server(let message):
+    case .server(let message), .conflict(let message):
       return message
     case .reconciliationMismatch(let detail):
       return detail.message
@@ -53,8 +65,10 @@ enum APIClientError: LocalizedError {
       return "Your session has expired. Sign in again."
     case .decoding(let message):
       return "Could not decode API data: \(message)"
-    case .validation(let message):
+    case .validation(let message), .planNotEmpty(let message), .ynabMirrorPlan(let message), .ownerRequired(let message):
       return message
+    case .payloadTooLarge:
+      return "This is too much to send in one go."
     }
   }
 }
@@ -62,6 +76,8 @@ enum APIClientError: LocalizedError {
 struct APIClient {
   let settings: APISettings
   private static let transactionPageSize = 100
+  /// The largest request body `import_snapshot` accepts.
+  static let snapshotByteLimit = 8 * 1024 * 1024
 
   func fetchAuthStatus() async throws -> AuthStatusPayload {
     let response: APIEnvelope<AuthStatusPayload> = try await request(path: "/api/auth/status")
@@ -154,6 +170,12 @@ struct APIClient {
   }
 
   func fetchAccountPreferences(planID: String) async throws -> SyncedAccountPreferences? {
+    // Account preferences sync between a user's devices. The on-device engine
+    // has one device and no user principal (it answers 403), and the app
+    // already keeps the same preferences locally.
+    guard !settings.isLocal else {
+      return nil
+    }
     do {
       let response: APIEnvelope<AccountPreferencesPayload> = try await request(
         path: "/v1/plans/\(planID)/account_preferences"
@@ -173,6 +195,9 @@ struct APIClient {
     preferences: AccountPresentationPreferences,
     expectedRevision: Int
   ) async throws -> SyncedAccountPreferences {
+    guard !settings.isLocal else {
+      throw APIClientError.endpointUnsupported
+    }
     let response: APIEnvelope<AccountPreferencesPayload> = try await request(
       path: "/v1/plans/\(planID)/account_preferences",
       method: "PUT",
@@ -195,53 +220,29 @@ struct APIClient {
     return response.data.categoryGroups.filter { !$0.deleted }
   }
 
+  /// Creates a category group on a HowMuch-native plan. The id is chosen here,
+  /// so a retried create cannot make a second group.
+  func createCategoryGroup(planID: String, id: String, name: String) async throws {
+    let _: APIEnvelope<IgnoredPayload> = try await request(
+      path: "/v1/plans/\(planID)/category_groups",
+      method: "POST",
+      headers: ["Idempotency-Key": id],
+      body: CategoryGroupCreateRequest(categoryGroup: .init(id: id, name: name))
+    )
+  }
+
+  func createCategory(planID: String, id: String, groupID: String, name: String) async throws {
+    let _: APIEnvelope<IgnoredPayload> = try await request(
+      path: "/v1/plans/\(planID)/categories",
+      method: "POST",
+      headers: ["Idempotency-Key": id],
+      body: CategoryCreateRequest(category: .init(id: id, categoryGroupId: groupID, name: name))
+    )
+  }
+
   func fetchPayees(planID: String) async throws -> [Payee] {
     let response: APIEnvelope<PayeesPayload> = try await request(path: "/v1/plans/\(planID)/payees")
     return response.data.payees.filter { $0.deleted != true }
-  }
-
-  func fetchPlanMonth(planID: String, month: String) async throws -> PlanMonth {
-    let response: APIEnvelope<PlanMonthPayload> = try await request(
-      path: "/v1/plans/\(planID)/months/\(month)"
-    )
-    return response.data.month
-  }
-
-  func setPlanMonthCategoryAssignment(
-    planID: String,
-    month: String,
-    categoryID: String,
-    budgeted: Int,
-  ) async throws -> PlanMonth {
-    let response: APIEnvelope<PlanMonthPayload> = try await request(
-      path: "/v1/plans/\(planID)/months/\(month)/categories/\(categoryID)",
-      method: "PATCH",
-      body: PlanAssignmentRequest(budgeted: budgeted)
-    )
-    return response.data.month
-  }
-
-  func setPlanMonthCategoryTarget(
-    planID: String,
-    month: String,
-    categoryID: String,
-    target: PlanTargetPayload?
-  ) async throws -> PlanMonth {
-    let response: APIEnvelope<PlanMonthPayload> = try await request(
-      path: "/v1/plans/\(planID)/months/\(month)/categories/\(categoryID)",
-      method: "PATCH",
-      body: PlanTargetRequest(target: target)
-    )
-    return response.data.month
-  }
-
-  func restorePlanMonthCategoryTarget(planID: String, month: String, categoryID: String) async throws -> PlanMonth {
-    let response: APIEnvelope<PlanMonthPayload> = try await request(
-      path: "/v1/plans/\(planID)/months/\(month)/categories/\(categoryID)",
-      method: "PATCH",
-      body: PlanTargetRestoreRequest()
-    )
-    return response.data.month
   }
 
   func fetchTransactions(
@@ -251,10 +252,11 @@ struct APIClient {
     sinceDate: String? = nil,
     untilDate: String? = nil,
     type: String? = nil,
-    q: String? = nil
+    q: String? = nil,
+    limit: Int = transactionPageSize
   ) async throws -> TransactionPage {
     var queryItems = [
-      URLQueryItem(name: "limit", value: String(Self.transactionPageSize)),
+      URLQueryItem(name: "limit", value: String(limit)),
       URLQueryItem(name: "offset", value: String(offset)),
     ]
     if let sinceDate {
@@ -628,6 +630,32 @@ struct APIClient {
     return response.data.transaction
   }
 
+  /// The plan's whole ledger in the `howmuch-plan-snapshot` format, as JSON
+  /// bytes. The snapshot object is re-serialised with `JSONSerialization`
+  /// (sorted keys, so the same ledger always gives the same bytes), never
+  /// through models: this client's snake-case coding would rename its keys.
+  func exportSnapshot(planID: String) async throws -> Data {
+    let data = try await executeRawRequest(path: "/v1/plans/\(planID)/export_snapshot", bodyData: nil)
+    return try SnapshotImport.snapshot(fromExportResponse: data)
+  }
+
+  /// Imports snapshot bytes (from `exportSnapshot`) into an empty plan.
+  /// Returns whether the server replayed an earlier import with this key.
+  @discardableResult
+  func importSnapshot(planID: String, idempotencyKey: String, snapshot: Data) async throws -> Bool {
+    let data = try await executeRawRequest(
+      path: "/v1/plans/\(planID)/import_snapshot",
+      method: "POST",
+      headers: ["Idempotency-Key": idempotencyKey],
+      bodyData: SnapshotImport.requestBody(snapshot: snapshot)
+    )
+    do {
+      return try decoder.decode(APIEnvelope<SnapshotImportPayload>.self, from: data).data.replayed
+    } catch {
+      throw APIClientError.decoding(error.localizedDescription)
+    }
+  }
+
   private func report<Payload: Decodable>(
     path: String,
     planID: String,
@@ -691,6 +719,31 @@ struct APIClient {
     headers: [String: String] = [:],
     bodyData: Data?
   ) async throws -> Payload {
+    let data = try await executeRawRequest(
+      path: path,
+      appendedPathSegments: appendedPathSegments,
+      queryItems: queryItems,
+      method: method,
+      headers: headers,
+      bodyData: bodyData
+    )
+    do {
+      return try decoder.decode(Payload.self, from: data)
+    } catch {
+      throw APIClientError.decoding(error.localizedDescription)
+    }
+  }
+
+  /// Sends one request and maps a failure status to `APIClientError`.
+  /// Returns a successful response's body undecoded.
+  private func executeRawRequest(
+    path: String,
+    appendedPathSegments: [String] = [],
+    queryItems: [URLQueryItem] = [],
+    method: String = "GET",
+    headers: [String: String] = [:],
+    bodyData: Data?
+  ) async throws -> Data {
     let url = try makeURL(path: path, appendedPathSegments: appendedPathSegments, queryItems: queryItems)
     var request = URLRequest(url: url)
     request.httpMethod = method
@@ -710,7 +763,7 @@ struct APIClient {
       request.httpBody = bodyData
     }
 
-    let (data, response) = try await URLSession.shared.data(for: request)
+    let (data, response) = try await send(request)
     guard let httpResponse = response as? HTTPURLResponse else {
       throw APIClientError.invalidResponse
     }
@@ -728,7 +781,7 @@ struct APIClient {
           (httpResponse.statusCode == 401 ||
            (httpResponse.statusCode == 403 && serverError.error.name == "not_authorized"))
         if authFailure {
-          NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: trimmedToken)
+          postAuthenticationExpiry(token: trimmedToken)
           throw APIClientError.authenticationExpired
         }
         if serverError.error.name == "reconciliation_mismatch",
@@ -749,20 +802,79 @@ struct APIClient {
         if serverError.error.name == "account_preferences_conflict" {
           throw APIClientError.accountPreferencesConflict
         }
+        if httpResponse.statusCode == 409, serverError.error.name == "conflict" {
+          throw APIClientError.conflict(serverError.error.detail)
+        }
+        if path.hasSuffix("/import_snapshot") {
+          switch (httpResponse.statusCode, serverError.error.name) {
+          case (409, "plan_not_empty"):
+            throw APIClientError.planNotEmpty(serverError.error.detail)
+          case (409, "ynab_mirror_plan"):
+            throw APIClientError.ynabMirrorPlan(serverError.error.detail)
+          case (403, _):
+            throw APIClientError.ownerRequired(serverError.error.detail)
+          default:
+            break
+          }
+        }
+        if httpResponse.statusCode == 413 {
+          throw APIClientError.payloadTooLarge
+        }
         throw APIClientError.server(serverError.error.detail)
       }
       if requestHasSession && httpResponse.statusCode == 401 {
-        NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: trimmedToken)
+        postAuthenticationExpiry(token: trimmedToken)
         throw APIClientError.authenticationExpired
+      }
+      if httpResponse.statusCode == 413 {
+        throw APIClientError.payloadTooLarge
       }
       throw APIClientError.httpStatus(httpResponse.statusCode)
     }
+    return data
+  }
 
-    do {
-      return try decoder.decode(Payload.self, from: data)
-    } catch {
-      throw APIClientError.decoding(error.localizedDescription)
+  /// Signs every surface out of a server session the server stopped
+  /// accepting. The on-device engine has no session to lose: its token is
+  /// repaired on load, so local mode never signs out here.
+  private func postAuthenticationExpiry(token: String) {
+    guard !settings.isLocal else {
+      return
     }
+    NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: token)
+  }
+
+  /// The one transport seam. Local mode hands the same request to the
+  /// embedded engine; the response goes through the same decoding and error
+  /// mapping either way. Engine failures are not `URLError`s, so they are
+  /// never mistaken for offline writes and queued for replay.
+  private func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+    guard settings.isLocal else {
+      return try await URLSession.shared.data(for: request)
+    }
+    guard
+      let url = request.url,
+      let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+    else {
+      throw APIClientError.invalidBaseURL
+    }
+    let result = try await LocalEngine.shared.handle(
+      config: settings.localEngineConfig,
+      method: request.httpMethod ?? "GET",
+      path: components.percentEncodedPath,
+      query: components.percentEncodedQuery,
+      headers: request.allHTTPHeaderFields ?? [:],
+      body: request.httpBody
+    )
+    guard let response = HTTPURLResponse(
+      url: url,
+      statusCode: result.status,
+      httpVersion: "HTTP/1.1",
+      headerFields: result.headers
+    ) else {
+      throw APIClientError.invalidResponse
+    }
+    return (result.body, response)
   }
 
   private func makeURL(path: String, appendedPathSegments: [String], queryItems: [URLQueryItem]) throws -> URL {
@@ -816,6 +928,180 @@ struct APIClient {
   }
 }
 
+// MARK: - Outbox transport
+
+/// One answer to an outbox write. Unlike the rest of the client, a refusal is
+/// returned rather than thrown, with its status, so the outbox can tell "the
+/// server has it", "try again later" and "the server said no" apart. Only a
+/// transport failure throws.
+struct OutboxReply {
+  let status: Int
+  let data: Data
+  /// The server's `detail`, or a generic line when the body carried none.
+  let message: String
+
+  var isSuccess: Bool {
+    (200 ..< 300).contains(status)
+  }
+}
+
+extension APIClient {
+  func outboxCreate(planID: String, request body: TransactionWriteRequest) async throws -> OutboxReply {
+    try await outboxSend(
+      path: "/v1/plans/\(planID)/transactions",
+      method: "POST",
+      body: try encoder.encode(TransactionWriteEnvelope(transaction: body))
+    )
+  }
+
+  func outboxUpdate(planID: String, transactionID: String, request body: TransactionWriteRequest) async throws -> OutboxReply {
+    try await outboxSend(
+      path: "/v1/plans/\(planID)/transactions/\(transactionID)",
+      method: "PUT",
+      body: try encoder.encode(TransactionWriteEnvelope(transaction: body))
+    )
+  }
+
+  func outboxCleared(
+    planID: String,
+    transactionID: String,
+    expectedCleared: ClearedState,
+    cleared: ClearedState
+  ) async throws -> OutboxReply {
+    try await outboxSend(
+      path: "/v1/plans/\(planID)/transactions/\(transactionID)/cleared",
+      method: "PATCH",
+      body: try encoder.encode(ClearedUpdateRequest(expectedCleared: expectedCleared, cleared: cleared))
+    )
+  }
+
+  func outboxApprove(planID: String, transactionIDs: [String]) async throws -> OutboxReply {
+    try await outboxSend(
+      path: "/v1/plans/\(planID)/transactions",
+      method: "PATCH",
+      body: try encoder.encode(
+        TransactionCollectionApprovalEnvelope(transactions: transactionIDs.map { .init(id: $0, approved: true) })
+      )
+    )
+  }
+
+  func outboxDelete(planID: String, transactionID: String, expectedApproved: Bool?) async throws -> OutboxReply {
+    var queryItems: [URLQueryItem] = []
+    if let expectedApproved {
+      queryItems.append(URLQueryItem(name: "expected_approved", value: expectedApproved ? "true" : "false"))
+    }
+    return try await outboxSend(
+      path: "/v1/plans/\(planID)/transactions/\(transactionID)",
+      method: "DELETE",
+      queryItems: queryItems
+    )
+  }
+
+  func outboxFetch(planID: String, transactionID: String) async throws -> OutboxReply {
+    try await outboxSend(path: "/v1/plans/\(planID)/transactions/\(transactionID)", method: "GET")
+  }
+
+  enum ImportIDLookup {
+    /// Every row with the import id, deleted ones included, from one
+    /// consistent read of the plan. Empty means it was never created.
+    case rows([Transaction])
+    /// No consistent answer: the plan kept changing, or the server refused
+    /// or sent something unreadable.
+    case unknown
+  }
+
+  /// Finds the rows carrying `importID`, deleted ones included. A delta
+  /// read from knowledge 0 is the only list the server answers with
+  /// tombstones, so this walks the whole plan; it is kept for creates from
+  /// the old queue, which carry no id of ours to fetch by. The walk must see
+  /// one knowledge value throughout, or a row could move between pages.
+  func outboxRows(importID: String, planID: String) async throws -> ImportIDLookup {
+    for _ in 0 ..< 3 {
+      var matches: [Transaction] = []
+      var knowledge: Int?
+      var offset = 0
+      var changed = false
+      while true {
+        let reply = try await outboxSend(
+          path: "/v1/plans/\(planID)/transactions",
+          method: "GET",
+          queryItems: [
+            URLQueryItem(name: "last_knowledge_of_server", value: "0"),
+            URLQueryItem(name: "limit", value: "250"),
+            URLQueryItem(name: "offset", value: String(offset)),
+          ]
+        )
+        guard reply.isSuccess,
+              let page = (try? decoder.decode(APIEnvelope<TransactionsPayload>.self, from: reply.data))?.data,
+              let pageKnowledge = page.serverKnowledge else {
+          return .unknown
+        }
+        if let knowledge, knowledge != pageKnowledge {
+          changed = true
+          break
+        }
+        knowledge = pageKnowledge
+        matches += page.transactions.filter { $0.importID == importID }
+        guard page.hasMore == true, !page.transactions.isEmpty else {
+          break
+        }
+        offset = page.nextOffset ?? offset + page.transactions.count
+      }
+      if !changed {
+        return .rows(matches)
+      }
+    }
+    return .unknown
+  }
+
+  /// The row in a single-transaction reply, or nil when the body is not one.
+  func outboxTransaction(in reply: OutboxReply) -> Transaction? {
+    (try? decoder.decode(APIEnvelope<TransactionPayload>.self, from: reply.data))?.data.transaction
+  }
+
+  /// The rows in a collection reply.
+  func outboxTransactions(in reply: OutboxReply) -> [Transaction]? {
+    (try? decoder.decode(APIEnvelope<TransactionCollectionPayload>.self, from: reply.data))?.data.transactions
+  }
+
+  private func outboxSend(
+    path: String,
+    method: String,
+    queryItems: [URLQueryItem] = [],
+    body: Data? = nil
+  ) async throws -> OutboxReply {
+    let url = try makeURL(path: path, appendedPathSegments: [], queryItems: queryItems)
+    var request = URLRequest(url: url)
+    request.httpMethod = method
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    let token = settings.sessionToken.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !token.isEmpty {
+      request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
+    if let body {
+      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      request.httpBody = body
+    }
+    let (data, response) = try await send(request)
+    guard let http = response as? HTTPURLResponse else {
+      throw APIClientError.invalidResponse
+    }
+    let serverError = (try? decoder.decode(ServerErrorEnvelope.self, from: data))?.error
+    if !token.isEmpty,
+       http.statusCode == 401 || (http.statusCode == 403 && serverError?.name == "not_authorized") {
+      // Signed out everywhere, exactly as any other request would be. The
+      // outbox keeps the command for when this connection signs in again.
+      postAuthenticationExpiry(token: token)
+      return OutboxReply(status: 401, data: data, message: APIClientError.authenticationExpired.localizedDescription)
+    }
+    return OutboxReply(
+      status: http.statusCode,
+      data: data,
+      message: serverError?.detail ?? APIClientError.httpStatus(http.statusCode).localizedDescription
+    )
+  }
+}
+
 private struct ClearedUpdateRequest: Encodable {
   let expectedCleared: ClearedState
   let cleared: ClearedState
@@ -828,8 +1114,34 @@ private struct LoginRequest: Encodable {
 
 private struct EmptyRequest: Encodable {}
 
+/// A response whose payload the caller does not read.
+private struct IgnoredPayload: Decodable {}
+
+private struct CategoryGroupCreateRequest: Encodable {
+  struct Group: Encodable {
+    let id: String
+    let name: String
+  }
+
+  let categoryGroup: Group
+}
+
+private struct CategoryCreateRequest: Encodable {
+  struct NewCategory: Encodable {
+    let id: String
+    let categoryGroupId: String
+    let name: String
+  }
+
+  let category: NewCategory
+}
+
 private struct LogoutPayload: Decodable {
   let ok: Bool
+}
+
+private struct SnapshotImportPayload: Decodable {
+  let replayed: Bool
 }
 
 extension Error {

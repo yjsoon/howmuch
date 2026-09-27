@@ -155,16 +155,6 @@ export type UnapprovedCount = {
   server_knowledge: number;
 };
 
-/**
- * A HowMuch-owned monthly target. `null` removes the imported target from the
- * response projection; omitting a row restores the exact imported target.
- */
-export type MonthCategoryTargetInput = {
-  goal_type: "TB" | "TBD" | "MF" | "NEED" | "DEBT" | null;
-  goal_target?: number | null;
-  goal_target_month?: string | null;
-};
-
 export type ScheduledSubtransactionInput = {
   id?: string;
   amount: number;

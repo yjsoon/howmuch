@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { mkdirSync } from "node:fs";
-import { REMATERIALISE_ALL_PLANS } from "../../apps/api/src/ynab-month-activity";
 
 const COPY_TABLES = ["plans", "category_groups", "categories", "payees", "accounts", "import_sessions", "transactions", "subtransactions", "source_events", "import_rows", "ynab_raw_objects"] as const;
 const EMPTY_TABLES = ["plans","category_groups","categories","payees","accounts","transactions","subtransactions","source_events","import_sessions","import_rows","ynab_raw_objects","plan_month_assignments","plan_month_category_targets","scheduled_transaction_edits","scheduled_subtransaction_edits","scheduled_transaction_snapshot_assertions","account_reconciliation_assertions","ynab_sync_state","sync_runs","sync_attempts","sync_transition_receipts","sync_renewal_receipts","audit_events","write_commands","write_assertions","users","auth_identities","sessions","personal_api_tokens","plan_memberships","password_credentials","auth_setup","login_rate_limits"];
@@ -155,15 +154,6 @@ function generateBootstrap(inputPath: string, outputPath: string, mode: "single"
       sql: `UPDATE accounts SET balance_milli=opening_balance_milli+COALESCE((SELECT sum(amount_milli) FROM transactions WHERE account_id=accounts.id AND deleted=0),0), cleared_balance_milli=opening_balance_milli+COALESCE((SELECT sum(amount_milli) FROM transactions WHERE account_id=accounts.id AND deleted=0 AND cleared IN ('cleared','reconciled')),0), uncleared_balance_milli=COALESCE((SELECT sum(amount_milli) FROM transactions WHERE account_id=accounts.id AND deleted=0 AND cleared='uncleared'),0);`,
       counts: {},
     });
-    // Migration 0017 backfills the month activity baseline, but a bootstrapped
-    // D1 applies the migrations to an empty database and only then loads the
-    // rows, so its backfill sees nothing. Recomputing here, after the raw
-    // objects are in, is what stops every month view on a bootstrapped
-    // database from taking the unmaterialised fallback — the very scan #174
-    // exists to remove. It is derived from the copied raw objects rather than
-    // copied from the source, so a source SQLite migrated before 020 (which
-    // has no such table to read) bootstraps correctly too.
-    dataStatements.push({ sql: `${REMATERIALISE_ALL_PLANS};`, counts: {} });
     const guard = checkpointGuard(emptyCounts());
     const statements = [...guard, ...dataStatements.map((statement) => statement.sql)];
     const sql = statements.join("\n") + "\n";
@@ -247,22 +237,6 @@ function validateStatementGroups(source: Database, statementGroups: string[][], 
     checkZero(db, "SELECT count(*) n FROM transactions t LEFT JOIN accounts a ON a.id=t.account_id LEFT JOIN payees p ON p.id=t.payee_id LEFT JOIN categories c ON c.id=t.category_id WHERE a.plan_id<>t.plan_id OR (p.id IS NOT NULL AND p.plan_id<>t.plan_id) OR (c.id IS NOT NULL AND c.plan_id<>t.plan_id)", "transaction ownership");
     checkZero(db, "SELECT count(*) n FROM categories c JOIN category_groups g ON g.id=c.category_group_id WHERE c.plan_id<>g.plan_id", "category ownership");
     checkZero(db, "SELECT count(*) n FROM ynab_raw_objects r WHERE r.plan_id<>? OR r.object_type='' OR r.object_id='' OR json_valid(r.payload_json)=0", "YNAB raw-object ownership", [planId]);
-    // The generated database must carry the month activity baseline, not only
-    // the raw mirror it is derived from. Recomputing it into a scratch table
-    // and diffing proves the bootstrap's copy is present and correct; the
-    // failure this guards against — migration 0017 backfilling an empty
-    // database and the data statements never filling it — trips the count
-    // check first.
-    db.exec(`CREATE TEMP TABLE expected_month_activity AS ${REMATERIALISE_ALL_PLANS.slice(REMATERIALISE_ALL_PLANS.indexOf("WITH"))}`);
-    if (scalar(db, "SELECT count(*) n FROM ynab_source_month_activity") !== scalar(db, "SELECT count(*) n FROM expected_month_activity")) {
-      throw new Error("Generated month activity baseline is missing rows");
-    }
-    checkZero(db, `SELECT count(*) n FROM expected_month_activity e
-      LEFT JOIN ynab_source_month_activity a
-        ON a.plan_id=e.plan_id AND a.month=e.month AND a.category_id=e.category_id
-      WHERE a.activity IS NULL OR a.activity<>e.activity`, "month activity baseline");
-    checkZero(db, "SELECT count(*) n FROM ynab_source_month_activity WHERE plan_id<>?", "month activity ownership", [planId]);
-    db.exec("DROP TABLE expected_month_activity");
     checkZero(db, "SELECT count(*) n FROM accounts a WHERE a.deleted=0 AND (a.transfer_payee_id IS NULL OR NOT EXISTS(SELECT 1 FROM payees p WHERE p.id=a.transfer_payee_id AND p.transfer_account_id=a.id AND p.plan_id=a.plan_id AND p.deleted=0))", "account transfer payees");
     checkZero(db, "SELECT count(*) n FROM subtransactions s JOIN transactions t ON t.id=s.transaction_id LEFT JOIN payees p ON p.id=s.payee_id LEFT JOIN categories c ON c.id=s.category_id LEFT JOIN accounts a ON a.id=s.transfer_account_id WHERE (p.id IS NOT NULL AND p.plan_id<>t.plan_id) OR (c.id IS NOT NULL AND c.plan_id<>t.plan_id) OR (a.id IS NOT NULL AND a.plan_id<>t.plan_id)", "subtransaction ownership");
     checkZero(db, "SELECT count(*) n FROM transactions WHERE ledger_sequence IS NULL OR ledger_sequence<1", "transaction sequence");

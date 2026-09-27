@@ -16,6 +16,13 @@
 		A10000000000000000000021 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* AppModel.swift */; };
 		A10000000000000000000022 /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* APIModels.swift */; };
 		A100000000000000000000A1 /* RefreshPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000A0 /* RefreshPlan.swift */; };
+		B90000000000000000000002 /* OutboxCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000001 /* OutboxCommand.swift */; };
+		B90000000000000000000004 /* OutboxPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000003 /* OutboxPlanner.swift */; };
+		B90000000000000000000006 /* OutboxPlannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000005 /* OutboxPlannerTests.swift */; };
+		B90000000000000000000008 /* OutboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000007 /* OutboxStore.swift */; };
+		B9000000000000000000000A /* OutboxOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000009 /* OutboxOverlay.swift */; };
+		B9000000000000000000000C /* OutboxStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9000000000000000000000B /* OutboxStoreTests.swift */; };
+		B9000000000000000000000E /* OutboxSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9000000000000000000000D /* OutboxSyncTests.swift */; };
 		A100000000000000000000B1 /* ReferenceSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000B0 /* ReferenceSnapshot.swift */; };
 		A10000000000000000000025 /* AccountGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* AccountGroups.swift */; };
 		A10000000000000000000026 /* AccountIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* AccountIcon.swift */; };
@@ -36,7 +43,6 @@
 		A10000000000000000000064 /* Pickers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000074 /* Pickers.swift */; };
 		A10000000000000000000065 /* ReflectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000075 /* ReflectView.swift */; };
 		A10000000000000000000066 /* ReflectDetails.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000076 /* ReflectDetails.swift */; };
-		A10000000000000000000067 /* CategoriesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000077 /* CategoriesView.swift */; };
 		A50000000000000000000011 /* RewardsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000010 /* RewardsView.swift */; };
 		A50000000000000000000013 /* RewardsImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000012 /* RewardsImportView.swift */; };
 		A50000000000000000000015 /* RewardCardEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000014 /* RewardCardEditorView.swift */; };
@@ -106,6 +112,19 @@
 		A30000000000000000000003 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000002 /* ShareViewController.swift */; };
 		A30000000000000000000006 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
 		A3000000000000000000000B /* HowMuchShare.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* HowMuchShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B10000000000000000000011 /* LocalEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000010 /* LocalEngine.swift */; };
+		B100000000000000000000F1 /* PlanSettingsSeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000F0 /* PlanSettingsSeed.swift */; };
+		B100000000000000000000F3 /* PlanSettingsSeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000F2 /* PlanSettingsSeedTests.swift */; };
+		B10000000000000000000013 /* LocalDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* LocalDatabase.swift */; };
+		B10000000000000000000015 /* howmuch-engine.js in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* howmuch-engine.js */; };
+		B10000000000000000000017 /* migrations in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* migrations */; };
+		B10000000000000000000019 /* StarterCategories.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000018 /* StarterCategories.swift */; };
+		B1000000000000000000001B /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001A /* WelcomeView.swift */; };
+		B1000000000000000000001D /* LocalEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001C /* LocalEngineTests.swift */; };
+		B1000000000000000000001F /* LocalModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001E /* LocalModeTests.swift */; };
+		B10000000000000000000021 /* ServerConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000020 /* ServerConnection.swift */; };
+		B10000000000000000000023 /* ServerConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000022 /* ServerConnectView.swift */; };
+		B10000000000000000000025 /* ServerConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000024 /* ServerConnectionTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -178,6 +197,13 @@
 		A10000000000000000000010 /* HowMuchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HowMuchApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000011 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		A10000000000000000000012 /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
+		B90000000000000000000001 /* OutboxCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutboxCommand.swift; sourceTree = "<group>"; };
+		B90000000000000000000003 /* OutboxPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutboxPlanner.swift; sourceTree = "<group>"; };
+		B90000000000000000000005 /* OutboxPlannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutboxPlannerTests.swift; sourceTree = "<group>"; };
+		B90000000000000000000007 /* OutboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutboxStore.swift; sourceTree = "<group>"; };
+		B90000000000000000000009 /* OutboxOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutboxOverlay.swift; sourceTree = "<group>"; };
+		B9000000000000000000000B /* OutboxStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutboxStoreTests.swift; sourceTree = "<group>"; };
+		B9000000000000000000000D /* OutboxSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutboxSyncTests.swift; sourceTree = "<group>"; };
 		A100000000000000000000A0 /* RefreshPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefreshPlan.swift; sourceTree = "<group>"; };
 		A100000000000000000000B0 /* ReferenceSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReferenceSnapshot.swift; sourceTree = "<group>"; };
 		A10000000000000000000015 /* AccountGroups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountGroups.swift; sourceTree = "<group>"; };
@@ -199,7 +225,6 @@
 		A10000000000000000000074 /* Pickers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pickers.swift; sourceTree = "<group>"; };
 		A10000000000000000000075 /* ReflectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReflectView.swift; sourceTree = "<group>"; };
 		A10000000000000000000076 /* ReflectDetails.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReflectDetails.swift; sourceTree = "<group>"; };
-		A10000000000000000000077 /* CategoriesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoriesView.swift; sourceTree = "<group>"; };
 		A50000000000000000000010 /* RewardsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardsView.swift; sourceTree = "<group>"; };
 		A50000000000000000000012 /* RewardsImportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardsImportView.swift; sourceTree = "<group>"; };
 		A50000000000000000000014 /* RewardCardEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardCardEditorView.swift; sourceTree = "<group>"; };
@@ -211,6 +236,19 @@
 		A50000000000000000000032 /* RewardDraftPeriod.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardDraftPeriod.swift; sourceTree = "<group>"; };
 		A1000000000000000000001A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000000000000000000001B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B10000000000000000000010 /* LocalEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalEngine.swift; sourceTree = "<group>"; };
+		B100000000000000000000F0 /* PlanSettingsSeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanSettingsSeed.swift; sourceTree = "<group>"; };
+		B100000000000000000000F2 /* PlanSettingsSeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanSettingsSeedTests.swift; sourceTree = "<group>"; };
+		B10000000000000000000012 /* LocalDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDatabase.swift; sourceTree = "<group>"; };
+		B10000000000000000000014 /* howmuch-engine.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = howmuch-engine.js; sourceTree = "<group>"; };
+		B10000000000000000000016 /* migrations */ = {isa = PBXFileReference; lastKnownFileType = folder; path = migrations; sourceTree = "<group>"; };
+		B10000000000000000000018 /* StarterCategories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StarterCategories.swift; sourceTree = "<group>"; };
+		B1000000000000000000001A /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
+		B1000000000000000000001C /* LocalEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalEngineTests.swift; sourceTree = "<group>"; };
+		B1000000000000000000001E /* LocalModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModeTests.swift; sourceTree = "<group>"; };
+		B10000000000000000000020 /* ServerConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConnection.swift; sourceTree = "<group>"; };
+		B10000000000000000000022 /* ServerConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConnectView.swift; sourceTree = "<group>"; };
+		B10000000000000000000024 /* ServerConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConnectionTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXContainerItemProxy section */
@@ -288,6 +326,7 @@
 				A1000000000000000000001A /* Assets.xcassets */,
 				A1000000000000000000001B /* Info.plist */,
 				A20000000000000000000014 /* Capture */,
+				B1000000000000000000000A /* Engine */,
 				A20000000000000000000032 /* Intents */,
 				A10000000000000000000005 /* Models */,
 				A10000000000000000000006 /* Services */,
@@ -311,10 +350,14 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000012 /* APIModels.swift */,
+				B90000000000000000000001 /* OutboxCommand.swift */,
+				B90000000000000000000007 /* OutboxStore.swift */,
 				A100000000000000000000A0 /* RefreshPlan.swift */,
 				A100000000000000000000B0 /* ReferenceSnapshot.swift */,
 				A10000000000000000000015 /* AccountGroups.swift */,
 				A10000000000000000000016 /* AccountIcon.swift */,
+				B10000000000000000000018 /* StarterCategories.swift */,
+				B10000000000000000000020 /* ServerConnection.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -333,6 +376,8 @@
 				A10000000000000000000014 /* Formatting.swift */,
 				A10000000000000000000017 /* RegisterHorizon.swift */,
 				A1000000000000000000001C /* RegisterCurrent.swift */,
+				B90000000000000000000003 /* OutboxPlanner.swift */,
+				B90000000000000000000009 /* OutboxOverlay.swift */,
 				A1000000000000000000001D /* RegisterQuery.swift */,
 				A200000000000000000000C0 /* RegisterApproval.swift */,
 				A50000000000000000000030 /* RewardRowProjection.swift */,
@@ -346,6 +391,8 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000070 /* Components.swift */,
+				B1000000000000000000001A /* WelcomeView.swift */,
+				B10000000000000000000022 /* ServerConnectView.swift */,
 				A1000000000000000000007A /* Confirm.swift */,
 				A1000000000000000000007B /* AccountIconPicker.swift */,
 				A1000000000000000000007C /* NewAccountSheet.swift */,
@@ -353,7 +400,6 @@
 				A1000000000000000000007E /* EditAccountSheet.swift */,
 				A10000000000000000000071 /* AccountsView.swift */,
 				A10000000000000000000072 /* RegisterView.swift */,
-				A10000000000000000000077 /* CategoriesView.swift */,
 				A50000000000000000000010 /* RewardsView.swift */,
 				A50000000000000000000012 /* RewardsImportView.swift */,
 				A50000000000000000000014 /* RewardCardEditorView.swift */,
@@ -440,10 +486,17 @@
 				A60000000000000000000010 /* IPadLayoutTests.swift */,
 				A200000000000000000000D0 /* LaunchRefreshTests.swift */,
 				A200000000000000000000E0 /* NarrowRefreshTests.swift */,
+				B90000000000000000000005 /* OutboxPlannerTests.swift */,
+				B9000000000000000000000B /* OutboxStoreTests.swift */,
+				B9000000000000000000000D /* OutboxSyncTests.swift */,
 				A200000000000000000000E2 /* RefreshPlanTests.swift */,
 				A200000000000000000000F0 /* ReferenceSnapshotTests.swift */,
 				A200000000000000000000F2 /* SplitMirrorDeleteTests.swift */,
 				A200000000000000000000F4 /* AccountGroupOrderTests.swift */,
+				B1000000000000000000001C /* LocalEngineTests.swift */,
+				B100000000000000000000F2 /* PlanSettingsSeedTests.swift */,
+				B1000000000000000000001E /* LocalModeTests.swift */,
+				B10000000000000000000024 /* ServerConnectionTests.swift */,
 			);
 			path = HowMuchTests;
 			sourceTree = "<group>";
@@ -456,6 +509,18 @@
 				A30000000000000000000005 /* HowMuchShare.entitlements */,
 			);
 			path = HowMuchShare;
+			sourceTree = "<group>";
+		};
+		B1000000000000000000000A /* Engine */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000010 /* LocalEngine.swift */,
+				B100000000000000000000F0 /* PlanSettingsSeed.swift */,
+				B10000000000000000000012 /* LocalDatabase.swift */,
+				B10000000000000000000014 /* howmuch-engine.js */,
+				B10000000000000000000016 /* migrations */,
+			);
+			path = Engine;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -569,6 +634,8 @@
 			files = (
 				A1000000000000000000002A /* Assets.xcassets in Resources */,
 				A60000000000000000000017 /* AIModels.json in Resources */,
+				B10000000000000000000015 /* howmuch-engine.js in Resources */,
+				B10000000000000000000017 /* migrations in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -589,6 +656,10 @@
 				A10000000000000000000021 /* AppModel.swift in Sources */,
 				A10000000000000000000022 /* APIModels.swift in Sources */,
 				A100000000000000000000A1 /* RefreshPlan.swift in Sources */,
+				B90000000000000000000002 /* OutboxCommand.swift in Sources */,
+				B90000000000000000000008 /* OutboxStore.swift in Sources */,
+				B90000000000000000000004 /* OutboxPlanner.swift in Sources */,
+				B9000000000000000000000A /* OutboxOverlay.swift in Sources */,
 				A100000000000000000000B1 /* ReferenceSnapshot.swift in Sources */,
 				A10000000000000000000025 /* AccountGroups.swift in Sources */,
 				A10000000000000000000026 /* AccountIcon.swift in Sources */,
@@ -613,7 +684,6 @@
 				A10000000000000000000064 /* Pickers.swift in Sources */,
 				A10000000000000000000065 /* ReflectView.swift in Sources */,
 				A10000000000000000000066 /* ReflectDetails.swift in Sources */,
-				A10000000000000000000067 /* CategoriesView.swift in Sources */,
 				A50000000000000000000011 /* RewardsView.swift in Sources */,
 				A50000000000000000000013 /* RewardsImportView.swift in Sources */,
 				A50000000000000000000015 /* RewardCardEditorView.swift in Sources */,
@@ -621,6 +691,13 @@
 				A10000000000000000000069 /* ScheduledTransactionEditorView.swift in Sources */,
 				A10000000000000000000028 /* SettingsView.swift in Sources */,
 				A10000000000000000000020 /* HowMuchApp.swift in Sources */,
+				B10000000000000000000011 /* LocalEngine.swift in Sources */,
+				B100000000000000000000F1 /* PlanSettingsSeed.swift in Sources */,
+				B10000000000000000000013 /* LocalDatabase.swift in Sources */,
+				B10000000000000000000019 /* StarterCategories.swift in Sources */,
+				B1000000000000000000001B /* WelcomeView.swift in Sources */,
+				B10000000000000000000021 /* ServerConnection.swift in Sources */,
+				B10000000000000000000023 /* ServerConnectView.swift in Sources */,
 				A20000000000000000000011 /* CaptureRequest.swift in Sources */,
 				A40000000000000000000011 /* CaptureOrigin.swift in Sources */,
 				A40000000000000000000013 /* CaptureSession.swift in Sources */,
@@ -683,9 +760,16 @@
 				A200000000000000000000D1 /* LaunchRefreshTests.swift in Sources */,
 				A200000000000000000000E1 /* NarrowRefreshTests.swift in Sources */,
 				A200000000000000000000E3 /* RefreshPlanTests.swift in Sources */,
+				B90000000000000000000006 /* OutboxPlannerTests.swift in Sources */,
+				B9000000000000000000000C /* OutboxStoreTests.swift in Sources */,
+				B9000000000000000000000E /* OutboxSyncTests.swift in Sources */,
 				A200000000000000000000F1 /* ReferenceSnapshotTests.swift in Sources */,
 				A200000000000000000000F3 /* SplitMirrorDeleteTests.swift in Sources */,
 				A200000000000000000000F5 /* AccountGroupOrderTests.swift in Sources */,
+				B1000000000000000000001D /* LocalEngineTests.swift in Sources */,
+				B100000000000000000000F3 /* PlanSettingsSeedTests.swift in Sources */,
+				B1000000000000000000001F /* LocalModeTests.swift in Sources */,
+				B10000000000000000000025 /* ServerConnectionTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

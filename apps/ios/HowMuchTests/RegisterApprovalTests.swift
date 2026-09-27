@@ -128,7 +128,7 @@ final class RegisterApprovalTests: XCTestCase {
 final class ApprovalCascadeTests: XCTestCase {
   private var credentialService = ""
   private var defaults: [String: Any] = [:]
-  private let keys = [APISettings.userDefaultsKey, ScopedViewPrefsStore.userDefaultsKey, OutboxStore.userDefaultsKey]
+  private let keys = [APISettings.userDefaultsKey, ScopedViewPrefsStore.userDefaultsKey, OutboxStore.legacyDefaultsKey]
 
   override func setUp() {
     super.setUp()
@@ -250,7 +250,7 @@ final class ApprovalCascadeTests: XCTestCase {
     settings.authenticatedUserID = UUID().uuidString
     settings.sessionToken = "fixture"
     settings.planID = "p"
-    return AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: SnapshotStore(
+    return AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: SnapshotStore(
       directory: FileManager.default.temporaryDirectory.appendingPathComponent("approval-\(UUID())")
     ))
   }

@@ -93,8 +93,8 @@ final class SplitMirrorDeleteTests: XCTestCase {
     previousScopedViewPrefs = UserDefaults.standard.object(
       forKey: ScopedViewPrefsStore.userDefaultsKey
     )
-    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
-    UserDefaults.standard.removeObject(forKey: OutboxStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.legacyDefaultsKey)
+    UserDefaults.standard.removeObject(forKey: OutboxStore.legacyDefaultsKey)
     XCTAssertTrue(URLProtocol.registerClass(SplitMirrorFixtureProtocol.self))
     SplitMirrorFixtureProtocol.reset()
     store = SnapshotStore(
@@ -108,7 +108,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
     UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
-    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.legacyDefaultsKey)
     super.tearDown()
   }
 
@@ -120,6 +120,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     let mirror = try XCTUnwrap(loadedMirror(in: model))
 
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
 
     let parent = try XCTUnwrap(
       model.transactions.first { $0.id == SplitMirrorFixtureProtocol.parentID },
@@ -194,13 +195,14 @@ final class SplitMirrorDeleteTests: XCTestCase {
 
     // Delete from a warm launch, before its provisional references have been
     // refreshed. Simply calling persistSnapshot would refuse to write here.
-    let model = AppModel(settings: initial.settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: initial.settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     XCTAssertTrue(model.ledgerIsProvisional)
     let mirror = try XCTUnwrap(loadedMirror(in: model))
     SplitMirrorFixtureProtocol.failReadsAfterDelete()
     // A queued pre-delete write must not recreate the invalidated file either.
     store.scheduleWrite(snapshot)
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
     await model.refresh(slices: [.accounts])
     assertMirrorGoneAndParentUnlinked(model)
     let requests = SplitMirrorFixtureProtocol.requests()
@@ -211,7 +213,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     store.waitForPendingWrites()
 
     // No network refresh runs on this new model: this is the offline first frame.
-    let restored = AppModel(settings: model.settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let restored = AppModel(outboxStore: .temporary(), settings: model.settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     XCTAssertFalse(restored.transactions.contains { $0.id == SplitMirrorFixtureProtocol.mirrorID })
     XCTAssertFalse(restored.transactions.flatMap(\.subtransactions).contains {
       $0.transferTransactionID == SplitMirrorFixtureProtocol.mirrorID
@@ -232,6 +234,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     XCTAssertTrue(parked, "the first page must be in flight before the delete lands")
 
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
     SplitMirrorFixtureProtocol.releaseParked()
     await refresh.value
 
@@ -257,6 +260,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     XCTAssertTrue(parked, "the older page must be in flight before the delete lands")
 
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
     SplitMirrorFixtureProtocol.releaseParked()
     await older.value
 
@@ -293,6 +297,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     XCTAssertTrue(parked, "the walk's first page must be in flight before the delete lands")
 
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
     SplitMirrorFixtureProtocol.clearHold()
     SplitMirrorFixtureProtocol.releaseParked()
     await walk.value
@@ -355,6 +360,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     XCTAssertTrue(parked, "the queue must be in flight before the delete lands")
 
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
     SplitMirrorFixtureProtocol.releaseParked()
     await queue.value
 
@@ -390,6 +396,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     XCTAssertTrue(parked, "the focused account page must be in flight before the delete lands")
 
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
     SplitMirrorFixtureProtocol.releaseParked()
 
     let landed = await waitUntil {
@@ -406,6 +413,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     await loadLedger(model)
     let mirror = try XCTUnwrap(loadedMirror(in: model))
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
 
     await model.refresh(slices: [.ledger], quiet: false)
 
@@ -429,6 +437,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     XCTAssertNil(mirror.parentTransactionID, "this test needs the row in hand to omit the parent")
 
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
 
     assertMirrorGoneAndParentUnlinked(model)
   }
@@ -445,6 +454,7 @@ final class SplitMirrorDeleteTests: XCTestCase {
     let parked = await waitUntil { SplitMirrorFixtureProtocol.parkedCount == 1 }
     XCTAssertTrue(parked, "the plan-one page must be in flight before the delete lands")
     try await model.deleteTransaction(mirror)
+    await model.waitForOutboxDrain()
     SplitMirrorFixtureProtocol.clearHold()
 
     var switched = model.settings
@@ -476,7 +486,9 @@ final class SplitMirrorDeleteTests: XCTestCase {
     settings.authenticatedUserID = "split-mirror-\(UUID().uuidString)"
     settings.sessionToken = "token"
     settings.planID = SplitMirrorFixtureProtocol.planID
-    return AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    model.outboxDebounce = .zero
+    return model
   }
 
   private func loadLedger(_ model: AppModel) async {
@@ -1179,4 +1191,122 @@ private struct PlansBody: Encodable {
   }
 
   let plans: [Plan]
+}
+
+/// What a delete takes off each account. Pure: rows in, deltas out. Every
+/// value is invented.
+final class DeleteBalanceDeltaTests: XCTestCase {
+  func testAPlainRowComesOffItsAccountByClearedState() {
+    let uncleared = Self.row("txn-1", account: "acct-a", amount: -1_000, cleared: .uncleared)
+    XCTAssertEqual(
+      DeleteBalanceDelta.deltas(deleted: uncleared, removedIDs: ["txn-1"], knownRows: [:]),
+      ["acct-a": .init(balance: 1_000, cleared: 0, uncleared: 1_000)]
+    )
+    let reconciled = Self.row("txn-2", account: "acct-a", amount: 2_500, cleared: .reconciled)
+    XCTAssertEqual(
+      DeleteBalanceDelta.deltas(deleted: reconciled, removedIDs: ["txn-2"], knownRows: [:]),
+      ["acct-a": .init(balance: -2_500, cleared: -2_500, uncleared: 0)]
+    )
+  }
+
+  func testATransferTakesBothSidesUsingEachSidesClearedState() {
+    let out = Self.row("out", account: "acct-a", amount: -5_000, cleared: .cleared,
+                       transferAccount: "acct-b", transferID: "in")
+    let into = Self.row("in", account: "acct-b", amount: 5_000, cleared: .uncleared,
+                        transferAccount: "acct-a", transferID: "out")
+    XCTAssertEqual(
+      DeleteBalanceDelta.deltas(deleted: out, removedIDs: ["out", "in"], knownRows: ["out": out, "in": into]),
+      [
+        "acct-a": .init(balance: 5_000, cleared: 5_000, uncleared: 0),
+        "acct-b": .init(balance: -5_000, cleared: 0, uncleared: -5_000),
+      ]
+    )
+  }
+
+  func testATransferSideNotInHandIsDerivedFromTheLink() {
+    let out = Self.row("out", account: "acct-a", amount: -5_000, cleared: .cleared,
+                       transferAccount: "acct-b", transferID: "in")
+    XCTAssertEqual(
+      DeleteBalanceDelta.deltas(deleted: out, removedIDs: ["out", "in"], knownRows: [:])["acct-b"],
+      .init(balance: -5_000, cleared: 0, uncleared: -5_000)
+    )
+  }
+
+  func testASplitParentTakesItsMirroredLines() {
+    let parent = Self.row("parent", account: "acct-a", amount: -3_000, cleared: .uncleared, lines: [
+      Self.line("line-1", parent: "parent", amount: -1_000),
+      Self.line("line-2", parent: "parent", amount: -2_000, transferAccount: "acct-b", transferID: "mirror"),
+    ])
+    XCTAssertEqual(
+      DeleteBalanceDelta.deltas(deleted: parent, removedIDs: ["parent", "mirror"], knownRows: [:]),
+      [
+        "acct-a": .init(balance: 3_000, cleared: 0, uncleared: 3_000),
+        "acct-b": .init(balance: -2_000, cleared: 0, uncleared: -2_000),
+      ]
+    )
+  }
+
+  /// Deleting a split mirror removes only the mirror; the parent and its line
+  /// stay, so the parent's account does not move.
+  func testASplitMirrorMovesOnlyItsOwnAccount() {
+    let mirror = Self.row("mirror", account: "acct-b", amount: 2_000, cleared: .cleared,
+                          transferAccount: "acct-a", transferID: "line-2", parentID: "parent")
+    XCTAssertEqual(
+      DeleteBalanceDelta.deltas(deleted: mirror, removedIDs: ["mirror"], knownRows: [:]),
+      ["acct-b": .init(balance: -2_000, cleared: -2_000, uncleared: 0)]
+    )
+  }
+
+  func testApplyingAdjustsOnlyTheNamedAccounts() {
+    let accounts = [Self.account("acct-a", balance: 10_000, cleared: 8_000), Self.account("acct-b", balance: 0, cleared: 0)]
+    let next = DeleteBalanceDelta.applying(["acct-a": .init(balance: 1_000, cleared: 0, uncleared: 1_000)], to: accounts)
+    XCTAssertEqual(next[0].balance, 11_000)
+    XCTAssertEqual(next[0].clearedBalance, 8_000)
+    XCTAssertEqual(next[0].unclearedBalance, 3_000)
+    XCTAssertEqual(next[1], accounts[1])
+  }
+
+  // MARK: Fixtures
+
+  private static func row(
+    _ id: String,
+    account: String,
+    amount: Int,
+    cleared: ClearedState,
+    transferAccount: String? = nil,
+    transferID: String? = nil,
+    parentID: String? = nil,
+    lines: [Subtransaction] = []
+  ) -> Transaction {
+    Transaction(
+      id: id, date: "2026-01-02", amount: amount, memo: nil, cleared: cleared, approved: true,
+      flagColor: nil, flagName: nil, accountID: account, accountName: "Fixture", payeeID: nil,
+      payeeName: nil, categoryID: nil, categoryName: nil, transferAccountID: transferAccount,
+      transferTransactionID: transferID, parentTransactionID: parentID, matchedTransactionID: nil,
+      importID: nil, importPayeeName: nil, importPayeeNameOriginal: nil, deleted: false,
+      subtransactions: lines
+    )
+  }
+
+  private static func line(
+    _ id: String,
+    parent: String,
+    amount: Int,
+    transferAccount: String? = nil,
+    transferID: String? = nil
+  ) -> Subtransaction {
+    Subtransaction(
+      id: id, transactionID: parent, amount: amount, memo: nil, payeeID: nil, payeeName: nil,
+      categoryID: nil, categoryName: nil, transferAccountID: transferAccount,
+      transferTransactionID: transferID, deleted: false
+    )
+  }
+
+  private static func account(_ id: String, balance: Int, cleared: Int) -> Account {
+    Account(
+      id: id, name: "Fixture", icon: nil, type: "checking", onBudget: true, closed: false,
+      balance: balance, clearedBalance: cleared, unclearedBalance: balance - cleared,
+      lastReconciledDate: nil, deleted: false
+    )
+  }
 }

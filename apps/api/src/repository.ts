@@ -1,7 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { createId } from "./ids";
-import { CLEAR_ONE_PLAN, REMATERIALISE_ONE_PLAN } from "./ynab-month-activity";
 import { SqliteRepositoryDatabase, type RepositoryDatabase } from "./repository-db";
 import {
   DEFAULT_TRANSACTION_PAGE_SIZE,
@@ -9,7 +8,6 @@ import {
   type ClearedState,
   type TransactionFilters,
   type TransactionInput,
-  type MonthCategoryTargetInput,
   type ScheduledTransactionInput,
   type ScheduledMaterializationResult,
   type ScheduledCronMaterializationResult,
@@ -40,8 +38,56 @@ import {
 import { parseAccountIcon, resolveAccountPresentation, splitLegacyAccountName } from "./account-icon";
 import { applyAccountUpdate, type AccountUpdatePatch } from "./account-kind";
 import { parseRegisterQuery, transactionSearchSql } from "@howmuch/register-query";
+import {
+  CATEGORY_IN_USE_CONDITION,
+  CategoryInUseError,
+  EntityConflictError,
+  YNAB_MONTH_PRESENT_SQL,
+  YnabMirrorPlanError,
+  categoryCommandStatements,
+  categoryInUseValues,
+  createCategoryCommand,
+  createCategoryGroupCommand,
+  deleteCategoryCommand,
+  isUniqueViolation,
+  updateCategoryCommand,
+  updateCategoryGroupCommand,
+  type CategoryCommand,
+  type CategoryCreate,
+  type CategoryGroupCreate,
+  type CategoryGroupPatch,
+  type CategoryGroupRow,
+  type CategoryPatch,
+  type CategoryRow,
+} from "./category-management";
+import { requestHash } from "./d1-guarded-command";
+import {
+  PLAN_NOT_EMPTY_CONDITION,
+  PlanNotEmptyError,
+  parsePlanSnapshot,
+  planNotEmptyValues,
+  projectPlanSnapshot,
+  snapshotImportStatements,
+  type PlanSnapshot,
+  type SnapshotCounts,
+} from "./plan-snapshot";
 
 type Row = Record<string, any>;
+
+export type SnapshotImportResult = { imported: SnapshotCounts; replayed: boolean; server_knowledge: number };
+
+export type CategoryWriteOptions = { operationId?: string };
+
+/** Stable across retries when the client sends an Idempotency-Key but no id. */
+function derivedEntityId(prefix: string, planId: string, operationId?: string): string {
+  return operationId
+    ? `${prefix}_${createHash("sha256").update(`${planId}:${operationId}`).digest("hex").slice(0, 24)}`
+    : createId(prefix);
+}
+
+function categoryRequestHash(action: string, planId: string, resourceId: string, request: unknown): string {
+  return requestHash({ action, planId, resourceId, request });
+}
 
 function displayAccountName(value: unknown): string | null {
   if (value == null) return null;
@@ -782,6 +828,205 @@ export class LedgerRepository {
       category_groups: assembleCategoryGroups(groups ?? [], categories ?? []),
       server_knowledge: knowledgeFrom(knowledgeRows),
     };
+  }
+
+  /** Plan-level gate: a native plan has no YNAB `month` raw object at all. */
+  async isNativePlan(planId: string): Promise<boolean> {
+    return !(await this.db.query(YNAB_MONTH_PRESENT_SQL).get(planId));
+  }
+
+  protected async requireNativePlan(planId: string): Promise<void> {
+    if (!(await this.isNativePlan(planId))) throw new YnabMirrorPlanError();
+  }
+
+  async createCategoryGroup(planId: string, input: CategoryGroupCreate, options: CategoryWriteOptions = {}): Promise<any> {
+    const id = input.id ?? derivedEntityId("category_group", planId, options.operationId);
+    return this.applyCategoryCommand(planId, "category_group.create", id, input, options,
+      () => this.planCreateCategoryGroup(planId, id, input), () => this.readCategoryGroupResponse(planId, id));
+  }
+
+  async updateCategoryGroup(planId: string, groupId: string, patch: CategoryGroupPatch, options: CategoryWriteOptions = {}): Promise<any> {
+    return this.applyCategoryCommand(planId, "category_group.update", groupId, patch, options,
+      () => this.planUpdateCategoryGroup(planId, groupId, patch), () => this.readCategoryGroupResponse(planId, groupId));
+  }
+
+  async createCategory(planId: string, input: CategoryCreate, options: CategoryWriteOptions = {}): Promise<any> {
+    const id = input.id ?? derivedEntityId("category", planId, options.operationId);
+    return this.applyCategoryCommand(planId, "category.create", id, input, options,
+      () => this.planCreateCategory(planId, id, input), () => this.readCategoryResponse(planId, id));
+  }
+
+  async updateCategory(planId: string, categoryId: string, patch: CategoryPatch, options: CategoryWriteOptions = {}): Promise<any> {
+    return this.applyCategoryCommand(planId, "category.update", categoryId, patch, options,
+      () => this.planUpdateCategory(planId, categoryId, patch), () => this.readCategoryResponse(planId, categoryId));
+  }
+
+  /** Soft delete, refused while any live transaction or schedule names the category. */
+  async deleteCategory(planId: string, categoryId: string, options: CategoryWriteOptions = {}): Promise<any> {
+    return this.applyCategoryCommand(planId, "category.delete", categoryId, {}, options,
+      () => this.planDeleteCategory(planId, categoryId), () => this.readCategoryResponse(planId, categoryId));
+  }
+
+  /**
+   * SQLite runner: replay check, planning reads and the write share one
+   * BEGIN IMMEDIATE, so the checks cannot go stale before the write lands.
+   */
+  protected async applyCategoryCommand(
+    planId: string,
+    action: CategoryCommand["action"],
+    resourceId: string,
+    request: unknown,
+    options: CategoryWriteOptions,
+    plan: () => Promise<CategoryCommand>,
+    read: () => Promise<any>,
+  ): Promise<any> {
+    const hash = categoryRequestHash(action, planId, resourceId, request);
+    return this.db.transaction(async () => {
+      if (await this.replayedScheduleMutation(planId, resourceId, action, options.operationId, hash)) return read();
+      const command = await plan();
+      const auditId = options.operationId ? `audit_${scheduleDigest(options.operationId).slice(0, 24)}` : createId("audit");
+      for (const planned of categoryCommandStatements(command, planId, auditId, hash)) {
+        await this.db.query(planned.sql).run(...planned.values);
+      }
+      return read();
+    })();
+  }
+
+  protected async planCreateCategoryGroup(planId: string, id: string, input: CategoryGroupCreate): Promise<CategoryCommand> {
+    await this.requireNativePlan(planId);
+    if (await this.db.query("SELECT 1 FROM category_groups WHERE id = ?").get(id)) {
+      throw new EntityConflictError("Category group already exists");
+    }
+    return createCategoryGroupCommand(planId, id, input);
+  }
+
+  protected async planUpdateCategoryGroup(planId: string, groupId: string, patch: CategoryGroupPatch): Promise<CategoryCommand> {
+    await this.requireNativePlan(planId);
+    const current = await this.liveCategoryGroupRow(planId, groupId);
+    if (!current) throw new NotFoundError("Category group not found");
+    return updateCategoryGroupCommand(planId, current, patch);
+  }
+
+  protected async planCreateCategory(planId: string, id: string, input: CategoryCreate): Promise<CategoryCommand> {
+    await this.requireNativePlan(planId);
+    const group = await this.liveCategoryGroupRow(planId, input.category_group_id);
+    if (!group) throw new ValidationError("Category group not found");
+    if (await this.db.query("SELECT 1 FROM categories WHERE id = ?").get(id)) {
+      throw new EntityConflictError("Category already exists");
+    }
+    return createCategoryCommand(planId, id, input, group);
+  }
+
+  protected async planUpdateCategory(planId: string, categoryId: string, patch: CategoryPatch): Promise<CategoryCommand> {
+    await this.requireNativePlan(planId);
+    const current = await this.db.query("SELECT * FROM categories WHERE id = ? AND plan_id = ? AND deleted = 0").get(categoryId, planId) as CategoryRow | null;
+    if (!current) throw new NotFoundError("Category not found");
+    const targetGroup = patch.category_group_id === undefined ? null : await this.liveCategoryGroupRow(planId, patch.category_group_id);
+    if (patch.category_group_id !== undefined && !targetGroup) throw new ValidationError("Category group not found");
+    return updateCategoryCommand(planId, current, patch, targetGroup);
+  }
+
+  protected async planDeleteCategory(planId: string, categoryId: string): Promise<CategoryCommand> {
+    await this.requireNativePlan(planId);
+    const current = await this.db.query("SELECT * FROM categories WHERE id = ? AND plan_id = ? AND deleted = 0").get(categoryId, planId) as CategoryRow | null;
+    if (!current) throw new NotFoundError("Category not found");
+    const inUse = await this.db.query(`SELECT ${CATEGORY_IN_USE_CONDITION} AS in_use`).get(...categoryInUseValues(planId, categoryId)) as Row | null;
+    if (toBoolean(inUse?.in_use)) throw new CategoryInUseError();
+    return deleteCategoryCommand(planId, current);
+  }
+
+  private async liveCategoryGroupRow(planId: string, groupId: string): Promise<CategoryGroupRow | null> {
+    return await this.db.query("SELECT * FROM category_groups WHERE id = ? AND plan_id = ? AND deleted = 0").get(groupId, planId) as CategoryGroupRow | null;
+  }
+
+  protected async readCategoryGroupResponse(planId: string, groupId: string): Promise<any> {
+    const [groups, categories] = await this.db.batchRead([
+      { sql: "SELECT * FROM category_groups WHERE id = ? AND plan_id = ?", values: [groupId, planId] },
+      { sql: "SELECT * FROM categories WHERE category_group_id = ? AND plan_id = ? AND deleted = 0 ORDER BY name", values: [groupId, planId] },
+    ]);
+    if (!groups?.length) throw new NotFoundError("Category group not found");
+    return assembleCategoryGroups(groups, categories ?? [])[0];
+  }
+
+  protected async readCategoryResponse(planId: string, categoryId: string): Promise<any> {
+    const row = await this.db.query("SELECT * FROM categories WHERE id = ? AND plan_id = ?").get(categoryId, planId) as Row | null;
+    if (!row) throw new NotFoundError("Category not found");
+    return formatCategory(row);
+  }
+
+  /** The plan's ledger in `howmuch-plan-snapshot` form, read in one consistent batch. */
+  async exportPlanSnapshot(planId: string): Promise<{ snapshot: PlanSnapshot; server_knowledge: number }> {
+    const [groups, categories, payees, accounts, transactions, subtransactions, rawParents, rawSubs, editRows, editSubRows, knowledge] = await this.db.batchRead([
+      { sql: "SELECT id, name, hidden, internal, deleted FROM category_groups WHERE plan_id = ? ORDER BY id", values: [planId] },
+      { sql: "SELECT id, category_group_id, name, hidden, internal, deleted FROM categories WHERE plan_id = ? ORDER BY id", values: [planId] },
+      { sql: "SELECT id, name, transfer_account_id, deleted FROM payees WHERE plan_id = ? ORDER BY id", values: [planId] },
+      {
+        // Opening balance is whatever makes the live ledger reproduce the
+        // displayed balance, so an import recomputes exactly what was shown
+        // even where the stored opening balance was never set.
+        sql: `SELECT id, name, icon, type, on_budget, closed, transfer_payee_id,
+                balance_milli - COALESCE((SELECT SUM(t.amount_milli) FROM transactions t WHERE t.account_id = accounts.id AND t.deleted = 0), 0) AS opening_balance_milli
+              FROM accounts WHERE plan_id = ? AND deleted = 0 ORDER BY id`,
+        values: [planId],
+      },
+      {
+        sql: `SELECT id, account_id, date, amount_milli, memo, cleared, approved, flag_color, flag_name, payee_id, payee_name_snapshot, category_id,
+                transfer_account_id, transfer_transaction_id, matched_transaction_id, import_id, import_payee_name, import_payee_name_original
+              FROM transactions WHERE plan_id = ? AND deleted = 0 ORDER BY id`,
+        values: [planId],
+      },
+      {
+        sql: `SELECT s.id, s.transaction_id, s.amount_milli, s.memo, s.payee_id, s.payee_name_snapshot, s.category_id, s.transfer_account_id, s.transfer_transaction_id
+              FROM subtransactions s JOIN transactions t ON t.id = s.transaction_id
+              WHERE t.plan_id = ? AND t.deleted = 0 AND s.deleted = 0 ORDER BY s.transaction_id, s.id`,
+        values: [planId],
+      },
+      ...SCHEDULED_SQL.map((sql) => ({ sql, values: [planId] })),
+      { sql: SERVER_KNOWLEDGE_SQL, values: [planId] },
+    ]);
+    return {
+      snapshot: projectPlanSnapshot({
+        categoryGroups: groups ?? [],
+        categories: categories ?? [],
+        payees: payees ?? [],
+        accounts: accounts ?? [],
+        transactions: transactions ?? [],
+        subtransactions: subtransactions ?? [],
+        scheduledTransactions: assembleScheduledTransactions(rawParents ?? [], rawSubs ?? [], editRows ?? [], editSubRows ?? []),
+      }),
+      server_knowledge: knowledgeFrom(knowledge),
+    };
+  }
+
+  /**
+   * Loads a whole snapshot into an empty native plan as one atomic write.
+   * An exact retry with the same Idempotency-Key replays; the plan is never
+   * left partly imported.
+   */
+  async importPlanSnapshot(planId: string, input: unknown, options: { operationId: string }): Promise<SnapshotImportResult> {
+    const rows = parsePlanSnapshot(input, planId);
+    const hash = requestHash({ action: "plan.snapshot.import", planId, snapshot: input });
+    const replayed = await this.db.transaction(async () => {
+      if (await this.replayedScheduleMutation(planId, planId, "plan.snapshot.import", options.operationId, hash)) return true;
+      await this.requireNativePlan(planId);
+      await this.requireEmptyPlan(planId);
+      const auditId = `audit_${scheduleDigest(options.operationId).slice(0, 24)}`;
+      try {
+        for (const planned of snapshotImportStatements(planId, rows, auditId, hash)) {
+          await this.db.query(planned.sql).run(...planned.values);
+        }
+      } catch (error) {
+        if (isUniqueViolation(error)) throw new EntityConflictError("The snapshot reuses ids that already exist on this server");
+        throw error;
+      }
+      return false;
+    })();
+    return { imported: rows.counts, replayed, server_knowledge: await this.getServerKnowledge(planId) };
+  }
+
+  protected async requireEmptyPlan(planId: string): Promise<void> {
+    const row = await this.db.query(`SELECT ${PLAN_NOT_EMPTY_CONDITION} AS not_empty`).get(...planNotEmptyValues(planId)) as Row | null;
+    if (toBoolean(row?.not_empty)) throw new PlanNotEmptyError();
   }
 
   async createTransaction(planId: string, input: TransactionInput, options: TransactionWriteOptions = {}): Promise<any> {
@@ -1742,364 +1987,6 @@ export class LedgerRepository {
     return this.formatTransaction(row);
   }
 
-  async getMonth(planId: string, month: string): Promise<any> {
-    const start = month.length === 7 ? `${month}-01` : month;
-    const ynabMonth = await this.db
-      .query("SELECT payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month' AND object_id = ?")
-      .get(planId, start) as Row | null;
-    if (ynabMonth) {
-      const raw = parseRawYnabObject(ynabMonth.payload_json, "month");
-      const categories = await this.db
-        .query("SELECT payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month_category' AND object_id LIKE ? ORDER BY object_id")
-        .all(planId, `${start}\u001f%`) as Row[];
-      const sourceCategories = categories.map((row) => parseRawYnabObject(row.payload_json, "month category"));
-      const currentAssignments = await this.db
-        .query("SELECT category_id, budgeted_milli, source FROM plan_month_assignments WHERE plan_id = ? AND month = ?")
-        .all(planId, start) as Row[];
-      const currentTargets = await this.db
-        .query("SELECT category_id, goal_type, goal_target_milli, goal_target_month, source FROM plan_month_category_targets WHERE plan_id = ? AND month = ?")
-        .all(planId, start) as Row[];
-      // The source balance has already carried YNAB's historical assignments
-      // forward.  Local overrides must do the same, so Available reflects the
-      // difference for every assigned month up to the requested one.
-      const cumulativeAssignments = await this.db
-        .query(
-          `SELECT assignment.month, assignment.category_id, assignment.budgeted_milli,
-                  source.payload_json AS source_payload_json
-           FROM plan_month_assignments assignment
-           JOIN ynab_raw_objects source
-             ON source.plan_id = assignment.plan_id
-            AND source.object_type = 'month_category'
-            AND source.object_id = assignment.month || char(31) || assignment.category_id
-           WHERE assignment.plan_id = ? AND assignment.month <= ?`,
-        )
-        .all(planId, start) as Row[];
-      const activityDeltas = await this.monthCategoryActivityDeltas(planId, start, sourceCategories);
-      return projectMonthAssignments({
-        ...raw,
-        month: raw.month ?? start,
-        categories: sourceCategories,
-      }, currentAssignments, currentTargets, cumulativeAssignmentDeltas(cumulativeAssignments), activityDeltas);
-    }
-    const categoryRows = await this.monthCategoryActivityRows(planId, start, await this.uncategorisedCategoryID(planId));
-
-    return {
-      month: start,
-      note: null,
-      income: 0,
-      budgeted: 0,
-      activity: categoryRows.reduce((total, row) => total + Number(row.activity ?? 0), 0),
-      to_be_budgeted: 0,
-      age_of_money: null,
-      deleted: false,
-      categories: categoryRows.map((row) => ({
-        id: row.id,
-        name: row.name,
-        category_group_id: row.category_group_id,
-        activity: Number(row.activity ?? 0),
-        budgeted: 0,
-        balance: 0,
-        deleted: false,
-      })),
-    };
-  }
-
-  /**
-   * Returns only the ledger change relative to the imported transaction
-   * mirror. The YNAB month category activity is the baseline: rebuilding it
-   * from transactions would discard source-side rounding differences.
-   */
-  private async monthCategoryActivityDeltas(
-    planId: string,
-    start: string,
-    sourceCategories: any[],
-  ): Promise<Map<string, number>> {
-    const uncategorisedCategoryID = await this.uncategorisedCategoryID(planId, sourceCategories);
-    const currentRows = await this.monthCategoryActivityRows(planId, start, uncategorisedCategoryID);
-    const current = activityMap(currentRows);
-    const source = await this.sourceMonthActivity(planId, start, uncategorisedCategoryID);
-    if (source === null) return current;
-
-    const categoryIDs = new Set([...current.keys(), ...source.keys()]);
-    const deltas = new Map<string, number>();
-    for (const categoryID of categoryIDs) {
-      const delta = (current.get(categoryID) ?? 0) - (source.get(categoryID) ?? 0);
-      if (delta !== 0) deltas.set(categoryID, delta);
-    }
-    return deltas;
-  }
-
-  /**
-   * The imported source activity for one month, by category.
-   *
-   * Reads `ynab_source_month_activity` (materialised by migration 020/0017).
-   * Returns `null` for "this plan has no YNAB source transactions at all", in
-   * which case every current ledger row is a local change.
-   *
-   * Three cases, in order:
-   *
-   *  1. Rows for this month — the normal path, one indexed read, no contact
-   *     with `ynab_raw_objects`.
-   *  2. No rows for this month but rows for the plan — the plan is
-   *     materialised and this month genuinely has no source activity. A month
-   *     the user has not spent in yet must not be mistaken for a missing
-   *     backfill.
-   *     Deciding this before probing the raw mirror is what keeps an empty
-   *     month off `ynab_raw_objects` entirely.
-   *  3. No rows for the plan — either there is no source mirror (null, the
-   *     pre-existing fallback) or the mirror was never materialised. The
-   *     latter happens if a deploy lands before the migration, which
-   *     `docs/deployment.md` allows; raising there would 500 the iOS
-   *     Categories tab, so it falls back to the old in-Worker scan and logs.
-   *     The same branch keeps parity when every raw transaction is deleted and
-   *     the backfill therefore produced no rows.
-   */
-  private async sourceMonthActivity(
-    planId: string,
-    start: string,
-    uncategorisedCategoryID: string | null,
-  ): Promise<Map<string, number> | null> {
-    const rows = await this.db
-      .query("SELECT category_id, activity FROM ynab_source_month_activity WHERE plan_id = ? AND month = ?")
-      .all(planId, start) as Row[];
-    if (rows.length > 0) return materialisedActivityMap(rows, uncategorisedCategoryID);
-
-    // Is the plan materialised at all? An empty month on a materialised plan
-    // settles here, so viewing a month the user has not spent in never touches
-    // `ynab_raw_objects`.
-    const materialised = await this.db
-      .query("SELECT 1 AS present FROM ynab_source_month_activity WHERE plan_id = ? LIMIT 1")
-      .get(planId) as Row | null;
-    if (materialised) return new Map();
-
-    // Only once the plan has no materialised rows at all is it worth asking
-    // whether a source mirror exists. Indexed existence probe, not a scan.
-    const source = await this.db
-      .query("SELECT 1 AS present FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'transaction' LIMIT 1")
-      .get(planId) as Row | null;
-    if (!source) return null;
-
-    console.warn(JSON.stringify({
-      event: "month_activity_unmaterialised",
-      plan_id: planId,
-      month: start,
-      detail: "ynab_source_month_activity is empty for a plan that has raw transactions; falling back to the raw scan",
-    }));
-    return await this.scanSourceMonthActivity(planId, start, uncategorisedCategoryID);
-  }
-
-  /**
-   * The pre-materialisation baseline: load every raw transaction and
-   * subtransaction object in the plan and filter by date in the Worker.
-   *
-   * Kept only as the unmaterialised fallback above and as the reference
-   * implementation the parity script checks the materialised table against.
-   */
-  private async scanSourceMonthActivity(
-    planId: string,
-    start: string,
-    uncategorisedCategoryID: string | null,
-  ): Promise<Map<string, number>> {
-    const sourceTransactions = await this.db
-      .query("SELECT object_id, payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'transaction'")
-      .all(planId) as Row[];
-    const sourceSubtransactions = await this.db
-      .query("SELECT payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'subtransaction'")
-      .all(planId) as Row[];
-    const subsByTransaction = new Map<string, any[]>();
-    for (const row of sourceSubtransactions) {
-      const subtransaction = parseRawYnabObject(row.payload_json, "subtransaction");
-      if (subtransaction.deleted || !subtransaction.transaction_id) continue;
-      const transactionID = String(subtransaction.transaction_id);
-      const entries = subsByTransaction.get(transactionID) ?? [];
-      entries.push(subtransaction);
-      subsByTransaction.set(transactionID, entries);
-    }
-
-    const source = new Map<string, number>();
-    const monthPrefix = start.slice(0, 7) + "-";
-    for (const row of sourceTransactions) {
-      const transaction = parseRawYnabObject(row.payload_json, "transaction");
-      if (transaction.deleted || typeof transaction.date !== "string" || !transaction.date.startsWith(monthPrefix)) continue;
-      const transactionID = String(transaction.id ?? row.object_id);
-      const subtransactions = subsByTransaction.get(transactionID) ?? [];
-      const lines = subtransactions.length > 0
-        ? subtransactions.map((subtransaction) => ({ categoryID: subtransaction.category_id, amount: subtransaction.amount }))
-        : [{ categoryID: transaction.category_id, amount: transaction.amount }];
-      for (const line of lines) {
-        const categoryID = line.categoryID == null ? uncategorisedCategoryID : String(line.categoryID);
-        if (!categoryID) continue;
-        addActivity(source, categoryID, integerMilliunits(line.amount, "source transaction amount"));
-      }
-    }
-    return source;
-  }
-
-  /** Maps genuine uncategorised ledger lines to YNAB's imported internal category. */
-  private async uncategorisedCategoryID(planId: string, sourceCategories: any[] = []): Promise<string | null> {
-    const sourceCategory = sourceCategories.find((category) => !category.deleted && isUncategorisedName(category.name));
-    if (sourceCategory?.id) return String(sourceCategory.id);
-    const category = await this.db
-      .query(
-        "SELECT id FROM categories WHERE plan_id = ? AND deleted = 0 AND lower(name) IN ('uncategorized', 'uncategorised') ORDER BY internal DESC, id LIMIT 1",
-      )
-      .get(planId) as Row | null;
-    return category?.id == null ? null : String(category.id);
-  }
-
-  private async monthCategoryActivityRows(
-    planId: string,
-    start: string,
-    uncategorisedCategoryID: string | null = null,
-  ): Promise<Row[]> {
-    return await this.db
-      .query(
-        `WITH lines AS (
-           SELECT
-             t.date,
-             COALESCE(st.category_id, t.category_id, ?) AS category_id,
-             COALESCE(st.amount_milli, t.amount_milli) AS amount_milli
-           FROM transactions t
-           LEFT JOIN subtransactions st ON st.transaction_id = t.id AND st.deleted = 0
-           WHERE t.plan_id = ?
-             AND t.deleted = 0
-             AND t.date >= ?
-             AND t.date < date(?, '+1 month')
-         )
-         SELECT
-           c.id,
-           c.name,
-           c.category_group_id,
-           SUM(lines.amount_milli) AS activity
-         FROM categories c
-         LEFT JOIN lines ON lines.category_id = c.id
-         WHERE c.plan_id = ? AND c.deleted = 0
-         GROUP BY c.id
-         ORDER BY c.name`,
-      )
-      .all(uncategorisedCategoryID, planId, start, start, planId) as Row[];
-  }
-
-  /**
-   * Stores a HowMuch-local assignment overlay for an imported month category.
-   * The exact YNAB month/category JSON is never mutated: `getMonth()` projects
-   * this value over the source snapshot and rebalances its derived totals.
-   */
-  async setMonthCategoryAssignment(
-    planId: string,
-    month: string,
-    categoryId: string,
-    budgetedMilli: number,
-  ): Promise<any> {
-    if (!Number.isSafeInteger(budgetedMilli)) {
-      throw new ValidationError("budgeted must be integer milliunits");
-    }
-    const start = normaliseBudgetMonth(month);
-    await this.ensurePlan(planId);
-
-    const sourceMonth = await this.db
-      .query("SELECT 1 FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month' AND object_id = ?")
-      .get(planId, start);
-    if (!sourceMonth) {
-      throw new NotFoundError("Imported month not found");
-    }
-    const sourceRow = await this.db
-      .query("SELECT payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month_category' AND object_id = ?")
-      .get(planId, `${start}\u001f${categoryId}`) as Row | null;
-    if (!sourceRow) {
-      throw new NotFoundError("Imported month category not found");
-    }
-    const sourceCategory = parseRawYnabObject(sourceRow.payload_json, "month category");
-    if (sourceCategory.deleted) {
-      throw new ValidationError("Deleted categories cannot be assigned");
-    }
-    const category = await this.db
-      .query("SELECT id FROM categories WHERE id = ? AND plan_id = ? AND deleted = 0")
-      .get(categoryId, planId);
-    if (!category) {
-      throw new NotFoundError("Category not found");
-    }
-    const sourceBudgeted = integerMilliunits(sourceCategory.budgeted, "source category budgeted");
-
-    await this.db.transaction(async () => {
-      if (budgetedMilli === sourceBudgeted) {
-        await this.db
-          .query("DELETE FROM plan_month_assignments WHERE plan_id = ? AND month = ? AND category_id = ?")
-          .run(planId, start, categoryId);
-      } else {
-        await this.db
-          .query(
-            `INSERT INTO plan_month_assignments (plan_id, month, category_id, budgeted_milli, source, updated_at)
-             VALUES (?, ?, ?, ?, 'howmuch-local', CURRENT_TIMESTAMP)
-             ON CONFLICT(plan_id, month, category_id) DO UPDATE SET
-               budgeted_milli = excluded.budgeted_milli,
-               source = excluded.source,
-               updated_at = CURRENT_TIMESTAMP`,
-          )
-          .run(planId, start, categoryId, budgetedMilli);
-      }
-      await this.db
-        .query("UPDATE plans SET server_knowledge = server_knowledge + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-        .run(planId);
-    })();
-
-    return this.getMonth(planId, start);
-  }
-
-  /**
-   * Stores a local target overlay, never a mutation of an imported YNAB
-   * object. A null goal_type explicitly clears the target; restoring the raw
-   * source means deleting this row through `restoreMonthCategoryTarget`.
-   */
-  async setMonthCategoryTarget(
-    planId: string,
-    month: string,
-    categoryId: string,
-    target: MonthCategoryTargetInput,
-  ): Promise<any> {
-    const start = normaliseBudgetMonth(month);
-    const normalised = normaliseMonthCategoryTarget(target);
-    await this.ensurePlan(planId);
-    await this.requireImportedMonthCategory(planId, start, categoryId);
-    await this.db.transaction(async () => {
-      await this.db.query(
-        `INSERT INTO plan_month_category_targets
-          (plan_id, month, category_id, goal_type, goal_target_milli, goal_target_month, source, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'howmuch-local', CURRENT_TIMESTAMP)
-         ON CONFLICT(plan_id, month, category_id) DO UPDATE SET
-           goal_type = excluded.goal_type,
-           goal_target_milli = excluded.goal_target_milli,
-           goal_target_month = excluded.goal_target_month,
-           source = excluded.source,
-           updated_at = CURRENT_TIMESTAMP`,
-      ).run(planId, start, categoryId, normalised.goal_type, normalised.goal_target, normalised.goal_target_month);
-      await this.db.query("UPDATE plans SET server_knowledge = server_knowledge + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(planId);
-    })();
-    return this.getMonth(planId, start);
-  }
-
-  async restoreMonthCategoryTarget(planId: string, month: string, categoryId: string): Promise<any> {
-    const start = normaliseBudgetMonth(month);
-    await this.ensurePlan(planId);
-    await this.requireImportedMonthCategory(planId, start, categoryId);
-    await this.db.transaction(async () => {
-      await this.db.query("DELETE FROM plan_month_category_targets WHERE plan_id = ? AND month = ? AND category_id = ?").run(planId, start, categoryId);
-      await this.db.query("UPDATE plans SET server_knowledge = server_knowledge + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(planId);
-    })();
-    return this.getMonth(planId, start);
-  }
-
-  private async requireImportedMonthCategory(planId: string, start: string, categoryId: string): Promise<void> {
-    const sourceMonth = await this.db.query("SELECT 1 FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month' AND object_id = ?").get(planId, start);
-    if (!sourceMonth) throw new NotFoundError("Imported month not found");
-    const sourceRow = await this.db.query("SELECT payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month_category' AND object_id = ?").get(planId, `${start}\u001f${categoryId}`) as Row | null;
-    if (!sourceRow) throw new NotFoundError("Imported month category not found");
-    const sourceCategory = parseRawYnabObject(sourceRow.payload_json, "month category");
-    if (sourceCategory.deleted) throw new ValidationError("Deleted categories cannot have targets");
-    const category = await this.db.query("SELECT id FROM categories WHERE id = ? AND plan_id = ? AND deleted = 0").get(categoryId, planId);
-    if (!category) throw new NotFoundError("Category not found");
-  }
-
   async createImportSession(planId: string | null, source: string): Promise<string> {
     const id = createId("imp");
     if (planId) {
@@ -2151,21 +2038,6 @@ export class LedgerRepository {
       .query("SELECT payload_json FROM ynab_raw_objects WHERE plan_id = ? AND object_type = ? ORDER BY object_id")
       .all(planId, objectType) as Row[];
     return rows.map((row) => parseRawYnabObject(row.payload_json, objectType));
-  }
-
-  /**
-   * Rebuilds `ynab_source_month_activity` for one plan from its raw mirror.
-   *
-   * Only the YNAB import path writes raw objects, and only local development
-   * runs it (production has no YNAB config and no sync cron), so this runs at
-   * the end of an import rather than per object: a subtransaction can arrive
-   * before its parent, and a re-imported transaction whose date moved would
-   * otherwise leave a stale row in its old month. Clearing and recomputing the
-   * whole plan is correct in both cases and cheap at local-dev sizes.
-   */
-  async rematerialiseYnabMonthActivity(planId: string): Promise<void> {
-    await this.db.query(CLEAR_ONE_PLAN).run(planId);
-    await this.db.query(REMATERIALISE_ONE_PLAN).run(planId, planId);
   }
 
   /** Effective schedules: immutable YNAB rows plus HowMuch-owned overlays. */
@@ -3705,150 +3577,9 @@ function parseRawYnabObject(value: unknown, label: string): any {
     return JSON.parse(String(value));
   } catch {
     // A corrupt mirror must not make a read route quietly return fabricated
-    // budgeting data.  It is a database-integrity fault and should surface.
+    // data.  It is a database-integrity fault and should surface.
     throw new Error(`Stored YNAB ${label} is not valid JSON`);
   }
-}
-
-/** Applies mutable HowMuch assignments only to the response projection. */
-function projectMonthAssignments(
-  month: any,
-  currentAssignments: Row[],
-  currentTargets: Row[],
-  cumulativeDeltas: Map<string, number>,
-  activityDeltas: Map<string, number>,
-): any {
-  const byCategory = new Map(currentAssignments.map((assignment) => [String(assignment.category_id), assignment]));
-  const targetsByCategory = new Map(currentTargets.map((target) => [String(target.category_id), target]));
-  let assignedDelta = 0;
-  let activityChanged = false;
-  const categories = (month.categories ?? []).map((category: any) => {
-    const assignment = byCategory.get(String(category.id));
-    const target = targetsByCategory.get(String(category.id));
-    const sourceBudgeted = integerMilliunits(category.budgeted, "source category budgeted");
-    const effectiveBudgeted = assignment ? Number(assignment.budgeted_milli) : sourceBudgeted;
-    const currentAssignmentDelta = effectiveBudgeted - sourceBudgeted;
-    assignedDelta += currentAssignmentDelta;
-    const cumulativeAssignmentDelta = cumulativeDeltas.get(String(category.id)) ?? 0;
-    const sourceActivity = integerMilliunits(category.activity, "source category activity");
-    const activityDelta = activityDeltas.get(String(category.id)) ?? 0;
-    const effectiveActivity = sourceActivity + activityDelta;
-    activityChanged ||= activityDelta !== 0;
-    if (!assignment && !target && cumulativeAssignmentDelta === 0 && activityDelta === 0) return category;
-    return {
-      ...category,
-      budgeted: effectiveBudgeted,
-      activity: effectiveActivity,
-      balance: integerMilliunits(category.balance, "source category balance") + cumulativeAssignmentDelta + activityDelta,
-      ...(assignment ? { source_budgeted: sourceBudgeted, assignment_source: assignment.source } : {}),
-      ...(target ? projectMonthCategoryTarget(category, target) : {}),
-    };
-  });
-  if (currentAssignments.length === 0 && currentTargets.length === 0 && cumulativeDeltas.size === 0 && !activityChanged) return month;
-  return {
-    ...month,
-    budgeted: integerMilliunits(month.budgeted, "source month budgeted") + assignedDelta,
-    activity: categories.reduce((total: number, category: any) => total + integerMilliunits(category.activity, "category activity"), 0),
-    to_be_budgeted: integerMilliunits(month.to_be_budgeted, "source month ready to assign") - assignedDelta,
-    categories,
-  };
-}
-
-function projectMonthCategoryTarget(category: any, target: Row): any {
-  const goalTarget = target.goal_target_milli == null ? null : integerMilliunits(target.goal_target_milli, "target amount");
-  const balance = integerMilliunits(category.balance, "source category balance");
-  return {
-    goal_type: target.goal_type,
-    goal_target: goalTarget,
-    goal_target_month: target.goal_target_month,
-    goal_percentage_complete: goalTarget != null && goalTarget > 0 ? Math.min(100, Math.max(0, Math.round((balance / goalTarget) * 100))) : null,
-    goal_months_to_budget: null,
-    goal_under_funded: goalTarget != null ? Math.max(0, goalTarget - balance) : 0,
-    goal_overall_funded: goalTarget != null ? Math.min(goalTarget, Math.max(0, balance)) : 0,
-    goal_overall_left: goalTarget != null ? Math.max(0, goalTarget - balance) : 0,
-    target_source: target.source,
-  };
-}
-
-function normaliseMonthCategoryTarget(input: MonthCategoryTargetInput): Required<Pick<MonthCategoryTargetInput, "goal_type" | "goal_target" | "goal_target_month">> {
-  if (!input || typeof input !== "object" || Array.isArray(input)) throw new ValidationError("target must be an object or null");
-  if (input.goal_type === null) {
-    if (input.goal_target != null || input.goal_target_month != null) throw new ValidationError("Cleared targets cannot include an amount or target month");
-    return { goal_type: null, goal_target: null, goal_target_month: null };
-  }
-  if (!["TB", "TBD", "MF", "NEED", "DEBT"].includes(String(input.goal_type))) {
-    throw new ValidationError("goal_type must be TB, TBD, MF, NEED, or DEBT");
-  }
-  if (!Number.isSafeInteger(input.goal_target) || Number(input.goal_target) <= 0) {
-    throw new ValidationError("goal_target must be a positive integer milliunits");
-  }
-  const targetMonth = input.goal_target_month == null ? null : normaliseBudgetMonth(input.goal_target_month);
-  return { goal_type: input.goal_type, goal_target: Number(input.goal_target), goal_target_month: targetMonth };
-}
-
-function activityMap(rows: Row[]): Map<string, number> {
-  const amounts = new Map<string, number>();
-  for (const row of rows) {
-    if (row.id == null) continue;
-    addActivity(amounts, String(row.id), integerMilliunits(row.activity, "transaction activity"));
-  }
-  return amounts;
-}
-
-/**
- * Turns materialised source rows into the same map the raw scan produced.
- *
- * `category_id = ''` is the "no category on the source line" sentinel: the
- * backfill cannot resolve it because the imported "Uncategorized" category is
- * read per month from the month snapshot. Resolving to nothing drops the line,
- * which is what the raw scan did.
- */
-function materialisedActivityMap(rows: Row[], uncategorisedCategoryID: string | null): Map<string, number> {
-  const amounts = new Map<string, number>();
-  for (const row of rows) {
-    const stored = String(row.category_id ?? "");
-    const categoryID = stored === "" ? uncategorisedCategoryID : stored;
-    if (!categoryID) continue;
-    addActivity(amounts, categoryID, integerMilliunits(row.activity, "source month activity"));
-  }
-  return amounts;
-}
-
-function addActivity(amounts: Map<string, number>, categoryID: string, amount: number): void {
-  amounts.set(categoryID, (amounts.get(categoryID) ?? 0) + amount);
-}
-
-function isUncategorisedName(value: unknown): boolean {
-  const name = String(value ?? "").trim().toLocaleLowerCase();
-  return name === "uncategorized" || name === "uncategorised";
-}
-
-function cumulativeAssignmentDeltas(rows: Row[]): Map<string, number> {
-  const deltas = new Map<string, number>();
-  for (const row of rows) {
-    const source = parseRawYnabObject(row.source_payload_json, "assignment source month category");
-    const delta = integerMilliunits(row.budgeted_milli, "assigned category budgeted")
-      - integerMilliunits(source.budgeted, "source category budgeted");
-    const categoryId = String(row.category_id);
-    deltas.set(categoryId, (deltas.get(categoryId) ?? 0) + delta);
-  }
-  return deltas;
-}
-
-function integerMilliunits(value: unknown, label: string): number {
-  const number = value == null ? 0 : Number(value);
-  if (!Number.isSafeInteger(number)) {
-    throw new ValidationError(`${label} must be integer milliunits`);
-  }
-  return number;
-}
-
-function normaliseBudgetMonth(month: string): string {
-  const start = normaliseMonthStart(month);
-  if (!/^\d{4}-(0[1-9]|1[0-2])-01$/.test(start)) {
-    throw new ValidationError("month must be YYYY-MM");
-  }
-  return start;
 }
 
 function normaliseMonthStart(month: string): string {

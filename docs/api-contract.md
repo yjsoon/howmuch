@@ -202,32 +202,36 @@ Create body:
 
 `GET /v1/plans/{plan_id}/categories`
 
-Return category groups with categories. For a locally created plan, assignment fields may be zero/null when not meaningful.
+Return category groups with categories. HowMuch has no budgeting, so the YNAB-shaped assignment fields on each category (`budgeted`, `activity`, `balance`, `goal_*`) are always zero or null.
 
-### Months
+#### Managing categories (HowMuch-native plans only)
 
-`GET /v1/plans/{plan_id}/months/{month}`
+- `POST /v1/plans/{plan_id}/category_groups` with `{ "category_group": { "id"?, "name", "hidden"? } }`
+- `PATCH /v1/plans/{plan_id}/category_groups/{category_group_id}` with `{ "category_group": { "name"?, "hidden"? } }`
+- `POST /v1/plans/{plan_id}/categories` with `{ "category": { "id"?, "category_group_id", "name", "hidden"? } }`
+- `PATCH /v1/plans/{plan_id}/categories/{category_id}` with `{ "category": { "name"?, "hidden"?, "category_group_id"? } }`
+- `DELETE /v1/plans/{plan_id}/categories/{category_id}`
 
-For an API-imported YNAB plan, this returns the imported month and category records, including assigned/budgeted, activity, balance, notes, targets, goals, and deleted flags. For a local-only plan with no imported month mirror, the service falls back to transaction-derived activity and zero/null assignment fields.
+A plan is **native** when it has no YNAB `month` raw object. On a YNAB-mirror plan, such as the owner's production plan, every route above returns `409 ynab_mirror_plan` and changes nothing.
 
-`PATCH /v1/plans/{plan_id}/months/{month}/categories/{category_id}`
+Owners and editors may call these routes; the default-plan API token is also accepted. Creates return `201`, updates and deletes `200`. Each response carries the `category_group` (with its live `categories`) or the `category`, plus `server_knowledge`. Every write moves `server_knowledge`, so clients revalidate cached categories.
 
-Update one imported category assignment with a safe-integer milliunit value:
+Rules:
 
-```json
-{ "category": { "budgeted": 125000 } }
-```
+- Ids are chosen by the client and must be 1–128 letters, digits, dots, underscores, colons or hyphens. Without an id, the server derives a stable one from the `Idempotency-Key`, or generates one. An id that already exists anywhere on the server returns `409 conflict`.
+- Names are trimmed and must be 1–100 visible characters. Unknown fields return `400`.
+- `category_group_id` must name a live group in the same plan, otherwise `400`. A missing category or group in the path returns `404`.
+- Internal groups and categories (YNAB's bookkeeping rows, flagged `internal`) are read-only, and new categories cannot be added to an internal group.
+- `DELETE` is a soft delete (`deleted: true`). It returns `409 category_in_use` while a live transaction, split line, schedule or schedule split still names the category.
+- Send an `Idempotency-Key` (the Idempotency-Key rules above apply). An exact retry replays the result; reusing the key for a different request returns `409 conflict`.
 
-The value is stored as a HowMuch assignment overlay; imported YNAB objects remain unchanged. The response includes the updated `category` and projected `month`. Ready to assign and Available are recalculated from the assignment delta and current normalised month activity. Setting the amount back to the imported assignment clears the overlay.
+SQLite checks and writes in one immediate transaction. D1 repeats every check inside the guarded write batch, so a concurrent change aborts the whole write.
 
-Update a HowMuch-local target with a supported YNAB goal type and a positive integer milliunit amount:
+### Budgeting (removed)
 
-```http
-PATCH /v1/plans/{plan_id}/months/{month}/categories/{category_id}
-{ "category": { "target": { "goal_type": "TB", "goal_target": 500000, "goal_target_month": "2026-12" } } }
-```
+HowMuch has no budgeting. The YNAB month routes (`GET /v1/plans/{plan_id}/months/{month}`, `PATCH …/months/{month}/categories/{category_id}` for assignments and targets, and `GET …/months/{month}/transactions`) and the money-movement routes now return `404`.
 
-`goal_type` is one of `TB`, `TBD`, `MF`, `NEED`, or `DEBT`; the target month is optional. `{ "target": null }` hides the target in a HowMuch-local overlay. `{ "restore_target": true }` deletes that overlay and returns to the exact imported target. Both target mutations are authenticated and use D1's versioned guarded-command protocol; neither mutates `ynab_raw_objects` or writes back to YNAB.
+The YNAB importer still mirrors months, month categories and money movements into `ynab_raw_objects`. The tables behind the old overlays (`plan_month_assignments`, `plan_month_category_targets`) and the materialised `ynab_source_month_activity` baseline are retained legacy tables: no migration drops them and no code reads or writes them.
 
 ### Scheduled transactions
 
@@ -264,13 +268,7 @@ Production invokes a separate, private automatic materialiser at `16:05 UTC` eac
 
 ### Imported read-only collections
 
-The following GET endpoints return exact objects from the imported YNAB mirror. They have no HowMuch mutation endpoint yet:
-
-- `GET /v1/plans/{plan_id}/payee_locations`
-- `GET /v1/plans/{plan_id}/money_movements`
-- `GET /v1/plans/{plan_id}/money_movement_groups`
-- `GET /v1/plans/{plan_id}/months/{month}/money_movements`
-- `GET /v1/plans/{plan_id}/months/{month}/money_movement_groups`
+`GET /v1/plans/{plan_id}/payee_locations` returns exact objects from the imported YNAB mirror. It has no HowMuch mutation endpoint yet.
 
 ### Transactions
 
@@ -308,7 +306,6 @@ Scoped lists:
 - `GET /v1/plans/{plan_id}/accounts/{account_id}/transactions`
 - `GET /v1/plans/{plan_id}/payees/{payee_id}/transactions`
 - `GET /v1/plans/{plan_id}/categories/{category_id}/transactions`
-- `GET /v1/plans/{plan_id}/months/{month}/transactions`
 
 Unapproved count:
 
@@ -553,6 +550,55 @@ Transaction response fields:
 - `import_payee_name_original`
 - `deleted`
 - `subtransactions`
+
+### Plan snapshots
+
+A snapshot moves a whole ledger between installs, for example from a phone's local database to a self-hosted server.
+
+`GET /v1/plans/{plan_id}/export_snapshot`
+
+Owners and editors (and the default-plan API token) may export; viewers get `403`. The response is `{ "data": { "snapshot": { … }, "server_knowledge": 12 } }`. All reads come from one consistent batch.
+
+`POST /v1/plans/{plan_id}/import_snapshot`
+
+```http
+POST /v1/plans/{plan_id}/import_snapshot
+Idempotency-Key: <stable-client-key>
+Content-Type: application/json
+
+{ "snapshot": { "format": "howmuch-plan-snapshot", "version": 1, … } }
+```
+
+Only an owner (or the default-plan API token) may import, and an `Idempotency-Key` is required. The response is `201` with `imported` (row counts per section), `replayed`, and `server_knowledge`. An exact retry replays and writes nothing; the same key with a different snapshot returns `409 conflict`.
+
+Snapshot format, version 1. Every section is an array and may be omitted. Amounts are integer milliunits, dates `YYYY-MM-DD`, and ids follow the category id rules above.
+
+- `category_groups`: `id`, `name`, `hidden`, `internal`, `deleted`
+- `categories`: `id`, `category_group_id`, `name`, `hidden`, `internal`, `deleted`
+- `payees`: `id`, `name`, `transfer_account_id`, `deleted`
+- `accounts`: `id`, `name`, `icon`, `type`, `on_budget`, `closed`, `opening_balance`, `transfer_payee_id`
+- `transactions`: `id`, `account_id`, `date`, `amount`, `memo`, `cleared`, `approved`, `flag_color`, `flag_name`, `payee_id`, `payee_name`, `category_id`, `transfer_account_id`, `transfer_transaction_id`, `matched_transaction_id`, `import_id`, `import_payee_name`, `import_payee_name_original`, `subtransactions` (`id`, `amount`, `memo`, `payee_id`, `payee_name`, `category_id`, `transfer_account_id`, `transfer_transaction_id`)
+- `scheduled_transactions`: `id`, `account_id`, `date_first`, `date_next`, `frequency`, `amount`, `memo`, `flag_color`, `payee_id`, `category_id`, `transfer_account_id`, `subtransactions` (`id`, `amount`, `memo`, `payee_id`, `category_id`, `transfer_account_id`)
+
+`payee_name` (optional, at most 500 characters) is the free-text payee of a row or split line that has no payee row. Export sets it only when `payee_id` is null; import ignores it when `payee_id` is set and takes the name from that payee, as reads do. It was added without a version bump: the parser rejects unknown top-level sections but not unknown fields inside a row, so a server that predates it accepts a snapshot carrying it and simply drops the name, as before.
+
+Export writes live accounts, transactions and schedules, and every group, category and payee (tombstones included, because live transactions may still name them). An account's `opening_balance` is exported as the value that reproduces its displayed balance from its live transactions. Budgeting data, YNAB raw objects, account preferences (per user) and Rewards Tracker configuration are not included; set preferences and rewards cards through their own endpoints after importing. Some derived or server-side state is also not carried:
+
+- `last_reconciled_date` on an account comes from the reconciliation history, which is not exported. After import it is the date of the latest reconciled transaction, which is earlier than the original when the last statement date fell after that transaction.
+- `direct_import_linked` and `direct_import_in_error` are YNAB bank-link flags; imported accounts read `false`.
+- Imported transactions are stamped `source_kind: snapshot-import` with no `source_ref`. A materialised schedule occurrence therefore loses its link to the schedule, so replaying an already-entered occurrence on the new server is refused rather than replayed. The schedule's `date_next` travels, so future occurrences are unaffected.
+
+Import rules:
+
+- The plan must be native (`409 ynab_mirror_plan` otherwise) and empty, as a freshly created plan is: no live accounts, transactions, schedules, payees, or non-internal categories or category groups. Anything else returns `409 plan_not_empty`. Internal groups and categories may already exist.
+- Every reference must resolve inside the snapshot: groups, categories, payees, accounts, transfer accounts, and transfer links to a transaction or split line. Split lines must sum to their parent, which then has no category. Schedules may only name live payees and categories. Violations return `400` and write nothing.
+- Transfer links must be two-sided, as the server writes them. A row with `transfer_transaction_id` must also set `transfer_account_id`, and its counterpart must link back to it, sit in that account, carry the negated amount, and name the row's account as its own `transfer_account_id`. A split line's counterpart is a top-level transaction, never another split line. A `transfer_account_id` without a `transfer_transaction_id` (a one-sided transfer) is allowed.
+- An unknown top-level key (for example `month_assignments`) returns `400`, so nothing is dropped silently. `deleted: true` transactions and schedules are skipped.
+- `on_budget` defaults from `type`. An account without a transfer payee gets a `Transfer : <name>` payee with an id stable for that plan and account. Balances are recomputed from `opening_balance` and the imported transactions.
+- An id that already exists anywhere on the server returns `409 conflict`, and nothing is imported.
+- The request body is limited to 8 MiB (`413 payload_too_large`). Imports are meant for device-sized ledgers. A very large ledger (tens of thousands of transactions) should be loaded with the offline bootstrap procedure in [Restoring or bulk-loading D1 data](deployment.md#restoring-or-bulk-loading-d1-data) instead.
+
+The import is one atomic write. Each table's rows are bound as JSON chunks of at most 512 KiB and expanded in SQL with `json_each`, so the statement count grows with the snapshot's size in bytes, not its row count. On SQLite the whole import runs in one immediate transaction; on D1 it is one guarded batch that re-checks emptiness and the native-plan rule inside the batch. A failure leaves the plan exactly as it was, never partly imported.
 
 ## Native Endpoints
 

@@ -45,6 +45,21 @@ struct APISettings: Codable, Equatable {
   /// a fresh install prevents requests from accidentally targeting the old
   /// development-only `local-plan` identifier.
   var planID = ""
+  /// Where requests go. Settings saved before local mode existed have no
+  /// value here and decode as `.server`, so an existing install keeps its
+  /// connection exactly as it was.
+  var mode: Mode = .server
+
+  enum Mode: String, Codable {
+    /// A HowMuch server, reached over the network.
+    case server
+    /// The embedded engine and on-device database (`LocalEngine`).
+    case local
+  }
+
+  var isLocal: Bool {
+    mode == .local
+  }
 
   var trimmedBaseURL: String {
     baseURLString.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -259,6 +274,24 @@ struct APISettings: Codable, Equatable {
       return APISettings()
     }
     var settings = decoded
+    if settings.isLocal {
+      // The engine token only has to match between the app and its own
+      // engine, so a Keychain that lost it is repaired rather than signed out.
+      if let normalizedBaseURL = settings.normalizedBaseURLString,
+         let token = CredentialStore.load(for: normalizedBaseURL) {
+        settings.sessionToken = token
+      } else {
+        settings.sessionToken = randomEngineToken()
+        settings.save(to: defaults)
+      }
+      // Local mode has one principal. An install whose user id was cleared
+      // (an earlier build signed local mode out) is restored, not stranded.
+      if settings.authenticatedUserID.isEmpty {
+        settings.authenticatedUserID = localUserID
+        settings.save(to: defaults)
+      }
+      return settings
+    }
     if settings.normalizedBaseURLString == normalizedBaseURLString(from: legacyDevelopmentBaseURL) {
       settings.baseURLString = productionBaseURL
       settings.sessionToken = ""
@@ -339,6 +372,19 @@ struct APISettings: Codable, Equatable {
     defaults.set(data, forKey: Self.userDefaultsKey)
   }
 
+  /// The session saved in the Keychain for a server, if any.
+  static func savedSessionToken(forBaseURL baseURLString: String) -> String? {
+    normalizedBaseURLString(from: baseURLString).flatMap(CredentialStore.load(for:))
+  }
+
+  /// Drops the session saved in the Keychain for a server.
+  static func forgetSavedSession(forBaseURL baseURLString: String) {
+    guard let normalized = normalizedBaseURLString(from: baseURLString) else {
+      return
+    }
+    CredentialStore.remove(for: normalized)
+  }
+
 #if DEBUG
   /// Points credential storage at a service the caller owns, so a test never
   /// reads or migrates the token the installed app keeps for a real server.
@@ -348,6 +394,117 @@ struct APISettings: Codable, Equatable {
     CredentialStore.useService(name)
   }
 #endif
+}
+
+// MARK: - Local mode
+
+extension APISettings {
+  /// Local requests are addressed as though to this server, so endpoint-scoped
+  /// state (the Keychain token, view preferences, snapshots) needs no special case.
+  static let localBaseURL = LocalEngine.origin
+  /// The id the engine reports for its API-token principal (`GET /v1/user`).
+  static let localUserID = "local-user"
+  static let localPlanIDKey = "HowMuch.LocalPlanID"
+
+  /// Local-mode settings for this install. The plan id is created once and
+  /// kept, so the on-device ledger stays addressable after any later change
+  /// of mode; the engine token is new each time and saved to the Keychain by `save`.
+  /// `livePlanIDs` are the plans already in the on-device database, read
+  /// before the engine starts (see `LocalEngine.livePlanIDs()`).
+  static func local(in defaults: UserDefaults = .standard, livePlanIDs: [String] = []) -> APISettings {
+    APISettings(
+      baseURLString: localBaseURL,
+      sessionToken: randomEngineToken(),
+      authenticatedUserID: localUserID,
+      planID: localPlanID(in: defaults, livePlanIDs: livePlanIDs),
+      mode: .local
+    )
+  }
+
+  static func localPlanID(in defaults: UserDefaults = .standard, livePlanIDs: [String] = []) -> String {
+    let saved = defaults.string(forKey: localPlanIDKey)
+    let planID = LocalPlanRecovery.planID(saved: saved, livePlanIDs: livePlanIDs)
+      ?? "plan_" + UUID().uuidString.lowercased()
+    if planID != saved {
+      defaults.set(planID, forKey: localPlanIDKey)
+    }
+    return planID
+  }
+
+  static func randomEngineToken() -> String {
+    var bytes = [UInt8](repeating: 0, count: 32)
+    if SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) != errSecSuccess {
+      return UUID().uuidString + UUID().uuidString
+    }
+    return bytes.map { String(format: "%02x", $0) }.joined()
+  }
+
+  /// Whether this install has ever saved a connection. A fresh install has
+  /// not; an install that signed out or lost its session still has.
+  static func hasSavedSettings(in defaults: UserDefaults = .standard) -> Bool {
+    defaults.data(forKey: userDefaultsKey) != nil
+  }
+
+  var localEngineConfig: LocalEngineConfig {
+    LocalEngineConfig(
+      apiToken: sessionToken,
+      defaultPlanId: planID,
+      timeZone: TimeZone.current.identifier,
+      newPlanSettings: Self.newPlanSettings
+    )
+  }
+
+  /// Read once per launch so the engine config stays equal between calls.
+  private static let newPlanSettings = PlanSettingsSeed.from(locale: .current)
+}
+
+extension APISettings {
+  /// Written by hand only so that a missing `mode` decodes as `.server`; every
+  /// other key decodes exactly as the synthesised conformance did.
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.init(
+      baseURLString: try container.decode(String.self, forKey: .baseURLString),
+      username: try container.decode(String.self, forKey: .username),
+      sessionToken: try container.decode(String.self, forKey: .sessionToken),
+      authenticatedUserID: try container.decode(String.self, forKey: .authenticatedUserID),
+      planID: try container.decode(String.self, forKey: .planID),
+      mode: try container.decodeIfPresent(Mode.self, forKey: .mode) ?? .server
+    )
+  }
+}
+
+/// Which plan the on-device ledger uses when local mode starts.
+enum LocalPlanRecovery {
+  /// The saved id wins. Without one (lost preferences, a restored backup),
+  /// a database holding exactly one live plan is adopted, so the ledger on
+  /// the device is not orphaned behind a new, empty plan. Otherwise `nil`:
+  /// the caller creates a plan.
+  static func planID(saved: String?, livePlanIDs: [String]) -> String? {
+    if let saved, !saved.isEmpty {
+      return saved
+    }
+    return livePlanIDs.count == 1 ? livePlanIDs[0] : nil
+  }
+}
+
+/// Where a launch starts: first use, a connection that needs signing in, or
+/// the app itself.
+enum LaunchRoute: Equatable {
+  case welcome
+  case connection
+  case main
+
+  /// Only an install that has never saved settings is offered the welcome
+  /// screen. A saved but signed-out connection (a revoked session, a restore
+  /// without its Keychain) returns to Connection, as it always has, so an
+  /// existing server user is never moved into local mode.
+  static func resolve(hasSavedSettings: Bool, isAuthenticated: Bool) -> LaunchRoute {
+    if isAuthenticated {
+      return .main
+    }
+    return hasSavedSettings ? .connection : .welcome
+  }
 }
 
 private enum CredentialStore {
@@ -982,145 +1139,6 @@ struct PayeesPayload: Decodable {
   let payees: [Payee]
 }
 
-struct PlanMonthPayload: Decodable {
-  let month: PlanMonth
-  let serverKnowledge: Int?
-}
-
-struct PlanAssignmentRequest: Encodable {
-  private let category: Category
-
-  init(budgeted: Int) {
-    category = Category(budgeted: budgeted)
-  }
-
-  private struct Category: Encodable {
-    let budgeted: Int
-  }
-}
-
-struct PlanTargetRequest: Encodable {
-  private let category: Category
-
-  init(target: PlanTargetPayload?) {
-    category = Category(target: target)
-  }
-
-  private struct Category: Encodable {
-    let target: PlanTargetPayload?
-
-    func encode(to encoder: Encoder) throws {
-      var container = encoder.container(keyedBy: CodingKeys.self)
-      try container.encode(target, forKey: .target)
-    }
-
-    private enum CodingKeys: String, CodingKey {
-      case target
-    }
-  }
-}
-
-struct PlanTargetRestoreRequest: Encodable {
-  private let category = Category()
-
-  private struct Category: Encodable {
-    let restoreTarget = true
-  }
-}
-
-struct PlanTargetPayload: Encodable {
-  let goalType: String
-  let goalTarget: Int
-  let goalTargetMonth: String?
-}
-
-/// A monthly planning snapshot. Imported values stay read-only unless a
-/// HowMuch-owned assignment or target overlay is present.
-struct PlanMonth: Decodable {
-  let month: String
-  let note: String?
-  let income: Int?
-  let budgeted: Int?
-  let activity: Int?
-  let toBeBudgeted: Int?
-  let ageOfMoney: Int?
-  let deleted: Bool?
-  let categories: [PlanMonthCategory]
-}
-
-struct PlanMonthCategory: Decodable, Identifiable, Hashable {
-  let id: String
-  let name: String
-  let categoryGroupID: String
-  let hidden: Bool?
-  let originalCategoryGroupID: String?
-  let note: String?
-  let budgeted: Int?
-  let activity: Int?
-  let balance: Int?
-  let goalType: String?
-  let goalDay: Int?
-  let goalCadence: Int?
-  let goalCadenceFrequency: Int?
-  let goalCreationMonth: String?
-  let goalTarget: Int?
-  let goalTargetMonth: String?
-  let goalPercentageComplete: Int?
-  let goalMonthsToBudget: Int?
-  let goalUnderFunded: Int?
-  let goalOverallFunded: Int?
-  let goalOverallLeft: Int?
-  let goalNeededForSpending: Int?
-  let goalNeedsWholeAmount: Bool?
-  let targetSource: String?
-  let deleted: Bool?
-
-  private enum CodingKeys: String, CodingKey {
-    case id
-    case name
-    // `convertFromSnakeCase` normalises the API's `*_id` suffix to `*Id`.
-    // Swift acronym spelling therefore needs the same explicit bridge used by
-    // Category, Transaction, and the report models below.
-    case categoryGroupID = "categoryGroupId"
-    case hidden
-    case originalCategoryGroupID = "originalCategoryGroupId"
-    case note
-    case budgeted
-    case activity
-    case balance
-    case goalType
-    case goalDay
-    case goalCadence
-    case goalCadenceFrequency
-    case goalCreationMonth
-    case goalTarget
-    case goalTargetMonth
-    case goalPercentageComplete
-    case goalMonthsToBudget
-    case goalUnderFunded
-    case goalOverallFunded
-    case goalOverallLeft
-    case goalNeededForSpending
-    case goalNeedsWholeAmount
-    case targetSource
-    case deleted
-  }
-
-  var hasTarget: Bool {
-    goalType != nil || (goalTarget ?? 0) != 0
-  }
-
-  var targetProgress: Double? {
-    if let goalPercentageComplete {
-      return min(max(Double(goalPercentageComplete) / 100, 0), 1)
-    }
-    guard let goalTarget, goalTarget > 0 else {
-      return nil
-    }
-    return min(max(Double(balance ?? 0) / Double(goalTarget), 0), 1)
-  }
-}
-
 struct Payee: Codable, Identifiable, Hashable {
   let id: String
   let name: String
@@ -1609,6 +1627,72 @@ enum SplitMirrorUnlink {
   }
 }
 
+/// What a delete takes off each account's balances, so the accounts on screen
+/// (and the snapshot written from them) match the server before the follow-up
+/// read lands -- or when it never does.
+enum DeleteBalanceDelta {
+  struct Delta: Equatable {
+    var balance = 0
+    var cleared = 0
+    var uncleared = 0
+  }
+
+  /// One entry per account a removed row sat in. `removedIDs` are every row
+  /// the server tombstoned; `knownRows` are rows in hand before the delete,
+  /// by id. A removed row not in hand (the far side of a transfer on an
+  /// unloaded page) is derived from the link that names it, and counts as
+  /// uncleared: its own cleared state is unknown, and the next accounts read
+  /// settles the split between cleared and uncleared either way.
+  static func deltas(
+    deleted: Transaction,
+    removedIDs: Set<String>,
+    knownRows: [String: Transaction]
+  ) -> [String: Delta] {
+    var result: [String: Delta] = [:]
+    func take(_ amount: Int, from accountID: String, cleared: ClearedState) {
+      var delta = result[accountID, default: Delta()]
+      delta.balance -= amount
+      if cleared == .uncleared {
+        delta.uncleared -= amount
+      } else {
+        delta.cleared -= amount
+      }
+      result[accountID] = delta
+    }
+    for id in removedIDs.sorted() {
+      if let row = knownRows[id] ?? (id == deleted.id ? deleted : nil) {
+        guard !row.deleted else { continue }
+        take(row.amount, from: row.accountID, cleared: row.cleared)
+      } else if deleted.transferTransactionID == id, let accountID = deleted.transferAccountID {
+        take(-deleted.amount, from: accountID, cleared: .uncleared)
+      } else if let line = deleted.subtransactions.first(where: { $0.transferTransactionID == id }),
+                let accountID = line.transferAccountID {
+        take(-line.amount, from: accountID, cleared: .uncleared)
+      }
+    }
+    return result.filter { $0.value != Delta() }
+  }
+
+  static func applying(_ deltas: [String: Delta], to accounts: [Account]) -> [Account] {
+    accounts.map { account in
+      guard let delta = deltas[account.id] else { return account }
+      return Account(
+        id: account.id,
+        name: account.name,
+        icon: account.icon,
+        type: account.type,
+        onBudget: account.onBudget,
+        closed: account.closed,
+        balance: account.balance + delta.balance,
+        clearedBalance: account.clearedBalance + delta.cleared,
+        unclearedBalance: account.unclearedBalance + delta.uncleared,
+        lastReconciledDate: account.lastReconciledDate,
+        deleted: account.deleted
+      )
+    }
+  }
+}
+
 extension Subtransaction {
   /// True when this line is the one a deleted mirror left behind. A line that
   /// still names the deleted mirror is one; the mirror's own row names its line
@@ -1809,12 +1893,12 @@ struct ReconciliationMismatchDetail: Equatable {
   let message: String
 }
 
-struct SpendingBreakdownReport: Decodable {
+struct SpendingBreakdownReport: Codable {
   let total: Int
   let groups: [SpendingBreakdownGroup]
 }
 
-struct SpendingBreakdownGroup: Decodable, Identifiable {
+struct SpendingBreakdownGroup: Codable, Identifiable {
   var id: String { categoryID }
 
   let categoryID: String
@@ -1836,12 +1920,12 @@ struct SpendingBreakdownGroup: Decodable, Identifiable {
   }
 }
 
-struct IncomeVsSpendingReport: Decodable {
+struct IncomeVsSpendingReport: Codable {
   let interval: String
   let periods: [IncomeVsSpendingPeriod]
 }
 
-struct IncomeVsSpendingPeriod: Decodable, Identifiable {
+struct IncomeVsSpendingPeriod: Codable, Identifiable {
   var id: String { period }
 
   let period: String
@@ -1851,11 +1935,11 @@ struct IncomeVsSpendingPeriod: Decodable, Identifiable {
   let cumulativeNet: Int
 }
 
-struct NetWorthReport: Decodable {
+struct NetWorthReport: Codable {
   let periods: [NetWorthPeriod]
 }
 
-struct NetWorthPeriod: Decodable, Identifiable {
+struct NetWorthPeriod: Codable, Identifiable {
   var id: String { period }
 
   let period: String
@@ -1865,7 +1949,7 @@ struct NetWorthPeriod: Decodable, Identifiable {
   let accounts: [NetWorthAccount]
 }
 
-struct NetWorthAccount: Decodable, Identifiable {
+struct NetWorthAccount: Codable, Identifiable {
   var id: String { accountID }
 
   let accountID: String
@@ -1879,12 +1963,12 @@ struct NetWorthAccount: Decodable, Identifiable {
   }
 }
 
-struct AgeOfMoneyReport: Decodable {
+struct AgeOfMoneyReport: Codable {
   let interval: String
   let periods: [AgeOfMoneyPeriod]
 }
 
-struct AgeOfMoneyPeriod: Decodable, Identifiable {
+struct AgeOfMoneyPeriod: Codable, Identifiable {
   var id: String { period }
 
   let period: String
@@ -1909,7 +1993,7 @@ private extension KeyedDecodingContainer {
   }
 }
 
-enum RewardGroupBy: String, CaseIterable, Identifiable, Decodable, Sendable {
+enum RewardGroupBy: String, CaseIterable, Identifiable, Codable, Sendable {
   case flag
   case payee
   case category
@@ -2347,7 +2431,7 @@ struct RewardSettingsPayload: Decodable, Sendable {
 typealias RewardsCard = CreditCard
 typealias RewardsTrackerCard = CreditCard
 
-struct RewardsReport: Decodable, Sendable {
+struct RewardsReport: Codable, Sendable {
   let from: String?
   let to: String?
   let asOf: String?
@@ -2378,14 +2462,14 @@ struct RewardsReport: Decodable, Sendable {
   }
 }
 
-struct RewardsTotals: Decodable, Sendable {
+struct RewardsTotals: Codable, Sendable {
   let spend: Double
   let rewardDollars: Double
   let cashback: Double
   let miles: Double
 }
 
-struct RewardsCardRow: Decodable, Identifiable, Sendable {
+struct RewardsCardRow: Codable, Identifiable, Sendable {
   var id: String { card.id }
 
   let card: RewardsCard
@@ -2394,7 +2478,7 @@ struct RewardsCardRow: Decodable, Identifiable, Sendable {
   let calculation: RewardsCalculation
 }
 
-struct RewardsCalculation: Decodable, Sendable {
+struct RewardsCalculation: Codable, Sendable {
   let period: String
   let totalSpend: Double
   let countedSpend: Double
@@ -2420,13 +2504,13 @@ struct RewardsCalculation: Decodable, Sendable {
   let flags: [RewardsFlagRow]
 }
 
-struct RewardsCalculationPeriod: Decodable, Sendable {
+struct RewardsCalculationPeriod: Codable, Sendable {
   let start: String
   let end: String
   let calculation: RewardsCalculation
 }
 
-struct RewardsMonthlyQualification: Decodable, Sendable {
+struct RewardsMonthlyQualification: Codable, Sendable {
   let start: String
   let end: String
   let spend: Double
@@ -2434,12 +2518,12 @@ struct RewardsMonthlyQualification: Decodable, Sendable {
   let status: String
 }
 
-struct RewardsTransactionReward: Decodable, Sendable {
+struct RewardsTransactionReward: Codable, Sendable {
   let reward: Double
   let rewardDollars: Double
 }
 
-struct RewardsFlagRow: Decodable, Identifiable, Sendable {
+struct RewardsFlagRow: Codable, Identifiable, Sendable {
   var id: String { subcategoryId }
 
   let subcategoryId: String
@@ -2459,7 +2543,7 @@ struct RewardsFlagRow: Decodable, Identifiable, Sendable {
   var blockSize: Double? = nil
 }
 
-struct RewardsGroupRow: Decodable, Identifiable, Sendable {
+struct RewardsGroupRow: Codable, Identifiable, Sendable {
   var id: String { key }
 
   let key: String
@@ -2637,6 +2721,10 @@ struct TransactionWriteRequest: Codable, Equatable {
   /// Client-minted create identity. The server returns the existing row when
   /// this value is replayed, so a lost response cannot double-post money.
   var importID: String?
+  /// Client-minted transaction id (`txn_<uuid>`), sent only on a create. The
+  /// outbox keeps it on the command and stamps it here at send time, so a
+  /// queued create has its real id before the server has seen it.
+  var id: String?
 
   private enum CodingKeys: String, CodingKey {
     case accountID
@@ -2651,6 +2739,7 @@ struct TransactionWriteRequest: Codable, Equatable {
     case flagColor
     case subtransactions
     case importID
+    case id
   }
 
   init(
@@ -2665,7 +2754,8 @@ struct TransactionWriteRequest: Codable, Equatable {
     approved: Bool,
     flagColor: String?,
     subtransactions: [TransactionSubtransactionWriteRequest],
-    importID: String? = nil
+    importID: String? = nil,
+    id: String? = nil
   ) {
     self.accountID = accountID
     self.date = date
@@ -2679,6 +2769,7 @@ struct TransactionWriteRequest: Codable, Equatable {
     self.flagColor = flagColor
     self.subtransactions = subtransactions
     self.importID = importID
+    self.id = id
   }
 
   func encode(to encoder: Encoder) throws {
@@ -2695,6 +2786,7 @@ struct TransactionWriteRequest: Codable, Equatable {
     try container.encode(flagColor, forKey: .flagColor)
     try container.encode(subtransactions, forKey: .subtransactions)
     try container.encodeIfPresent(importID, forKey: .importID)
+    try container.encodeIfPresent(id, forKey: .id)
   }
 
   /// Captures made before split support did not persist this key. Keep those
@@ -2714,9 +2806,12 @@ struct TransactionWriteRequest: Codable, Equatable {
     flagColor = try container.decodeIfPresent(String.self, forKey: .flagColor)
     subtransactions = try container.decodeIfPresent([TransactionSubtransactionWriteRequest].self, forKey: .subtransactions) ?? []
     importID = try container.decodeIfPresent(String.self, forKey: .importID)
+    id = try container.decodeIfPresent(String.self, forKey: .id)
   }
 }
 
+/// The create-only queue item from before the outbox moved to a file. Kept
+/// only so `OutboxStore` can read and migrate what is still in UserDefaults.
 struct PendingTransaction: Codable, Equatable, Identifiable {
   let id: UUID
   let request: TransactionWriteRequest
@@ -2765,72 +2860,6 @@ struct PendingTransaction: Codable, Equatable, Identifiable {
   }
 }
 
-enum OutboxStore {
-  static let userDefaultsKey = "HowMuch.Outbox"
-
-  static func load(from defaults: UserDefaults = .standard) -> [PendingTransaction] {
-    guard
-      let data = defaults.data(forKey: userDefaultsKey),
-      let decoded = try? JSONDecoder().decode([PendingTransaction].self, from: data)
-    else {
-      return []
-    }
-    return decoded
-  }
-
-  static func save(_ pending: [PendingTransaction], to defaults: UserDefaults = .standard) throws {
-    let data = try JSONEncoder().encode(pending)
-    defaults.set(data, forKey: userDefaultsKey)
-  }
-}
-
-enum OutboxBatch {
-  static func appending(
-    _ drafts: [TransactionDraft],
-    onto existing: [PendingTransaction],
-    fingerprint: String,
-    isCurrentConnection: (String) -> Bool
-  ) -> [PendingTransaction] {
-    var next = existing
-    for draft in drafts {
-      let request = draft.writeRequest(includeCleared: draft.shouldWriteCleared)
-      let importID = request.importID
-      let alreadyQueued = next.contains { pending in
-        pending.request.importID == importID
-          && importID != nil
-          && isCurrentConnection(pending.connectionFingerprint)
-      }
-      if !alreadyQueued {
-        next.append(
-          PendingTransaction(request: request, connectionFingerprint: fingerprint)
-        )
-      }
-    }
-    return next
-  }
-}
-
-enum CaptureOutboxRevision {
-  enum Action: Equatable {
-    case replaceOutbox(index: Int)
-    case queueUntilCreateSettles
-  }
-
-  static func action(
-    importID: String,
-    pending: [PendingTransaction],
-    inFlightIDs: Set<UUID>
-  ) -> Action {
-    guard let index = pending.firstIndex(where: { $0.request.importID == importID }) else {
-      return .queueUntilCreateSettles
-    }
-    if inFlightIDs.contains(pending[index].id) {
-      return .queueUntilCreateSettles
-    }
-    return .replaceOutbox(index: index)
-  }
-}
-
 struct SaveMessage: Equatable, Identifiable {
   enum Kind: Equatable {
     case success
@@ -2875,9 +2904,12 @@ struct PendingRow: Identifiable, Equatable {
     case rejected(String)
   }
 
+  /// The outbox command's id.
   typealias ID = UUID
 
   let id: ID
+  /// The client-minted id the row will have on the server.
+  let transactionID: String
   let accountID: String
   let accountName: String
   let isoDate: String
@@ -2893,14 +2925,16 @@ struct PendingRow: Identifiable, Equatable {
   let status: Status
 
   init(
-    pending: PendingTransaction,
+    id: ID,
+    transactionID: String,
+    request: TransactionWriteRequest,
     status: Status,
     accountName: String,
     categoryName: String?,
     payeeName: String?
   ) {
-    let request = pending.request
-    id = pending.id
+    self.id = id
+    self.transactionID = transactionID
     accountID = request.accountID
     self.accountName = accountName
     isoDate = request.date
@@ -2921,71 +2955,16 @@ struct PendingRow: Identifiable, Equatable {
   }
 }
 
-struct PendingEdit: Equatable {
+/// One unsent change as the outbox card lists it.
+struct OutboxItem: Identifiable, Equatable {
+  let id: UUID
   let transactionID: String
-  let isoDate: String
-  let amount: Int
-  let accountID: String
-  let accountName: String
-  let payeeID: String?
+  /// "New", "Edit", "Cleared", "Approve" or "Delete".
+  let action: String
   let payeeName: String?
-  let categoryID: String?
-  let categoryName: String?
-  let memo: String?
-  let flagColor: String?
-  let cleared: ClearedState?
-
-  init?(
-    draft: TransactionDraft,
-    existing: Transaction,
-    accountName: String,
-    categoryName: String?,
-    payeeName: String?
-  ) {
-    guard draft.isSplit == existing.isSplit else {
-      return nil
-    }
-    transactionID = existing.id
-    isoDate = draft.date.isoDateString
-    amount = draft.signedMilliunits
-    accountID = draft.accountID
-    self.accountName = accountName
-    payeeID = draft.payeeID
-    self.payeeName = payeeName
-    categoryID = draft.isSplit ? existing.categoryID : draft.categoryID
-    self.categoryName = draft.isSplit ? existing.categoryName : categoryName
-    memo = draft.memo.trimmedNil
-    flagColor = draft.flag.rawValue.isEmpty ? nil : draft.flag.rawValue
-    cleared = draft.shouldWriteCleared ? draft.clearedState : nil
-  }
-
-  func applied(to transaction: Transaction) -> Transaction {
-    Transaction(
-      id: transaction.id,
-      date: isoDate,
-      amount: amount,
-      memo: memo,
-      cleared: cleared ?? transaction.cleared,
-      approved: transaction.approved,
-      flagColor: flagColor,
-      flagName: transaction.flagName,
-      accountID: accountID,
-      accountName: accountName,
-      payeeID: payeeID,
-      payeeName: payeeName,
-      categoryID: categoryID,
-      categoryName: categoryName,
-      transferAccountID: transaction.transferAccountID,
-      transferTransactionID: transaction.transferTransactionID,
-      parentTransactionID: transaction.parentTransactionID,
-      matchedTransactionID: transaction.matchedTransactionID,
-      importID: transaction.importID,
-      importPayeeName: transaction.importPayeeName,
-      importPayeeNameOriginal: transaction.importPayeeNameOriginal,
-      deleted: transaction.deleted,
-      subtransactions: transaction.subtransactions
-    )
-  }
+  let isoDate: String?
+  let signedAmount: Int?
+  let status: PendingRow.Status
 }
 
 enum OutboxDrainTrigger: Equatable {
@@ -2993,6 +2972,7 @@ enum OutboxDrainTrigger: Equatable {
   case refresh
   case manual
 }
+
 
 enum EntryDirection: String, Codable, CaseIterable, Identifiable {
   case outflow

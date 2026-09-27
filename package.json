@@ -30,7 +30,9 @@
     "verify:ios-disclosure-chevron": "bun scripts/verify-ios-disclosure-chevron.ts",
     "verify:cleared-status-toggle": "bun scripts/verify-cleared-status-toggle.ts",
     "test": "bun test",
-    "verify:worker": "bun run --cwd apps/worker build"
+    "verify:worker": "bun run --cwd apps/worker build",
+    "build:ios-engine": "bun scripts/build-ios-engine.ts build",
+    "check:ios-engine": "bun scripts/build-ios-engine.ts check"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260718.1",

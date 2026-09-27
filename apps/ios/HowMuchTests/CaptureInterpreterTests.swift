@@ -74,7 +74,6 @@ final class CaptureInterpreterTests: XCTestCase {
   }
 
   func testFixedBackendDoesNotCommit() async {
-    let before = OutboxStore.load()
     let session = CaptureSession(
       scopeKey: "scope-a",
       origin: .lastUsedOpen,
@@ -112,7 +111,6 @@ final class CaptureInterpreterTests: XCTestCase {
     XCTAssertEqual(value.0.intent, .add)
     XCTAssertEqual(value.1.count, 1)
     XCTAssertEqual(value.1.first?.mapped.draft.payeeName, "Lunch")
-    XCTAssertEqual(OutboxStore.load().map(\.id), before.map(\.id))
   }
 
   func testInterpretMapsRelativeDatesFromFrozenContext() async {
@@ -434,7 +432,6 @@ final class CaptureInterpreterTests: XCTestCase {
     continueAfterFailure = false
     executionTimeAllowance = 240
 
-    let outboxBefore = OutboxStore.load()
     let accounts = Self.liveAccounts
     let categoryGroups = Self.liveCategoryGroups
     let payees = Self.livePayees
@@ -634,7 +631,6 @@ final class CaptureInterpreterTests: XCTestCase {
     XCTAssertEqual(session.drafts.map(\.draft.accountID), draftsBeforeQuery.map(\.draft.accountID))
     XCTAssertEqual(session.drafts[0].id, draftID)
     XCTAssertEqual(session.drafts[0].draft.signedMilliunits, -7_000)
-    XCTAssertEqual(OutboxStore.load().map(\.id), outboxBefore.map(\.id))
   }
 
   private func skipUnlessLiveModelAvailable() throws {

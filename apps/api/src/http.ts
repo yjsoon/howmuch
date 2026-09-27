@@ -37,6 +37,17 @@ import { ACCOUNT_KINDS, parseAccountKind, type AccountUpdatePatch } from "./acco
 import { handleRewardTool } from "./reward-tools";
 import { autoCategorise, CategoriserUnavailableError, parseCategoriseExclusions, parseCategoriseItems, suggestCategories, type CategoriserConfig } from "./categoriser";
 import type { Fetch } from "@typesafe-ai/sdk";
+import {
+  CategoryInUseError,
+  CategoryValidationError,
+  EntityConflictError,
+  YnabMirrorPlanError,
+  parseCategoryCreate,
+  parseCategoryGroupCreate,
+  parseCategoryGroupPatch,
+  parseCategoryPatch,
+} from "./category-management";
+import { MAX_SNAPSHOT_BYTES, PlanNotEmptyError, SnapshotValidationError } from "./plan-snapshot";
 
 type HandlerOptions = {
   db?: Database;
@@ -123,6 +134,24 @@ export function createHandler(options: HandlerOptions): (request: Request) => Pr
       }
       if (error instanceof ScheduledTransactionValidationError) {
         return apiError(400, "bad_request", error.message);
+      }
+      if (error instanceof CategoryValidationError) {
+        return apiError(400, "bad_request", error.message);
+      }
+      if (error instanceof SnapshotValidationError) {
+        return apiError(400, "bad_request", error.message);
+      }
+      if (error instanceof PlanNotEmptyError) {
+        return apiError(409, "plan_not_empty", error.message);
+      }
+      if (error instanceof YnabMirrorPlanError) {
+        return apiError(409, "ynab_mirror_plan", error.message);
+      }
+      if (error instanceof CategoryInUseError) {
+        return apiError(409, "category_in_use", error.message);
+      }
+      if (error instanceof EntityConflictError) {
+        return apiError(409, "conflict", error.message);
       }
       if (error instanceof ReconciliationMismatchError) {
         return json({
@@ -305,8 +334,66 @@ async function handleV1(
     }
   }
 
+  if (resource === "export_snapshot" && segments.length === 4 && method === "GET") {
+    if (principal.kind !== "api-token" && principal.roles[planId] === "viewer") {
+      return apiError(403, "forbidden", "Plan owner or editor access is required");
+    }
+    return json({ data: await repo.exportPlanSnapshot(planId) });
+  }
+
+  if (resource === "import_snapshot" && segments.length === 4 && method === "POST") {
+    const administrationDenied = authorizePlanAdministration(principal, planId);
+    if (administrationDenied) return administrationDenied;
+    const operationId = requireIdempotencyKey(request);
+    const text = await request.text();
+    if (new TextEncoder().encode(text).byteLength > MAX_SNAPSHOT_BYTES) {
+      return apiError(413, "payload_too_large", `Snapshots are limited to ${MAX_SNAPSHOT_BYTES / (1024 * 1024)} MiB`);
+    }
+    let body: any;
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch {
+      throw new ValidationError("Request body is not valid JSON");
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body) || body.snapshot === undefined) {
+      throw new ValidationError("snapshot is required");
+    }
+    return json({ data: await repo.importPlanSnapshot(planId, body.snapshot, { operationId }) }, 201);
+  }
+
+  if (resource === "category_groups") {
+    if (segments.length === 4 && method === "POST") {
+      const body = await readJson(request);
+      const input = parseCategoryGroupCreate(body?.category_group);
+      const categoryGroup = await repo.createCategoryGroup(planId, input, scheduledWriteOptions(request));
+      return json({ data: { category_group: categoryGroup, server_knowledge: await repo.getServerKnowledge(planId) } }, 201);
+    }
+    if (segments.length === 5 && method === "PATCH") {
+      const body = await readJson(request);
+      const patch = parseCategoryGroupPatch(body?.category_group);
+      const categoryGroup = await repo.updateCategoryGroup(planId, segments[4], patch, scheduledWriteOptions(request));
+      return json({ data: { category_group: categoryGroup, server_knowledge: await repo.getServerKnowledge(planId) } });
+    }
+  }
+
   if (resource === "categories" && segments.length === 4 && method === "GET") {
     return json({ data: await repo.listCategoryGroupsWithKnowledge(planId) });
+  }
+  if (resource === "categories" && segments.length === 4 && method === "POST") {
+    const body = await readJson(request);
+    const input = parseCategoryCreate(body?.category);
+    const category = await repo.createCategory(planId, input, scheduledWriteOptions(request));
+    return json({ data: { category, server_knowledge: await repo.getServerKnowledge(planId) } }, 201);
+  }
+  if (resource === "categories" && segments.length === 5 && method === "PATCH") {
+    const body = await readJson(request);
+    const patch = parseCategoryPatch(body?.category);
+    const category = await repo.updateCategory(planId, segments[4], patch, scheduledWriteOptions(request));
+    return json({ data: { category, server_knowledge: await repo.getServerKnowledge(planId) } });
+  }
+  if (resource === "categories" && segments.length === 5 && method === "DELETE") {
+    const category = await repo.deleteCategory(planId, segments[4], scheduledWriteOptions(request));
+    return json({ data: { category, server_knowledge: await repo.getServerKnowledge(planId) } });
   }
   if (resource === "categories") {
     const categoryId = segments[4];
@@ -385,64 +472,17 @@ async function handleV1(
     return json({ data: { scheduled_subtransactions: await repo.listScheduledSubtransactions(planId), server_knowledge: await repo.getServerKnowledge(planId) } });
   }
 
-  // These source-only YNAB resources have no normalised write model yet. The
-  // raw mirror makes them safely available for clients switching over without
-  // discarding their existing scheduled/payee-location/movement data.
+  // Payee locations have no normalised write model yet. The raw mirror makes
+  // them available to clients switching over without discarding them. YNAB
+  // money movements are budgeting data: the importer still mirrors them, but
+  // HowMuch has no budgeting and no longer serves them.
   const sourceOnlyCollections: Record<string, { type: string; field: string }> = {
     payee_locations: { type: "payee_location", field: "payee_locations" },
-    money_movements: { type: "money_movement", field: "money_movements" },
-    money_movement_groups: { type: "money_movement_group", field: "money_movement_groups" },
   };
   const sourceOnly = sourceOnlyCollections[resource];
   if (sourceOnly && segments.length === 4 && method === "GET") {
     const sourceObjects = await repo.listYnabRawObjects(planId, sourceOnly.type);
     return json({ data: { [sourceOnly.field]: sourceObjects, server_knowledge: await repo.getServerKnowledge(planId) } });
-  }
-
-  if (resource === "months") {
-    const month = segments[4];
-    if (segments.length === 5 && method === "GET") {
-      return json({ data: { month: await repo.getMonth(planId, month), server_knowledge: await repo.getServerKnowledge(planId) } });
-    }
-    if (segments.length === 7 && segments[5] === "categories" && method === "PATCH") {
-      const body = await readJson(request);
-      if (!body || typeof body !== "object" || Array.isArray(body) || !body.category || typeof body.category !== "object" || Array.isArray(body.category)) {
-        throw new ValidationError("category with budgeted is required");
-      }
-      const category = body.category as Record<string, unknown>;
-      let updated: any;
-      if (Object.hasOwn(category, "target") || Object.hasOwn(category, "restore_target")) {
-        if (Object.hasOwn(category, "budgeted")) throw new ValidationError("Update either budgeted or target, not both");
-        if (category.restore_target === true) {
-          if (Object.hasOwn(category, "target")) throw new ValidationError("restore_target cannot be combined with target");
-          updated = await repo.restoreMonthCategoryTarget(planId, month, segments[6]);
-        } else if (Object.hasOwn(category, "target")) {
-          const target = category.target;
-          if (target !== null && (typeof target !== "object" || Array.isArray(target))) throw new ValidationError("target must be an object or null");
-          updated = await repo.setMonthCategoryTarget(planId, month, segments[6], target === null
-            ? { goal_type: null }
-            : target as { goal_type: "TB" | "TBD" | "MF" | "NEED" | "DEBT" | null; goal_target?: number | null; goal_target_month?: string | null });
-        } else {
-          throw new ValidationError("restore_target must be true");
-        }
-      } else {
-        const budgeted = category.budgeted;
-        if (typeof budgeted !== "number" || !Number.isSafeInteger(budgeted)) throw new ValidationError("budgeted must be integer milliunits");
-        updated = await repo.setMonthCategoryAssignment(planId, month, segments[6], budgeted);
-      }
-      return json({ data: { category: updated.categories.find((category: { id: string }) => category.id === segments[6]), month: updated, server_knowledge: await repo.getServerKnowledge(planId) } });
-    }
-    if (segments.length === 6 && segments[5] === "transactions" && method === "GET") {
-      return transactionListResponse(repo, planId, queryFilters(url, { month }));
-    }
-    if (segments.length === 6 && method === "GET" && (segments[5] === "money_movements" || segments[5] === "money_movement_groups")) {
-      const mapping = segments[5] === "money_movements"
-        ? { type: "money_movement", field: "money_movements" }
-        : { type: "money_movement_group", field: "money_movement_groups" };
-      const objects = await repo.listYnabRawObjects(planId, mapping.type);
-      const monthStart = month.length === 7 ? `${month}-01` : month;
-      return json({ data: { [mapping.field]: objects.filter((object: any) => object.month === monthStart), server_knowledge: await repo.getServerKnowledge(planId) } });
-    }
   }
 
   if (resource === "transactions") {
@@ -1202,6 +1242,14 @@ function isTransitionFinancialWrite(methodValue: string, segments: string[]): bo
   if ((resource === "accounts" || resource === "payees") && segments.length === 4) {
     return method === "POST";
   }
+  if (resource === "import_snapshot" && segments.length === 4) {
+    return method === "POST";
+  }
+  if (resource === "category_groups" || resource === "categories") {
+    if (segments.length === 4) return method === "POST";
+    if (segments.length === 5) return method === "PATCH" || method === "DELETE";
+    return false;
+  }
   if (resource === "accounts" && segments.length === 6 && segments[5] === "reconcile") {
     return method === "POST";
   }
@@ -1220,10 +1268,7 @@ function isTransitionFinancialWrite(methodValue: string, segments: string[]): bo
     if (segments.length === 6 && segments[5] === "materialize") return method === "POST";
     return false;
   }
-  return resource === "months"
-    && segments.length === 7
-    && segments[5] === "categories"
-    && method === "PATCH";
+  return false;
 }
 
 function isToggleClearedState(value: unknown): value is "uncleared" | "cleared" {

@@ -226,7 +226,7 @@ struct AccountsView: View {
   private func overview() -> some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
-        if !model.pendingRows.isEmpty {
+        if model.unsentChangeCount > 0 || model.outboxNotice != nil {
           OutboxCard()
             .transition(.move(edge: .top).combined(with: .opacity))
         }
@@ -694,7 +694,7 @@ struct AccountsView: View {
 
   private struct OutboxCard: View {
     @Environment(AppModel.self) private var model
-    @State private var pendingDiscard: PendingRow?
+    @State private var pendingDiscard: OutboxItem?
 
     var body: some View {
       VStack(spacing: 0) {
@@ -705,7 +705,7 @@ struct AccountsView: View {
             Text(title)
               .font(.subheadline.weight(.semibold))
               .foregroundStyle(Theme.textPrimary)
-            Text("Shown here until they reach the server")
+            Text(subtitle)
               .font(.caption)
               .foregroundStyle(.secondary)
           }
@@ -729,53 +729,91 @@ struct AccountsView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
 
-        ForEach(model.pendingRows) { row in
+        if let notice = model.outboxNotice {
           Divider().padding(.leading, 16)
-          pendingRow(row)
+          Label(notice, systemImage: "exclamationmark.triangle")
+            .font(.footnote)
+            .foregroundStyle(Theme.outflow)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        }
+
+        ForEach(listedItems) { item in
+          Divider().padding(.leading, 16)
+          itemRow(item)
         }
       }
       .ynabCard()
       .binaryConfirm(
-        "Discard this transaction? It hasn’t reached the server.",
+        "Discard this change? It hasn’t reached the server.",
         presenting: $pendingDiscard,
-        confirm: .destructive("Discard Transaction")
-      ) { row in
-        model.discardPending(row.id)
+        confirm: .destructive("Discard Change")
+      ) { item in
+        model.discardPending(item.id)
       }
     }
 
     private var title: String {
-      let count = model.pendingRows.count
-      return count == 1 ? "1 transaction waiting to sync" : "\(count) transactions waiting to sync"
+      let count = model.unsentChangeCount
+      return count == 1 ? "1 change not sent yet" : "\(count) changes not sent yet"
     }
 
-    private func pendingRow(_ row: PendingRow) -> some View {
+    private var subtitle: String {
+      let rejected = rejectedItems.count
+      if rejected > 0 {
+        return rejected == 1
+          ? "The server refused 1. Retry or discard it."
+          : "The server refused \(rejected). Retry or discard them."
+      }
+      return "Shown here until they reach the server"
+    }
+
+    private var rejectedItems: [OutboxItem] {
+      model.outboxItems.filter { item in
+        if case .rejected = item.status {
+          return true
+        }
+        return false
+      }
+    }
+
+    /// Every change, refused ones first, so any of them can be discarded.
+    private var listedItems: [OutboxItem] {
+      model.outboxItems
+    }
+
+    private func itemRow(_ item: OutboxItem) -> some View {
       HStack(spacing: 12) {
         VStack(alignment: .leading, spacing: 2) {
-          Text(row.payeeName ?? "Transaction")
+          Text("\(item.action) · \(item.payeeName ?? "Transaction")")
             .foregroundStyle(Theme.textPrimary)
             .lineLimit(1)
-          Text(LedgerDate.friendlyString(fromISO: row.isoDate))
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-          if case .rejected(let error) = row.status {
+          if let isoDate = item.isoDate {
+            Text(LedgerDate.friendlyString(fromISO: isoDate))
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+          }
+          if case .rejected(let error) = item.status {
             Text(error)
               .font(.footnote)
               .foregroundStyle(Theme.outflow)
               .lineLimit(2)
-          } else if row.status == .sending {
+          } else if item.status == .sending {
             Text("Sending…")
               .font(.footnote)
               .foregroundStyle(.secondary)
           }
         }
         Spacer()
-        Text(MoneyCodec.signedDisplayString(for: row.signedAmount, currencyFormat: model.currencyFormat))
-          .monospacedDigit()
-          .foregroundStyle(Theme.registerAmountColour(row.signedAmount))
-        if case .rejected = row.status {
+        if let amount = item.signedAmount {
+          Text(MoneyCodec.signedDisplayString(for: amount, currencyFormat: model.currencyFormat))
+            .monospacedDigit()
+            .foregroundStyle(Theme.registerAmountColour(amount))
+        }
+        if case .rejected = item.status {
           Button {
-            model.retryPending(row.id)
+            model.retryPending(item.id)
           } label: {
             Image(systemName: "arrow.clockwise")
               .font(.footnote)
@@ -783,11 +821,11 @@ struct AccountsView: View {
               .frame(width: 44, height: 44)
           }
           .buttonStyle(.plain)
-          .accessibilityLabel("Retry \(row.payeeName ?? "transaction")")
+          .accessibilityLabel("Retry \(item.payeeName ?? "change")")
         }
-        if row.status != .sending {
+        if item.status != .sending {
           Button {
-            pendingDiscard = row
+            pendingDiscard = item
           } label: {
             Image(systemName: "trash")
               .font(.footnote)
@@ -795,7 +833,7 @@ struct AccountsView: View {
               .frame(width: 44, height: 44)
           }
           .buttonStyle(.plain)
-          .accessibilityLabel("Discard \(row.payeeName ?? "pending transaction")")
+          .accessibilityLabel("Discard \(item.payeeName ?? "change")")
         }
       }
       .padding(.horizontal, 16)

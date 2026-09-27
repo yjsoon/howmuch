@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// YNAB-inspired palette: warm cream canvas, white cards, blurple accent,
+/// Warm cream canvas, white cards, the app icon's forest-green accent,
 /// lime inflow highlight, ledger red/green for amounts. Dark variants keep the
 /// same hues on a deep navy canvas.
 enum Theme {
@@ -21,10 +21,7 @@ enum Theme {
     dark: Color(red: 0.157, green: 0.180, blue: 0.275)
   )
 
-  static let accent = Color(
-    light: Color(red: 0.357, green: 0.353, blue: 0.937),
-    dark: Color(red: 0.541, green: 0.553, blue: 0.973)
-  )
+  static let accent = Color("AccentColor")
 
   static let newStatus = accent
 
@@ -50,7 +47,7 @@ enum Theme {
   )
 
   /// System red for destructive swipe and cancellation actions.
-  /// The app-wide accent would otherwise recast `role: .destructive` as blurple.
+  /// The app-wide accent would otherwise recast `role: .destructive` as green.
   static let cancellation = Color.red
 
   /// Lime header behind the amount when entering an inflow.

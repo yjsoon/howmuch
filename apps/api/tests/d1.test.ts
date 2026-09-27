@@ -834,37 +834,6 @@ describe("D1 foundation", () => {
     expect(page.next_offset).toBe(100);
   });
 
-  test("D1 assignment writes are guarded, retain raw source rows, and carry availability forward", async () => {
-    const db = await ledgerSqlite();
-    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p", {
-      operationId: (kind, _planId, resourceId) => `assignment-${kind}-${resourceId.replaceAll("\u001f", "-")}`,
-    });
-    await repo.upsertCategoryGroup("p", { id: "food", name: "Food" });
-    await repo.upsertCategory("p", { id: "groceries", category_group_id: "food", name: "Groceries" });
-    for (const month of ["2026-06-01", "2026-07-01"]) {
-      await repo.upsertYnabRawObject("p", "month", month, { month, budgeted: 5000, to_be_budgeted: 4000, activity: 0 });
-      await repo.upsertYnabRawObject("p", "month_category", `${month}\u001fgroceries`, {
-        id: "groceries", category_group_id: "food", name: "Groceries", budgeted: 5000, activity: 0, balance: 5000, deleted: false,
-      });
-    }
-    const rawBefore = db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category' AND object_id='2026-06-01\u001fgroceries'").get();
-    const versionBefore = db.query("SELECT write_version FROM write_state").get() as { write_version: number };
-
-    const june = await repo.setMonthCategoryAssignment("p", "2026-06", "groceries", 7000);
-    expect(june).toMatchObject({ budgeted: 7000, to_be_budgeted: 2000 });
-    expect(june.categories).toEqual([expect.objectContaining({ id: "groceries", budgeted: 7000, balance: 7000 })]);
-    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category' AND object_id='2026-06-01\u001fgroceries'").get()).toEqual(rawBefore);
-    expect(db.query("SELECT budgeted_milli FROM plan_month_assignments WHERE plan_id='p' AND month='2026-06-01' AND category_id='groceries'").get()).toEqual({ budgeted_milli: 7000 });
-    expect(db.query("SELECT write_version FROM write_state").get()).toEqual({ write_version: versionBefore.write_version + 1 });
-    expect(db.query("SELECT status FROM write_commands WHERE kind='plan.assignment.set'").get()).toEqual({ status: "applied" });
-
-    const july = await repo.getMonth("p", "2026-07");
-    expect(july).toMatchObject({ budgeted: 5000, to_be_budgeted: 4000 });
-    expect(july.categories).toEqual([expect.objectContaining({ id: "groceries", budgeted: 5000, balance: 7000 })]);
-    await expect(repo.setMonthCategoryAssignment("p", "2026-08", "groceries", 8000)).rejects.toThrow("Imported month not found");
-    await expect(repo.setMonthCategoryAssignment("p", "2026-06", "missing", 8000)).rejects.toThrow("Imported month category not found");
-  });
-
   test("D1 category resolution avoids a fallback group for existing categories", async () => {
     const db = await ledgerSqlite();
     const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
@@ -899,46 +868,6 @@ describe("D1 foundation", () => {
       { id: "ynab-txn-b", payee_id: "ynab-payee-b", payee_name_snapshot: "Same merchant" },
     ]);
     expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
-  });
-
-  test("D1 assignment writes are guarded, replayable, and preserve the YNAB source rows", async () => {
-    const db = await ledgerSqlite();
-    db.exec("INSERT INTO category_groups(id,plan_id,name) VALUES('food-group','p','Food'); INSERT INTO categories(id,plan_id,category_group_id,name) VALUES('food','p','food-group','Groceries')");
-    const sourceMonth = { month: "2026-06-01", budgeted: 5000, to_be_budgeted: 4000, activity: 0 };
-    const sourceCategory = { id: "food", category_group_id: "food-group", name: "Groceries", budgeted: 5000, activity: 0, balance: 5000, deleted: false };
-    db.run("INSERT INTO ynab_raw_objects(plan_id,object_type,object_id,payload_json) VALUES('p','month','2026-06-01',?),('p','month_category','2026-06-01\u001ffood',?)", [JSON.stringify(sourceMonth), JSON.stringify(sourceCategory)]);
-    const rawBefore = db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category'").get();
-    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p", {
-      operationId: (kind) => kind === "plan.assignment.set" ? "assignment-once" : `op-${kind}`,
-    });
-
-    const first = await repo.setMonthCategoryAssignment("p", "2026-06", "food", 7000);
-    const second = await repo.setMonthCategoryAssignment("p", "2026-06", "food", 7000);
-    expect(first).toMatchObject({ budgeted: 7000, to_be_budgeted: 2000, categories: [expect.objectContaining({ id: "food", budgeted: 7000, balance: 7000, source_budgeted: 5000 })] });
-    expect(second).toEqual(first);
-    expect(db.query("SELECT budgeted_milli,source FROM plan_month_assignments").get()).toEqual({ budgeted_milli: 7000, source: "howmuch-local" });
-    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category'").get()).toEqual(rawBefore);
-    expect(db.query("SELECT COUNT(*) AS count FROM audit_events WHERE action='plan_assignment.set'").get()).toEqual({ count: 1 });
-    expect(db.query("SELECT COUNT(*) AS count FROM write_commands WHERE kind='plan.assignment.set' AND status='applied'").get()).toEqual({ count: 1 });
-  });
-
-  test("D1 target writes are guarded, replayable, and preserve the YNAB source rows", async () => {
-    const db = await ledgerSqlite();
-    db.exec("INSERT INTO category_groups(id,plan_id,name) VALUES('food-group','p','Food'); INSERT INTO categories(id,plan_id,category_group_id,name) VALUES('food','p','food-group','Groceries')");
-    const sourceMonth = { month: "2026-06-01", budgeted: 0, to_be_budgeted: 0, activity: 0 };
-    const sourceCategory = { id: "food", category_group_id: "food-group", name: "Groceries", budgeted: 0, activity: 0, balance: 5000, goal_type: "NEED", goal_target: 9000, deleted: false };
-    db.run("INSERT INTO ynab_raw_objects(plan_id,object_type,object_id,payload_json) VALUES('p','month','2026-06-01',?),('p','month_category','2026-06-01\u001ffood',?)", [JSON.stringify(sourceMonth), JSON.stringify(sourceCategory)]);
-    const rawBefore = db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category'").get();
-    const repo = new D1LedgerRepository(new D1Database(fakeD1(db)), "p", { operationId: (kind) => kind === "plan.target.set" ? "target-once" : `op-${kind}` });
-
-    const target = { goal_type: "TB" as const, goal_target: 7000, goal_target_month: "2026-12" };
-    const first = await repo.setMonthCategoryTarget("p", "2026-06", "food", target);
-    const second = await repo.setMonthCategoryTarget("p", "2026-06", "food", target);
-    expect(first.categories).toEqual([expect.objectContaining({ id: "food", goal_type: "TB", goal_target: 7000, goal_target_month: "2026-12-01", target_source: "howmuch-local" })]);
-    expect(second).toEqual(first);
-    expect(db.query("SELECT goal_type,goal_target_milli FROM plan_month_category_targets").get()).toEqual({ goal_type: "TB", goal_target_milli: 7000 });
-    expect(db.query("SELECT payload_json FROM ynab_raw_objects WHERE object_type='month_category'").get()).toEqual(rawBefore);
-    expect(db.query("SELECT COUNT(*) AS count FROM write_commands WHERE kind='plan.target.set' AND status='applied'").get()).toEqual({ count: 1 });
   });
 
   test("D1 imports reciprocal transfer payees before their accounts", async () => {

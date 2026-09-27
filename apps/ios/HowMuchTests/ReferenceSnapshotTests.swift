@@ -60,7 +60,8 @@ private enum SnapshotFixture {
     id: String,
     accountID: String = "acct-1",
     date: String = "2026-01-02",
-    amount: Int = -1230
+    amount: Int = -1230,
+    approved: Bool = true
   ) -> Transaction {
     Transaction(
       id: id,
@@ -68,7 +69,7 @@ private enum SnapshotFixture {
       amount: amount,
       memo: nil,
       cleared: .uncleared,
-      approved: true,
+      approved: approved,
       flagColor: nil,
       flagName: nil,
       accountID: accountID,
@@ -420,8 +421,8 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     // into another test or the installed app.
     previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
     previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
-    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.userDefaultsKey)
-    UserDefaults.standard.removeObject(forKey: OutboxStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.legacyDefaultsKey)
+    UserDefaults.standard.removeObject(forKey: OutboxStore.legacyDefaultsKey)
     store = SnapshotFixture.temporaryStore()
     XCTAssertTrue(URLProtocol.registerClass(SnapshotRefreshProtocol.self))
     SnapshotRefreshProtocol.reset()
@@ -433,7 +434,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     APISettings.useCredentialService(previousCredentialService)
     UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
     UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
-    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.legacyDefaultsKey)
     try? FileManager.default.removeItem(at: store.directory)
     super.tearDown()
   }
@@ -459,7 +460,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     )
     SnapshotRefreshProtocol.holdResponses()
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
 
     XCTAssertEqual(model.referencePhase, .loaded, "the snapshot must render without a request")
     XCTAssertEqual(model.ledgerPhase, .loaded)
@@ -537,7 +538,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
       )
     )
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     await model.refreshAll()
 
     XCTAssertEqual(model.transactions.map(\.id), [SnapshotRefreshProtocol.networkTransactionID])
@@ -564,7 +565,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
       )
     )
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     await model.refreshAll()
 
     XCTAssertEqual(
@@ -587,7 +588,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
       )
     )
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     await model.refreshAll()
 
     XCTAssertEqual(
@@ -606,7 +607,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: settings)))
     SnapshotRefreshProtocol.goOffline()
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     await model.refreshAll()
 
     XCTAssertNotNil(
@@ -640,7 +641,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
 
     let settings = fixtureSettings()
     XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: settings)))
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     XCTAssertTrue(model.referenceIsProvisional)
 
     await model.refresh(
@@ -675,7 +676,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
       )
     )
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     await model.loadOlderTransactions()
     XCTAssertEqual(
       model.transactions.map(\.id),
@@ -697,7 +698,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
   func testSessionRevocationDeletesTheSnapshot() async {
     let settings = fixtureSettings()
     XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: settings)))
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     XCTAssertTrue(model.isProvisional)
 
     NotificationCenter.default.post(
@@ -728,7 +729,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
       )
     )
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     XCTAssertEqual(
       model.unapprovedBadgeCount,
       9,
@@ -749,11 +750,70 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     XCTAssertEqual(store.load()?.unapprovedCount, SnapshotRefreshProtocol.networkUnapprovedCount)
   }
 
+  /// A delete used to wipe the snapshot, so the next launch -- offline, say --
+  /// started cold. It now writes the repaired page at once: the deleted row is
+  /// gone from it, and a row rejected from the "New" queue is off the stored
+  /// count, even when every follow-up read fails.
+  func testDeletePersistsTheRepairedSnapshotWhenFollowUpReadsFail() async throws {
+    // The row rejected below is one the server has awaiting approval.
+    SnapshotRefreshProtocol.serveNetworkRowUnapproved()
+    let settings = fixtureSettings()
+    XCTAssertTrue(
+      store.save(
+        SnapshotFixture.snapshot(
+          settings: settings,
+          serverKnowledge: SnapshotRefreshProtocol.serverKnowledge - 1
+        )
+      )
+    )
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    await model.refreshAll()
+    let counted = await waitUntil {
+      model.unapprovedBadgeCount == SnapshotRefreshProtocol.networkUnapprovedCount
+    }
+    XCTAssertTrue(counted, "the server's count must land before the delete")
+    XCTAssertFalse(model.isProvisional, "the launch refresh must own the screen before the delete")
+    XCTAssertEqual(model.transactions.map(\.id), [SnapshotRefreshProtocol.networkTransactionID])
+
+    // Every read after the delete fails, as it would if the connection
+    // dropped straight after the write.
+    SnapshotRefreshProtocol.goOfflineAfterDelete()
+    let row = SnapshotFixture.transaction(
+      id: SnapshotRefreshProtocol.networkTransactionID,
+      accountID: SnapshotRefreshProtocol.networkAccountID,
+      approved: false
+    )
+    try await model.deleteTransaction(row)
+    await model.waitForOutboxDrain()
+    XCTAssertEqual(model.unapprovedBadgeCount, SnapshotRefreshProtocol.networkUnapprovedCount - 1)
+    await model.refresh(slices: [.accounts, .ledger])
+
+    store.waitForPendingWrites()
+    let persisted = try XCTUnwrap(store.load(), "a delete must not leave the next launch cold")
+    XCTAssertEqual(persisted.ledgerPage?.transactions.map(\.id), [])
+    // The network row (-4560, uncleared) comes off its account's balances.
+    let persistedAccount = try XCTUnwrap(persisted.accounts.first)
+    XCTAssertEqual(persistedAccount.balance, 999 + 4_560, "the saved balance must not still count the deleted row")
+    XCTAssertEqual(persistedAccount.clearedBalance, 999)
+    XCTAssertEqual(persistedAccount.unclearedBalance, 4_560)
+    XCTAssertEqual(
+      persisted.unapprovedCount,
+      SnapshotRefreshProtocol.networkUnapprovedCount - 1,
+      "the rejected row must not come back on the tile at the next launch"
+    )
+
+    let relaunched = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    XCTAssertEqual(relaunched.referencePhase, .loaded)
+    XCTAssertEqual(relaunched.accounts.map(\.id), [SnapshotRefreshProtocol.networkAccountID])
+    XCTAssertTrue(relaunched.transactions.isEmpty)
+    XCTAssertEqual(relaunched.unapprovedBadgeCount, SnapshotRefreshProtocol.networkUnapprovedCount - 1)
+  }
+
   func testSignOutDeletesTheSnapshot() async {
     let settings = fixtureSettings()
     XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: settings)))
 
-    let model = AppModel(settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
     XCTAssertTrue(model.isProvisional)
 
     var signedOut = settings
@@ -777,7 +837,7 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
     )
     XCTAssertTrue(store.save(SnapshotFixture.snapshot(settings: other)))
 
-    let model = AppModel(settings: fixtureSettings(), viewPrefs: ViewPrefs(), snapshotStore: store)
+    let model = AppModel(outboxStore: .temporary(), settings: fixtureSettings(), viewPrefs: ViewPrefs(), snapshotStore: store)
 
     XCTAssertEqual(model.referencePhase, .idle)
     XCTAssertTrue(model.accounts.isEmpty)
@@ -800,6 +860,312 @@ final class ReferenceSnapshotLaunchTests: XCTestCase {
   }
 }
 
+// MARK: - Reports cache (stale-while-revalidate)
+
+/// The Reflect overview and the default Rewards board are cached beside the
+/// reference snapshot, under the same identity rules, so both render at once
+/// on a warm launch. Every value here is invented.
+@MainActor
+final class ReportsSnapshotTests: XCTestCase {
+  private var previousCredentialService = ""
+  private var previousAPISettings: Any?
+  private var previousScopedViewPrefs: Any?
+  private var previousOutbox: Any?
+  private var store = SnapshotFixture.temporaryStore()
+
+  override func setUp() {
+    super.setUp()
+    previousCredentialService = APISettings.useCredentialService(
+      "HowMuch.ReportsSnapshotTests.\(UUID().uuidString)"
+    )
+    previousAPISettings = UserDefaults.standard.object(forKey: APISettings.userDefaultsKey)
+    previousScopedViewPrefs = UserDefaults.standard.object(forKey: ScopedViewPrefsStore.userDefaultsKey)
+    previousOutbox = UserDefaults.standard.object(forKey: OutboxStore.legacyDefaultsKey)
+    UserDefaults.standard.removeObject(forKey: OutboxStore.legacyDefaultsKey)
+    store = SnapshotFixture.temporaryStore()
+    XCTAssertTrue(URLProtocol.registerClass(SnapshotRefreshProtocol.self))
+    SnapshotRefreshProtocol.reset()
+  }
+
+  override func tearDown() {
+    SnapshotRefreshProtocol.releaseResponses()
+    URLProtocol.unregisterClass(SnapshotRefreshProtocol.self)
+    APISettings.useCredentialService(previousCredentialService)
+    UserDefaults.standard.set(previousAPISettings, forKey: APISettings.userDefaultsKey)
+    UserDefaults.standard.set(previousScopedViewPrefs, forKey: ScopedViewPrefsStore.userDefaultsKey)
+    UserDefaults.standard.set(previousOutbox, forKey: OutboxStore.legacyDefaultsKey)
+    try? FileManager.default.removeItem(at: store.directory)
+    super.tearDown()
+  }
+
+  private var reportsStore: ReportsSnapshotStore {
+    ReportsSnapshotStore(directory: store.directory)
+  }
+
+  private func fixtureSettings() -> APISettings {
+    SnapshotFixture.settings(baseURL: SnapshotRefreshProtocol.fixtureBaseURL)
+  }
+
+  func testStoreRoundTripsEveryReport() throws {
+    let reports = reportsStore
+    let saved = try Self.snapshot(settings: fixtureSettings())
+    XCTAssertTrue(reports.save(saved))
+
+    let loaded = try XCTUnwrap(reports.load())
+    XCTAssertEqual(loaded.connectionFingerprint, saved.connectionFingerprint)
+    XCTAssertEqual(loaded.spendingBreakdown?.total, 45_600)
+    XCTAssertEqual(loaded.spendingBreakdown?.groups.first?.categoryID, "cat-food")
+    XCTAssertEqual(loaded.incomeVsSpending?.periods.first?.cumulativeNet, 7_000)
+    XCTAssertEqual(loaded.netWorth?.periods.first?.accounts.first?.accountID, "acct-1")
+    XCTAssertEqual(loaded.ageOfMoney?.periods.first?.ageOfMoneyDays, 21.5)
+    XCTAssertEqual(loaded.rewards?.cards.first?.accountId, "acct-card")
+    XCTAssertEqual(loaded.rewards?.cards.first?.calculation.flags.first?.subcategoryId, "dining")
+    XCTAssertEqual(loaded.rewards?.totals.miles, 400)
+    XCTAssertTrue(loaded.hasReflectOverview)
+
+    reports.delete()
+    XCTAssertNil(reports.load())
+  }
+
+  func testWarmLaunchRestoresReportsAsLoaded() throws {
+    let settings = fixtureSettings()
+    XCTAssertTrue(reportsStore.save(try Self.snapshot(settings: settings)))
+
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+
+    XCTAssertEqual(model.reportsPhase, .loaded, "Reflect must render from the cache without a request")
+    XCTAssertEqual(model.spendingBreakdown?.total, 45_600)
+    XCTAssertNotNil(model.incomeVsSpending)
+    XCTAssertNotNil(model.netWorth)
+    XCTAssertNotNil(model.ageOfMoney)
+    XCTAssertEqual(model.rewardsPhase, .loaded, "the Rewards board must render from the cache too")
+    XCTAssertEqual(
+      model.rewardsReport(for: .overview(planID: settings.planID))?.cards.map(\.accountId),
+      ["acct-card"]
+    )
+    // The cached board is the overview; it must not appear under a filter.
+    var filtered = RewardsRequest.overview(planID: settings.planID)
+    filtered.accountIDs = ["acct-card"]
+    XCTAssertNil(model.rewardsReport(for: filtered), "a report must only show under the request that produced it")
+    var asOf = RewardsRequest.overview(planID: settings.planID)
+    asOf.to = "2026-01-15"
+    XCTAssertNil(model.rewardsReport(for: asOf))
+    XCTAssertTrue(SnapshotRefreshProtocol.paths().isEmpty, "a restore is not a fetch")
+  }
+
+  func testAnotherConnectionsReportsAreIgnoredAndDeleted() throws {
+    let other = SnapshotFixture.settings(
+      baseURL: SnapshotRefreshProtocol.fixtureBaseURL,
+      userID: "someone-else"
+    )
+    XCTAssertTrue(reportsStore.save(try Self.snapshot(settings: other)))
+
+    let model = AppModel(outboxStore: .temporary(), settings: fixtureSettings(), viewPrefs: ViewPrefs(), snapshotStore: store)
+
+    XCTAssertEqual(model.reportsPhase, .idle)
+    XCTAssertNil(model.spendingBreakdown)
+    XCTAssertEqual(model.rewardsPhase, .idle)
+    XCTAssertNil(model.rewardsReport(for: .overview(planID: SnapshotFixture.planID)))
+    XCTAssertNil(reportsStore.load(), "reports that can never be applied must not be kept")
+  }
+
+  /// The restored reports stay on screen while Reflect revalidates them: the
+  /// refetch runs, but quietly, with no spinner in place of the cards.
+  func testRestoredReflectRevalidatesQuietly() async throws {
+    let settings = fixtureSettings()
+    XCTAssertTrue(reportsStore.save(try Self.snapshot(settings: settings)))
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    SnapshotRefreshProtocol.holdResponses()
+
+    let refresh = Task { await model.refreshReportsIfNeeded() }
+    let asked = await waitUntil {
+      SnapshotRefreshProtocol.paths().contains("/api/reports/spending-breakdown")
+    }
+    XCTAssertTrue(asked, "a restored cache must still be revalidated, saw \(SnapshotRefreshProtocol.paths())")
+    XCTAssertEqual(model.reportsPhase, .loaded, "the revalidation must not replace the cards with a spinner")
+    XCTAssertEqual(model.spendingBreakdown?.total, 45_600)
+    XCTAssertNil(model.reportsStaleMessage)
+
+    SnapshotRefreshProtocol.releaseResponses()
+    await refresh.value
+    XCTAssertEqual(model.spendingBreakdown?.total, 45_600, "a failed revalidation keeps the cached cards")
+    XCTAssertNotNil(model.reportsStaleMessage, "cards a refresh could not replace must be marked as out of date")
+  }
+
+  /// The spending card is labelled with the current month, so an overview
+  /// cached in an earlier month is not restored under it. The Rewards board,
+  /// which carries its own period, still is.
+  func testReflectCachedInAnEarlierMonthIsNotRestored() throws {
+    let settings = fixtureSettings()
+    XCTAssertTrue(reportsStore.save(try Self.snapshot(settings: settings, reflectMonth: "2000-01")))
+
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+
+    XCTAssertEqual(model.reportsPhase, .idle)
+    XCTAssertNil(model.spendingBreakdown)
+    XCTAssertNil(model.netWorth)
+    XCTAssertNotNil(model.rewardsReport(for: .overview(planID: settings.planID)))
+  }
+
+  func testReflectMonthMatchesOnlyTheCurrentMonth() throws {
+    let now = try XCTUnwrap(Calendar.current.date(from: DateComponents(year: 2026, month: 3, day: 31, hour: 23)))
+    XCTAssertEqual(ReportsSnapshot.month(of: now), "2026-03")
+    XCTAssertTrue(ReportsSnapshot.reflectIsCurrent(storedMonth: "2026-03", now: now))
+    XCTAssertFalse(ReportsSnapshot.reflectIsCurrent(storedMonth: "2026-02", now: now))
+    XCTAssertFalse(ReportsSnapshot.reflectIsCurrent(storedMonth: nil, now: now), "a file without a month is not trusted")
+  }
+
+  func testSignOutDeletesTheReportsCache() async throws {
+    let settings = fixtureSettings()
+    XCTAssertTrue(reportsStore.save(try Self.snapshot(settings: settings)))
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+    XCTAssertEqual(model.reportsPhase, .loaded)
+
+    var signedOut = settings
+    signedOut.sessionToken = ""
+    signedOut.authenticatedUserID = ""
+    signedOut.planID = ""
+    await model.applySettings(signedOut)
+
+    reportsStore.waitForPendingWrites()
+    XCTAssertNil(reportsStore.load(), "signing out must leave no cached reports on the device")
+    XCTAssertNil(model.spendingBreakdown)
+    XCTAssertNil(model.rewardsReport(for: .overview(planID: SnapshotFixture.planID)))
+    XCTAssertEqual(model.rewardsPhase, .idle)
+  }
+
+  func testSessionRevocationDeletesTheReportsCache() async throws {
+    let settings = fixtureSettings()
+    XCTAssertTrue(reportsStore.save(try Self.snapshot(settings: settings)))
+    let model = AppModel(outboxStore: .temporary(), settings: settings, viewPrefs: ViewPrefs(), snapshotStore: store)
+
+    NotificationCenter.default.post(name: .howMuchAuthenticationExpired, object: settings.sessionToken)
+    let cleared = await waitUntil { !model.settings.isAuthenticated }
+    XCTAssertTrue(cleared)
+
+    XCTAssertNil(reportsStore.load(), "a revoked session must leave no cached reports on the device")
+    XCTAssertNil(model.rewardsReport(for: .overview(planID: SnapshotFixture.planID)))
+  }
+
+  func testOnlyTheOverviewRewardsRequestIsCached() {
+    func request(from: String? = nil, to: String? = nil, accountIDs: [String] = []) -> RewardsRequest {
+      RewardsRequest(planID: "plan-1", from: from, to: to, accountIDs: accountIDs)
+    }
+    XCTAssertTrue(request().isOverview)
+    XCTAssertEqual(request(), .overview(planID: "plan-1"))
+    XCTAssertFalse(request(to: "2026-01-31").isOverview)
+    XCTAssertFalse(request(from: "0001-01-01").isOverview)
+    XCTAssertFalse(request(accountIDs: ["acct-card"]).isOverview)
+  }
+
+  // MARK: Fixtures
+
+  /// Decoded the way the API client decodes, so the cache is proven to
+  /// round-trip what the server actually sends.
+  private static func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    return try decoder.decode(type, from: Data(json.utf8))
+  }
+
+  private static func snapshot(
+    settings: APISettings,
+    reflectMonth: String? = ReportsSnapshot.month(of: .now)
+  ) throws -> ReportsSnapshot {
+    ReportsSnapshot(
+      connectionFingerprint: settings.connectionFingerprint,
+      authenticatedUserID: settings.authenticatedUserID,
+      planID: settings.planID,
+      capturedAt: Date(timeIntervalSince1970: 1_770_000_000),
+      spendingBreakdown: try decode(
+        SpendingBreakdownReport.self,
+        #"{"total":45600,"groups":[{"categoryId":"cat-food","categoryName":"Fixture Food","categoryGroupId":"grp-1","categoryGroupName":"Fixture Group","amount":45600,"share":1,"transactionCount":3}]}"#
+      ),
+      incomeVsSpending: try decode(
+        IncomeVsSpendingReport.self,
+        #"{"interval":"month","periods":[{"period":"2026-01","income":10000,"spending":3000,"net":7000,"cumulative_net":7000}]}"#
+      ),
+      netWorth: try decode(
+        NetWorthReport.self,
+        #"{"periods":[{"period":"2026-01","end_date":"2026-01-31","net_worth":123400,"delta":null,"accounts":[{"accountId":"acct-1","accountName":"Fixture Account","balance":123400}]}]}"#
+      ),
+      ageOfMoney: try decode(
+        AgeOfMoneyReport.self,
+        #"{"interval":"month","periods":[{"period":"2026-01","age_of_money_days":21.5,"spent":3000,"unmatched_spending":0}]}"#
+      ),
+      reflectMonth: reflectMonth,
+      rewards: try decode(RewardsReport.self, rewardsJSON)
+    )
+  }
+
+  private static let rewardsJSON = """
+  {
+    "from": null,
+    "to": null,
+    "as_of": "2026-01-20",
+    "group_by": "flag",
+    "miles_valuation": 0.015,
+    "totals": {"spend": 100, "reward_dollars": 6, "cashback": 0, "miles": 400},
+    "cards": [
+      {
+        "card": {
+          "id": "card-fixture",
+          "name": "Fixture Card",
+          "issuer": "Example Bank",
+          "type": "miles",
+          "ynabAccountId": "acct-card",
+          "featured": true
+        },
+        "account_id": "acct-card",
+        "account_name": "Fixture Card",
+        "calculation": {
+          "period": "2026-01-01/2026-01-31",
+          "total_spend": 100,
+          "counted_spend": 100,
+          "eligible_spend": 100,
+          "reward_earned": 400,
+          "reward_earned_dollars": 6,
+          "reward_type": "miles",
+          "minimum_spend": null,
+          "minimum_spend_met": true,
+          "minimum_spend_progress": null,
+          "maximum_spend": null,
+          "maximum_spend_exceeded": false,
+          "maximum_spend_progress": null,
+          "flags": [
+            {
+              "subcategoryId": "dining",
+              "name": "Dining",
+              "flagColor": "orange",
+              "totalSpend": 100,
+              "eligibleSpend": 100,
+              "rewardEarned": 400,
+              "rewardEarnedDollars": 6,
+              "rewardRate": 4
+            }
+          ]
+        }
+      }
+    ],
+    "groups": []
+  }
+  """
+
+  private func waitUntil(
+    timeoutNanoseconds: UInt64 = 3_000_000_000,
+    _ condition: @MainActor () -> Bool
+  ) async -> Bool {
+    let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+    while DispatchTime.now().uptimeNanoseconds < deadline {
+      if condition() {
+        return true
+      }
+      try? await Task.sleep(nanoseconds: 10_000_000)
+    }
+    return condition()
+  }
+}
+
 // MARK: - Stub server
 
 private final class SnapshotRefreshLog: @unchecked Sendable {
@@ -808,6 +1174,8 @@ private final class SnapshotRefreshLog: @unchecked Sendable {
   private var recorded: [String] = []
   private var held = false
   private var offline = false
+  private var offlineAfterDelete = false
+  private var networkRowUnapproved = false
   private var pending: [SnapshotRefreshProtocol] = []
 
   func reset() {
@@ -815,7 +1183,24 @@ private final class SnapshotRefreshLog: @unchecked Sendable {
     recorded = []
     held = false
     offline = false
+    offlineAfterDelete = false
+    networkRowUnapproved = false
     pending = []
+    lock.unlock()
+  }
+
+  func goOfflineAfterDelete() {
+    lock.lock()
+    offlineAfterDelete = true
+    lock.unlock()
+  }
+
+  /// Called once a DELETE has been answered.
+  func noteDelete() {
+    lock.lock()
+    if offlineAfterDelete {
+      offline = true
+    }
     lock.unlock()
   }
 
@@ -829,6 +1214,18 @@ private final class SnapshotRefreshLog: @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
     return offline
+  }
+
+  func serveNetworkRowUnapproved() {
+    lock.lock()
+    networkRowUnapproved = true
+    lock.unlock()
+  }
+
+  var servesNetworkRowUnapproved: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return networkRowUnapproved
   }
 
   func record(_ path: String) {
@@ -920,6 +1317,22 @@ private final class SnapshotRefreshProtocol: URLProtocol {
     SnapshotRefreshLog.shared.goOffline()
   }
 
+  static func serveNetworkRowUnapproved() {
+    SnapshotRefreshLog.shared.serveNetworkRowUnapproved()
+  }
+
+  /// The network row as served, approved unless a test asked otherwise.
+  private static var networkRowJSON: String {
+    SnapshotRefreshLog.shared.servesNetworkRowUnapproved
+      ? transactionJSON.replacingOccurrences(of: "\"approved\": true", with: "\"approved\": false")
+      : transactionJSON
+  }
+
+  /// Answers the next DELETE, then fails every request after it.
+  static func goOfflineAfterDelete() {
+    SnapshotRefreshLog.shared.goOfflineAfterDelete()
+  }
+
   /// Lets every held response finish. Called from the test's thread; the
   /// stub never blocks a URLSession worker, so a held request cannot stop the
   /// next one from being issued.
@@ -959,6 +1372,11 @@ private final class SnapshotRefreshProtocol: URLProtocol {
     // slice, so holding it would park the launch before the code under test
     // ever runs. Everything else is parked and returned to, rather than slept
     // on, so no URLSession worker is blocked and later requests still issue.
+    if request.httpMethod == "DELETE" {
+      finish()
+      SnapshotRefreshLog.shared.noteDelete()
+      return
+    }
     if url.path != "/v1/plans", SnapshotRefreshLog.shared.park(self) {
       return
     }
@@ -1073,6 +1491,9 @@ private final class SnapshotRefreshProtocol: URLProtocol {
       return #"{"data":{"transactions":[\#(olderTransactionJSON)],"has_more":false,"server_knowledge":\#(serverKnowledge)}}"#
     }
     switch path {
+    case "\(plan)/transactions/\(networkTransactionID)":
+      // Only DELETE reaches this path in these tests.
+      return #"{"data":{"transaction":\#(networkRowJSON),"server_knowledge":\#(serverKnowledge + 1)}}"#
     case "/v1/plans":
       return #"{"data":{"plans":[{"id":"\#(planID)","name":"Fixture Plan"}]}}"#
     case "\(plan)/settings":
@@ -1086,7 +1507,7 @@ private final class SnapshotRefreshProtocol: URLProtocol {
     case "\(plan)/account_preferences":
       return #"{"data":{"account_preferences":null,"account_preferences_revision":0}}"#
     case "\(plan)/transactions":
-      return #"{"data":{"transactions":[\#(transactionJSON)],"has_more":false,"server_knowledge":\#(serverKnowledge)}}"#
+      return #"{"data":{"transactions":[\#(networkRowJSON)],"has_more":false,"server_knowledge":\#(serverKnowledge)}}"#
     case "\(plan)/transactions/unapproved_count":
       return #"{"data":{"count":\#(networkUnapprovedCount),"server_knowledge":\#(serverKnowledge)}}"#
     case "\(plan)/scheduled_transactions":

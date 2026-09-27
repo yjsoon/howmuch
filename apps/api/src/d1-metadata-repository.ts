@@ -6,7 +6,7 @@ import { D1GuardedCommandExecutor, statement } from "./d1-guarded-command";
 import type { EffectiveScheduledTransaction } from "./scheduled-transactions";
 import { resolveAccountPresentation } from "./account-icon";
 import { onBudgetForKind, type AccountUpdatePatch } from "./account-kind";
-import { CLEAR_ONE_PLAN, REMATERIALISE_ONE_PLAN } from "./ynab-month-activity";
+import { ynabMirrorGuard, type PlannedSql } from "./category-management";
 
 /** Exact effective-source snapshot required to merge a scheduled mutation. */
 export type ScheduledMutationSnapshot = Readonly<{
@@ -166,108 +166,6 @@ export class D1MetadataRepository {
       assertion(commandId,"metadata_plan_exists",planId,planId),
       statement(`INSERT INTO ynab_raw_objects(plan_id,object_type,object_id,payload_json,deleted,server_knowledge,updated_at) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)
         ON CONFLICT(plan_id,object_type,object_id) DO UPDATE SET payload_json=excluded.payload_json,deleted=excluded.deleted,server_knowledge=excluded.server_knowledge,updated_at=CURRENT_TIMESTAMP`,[planId,objectType,objectId,json,deleted,serverKnowledge??null]),
-    ]);
-  }
-
-  /** Rebuilds a plan's materialised month activity as one guarded write. */
-  async rematerialiseYnabMonthActivity(planId:string,context?:D1WriteContext):Promise<void>{
-    const commandId=this.id(context);
-    await this.run("ynab.month_activity.rematerialise",planId,planId,{},context,[
-      assertion(commandId,"metadata_plan_exists",planId,planId),
-      statement(CLEAR_ONE_PLAN,[planId]),
-      statement(REMATERIALISE_ONE_PLAN,[planId,planId]),
-    ]);
-  }
-
-  /** Writes a local planning overlay without ever changing the YNAB raw row. */
-  async setMonthCategoryAssignment(
-    planId: string,
-    month: string,
-    categoryId: string,
-    budgetedMilli: number,
-    sourceBudgeted: number,
-    context?: D1WriteContext,
-  ): Promise<void> {
-    const commandId = this.id(context);
-    const resourceId = `${month}\u001f${categoryId}`;
-    const auditId = `audit_${digest(commandId).slice(0, 24)}`;
-    const metadata = JSON.stringify({
-      month,
-      category_id: categoryId,
-      source_budgeted: sourceBudgeted,
-      budgeted: budgetedMilli,
-    });
-    const assignment = budgetedMilli === sourceBudgeted
-      ? statement("DELETE FROM plan_month_assignments WHERE plan_id = ? AND month = ? AND category_id = ?", [planId, month, categoryId])
-      : statement(
-        `INSERT INTO plan_month_assignments (plan_id, month, category_id, budgeted_milli, source, updated_at)
-         VALUES (?, ?, ?, ?, 'howmuch-local', CURRENT_TIMESTAMP)
-         ON CONFLICT(plan_id, month, category_id) DO UPDATE SET
-           budgeted_milli = excluded.budgeted_milli,
-           source = excluded.source,
-           updated_at = CURRENT_TIMESTAMP`,
-        [planId, month, categoryId, budgetedMilli],
-      );
-    await this.run("plan.assignment.set", planId, resourceId, { month, categoryId, budgetedMilli, sourceBudgeted }, context, [
-      assertion(commandId, "metadata_plan_exists", planId, planId),
-      assertion(commandId, "category", categoryId, planId),
-      assignment,
-      statement("UPDATE plans SET server_knowledge=server_knowledge+1,updated_at=CURRENT_TIMESTAMP WHERE id=?", [planId]),
-      statement(
-        "INSERT INTO audit_events(id,plan_id,action,resource_type,resource_id,source,metadata_json) VALUES (?,?,'plan_assignment.set','month_category',?,'howmuch-local',?)",
-        [auditId, planId, resourceId, metadata],
-      ),
-    ]);
-  }
-
-  /** Version-guarded D1 write for a HowMuch-owned monthly target overlay. */
-  async setMonthCategoryTarget(
-    planId: string,
-    month: string,
-    categoryId: string,
-    target: { goal_type: string | null; goal_target: number | null; goal_target_month: string | null },
-    context?: D1WriteContext,
-  ): Promise<void> {
-    const commandId = this.id(context);
-    const resourceId = `${month}\u001f${categoryId}`;
-    const auditId = `audit_${digest(commandId).slice(0, 24)}`;
-    const metadata = JSON.stringify({ month, category_id: categoryId, target });
-    await this.run("plan.target.set", planId, resourceId, { month, categoryId, target }, context, [
-      assertion(commandId, "metadata_plan_exists", planId, planId),
-      assertion(commandId, "category", categoryId, planId),
-      statement(
-        `INSERT INTO plan_month_category_targets
-          (plan_id, month, category_id, goal_type, goal_target_milli, goal_target_month, source, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'howmuch-local', CURRENT_TIMESTAMP)
-         ON CONFLICT(plan_id, month, category_id) DO UPDATE SET
-           goal_type = excluded.goal_type,
-           goal_target_milli = excluded.goal_target_milli,
-           goal_target_month = excluded.goal_target_month,
-           source = excluded.source,
-           updated_at = CURRENT_TIMESTAMP`,
-        [planId, month, categoryId, target.goal_type, target.goal_target, target.goal_target_month],
-      ),
-      statement("UPDATE plans SET server_knowledge=server_knowledge+1,updated_at=CURRENT_TIMESTAMP WHERE id=?", [planId]),
-      statement(
-        "INSERT INTO audit_events(id,plan_id,action,resource_type,resource_id,source,metadata_json) VALUES (?,?,'plan_target.set','month_category',?,'howmuch-local',?)",
-        [auditId, planId, resourceId, metadata],
-      ),
-    ]);
-  }
-
-  async restoreMonthCategoryTarget(planId: string, month: string, categoryId: string, context?: D1WriteContext): Promise<void> {
-    const commandId = this.id(context);
-    const resourceId = `${month}\u001f${categoryId}`;
-    const auditId = `audit_${digest(commandId).slice(0, 24)}`;
-    await this.run("plan.target.restore", planId, resourceId, { month, categoryId }, context, [
-      assertion(commandId, "metadata_plan_exists", planId, planId),
-      assertion(commandId, "category", categoryId, planId),
-      statement("DELETE FROM plan_month_category_targets WHERE plan_id = ? AND month = ? AND category_id = ?", [planId, month, categoryId]),
-      statement("UPDATE plans SET server_knowledge=server_knowledge+1,updated_at=CURRENT_TIMESTAMP WHERE id=?", [planId]),
-      statement(
-        "INSERT INTO audit_events(id,plan_id,action,resource_type,resource_id,source,metadata_json) VALUES (?,?,'plan_target.restore','month_category',?,'howmuch-local',?)",
-        [auditId, planId, resourceId, JSON.stringify({ month, category_id: categoryId })],
-      ),
     ]);
   }
 
@@ -434,6 +332,20 @@ export class D1MetadataRepository {
       assertion(commandId,"metadata_plan_exists",planId,planId), assertion(commandId,"metadata_payee",payee.id,planId),
       statement("INSERT INTO payees(id,plan_id,name,external_ynab_id) VALUES (?,?,?,?)", [payee.id,planId,payee.name,payee.id]),
       statement("UPDATE plans SET server_knowledge=server_knowledge+1,updated_at=CURRENT_TIMESTAMP WHERE id=?", [planId]),
+    ]);
+  }
+
+  /**
+   * One guarded batch for a HowMuch-native plan command. The caller supplies
+   * the planned statements; this adds the plan-exists assertion and the
+   * in-batch refusal to touch a YNAB-mirror plan.
+   */
+  async applyNativeCommand(kind: string, planId: string, resourceId: string, payload: unknown, statements: readonly PlannedSql[], context?: D1WriteContext): Promise<void> {
+    const commandId = this.id(context);
+    await this.run(kind, planId, resourceId, payload, context, [
+      assertion(commandId, "metadata_plan_exists", planId, planId),
+      ynabMirrorGuard(commandId, planId),
+      ...statements.map((planned) => statement(planned.sql, planned.values as unknown[])),
     ]);
   }
 

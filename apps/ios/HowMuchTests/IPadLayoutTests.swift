@@ -145,16 +145,12 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertTrue(hasEveryday, "compact accounts must list Everyday. OCR: [\(captured.text)] AX: \(surface.accessibilityLabels())")
   }
 
-  func testPlanAndReflectSurfacesDoNotLeakFocusedRegister() {
-    let model = AppModel()
+  func testReflectSurfaceDoesNotLeakFocusedRegister() {
+    let model = AppModel(outboxStore: .temporary())
     model.activeCaptureSurface = .accounts
     model.beginFocusedRegisterAccount("acct-everyday")
     XCTAssertEqual(model.visibleRegisterAccountID, "acct-everyday")
     XCTAssertEqual(model.addTransactionsOrigin(), .visibleRegister(accountID: "acct-everyday"))
-
-    model.activeCaptureSurface = .plan
-    XCTAssertNil(model.visibleRegisterAccountID)
-    XCTAssertEqual(model.addTransactionsOrigin(), .lastUsedOpen)
 
     model.activeCaptureSurface = .reflect
     XCTAssertNil(model.visibleRegisterAccountID)
@@ -313,12 +309,10 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertEqual(AppTab.accounts.captureSurface, .accounts)
     XCTAssertEqual(AppTab.rewards.captureSurface, .rewards)
     XCTAssertEqual(AppTab.reflect.captureSurface, .reflect)
-    XCTAssertEqual(AppTab.plan.captureSurface, .plan)
     XCTAssertEqual(AppTab.assistant.captureSurface, .assistant)
     XCTAssertEqual(AppTab.accounts.compactBarSelection, .accounts)
     XCTAssertEqual(AppTab.rewards.compactBarSelection, .rewards)
     XCTAssertEqual(AppTab.reflect.compactBarSelection, .reflect)
-    XCTAssertNil(AppTab.plan.compactBarSelection)
     XCTAssertNil(AppTab.assistant.compactBarSelection)
     XCTAssertEqual(CompactBarSelection.accounts.tab, .accounts)
     XCTAssertNil(CompactBarSelection.addTransaction.tab)
@@ -337,8 +331,8 @@ final class IPadLayoutTests: XCTestCase {
     )
   }
 
-  func testOpenMorePlanFromAccountsDoesNotLeakFocusedRegister() {
-    let model = AppModel()
+  func testOpenMoreAssistantFromAccountsDoesNotLeakFocusedRegister() {
+    let model = AppModel(outboxStore: .temporary())
     let chrome = RootChromeState()
     chrome.tab = .accounts
     model.activeCaptureSurface = chrome.captureSurface
@@ -346,22 +340,15 @@ final class IPadLayoutTests: XCTestCase {
     XCTAssertEqual(model.visibleRegisterAccountID, "acct-everyday")
     XCTAssertEqual(model.addTransactionsOrigin(), .visibleRegister(accountID: "acct-everyday"))
 
-    chrome.openMore(.plan)
-    model.activeCaptureSurface = chrome.captureSurface
-    XCTAssertEqual(chrome.captureSurface, .plan)
-    XCTAssertEqual(chrome.overflow(on: .accounts), .plan)
-    XCTAssertNil(model.visibleRegisterAccountID)
-    XCTAssertEqual(model.addTransactionsOrigin(), .lastUsedOpen)
-
-    chrome.openMore(.plan)
-    XCTAssertEqual(chrome.overflow(on: .accounts), .plan)
-
     chrome.openMore(.assistant)
     model.activeCaptureSurface = chrome.captureSurface
     XCTAssertEqual(chrome.captureSurface, .assistant)
     XCTAssertEqual(chrome.overflow(on: .accounts), .assistant)
     XCTAssertNil(model.visibleRegisterAccountID)
     XCTAssertEqual(model.addTransactionsOrigin(), .lastUsedOpen)
+
+    chrome.openMore(.assistant)
+    XCTAssertEqual(chrome.overflow(on: .accounts), .assistant)
 
     chrome.dismissMore()
     model.activeCaptureSurface = chrome.captureSurface
@@ -372,35 +359,34 @@ final class IPadLayoutTests: XCTestCase {
   }
 
   func testMoreMenuItemsOmitOnlyTheNamedDestination() {
-    XCTAssertEqual(MoreDestination.menuItems(omitting: nil), [.plan, .assistant])
-    XCTAssertEqual(MoreDestination.menuItems(omitting: .plan), [.assistant])
-    XCTAssertEqual(MoreDestination.menuItems(omitting: .assistant), [.plan])
+    XCTAssertEqual(MoreDestination.menuItems(omitting: nil), [.assistant])
+    XCTAssertEqual(MoreDestination.menuItems(omitting: .assistant), [])
   }
 
   func testOverflowItemsStayOnPhoneAndLeaveIPadSidebar() {
     XCTAssertEqual(
       MoreDestination.overflowItems(usesSidebar: false, omitting: nil),
-      [.plan, .assistant]
+      [.assistant]
     )
     XCTAssertEqual(
       MoreDestination.overflowItems(usesSidebar: true, omitting: nil),
       []
     )
     XCTAssertEqual(
-      MoreDestination.overflowItems(usesSidebar: false, omitting: .plan),
-      [.assistant]
+      MoreDestination.overflowItems(usesSidebar: false, omitting: .assistant),
+      []
     )
   }
 
   func testAdoptSidebarPromotesPhoneOverflowToTab() {
     let chrome = RootChromeState()
     chrome.tab = .accounts
-    chrome.openMore(.plan)
-    XCTAssertEqual(chrome.captureSurface, .plan)
+    chrome.openMore(.assistant)
+    XCTAssertEqual(chrome.captureSurface, .assistant)
     chrome.adoptSidebarLayout()
-    XCTAssertEqual(chrome.tab, .plan)
+    XCTAssertEqual(chrome.tab, .assistant)
     XCTAssertNil(chrome.overflow(on: .accounts))
-    XCTAssertEqual(chrome.captureSurface, .plan)
+    XCTAssertEqual(chrome.captureSurface, .assistant)
   }
 
   func testAdoptCompactMovesSidebarTabIntoMore() {
@@ -420,11 +406,8 @@ final class IPadLayoutTests: XCTestCase {
     chrome.tab = .rewards
     XCTAssertEqual(chrome.compactBarTab, .rewards)
 
-    chrome.tab = .plan
-    XCTAssertEqual(chrome.tab, .plan)
-    XCTAssertEqual(chrome.compactBarTab, .rewards)
-
     chrome.tab = .assistant
+    XCTAssertEqual(chrome.tab, .assistant)
     XCTAssertEqual(chrome.compactBarTab, .rewards)
   }
 
@@ -601,7 +584,7 @@ final class IPadLayoutTests: XCTestCase {
   func testCompactRootTabViewAcceptsOverflowSelectionWithoutCrashing() async {
     let harness = SnapshotHarness.make()
     let chrome = RootChromeState()
-    chrome.tab = .plan
+    chrome.tab = .assistant
     guard let surface = SnapshotSurface(
       root: RootTabView(chrome: chrome, usesSidebar: false, workspace: harness.workspace)
         .environment(harness.model)

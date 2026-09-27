@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OSLog
 
 enum LoadPhase: Equatable {
   case idle
@@ -36,17 +37,53 @@ private struct LedgerDelete {
   let mirror: SplitMirrorLink
 }
 
+/// One acknowledged outbox write, kept on the same terms as `LedgerDelete`:
+/// a read issued before it landed gets this row in place of the one it
+/// fetched (or, for a create, gets the row added to its first page).
+private struct LedgerWrite {
+  let generation: Int
+  let row: Transaction
+  let isCreate: Bool
+}
+
+/// The balance effect of an acknowledged command, and the accounts read
+/// sequence at the moment it was acknowledged.
+private struct AcknowledgedDelta {
+  let sequence: Int
+  let deltas: [String: DeleteBalanceDelta.Delta]
+}
+
 @MainActor
 @Observable
 final class AppModel {
+  private static let logger = Logger(subsystem: "sg.soon.howmuch", category: "AppModel")
+
   var settings: APISettings
   let captureAI: CaptureAISettings
   var planSettings: PlanSettings?
-  var accounts: [Account] = []
+  /// The balances on screen: the server's, moved by unsent changes. Setting
+  /// it sets the server's copy.
+  var accounts: [Account] {
+    get { displayedAccounts }
+    set { serverAccounts = newValue }
+  }
+  private var displayedAccounts: [Account] = []
   var categoryGroups: [CategoryGroup] = []
-  var payees: [Payee] = []
-  private var serverTransactions: [Transaction] = []
-  private var serverUnapprovedTransactions: [Transaction] = []
+  var payees: [Payee] = [] {
+    didSet {
+      if !outbox.isEmpty { recomputeDisplayedAccounts() }
+    }
+  }
+  private var serverTransactions: [Transaction] = [] {
+    didSet {
+      if !outbox.isEmpty { recomputeDisplayedAccounts() }
+    }
+  }
+  private var serverUnapprovedTransactions: [Transaction] = [] {
+    didSet {
+      if !outbox.isEmpty { recomputeDisplayedAccounts() }
+    }
+  }
   /// Size of the unapproved queue as the server last reported it, without any
   /// of its rows. The badge is drawn from this so launch never waits on a walk
   /// of the whole queue.
@@ -115,15 +152,20 @@ final class AppModel {
   var referencePhase: LoadPhase = .idle
   var ledgerPhase: LoadPhase = .idle
   var scheduledTransactionsPhase: LoadPhase = .idle
-  /// Increments after mutations that affect a plan month, so the Plan
-  /// destination reloads its locally held monthly snapshot when it becomes visible.
-  private(set) var planRefreshGeneration = 0
   private(set) var reportsRefreshGeneration = 0
   private(set) var rewardsRefreshGeneration = 0
   var reportsPhase: LoadPhase = .idle
+  /// The Rewards board's last report and the request that produced it. Read
+  /// through `rewardsReport(for:)`, so a report is never shown under another
+  /// filter's controls.
+  private var rewardsReport: RewardsReport?
+  private var rewardsReportRequest: RewardsRequest?
+  private(set) var rewardsPhase: LoadPhase = .idle
   var isSubmitting = false
   var lastSaveMessage: SaveMessage?
   var isShowingSettings = false
+  /// First run: choose between this iPhone and a server.
+  var isShowingWelcome = false
   /// Account registers currently on a navigation stack, deepest last.
   /// Horizon fill uses this stack. Capture origin uses `visibleRegisterAccountID`.
   private(set) var focusedRegisterAccountIDs: [String] = []
@@ -131,26 +173,43 @@ final class AppModel {
   /// register must not leak into Rewards/Assistant or Home Screen.
   var activeCaptureSurface: CaptureSurface = .accounts
   private var focusedRegisters: [(surface: CaptureSurface, accountID: String)] = []
-  private var pendingTransactions: [PendingTransaction] = OutboxStore.load()
-  /// Latest conversation revision for a create that is still sending.
-  /// Applied as an edit once the POST lands, or written into the outbox if it fails.
-  private var pendingCreateRevisions: [String: TransactionDraft] = [:]
+  // MARK: Outbox (docs/plans/offline-writes.md P1)
+
+  /// Every transaction write not yet acknowledged by the server, for every
+  /// connection, exactly as it is on disk. Only commands stamped for the
+  /// current connection are shown or sent (`currentOutbox`).
+  private(set) var outbox: [OutboxCommand] = [] {
+    didSet {
+      syncApprovalPending()
+      recomputeDisplayedAccounts()
+    }
+  }
+  @ObservationIgnored private let outboxStore: OutboxStore
+  /// The store behind this model, for tests that relaunch on the same file.
+  var outboxStoreForTesting: OutboxStore { outboxStore }
+  /// Set when the outbox file exists but could not be read. Writes are
+  /// refused until a read succeeds, so nothing on disk is overwritten.
+  @ObservationIgnored private var outboxLoadFailure: String?
   /// True while a replay pass is running, whoever started it — the outbox
   /// card drives its spinner from this rather than view-local state.
   var isSyncingOutbox = false
-  private var pendingEdits: [String: PendingEdit] = [:]
-  private var inFlightCreates: Set<PendingRow.ID> = []
-  @ObservationIgnored private var editTasks: [String: Task<Void, Never>] = [:]
-  @ObservationIgnored private var editGenerations: [String: Int] = [:]
-  @ObservationIgnored private var clearedTogglesInFlight: Set<String> = []
-  /// Flipped cleared values that must survive `refreshLedger` replacing
-  /// `serverTransactions` with a fetch that still has the pre-PATCH row.
-  private var clearedToggleOverlays: [String: ClearedState] = [:]
-  /// An editor acknowledgement supersedes a toggle, but not an older read.
-  /// A new ledger generation and a response containing this row retire it.
-  private var clearedOverlayMinimumLedgerGeneration: [String: Int] = [:]
   @ObservationIgnored private var needsAnotherDrain = false
-  @ObservationIgnored private var coalescedDrainTrigger: OutboxDrainTrigger?
+  /// How long a new change waits before a pass sends it, so a burst of taps
+  /// goes out together. Tests set it to zero.
+  @ObservationIgnored var outboxDebounce: Duration = .milliseconds(400)
+  /// Balance effects of commands the server has acknowledged, kept until an
+  /// accounts read that started after the acknowledgement lands. Without
+  /// them a balance would jump back while that read is still out.
+  private var acknowledgedBalanceDeltas: [AcknowledgedDelta] = [] {
+    didSet { recomputeDisplayedAccounts() }
+  }
+  /// Bumped when an accounts read starts; see `acknowledgedBalanceDeltas`.
+  @ObservationIgnored private var accountsReadSequence = 0
+  /// The accounts as the server last sent them. `accounts` adds what the
+  /// outbox has not sent yet, and what it sent that no read reflects yet.
+  private var serverAccounts: [Account] = [] {
+    didSet { recomputeDisplayedAccounts() }
+  }
   private var accountsByID: [String: Account] = [:]
   private var categoriesByID: [String: Category] = [:]
   private var payeesByID: [String: Payee] = [:]
@@ -186,6 +245,7 @@ final class AppModel {
   /// when offsetting external transactions leave balances unchanged. A fill
   /// already in flight must not restore its completion after that refresh.
   @ObservationIgnored private var accountHorizonCompletionEpoch = 0
+  @ObservationIgnored private var ledgerWrites: [LedgerWrite] = []
   /// Latest plan cursor seen on a ledger fetch. Changes made on another
   /// device advance it, which is how the reports cache (#180) notices them.
   private(set) var serverKnowledge: Int?
@@ -216,6 +276,15 @@ final class AppModel {
   // MARK: - #176: the on-device reference snapshot
 
   @ObservationIgnored private let snapshotStore: SnapshotStore
+  /// The Reflect overview and the default Rewards board, in the same
+  /// directory as the reference snapshot and discarded with it.
+  @ObservationIgnored private let reportsStore: ReportsSnapshotStore
+  /// The default board request's last report. Kept apart from
+  /// `rewardsReport`, which may hold a filtered board that is never cached.
+  @ObservationIgnored private var cachedRewardsOverview: RewardsReport?
+  @ObservationIgnored private var rewardsGeneration = 0
+  /// The month the Reflect reports on screen were fetched for (`yyyy-MM`).
+  @ObservationIgnored private var reflectMonth: String?
   /// True while the reference set on screen came from the snapshot rather than
   /// from this launch's network refresh. Each area clears its own flag the
   /// moment the network replaces it.
@@ -243,12 +312,16 @@ final class AppModel {
   }
 
   init(
+    outboxStore: OutboxStore = .shared,
     settings: APISettings = .load(),
     viewPrefs: ViewPrefs = .load(),
     captureAI: CaptureAISettings? = nil,
-    snapshotStore: SnapshotStore = .shared
+    snapshotStore: SnapshotStore = .shared,
+    hasSavedSettings: Bool = APISettings.hasSavedSettings()
   ) {
     self.snapshotStore = snapshotStore
+    self.outboxStore = outboxStore
+    self.reportsStore = ReportsSnapshotStore(directory: snapshotStore.directory)
     var scopedStore = ScopedViewPrefsStore.load()
     let scope = settings.viewPrefsScopeKey
     if scope == nil {
@@ -262,8 +335,16 @@ final class AppModel {
     self.viewPrefs = scope.map { scopedStore.activate(scope: $0, legacy: viewPrefs) } ?? ViewPrefs()
     self.scopedViewPrefsStore = scopedStore
     // A revoked session is persisted as signed out. Do not let a cold launch
-    // fall back to tabs that can only render tokenless API errors.
-    self.isShowingSettings = !settings.isAuthenticated
+    // fall back to tabs that can only render tokenless API errors. Only an
+    // install that has never saved settings sees the welcome screen.
+    switch LaunchRoute.resolve(hasSavedSettings: hasSavedSettings, isAuthenticated: settings.isAuthenticated) {
+    case .welcome:
+      self.isShowingWelcome = true
+    case .connection:
+      self.isShowingSettings = true
+    case .main:
+      break
+    }
     NotificationCenter.default.addObserver(
       forName: .howMuchAuthenticationExpired,
       object: nil,
@@ -274,9 +355,76 @@ final class AppModel {
         self?.handleAuthenticationExpiry(expiredSessionToken: expiredSessionToken)
       }
     }
+    // Before the snapshot, so the first frame already shows unsent changes.
+    loadOutbox()
     // #176: before the first frame, and off the network. A snapshot that does
     // not belong to this connection is deleted rather than shown.
     restoreSnapshot()
+    restoreReports()
+  }
+
+  /// Puts the last Reflect overview and Rewards board on screen. Each is
+  /// revalidated quietly when its view appears: `reportsGenerationAtLastFetch`
+  /// stays `nil`, so `ReportsRefreshPolicy` asks for one refetch, and a loaded
+  /// phase keeps that refetch free of spinners.
+  private func restoreReports() {
+    guard let snapshot = reportsStore.load() else {
+      return
+    }
+    guard ReportsSnapshot.rejection(snapshot, settings: settings) == nil else {
+      reportsStore.delete()
+      return
+    }
+    if snapshot.hasReflectOverview,
+       ReportsSnapshot.reflectIsCurrent(storedMonth: snapshot.reflectMonth, now: .now) {
+      reflectMonth = snapshot.reflectMonth
+      spendingBreakdown = snapshot.spendingBreakdown
+      incomeVsSpending = snapshot.incomeVsSpending
+      netWorth = snapshot.netWorth
+      ageOfMoney = snapshot.ageOfMoney
+      reportsPhase = .loaded
+    }
+    if let rewards = snapshot.rewards {
+      cachedRewardsOverview = rewards
+      rewardsReport = rewards
+      rewardsReportRequest = .overview(planID: snapshot.planID)
+      rewardsPhase = .loaded
+    }
+  }
+
+  /// The board's report, only when it was produced by exactly this request.
+  func rewardsReport(for request: RewardsRequest) -> RewardsReport? {
+    rewardsReportRequest == request ? rewardsReport : nil
+  }
+
+  /// Set while Reflect shows reports its last refresh could not replace, so
+  /// the screen can say they may be out of date.
+  var reportsStaleMessage: String? {
+    guard spendingBreakdown != nil || netWorth != nil else { return nil }
+    return reportsPhase.errorMessage
+  }
+
+  /// Writes whatever reports are in hand. Each is written as it last loaded;
+  /// they share no cursor, so a mixture of ages is fine.
+  private func persistReports() {
+    guard settings.isAuthenticated,
+          !settings.planID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+          !settings.authenticatedUserID.isEmpty else {
+      return
+    }
+    reportsStore.scheduleWrite(
+      ReportsSnapshot(
+        connectionFingerprint: settings.connectionFingerprint,
+        authenticatedUserID: settings.authenticatedUserID,
+        planID: settings.planID,
+        spendingBreakdown: spendingBreakdown,
+        incomeVsSpending: incomeVsSpending,
+        netWorth: netWorth,
+        ageOfMoney: ageOfMoney,
+        reflectMonth: reflectMonth,
+        rewards: cachedRewardsOverview
+      )
+    )
   }
 
   /// Puts the last written reference set on screen so a warm launch renders
@@ -303,8 +451,8 @@ final class AppModel {
     snapshotKnowledge = snapshot.serverKnowledge
     // #181's badge: the tile shows the last count the server gave rather than
     // flashing 0 while `refreshUnapprovedCount` is in flight. It is a plain
-    // number with no rows behind it, and `unapprovedBadgeCount` already
-    // subtracts anything approved since — which, on a launch, is nothing.
+    // number with no rows behind it. The restored outbox supplies pending
+    // approvals/deletes, which `unapprovedBadgeCount` subtracts once.
     // Per-account counts are not restored: a narrowed register fetches its own
     // when it opens, and a stale per-account number has no tile to sit on.
     if let unapprovedCount = snapshot.unapprovedCount {
@@ -332,8 +480,11 @@ final class AppModel {
 
   /// Writes the current reference set, tagged with the cursor the last ledger
   /// fetch observed. Called from every slice's success path; the store
-  /// coalesces queued writes and encodes off the main actor.
-  private func persistSnapshot() {
+  /// coalesces queued writes and encodes off the main actor. Returns false
+  /// when nothing was written, so a caller that must not leave the old file
+  /// behind can delete it.
+  @discardableResult
+  private func persistSnapshot() -> Bool {
     guard settings.isAuthenticated,
           !settings.planID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
           !settings.authenticatedUserID.isEmpty,
@@ -343,7 +494,7 @@ final class AppModel {
           // have come from the network at that cursor. The slice that clears
           // the final provisional flag is the one that writes.
           !isProvisional else {
-      return
+      return false
     }
     snapshotStore.scheduleWrite(
       ReferenceSnapshot(
@@ -352,15 +503,20 @@ final class AppModel {
         planID: settings.planID,
         serverKnowledge: serverKnowledge,
         planSettings: planSettings,
-        accounts: accounts,
+        // The server's balances plus what it has acknowledged since: a
+        // restore adds back only what is still in the outbox.
+        accounts: acknowledgedAccounts,
         categoryGroups: categoryGroups,
         payees: payees,
         accountPreferences: lastSyncedAccountPreferences,
         scheduledTransactions: scheduledTransactions,
         ledgerPage: lastLedgerFirstPage,
-        unapprovedCount: serverUnapprovedCount
+        // Keep acknowledged-only adjustments, but undo durable pending ones:
+        // the restored outbox will subtract those again on the first frame.
+        unapprovedCount: unapprovedBadgeCount + approvalSession.pending.union(queuedUnapprovedRejections.keys).count
       )
     )
+    return true
   }
 
   /// Reports a launch that never reached the plan-scoped requests against the
@@ -385,6 +541,10 @@ final class AppModel {
   /// one endpoint, user and plan, so any change to those discards it outright.
   private func discardSnapshot() {
     snapshotStore.delete()
+    // The reports cache belongs to the same endpoint, user and plan.
+    reportsStore.delete()
+    cachedRewardsOverview = nil
+    reflectMonth = nil
     referenceIsProvisional = false
     ledgerIsProvisional = false
     schedulesIsProvisional = false
@@ -399,6 +559,12 @@ final class AppModel {
   /// "Invalid credentials" is misleading and can invite writes with a dead
   /// session, so the connection screen is made the single next step.
   private func handleAuthenticationExpiry(expiredSessionToken: String) {
+    // The on-device engine has no session to revoke. Signing it out would
+    // leave local mode on a server sign-in screen with no way back.
+    guard !settings.isLocal else {
+      Self.logger.notice("Ignored an authentication expiry in local mode")
+      return
+    }
     guard settings.isAuthenticated, settings.sessionToken == expiredSessionToken else {
       return
     }
@@ -422,15 +588,18 @@ final class AppModel {
     unapprovedQueuePhase = .idle
     unapprovedQueueViewers = []
     approvalSession = .empty
-    clearedToggleOverlays.removeAll()
-    clearedOverlayMinimumLedgerGeneration.removeAll()
-    clearedTogglesInFlight.removeAll()
+    syncApprovalPending()
     scheduledTransactions = []
     spendingBreakdown = nil
     incomeVsSpending = nil
     netWorth = nil
     ageOfMoney = nil
-    cancelPendingEdits()
+    clearRewards()
+    // The outbox itself stays: it is keyed by connection, and its commands
+    // wait for this connection to sign in again.
+    drainScheduleToken &+= 1
+    isDrainScheduled = false
+    acknowledgedBalanceDeltas = []
     invalidateAccountUsage()
     rebuildLookups()
     referencePhase = .idle
@@ -441,6 +610,7 @@ final class AppModel {
     ledgerReadGeneration &+= 1
     inFlightLedgerReads.removeAll()
     ledgerDeletes.removeAll()
+    ledgerWrites.removeAll()
     isShowingSettings = true
     wipeIntentCatalog()
   }
@@ -578,8 +748,8 @@ final class AppModel {
       icon: icon?.rawValue,
       onBudget: kind.onBudget
     )
-    if !accounts.contains(where: { $0.id == created.id }) {
-      accounts.append(created)
+    if !serverAccounts.contains(where: { $0.id == created.id }) {
+      serverAccounts.append(created)
       rebuildLookups()
     }
     // The new account is already applied, so the sheet need not wait for the
@@ -594,13 +764,13 @@ final class AppModel {
     if trimmed.isEmpty {
       throw APIClientError.validation("Name cannot be empty")
     }
-    guard let index = accounts.firstIndex(where: { $0.id == accountID }) else {
+    guard let index = serverAccounts.firstIndex(where: { $0.id == accountID }) else {
       throw APIClientError.validation("Account not found")
     }
-    let previous = accounts[index]
+    let previous = serverAccounts[index]
     let previousPayees = payees
     let next = AccountIdentity(name: trimmed, classification: identity.classification, icon: identity.icon)
-    accounts[index] = previous.with(next)
+    serverAccounts[index] = previous.with(next)
     renameTransferPayee(forAccountID: accountID, to: trimmed)
     rebuildLookups()
     do {
@@ -625,16 +795,16 @@ final class AppModel {
       if let typeToSend, updated.type != typeToSend {
         throw APIClientError.validation("The server did not save the account type.")
       }
-      if let current = accounts.firstIndex(where: { $0.id == accountID }) {
-        accounts[current] = updated
+      if let current = serverAccounts.firstIndex(where: { $0.id == accountID }) {
+        serverAccounts[current] = updated
         renameTransferPayee(forAccountID: accountID, to: updated.name)
         rebuildLookups()
       }
       publishIntentCatalog()
       scheduleRefresh(after: .accountUpdated)
     } catch {
-      if let current = accounts.firstIndex(where: { $0.id == accountID }) {
-        accounts[current] = previous
+      if let current = serverAccounts.firstIndex(where: { $0.id == accountID }) {
+        serverAccounts[current] = previous
         payees = previousPayees
         rebuildLookups()
       }
@@ -1179,8 +1349,12 @@ final class AppModel {
     return sorted
   }
 
+  /// `rows` as they will be once every unsent change lands: edits, status
+  /// changes and approvals applied, deletes hidden.
   func overlaying(_ rows: [Transaction]) -> [Transaction] {
-    overlayingApproval(on: overlayingClearedToggles(on: overlayingPendingEdits(on: rows)))
+    let commands = currentOutbox
+    let overlaid = commands.isEmpty ? rows : OutboxOverlay.apply(commands, to: rows, names: overlayNames)
+    return overlayingApproval(on: overlaid)
   }
 
   var transactions: [Transaction] {
@@ -1213,8 +1387,10 @@ final class AppModel {
     let since = locallyResolvedUnapprovedIDs.subtracting(confirmedWhenCounted[countScopeKey(accountID)] ?? [])
     guard let accountID else { return since.count }
     guard !since.isEmpty else { return 0 }
+    let queuedRejections = queuedUnapprovedRejections
     // One pass over the rows instead of a linear search per resolved ID. The
-    // ledger's row wins over the queue's, as the old `first ?? first` did.
+    // ledger's row wins over the queue's, as the old `first ?? first` did, and
+    // an outbox command's saved row is the last resort.
     var accountByID: [String: String] = [:]
     for row in serverUnapprovedTransactions where since.contains(row.id) {
       accountByID[row.id] = accountByID[row.id] ?? row.accountID
@@ -1223,9 +1399,12 @@ final class AppModel {
     for row in serverTransactions where since.contains(row.id) && ledgerSeen.insert(row.id).inserted {
       accountByID[row.id] = row.accountID
     }
+    for command in currentOutbox where since.contains(command.transactionID) {
+      accountByID[command.transactionID] = accountByID[command.transactionID] ?? command.baseSnapshot?.accountID
+    }
     return since.count { id in
       // A rejected row is gone from both arrays, so its account was recorded.
-      if let rejectedFrom = rejectedUnapprovedAccounts[id] {
+      if let rejectedFrom = rejectedUnapprovedAccounts[id] ?? queuedRejections[id] {
         return rejectedFrom == accountID
       }
       return accountByID[id] == accountID
@@ -1238,8 +1417,10 @@ final class AppModel {
     }
   }
 
+  /// True while an approval is on the wire. Queued approvals already show as
+  /// approved, so they do not hold anything up.
   var isApprovalInFlight: Bool {
-    !approvalSession.pending.isEmpty
+    currentOutbox.contains { $0.isInFlight && $0.carriesApproval }
   }
 
   func isApprovalPending(_ transactionID: String) -> Bool {
@@ -1251,33 +1432,290 @@ final class AppModel {
     return count == 0 ? nil : RegisterApproval.approveAllLabel(count)
   }
 
+  // MARK: - Outbox: what is on screen
+
+  /// The commands this connection owns. Commands stamped for another
+  /// connection stay on disk, untouched, until that connection is back.
+  var currentOutbox: [OutboxCommand] {
+    outbox.filter { settings.matchesCurrentOrLegacyOutboxStamp($0.connectionFingerprint) }
+  }
+
+  /// How many changes have not reached the server.
+  var unsentChangeCount: Int {
+    currentOutbox.count
+  }
+
+  /// New transactions waiting to be sent, as the register shows them.
   var pendingRows: [PendingRow] {
-    guard !pendingTransactions.isEmpty else { return [] }
-    let serverImportIDs = Set(serverTransactions.compactMap(\.importID))
-    return pendingTransactions.compactMap { pending in
-      guard settings.matchesCurrentOrLegacyOutboxStamp(pending.connectionFingerprint) else {
-        return nil
-      }
-      if let importID = pending.request.importID, serverImportIDs.contains(importID) {
-        return nil
-      }
-      return pendingRow(from: pending)
+    let commands = currentOutbox
+    guard commands.contains(where: { if case .create = $0.kind { return true }; return false }) else {
+      return []
     }
+    let serverImportIDs = Set(serverTransactions.compactMap(\.importID))
+    let serverIDs = Set(serverTransactions.map(\.id))
+    return commands.compactMap { command in
+      guard case .create(let request) = command.kind,
+            !serverIDs.contains(command.transactionID) else {
+        return nil
+      }
+      if let importID = request.importID, serverImportIDs.contains(importID) {
+        return nil
+      }
+      return PendingRow(
+        id: command.id,
+        transactionID: command.transactionID,
+        request: request,
+        status: rowStatus(command),
+        accountName: account(withID: request.accountID)?.name ?? "",
+        categoryName: categoryName(forID: request.categoryID),
+        payeeName: request.payeeName ?? request.payeeID.flatMap { payee(withID: $0)?.name }
+      )
+    }
+  }
+
+  /// The glyph a row with unsent changes carries, or nil when it has none.
+  func syncStatus(forTransactionID transactionID: String) -> PendingRow.Status? {
+    let commands = currentOutbox.filter { $0.transactionID == transactionID }
+    if let rejected = commands.first(where: { if case .rejected = $0.state { return true }; return false }) {
+      return rowStatus(rejected)
+    }
+    if commands.contains(where: \.isInFlight) {
+      return .sending
+    }
+    return commands.isEmpty ? nil : .waitingForConnection
+  }
+
+  /// Every unsent change, for the outbox card: rejected ones first.
+  var outboxItems: [OutboxItem] {
+    let items = currentOutbox.map { command -> OutboxItem in
+      let row = serverTransactions.first { $0.id == command.transactionID }
+        ?? serverUnapprovedTransactions.first { $0.id == command.transactionID }
+        ?? command.baseSnapshot
+      let action: String
+      var payeeName = row?.payeeName
+      var isoDate = row?.date
+      var amount = row?.amount
+      switch command.kind {
+      case .create(let request), .update(let request):
+        action = command.kind.isCreate ? "New" : "Edit"
+        payeeName = request.payeeName ?? request.payeeID.flatMap { payee(withID: $0)?.name } ?? payeeName
+        isoDate = request.date
+        amount = request.amount
+      case .cleared(_, let cleared, _):
+        action = cleared == .cleared ? "Cleared" : "Uncleared"
+      case .approve:
+        action = "Approve"
+      case .delete:
+        action = "Delete"
+      }
+      return OutboxItem(
+        id: command.id,
+        transactionID: command.transactionID,
+        action: action,
+        payeeName: payeeName,
+        isoDate: isoDate,
+        signedAmount: amount,
+        status: rowStatus(command)
+      )
+    }
+    return items.filter { if case .rejected = $0.status { return true }; return false }
+      + items.filter { if case .rejected = $0.status { return false }; return true }
+  }
+
+  /// Why Reconcile must wait, or nil when it can go ahead. The server checks
+  /// the statement against what it holds, so every change touching the
+  /// account has to reach it first.
+  func reconcileBlockReason(accountID: String) -> String? {
+    let commands = currentOutbox
+    guard !commands.isEmpty else {
+      return nil
+    }
+    let deltaAccounts = Set(
+      OutboxPlanner.balanceDeltas(
+        commands,
+        rowsByID: rowsForBalanceDeltas(commands),
+        transferAccountIDsByPayeeID: transferAccountIDsByPayeeID
+      ).keys
+    )
+    let waiting = commands.filter { command in
+      command.touchedAccountIDs.contains(accountID)
+        || serverRow(command.transactionID)?.accountID == accountID
+    }.count
+    guard waiting > 0 || deltaAccounts.contains(accountID) else {
+      return nil
+    }
+    let count = max(waiting, 1)
+    return count == 1
+      ? "1 change to this account hasn’t reached the server yet. Send or discard it before reconciling."
+      : "\(count) changes to this account haven’t reached the server yet. Send or discard them before reconciling."
+  }
+
+  private func rowStatus(_ command: OutboxCommand) -> PendingRow.Status {
+    switch command.state {
+    case .inFlight:
+      return .sending
+    case .queued:
+      return .waitingForConnection
+    case .rejected(let message, _):
+      return .rejected(message)
+    }
+  }
+
+  private var overlayNames: OutboxOverlay.Names {
+    OutboxOverlay.Names(
+      accountName: { [accountsByID] in accountsByID[$0]?.name },
+      categoryName: { [categoriesByID] in categoriesByID[$0]?.name },
+      payeeName: { [payeesByID] in payeesByID[$0]?.name },
+      transferAccountID: { [payeesByID] in payeesByID[$0]?.transferAccountId }
+    )
+  }
+
+  private var transferAccountIDsByPayeeID: [String: String] {
+    var result: [String: String] = [:]
+    for payee in payees {
+      if let accountID = payee.transferAccountId {
+        result[payee.id] = accountID
+      }
+    }
+    return result
+  }
+
+  /// The server rows a balance calculation needs: each command's row and the
+  /// far sides of its transfers.
+  private func rowsForBalanceDeltas(_ commands: [OutboxCommand]) -> [String: Transaction] {
+    var wanted = Set(commands.map(\.transactionID))
+    for command in commands {
+      if let base = command.baseSnapshot {
+        wanted.formUnion(base.linkedTransferIDs)
+      }
+    }
+    var rows: [String: Transaction] = [:]
+    for row in serverUnapprovedTransactions + serverTransactions where wanted.contains(row.id) {
+      rows[row.id] = row
+      wanted.formUnion(row.linkedTransferIDs)
+    }
+    // Far sides named only by a row found above.
+    for row in serverUnapprovedTransactions + serverTransactions where wanted.contains(row.id) && rows[row.id] == nil {
+      rows[row.id] = row
+    }
+    return rows
+  }
+
+  private func serverRow(_ transactionID: String) -> Transaction? {
+    serverTransactions.first { $0.id == transactionID }
+      ?? serverUnapprovedTransactions.first { $0.id == transactionID }
+  }
+
+  /// The row as the register shows it now.
+  private func displayedRow(_ transactionID: String) -> Transaction? {
+    guard let row = serverRow(transactionID) else {
+      return nil
+    }
+    return overlaying([row]).first
+  }
+
+  /// The server's accounts plus what it has acknowledged since they were read.
+  private var acknowledgedAccounts: [Account] {
+    let deltas = acknowledgedBalanceDeltas.reduce(into: [String: DeleteBalanceDelta.Delta]()) { sum, entry in
+      Self.add(entry.deltas, into: &sum)
+    }
+    return deltas.isEmpty ? serverAccounts : DeleteBalanceDelta.applying(deltas, to: serverAccounts)
+  }
+
+  private func recomputeDisplayedAccounts() {
+    var deltas = acknowledgedBalanceDeltas.reduce(into: [String: DeleteBalanceDelta.Delta]()) { sum, entry in
+      Self.add(entry.deltas, into: &sum)
+    }
+    let commands = currentOutbox
+    if !commands.isEmpty {
+      Self.add(
+        OutboxPlanner.balanceDeltas(
+          commands,
+          rowsByID: rowsForBalanceDeltas(commands),
+          transferAccountIDsByPayeeID: transferAccountIDsByPayeeID
+        ),
+        into: &deltas
+      )
+    }
+    let next = deltas.isEmpty ? serverAccounts : DeleteBalanceDelta.applying(deltas, to: serverAccounts)
+    guard next != displayedAccounts else {
+      return
+    }
+    displayedAccounts = next
+    accountsByID = Dictionary(next.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+  }
+
+  private static func add(_ deltas: [String: DeleteBalanceDelta.Delta], into sum: inout [String: DeleteBalanceDelta.Delta]) {
+    for (accountID, delta) in deltas {
+      var total = sum[accountID, default: DeleteBalanceDelta.Delta()]
+      total.balance += delta.balance
+      total.cleared += delta.cleared
+      total.uncleared += delta.uncleared
+      sum[accountID] = total
+    }
+  }
+
+  /// Queued approvals count as approved on the badge and in the register,
+  /// including after a relaunch, because the outbox is their record.
+  private func syncApprovalPending() {
+    let pending = Set(currentOutbox.filter(\.carriesApproval).map(\.transactionID))
+    if approvalSession.pending != pending {
+      approvalSession.pending = pending
+    }
+  }
+
+  /// Unapproved rows with a queued delete, by the account they sit in.
+  private var queuedUnapprovedRejections: [String: String] {
+    var result: [String: String] = [:]
+    for command in currentOutbox {
+      guard case .delete = command.kind,
+            let base = command.baseSnapshot ?? serverRow(command.transactionID),
+            !base.approved else {
+        continue
+      }
+      result[command.transactionID] = base.accountID
+    }
+    return result
   }
 
   func hasPendingCreate(importID: String?) -> Bool {
     guard let importID, !importID.isEmpty else {
       return false
     }
-    return pendingTransactions.contains { $0.request.importID == importID }
+    return currentOutbox.contains { command in
+      if case .create(let request) = command.kind {
+        return request.importID == importID
+      }
+      return false
+    }
   }
 
+  /// A conversation revision of something already saved. The row may be on
+  /// the server already, or still in the outbox (queued or on the wire); the
+  /// revision becomes an edit of whichever it is, and the planner folds it
+  /// into a create that has not been sent.
   func reviseConversationCapture(_ item: CaptureDraftItem) {
-    if applyRevisionToExistingServerRow(item) {
+    let transactionID: String
+    let base: Transaction?
+    if let existing = matchingServerRow(importID: item.id, accountID: item.draft.accountID) {
+      transactionID = existing.id
+      base = existing
+    } else if let create = currentOutbox.first(where: { command in
+      if case .create(let request) = command.kind { return request.importID == item.id }
+      return false
+    }) {
+      transactionID = create.transactionID
+      base = nil
+    } else {
       return
     }
-    replacePendingCreate(importID: item.id, draft: item.draft)
-    _ = applyRevisionToExistingServerRow(item)
+    var draft = item.draft
+    draft.id = transactionID
+    do {
+      try enqueueOutbox([editCommand(draft, transactionID: transactionID, base: base)])
+    } catch {
+      showSaveMessage("Couldn’t save changes — \(error.localizedDescription)", kind: .failure)
+    }
   }
 
   private func matchingServerRow(importID: String, accountID: String) -> Transaction? {
@@ -1286,84 +1724,6 @@ final class AppModel {
     }
     return serverTransactions.first(where: match)
       ?? serverUnapprovedTransactions.first(where: match)
-  }
-
-  @discardableResult
-  private func applyRevisionToExistingServerRow(_ item: CaptureDraftItem) -> Bool {
-    guard let existing = matchingServerRow(importID: item.id, accountID: item.draft.accountID) else {
-      return false
-    }
-    pendingCreateRevisions[item.id] = nil
-    var draft = item.draft
-    draft.id = existing.id
-    applyPendingEdit(draft, transactionID: existing.id)
-    return true
-  }
-
-  private func replacePendingCreate(importID: String, draft: TransactionDraft) {
-    switch CaptureOutboxRevision.action(
-      importID: importID,
-      pending: pendingTransactions,
-      inFlightIDs: inFlightCreates
-    ) {
-    case .queueUntilCreateSettles:
-      pendingCreateRevisions[importID] = draft
-    case .replaceOutbox(let index):
-      pendingCreateRevisions[importID] = nil
-      replaceOutboxRequest(at: index, draft: draft)
-    }
-  }
-
-  private func replaceOutboxRequest(at index: Int, draft: TransactionDraft) {
-    let old = pendingTransactions[index]
-    var next = pendingTransactions
-    next[index] = old.replacing(request: draft.writeRequest(includeCleared: draft.shouldWriteCleared))
-    do {
-      try OutboxStore.save(next)
-      pendingTransactions = next
-    } catch {
-      showSaveMessage("Couldn’t save changes — \(error.localizedDescription)", kind: .failure)
-    }
-  }
-
-  private func applyQueuedCreateRevision(importID: String?, transactionID: String) {
-    guard let importID, var revision = pendingCreateRevisions.removeValue(forKey: importID) else {
-      return
-    }
-    revision.id = transactionID
-    applyPendingEdit(revision, transactionID: transactionID)
-  }
-
-  private func writeQueuedRevisionIntoOutbox(_ item: PendingTransaction) {
-    guard let importID = item.request.importID,
-          let revision = pendingCreateRevisions.removeValue(forKey: importID),
-          let index = pendingTransactions.firstIndex(where: { $0.id == item.id })
-    else {
-      return
-    }
-    replaceOutboxRequest(at: index, draft: revision)
-  }
-
-  private func overlayingPendingEdits(on rows: [Transaction]) -> [Transaction] {
-    guard !pendingEdits.isEmpty else {
-      return rows
-    }
-    return rows.map { row in
-      pendingEdits[row.id]?.applied(to: row) ?? row
-    }
-    .sorted { ($0.date, $0.id) > ($1.date, $1.id) }
-  }
-
-  private func overlayingClearedToggles(on rows: [Transaction]) -> [Transaction] {
-    guard !clearedToggleOverlays.isEmpty else {
-      return rows
-    }
-    return rows.map { row in
-      guard let cleared = clearedToggleOverlays[row.id] else {
-        return row
-      }
-      return row.withCleared(cleared)
-    }
   }
 
   /// `RegisterApproval.looksApproved` per row, with the session's union taken once.
@@ -1379,62 +1739,6 @@ final class AppModel {
     return rows.map { row in
       !row.approved && resolved.contains(row.id) ? row.withApproved(true) : row
     }
-  }
-
-  /// Editor overrides belong to the pre-save read generation, not a value:
-  /// a later authoritative response may reflect another client's change.
-  /// Legacy toggle overrides still wait for a matching server snapshot.
-  private func reconcileClearedToggleOverlays(generation: Int, fetched: [Transaction]) {
-    guard !clearedToggleOverlays.isEmpty else {
-      return
-    }
-    for (id, cleared) in clearedToggleOverlays {
-      if clearedTogglesInFlight.contains(id) {
-        continue
-      }
-      guard let authoritative = fetched.first(where: { $0.id == id }) else {
-        continue
-      }
-      if let minimum = clearedOverlayMinimumLedgerGeneration[id] {
-        guard generation >= minimum else { continue }
-        // Older-page merges prefer already-loaded rows; update their status
-        // from this response before removing the editor's temporary override.
-        serverTransactions = serverTransactions.map { $0.id == id ? $0.withCleared(authoritative.cleared) : $0 }
-        serverUnapprovedTransactions = serverUnapprovedTransactions.map { $0.id == id ? $0.withCleared(authoritative.cleared) : $0 }
-        clearedToggleOverlays[id] = nil
-        clearedOverlayMinimumLedgerGeneration[id] = nil
-        continue
-      }
-      let snapshots = [serverTransactions, serverUnapprovedTransactions].compactMap { rows in
-        rows.first { $0.id == id }
-      }
-      if snapshots.isEmpty {
-        continue
-      }
-      if snapshots.allSatisfy({ $0.cleared == cleared }) {
-        clearedToggleOverlays[id] = nil
-        clearedOverlayMinimumLedgerGeneration[id] = nil
-      }
-    }
-  }
-
-  private func pendingRow(from pending: PendingTransaction) -> PendingRow {
-    let request = pending.request
-    let status: PendingRow.Status
-    if inFlightCreates.contains(pending.id) {
-      status = .sending
-    } else if let error = pending.lastSyncError {
-      status = .rejected(error)
-    } else {
-      status = .waitingForConnection
-    }
-    return PendingRow(
-      pending: pending,
-      status: status,
-      accountName: account(withID: request.accountID)?.name ?? "",
-      categoryName: categoryName(forID: request.categoryID),
-      payeeName: request.payeeName ?? request.payeeID.flatMap { payee(withID: $0)?.name }
-    )
   }
 
   /// True when both ids resolve to on-budget accounts; such transfers carry
@@ -1481,6 +1785,155 @@ final class AppModel {
     if !launchIdentityChanged {
       await refreshAll()
     }
+  }
+
+  // MARK: - Local mode
+
+  /// "Start on this iPhone": creates the on-device plan, gives it starter
+  /// categories, then switches to it. Nothing is saved until the engine has
+  /// answered, so a failure leaves the welcome screen as it was.
+  func startOnThisDevice() async throws {
+    // Read before `prepare`, which creates the plan it is configured with:
+    // an install that lost its preferences keeps the ledger already on disk.
+    let local = APISettings.local(livePlanIDs: try await LocalEngine.shared.livePlanIDs())
+    try await LocalEngine.shared.prepare(config: local.localEngineConfig)
+    await completeStarterCategories(settings: local)
+    isShowingWelcome = false
+    isShowingSettings = false
+    await applySettings(local)
+  }
+
+  /// Starter categories are a convenience: an empty list is still a working
+  /// plan. A seed cut short finishes on a later launch.
+  func completeStarterCategories(settings: APISettings? = nil) async {
+    let settings = settings ?? self.settings
+    guard settings.isLocal, settings.isAuthenticated else {
+      return
+    }
+    do {
+      try await StarterCategories.seedIfNeeded(client: APIClient(settings: settings), planID: settings.planID)
+    } catch {
+      Self.logger.error("Starter categories incomplete: \(error.localizedDescription, privacy: .public)")
+    }
+  }
+
+  /// "Connect to a server" on the welcome screen: today's sign-in.
+  func showConnectionFromWelcome() {
+    isShowingWelcome = false
+    isShowingSettings = true
+  }
+
+  /// Sign-in started from the welcome screen can go back to it until a
+  /// connection has been saved.
+  var canReturnToWelcome: Bool {
+    LaunchRoute.resolve(
+      hasSavedSettings: APISettings.hasSavedSettings(),
+      isAuthenticated: settings.isAuthenticated
+    ) == .welcome
+  }
+
+  func returnToWelcome() {
+    isShowingSettings = false
+    isShowingWelcome = true
+  }
+
+  // MARK: - Connecting a local install to a server
+
+  /// Moves this install to a signed-in server. The on-device database stays
+  /// where it is, untouched, and is recorded as an archive.
+  func adoptServerConnection(_ server: APISettings) async {
+    guard settings.isLocal, !server.isLocal, server.isAuthenticated else {
+      return
+    }
+    let adoption = ConnectionSwitch.adoptServer(server, leaving: settings, databaseURL: LocalEngine.shared.databaseURL)
+    isShowingSettings = false
+    await applySettings(adoption.settings)
+    if let supersededToken = adoption.supersededToken {
+      var previous = server
+      previous.sessionToken = supersededToken
+      try? await APIClient(settings: previous).logout()
+    }
+  }
+
+  /// True while the connect flow waits on the network. Settings cannot be
+  /// swiped away then, so a result never lands after the flow has gone.
+  var isConnectingToServer = false
+
+  /// "Keep using this iPhone only": ends the server session the connect flow
+  /// opened. Local mode is untouched.
+  func discardServerSession(_ server: APISettings) async {
+    APISettings.forgetSavedSession(forBaseURL: server.baseURLString)
+    try? await APIClient(settings: server).logout()
+  }
+
+  /// The ledger this install used before it connected to a server, if its
+  /// database is still on the device.
+  var localArchive: LocalArchive? {
+    LocalArchive.existing()
+  }
+
+  /// Returns to the archived on-device ledger and signs out of the server.
+  /// Refused while offline changes still wait to be sent: local mode would
+  /// hide them.
+  func switchToLocalArchive() async throws {
+    guard !settings.isLocal, let archive = localArchive else {
+      return
+    }
+    if let reason = ConnectionSwitch.blockReason(outbox: outbox, settings: settings) {
+      throw APIClientError.validation(reason)
+    }
+    let server = settings
+    // Local mode always runs on the shared engine's database, so only an
+    // archive of that file can become live again.
+    guard archive.databaseURL.standardizedFileURL == LocalEngine.shared.databaseURL.standardizedFileURL else {
+      throw APIClientError.validation("The records from before you connected are not where HowMuch expects them.")
+    }
+    // Opens the database before anything is saved, so a failure leaves
+    // server mode exactly as it was.
+    try await LocalEngine.shared.prepare(config: archive.engineSettings.localEngineConfig)
+    guard let local = ConnectionSwitch.returnToArchive(leaving: server) else {
+      return
+    }
+    isShowingSettings = false
+    await applySettings(local)
+    try? await APIClient(settings: server).logout()
+  }
+
+  /// The archived ledger as a `howmuch-plan-snapshot` JSON file.
+  func exportLocalArchive() async throws -> Data {
+    guard let archive = localArchive else {
+      throw APIClientError.validation("The records from before you connected are no longer on this device.")
+    }
+    return try await ServerConnector.exportArchive(archive)
+  }
+
+  /// Local mode has no cron, so the daily schedule catch-up runs on launch
+  /// and whenever the app returns to the foreground.
+  func runLocalScheduledTransactions(refreshAfter: Bool = true) async {
+    guard settings.isLocal, settings.isAuthenticated else {
+      return
+    }
+    guard let summary = try? await LocalEngine.shared.runScheduledMaterialization(config: settings.localEngineConfig),
+          summary.occurrenceCount > 0,
+          refreshAfter
+    else {
+      return
+    }
+    await refresh(slices: [.accounts, .payees, .ledger, .schedules])
+  }
+
+  /// A successful read means the server is reachable: send what waits.
+  private func drainOutboxIfQueued() {
+    guard !isSyncingOutbox, !isDrainScheduled,
+          currentOutbox.contains(where: { $0.state == .queued }) else {
+      return
+    }
+    scheduleOutboxDrain()
+  }
+
+  /// The app came back to the foreground.
+  func sceneDidBecomeActive() {
+    drainOutboxIfQueued()
   }
 
   /// True while a `refreshAll()` run is in flight, including the plan
@@ -1535,11 +1988,11 @@ final class AppModel {
     // most expensive requests the app makes and nothing on launch shows them.
     // ReflectView fetches them when it appears, through
     // `refreshReportsIfNeeded()`.
-    async let outbox: Int = drainOutbox(trigger: .refresh)
+    async let sent: Int = drainOutbox(trigger: .refresh)
     async let reference: Void = refreshReferenceData(quiet: quiet)
     async let ledger: Void = refreshLedger(quiet: quiet)
     async let schedules: Void = refreshScheduledTransactions(quiet: quiet)
-    _ = await (outbox, reference, ledger, schedules)
+    _ = await (sent, reference, ledger, schedules)
   }
 
   // MARK: - Narrow refreshes (#179)
@@ -1557,7 +2010,6 @@ final class AppModel {
   @discardableResult
   func scheduleRefresh(after mutation: MutationKind) -> Task<Void, Never>? {
     if RefreshPlanner.invalidatesPlanAndReports(after: mutation) {
-      planRefreshGeneration &+= 1
       reportsRefreshGeneration &+= 1
     }
     return enqueue(RefreshRequest(slices: RefreshPlanner.slices(after: mutation)))
@@ -1612,7 +2064,7 @@ final class AppModel {
     // A pull-to-refresh must still replay offline captures, as the launch
     // refresh does. Quiet passes are the ones that follow a write, which
     // already had its chance to send. An empty outbox issues no request.
-    async let outbox: Int = request.quiet ? 0 : drainOutbox(trigger: .refresh)
+    async let sent: Int = request.quiet ? 0 : drainOutbox(trigger: .refresh)
     async let accountsSlice: Void = run(.accounts, in: request)
     async let payeesSlice: Void = run(.payees, in: request)
     async let referenceSlice: Void = run(.referenceData, in: request)
@@ -1620,7 +2072,7 @@ final class AppModel {
     async let schedulesSlice: Void = run(.schedules, in: request)
     async let reportsSlice: Void = run(.reports, in: request)
     _ = await (
-      outbox, accountsSlice, payeesSlice, referenceSlice, ledgerSlice, schedulesSlice, reportsSlice
+      sent, accountsSlice, payeesSlice, referenceSlice, ledgerSlice, schedulesSlice, reportsSlice
     )
   }
 
@@ -1653,6 +2105,7 @@ final class AppModel {
     let generation = accountsGeneration
     let planID = settings.planID
     let scope = activeViewPrefsScope
+    let readSequence = beginAccountsRead()
     // This slice fetches accounts alone, so it must never move
     // `referencePhase` to `.loaded`: categories, payees and plan settings
     // would still be missing behind that claim. A pull that arrives while the
@@ -1669,8 +2122,10 @@ final class AppModel {
         pruneViewPrefs(using: fetched)
       }
       invalidateAccountHorizonFills()
+      finishAccountsRead(readSequence)
       accounts = fetched
       rebuildLookups()
+      drainOutboxIfQueued()
       persistSnapshot()
       publishIntentCatalog()
     } catch {
@@ -1781,6 +2236,7 @@ final class AppModel {
     let planID = settings.planID
     let scope = activeViewPrefsScope
     let accountPreferencesAtStart = AccountPresentationPreferences(viewPrefs)
+    let readSequence = beginAccountsRead()
     // #176: a launch refresh is loud, but blanking a snapshot the reader is
     // already looking at would undo the whole point of having one. The rows
     // stay until this fetch replaces them.
@@ -1797,6 +2253,7 @@ final class AppModel {
       }
       invalidateAccountHorizonFills()
       planSettings = reference.planSettings
+      finishAccountsRead(readSequence)
       accounts = reference.accounts
       categoryGroups = reference.categoryGroups
       payees = reference.payees
@@ -1833,6 +2290,7 @@ final class AppModel {
       // The network has replaced every reference row, so nothing older than
       // this response is on screen any more (#144).
       referenceIsProvisional = false
+      drainOutboxIfQueued()
       lastSyncedAccountPreferences = reference.accountPreferences
       persistSnapshot()
       publishIntentCatalog()
@@ -1907,7 +2365,6 @@ final class AppModel {
           )
         }
       }
-      reconcileClearedToggleOverlays(generation: generation, fetched: page.transactions)
       applyTransactionPageCursor(page)
       ledgerPhase = .loaded
       ledgerIsProvisional = false
@@ -1980,22 +2437,42 @@ final class AppModel {
   }
 
   private func refreshUnapprovedCount(generation: Int, planID: String, accountID: String?) async {
+    // What the count can already reflect is what was resolved before it was
+    // asked for. A row approved or rejected while the request is out may land
+    // either side of the server's count, so it stays subtracted until the next
+    // count rather than being assumed counted.
+    let resolvedAtRequest = unapprovedIDsTheServerMayReflect
     guard let count = try? await apiClient.fetchUnapprovedCount(planID: planID, accountID: accountID) else { return }
     guard generation == ledgerPageGeneration, planID == settings.planID else { return }
     if let accountID {
       serverUnapprovedCountsByAccount[accountID] = count
     } else {
       serverUnapprovedCount = count
+    }
+    confirmedWhenCounted[countScopeKey(accountID)] = resolvedAtRequest
+    if accountID == nil {
       // The count lands after the ledger page that spawned it, so the snapshot
-      // written there carries the previous number. Rewrite it with this one.
+      // written there carries the previous number. Rewrite it with this one,
+      // once the rows it already reflects are no longer subtracted from it.
       persistSnapshot()
     }
-    confirmedWhenCounted[countScopeKey(accountID)] = locallyResolvedUnapprovedIDs
   }
 
   /// Rows this session has taken off the queue: approved, or rejected.
   private var locallyResolvedUnapprovedIDs: Set<String> {
-    RegisterApproval.resolvedIDs(approvalSession).union(rejectedUnapprovedAccounts.keys)
+    RegisterApproval.resolvedIDs(approvalSession)
+      .union(rejectedUnapprovedAccounts.keys)
+      .union(queuedUnapprovedRejections.keys)
+  }
+
+  /// The resolved rows a count asked for now may already reflect: those the
+  /// server has acknowledged, and those on the wire. A change still waiting
+  /// in the outbox cannot be in any count, so it is always subtracted.
+  private var unapprovedIDsTheServerMayReflect: Set<String> {
+    let inFlight = currentOutbox.filter(\.isInFlight).map(\.transactionID)
+    return approvalSession.confirmed
+      .union(rejectedUnapprovedAccounts.keys)
+      .union(locallyResolvedUnapprovedIDs.intersection(inFlight))
   }
 
   /// One key per counted scope: the plan, or a single account.
@@ -2039,7 +2516,6 @@ final class AppModel {
       guard stillWantsUnapprovedQueue() else { return }
       let repaired = repairingStaleRead(unapproved, startedAt: readGeneration)
       replaceUnapprovedQueue(with: repaired)
-      reconcileClearedToggleOverlays(generation: generation, fetched: repaired)
       unapprovedQueuePhase = .loaded
     } catch {
       guard generation == ledgerPageGeneration, planID == settings.planID else { return }
@@ -2087,15 +2563,18 @@ final class AppModel {
     unapprovedQueuePhase = .idle
     unapprovedQueueViewers = []
     approvalSession = .empty
-    clearedToggleOverlays.removeAll()
-    clearedOverlayMinimumLedgerGeneration.removeAll()
-    clearedTogglesInFlight.removeAll()
+    syncApprovalPending()
     scheduledTransactions = []
     spendingBreakdown = nil
     incomeVsSpending = nil
     netWorth = nil
     ageOfMoney = nil
-    cancelPendingEdits()
+    clearRewards()
+    // The outbox itself stays: it is keyed by connection, and its commands
+    // wait for this connection to sign in again.
+    drainScheduleToken &+= 1
+    isDrainScheduled = false
+    acknowledgedBalanceDeltas = []
     hasMoreTransactions = false
     nextTransactionOffset = nil
     isLoadingOlderTransactions = false
@@ -2119,13 +2598,13 @@ final class AppModel {
     ledgerReadGeneration &+= 1
     inFlightLedgerReads.removeAll()
     ledgerDeletes.removeAll()
+    ledgerWrites.removeAll()
     // A cursor and a reports cache belong to one plan; carrying them across a
     // connection change would serve the previous plan's reports.
     serverKnowledge = nil
     reportsKnowledge = nil
     reportsGenerationAtLastFetch = nil
     queuedRefresh = .none
-    planRefreshGeneration &+= 1
     // ReflectView's only trigger is `.task(id: reportsRefreshGeneration)`, so
     // without this a plan switch made while Reflect is visible leaves it
     // sitting on an empty placeholder.
@@ -2133,6 +2612,56 @@ final class AppModel {
     rewardsRefreshGeneration &+= 1
     invalidateAccountUsage()
     wipeIntentCatalog()
+  }
+
+  private func clearRewards() {
+    rewardsReport = nil
+    rewardsReportRequest = nil
+    rewardsPhase = .idle
+    rewardsGeneration &+= 1
+  }
+
+  /// Loads the Rewards board for one request. Only the latest call may land,
+  /// so a filter changed mid-flight cannot be overwritten by the one before
+  /// it. The overview request is cached for the next launch; a filtered one
+  /// is not. Returns the report when it landed, for the view's own follow-up.
+  @discardableResult
+  func refreshRewards(_ request: RewardsRequest) async -> RewardsReport? {
+    rewardsGeneration &+= 1
+    let generation = rewardsGeneration
+    rewardsPhase = .loading
+    do {
+      let next = try await apiClient.fetchRewards(
+        planID: request.planID,
+        from: request.from,
+        to: request.to,
+        accountIDs: request.accountIDs,
+        group: .flag
+      )
+      guard generation == rewardsGeneration, request.planID == settings.planID else {
+        return nil
+      }
+      rewardsReport = next
+      rewardsReportRequest = request
+      rewardsPhase = .loaded
+      if request.isOverview {
+        cachedRewardsOverview = next
+        persistReports()
+      }
+      return next
+    } catch {
+      guard generation == rewardsGeneration, request.planID == settings.planID else {
+        return nil
+      }
+      // Leaving the tab cancels the view's task. That is not a failure, and a
+      // phase stuck at `.loading` would spin forever: settle it as Reflect does.
+      if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
+        rewardsPhase = rewardsReport(for: request) == nil ? .idle : .loaded
+        return nil
+      }
+      rewardsPhase = .failed(error.localizedDescription)
+      return nil
+    }
   }
 
   func noteRewardsBoardChanged() {
@@ -2273,6 +2802,15 @@ final class AppModel {
   ) async throws -> AccountReconciliationPayload {
     isSubmitting = true
     defer { isSubmitting = false }
+    // The server checks the statement against what it holds, so the changes
+    // to this account go first.
+    if reconcileBlockReason(accountID: accountID) != nil {
+      await waitForOutboxDrain()
+      await drainOutbox(trigger: .manual)
+    }
+    if let reason = reconcileBlockReason(accountID: accountID) {
+      throw APIClientError.validation(reason)
+    }
 
     let result = try await apiClient.reconcileAccount(
       planID: settings.planID,
@@ -2282,9 +2820,13 @@ final class AppModel {
       statementBalance: statementBalance
     )
 
-    // The response already carries the account with its new balances.
-    if let index = accounts.firstIndex(where: { $0.id == result.account.id }) {
-      accounts[index] = result.account
+    // The response already carries the account with its new balances, and
+    // every acknowledged change to it (Reconcile waits for the outbox).
+    if let index = serverAccounts.firstIndex(where: { $0.id == result.account.id }) {
+      acknowledgedBalanceDeltas = acknowledgedBalanceDeltas.map { entry in
+        AcknowledgedDelta(sequence: entry.sequence, deltas: entry.deltas.filter { $0.key != result.account.id })
+      }
+      serverAccounts[index] = result.account
       rebuildLookups()
     }
     // Waits, unlike the other saves: until the read lands, rows would still
@@ -2381,9 +2923,9 @@ final class AppModel {
         else {
           return
         }
-        loaded = sortedUniqueTransactions(loaded + page.transactions).filter { $0.accountID == accountID }
-        serverTransactions = sortedUniqueTransactions(serverTransactions + page.transactions)
-        reconcileClearedToggleOverlays(generation: generation, fetched: page.transactions)
+        loaded = sortedUniqueTransactions(page.transactions + loaded).filter { $0.accountID == accountID }
+        // Fetched rows win, as for older pages: the read is already fenced.
+        serverTransactions = sortedUniqueTransactions(page.transactions + serverTransactions)
         offset = page.nextOffset ?? loaded.count
         hasMore = page.hasMore && page.nextOffset != nil
       } catch {
@@ -2459,8 +3001,11 @@ final class AppModel {
   }
 
   private func applyOlderTransactionPage(_ page: TransactionPage, generation: Int) {
-    serverTransactions = sortedUniqueTransactions(serverTransactions + page.transactions)
-    reconcileClearedToggleOverlays(generation: generation, fetched: page.transactions)
+    // The page is the server's word on its rows: `fetchLedgerPage` has
+    // already repaired it against any write acknowledged since it was asked
+    // for, and unsent changes are an overlay, so a fetched row replaces the
+    // copy already loaded.
+    serverTransactions = sortedUniqueTransactions(page.transactions + serverTransactions)
     applyTransactionPageCursor(page)
   }
 
@@ -2512,7 +3057,9 @@ final class AppModel {
       incomeVsSpending = incomeReport
       netWorth = worthReport
       ageOfMoney = ageReport
+      reflectMonth = ReportsSnapshot.month(of: monthStart)
       reportsPhase = .loaded
+      persistReports()
       return true
     } catch {
       guard generation == reportsGeneration,
@@ -2536,6 +3083,12 @@ final class AppModel {
     }
   }
 
+  // MARK: - Transaction writes (docs/plans/offline-writes.md P1)
+  //
+  // Every transaction write goes into the outbox first: it is on disk before
+  // it is on screen, and on screen before any request is made. Replay sends it
+  // later, in batches, and the overlay shows it until the server has it.
+
   func commit(_ draft: TransactionDraft) throws {
     try commit([draft])
   }
@@ -2547,24 +3100,36 @@ final class AppModel {
     for draft in drafts {
       try CommitRejection.check(draft)
     }
-    if drafts.count == 1, let draft = drafts.first, let transactionID = draft.id {
-      applyPendingEdit(draft, transactionID: transactionID)
-      rememberLastUsedAccount(from: drafts)
-      return
-    }
-    let creates = drafts.filter { $0.id == nil }
+    var commands: [OutboxCommand] = []
+    var creates: [TransactionDraft] = []
+    var seenImportIDs: Set<String> = []
     for draft in drafts {
       if let transactionID = draft.id {
-        applyPendingEdit(draft, transactionID: transactionID)
+        commands.append(editCommand(draft, transactionID: transactionID, base: serverRow(transactionID)))
+        continue
       }
+      var request = draft.writeRequest(includeCleared: draft.shouldWriteCleared)
+      let importID = request.importID ?? UUID().uuidString.lowercased()
+      request.importID = importID
+      request.id = nil
+      // A capture saved twice is still one transaction.
+      guard !hasPendingCreate(importID: importID), seenImportIDs.insert(importID).inserted else {
+        continue
+      }
+      commands.append(
+        makeCommand(transactionID: OutboxCommand.mintTransactionID(), kind: .create(request), base: nil)
+      )
+      creates.append(draft)
     }
-    guard !creates.isEmpty else {
-      rememberLastUsedAccount(from: drafts)
-      return
+    do {
+      try enqueueOutbox(commands)
+    } catch let refusal as OutboxEnqueueRefusal {
+      throw refusal
+    } catch {
+      throw CommitRejection.persistFailed
     }
-    try enqueueCreates(creates)
-    rememberLastUsedAccount(from: creates)
-    showSaveMessage(savedMessage(for: creates))
+    rememberLastUsedAccount(from: drafts)
+    showSaveMessage(savedMessage(for: creates.isEmpty ? drafts : creates))
   }
 
   private func rememberLastUsedAccount(from drafts: [TransactionDraft]) {
@@ -2583,136 +3148,64 @@ final class AppModel {
     return "Saved \(drafts.count) transactions"
   }
 
-  func retryPending(_ id: PendingRow.ID) {
-    guard pendingTransactions.contains(where: { $0.id == id }) else {
+  func toggleTransactionCleared(_ transaction: Transaction) async throws {
+    // The compare-and-set guard is the status the server will hold when this
+    // is sent: the row as shown, which already includes anything on the wire.
+    let current = displayedRow(transaction.id) ?? transaction
+    guard current.cleared != .reconciled else {
+      throw APIClientError.validation("Reconciled transactions stay locked.")
+    }
+    let cleared: ClearedState = current.cleared == .cleared ? .uncleared : .cleared
+    try enqueueOutbox([
+      makeCommand(
+        transactionID: transaction.id,
+        kind: .cleared(expected: current.cleared, cleared: cleared, approve: false),
+        base: serverRow(transaction.id) ?? transaction
+      ),
+    ])
+    showSaveMessage(cleared == .cleared ? "Marked transaction cleared" : "Marked transaction uncleared")
+  }
+
+  func deleteTransaction(_ transaction: Transaction) async throws {
+    let current = displayedRow(transaction.id) ?? transaction
+    try enqueueOutbox([
+      makeCommand(
+        transactionID: transaction.id,
+        kind: .delete(expectedApproved: current.approved ? nil : false),
+        base: serverRow(transaction.id) ?? transaction
+      ),
+    ])
+    showSaveMessage("Deleted \(transaction.payeeName ?? "transaction")")
+  }
+
+  func approveEligible(from rows: [Transaction]) {
+    startApproval(from: rows, success: .bulk)
+  }
+
+  func approveTransaction(_ transaction: Transaction) {
+    guard !transaction.approved else {
       return
     }
-    Task { await drainOutbox(trigger: .manual) }
+    startApproval(from: [transaction], success: .single(transaction))
   }
 
-  func discardPending(_ id: PendingRow.ID) {
-    guard !inFlightCreates.contains(id) else {
-      showSaveMessage("This transaction is still sending. Wait for it to finish.", kind: .failure)
+  private func startApproval(from rows: [Transaction], success: ApprovalSuccessCopy) {
+    guard let plan = RegisterApproval.plan(
+      submitted: rows.map(\.approvalRow),
+      session: approvalSession
+    ) else {
       return
     }
-    let next = pendingTransactions.filter { $0.id != id }
+    let commands = plan.ids.map { id in
+      makeCommand(transactionID: id, kind: .approve, base: serverRow(id) ?? rows.first { $0.id == id })
+    }
     do {
-      try OutboxStore.save(next)
-      pendingTransactions = next
+      try enqueueOutbox(commands)
     } catch {
-      showSaveMessage("Couldn’t discard this transaction. Try again.", kind: .failure)
+      showSaveMessage("Couldn’t approve — \(error.localizedDescription)", kind: .failure)
+      return
     }
-  }
-
-  private func enqueueCreates(_ drafts: [TransactionDraft]) throws {
-    let next = OutboxBatch.appending(
-      drafts,
-      onto: pendingTransactions,
-      fingerprint: settings.connectionFingerprint,
-      isCurrentConnection: { settings.matchesCurrentOrLegacyOutboxStamp($0) }
-    )
-    do {
-      try OutboxStore.save(next)
-      pendingTransactions = next
-    } catch {
-      throw CommitRejection.persistFailed
-    }
-    Task { await drainOutbox(trigger: .commit) }
-  }
-
-  private func applyPendingEdit(_ draft: TransactionDraft, transactionID: String) {
-    editTasks[transactionID]?.cancel()
-    editGenerations[transactionID, default: 0] += 1
-    let generation = editGenerations[transactionID] ?? 1
-    let existing = serverTransactions.first { $0.id == transactionID }
-      ?? serverUnapprovedTransactions.first { $0.id == transactionID }
-    if let existing {
-      pendingEdits[transactionID] = PendingEdit(
-        draft: draft,
-        existing: existing,
-        accountName: account(withID: draft.accountID)?.name ?? existing.accountName,
-        categoryName: categoryName(forID: draft.categoryID),
-        payeeName: draft.payeeName.trimmedNil ?? draft.payeeID.flatMap { payee(withID: $0)?.name }
-      )
-    }
-    let destination = EditDestination(
-      planID: settings.planID,
-      connectionFingerprint: settings.connectionFingerprint,
-      client: apiClient
-    )
-    editTasks[transactionID] = Task {
-      await pushEdit(draft, transactionID: transactionID, generation: generation, destination: destination)
-    }
-  }
-
-  private func pushEdit(
-    _ draft: TransactionDraft,
-    transactionID: String,
-    generation: Int,
-    destination: EditDestination
-  ) async {
-    let request = draft.writeRequest(includeCleared: draft.shouldWriteCleared)
-    do {
-      let saved = try await destination.client.updateTransaction(
-        planID: destination.planID,
-        transactionID: transactionID,
-        request: request
-      )
-      guard isCurrentEdit(transactionID, generation: generation, destination: destination) else {
-        return
-      }
-      let existingRow = serverTransactions.first(where: { $0.id == transactionID })
-        ?? serverUnapprovedTransactions.first(where: { $0.id == transactionID })
-      if let existingRow {
-        applySavedTransaction(saved, replacing: existingRow, ownsCleared: draft.shouldWriteCleared)
-      }
-      pendingEdits[transactionID] = nil
-      editTasks[transactionID] = nil
-      showSaveMessage(savedMessage(for: [draft]))
-      let movedAccount = existingRow.map { $0.accountID != saved.accountID } ?? true
-      let touchesTransfer = isTransfer(saved) || (existingRow.map(isTransfer) ?? false)
-      let mutation = MutationKind.transactionEdited(
-        changesAccount: movedAccount,
-        touchesTransfer: touchesTransfer,
-        hasNewPayee: isUnknownPayee(saved)
-      )
-      scheduleRefresh(after: mutation)
-    } catch {
-      guard isCurrentEdit(transactionID, generation: generation, destination: destination) else {
-        return
-      }
-      pendingEdits[transactionID] = nil
-      editTasks[transactionID] = nil
-      showSaveMessage("Couldn’t save changes — \(error.localizedDescription)", kind: .failure)
-      await refreshLedger(quiet: true)
-    }
-  }
-
-  private func isCurrentEdit(
-    _ transactionID: String,
-    generation: Int,
-    destination: EditDestination
-  ) -> Bool {
-    !Task.isCancelled
-      && editGenerations[transactionID] == generation
-      && destination.planID == settings.planID
-      && destination.connectionFingerprint == settings.connectionFingerprint
-  }
-
-  private func cancelPendingEdits() {
-    for task in editTasks.values {
-      task.cancel()
-    }
-    editTasks.removeAll()
-    editGenerations.removeAll()
-    pendingEdits.removeAll()
-    pendingCreateRevisions.removeAll()
-  }
-
-  private func ensureNoPendingEdit(on transaction: Transaction) throws {
-    guard pendingEdits[transaction.id] == nil, editTasks[transaction.id] == nil else {
-      throw APIClientError.validation("This transaction has unsaved changes syncing.")
-    }
+    showSaveMessage(Self.successToast(success, plannedCount: plan.ids.count))
   }
 
   func hasReconciledLinkedTransfer(ids: [String]) -> Bool {
@@ -2725,40 +3218,871 @@ final class AppModel {
     }
   }
 
-  func toggleTransactionCleared(_ transaction: Transaction) async throws {
-    try ensureNoPendingEdit(on: transaction)
-    guard !isSubmitting else {
-      throw APIClientError.validation("Another transaction change is already in progress.")
-    }
-    guard transaction.cleared != .reconciled else {
-      throw APIClientError.validation("Reconciled transactions stay locked.")
-    }
-    guard !clearedTogglesInFlight.contains(transaction.id) else {
+  /// Sends a rejected change again.
+  func retryPending(_ id: PendingRow.ID) {
+    guard let index = outbox.firstIndex(where: { $0.id == id }) else {
       return
     }
-
-    let cleared: ClearedState = transaction.cleared == .cleared ? .uncleared : .cleared
-    clearedTogglesInFlight.insert(transaction.id)
-    clearedToggleOverlays[transaction.id] = cleared
-    clearedOverlayMinimumLedgerGeneration[transaction.id] = nil
-    defer { clearedTogglesInFlight.remove(transaction.id) }
-    do {
-      let saved = try await apiClient.updateTransactionCleared(
-        planID: settings.planID,
-        transactionID: transaction.id,
-        expectedCleared: transaction.cleared,
-        cleared: cleared
-      )
-      applySavedTransaction(saved, replacing: transaction)
-      showSaveMessage(cleared == .cleared ? "Marked transaction cleared" : "Marked transaction uncleared")
-      scheduleRefresh(after: .clearedToggled)
-    } catch {
-      if clearedToggleOverlays[transaction.id] == cleared {
-        clearedToggleOverlays[transaction.id] = nil
-        clearedOverlayMinimumLedgerGeneration[transaction.id] = nil
+    if case .rejected(_, let code) = outbox[index].state {
+      var next = outbox
+      next[index].state = .queued
+      if code == Self.deletedElsewhereCode, outbox[index].kind.isCreate {
+        // The user chose to add it again. The old id may belong to a row
+        // deleted on another device, so the new row gets a new one, and the
+        // changes queued behind it follow.
+        let oldKey = outbox[index].rowKey
+        let newID = OutboxCommand.mintTransactionID()
+        for other in next.indices where next[other].rowKey == oldKey && !next[other].isInFlight {
+          next[other].transactionID = newID
+        }
+        next[index].attempted = false
+        next[index].sentWithClientID = false
       }
-      await refreshLedger(quiet: true)
-      throw error
+      do {
+        try outboxStore.save(next)
+      } catch {
+        showSaveMessage("Couldn’t retry this change. Try again.", kind: .failure)
+        return
+      }
+      outbox = next
+    }
+    // Only this change was retried: a plain pass, not "Sync Now".
+    Task { await drainOutbox(trigger: .refresh) }
+  }
+
+  /// Drops an unsent change. The row goes back to what the server has.
+  func discardPending(_ id: PendingRow.ID) {
+    guard let command = outbox.first(where: { $0.id == id }) else {
+      return
+    }
+    guard !command.isInFlight else {
+      showSaveMessage("This change is still sending. Wait for it to finish.", kind: .failure)
+      return
+    }
+    // Discarding a create discards the row: the changes queued behind it
+    // have nothing to apply to.
+    let next = outbox.filter { other in
+      if other.id == id { return false }
+      return !(command.kind.isCreate && other.rowKey == command.rowKey && !other.isInFlight)
+    }
+    do {
+      try outboxStore.save(next)
+    } catch {
+      showSaveMessage("Couldn’t discard this change. Try again.", kind: .failure)
+      return
+    }
+    outbox = next
+    if let base = command.baseSnapshot, !command.kind.isCreate, serverRow(base.id) == nil {
+      serverTransactions = sortedUniqueTransactions([base] + serverTransactions)
+    }
+    if case .rejected = command.state {
+      // The server refused it, so its copy may differ from ours.
+      enqueue(RefreshRequest(slices: [.ledger, .accounts]))
+    }
+  }
+
+  private func editCommand(_ draft: TransactionDraft, transactionID: String, base: Transaction?) -> OutboxCommand {
+    var request = draft.writeRequest(includeCleared: draft.shouldWriteCleared)
+    request.importID = nil
+    request.id = nil
+    return makeCommand(transactionID: transactionID, kind: .update(request), base: base)
+  }
+
+  private func makeCommand(
+    transactionID: String,
+    kind: OutboxCommand.Kind,
+    base: Transaction?
+  ) -> OutboxCommand {
+    OutboxCommand(
+      id: UUID(),
+      transactionID: transactionID,
+      connectionFingerprint: settings.connectionFingerprint,
+      createdAt: .now,
+      kind: kind,
+      baseSnapshot: base
+    )
+  }
+
+  // MARK: - Outbox: storage
+
+  private func loadOutbox() {
+    do {
+      outbox = try outboxStore.load()
+      outboxLoadFailure = nil
+      adoptLegacyOutboxStamps()
+    } catch {
+      outboxLoadFailure = error.localizedDescription
+      Self.logger.error("Outbox unreadable: \(error.localizedDescription, privacy: .public)")
+    }
+  }
+
+  /// Commands are matched to a row by connection and id, so a create moved
+  /// from the old queue under this connection's older stamp is restamped
+  /// with the current one before anything is folded into it or sent.
+  private func adoptLegacyOutboxStamps() {
+    let current = settings.connectionFingerprint
+    guard outbox.contains(where: {
+      $0.connectionFingerprint != current && settings.matchesCurrentOrLegacyOutboxStamp($0.connectionFingerprint)
+    }) else {
+      return
+    }
+    let next = outbox.map { command -> OutboxCommand in
+      guard command.connectionFingerprint != current,
+            settings.matchesCurrentOrLegacyOutboxStamp(command.connectionFingerprint) else {
+        return command
+      }
+      return OutboxCommand(
+        id: command.id, seq: command.seq, transactionID: command.transactionID,
+        connectionFingerprint: current, createdAt: command.createdAt, kind: command.kind,
+        state: command.state, baseSnapshot: command.baseSnapshot, attempted: command.attempted,
+        sentWithClientID: command.sentWithClientID
+      )
+    }
+    // Only the stamp changes, and a later write carries it; the old stamp
+    // still matches this connection if this write fails.
+    outbox = next
+    try? outboxStore.save(next)
+  }
+
+  /// Folds `commands` into the outbox and writes it, before anything is
+  /// shown. Throws, leaving the outbox as it was, when the write fails.
+  private func enqueueOutbox(_ commands: [OutboxCommand]) throws {
+    guard !commands.isEmpty else {
+      return
+    }
+    if outboxLoadFailure != nil {
+      loadOutbox()
+      if let failure = outboxLoadFailure {
+        throw OutboxStoreError.unreadable(failure)
+      }
+    }
+    adoptLegacyOutboxStamps()
+    // The planner ignores a change to a row that is on its way out. Say so
+    // rather than show "Saved" for something that will never be sent.
+    let deleting = Set(currentOutbox.filter { command in
+      if case .delete = command.kind { return true }
+      return false
+    }.map(\.transactionID))
+    if commands.contains(where: { deleting.contains($0.transactionID) }) {
+      throw OutboxEnqueueRefusal.rowIsBeingDeleted
+    }
+    let next = commands.reduce(outbox) { OutboxPlanner.enqueue($1, onto: $0) }
+    try outboxStore.save(next)
+    outbox = next
+    scheduleOutboxDrain()
+  }
+
+  /// A note for the outbox card when the file could not be read, or part of
+  /// it had to be set aside.
+  var outboxNotice: String? {
+    if outboxLoadFailure != nil {
+      return "Unsent changes couldn’t be read yet. They are kept on this iPhone, and new changes can’t be saved until they can be read."
+    }
+    if outboxStore.quarantinedOnLastLoad {
+      return "Some unsent changes couldn’t be read; a copy was kept on this iPhone."
+    }
+    return nil
+  }
+
+  /// Replay's own bookkeeping. A failed write here is not fatal: every
+  /// command is safe to send again, so the worst case is a repeat after a
+  /// relaunch.
+  private func storeOutbox(_ next: [OutboxCommand]) {
+    outbox = next
+    do {
+      try outboxStore.save(next)
+    } catch {
+      Self.logger.error("Outbox write failed: \(error.localizedDescription, privacy: .public)")
+    }
+  }
+
+  private func updateOutbox(_ transform: (inout [OutboxCommand]) -> Void) {
+    var next = outbox
+    transform(&next)
+    storeOutbox(next)
+  }
+
+  private func setState(_ state: OutboxCommand.State, for ids: Set<UUID>) {
+    updateOutbox { queue in
+      for index in queue.indices where ids.contains(queue[index].id) {
+        queue[index].state = state
+      }
+    }
+  }
+
+  // MARK: - Outbox: replay
+
+  @ObservationIgnored private var drainScheduleToken = 0
+  @ObservationIgnored private var isDrainScheduled = false
+
+  /// Starts a pass once `outboxDebounce` has passed without another change.
+  func scheduleOutboxDrain() {
+    drainScheduleToken &+= 1
+    let token = drainScheduleToken
+    // The on-device engine is never offline, so local mode sends at once.
+    let delay = settings.isLocal ? .zero : outboxDebounce
+    isDrainScheduled = true
+    Task { [weak self] in
+      if delay > .zero {
+        try? await Task.sleep(for: delay)
+      }
+      guard let self, token == self.drainScheduleToken else {
+        return
+      }
+      self.isDrainScheduled = false
+      await self.drainOutbox(trigger: .commit)
+    }
+  }
+
+  /// Returns once no pass is scheduled or running.
+  func waitForOutboxDrain() async {
+    while isDrainScheduled || isSyncingOutbox {
+      try? await Task.sleep(for: .milliseconds(5))
+    }
+  }
+
+  private enum WireResult {
+    /// The server has what the command asked for; the row when it sent one.
+    case done(Transaction?)
+    /// A delete found the row already gone.
+    case gone
+    /// A status change found the row changed underneath; the row as it is.
+    case conflict(Transaction?)
+    /// The request provably never reached the server.
+    case notSent
+    /// Refused for a reason the planner's status mapping would misread.
+    case refused(message: String, code: Int)
+    case failed(OutboxPlanner.ServerResult)
+
+    /// True when the answer shows the server did not apply the command, so
+    /// it is no more "attempted" than it was before this send.
+    var provesNotApplied: Bool {
+      switch self {
+      case .notSent, .refused, .conflict:
+        return true
+      case .failed(.status(let code, _)):
+        return (400 ..< 500).contains(code) && code != 408
+      case .done, .gone, .failed:
+        return false
+      }
+    }
+  }
+
+  static let deletedElsewhereCode = 410
+  private static let deletedElsewhereMessage =
+    "This may have been deleted on another device. Retry to add it again, or Discard it."
+
+
+  private enum StepResult {
+    case progressed
+    case rejected
+    case stop
+  }
+
+  private struct DrainTally {
+    var sent = 0
+    var rejected = 0
+    var created = 0
+    var createdTransfer = false
+    var createdNewPayee = false
+    var edited = false
+    var editedMovedAccount = false
+    var editedTransfer = false
+    var editedNewPayee = false
+    var cleared = false
+    var deleted = false
+    var approved = false
+  }
+
+  /// Sends what the outbox holds for this connection, in the planner's order,
+  /// until it is empty or the server cannot be reached. Returns how many
+  /// commands the server acknowledged.
+  @discardableResult
+  func drainOutbox(trigger: OutboxDrainTrigger) async -> Int {
+    // This pass covers whatever a scheduled one was waiting to send.
+    drainScheduleToken &+= 1
+    isDrainScheduled = false
+    if trigger == .manual, outboxLoadFailure == nil {
+      // "Sync Now" asks for everything, refused changes included.
+      let refused = Set(currentOutbox.filter { command in
+        if case .rejected = command.state { return true }
+        return false
+      }.map(\.id))
+      if !refused.isEmpty {
+        setState(.queued, for: refused)
+      }
+    }
+    guard settings.isAuthenticated,
+          outboxLoadFailure == nil,
+          currentOutbox.contains(where: { $0.state == .queued }) else {
+      return 0
+    }
+    if isSyncingOutbox {
+      needsAnotherDrain = true
+      return 0
+    }
+    isSyncingOutbox = true
+    defer { isSyncingOutbox = false }
+    adoptLegacyOutboxStamps()
+
+    let fingerprint = settings.connectionFingerprint
+    let planID = settings.planID
+    let client = apiClient
+    var tally = DrainTally()
+
+    passes: while true {
+      needsAnotherDrain = false
+      guard settings.connectionFingerprint == fingerprint else {
+        break
+      }
+      let plan = OutboxPlanner.plan(currentOutbox)
+      guard !plan.batches.isEmpty else {
+        break
+      }
+      var progressed = false
+      for batch in plan.batches {
+        if batch.stage == .approve {
+          var start = 0
+          while start < batch.commands.count {
+            let chunk = Array(batch.commands[start ..< min(start + RegisterApproval.batchLimit, batch.commands.count)])
+            start += RegisterApproval.batchLimit
+            switch await sendApprovals(chunk, client: client, planID: planID, fingerprint: fingerprint, tally: &tally) {
+            case .stop:
+              break passes
+            case .progressed:
+              progressed = true
+            case .rejected:
+              break
+            }
+          }
+          continue
+        }
+        for planned in batch.commands {
+          guard settings.connectionFingerprint == fingerprint else {
+            break passes
+          }
+          // Folded, discarded or retried while earlier commands were out.
+          guard let command = outbox.first(where: { $0.id == planned.id }),
+                command.state == .queued,
+                OutboxPlanner.stage(of: command.kind) == batch.stage else {
+            needsAnotherDrain = true
+            continue
+          }
+          guard markSending([command], resolvingLegacyCreate: command.isUnresolvedLegacyCreate) else {
+            break passes
+          }
+          let result = await send(command, client: client, planID: planID)
+          if result.provesNotApplied {
+            restoreAttempt(of: [command])
+          }
+          guard settings.connectionFingerprint == fingerprint else {
+            break passes
+          }
+          switch settle(command, result: result, tally: &tally) {
+          case .stop:
+            break passes
+          case .progressed:
+            progressed = true
+          case .rejected:
+            break
+          }
+        }
+      }
+      if !(progressed || needsAnotherDrain) {
+        break
+      }
+    }
+
+    // A pass cut short leaves its command marked as on the wire. It was
+    // either sent or not; either way it is safe to send again.
+    let stranded = Set(outbox.filter(\.isInFlight).map(\.id))
+    if !stranded.isEmpty {
+      setState(.queued, for: stranded)
+    }
+    finishDrain(tally, trigger: trigger)
+    return tally.sent
+  }
+
+  /// Marks commands as on the wire and as attempted, on disk, before any
+  /// byte is sent: from here on the server may hold them. Returns false,
+  /// changing nothing, when that write fails; the caller must not send.
+  /// Otherwise a create the server committed could look unsent after a
+  /// crash, take later edits folded into it, and lose them to the import-id
+  /// dedupe on replay.
+  private func markSending(_ commands: [OutboxCommand], resolvingLegacyCreate: Bool = false) -> Bool {
+    let ids = Set(commands.map(\.id))
+    var next = outbox
+    for index in next.indices where ids.contains(next[index].id) {
+      next[index].state = .inFlight
+      next[index].attempted = true
+      // A legacy lookup is only a read. A crash or timeout during it must
+      // leave recovery looking for the old server id, not our new client id.
+      if next[index].kind.isCreate && !resolvingLegacyCreate {
+        next[index].sentWithClientID = true
+      }
+    }
+    do {
+      try outboxStore.save(next)
+    } catch {
+      Self.logger.error("Outbox write failed; not sending: \(error.localizedDescription, privacy: .public)")
+      return false
+    }
+    outbox = next
+    return true
+  }
+
+  /// Puts back the attempt flags a send set, once its answer proves the
+  /// server did not apply it.
+  private func restoreAttempt(of commands: [OutboxCommand]) {
+    let before = Dictionary(uniqueKeysWithValues: commands.map { ($0.id, $0) })
+    updateOutbox { queue in
+      for index in queue.indices {
+        guard let original = before[queue[index].id] else { continue }
+        queue[index].attempted = original.attempted
+        queue[index].sentWithClientID = original.sentWithClientID
+      }
+    }
+  }
+
+  /// True for the server's answer to a transaction it does not have, and
+  /// only that: a plan the session can no longer see is also a 404.
+  private static func isTransactionNotFound(_ reply: OutboxReply) -> Bool {
+    reply.status == 404 && reply.message == "Transaction not found"
+  }
+
+  private func send(_ command: OutboxCommand, client: APIClient, planID: String) async -> WireResult {
+    do {
+      switch command.kind {
+      case .create(let request):
+        if command.isUnresolvedLegacyCreate {
+          // From the old queue: it may be on the server under an id we never
+          // learned, and may since have been deleted there. Send it only
+          // once no row, live or deleted, carries its import id.
+          guard let importID = request.importID else {
+            return .refused(message: Self.deletedElsewhereMessage, code: Self.deletedElsewhereCode)
+          }
+          switch try await client.outboxRows(importID: importID, planID: planID) {
+          case .unknown:
+            // Nothing was sent; try again on a later pass.
+            return .notSent
+          case .rows(let rows) where !rows.isEmpty:
+            if let live = rows.first(where: { !$0.deleted && $0.accountID == request.accountID })
+              ?? rows.first(where: { !$0.deleted }) {
+              return .done(live)
+            }
+            return .refused(message: Self.deletedElsewhereMessage, code: Self.deletedElsewhereCode)
+          case .rows:
+            // Only now can a POST with our id occur. Recheck ownership after
+            // the awaited lookup and make that attempt durable before sending.
+            guard settings.connectionFingerprint == command.connectionFingerprint,
+                  outbox.contains(where: { $0.id == command.id && $0.isInFlight }),
+                  markSending([command]) else {
+              return .notSent
+            }
+          }
+        } else if command.attempted, command.sentWithClientID {
+          // It may be on the server already. A replay would be answered by
+          // the import-id check, which ignores deleted rows, so look it up
+          // by id first rather than risk bringing back a deleted row.
+          let lookup = try await client.outboxFetch(planID: planID, transactionID: command.transactionID)
+          if lookup.isSuccess, let row = client.outboxTransaction(in: lookup), !row.deleted {
+            return .done(row)
+          }
+          if lookup.isSuccess || Self.isTransactionNotFound(lookup) {
+            return .refused(message: Self.deletedElsewhereMessage, code: Self.deletedElsewhereCode)
+          }
+          return .failed(.status(lookup.status, message: lookup.message))
+        }
+        var body = request
+        body.id = command.transactionID
+        let reply = try await client.outboxCreate(planID: planID, request: body)
+        if reply.isSuccess {
+          return .done(client.outboxTransaction(in: reply))
+        }
+        // A replay can meet its own earlier success in a form the import-id
+        // check does not catch. If the row is there, the create landed.
+        if reply.status == 409 || reply.status >= 500,
+           let row = try await fetchLive(command.transactionID, client: client, planID: planID) {
+          return .done(row)
+        }
+        return .failed(.status(reply.status, message: reply.message))
+
+      case .update(let request):
+        var body = request
+        body.id = nil
+        body.importID = nil
+        let reply = try await client.outboxUpdate(planID: planID, transactionID: command.transactionID, request: body)
+        return reply.isSuccess
+          ? .done(client.outboxTransaction(in: reply))
+          : .failed(.status(reply.status, message: reply.message))
+
+      case .cleared(let expected, let cleared, _):
+        let reply = try await client.outboxCleared(
+          planID: planID,
+          transactionID: command.transactionID,
+          expectedCleared: expected,
+          cleared: cleared
+        )
+        if reply.isSuccess {
+          return .done(client.outboxTransaction(in: reply))
+        }
+        if reply.status == 409 {
+          // A replay of a toggle that landed, or a change made elsewhere.
+          let row = try await fetchLive(command.transactionID, client: client, planID: planID)
+          if let row, row.cleared == cleared {
+            return .done(row)
+          }
+          return .conflict(row)
+        }
+        return .failed(.status(reply.status, message: reply.message))
+
+      case .delete(let expectedApproved):
+        let reply = try await client.outboxDelete(
+          planID: planID,
+          transactionID: command.transactionID,
+          expectedApproved: expectedApproved
+        )
+        if reply.isSuccess {
+          return .done(client.outboxTransaction(in: reply))
+        }
+        if Self.isTransactionNotFound(reply) {
+          return .gone
+        }
+        if reply.status == 404 {
+          // Not this row: the plan is gone or out of reach. Not a success.
+          return .refused(message: reply.message, code: 404)
+        }
+        // Older servers answer a replayed delete of a removed row with a 500.
+        if reply.status >= 500, try await fetchLive(command.transactionID, client: client, planID: planID) == nil {
+          return .gone
+        }
+        return .failed(.status(reply.status, message: reply.message))
+
+      case .approve:
+        // Sent in batches by `sendApprovals`.
+        return .failed(.offline)
+      }
+    } catch {
+      return error.isOfflineError ? .notSent : .failed(.offline)
+    }
+  }
+
+  /// The row as the server has it now, or nil when it has none (404 or a
+  /// tombstone). Throws when the server cannot be reached or gives no answer.
+  private func fetchLive(_ transactionID: String, client: APIClient, planID: String) async throws -> Transaction? {
+    let reply = try await client.outboxFetch(planID: planID, transactionID: transactionID)
+    if Self.isTransactionNotFound(reply) {
+      return nil
+    }
+    guard reply.isSuccess, let row = client.outboxTransaction(in: reply) else {
+      throw APIClientError.httpStatus(reply.status)
+    }
+    return row.deleted ? nil : row
+  }
+
+  private func settle(_ command: OutboxCommand, result: WireResult, tally: inout DrainTally) -> StepResult {
+    switch result {
+    case .done(let row):
+      acknowledge(command, row: row, tally: &tally)
+      return .progressed
+    case .gone:
+      acknowledgeDelete(command, deleted: nil, tally: &tally)
+      return .progressed
+    case .conflict(let row):
+      if let row, let existing = serverRow(row.id) {
+        applySavedTransaction(row, replacing: existing)
+      }
+      reject(
+        [command],
+        message: "This transaction changed on another device. Discard to keep that version, or Retry.",
+        code: 409,
+        tally: &tally
+      )
+      return .rejected
+    case .notSent:
+      setState(.queued, for: [command.id])
+      return .stop
+    case .refused(let message, let code):
+      reject([command], message: message, code: code, tally: &tally)
+      return .rejected
+    case .failed(let serverResult):
+      switch OutboxPlanner.action(for: command.kind, result: serverResult) {
+      case .complete:
+        acknowledgeDelete(command, deleted: nil, tally: &tally)
+        return .progressed
+      case .continueAs, .refetchAndCompare:
+        // Mapped to `.done` and `.conflict` in `send`; never reached.
+        setState(.queued, for: [command.id])
+        return .stop
+      case .retryLater:
+        setState(.queued, for: [command.id])
+        return .stop
+      case .reject(let message, let code):
+        reject([command], message: message, code: code, tally: &tally)
+        return .rejected
+      }
+    }
+  }
+
+  private func reject(_ commands: [OutboxCommand], message: String, code: Int?, tally: inout DrainTally) {
+    let ids = Set(commands.map(\.id))
+    setState(.rejected(message: message, code: code), for: ids)
+    tally.rejected += commands.count
+  }
+
+  /// The server has the command. Its balance effect is frozen until an
+  /// accounts read catches up, its row replaces ours, and the command leaves
+  /// the outbox (or, for a status change carrying an approval, becomes that
+  /// approval).
+  private func acknowledge(_ command: OutboxCommand, row: Transaction?, tally: inout DrainTally) {
+    if case .delete = command.kind {
+      acknowledgeDelete(command, deleted: row, tally: &tally)
+      return
+    }
+    tally.sent += 1
+    freezeBalanceEffect(of: command)
+    let existing = serverRow(command.transactionID)
+    let next = OutboxPlanner.action(for: command.kind, result: .succeeded)
+    updateOutbox { queue in
+      guard let index = queue.firstIndex(where: { $0.id == command.id }) else {
+        return
+      }
+      if case .continueAs(let kind) = next {
+        queue[index].kind = kind
+        queue[index].state = .queued
+      } else {
+        queue.remove(at: index)
+      }
+      // A replayed create can come back as a row the server made earlier
+      // under another id. Later changes follow the row the server has.
+      if let row, row.id != command.transactionID {
+        for other in queue.indices where queue[other].rowKey == command.rowKey {
+          queue[other].transactionID = row.id
+          if queue[other].baseSnapshot == nil {
+            queue[other].baseSnapshot = row
+          }
+        }
+      }
+    }
+    guard let row else {
+      // Acknowledged without a readable row: read back what the response
+      // could not tell us.
+      switch command.kind {
+      case .create:
+        tally.created += 1
+        tally.createdTransfer = true
+      case .update:
+        tally.edited = true
+        tally.editedMovedAccount = true
+      case .cleared:
+        tally.cleared = true
+      case .approve, .delete:
+        break
+      }
+      return
+    }
+    switch command.kind {
+    case .create:
+      tally.created += 1
+      tally.createdTransfer = tally.createdTransfer || isTransfer(row)
+      tally.createdNewPayee = tally.createdNewPayee || isUnknownPayee(row)
+      serverTransactions = sortedUniqueTransactions([row] + serverTransactions.filter { $0.id != row.id })
+      if !row.approved {
+        serverUnapprovedTransactions = sortedUniqueTransactions([row] + serverUnapprovedTransactions)
+      }
+      recordLedgerWrite(row, isCreate: true)
+    case .update:
+      tally.edited = true
+      tally.editedMovedAccount = tally.editedMovedAccount || existing.map { $0.accountID != row.accountID } ?? true
+      tally.editedTransfer = tally.editedTransfer || isTransfer(row) || (existing.map(isTransfer) ?? false)
+      tally.editedNewPayee = tally.editedNewPayee || isUnknownPayee(row)
+      applyAcknowledgedRow(row, replacing: existing)
+    case .cleared:
+      tally.cleared = true
+      applyAcknowledgedRow(row, replacing: existing)
+    case .approve, .delete:
+      break
+    }
+  }
+
+  private func applyAcknowledgedRow(_ row: Transaction, replacing existing: Transaction?) {
+    let saved = existing.map { row.preservingParent(from: $0) } ?? row
+    if let existing {
+      applySavedTransaction(saved, replacing: existing)
+    }
+    recordLedgerWrite(saved, isCreate: false)
+  }
+
+  private func acknowledgeDelete(_ command: OutboxCommand, deleted: Transaction?, tally: inout DrainTally) {
+    tally.sent += 1
+    tally.deleted = true
+    // The row is gone from the server. Anything else still held for it --
+    // a refused create or edit included -- must not be sent again, or Sync
+    // Now could bring the row back.
+    updateOutbox { queue in
+      queue.removeAll { $0.id == command.id || ($0.rowKey == command.rowKey && !$0.isInFlight) }
+    }
+    let fallback = serverRow(command.transactionID) ?? command.baseSnapshot ?? deleted
+    guard let fallback else {
+      return
+    }
+    applyDeletedTransaction(deleted ?? fallback, fallback: fallback)
+  }
+
+  /// Keeps an acknowledged command's effect on the balances until an
+  /// accounts read that started after now has landed.
+  private func freezeBalanceEffect(of command: OutboxCommand) {
+    let deltas = OutboxPlanner.balanceDeltas(
+      [command],
+      rowsByID: rowsForBalanceDeltas([command]),
+      transferAccountIDsByPayeeID: transferAccountIDsByPayeeID
+    )
+    retainAcknowledged(deltas)
+  }
+
+  private func retainAcknowledged(_ deltas: [String: DeleteBalanceDelta.Delta]) {
+    guard !deltas.isEmpty else {
+      return
+    }
+    acknowledgedBalanceDeltas.append(AcknowledgedDelta(sequence: accountsReadSequence, deltas: deltas))
+  }
+
+  /// Called when an accounts read starts. Returns its sequence number.
+  private func beginAccountsRead() -> Int {
+    accountsReadSequence &+= 1
+    return accountsReadSequence
+  }
+
+  /// Called when an accounts read that started at `sequence` lands: every
+  /// acknowledgement it can reflect is now in the server's balances.
+  private func finishAccountsRead(_ sequence: Int) {
+    if acknowledgedBalanceDeltas.contains(where: { $0.sequence < sequence }) {
+      acknowledgedBalanceDeltas.removeAll { $0.sequence < sequence }
+    }
+  }
+
+  private func sendApprovals(
+    _ chunk: [OutboxCommand],
+    client: APIClient,
+    planID: String,
+    fingerprint: String,
+    tally: inout DrainTally
+  ) async -> StepResult {
+    let commands = chunk.compactMap { planned in
+      outbox.first { $0.id == planned.id && $0.state == .queued && $0.kind == .approve }
+    }
+    guard !commands.isEmpty else {
+      return .rejected
+    }
+    let ids = commands.map(\.transactionID)
+    guard markSending(commands) else {
+      return .stop
+    }
+    let reply: OutboxReply
+    do {
+      reply = try await client.outboxApprove(planID: planID, transactionIDs: ids)
+    } catch {
+      if error.isOfflineError {
+        restoreAttempt(of: commands)
+      }
+      setState(.queued, for: Set(commands.map(\.id)))
+      return .stop
+    }
+    if !reply.isSuccess, (400 ..< 500).contains(reply.status), reply.status != 408 {
+      restoreAttempt(of: commands)
+    }
+    guard settings.connectionFingerprint == fingerprint else {
+      return .stop
+    }
+    if reply.isSuccess {
+      let returned = client.outboxTransactions(in: reply) ?? []
+      let graphIDs = (try? await approvedGraphIDs(
+        from: returned,
+        submitted: Set(ids),
+        client: client,
+        planID: planID
+      )) ?? Set(ids)
+      guard settings.connectionFingerprint == fingerprint else {
+        return .stop
+      }
+      // Rows the server had unapproved, whether or not they are loaded: the
+      // badge keeps subtracting them until its next count.
+      let knownUnapproved = locallyUnapprovedIDs(in: graphIDs)
+        .union(commands.filter { $0.baseSnapshot?.approved == false }.map(\.transactionID))
+      applyApprovedIDs(graphIDs)
+      approvalSession.confirmed.formUnion(knownUnapproved)
+      let done = Set(commands.map(\.id))
+      updateOutbox { queue in
+        queue.removeAll { done.contains($0.id) }
+      }
+      tally.sent += commands.count
+      tally.approved = true
+      return .progressed
+    }
+    let action = OutboxPlanner.action(for: .approve, result: .status(reply.status, message: reply.message))
+    if case .reject = action, commands.count > 1 {
+      // A refusal does not say which row it was about. Send each on its own
+      // so one bad row does not hold the rest back.
+      setState(.queued, for: Set(commands.map(\.id)))
+      var result = StepResult.rejected
+      for command in commands {
+        switch await sendApprovals([command], client: client, planID: planID, fingerprint: fingerprint, tally: &tally) {
+        case .stop:
+          return .stop
+        case .progressed:
+          result = .progressed
+        case .rejected:
+          break
+        }
+      }
+      return result
+    }
+    switch action {
+    case .reject(let message, let code):
+      reject(commands, message: message, code: code, tally: &tally)
+      return .rejected
+    default:
+      setState(.queued, for: Set(commands.map(\.id)))
+      return .stop
+    }
+  }
+
+  private func finishDrain(_ tally: DrainTally, trigger: OutboxDrainTrigger) {
+    if tally.created > 0 || tally.deleted {
+      invalidateAccountUsage()
+    }
+    if tally.created > 0 {
+      scheduleRefresh(after: .transactionsCreated(hasTransfer: tally.createdTransfer, hasNewPayee: tally.createdNewPayee))
+    }
+    if tally.edited {
+      scheduleRefresh(
+        after: .transactionEdited(
+          changesAccount: tally.editedMovedAccount,
+          touchesTransfer: tally.editedTransfer,
+          hasNewPayee: tally.editedNewPayee
+        )
+      )
+    }
+    if tally.cleared {
+      scheduleRefresh(after: .clearedToggled)
+    }
+    if tally.deleted {
+      scheduleRefresh(after: .transactionDeleted)
+    }
+    if tally.approved {
+      scheduleRefresh(after: .transactionsApproved)
+    }
+    if tally.rejected > 0 {
+      showSaveMessage(
+        tally.rejected == 1
+          ? "The server refused 1 change. See Accounts to retry or discard it."
+          : "The server refused \(tally.rejected) changes. See Accounts to retry or discard them.",
+        kind: .failure
+      )
+    } else if tally.sent > 0, trigger != .commit {
+      showSaveMessage(tally.sent == 1 ? "Synced 1 pending change" : "Synced \(tally.sent) pending changes")
+    } else if tally.sent == 0, trigger == .manual, !currentOutbox.isEmpty {
+      showSaveMessage("Couldn’t sync — will retry on the next refresh", kind: .failure)
     }
   }
 
@@ -2783,16 +4107,8 @@ final class AppModel {
     return payee(withID: payeeID) == nil
   }
 
-  private func applySavedTransaction(
-    _ saved: Transaction,
-    replacing existing: Transaction,
-    ownsCleared: Bool = false
-  ) {
+  private func applySavedTransaction(_ saved: Transaction, replacing existing: Transaction) {
     let next = saved.preservingParent(from: existing)
-    if ownsCleared {
-      clearedToggleOverlays[saved.id] = saved.cleared
-      clearedOverlayMinimumLedgerGeneration[saved.id] = ledgerPageGeneration + 1
-    }
     if let index = serverTransactions.firstIndex(where: { $0.id == existing.id }) {
       serverTransactions[index] = next
     }
@@ -2820,6 +4136,13 @@ final class AppModel {
     }
     serverUnapprovedTransactions.removeAll { ids.contains($0.id) }
     serverTransactions = serverTransactions.map { ids.contains($0.id) ? $0.withApproved(true) : $0 }
+    if let page = lastLedgerFirstPage {
+      lastLedgerFirstPage = ReferenceSnapshot.LedgerPage(
+        transactions: page.transactions.map { ids.contains($0.id) ? $0.withApproved(true) : $0 },
+        hasMore: page.hasMore,
+        nextOffset: page.nextOffset
+      )
+    }
   }
 
   /// The batch endpoint returns the requested rows, not every row its split
@@ -2830,7 +4153,8 @@ final class AppModel {
   private func approvedGraphIDs(
     from returned: [Transaction],
     submitted: Set<String>,
-    destination: EditDestination
+    client: APIClient,
+    planID: String
   ) async throws -> Set<String> {
     var graphIDs = Set(returned.map(\.id)).union(submitted)
     for row in returned {
@@ -2841,10 +4165,7 @@ final class AppModel {
         ?? serverUnapprovedTransactions.first(where: { $0.id == parentID }) {
         parent = loaded
       } else {
-        parent = try await destination.client.fetchTransaction(planID: destination.planID, transactionID: parentID)
-      }
-      guard isCurrentApproval(destination) else {
-        return []
+        parent = try await client.fetchTransaction(planID: planID, transactionID: parentID)
       }
       graphIDs.insert(parent.id)
       graphIDs.formUnion(parent.linkedTransferIDs)
@@ -2862,10 +4183,7 @@ final class AppModel {
   }
 
   private func eligibleApprovalCount(in rows: [Transaction]) -> Int {
-    RegisterApproval.eligibleIDs(
-      in: rows.filter { pendingEdits[$0.id] == nil }.map(\.approvalRow),
-      session: approvalSession
-    ).count
+    RegisterApproval.eligibleIDs(in: rows.map(\.approvalRow), session: approvalSession).count
   }
 
   private enum ApprovalSuccessCopy {
@@ -2873,146 +4191,13 @@ final class AppModel {
     case single(Transaction)
   }
 
-  @discardableResult
-  func drainOutbox(trigger: OutboxDrainTrigger) async -> Int {
-    guard !pendingTransactions.isEmpty else {
-      return 0
+  private static func successToast(_ success: ApprovalSuccessCopy, plannedCount: Int) -> String {
+    switch success {
+    case .bulk:
+      return RegisterApproval.approvedToast(plannedCount)
+    case .single(let row):
+      return "Approved \(row.payeeName ?? "transaction")"
     }
-    if isSyncingOutbox {
-      coalescedDrainTrigger = coalescedDrainTrigger.map { mergeDrainTrigger($0, with: trigger) } ?? trigger
-      needsAnotherDrain = true
-      return 0
-    }
-
-    isSyncingOutbox = true
-    defer {
-      isSyncingOutbox = false
-      inFlightCreates.removeAll()
-    }
-
-    var syncedCount = 0
-    // A transfer's mirror row and a payee created by name are the only parts
-    // of a create the POST response cannot hand back.
-    var syncedTransfer = false
-    var syncedNewPayee = false
-    var effectiveTrigger = trigger
-    repeat {
-      needsAnotherDrain = false
-      let retryRejected = effectiveTrigger == .manual
-      for item in pendingTransactions {
-        let connectionFingerprint = settings.connectionFingerprint
-        guard settings.matchesCurrentOrLegacyOutboxStamp(item.connectionFingerprint) else {
-          continue
-        }
-        guard retryRejected || item.lastSyncError == nil else {
-          continue
-        }
-        inFlightCreates.insert(item.id)
-        defer { inFlightCreates.remove(item.id) }
-        do {
-          let client = apiClient
-          let planID = settings.planID
-          var request = item.request
-          if request.importID == nil {
-            request.importID = item.id.uuidString.lowercased()
-          }
-          let saved = try await client.createTransaction(planID: planID, request: request)
-          removePending(item.id)
-          guard connectionFingerprint == settings.connectionFingerprint else {
-            pendingCreateRevisions.removeAll()
-            continue
-          }
-          if !serverTransactions.contains(where: { $0.id == saved.id }) {
-            serverTransactions.insert(saved, at: 0)
-          }
-          syncedTransfer = syncedTransfer || isTransfer(saved)
-          syncedNewPayee = syncedNewPayee || isUnknownPayee(saved)
-          applyQueuedCreateRevision(
-            importID: saved.importID ?? request.importID ?? item.request.importID,
-            transactionID: saved.id
-          )
-          syncedCount += 1
-        } catch let error where error.isOfflineError {
-          writeQueuedRevisionIntoOutbox(item)
-          break
-        } catch {
-          writeQueuedRevisionIntoOutbox(item)
-          markSyncError(error.localizedDescription, for: item.id)
-        }
-      }
-      if let pending = coalescedDrainTrigger {
-        coalescedDrainTrigger = nil
-        effectiveTrigger = mergeDrainTrigger(effectiveTrigger, with: pending)
-      }
-    } while needsAnotherDrain
-
-    if syncedCount > 0 {
-      serverTransactions = sortedUniqueTransactions(serverTransactions)
-      invalidateAccountUsage()
-      // Balances moved whichever trigger got here, including a drain running
-      // inside a pull: `scheduleRefresh` merges into that pass's queue rather
-      // than awaiting the pass it is running inside.
-      scheduleRefresh(
-        after: .transactionsCreated(hasTransfer: syncedTransfer, hasNewPayee: syncedNewPayee)
-      )
-      if effectiveTrigger != .commit {
-        showSaveMessage(
-          syncedCount == 1 ? "Synced 1 pending transaction" : "Synced \(syncedCount) pending transactions"
-        )
-      }
-    } else if effectiveTrigger == .manual, !pendingRows.isEmpty {
-      showSaveMessage("Couldn’t sync — will retry on the next refresh", kind: .failure)
-    }
-    return syncedCount
-  }
-
-  private func mergeDrainTrigger(
-    _ current: OutboxDrainTrigger,
-    with incoming: OutboxDrainTrigger
-  ) -> OutboxDrainTrigger {
-    switch (current, incoming) {
-    case (.manual, _), (_, .manual):
-      return .manual
-    case (.refresh, _), (_, .refresh):
-      return .refresh
-    case (.commit, .commit):
-      return .commit
-    }
-  }
-
-  private func removePending(_ id: UUID) {
-    let next = pendingTransactions.filter { $0.id != id }
-    pendingTransactions = next
-    try? OutboxStore.save(next)
-  }
-
-  private func markSyncError(_ message: String, for id: UUID) {
-    var next = pendingTransactions
-    guard let index = next.firstIndex(where: { $0.id == id }) else {
-      return
-    }
-    next[index].lastSyncError = message
-    do {
-      try OutboxStore.save(next)
-      pendingTransactions = next
-    } catch {
-      pendingTransactions = next
-    }
-  }
-
-  func deleteTransaction(_ transaction: Transaction) async throws {
-    try ensureNoPendingEdit(on: transaction)
-    isSubmitting = true
-    defer { isSubmitting = false }
-
-    let deleted = try await apiClient.deleteTransaction(
-      planID: settings.planID,
-      transactionID: transaction.id,
-      expectedApproved: transaction.approved ? nil : false
-    )
-    applyDeletedTransaction(deleted, fallback: transaction)
-    showSaveMessage("Deleted \(transaction.payeeName ?? "transaction")")
-    scheduleRefresh(after: .transactionDeleted)
   }
 
   /// Applies a delete from the row the server returned, falling back to the row
@@ -3044,6 +4229,16 @@ final class AppModel {
     if !fallback.approved {
       rejectedUnapprovedAccounts[fallback.id] = fallback.accountID
     }
+    // The removed rows come off their accounts from the rows as they stood
+    // before the delete. The effect is held with the other acknowledged
+    // writes until an accounts read that started after it lands, so the
+    // balances on screen and in the snapshot below are right even when that
+    // read fails -- and a read already in flight cannot put them back.
+    var knownRows: [String: Transaction] = [:]
+    for row in serverUnapprovedTransactions + serverTransactions where removedIDs.contains(row.id) {
+      knownRows[row.id] = row
+    }
+    retainAcknowledged(DeleteBalanceDelta.deltas(deleted: fallback, removedIDs: removedIDs, knownRows: knownRows))
     serverTransactions = SplitMirrorUnlink.applying(
       mirror,
       to: serverTransactions.filter { !removedIDs.contains($0.id) }
@@ -3067,20 +4262,25 @@ final class AppModel {
     }
     provisionalLedgerRowIDs.removeAll { removedIDs.contains($0) }
     recordLedgerDelete(removedIDs: removedIDs, mirror: mirror)
-    // The accounts refresh can fail, and provisional data cannot be persisted.
-    // Invalidate disk state and queued pre-delete writes now; a later successful
-    // refresh can persist the repaired page without resurrecting the old link.
-    snapshotStore.delete()
+    // Persist the repaired page now rather than waiting on the follow-up
+    // refresh, which can fail: the next launch then starts warm, without the
+    // deleted row. The write queues behind any pre-delete one, so it lands
+    // last. Provisional data cannot be persisted, so while the launch refresh
+    // is still out the old file is deleted instead -- a queued pre-delete
+    // write included -- and a later successful refresh persists the repair.
+    if !persistSnapshot() {
+      snapshotStore.delete()
+    }
   }
 
-  // MARK: - Delete read-order ownership
+  // MARK: - Read-order ownership for acknowledged writes
 
   /// One HTTP page of the ledger, with the read-order fence captured for that
   /// request alone and applied before the page leaves this function. A page
-  /// asked for after a delete is therefore handed over untouched even when it
-  /// belongs to a walk that started before it -- the later page of a horizon
-  /// fill, or of a register's older-page load. A page asked for before the
-  /// delete is repaired against what the delete removed.
+  /// asked for after a write landed is therefore handed over untouched even
+  /// when it belongs to a walk that started before it -- the later page of a
+  /// horizon fill, or of a register's older-page load. A page asked for before
+  /// it is repaired against what the write changed.
   private func fetchLedgerPage(
     planID: String,
     accountID: String? = nil,
@@ -3096,7 +4296,13 @@ final class AppModel {
       sinceDate: sinceDate
     )
     return TransactionPage(
-      transactions: repairingStaleRead(page.transactions, startedAt: generation),
+      transactions: repairingStaleRead(
+        page.transactions,
+        startedAt: generation,
+        addingCreates: offset == 0 ? { row in
+          (accountID == nil || row.accountID == accountID) && (sinceDate.map { row.date >= $0 } ?? true)
+        } : nil
+      ),
       hasMore: page.hasMore,
       nextOffset: page.nextOffset,
       serverKnowledge: page.serverKnowledge
@@ -3120,15 +4326,17 @@ final class AppModel {
     pruneLedgerDeletes()
   }
 
-  /// Drops delete records no in-flight request can still need. A request needs
-  /// the record of every delete newer than the generation it captured when it
-  /// was issued.
+  /// Drops records no in-flight request can still need. A request needs the
+  /// record of every write newer than the generation it captured when it was
+  /// issued.
   private func pruneLedgerDeletes() {
     guard let oldestInFlight = inFlightLedgerReads.keys.min() else {
       ledgerDeletes.removeAll()
+      ledgerWrites.removeAll()
       return
     }
     ledgerDeletes.removeAll { oldestInFlight >= $0.generation }
+    ledgerWrites.removeAll { oldestInFlight >= $0.generation }
   }
 
   /// Records a delete for the requests that were issued before it, then advances
@@ -3141,129 +4349,68 @@ final class AppModel {
     pruneLedgerDeletes()
   }
 
-  /// Repairs rows a request issued before a delete could know about: the rows
-  /// that delete tombstoned are dropped, and any surviving parent row forgets
-  /// the link the server cleared. A request issued at the current generation
-  /// needs no repair.
-  private func repairingStaleRead(_ rows: [Transaction], startedAt generation: Int) -> [Transaction] {
-    let stale = ledgerDeletes.filter { $0.generation > generation }
-    guard !stale.isEmpty else {
+  /// The same for an acknowledged create, edit or status change: a read
+  /// issued before it cannot put the old row back on screen.
+  private func recordLedgerWrite(_ row: Transaction, isCreate: Bool) {
+    if let page = lastLedgerFirstPage {
+      var rows = page.transactions
+      if let index = rows.firstIndex(where: { $0.id == row.id }) {
+        rows[index] = row
+      } else if isCreate {
+        rows = sortedUniqueTransactions([row] + rows)
+      }
+      lastLedgerFirstPage = ReferenceSnapshot.LedgerPage(
+        transactions: rows,
+        hasMore: page.hasMore,
+        nextOffset: page.nextOffset
+      )
+    }
+    guard !inFlightLedgerReads.isEmpty else {
+      return
+    }
+    ledgerReadGeneration &+= 1
+    ledgerWrites.append(LedgerWrite(generation: ledgerReadGeneration, row: row, isCreate: isCreate))
+  }
+
+  /// Repairs rows a request issued before a write could know about: the rows
+  /// a delete tombstoned are dropped, any surviving parent row forgets the
+  /// link the server cleared, an edited row is replaced by the saved one, and
+  /// a first page gains the rows created since. A request issued at the
+  /// current generation needs no repair.
+  private func repairingStaleRead(
+    _ rows: [Transaction],
+    startedAt generation: Int,
+    addingCreates includes: ((Transaction) -> Bool)? = nil
+  ) -> [Transaction] {
+    let staleDeletes = ledgerDeletes.filter { $0.generation > generation }
+    let staleWrites = ledgerWrites.filter { $0.generation > generation }
+    guard !staleDeletes.isEmpty || !staleWrites.isEmpty else {
       return rows
     }
-    return stale.reduce(rows) { repaired, delete in
-      SplitMirrorUnlink.applying(
-        delete.mirror,
-        to: repaired.filter { !delete.removedIDs.contains($0.id) }
-      )
+    var repaired = rows
+    var events: [(generation: Int, apply: ([Transaction]) -> [Transaction])] = []
+    for delete in staleDeletes {
+      events.append((delete.generation, { rows in
+        SplitMirrorUnlink.applying(delete.mirror, to: rows.filter { !delete.removedIDs.contains($0.id) })
+      }))
     }
-  }
-
-  func approveEligible(from rows: [Transaction]) {
-    startApproval(from: rows, success: .bulk)
-  }
-
-  func approveTransaction(_ transaction: Transaction) {
-    do {
-      try ensureNoPendingEdit(on: transaction)
-    } catch {
-      showSaveMessage(error.localizedDescription, kind: .failure)
-      return
-    }
-    guard !transaction.approved else {
-      return
-    }
-    startApproval(from: [transaction], success: .single(transaction))
-  }
-
-  private func startApproval(from rows: [Transaction], success: ApprovalSuccessCopy) {
-    let candidates = rows.filter { pendingEdits[$0.id] == nil && editTasks[$0.id] == nil }
-    guard let plan = RegisterApproval.plan(
-      submitted: candidates.map(\.approvalRow),
-      session: approvalSession
-    ) else {
-      return
-    }
-    guard let started = RegisterApproval.begin(approvalSession, ids: plan.ids) else {
-      return
-    }
-    let destination = EditDestination(
-      planID: settings.planID,
-      connectionFingerprint: settings.connectionFingerprint,
-      client: apiClient
-    )
-    approvalSession = started
-    showSaveMessage(Self.successToast(success, plannedCount: plan.ids.count))
-    Task {
-      await settleApproval(plan: plan, destination: destination)
-    }
-  }
-
-  private func settleApproval(plan: RegisterApproval.Plan, destination: EditDestination) async {
-    var approvedCount = 0
-    do {
-      for chunk in plan.chunks {
-        let returned = try await destination.client.approveTransactionBatch(
-          planID: destination.planID,
-          transactionIDs: chunk.ids
-        )
-        guard isCurrentApproval(destination) else {
-          return
+    for write in staleWrites {
+      events.append((write.generation, { rows in
+        if let index = rows.firstIndex(where: { $0.id == write.row.id }) {
+          var next = rows
+          next[index] = write.row
+          return next
         }
-        approvedCount += chunk.count
-        let graphIDs = try await approvedGraphIDs(
-          from: returned,
-          submitted: Set(chunk.ids),
-          destination: destination
-        )
-        guard isCurrentApproval(destination) else {
-          return
+        if write.isCreate, includes?(write.row) == true {
+          return rows + [write.row]
         }
-        let knownUnapproved = locallyUnapprovedIDs(in: graphIDs)
-        applyApprovedIDs(graphIDs)
-        approvalSession.confirmed.formUnion(knownUnapproved)
-      }
-      guard isCurrentApproval(destination) else {
-        return
-      }
-      approvalSession = RegisterApproval.finish(approvalSession, ids: plan.ids)
-      await refresh(after: .transactionsApproved)
-    } catch {
-      guard isCurrentApproval(destination) else {
-        return
-      }
-      let bulkError = BulkApprovalError(approvedCount: approvedCount, underlying: error)
-      approvalSession = RegisterApproval.fail(
-        approvalSession,
-        ids: plan.ids,
-        approvedCount: bulkError.approvedCount
-      )
-      showSaveMessage(Self.failureToast(bulkError, plannedCount: plan.ids.count), kind: .failure)
-      await refreshLedger(quiet: true)
+        return rows
+      }))
     }
-  }
-
-  private func isCurrentApproval(_ destination: EditDestination) -> Bool {
-    destination.planID == settings.planID
-      && destination.connectionFingerprint == settings.connectionFingerprint
-  }
-
-  private static func successToast(_ success: ApprovalSuccessCopy, plannedCount: Int) -> String {
-    switch success {
-    case .bulk:
-      return RegisterApproval.approvedToast(plannedCount)
-    case .single(let row):
-      return "Approved \(row.payeeName ?? "transaction")"
+    for event in events.sorted(by: { $0.generation < $1.generation }) {
+      repaired = event.apply(repaired)
     }
-  }
-
-  private static func failureToast(_ error: BulkApprovalError, plannedCount: Int) -> String {
-    if error.approvedCount > 0 {
-      return RegisterApproval.interruptedToast(
-        approvedCount: error.approvedCount,
-        uncertainCount: max(0, plannedCount - error.approvedCount)
-      )
-    }
-    return error.localizedDescription
+    return repaired
   }
 
   private func showSaveMessage(_ text: String, kind: SaveMessage.Kind = .success) {
@@ -3277,10 +4424,4 @@ final class AppModel {
       }
     }
   }
-}
-
-private struct EditDestination {
-  let planID: String
-  let connectionFingerprint: String
-  let client: APIClient
 }
