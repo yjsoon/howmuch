@@ -630,7 +630,7 @@ struct SpendingBreakdownDetailView: View {
   private func categoryRow(_ group: SpendingBreakdownGroup, total: Int, maxAmount: Int) -> some View {
     let amount = abs(group.amount)
     let share = total > 0 ? Double(amount) / Double(total) : 0
-    return HStack(spacing: 12) {
+    return HStack(alignment: .top, spacing: 12) {
       VStack(alignment: .leading, spacing: 6) {
         Text(group.categoryName)
           .font(.subheadline)
@@ -646,12 +646,13 @@ struct SpendingBreakdownDetailView: View {
             .foregroundStyle(.tertiary)
         }
       }
-      Spacer()
+      Spacer(minLength: 12)
       Text(MoneyCodec.displayString(for: amount, currencyFormat: model.currencyFormat))
         .font(.subheadline)
         .monospacedDigit()
         .foregroundStyle(Theme.textPrimary)
         .rollingNumber(amount)
+        .layoutPriority(1)
       Image(systemName: "chevron.forward")
         .font(.footnote.weight(.semibold))
         .foregroundStyle(.tertiary)
