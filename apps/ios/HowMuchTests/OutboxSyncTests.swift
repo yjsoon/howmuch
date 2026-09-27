@@ -650,11 +650,16 @@ final class OutboxSyncTests: XCTestCase {
       else { model.approveTransaction(target) }
       await model.waitForOutboxDrain()
       XCTAssertEqual(model.unapprovedBadgeCount, 2)
+      // Refresh persists the badge but also schedules a drain. Keep that
+      // drain offline and settle it before the shared server is reset.
+      model.outboxDebounce = .seconds(3_600)
       server.offline = false
       await model.refreshAccounts()
       snapshots.waitForPendingWrites()
       XCTAssertNotNil(snapshots.load())
       server.offline = true
+      await model.drainOutbox(trigger: .refresh)
+      await model.waitForOutboxDrain()
       let relaunched = makeModel(store: outbox, snapshotStore: snapshots)
       XCTAssertEqual(relaunched.unapprovedBadgeCount, 2)
       XCTAssertEqual(relaunched.unsentChangeCount, 1)

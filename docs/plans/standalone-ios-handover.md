@@ -25,7 +25,7 @@ Your server-mode install is unchanged. Adversarial reviews traced the settings m
 ## Before you deploy the backend
 
 - **Deploy order:** the backend no longer serves `/months/**`. The iOS build now on your phone calls those routes from the Plan screen. Install the new iOS build first, then push a `v*` tag, which deploys automatically.
-- **No D1 migration is needed.** A backup was taken anyway: `data/backups/howmuch-production-sg-2026-09-25.sql` in the main checkout (208 MB, sha256 `83c9b19a…5b15`). It holds 54,331 transactions and 116 accounts.
+- **No D1 migration is needed.** Take a production backup before deployment and keep backup files and ledger metadata private, outside the repository.
 
 ## Needs you
 
