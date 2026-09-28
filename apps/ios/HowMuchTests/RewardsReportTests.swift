@@ -778,7 +778,8 @@ final class RewardsSnapshotTests: XCTestCase {
     ))
     defer { surface.detach() }
     // Filter labels appear before the report loads; require the populated root.
-    let expected = ["Accounts", "Rewards", "Reflect", "Featured", "Today", "$99.70 earned", "2 below minimum",
+    // The date menu shows only its calendar icon in the toolbar.
+    let expected = ["Accounts", "Rewards", "Reflect", "Featured", "$99.70 earned", "2 below minimum",
       "Travel Fixture", "$169.20", "8 days left"]
     let rendered = await surface.captureUntilOCR(contains: expected, timeoutNanoseconds: 5_000_000_000)
     attach(rendered.image, "rewards-compact-root")

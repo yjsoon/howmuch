@@ -159,13 +159,15 @@ struct RewardsView: View {
       RewardsBoard(report: $0, preferences: preferences, currencyFormat: model.currencyFormat)
     }
     List {
-      controlBar(board)
       if let report = currentReport, let board {
         if !report.cards.isEmpty {
           summaryRow(board)
         }
         if let asOf = filter.asOfISO {
           pastDateBanner(asOf)
+        }
+        if !filter.scope.accountIDs.isEmpty {
+          accountsBanner
         }
         if let message = model.rewardsPhase.errorMessage {
           errorRow(message)
@@ -188,6 +190,13 @@ struct RewardsView: View {
     .navigationTitle("Rewards")
     .navigationBarTitleDisplayMode(.large)
     .toolbar {
+      ToolbarItem(placement: .topBarLeading) {
+        featuredMenu(board)
+      }
+      ToolbarItem(placement: .topBarTrailing) {
+        dateMenu
+      }
+      ToolbarSpacer(.fixed, placement: .topBarTrailing)
       ToolbarItem(placement: .topBarTrailing) {
         DestinationsMenu {
           rewardsMenuItems
@@ -465,45 +474,6 @@ struct RewardsView: View {
 
   // MARK: Controls
 
-  private func controlBar(_ board: RewardsBoard?) -> some View {
-    ViewThatFits(in: .horizontal) {
-      HStack(spacing: 4) {
-        featuredMenu(board)
-        Spacer(minLength: 8)
-        accountsButton
-        dateMenu
-      }
-      VStack(alignment: .leading, spacing: 0) {
-        featuredMenu(board)
-        Divider()
-        accountsButton
-        dateMenu
-      }
-    }
-    .padding(.horizontal, 6)
-    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 0, trailing: 16))
-    .listRowBackground(Color.clear)
-    .listRowSeparator(.hidden)
-  }
-
-  private func menuLabel(_ title: String, systemImage: String? = nil) -> some View {
-    HStack(spacing: 6) {
-      if let systemImage {
-        Image(systemName: systemImage)
-          .foregroundStyle(Theme.rowSecondary)
-      }
-      Text(title)
-        .foregroundStyle(Theme.textPrimary)
-      Image(systemName: "chevron.down")
-        .font(.footnote.weight(.semibold))
-        .foregroundStyle(Theme.rowSecondary)
-    }
-    .padding(.horizontal, 10)
-    .frame(minHeight: 44)
-    .contentShape(.rect)
-  }
-
   private func featuredMenu(_ board: RewardsBoard?) -> some View {
     let featuredOnly = board?.featuredOnly ?? (preferences.featuredOnly ?? true)
     let title = featuredOnly ? "Featured" : "All Cards"
@@ -521,36 +491,36 @@ struct RewardsView: View {
         set: { value in updatePreferences { $0.groupsByType = value } }
       ))
     } label: {
-      menuLabel(title)
+      Text(title)
     }
     .accessibilityLabel("Cards, \(title)")
   }
 
-  @ViewBuilder
-  private var accountsButton: some View {
-    if !filter.scope.accountIDs.isEmpty {
-      let count = filter.scope.accountIDs.count
-      HStack(spacing: 0) {
-        Button {
-          sheet = .accounts
-        } label: {
-          Label("\(count) Account\(count == 1 ? "" : "s")", systemImage: "building.columns")
-            .padding(.leading, 10)
-            .frame(minHeight: 44)
-        }
-        .accessibilityHint("Choose which accounts the report covers.")
-        Button {
-          filter.scope.accountIDs = []
-        } label: {
-          Image(systemName: "xmark.circle.fill")
-            .symbolRenderingMode(.hierarchical)
-            .frame(minWidth: 36, minHeight: 44)
-        }
-        .accessibilityLabel("Show all accounts")
+  private var accountsBanner: some View {
+    let count = filter.scope.accountIDs.count
+    return HStack(spacing: 8) {
+      Button {
+        sheet = .accounts
+      } label: {
+        Label("\(count) Account\(count == 1 ? "" : "s")", systemImage: "building.columns")
+          .font(.subheadline)
+          .foregroundStyle(Theme.textPrimary)
+          .frame(minHeight: 44)
       }
       .buttonStyle(.borderless)
+      .accessibilityHint("Choose which accounts the report covers.")
+      Spacer(minLength: 8)
+      Button("Show All") {
+        filter.scope.accountIDs = []
+      }
+      .buttonStyle(.borderless)
+      .font(.subheadline.weight(.semibold))
       .tint(Theme.accent)
+      .frame(minHeight: 44)
+      .accessibilityLabel("Show all accounts")
     }
+    .listRowBackground(Color.clear)
+    .listRowSeparator(.hidden)
   }
 
   private var dateMenu: some View {
@@ -580,7 +550,7 @@ struct RewardsView: View {
         }
       }
     } label: {
-      menuLabel(title, systemImage: "calendar")
+      Label(title, systemImage: "calendar")
     }
     .accessibilityLabel("As of, \(title)")
   }
