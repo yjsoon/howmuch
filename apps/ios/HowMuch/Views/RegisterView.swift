@@ -455,8 +455,6 @@ struct RegisterView: View {
           .buttonStyle(.plain)
           .accessibilityLabel(reconciledSubtitle)
           .accessibilityHint("Opens reconcile.")
-          // Reward minimum/cap for this account's card, in view while adding.
-          RegisterRewardsStrip(accountID: account.id)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -464,6 +462,17 @@ struct RegisterView: View {
         .listRowInsets(EdgeInsets())
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
+        .loadsRegisterRewards(accountID: account.id)
+        // Reward minimum/cap for this account's card, in view while adding.
+        let rewards = model.registerRewards(forAccount: account.id)
+        ForEach(rewards.rows) { row in
+          RegisterRewardRow(accountID: account.id, row: row, asOf: rewards.asOf)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
       }
     }
   }
