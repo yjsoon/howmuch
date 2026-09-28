@@ -1692,70 +1692,49 @@ struct RewardsValuationSheet: View {
 
 // MARK: - Register strip
 
-/// The reward rows for one account, shown in its register so the limit is in
+/// One reward row for an account, shown in its register so the limit is in
 /// view while adding transactions. Details and editing stay over the register.
-struct RegisterRewardsStrip: View {
+/// Each row is its own List row, so the List animates rows arriving.
+struct RegisterRewardRow: View {
   @Environment(AppModel.self) private var model
   let accountID: String
-  @State private var rows: [RewardsCardRow] = []
-  @State private var asOf: String?
-  @State private var loadedPlanID: String?
+  let row: RewardsCardRow
+  let asOf: String?
   @State private var sheet: Sheet?
 
   private enum Sheet: Identifiable {
-    case detail(String)
-    case editor(String)
+    case detail
+    case editor
 
-    var id: String {
-      switch self {
-      case .detail(let cardID): return "detail-\(cardID)"
-      case .editor(let cardID): return "editor-\(cardID)"
-      }
-    }
+    var id: Self { self }
   }
 
   var body: some View {
-    VStack(spacing: 8) {
-      if loadedPlanID == model.settings.planID {
-        ForEach(rows) { row in
-          let projection = RewardRowProjection.make(row: row, asOf: asOf, isRange: false)
-          Button {
-            sheet = .detail(row.id)
-          } label: {
-            RewardFilledRow(projection: projection, currencyFormat: model.currencyFormat)
-          }
-          .buttonStyle(.plain)
-          .accessibilityLabel("Rewards, \(projection.title)")
-          .accessibilityValue(RewardRowText(projection, currencyFormat: model.currencyFormat).accessibilityValue)
-          .accessibilityHint("Shows reward details for this account.")
-        }
-      }
+    let projection = RewardRowProjection.make(row: row, asOf: asOf, isRange: false)
+    Button {
+      sheet = .detail
+    } label: {
+      RewardFilledRow(projection: projection, currencyFormat: model.currencyFormat)
     }
-    .padding(.top, rows.isEmpty ? 0 : 6)
+    .buttonStyle(.plain)
+    .accessibilityLabel("Rewards, \(projection.title)")
+    .accessibilityValue(RewardRowText(projection, currencyFormat: model.currencyFormat).accessibilityValue)
+    .accessibilityHint("Shows reward details for this account.")
     .sheet(item: $sheet) { destination in
       Group {
         switch destination {
-        case .detail(let cardID):
-          if loadedPlanID == model.settings.planID,
-             let row = rows.first(where: { $0.id == cardID }) {
-            RewardCardDetailSheet(
-              row: row,
-              asOf: asOf,
-              icon: model.accounts.first { $0.id == accountID }?.displayIcon,
-              currencyFormat: model.currencyFormat,
-              canOpenAccount: false,
-              onEdit: { sheet = .editor(cardID) },
-              onOpenAccount: {}
-            )
-          } else {
-            ContentUnavailableView(
-              "Card Unavailable",
-              systemImage: "creditcard",
-              description: Text("This card is no longer in the report.")
-            )
-          }
-        case .editor(let cardID):
-          RewardCardEditorView(cardID: cardID)
+        case .detail:
+          RewardCardDetailSheet(
+            row: row,
+            asOf: asOf,
+            icon: model.accounts.first { $0.id == accountID }?.displayIcon,
+            currencyFormat: model.currencyFormat,
+            canOpenAccount: false,
+            onEdit: { sheet = .editor },
+            onOpenAccount: {}
+          )
+        case .editor:
+          RewardCardEditorView(cardID: row.id)
         }
       }
       .blocksCapturePresentation()
@@ -1763,37 +1742,36 @@ struct RegisterRewardsStrip: View {
     .onChange(of: model.settings.planID) { _, _ in
       sheet = nil
     }
-    .task(id: fetchKey) {
-      await load()
+  }
+}
+
+extension View {
+  /// Fetches the account's reward rows for its register, and again whenever
+  /// its transactions change, so a new transaction moves the limit without
+  /// leaving the register.
+  func loadsRegisterRewards(accountID: String) -> some View {
+    modifier(RegisterRewardsLoader(accountID: accountID))
+  }
+}
+
+private struct RegisterRewardsLoader: ViewModifier {
+  @Environment(AppModel.self) private var model
+  let accountID: String
+
+  func body(content: Content) -> some View {
+    content.task(id: fetchKey) {
+      guard let rewards = await model.fetchRegisterRewards(accountID: accountID) else { return }
+      withAnimation(Theme.Motion.arrive) {
+        model.storeRegisterRewards(rewards, accountID: accountID)
+      }
     }
   }
 
-  /// Refetches when this account's transactions change, so a new transaction
-  /// moves the limit without leaving the register.
   private var fetchKey: String {
     var hasher = Hasher()
     for transaction in model.transactions where transaction.accountID == accountID {
       hasher.combine(transaction)
     }
     return "\(model.settings.planID)|\(accountID)|\(model.rewardsRefreshGeneration)|\(hasher.finalize())"
-  }
-
-  private func load() async {
-    let planID = model.settings.planID
-    do {
-      let report = try await model.apiClient.fetchRewards(
-        planID: planID,
-        from: nil,
-        to: nil,
-        accountIDs: [accountID],
-        group: .flag
-      )
-      guard planID == model.settings.planID else { return }
-      rows = report.cards.filter { $0.accountId == accountID }
-      asOf = report.asOf
-      loadedPlanID = planID
-    } catch {
-      // The register stands on its own; keep the last rows on failure.
-    }
   }
 }

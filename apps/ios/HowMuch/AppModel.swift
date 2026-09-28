@@ -2,6 +2,12 @@ import Foundation
 import Observation
 import OSLog
 
+/// The reward rows an account register shows under its balance.
+struct RegisterRewards {
+  var rows: [RewardsCardRow] = []
+  var asOf: String?
+}
+
 enum LoadPhase: Equatable {
   case idle
   case loading
@@ -160,6 +166,9 @@ final class AppModel {
   /// filter's controls.
   private var rewardsReport: RewardsReport?
   private var rewardsReportRequest: RewardsRequest?
+  /// Each account register's last reward fetch, read through
+  /// `registerRewards(forAccount:)`.
+  private var registerRewardsByAccount: [String: RegisterRewards] = [:]
   private(set) var rewardsPhase: LoadPhase = .idle
   var isSubmitting = false
   var lastSaveMessage: SaveMessage?
@@ -395,6 +404,40 @@ final class AppModel {
   /// The board's report, only when it was produced by exactly this request.
   func rewardsReport(for request: RewardsRequest) -> RewardsReport? {
     rewardsReportRequest == request ? rewardsReport : nil
+  }
+
+  /// One account's reward rows for its register: its own last fetch, else its
+  /// cards from the cached overview, so the rows are there on arrival while
+  /// the fetch runs. The server computes each card's row the same with or
+  /// without an account filter.
+  func registerRewards(forAccount accountID: String) -> RegisterRewards {
+    if let fetched = registerRewardsByAccount[accountID] {
+      return fetched
+    }
+    guard let report = cachedRewardsOverview else { return RegisterRewards() }
+    return RegisterRewards(rows: report.cards.filter { $0.accountId == accountID }, asOf: report.asOf)
+  }
+
+  /// Fetches one account's reward rows. Returns nil when the fetch fails or
+  /// the plan changed under it; the register keeps what it had.
+  func fetchRegisterRewards(accountID: String) async -> RegisterRewards? {
+    let planID = settings.planID
+    guard let report = try? await apiClient.fetchRewards(
+      planID: planID,
+      from: nil,
+      to: nil,
+      accountIDs: [accountID],
+      group: .flag
+    ), planID == settings.planID else {
+      return nil
+    }
+    return RegisterRewards(rows: report.cards.filter { $0.accountId == accountID }, asOf: report.asOf)
+  }
+
+  /// Stores a fetch from `fetchRegisterRewards`. Separate so the register can
+  /// wrap it in an animation and the List animates the rows in.
+  func storeRegisterRewards(_ rewards: RegisterRewards, accountID: String) {
+    registerRewardsByAccount[accountID] = rewards
   }
 
   /// Set while Reflect shows reports its last refresh could not replace, so
@@ -2619,6 +2662,7 @@ final class AppModel {
     rewardsReportRequest = nil
     rewardsPhase = .idle
     rewardsGeneration &+= 1
+    registerRewardsByAccount = [:]
   }
 
   /// Loads the Rewards board for one request. Only the latest call may land,
