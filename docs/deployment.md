@@ -79,11 +79,58 @@ environment `tk` in `wrangler.jsonc`:
   deploying, when any `*.sql` file in `apps/api/d1-migrations` is not recorded
   there. It also fails when it cannot read D1 at all, so the
   `CLOUDFLARE_API_TOKEN` secret needs Account > D1 > Read in addition to its
-  Workers permissions. It uses a plain query rather than
+  Workers permissions (see [CI deploy token](#ci-deploy-token)). It uses a
+  plain query rather than
   `wrangler d1 migrations list` because that command exits 0 even when
   migrations are pending and first runs a `CREATE TABLE IF NOT EXISTS` against
   the database. To check before tagging, run the same script from the repo
   root with `--env tk --remote --profile tinkertanker`; it is read-only.
+
+### CI deploy token
+
+The `CLOUDFLARE_API_TOKEN` repository secret is a Tinkertanker **account** API
+token named `howmuch-deploy (GitHub Actions)`. Because it is account-scoped it
+cannot act on the YJ account, and the workflow also pins
+`CLOUDFLARE_ACCOUNT_ID` to Tinkertanker (`b8b1032c61d9475cd00229c74db7ec72`)
+as a second guard. The current token was created with no expiration.
+
+- Permissions: the Workers permission set that `wrangler deploy` needs (the
+  "Edit Cloudflare Workers" style set it was created with), plus
+  Account > D1 > Read for the pending-migrations check. The workflow never
+  writes to D1, so D1 Edit is not required.
+- Where it lives: only in the `yjsoon/howmuch` repository secrets (Settings >
+  Secrets and variables > Actions) and in the Tinkertanker account's API token
+  list. Cloudflare shows the value once at creation; never write it into the
+  repo, an issue, a PR, a log, or chat.
+
+Rotation is an owner action, because step 3 deploys production:
+
+1. In the Tinkertanker dashboard, create a replacement account API token with
+   the same permissions (including D1 Read) and the expiry set by the policy
+   below. Keep it scoped to the Tinkertanker account.
+2. Store it without putting it on the command line: run
+   `gh secret set CLOUDFLARE_API_TOKEN --repo yjsoon/howmuch` and paste the
+   value at the prompt.
+3. Run the Deploy workflow via `workflow_dispatch` (Actions > Deploy > Run
+   workflow, or `gh workflow run deploy.yml --repo yjsoon/howmuch --ref main`)
+   from a ref that is safe to ship, and confirm the migrations check, the
+   deploy, and the `/health` step all pass.
+4. Revoke the old token in the Tinkertanker dashboard, and confirm only the
+   new `howmuch-deploy` token remains.
+
+Recommended policy, pending owner confirmation:
+
+- Give the next token a 12-month expiry and set a calendar reminder about a
+  month before it lapses, then rotate with the steps above. An expired token
+  only stops CI deploys; the running Worker is unaffected, and
+  `bun run deploy:tk` still works through the `tinkertanker` profile.
+- Rotate immediately on suspected exposure (for example the value appearing
+  in a log or chat, or a compromised workflow dependency) and when a
+  maintainer with access to the repository secrets or the Tinkertanker account
+  leaves.
+- Add D1 Read before the next release, either by editing the existing token's
+  permissions or as part of the first rotation, since the deploy workflow
+  fails closed without it.
 
 ### Smart Placement experiment (#172, reverted)
 
