@@ -3137,13 +3137,16 @@ final class SnapshotSurface {
     return firstControl(label: "1")
   }
 
+  /// Finds the Add Transaction memo field in the hosted window or a presented sheet.
   func memoTextInput() -> UIView? {
+    /// True when a text control's placeholder or accessibility label names memo.
     func matches(_ view: UIView) -> Bool {
       let placeholder = (view as? UITextField)?.placeholder ?? ""
       let label = view.accessibilityLabel ?? ""
       return placeholder.localizedStandardContains("memo")
         || label.localizedStandardContains("memo")
     }
+    /// Depth-first search for the first memo text field or text view.
     func walk(_ view: UIView) -> UIView? {
       if (view is UITextField || view is UITextView), matches(view) {
         return view

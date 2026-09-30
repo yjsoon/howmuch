@@ -201,6 +201,7 @@ struct TransactionFormView: View {
     self.isKeypadVisible = !isEditing && draft.amountMagnitudeMilli == 0
   }
 
+  /// Hosts the form and collapses CalculatorKeypad when any text field begins editing.
   var body: some View {
     wrappedForm {
       VStack(spacing: 0) {
@@ -432,6 +433,7 @@ struct TransactionFormView: View {
     draft.payeeID != nil || !draft.payeeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
+  /// Amount tap resigns memo focus and shows CalculatorKeypad again.
   private var amountHeader: some View {
     VStack(spacing: 14) {
       if !draft.isSplit {
@@ -813,6 +815,7 @@ struct TransactionFormView: View {
     return RewardCardDraft.colourNames(from: card)
   }
 
+  /// Cleared, flag, and memo. Memo is a system text field, so it owns the QWERTY keyboard.
   private var extrasCard: some View {
     VStack(spacing: 0) {
       clearedRow
