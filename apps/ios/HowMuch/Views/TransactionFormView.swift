@@ -165,6 +165,9 @@ struct TransactionFormView: View {
   @State private var showCategoryPrompt = false
   @State private var isShowingDate = false
   @State private var rewardCards: [CreditCard] = []
+  /// Memo (and any later non-amount text field) — not the amount header, which
+  /// owns CalculatorKeypad rather than the system keyboard.
+  @FocusState private var isTextInputFocused: Bool
   private let isEditing: Bool
   private let allowsDeletion: Bool
   private let chrome: TransactionFormChrome
@@ -198,6 +201,7 @@ struct TransactionFormView: View {
     self.isKeypadVisible = !isEditing && draft.amountMagnitudeMilli == 0
   }
 
+  /// Hosts the form and collapses CalculatorKeypad when any text field begins editing.
   var body: some View {
     wrappedForm {
       VStack(spacing: 0) {
@@ -352,6 +356,17 @@ struct TransactionFormView: View {
       .onAppear {
         commitHook?.keypad = keypad
       }
+      .onChange(of: isTextInputFocused) { _, focused in
+        if focused {
+          collapseKeypad()
+        }
+      }
+      .onReceive(NotificationCenter.default.publisher(for: UITextView.textDidBeginEditingNotification)) { _ in
+        collapseKeypad()
+      }
+      .onReceive(NotificationCenter.default.publisher(for: UITextField.textDidBeginEditingNotification)) { _ in
+        collapseKeypad()
+      }
       .task(id: model.settings.planID) {
         rewardCards = []
         if let snapshot = try? await model.apiClient.fetchRewardsTrackerSnapshot(planID: model.settings.planID) {
@@ -418,6 +433,7 @@ struct TransactionFormView: View {
     draft.payeeID != nil || !draft.payeeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
+  /// Amount tap resigns memo focus and shows CalculatorKeypad again.
   private var amountHeader: some View {
     VStack(spacing: 14) {
       if !draft.isSplit {
@@ -428,6 +444,7 @@ struct TransactionFormView: View {
         guard !draft.isSplit else {
           return
         }
+        isTextInputFocused = false
         withAnimation(Theme.Motion.standard) {
           isKeypadVisible = true
         }
@@ -798,6 +815,7 @@ struct TransactionFormView: View {
     return RewardCardDraft.colourNames(from: card)
   }
 
+  /// Cleared, flag, and memo. Memo is a system text field, so it owns the QWERTY keyboard.
   private var extrasCard: some View {
     VStack(spacing: 0) {
       clearedRow
@@ -828,6 +846,7 @@ struct TransactionFormView: View {
         TextField("Enter a memo…", text: $draft.memo, axis: .vertical)
           .lineLimit(1 ... 3)
           .foregroundStyle(Theme.textPrimary)
+          .focused($isTextInputFocused)
       }
       .padding(.horizontal, 16)
       .padding(.vertical, 13)
