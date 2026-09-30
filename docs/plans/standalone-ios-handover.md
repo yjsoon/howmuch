@@ -29,7 +29,7 @@ Your server-mode install is unchanged. Adversarial reviews traced the settings m
 
 ## Needs you
 
-1. **Delete three dead files.** My delete permission was refused, so I left them. Run `trash apps/api/src/ynab-month-activity.ts apps/api/tests/ynab-month-activity.test.ts scripts/verify-month-activity-parity.ts`. Until then, 5 tests in that file fail and every commit shows them. Everything else passes: `bun test` 816 pass, and the full iOS suite ran 614 tests with 0 failures and 2 opt-in skips on the rebased HEAD.
+1. **Delete three dead files.** Done (commit "test(api): drop month-activity cases orphaned by the budgeting removal"): `apps/api/src/ynab-month-activity.ts`, `apps/api/tests/ynab-month-activity.test.ts` and `scripts/verify-month-activity-parity.ts` are removed, and the 5 tests that failed there are gone with them. `bun test` is then 791 pass, 0 fail. Earlier, the full iOS suite ran 614 tests with 0 failures and 2 opt-in skips on the rebased HEAD.
 2. **Stale worktree** `.claude/worktrees/agent-a8be16b0a256af6e1`. Its branch is fully merged, but the worktree holds files I couldn't inspect. Look at it before you remove it.
 3. **Decisions:**
    - Done (`5d63af0`): a new local plan now takes its currency and date format from the device's region. There is still no screen to change them afterwards. Snapshots don't carry plan settings, so a server plan keeps its own currency after an upload.
