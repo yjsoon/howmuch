@@ -57,7 +57,7 @@ State lives in one observable `AppModel` with independent load phases per surfac
 
 ## Validation
 
-Use `scripts/ios-xcodebuild.sh` from the repo root. It implements the [iOS validation contract](AGENTS.md): one owner per checkout, a pinned iOS 26+ simulator UDID, `build/xcode/DerivedData-simulator`, `-jobs 2 COMPILER_INDEX_STORE_ENABLE=NO`, and timestamped logs under `build/xcode/logs`. Rebuild after source changes and do not run tests from a failed build. Choose tests and representative UI states relevant to the change.
+Use `scripts/ios-xcodebuild.sh` from the repo root. It implements the [iOS validation contract](AGENTS.md): one owner per checkout, a pinned iOS 26+ simulator UDID, `build/xcode/DerivedData-simulator`, `-jobs 2 COMPILER_INDEX_STORE_ENABLE=NO`, and timestamped logs under `build/xcode/logs`. `test` rebuilds before every run and stops without testing if the build fails; `test-without-building` reruns existing products and warns that they may be stale. Choose tests and representative UI states relevant to the change.
 
 ```sh
 scripts/ios-xcodebuild.sh doctor

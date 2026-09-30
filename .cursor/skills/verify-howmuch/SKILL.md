@@ -76,7 +76,7 @@ It must report:
 Required for each selected `ios-*` recipe, not every recipe for every change. Skip those recipes (do not mark them verified via web `/add`) when Xcode / Simulator is missing. Continue safe local fixes and reruns within the task; validation does not authorize signing, publication, commits, pushes, or installing external skills.
 
 1. `control-howmuch launch` and `doctor` pass. Complete first-owner setup on `{web_url}` if `setup_required` is still true.
-2. Follow [apps/ios/AGENTS.md](../../../apps/ios/AGENTS.md) for canonical **HowMuch** simulator validation from the repo root. `scripts/ios-xcodebuild.sh test` reuses the selected iOS 26+ UDID, `build/xcode/DerivedData-simulator`, and successful products across build-for-testing and test-without-building; rebuild after source changes. No signing credentials or clean/pushed HEAD are needed.
+2. Follow [apps/ios/AGENTS.md](../../../apps/ios/AGENTS.md) for canonical **HowMuch** simulator validation from the repo root. `scripts/ios-xcodebuild.sh test` reuses the selected iOS 26+ UDID and `build/xcode/DerivedData-simulator` across build-for-testing and test-without-building, rebuilding before every run and stopping if the build fails. No signing credentials or clean/pushed HEAD are needed.
 
 Then install and launch the built app on that same simulator:
 

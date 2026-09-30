@@ -32,7 +32,10 @@ Usage:
   scripts/ios-xcodebuild.sh build [--generic]
   scripts/ios-xcodebuild.sh build-for-testing
   scripts/ios-xcodebuild.sh test-without-building [-- extra xcodebuild args]
-  scripts/ios-xcodebuild.sh test [-- extra xcodebuild args]   (always build-for-testing first)
+                                      reruns existing products; warns, never rebuilds
+  scripts/ios-xcodebuild.sh test [-- extra xcodebuild args]
+                                      build-for-testing, then test-without-building;
+                                      stops if the build fails
   scripts/ios-xcodebuild.sh app-path
   scripts/ios-xcodebuild.sh destination
 
@@ -374,6 +377,23 @@ test_product_exists() {
   [[ -d "$app" && ( -d "$xctest_root" || -d "$xctest_plugin" ) ]]
 }
 
+# Modification time of the built test binary, for telling fresh runs from stale ones.
+test_product_mtime() {
+  local bundle target
+  for bundle in \
+    "$SIM_DERIVED/Build/Products/Debug-iphonesimulator/HowMuchTests.xctest" \
+    "$(app_path)/PlugIns/HowMuchTests.xctest"; do
+    [[ -d "$bundle" ]] || continue
+    target="$bundle/HowMuchTests"
+    [[ -e "$target" ]] || target="$bundle"
+    stat -c '%y' "$target" 2>/dev/null \
+      || stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S %z' "$target" 2>/dev/null \
+      || echo unknown
+    return 0
+  done
+  echo missing
+}
+
 cmd_doctor() {
   need_darwin
   mkdir_build
@@ -386,7 +406,7 @@ cmd_doctor() {
   echo "jobs: $JOBS (COMPILER_INDEX_STORE_ENABLE=NO)"
   echo "lock: $([[ -d "$LOCK_DIR" ]] && echo held by "$(cat "$LOCK_DIR/pid" 2>/dev/null || echo unknown)" || echo free)"
   echo "app: $(app_path) $([[ -d "$(app_path)" ]] && echo present || echo missing)"
-  echo "tests: $(test_product_exists && echo present || echo missing)"
+  echo "tests: $(test_product_exists && echo "present (last linked $(test_product_mtime))" || echo missing)"
   echo "$(pressure_line)"
   echo "booted simulators:"
   local booted
@@ -467,14 +487,24 @@ cmd_test_without_building() {
     echo "error: no HowMuchTests.xctest in $SIM_DERIVED (a plain build can remove it); run build-for-testing or test" >&2
     exit 1
   fi
+  echo "warning: test-without-building reruns existing products without rebuilding" >&2
+  echo "warning: HowMuchTests last linked $(test_product_mtime); edits since the last successful build are not under test. Use test after source changes." >&2
   xcode_invocation test-without-building test-without-building "$@"
 }
 
 cmd_test() {
   prepare_build 0
-  # Always rebuild: skipping when products exist ran tests against stale binaries.
-  # Incremental builds are cheap; use test-without-building to reuse products deliberately.
-  xcode_invocation build-for-testing build-for-testing
+  # Always rebuild: skipping when products exist ran tests against stale binaries
+  # (#166). Incremental builds are cheap and also catch project, package, and
+  # deleted-file changes that an mtime check would miss. Use
+  # test-without-building to reuse products deliberately.
+  local status=0
+  xcode_invocation build-for-testing build-for-testing || status=$?
+  if ((status != 0)); then
+    echo "error: build-for-testing failed (exit $status); not running tests against the previous products" >&2
+    exit "$status"
+  fi
+  echo "runner: build-for-testing succeeded; products match this worktree (HowMuchTests last linked $(test_product_mtime))"
   xcode_invocation test-without-building test-without-building "$@"
 }
 
