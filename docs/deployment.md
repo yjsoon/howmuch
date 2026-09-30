@@ -88,11 +88,16 @@ environment `tk` in `wrangler.jsonc`:
 
 ### CI deploy token
 
+**Required before the next `v*` tag:** add Account > D1 > Read to this token,
+either by editing its permissions or as part of the first rotation. The
+pending-migrations check fails closed without it, so every deploy stops at
+that step until it is added.
+
 The `CLOUDFLARE_API_TOKEN` repository secret is a Tinkertanker **account** API
 token named `howmuch-deploy (GitHub Actions)`. Because it is account-scoped it
 cannot act on the YJ account, and the workflow also pins
 `CLOUDFLARE_ACCOUNT_ID` to Tinkertanker (`b8b1032c61d9475cd00229c74db7ec72`)
-as a second guard. The current token was created with no expiration.
+as a second guard. The current token was created with no expiry.
 
 - Permissions: the Workers permission set that `wrangler deploy` needs (the
   "Edit Cloudflare Workers" style set it was created with), plus
@@ -110,7 +115,11 @@ Rotation is an owner action, because step 3 deploys production:
    below. Keep it scoped to the Tinkertanker account.
 2. Store it without putting it on the command line: run
    `gh secret set CLOUDFLARE_API_TOKEN --repo yjsoon/howmuch` and paste the
-   value at the prompt.
+   value at the prompt. Before deploying, you can check the new token's D1
+   Read access read-only from the repo root, again without putting the value
+   in shell history: `read -rs CLOUDFLARE_API_TOKEN && export
+   CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID=b8b1032c61d9475cd00229c74db7ec72`,
+   paste the value, then run `scripts/check-d1-migrations.sh --env tk --remote`.
 3. Run the Deploy workflow via `workflow_dispatch` (Actions > Deploy > Run
    workflow, or `gh workflow run deploy.yml --repo yjsoon/howmuch --ref main`)
    from a ref that is safe to ship, and confirm the migrations check, the
@@ -128,9 +137,6 @@ Recommended policy, pending owner confirmation:
   in a log or chat, or a compromised workflow dependency) and when a
   maintainer with access to the repository secrets or the Tinkertanker account
   leaves.
-- Add D1 Read before the next release, either by editing the existing token's
-  permissions or as part of the first rotation, since the deploy workflow
-  fails closed without it.
 
 ### Smart Placement experiment (#172, reverted)
 

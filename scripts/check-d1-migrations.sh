@@ -59,7 +59,7 @@ set -e
 if [ "$status" -ne 0 ]; then
   printf '%s\n' "$output" >&2
   cat "$err_file" >&2
-  fail "could not read d1_migrations (wrangler exit $status). If the error above is an authentication or permission error, the CLOUDFLARE_API_TOKEN secret probably lacks Account > D1 > Read; see 'CI deploy token' in docs/deployment.md."
+  fail "could not read d1_migrations (wrangler exit $status). If the error above is an authentication or permission error, the CLOUDFLARE_API_TOKEN secret probably lacks Account > D1 > Read; see 'CI deploy token' in docs/deployment.md. If it is 'no such table: d1_migrations', the database has never been migrated or the binding points at the wrong database."
 fi
 
 applied="$(jq -r '.[0].results | if type == "array" then .[].name else error("no results array") end' <<<"$output")" ||
