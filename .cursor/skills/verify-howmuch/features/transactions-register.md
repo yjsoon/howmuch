@@ -38,6 +38,7 @@ Preconditions:
 
 - Bare `/transactions` defaults to the last two months. In 2026-08 that window is empty. Use **All Accounts** or `range=all`, not the default.
 - Search queries the plan, not only the rows already on screen. Amounts match as displayed money (`142.30`), not as milliunit digit strings. On iOS the extra control is **Load older matches**, never scroll.
+- On iOS the register opens with no search field. Tap the magnifier (**Search**) in the top bar to show it; **Cancel** with an empty field hides it again.
 - Multi-account filtered views may say `Load older entries to extend this multi-account result.` Use the button if a row you expect is missing.
 - Sidebar **Travel Card** is a credit account. Its outflows are on that register, not Everyday Account.
 - Choosing **All Accounts** after an account scope is the way back; the browser Back button also works but leaves leftover query params.
