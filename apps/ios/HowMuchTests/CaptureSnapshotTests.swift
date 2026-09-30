@@ -642,6 +642,67 @@ final class CaptureSnapshotTests: XCTestCase {
     (values.max() ?? 0) - (values.min() ?? 0)
   }
 
+  /// The Date row already collapses CalculatorKeypad. Memo / Remarks is a real
+  /// text input, so a focused field can raise the system keyboard while the
+  /// glass keypad stays mounted — the overlap E2E Date coverage never sees.
+  func testAddTransactionMemoFocusHidesCalculatorKeypad() async throws {
+    let harness = SnapshotHarness.make()
+    var draft = TransactionDraft()
+    draft.accountID = "acct-everyday"
+    guard let surface = SnapshotSurface(
+      root: TransactionFormView(draft: draft, isEditing: false)
+        .environment(harness.model),
+      size: CGSize(width: 390, height: 844)
+    ) else {
+      XCTFail("memo keypad isolation needs a connected UIWindowScene")
+      return
+    }
+    defer { surface.detach() }
+
+    let opened = await surface.waitUntil {
+      surface.firstControl(label: "Cancel") != nil
+        && surface.calculatorKeypadDigitOne() != nil
+    }
+    XCTAssertTrue(
+      opened,
+      "blank Add Transaction must show CalculatorKeypad: \(surface.accessibilityLabels())"
+    )
+
+    let memo = try XCTUnwrap(
+      surface.memoTextInput()
+        ?? surface.firstControl(label: "Enter a memo…")?.object as? UIView
+        ?? surface.firstControl(labelContains: "memo")?.object as? UIView,
+      "memo field missing: \(surface.accessibilityLabels())"
+    )
+    if !SnapshotSurface.activate(memo) {
+      XCTAssertTrue(
+        memo.becomeFirstResponder(),
+        "memo must take first responder so the system keyboard can appear"
+      )
+    }
+    let hidden = await surface.waitUntil { surface.calculatorKeypadDigitOne() == nil }
+    XCTAssertTrue(
+      hidden,
+      "memo focus must hide CalculatorKeypad: \(surface.accessibilityLabels())"
+    )
+
+    let amount = try XCTUnwrap(
+      surface.firstControl(labelContains: "0.00")
+        ?? surface.firstControl(labelContains: "$0"),
+      "amount header missing: \(surface.accessibilityLabels())"
+    )
+    XCTAssertTrue(surface.activate(amount))
+    let restored = await surface.waitUntil { surface.calculatorKeypadDigitOne() != nil }
+    XCTAssertTrue(
+      restored,
+      "amount focus must restore CalculatorKeypad: \(surface.accessibilityLabels())"
+    )
+    XCTAssertFalse(
+      memo.isFirstResponder,
+      "amount focus must resign the memo field so the keyboards do not overlap"
+    )
+  }
+
   func testManualShortcutTransferRequiresDistinctInheritedSource() async throws {
     let router = CaptureRouter.shared
     let previous = router.presented
@@ -3074,6 +3135,30 @@ final class SnapshotSurface {
       return nil
     }
     return firstControl(label: "1")
+  }
+
+  func memoTextInput() -> UIView? {
+    func matches(_ view: UIView) -> Bool {
+      let placeholder = (view as? UITextField)?.placeholder ?? ""
+      let label = view.accessibilityLabel ?? ""
+      return placeholder.localizedStandardContains("memo")
+        || label.localizedStandardContains("memo")
+    }
+    func walk(_ view: UIView) -> UIView? {
+      if (view is UITextField || view is UITextView), matches(view) {
+        return view
+      }
+      for child in view.subviews {
+        if let found = walk(child) {
+          return found
+        }
+      }
+      return nil
+    }
+    if let presented = presentedController()?.view, let found = walk(presented) {
+      return found
+    }
+    return walk(window)
   }
 
   func tabRowControl(label: String) -> SnapshotAXNode? {
