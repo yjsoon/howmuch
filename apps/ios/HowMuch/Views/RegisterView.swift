@@ -100,6 +100,27 @@ private struct RegisterSearchPage: Equatable {
   var error: String?
 }
 
+/// iOS 26 draws a pushed search drawer's text a beat before its capsule, so a
+/// drawer present on arrival flashes bare text over the register. The drawer
+/// is added only when asked for, and pinned while shown so a sheet dismissal
+/// cannot retarget it and jump the List. It hangs off a background rather
+/// than the List itself: toggling a modifier on the List would rebuild it and
+/// lose the scroll position.
+private struct RegisterSearchDrawer: ViewModifier {
+  @Binding var text: String
+  @Binding var isPresented: Bool
+  let isShown: Bool
+
+  func body(content: Content) -> some View {
+    content.background {
+      if isShown {
+        Color.clear
+          .searchable(text: $text, isPresented: $isPresented, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search transactions or amounts")
+      }
+    }
+  }
+}
+
 struct RegisterView: View {
   @Environment(AppModel.self) private var model
   let scope: RegisterScope
@@ -108,6 +129,10 @@ struct RegisterView: View {
   var accountIDs: Set<String>?
 
   @State private var searchText = ""
+  /// The search drawer exists only once the magnifier asks for it; see
+  /// `RegisterSearchDrawer`.
+  @State private var showsSearch = false
+  @State private var isSearchPresented = false
   @State private var searchPage = RegisterSearchPage()
   @State private var unclearedOnly = false
   @State private var uncategorisedOnly = false
@@ -204,11 +229,28 @@ struct RegisterView: View {
           .disabled(model.isApprovalInFlight)
         }
       }
+      if !showsSearch {
+        ToolbarItem(placement: .topBarTrailing) {
+          Button {
+            showsSearch = true
+            isSearchPresented = true
+          } label: {
+            Image(systemName: "magnifyingglass")
+          }
+          .accessibilityLabel("Search")
+          .accessibilityHint("Search transactions or amounts.")
+        }
+      }
       ToolbarItemGroup(placement: .topBarTrailing) {
         registerOverflowMenu(counts)
       }
     }
-    .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search transactions or amounts")
+    .modifier(RegisterSearchDrawer(text: $searchText, isPresented: $isSearchPresented, isShown: showsSearch))
+    .onChange(of: isSearchPresented) { _, presented in
+      if !presented, searchText.isEmpty {
+        showsSearch = false
+      }
+    }
     .task(id: searchFetchKey) {
       await runRegisterSearch()
     }
@@ -360,22 +402,33 @@ struct RegisterView: View {
       }
       .accessibilityLabel("Actions for \(account.name)")
       .accessibilityHint(accountOverflowHint(account, counts: counts))
-    } else {
-      if showsRegisterFilterMenu(counts) {
-        Menu {
+    } else if scope != .unapproved, !model.accounts.isEmpty {
+      // One menu, as on an account register, so the search button beside it
+      // leaves room for the title.
+      Menu {
+        if showsRegisterFilterMenu(counts) {
           registerFilterMenuItems(counts)
-        } label: {
-          Image(systemName: "line.3.horizontal.decrease.circle")
+          Divider()
         }
-        .accessibilityLabel("Register filters")
-        .accessibilityHint("Review new, uncleared, or uncategorised transactions.")
-      }
-      if scope != .unapproved, !model.accounts.isEmpty {
-        Button("Reconcile") {
+        Button {
           isShowingReconciliation = true
+        } label: {
+          Label("Reconcile", systemImage: "checkmark.circle")
         }
         .accessibilityHint("Choose an account, statement date, and statement balance before confirming a reconciliation.")
+      } label: {
+        Image(systemName: "ellipsis.circle")
       }
+      .accessibilityLabel("Register actions")
+      .accessibilityHint(showsRegisterFilterMenu(counts) ? "Filters and reconcile." : "Reconcile.")
+    } else if showsRegisterFilterMenu(counts) {
+      Menu {
+        registerFilterMenuItems(counts)
+      } label: {
+        Image(systemName: "line.3.horizontal.decrease.circle")
+      }
+      .accessibilityLabel("Register filters")
+      .accessibilityHint("Review new, uncleared, or uncategorised transactions.")
     }
   }
 
