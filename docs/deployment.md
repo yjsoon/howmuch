@@ -69,11 +69,21 @@ environment `tk` in `wrangler.jsonc`:
   (`run_worker_first: true`) so the redirect mode below applies to every path.
 - Pushing a `v*` tag (e.g. `v1.0.0`) triggers an automatic production deploy
   via `.github/workflows/deploy.yml`, authenticated by the `CLOUDFLARE_API_TOKEN`
-  repo secret and pinned to the Tinkertanker account ID. The workflow deploys
-  only — it never applies D1 migrations. If a release includes a migration,
-  apply it manually (`wrangler d1 migrations apply DB --env tk --remote
-  --profile tinkertanker`) before tagging, following the verification order
-  in this document.
+  repo secret and pinned to the Tinkertanker account ID. The workflow never
+  applies D1 migrations. If a release includes a migration, apply it manually
+  (`wrangler d1 migrations apply DB --env tk --remote --profile tinkertanker`)
+  before tagging, following the verification order in this document.
+- Before building or deploying, the workflow runs
+  `scripts/check-d1-migrations.sh --env tk --remote`. It reads the
+  `d1_migrations` table with a single `SELECT` and fails the run, without
+  deploying, when any `*.sql` file in `apps/api/d1-migrations` is not recorded
+  there. It also fails when it cannot read D1 at all, so the
+  `CLOUDFLARE_API_TOKEN` secret needs Account > D1 > Read in addition to its
+  Workers permissions. It uses a plain query rather than
+  `wrangler d1 migrations list` because that command exits 0 even when
+  migrations are pending and first runs a `CREATE TABLE IF NOT EXISTS` against
+  the database. To check before tagging, run the same script from the repo
+  root with `--env tk --remote --profile tinkertanker`; it is read-only.
 
 ### Smart Placement experiment (#172, reverted)
 
