@@ -24,7 +24,7 @@ That is `build-for-testing` then `test-without-building` with the same destinati
 
 Tell a fresh run from a stale one before trusting an unexpected pass or failure:
 
-- Fresh (`test`): the console shows `runner: build-for-testing finished … exit=0` and `runner: build-for-testing succeeded; products match this worktree` before `runner: start test-without-building`. In `build/xcode/logs`, an `xcodebuild-build-for-testing-*.log` ending `exit=0` sits just before the matching `xcodebuild-test-without-building-*.log`.
+- Fresh (`test`): the console shows `runner: build-for-testing finished … exit=0` and `runner: build-for-testing succeeded; products match this worktree` before `runner: start test-without-building`. In `build/xcode/logs`, an `xcodebuild-build-for-testing-*.log` whose `=== end … exit=0 ===` marker is its second-to-last line sits just before the matching `xcodebuild-test-without-building-*.log`.
 - Stale (`test-without-building`): it reruns existing products deliberately and warns with the time `HowMuchTests` was last linked. Edits after that time are not under test. `doctor` prints the same time. A no-op incremental build does not relink, so on a fresh run that time can predate the run.
 - Suspect: a test log with no successful build-for-testing log before it, or a run that reports 0 tests. Rerun with `test`.
 

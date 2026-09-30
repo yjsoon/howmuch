@@ -380,9 +380,10 @@ test_product_exists() {
 # Modification time of the built test binary, for telling fresh runs from stale ones.
 test_product_mtime() {
   local bundle target
+  # The app-hosted bundle under PlugIns is the one test-without-building loads.
   for bundle in \
-    "$SIM_DERIVED/Build/Products/Debug-iphonesimulator/HowMuchTests.xctest" \
-    "$(app_path)/PlugIns/HowMuchTests.xctest"; do
+    "$(app_path)/PlugIns/HowMuchTests.xctest" \
+    "$SIM_DERIVED/Build/Products/Debug-iphonesimulator/HowMuchTests.xctest"; do
     [[ -d "$bundle" ]] || continue
     target="$bundle/HowMuchTests"
     [[ -e "$target" ]] || target="$bundle"
