@@ -224,7 +224,12 @@ struct AccountsView: View {
   }
 
   private func overview() -> some View {
-    ScrollView {
+    // Group construction includes each group's selected sort. Share one
+    // snapshot between the emptiness checks and both bands for this render.
+    let groups = model.accountListGroups()
+    let collectionGroups = groups.filter { $0.kind == .collection }
+    let indexGroups = groups.filter { $0.kind == .index }
+    return ScrollView {
       VStack(alignment: .leading, spacing: 16) {
         if model.unsentChangeCount > 0 || model.outboxNotice != nil {
           OutboxCard()
@@ -839,18 +844,6 @@ struct AccountsView: View {
       .padding(.horizontal, 16)
       .padding(.vertical, 6)
     }
-  }
-
-  private var accountGroups: [AccountListGroup] {
-    model.accountListGroups()
-  }
-
-  private var collectionGroups: [AccountListGroup] {
-    accountGroups.filter { $0.kind == .collection }
-  }
-
-  private var indexGroups: [AccountListGroup] {
-    accountGroups.filter { $0.kind == .index }
   }
 
   private func accountListBandLabel(_ title: String) -> some View {

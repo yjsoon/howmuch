@@ -217,6 +217,11 @@ struct AccountPickerView: View {
   @State private var searchText = ""
 
   var body: some View {
+    let groups = model.accountListGroups(includeClosed: false, includeEmptyCustomGroups: false)
+    let visibleGroups = groups.compactMap { $0.matching(searchText) }
+    // Inspect all groups, not just search matches: usage sorting still needs
+    // its refresh when a search hides the group that uses it.
+    let usesMostUsedSort = groups.contains { model.sortForAccountGroup($0.id) == .mostUsedLast30Days }
     CategorisedPickerList(
       groups: visibleGroups,
       groupTitle: { $0.title },
@@ -232,28 +237,12 @@ struct AccountPickerView: View {
         dismiss()
       }
     )
-    .task(id: accountUsageTaskID) {
+    .task(id: "\(usesMostUsedSort)-\(model.accountUsageGeneration)") {
       guard usesMostUsedSort, model.accountUsagePhase != .loaded else {
         return
       }
       await model.refreshAccountUsageLast30Days()
     }
-  }
-
-  private var pickerGroups: [AccountListGroup] {
-    model.accountListGroups(includeClosed: false, includeEmptyCustomGroups: false)
-  }
-
-  private var visibleGroups: [AccountListGroup] {
-    pickerGroups.compactMap { $0.matching(searchText) }
-  }
-
-  private var usesMostUsedSort: Bool {
-    pickerGroups.contains { model.sortForAccountGroup($0.id) == .mostUsedLast30Days }
-  }
-
-  private var accountUsageTaskID: String {
-    "\(usesMostUsedSort)-\(model.accountUsageGeneration)"
   }
 }
 
