@@ -4,7 +4,7 @@ import Foundation
 struct AddTransactionIntent: AppIntent {
   static var title: LocalizedStringResource = "Add Transaction"
   static var description = IntentDescription(
-    "Opens HowMuch with a transaction ready to review and save. Nothing is saved until you tap Save."
+    "Opens Halation with a transaction ready to review and save. Nothing is saved until you tap Save."
   )
   static let supportedModes: IntentModes = .foreground(.immediate)
 

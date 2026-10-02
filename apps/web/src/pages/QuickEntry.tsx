@@ -50,7 +50,7 @@ export function QuickEntryPage() {
   const amountRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    document.title = "Quick entry · HowMuch";
+    document.title = "Quick entry · Halation";
   }, []);
 
   const isTransfer = direction === "transfer";

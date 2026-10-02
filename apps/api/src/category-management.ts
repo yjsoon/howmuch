@@ -19,7 +19,7 @@ export const MAX_CATEGORY_NAME_LENGTH = 100;
 export class CategoryValidationError extends Error {}
 
 export class YnabMirrorPlanError extends Error {
-  constructor(message = "This plan mirrors YNAB; categories and snapshots can only be changed on HowMuch-native plans") {
+  constructor(message = "This plan mirrors YNAB; categories and snapshots can only be changed on Halation-native plans") {
     super(message);
   }
 }

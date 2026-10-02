@@ -52,7 +52,7 @@ export function RewardsImportPage() {
     const url = URL.createObjectURL(new Blob([JSON.stringify(portableRewardsExport(snapshot.data), null, 2)], { type: "application/json" }));
     const link = document.createElement("a");
     link.href = url;
-    link.download = "howmuch-rewards.json";
+    link.download = "halation-rewards.json";
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
@@ -83,7 +83,7 @@ export function RewardsImportPage() {
       <div className="status-panel">
         <p className="status-title">Import replaces the stored card set.</p>
         <p className="status-detail">
-          Cards omitted from the export are soft-deleted. An empty <code>cards</code> array removes every HowMuch card.
+          Cards omitted from the export are soft-deleted. An empty <code>cards</code> array removes every Halation card.
           Miles valuation in the export replaces a native value when the export sets a finite number.
         </p>
       </div>

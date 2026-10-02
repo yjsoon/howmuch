@@ -4,7 +4,7 @@
       "id": "opencode-go",
       "name": "OpenCode Go",
       "baseURL": "https://opencode.ai/zen/go/v1",
-      "notice": "Go is intended for coding-agent traffic. Confirm your subscription permits HowMuch before use. Retention varies by model; Luna currently has up to 30-day abuse-monitoring retention.",
+      "notice": "Go is intended for coding-agent traffic. Confirm your subscription permits Halation before use. Retention varies by model; Luna currently has up to 30-day abuse-monitoring retention.",
       "documentationURL": "https://opencode.ai/docs/go/",
       "models": [
         { "id": "gpt-5.6-luna", "name": "GPT 5.6 Luna", "api": "responses", "format": "jsonSchema", "reasoning": "openAI" },
@@ -15,7 +15,7 @@
       "id": "openrouter",
       "name": "OpenRouter",
       "baseURL": "https://openrouter.ai/api/v1",
-      "notice": "OpenRouter routes requests to model providers. Retention varies by endpoint. HowMuch requests providers that do not collect data for training, but this is not a zero-retention guarantee.",
+      "notice": "OpenRouter routes requests to model providers. Retention varies by endpoint. Halation requests providers that do not collect data for training, but this is not a zero-retention guarantee.",
       "documentationURL": "https://openrouter.ai/docs/guides/privacy/data-collection",
       "models": [
         { "id": "openai/gpt-5.6-luna", "name": "GPT 5.6 Luna", "api": "chatCompletions", "format": "jsonSchema", "reasoning": "openRouter" },
@@ -26,7 +26,7 @@
       "id": "openai",
       "name": "OpenAI",
       "baseURL": "https://api.openai.com/v1",
-      "notice": "Uses separately billed OpenAI API access, not a ChatGPT subscription. HowMuch disables response storage; provider abuse-monitoring retention can still apply.",
+      "notice": "Uses separately billed OpenAI API access, not a ChatGPT subscription. Halation disables response storage; provider abuse-monitoring retention can still apply.",
       "documentationURL": "https://developers.openai.com/api/docs/guides/your-data",
       "models": [
         { "id": "gpt-5.6-luna", "name": "GPT 5.6 Luna", "api": "responses", "format": "jsonSchema", "reasoning": "openAI" }

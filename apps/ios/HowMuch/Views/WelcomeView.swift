@@ -19,7 +19,7 @@ struct WelcomeView: View {
           .frame(width: 80, height: 80)
           .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
           .accessibilityHidden(true)
-        Text("HowMuch")
+        Text("Halation")
           .font(.largeTitle.bold())
           .foregroundStyle(Theme.textPrimary)
         Text("Track what you spend, account by account.")

@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 struct AddFromImageIntent: AppIntent {
   static var title: LocalizedStringResource = "Add from Image"
   static var description = IntentDescription(
-    "Opens HowMuch to read a screenshot or receipt. Nothing is saved until you confirm."
+    "Opens Halation to read a screenshot or receipt. Nothing is saved until you confirm."
   )
   static let supportedModes: IntentModes = .foreground(.immediate)
 

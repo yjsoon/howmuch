@@ -1,6 +1,6 @@
 # API Contract
 
-This contract is intentionally smaller than the full YNAB write API. It covers the endpoints and fields used by existing local projects and OpenClaw, while retaining a lossless, read-only source mirror of imported YNAB objects. HowMuch-owned overlays provide safe mutations without rewriting that source.
+This contract is intentionally smaller than the full YNAB write API. It covers the endpoints and fields used by existing local projects and OpenClaw, while retaining a lossless, read-only source mirror of imported YNAB objects. Halation-owned overlays provide safe mutations without rewriting that source.
 
 ## Compatibility Principles
 
@@ -21,7 +21,7 @@ Authorization: Bearer <token>
 
 The first owner is created once with `POST /api/auth/setup`, authorized by `HOWMUCH_API_TOKEN`. That static token remains valid for integrations, but only against `HOWMUCH_DEFAULT_PLAN_ID`. Session users can access only plans where they hold an owner, editor, or viewer membership; viewers cannot mutate data.
 
-Signed-in browser users manage long-lived personal credentials at `GET`/`POST /api/auth/personal-tokens` and `DELETE /api/auth/personal-tokens/{id}`. Creation returns the `hm_pat_…` bearer value once; HowMuch stores only its SHA-256 fingerprint. Personal tokens inherit the user's current plan memberships, remain valid until revoked, and cannot create or manage other tokens. Management requires the secure browser session and same-origin checks; the global integration token and native bearer sessions are not accepted.
+Signed-in browser users manage long-lived personal credentials at `GET`/`POST /api/auth/personal-tokens` and `DELETE /api/auth/personal-tokens/{id}`. Creation returns the `hm_pat_…` bearer value once; Halation stores only its SHA-256 fingerprint. Personal tokens inherit the user's current plan memberships, remain valid until revoked, and cannot create or manage other tokens. Management requires the secure browser session and same-origin checks; the global integration token and native bearer sessions are not accepted.
 
 Error responses follow the YNAB wrapper shape:
 
@@ -93,7 +93,7 @@ for credit cards.
 
 Update body: `{ "account": { "icon": "🐷", "name": "Everyday", "type": "savings" } }`.
 Supply `icon`, `name`, `type`, or any combination. `type` is optional and must
-be one of the HowMuch account kinds. `on_budget` is derived from `type` and is
+be one of the Halation account kinds. `on_budget` is derived from `type` and is
 rejected if sent. `icon` must be a single emoji; `name` is stored as typed and
 does not lift a leading emoji. A name change also renames the matching
 `Transfer : …` payee. A type change that omits `icon` follows the new type
@@ -177,7 +177,7 @@ statement date, and only when their projected reconciled balance exactly matches
 the supplied statement balance. A mismatch returns `409 reconciliation_mismatch`
 with the current, projected, statement, and difference values; no rows change.
 Successful retries return the original receipt. Reconciliation is a cutover-only
-HowMuch write: it does not alter the immutable YNAB raw mirror and a later YNAB
+Halation write: it does not alter the immutable YNAB raw mirror and a later YNAB
 re-import must not be used to overwrite local ledger state.
 
 ### Payees
@@ -202,9 +202,9 @@ Create body:
 
 `GET /v1/plans/{plan_id}/categories`
 
-Return category groups with categories. HowMuch has no budgeting, so the YNAB-shaped assignment fields on each category (`budgeted`, `activity`, `balance`, `goal_*`) are always zero or null.
+Return category groups with categories. Halation has no budgeting, so the YNAB-shaped assignment fields on each category (`budgeted`, `activity`, `balance`, `goal_*`) are always zero or null.
 
-#### Managing categories (HowMuch-native plans only)
+#### Managing categories (Halation-native plans only)
 
 - `POST /v1/plans/{plan_id}/category_groups` with `{ "category_group": { "id"?, "name", "hidden"? } }`
 - `PATCH /v1/plans/{plan_id}/category_groups/{category_group_id}` with `{ "category_group": { "name"?, "hidden"? } }`
@@ -229,7 +229,7 @@ SQLite checks and writes in one immediate transaction. D1 repeats every check in
 
 ### Budgeting (removed)
 
-HowMuch has no budgeting. The YNAB month routes (`GET /v1/plans/{plan_id}/months/{month}`, `PATCH …/months/{month}/categories/{category_id}` for assignments and targets, and `GET …/months/{month}/transactions`) and the money-movement routes now return `404`.
+Halation has no budgeting. The YNAB month routes (`GET /v1/plans/{plan_id}/months/{month}`, `PATCH …/months/{month}/categories/{category_id}` for assignments and targets, and `GET …/months/{month}/transactions`) and the money-movement routes now return `404`.
 
 The YNAB importer still mirrors months, month categories and money movements into `ynab_raw_objects`. The tables behind the old overlays (`plan_month_assignments`, `plan_month_category_targets`) and the materialised `ynab_source_month_activity` baseline are retained legacy tables: no migration drops them and no code reads or writes them.
 
@@ -241,7 +241,7 @@ The YNAB importer still mirrors months, month categories and money movements int
 
 `GET /v1/plans/{plan_id}/scheduled_subtransactions`
 
-The collection is an effective view: untouched imported schedules are returned exactly from the YNAB mirror with their subtransactions, while HowMuch-local schedules and overlays replace source objects with the same ID. A tombstoned overlay hides its imported schedule. The source rows in `ynab_raw_objects` are never updated or deleted.
+The collection is an effective view: untouched imported schedules are returned exactly from the YNAB mirror with their subtransactions, while Halation-local schedules and overlays replace source objects with the same ID. A tombstoned overlay hides its imported schedule. The source rows in `ynab_raw_objects` are never updated or deleted.
 
 Create, replace, update, or delete an effective schedule with:
 
@@ -264,11 +264,11 @@ An owner or the default-plan API token can explicitly catch up all due schedules
 
 Materialised transactions use deterministic occurrence IDs and immutable receipts, so retries do not duplicate register rows. They are unapproved and uncleared except in cash accounts, where they are cleared. Parent and split transfers create paired ledger legs; each leg's cleared state follows its own account type. Month recurrences retain the original day anchor, including returning to the 31st after a shorter month; twice-monthly schedules use the chosen day and a second date exactly 15 days later. Schedule advancement uses a compare-and-set snapshot and never overwrites a concurrent user edit.
 
-Production invokes a separate, private automatic materialiser at `16:05 UTC` each day (`00:05 Asia/Singapore`). It is not the owner bulk route: each invocation is capped at 25 occurrences, takes one stable-order due occurrence per schedule before starting another round, re-reads the schedule before entry, and continues past an invalid schedule. Its count-only Worker log reports occurrence, closed-skip, failure, and remaining-work counts; no schedule or transaction payloads are logged. A retry uses deterministic daily and per-occurrence seeds and never duplicates already committed rows. Preview has no cron, so it remains an explicit verification environment. The Worker cron is HowMuch-only and never reads a YNAB token or starts a YNAB sync.
+Production invokes a separate, private automatic materialiser at `16:05 UTC` each day (`00:05 Asia/Singapore`). It is not the owner bulk route: each invocation is capped at 25 occurrences, takes one stable-order due occurrence per schedule before starting another round, re-reads the schedule before entry, and continues past an invalid schedule. Its count-only Worker log reports occurrence, closed-skip, failure, and remaining-work counts; no schedule or transaction payloads are logged. A retry uses deterministic daily and per-occurrence seeds and never duplicates already committed rows. Preview has no cron, so it remains an explicit verification environment. The Worker cron is Halation-only and never reads a YNAB token or starts a YNAB sync.
 
 ### Imported read-only collections
 
-`GET /v1/plans/{plan_id}/payee_locations` returns exact objects from the imported YNAB mirror. It has no HowMuch mutation endpoint yet.
+`GET /v1/plans/{plan_id}/payee_locations` returns exact objects from the imported YNAB mirror. It has no Halation mutation endpoint yet.
 
 ### Transactions
 
@@ -614,7 +614,7 @@ The import is one atomic write. Each table's rows are bound as JSON chunks of at
 
 `GET /api/reports/rewards`
 
-Rewards reads imported Rewards Tracker cards and the HowMuch ledger. It does not call YNAB. Spend and reward figures are currency units, not milliunits.
+Rewards reads imported Rewards Tracker cards and the Halation ledger. It does not call YNAB. Spend and reward figures are currency units, not milliunits.
 
 Rewards has two date modes:
 
@@ -729,7 +729,7 @@ Unknown properties are discarded recursively through known-field projection.
 
 `POST /api/rewards/cards`
 
-Creates a Rewards Tracker card mapped to a live HowMuch account. Body is `{ "plan_id"?: string, "card": { ... } }`. If `card.id` is omitted, the server assigns one. Native writes allowlist the `CreditCard` fields and strip secrets (`pat`, `howmuchToken`, Cloud Sync fields, cached data). Unknown or missing `ynabAccountId` returns 422. Closed accounts are still live. Returns `201 { "data": { "card" } }`.
+Creates a Rewards Tracker card mapped to a live Halation account. Body is `{ "plan_id"?: string, "card": { ... } }`. If `card.id` is omitted, the server assigns one. Native writes allowlist the `CreditCard` fields and strip secrets (`pat`, `howmuchToken`, Cloud Sync fields, cached data). Unknown or missing `ynabAccountId` returns 422. Closed accounts are still live. Returns `201 { "data": { "card" } }`.
 
 Rates, spend limits and block sizes must be finite and nonnegative. Repeating reward periods require integer `monthCount` from 2 through 24 and a real anchor date; billing days are integers from 1 through 31. Promotional dates must be real and ordered. Additional tier thresholds must be unique. Card/tier optional rates and limits accept null; category and category-override rates require numbers. `subcategoriesEnabled` is independent of retained category definitions.
 

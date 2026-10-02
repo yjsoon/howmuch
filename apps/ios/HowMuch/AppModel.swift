@@ -1929,7 +1929,7 @@ final class AppModel {
     // Local mode always runs on the shared engine's database, so only an
     // archive of that file can become live again.
     guard archive.databaseURL.standardizedFileURL == LocalEngine.shared.databaseURL.standardizedFileURL else {
-      throw APIClientError.validation("The records from before you connected are not where HowMuch expects them.")
+      throw APIClientError.validation("The records from before you connected are not where Halation expects them.")
     }
     // Opens the database before anything is saved, so a failure leaves
     // server mode exactly as it was.

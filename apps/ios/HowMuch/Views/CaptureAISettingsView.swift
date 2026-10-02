@@ -30,14 +30,14 @@ struct CaptureAISettingsView: View {
         .pickerStyle(.navigationLink)
         .accessibilityIdentifier("ai-provider-picker")
       } footer: {
-        Text("Used for Add and Assistant conversations. Changes apply to the next request. Your HowMuch server connection is unchanged.")
+        Text("Used for Add and Assistant conversations. Changes apply to the next request. Your Halation server connection is unchanged.")
       }
 
       if draft.isOnDevice {
         Section("On device") {
           Text("Uses Apple Intelligence. Financial text stays on this device. Manual entry is always available.")
           if settings.catalog.providers.isEmpty {
-            Text("The model catalog could not be loaded. Reinstall an updated HowMuch build to use an external provider.")
+            Text("The model catalog could not be loaded. Reinstall an updated Halation build to use an external provider.")
               .foregroundStyle(Theme.outflow)
           }
         }

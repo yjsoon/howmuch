@@ -5,6 +5,8 @@ description: Drive HowMuch in a real browser (web ledger) and, for capture/intak
 
 # Verify HowMuch
 
+The product is now **Halation**. In older feature recipes, read user-visible “HowMuch” labels and Shortcuts phrases as “Halation”. Keep technical identifiers, URLs, credentials, paths and the synthetic plan name `HowMuch Demo` unchanged.
+
 HowMuch has two user surfaces in this repo. Drive the one the change actually touched. Both talk to the same disposable local API from `control-howmuch launch`. Never point either at production (`howmuch.tk.sg`, or the legacy `howmuch.soon.sg` that redirects to it).
 
 **Web** (`apps/web`) is the React ledger: first-owner setup, five Reflect reports (including Rewards), register, `/add` quick entry, schedules, tokens, sidebar accounts. There is no monthly Plan edit on the web.
@@ -34,7 +36,7 @@ control-howmuch doctor
 - `api` — `bun run api:dev` on an OS-assigned localhost port
 - `web` — Vite on an OS-assigned localhost port, `HOWMUCH_API_URL` pointed at that API
 
-Ready when `control-howmuch doctor` prints `ok` lines, including `ok health={"ok":true}` and `ok web_title=HowMuch`. `launch` already waits for `/health` and the Vite HTML shell.
+Ready when `control-howmuch doctor` prints `ok` lines, including `ok health={"ok":true}` and `ok web_title=Halation`. `launch` already waits for `/health` and the Vite HTML shell.
 
 Do not use `bun run dev`, `bun run dev:stack`, or tmux session `howmuch-dev`. Those own the shared `data/howmuch.sqlite` on ports 8787/5173. If doctor would have to attach to that instance, stop and launch a disposable one instead.
 
@@ -67,7 +69,7 @@ It must report:
 - SQLite path inside `/tmp/howmuch-verify/<run-id>/`, never `data/howmuch.sqlite`
 - `GET {api}/health` → `{"ok":true}`
 - `GET {api}/api/auth/status` reachable
-- `GET {web}/` HTML title `HowMuch`
+- `GET {web}/` HTML title `Halation`
 
 `control-howmuch state` prints the URLs, ports, db path, and credentials. If doctor fails, cleanup and launch again. Do not "fix" it by talking to 8787/5173.
 
@@ -127,7 +129,7 @@ Web browser:
 - Open `{web_url}` from `control-howmuch state`.
 - Prefer visible names, `aria-label`s, and routes over CSS or coordinates.
 - Viewport ≤720px hides the sidebar. Click the button named **Open menu** before any nav link.
-- After setup, `document.title` is `{page} · HowMuch` (e.g. `All Accounts · HowMuch`).
+- After setup, `document.title` is `{page} · Halation` (e.g. `All Accounts · Halation`).
 - Demo rows are dated **2026-03-01 through 2026-05-24**. Default report/register windows follow today's calendar, so they are empty until you choose **All** or set From/To to that span.
 
 iOS Simulator:
@@ -141,8 +143,8 @@ Stable web handles:
 
 | Thing | Handle |
 | --- | --- |
-| First-run heading | `Set up HowMuch` |
-| Later heading | `Sign in to HowMuch` |
+| First-run heading | `Set up Halation` |
+| Later heading | `Sign in to Halation` |
 | Auth fields | labels `Username`, `Password`, `Setup token` |
 | Auth submit | `Create account` / `Sign in` |
 | Primary nav | `nav` named `Primary navigation` |
@@ -177,7 +179,7 @@ Stable iOS handles:
 | Ambiguous (planned) | footnote `Which account?` / `Which category?` in uncategorised ochre |
 | Review list (planned) | title `{N} Transactions`, trailing `Add {n} to {account}` |
 | Reading (planned) | title `Reading…`, caption `Stays on this device` |
-| Shortcuts (planned) | `Add Transaction` / phrase `Add a transaction in HowMuch` |
+| Shortcuts (planned) | `Add Transaction` / phrase `Add a transaction in Halation` |
 
 HTTP second view (Bearer token from state, not a substitute for the UI path):
 

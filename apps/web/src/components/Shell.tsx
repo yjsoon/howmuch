@@ -130,7 +130,7 @@ export function Shell() {
       ?? (location.pathname === "/rewards/new" ? "Add card" : null)
       ?? (location.pathname.startsWith("/rewards/") ? "Edit card" : null)
       ?? report?.label;
-    document.title = label ? `${label} · HowMuch` : "HowMuch";
+    document.title = label ? `${label} · Halation` : "Halation";
   }, [location.pathname, registerLabel]);
 
   useEffect(() => {
@@ -188,7 +188,7 @@ export function Shell() {
             <span />
           </span>
         </button>
-        <span className="masthead-title">HowMuch</span>
+        <span className="masthead-title">Halation</span>
         <div className="mobile-actions">
           <button
             type="button"

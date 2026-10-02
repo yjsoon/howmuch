@@ -1891,7 +1891,7 @@ final class CaptureSnapshotTests: XCTestCase {
       XCTAssertEqual(session.aiActivity?.phase, .fetching)
       surface.layoutNow()
       let labels = surface.accessibilityLabels().joined(separator: " | ")
-      XCTAssertTrue(labels.contains("HowMuch server"), labels)
+      XCTAssertTrue(labels.contains("Halation server"), labels)
       XCTAssertNotNil(labels.range(of: #"Looking up recorded spending · [0-9]+s"#, options: .regularExpression), labels)
       attachImage(surface.captureVisible(), name: "capture-pending-query-fetching-\(size)")
       guard let stop = await revealControl(on: surface, label: "Stop response") else {
@@ -2189,7 +2189,7 @@ final class CaptureSnapshotTests: XCTestCase {
       await assertRenderedContent(view, expected: ["Still thinking", "Taking longer"],
         name: "byok-slow-\(name)", required: ["Stop"])
       session.updateAIPhase(.fetching, generation: token.generation)
-      await assertRenderedContent(view, expected: ["HowMuch server", "Looking up recorded spending"],
+      await assertRenderedContent(view, expected: ["Halation server", "Looking up recorded spending"],
         name: "byok-fetching-\(name)")
       session.timeOutTurn(generation: token.generation)
       guard let surface = SnapshotSurface(root: view, size: CGSize(width: 390, height: 844)) else {

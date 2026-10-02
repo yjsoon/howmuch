@@ -76,7 +76,7 @@ export function ApiTokensPage() {
           <div className="api-token-reveal-copy">
             <span className="page-eyebrow">Shown once</span>
             <h2 id="new-token-heading">Save this token now</h2>
-            <p>HowMuch stores only its fingerprint. You cannot reveal it again after dismissing this panel.</p>
+            <p>Halation stores only its fingerprint. You cannot reveal it again after dismissing this panel.</p>
           </div>
           <div className="api-token-secret-row">
             <input
@@ -133,7 +133,7 @@ export function ApiTokensPage() {
         </div>
         {tokens.loading && !tokens.data && <div className="status-panel"><p className="status-title">Loading API tokens…</p></div>}
         {tokens.error && <div className="status-panel status-panel-error" role="alert"><p className="status-title">Could not load API tokens.</p><p className="status-detail">{tokens.error}</p></div>}
-        {!tokens.loading && !tokens.error && active.length === 0 && <p className="api-token-empty">No active tokens. Create one when an app needs direct access to HowMuch.</p>}
+        {!tokens.loading && !tokens.error && active.length === 0 && <p className="api-token-empty">No active tokens. Create one when an app needs direct access to Halation.</p>}
         {active.length > 0 && (
           <ul className="api-token-list">
             {active.map((token) => (

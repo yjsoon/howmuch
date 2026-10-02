@@ -88,7 +88,7 @@ final class RewardCardEditorTests: XCTestCase {
     draft.earningRate = "1"
 
     XCTAssertThrowsError(try draft.write()) { error in
-      XCTAssertEqual(error.localizedDescription, "Choose a HowMuch account.")
+      XCTAssertEqual(error.localizedDescription, "Choose a Halation account.")
     }
   }
 

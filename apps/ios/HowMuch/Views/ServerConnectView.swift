@@ -326,13 +326,13 @@ struct SetupRequiredSection: View {
 
   var body: some View {
     Section {
-      Text("This HowMuch site does not have an account yet. Finish setup in the website, then return here and sign in.")
+      Text("This Halation site does not have an account yet. Finish setup in the website, then return here and sign in.")
 
       if let setupURL {
         Button {
           openURL(setupURL)
         } label: {
-          Label("Open HowMuch Setup in Browser", systemImage: "safari")
+          Label("Open Halation Setup in Browser", systemImage: "safari")
         }
       } else {
         Text("Enter the HTTPS address above to open setup in your browser.")
@@ -420,7 +420,7 @@ struct ServerConnectView: View {
         progress("Uploading to \(flow.host)…")
       case .checkFailed(let message):
         failure(
-          "HowMuch couldn’t check \(flow.host). Nothing has changed on this \(device).",
+          "Halation couldn’t check \(flow.host). Nothing has changed on this \(device).",
           message: message
         ) {
           Task { await flow.check() }
@@ -437,7 +437,7 @@ struct ServerConnectView: View {
           Text("Upload \(Self.count(summary.accounts, "account")) and \(Self.count(summary.transactions, "transaction")) from this \(device) to \(flow.host)?")
             .foregroundStyle(Theme.textPrimary)
         } footer: {
-          Text("The records also stay on this \(device). After the upload, HowMuch uses the server.")
+          Text("The records also stay on this \(device). After the upload, Halation uses the server.")
         }
         Section {
           Button("Upload") {
@@ -449,7 +449,7 @@ struct ServerConnectView: View {
         }
       case .serverHasData:
         Section {
-          Text("\(flow.host) already has records. They may include an earlier upload from this \(device). HowMuch doesn’t combine two sets of records.")
+          Text("\(flow.host) already has records. They may include an earlier upload from this \(device). Halation doesn’t combine two sets of records.")
             .foregroundStyle(Theme.textPrimary)
         }
         Section {
@@ -525,7 +525,7 @@ struct ServerConnectView: View {
           : "Enter a complete HTTP or HTTPS URL with a host.")
           .foregroundStyle(Theme.outflow)
       } else {
-        Text("A HowMuch server that you or your organisation runs.")
+        Text("A Halation server that you or your organisation runs.")
       }
     }
 
