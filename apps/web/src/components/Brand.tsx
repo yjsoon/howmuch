@@ -34,7 +34,7 @@ export function BrandLockup({
     <>
       <HalationMark size="lockup" />
       <span>
-        <strong>HowMuch</strong>
+        <strong>Halation</strong>
         <small>{tagline}</small>
       </span>
     </>

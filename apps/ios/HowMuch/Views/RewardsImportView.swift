@@ -188,7 +188,7 @@ struct RewardsImportView: View {
       }
     }
     .fileExporter(isPresented: $isExporting, document: exportDocument, contentType: .json,
-      defaultFilename: "howmuch-rewards-\(Date.now.isoDateString).json") { outcome in
+      defaultFilename: "halation-rewards-\(Date.now.isoDateString).json") { outcome in
       if case .failure(let error) = outcome { exportError = error.localizedDescription }
       exportDocument = nil
     }

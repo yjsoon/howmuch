@@ -219,8 +219,8 @@ cmd_doctor() {
   fi
   status="$(curl -fsS --max-time 3 "$api_url/api/auth/status")"
   html="$(curl -fsS --max-time 3 "$web_url/")"
-  if [[ "$html" != *"<title>HowMuch</title>"* ]]; then
-    echo "fail web did not serve HowMuch at $web_url" >&2
+  if [[ "$html" != *"<title>Halation</title>"* ]]; then
+    echo "fail web did not serve Halation at $web_url" >&2
     exit 1
   fi
 
@@ -230,7 +230,7 @@ cmd_doctor() {
   echo "ok db=$db_path"
   echo "ok health=$health"
   echo "ok auth_status=$status"
-  echo "ok web_title=HowMuch"
+  echo "ok web_title=Halation"
 }
 
 cmd_state() {

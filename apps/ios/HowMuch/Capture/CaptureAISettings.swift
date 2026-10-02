@@ -228,7 +228,7 @@ enum CaptureAIError: Error, LocalizedError, Equatable {
     case .endpoint: return "Enter an HTTPS base URL without credentials, a query, or a fragment."
     case .configuration: return "Choose an available provider and model in AI provider settings."
     case .key: return "Add a valid API key in AI provider settings."
-    case .keychain(errSecMissingEntitlement): return "This build cannot store keys securely. Use a HowMuch build signed for Keychain access."
+    case .keychain(errSecMissingEntitlement): return "This build cannot store keys securely. Use a Halation build signed for Keychain access."
     case .keychain: return "The API key could not be accessed securely. Unlock this device and try again."
     case .authentication: return "The provider rejected this API key. Check AI provider settings."
     case .rateLimit: return "The provider's usage limit was reached. Check your quota or try again later."

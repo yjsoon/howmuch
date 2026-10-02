@@ -267,7 +267,7 @@ function RewardsBoard({ planId }: { planId: string }) {
           <p className="status-title">No reward cards in this range.</p>
           <p className="status-detail">
             Import a Rewards Tracker export from <Link to="/import/rewards">Settings → Rewards import</Link>,
-            or choose <Link to={addCardHref}>Add card</Link> to score one of your HowMuch cards.
+            or choose <Link to={addCardHref}>Add card</Link> to score one of your Halation cards.
           </p>
         </div>
       )}

@@ -11,7 +11,7 @@ enum InboxIntentHandoff {
       case .empty:
         return "Choose a value."
       case .payloadTooLarge:
-        return "That file is too large for HowMuch. Use a smaller image or a shorter sentence."
+        return "That file is too large for Halation. Use a smaller image or a shorter sentence."
       }
     }
   }
@@ -67,7 +67,7 @@ enum InboxIntentHandoff {
 struct AddFromTextIntent: AppIntent {
   static var title: LocalizedStringResource = "Add from Text"
   static var description = IntentDescription(
-    "Opens HowMuch to read a sentence into a transaction. Nothing is saved until you confirm."
+    "Opens Halation to read a sentence into a transaction. Nothing is saved until you confirm."
   )
   static let supportedModes: IntentModes = .foreground(.immediate)
 

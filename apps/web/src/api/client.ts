@@ -268,7 +268,7 @@ async function request<T>(path: string, init?: RequestInit, options?: ApiRequest
       throw new ApiError(message, response.status, typeof detail?.name === "string" ? detail.name : undefined, detail);
     }
     if (!body || typeof body !== "object" || !("data" in body)) {
-      throw new ApiError("Unexpected response from HowMuch", response.status);
+      throw new ApiError("Unexpected response from Halation", response.status);
     }
     return (body as { data: T }).data;
   } finally {

@@ -517,7 +517,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
   if (error) {
     return (
       <div className="boot-message">
-        <p>Could not reach HowMuch.</p>
+        <p>Could not reach Halation.</p>
         <p className="boot-detail">{error}</p>
         <button type="button" onClick={() => { setError(null); setGeneration((n) => n + 1); }}>
           Retry
@@ -581,7 +581,7 @@ function AuthForm({
       }}
     >
       <HalationMark size="hero" />
-      <h1>{setup ? "Set up HowMuch" : "Sign in to HowMuch"}</h1>
+      <h1>{setup ? "Set up Halation" : "Sign in to Halation"}</h1>
       <p>{setup ? "Create your account." : "Enter your username and password."}</p>
       <label>
         <span>Username</span>

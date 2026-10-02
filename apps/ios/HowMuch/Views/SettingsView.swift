@@ -56,7 +56,7 @@ private struct LocalArchiveSection: View {
       isPresented: $isExporting,
       document: exportDocument,
       contentType: .json,
-      defaultFilename: "howmuch-\(device.lowercased())-\(archive.archivedAt.isoDateString).json"
+      defaultFilename: "halation-\(device.lowercased())-\(archive.archivedAt.isoDateString).json"
     ) { outcome in
       if case .failure(let error) = outcome {
         errorMessage = error.localizedDescription
@@ -266,7 +266,7 @@ struct SettingsView: View {
               : "Enter a complete HTTP or HTTPS URL with a host.")
               .foregroundStyle(Theme.outflow)
           } else {
-            Text("New installs connect to HowMuch. HTTP is allowed only for this device or this network. First-time setup must be opened from the website.")
+            Text("New installs connect to Halation. HTTP is allowed only for this device or this network. First-time setup must be opened from the website.")
           }
         }
         .disabled(isTesting)
@@ -464,7 +464,7 @@ struct SettingsView: View {
       }
     case .failure(let message):
       Section("Couldn’t load plans") {
-        Text("You’re signed in, but HowMuch couldn’t load your plans. Check the connection and try again.")
+        Text("You’re signed in, but Halation couldn’t load your plans. Check the connection and try again.")
           .foregroundStyle(.secondary)
         Text(message)
           .font(.caption)

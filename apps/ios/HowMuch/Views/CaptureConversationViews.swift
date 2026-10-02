@@ -264,7 +264,7 @@ struct CaptureAssistantReply: View {
         TimelineView(.periodic(from: activity.startedAt, by: 1)) { context in
           let seconds = max(0, Int(context.date.timeIntervalSince(activity.startedAt)))
           VStack(alignment: .leading, spacing: 4) {
-            Text(activity.phase == .fetching ? "HowMuch server" : activity.provider).font(.caption)
+            Text(activity.phase == .fetching ? "Halation server" : activity.provider).font(.caption)
             Text("\(activity.phase.rawValue) · \(seconds)s")
               .monospacedDigit()
             if seconds >= 20 {

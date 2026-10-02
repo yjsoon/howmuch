@@ -361,7 +361,7 @@ struct RewardCardDraft: Equatable {
 
   func write() throws -> CreditCard {
     if ynabAccountId.isEmpty {
-      throw RewardCardWriteError.message("Choose a HowMuch account.")
+      throw RewardCardWriteError.message("Choose a Halation account.")
     }
     let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmedName.isEmpty {
@@ -735,8 +735,8 @@ struct RewardCardEditorView: View {
             .font(.footnote)
             .foregroundStyle(.secondary)
           }
-          Picker("HowMuch account", selection: $draft.ynabAccountId) {
-            Text("Choose a HowMuch account").tag("")
+          Picker("Halation account", selection: $draft.ynabAccountId) {
+            Text("Choose a Halation account").tag("")
             ForEach(accountChoices) { account in
               Text(account.closed ? "\(account.name) (closed)" : account.name).tag(account.id)
             }
