@@ -968,7 +968,7 @@
 				DEVELOPMENT_TEAM = PQ6U5ESLN2;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HowMuchShare/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = HowMuch;
+				INFOPLIST_KEY_CFBundleDisplayName = Halation;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -995,7 +995,7 @@
 				DEVELOPMENT_TEAM = PQ6U5ESLN2;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HowMuchShare/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = HowMuch;
+				INFOPLIST_KEY_CFBundleDisplayName = Halation;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
