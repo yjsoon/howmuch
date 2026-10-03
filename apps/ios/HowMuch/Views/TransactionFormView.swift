@@ -160,6 +160,7 @@ enum TransactionFormRowID {
 struct TransactionFormView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var draft: TransactionDraft
   @State private var keypad: AmountKeypadEngine
   @State private var isKeypadVisible: Bool
@@ -898,15 +899,30 @@ struct TransactionFormView: View {
       rowIdentifier: TransactionFormRowID.cleared
     ) {
       if draft.wasReconciled {
-        Text("Cleared")
-          .foregroundStyle(Theme.textPrimary)
-        Spacer(minLength: 8)
-        Text("Reconciled")
-          .foregroundStyle(.secondary)
-        Toggle("Cleared", isOn: .constant(true))
-          .labelsHidden()
-          .disabled(true)
-          .tint(Theme.inflow)
+        if dynamicTypeSize >= .xxxLarge {
+          VStack(alignment: .leading, spacing: 8) {
+            Text("Cleared")
+              .foregroundStyle(Theme.textPrimary)
+            Text("Reconciled")
+              .foregroundStyle(.secondary)
+            Toggle("Cleared", isOn: .constant(true))
+              .labelsHidden()
+              .disabled(true)
+              .tint(Theme.inflow)
+              .frame(maxWidth: .infinity, alignment: .trailing)
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+          Text("Cleared")
+            .foregroundStyle(Theme.textPrimary)
+          Spacer(minLength: 8)
+          Text("Reconciled")
+            .foregroundStyle(.secondary)
+          Toggle("Cleared", isOn: .constant(true))
+            .labelsHidden()
+            .disabled(true)
+            .tint(Theme.inflow)
+        }
       } else {
         Toggle("Cleared", isOn: $draft.isCleared)
           .tint(Theme.inflow)

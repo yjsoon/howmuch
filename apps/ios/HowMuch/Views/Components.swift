@@ -166,6 +166,7 @@ struct DisclosureValueRow: View {
         HStack(spacing: 8) {
           Text(caption)
             .foregroundStyle(Theme.textPrimary)
+            .layoutPriority(1)
           Spacer(minLength: 8)
           Text(value)
             .foregroundStyle(.secondary)
