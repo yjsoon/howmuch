@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ReflectView: View {
   @Environment(AppModel.self) private var model
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
   var body: some View {
     ScrollView {
@@ -25,16 +26,16 @@ struct ReflectView: View {
               spendingContent
             }
 
-            ReflectCard(icon: "building.columns.fill", title: "Net Worth") {
-              NetWorthDetailView()
-            } content: {
-              netWorthContent
-            }
-
             ReflectCard(icon: "arrow.left.arrow.right", title: "Income vs Spending") {
               IncomeVsSpendingDetailView()
             } content: {
               incomeContent
+            }
+
+            ReflectCard(icon: "building.columns.fill", title: "Net Worth") {
+              NetWorthDetailView()
+            } content: {
+              netWorthContent
             }
 
             ReflectCard(icon: "clock.fill", title: "Age of Money") {
@@ -179,21 +180,31 @@ struct ReflectView: View {
 
   @ViewBuilder
   private var incomeContent: some View {
-    if let report = model.incomeVsSpending, let latest = report.periods.last {
+    if let report = model.incomeVsSpending {
+      let now = Date.now
+      let year = Calendar.current.component(.year, from: now)
+      let monthKey = IncomeVsSpendingMaths.currentMonthKey(from: now)
+      let monthNet = report.periods.first { $0.period == monthKey }?.net ?? 0
+      let monthActive = IncomeVsSpendingMaths.hasActivity(periods: report.periods, matching: monthKey)
+      let yearNet = IncomeVsSpendingMaths.yearToDateNet(periods: report.periods, year: year)
+      let yearActive = IncomeVsSpendingMaths.hasActivity(periods: report.periods, matching: String(year))
       VStack(alignment: .leading, spacing: 10) {
-        Text(LedgerDate.periodLabel(latest.period))
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-        Text(MoneyCodec.signedDisplayString(for: latest.net, currencyFormat: model.currencyFormat))
-          .font(.title.weight(.bold))
-          .monospacedDigit()
-          .foregroundStyle(Theme.amountColour(latest.net))
-          .rollingNumber(latest.net)
-
-        PairedColumnChart(
-          pairs: report.periods.map { (Double($0.income), Double(abs($0.spending))) },
-          labels: LedgerDate.periodAxisLabels(report.periods.map(\.period))
+        headlinePair(
+          monthName: IncomeVsSpendingMaths.monthName(from: now),
+          monthNet: monthNet,
+          monthActive: monthActive,
+          year: year,
+          yearNet: yearNet,
+          yearActive: yearActive
         )
+
+        if !report.periods.isEmpty {
+          PairedColumnChart(
+            pairs: report.periods.map { (Double($0.income), Double(abs($0.spending))) },
+            labels: LedgerDate.periodAxisLabels(report.periods.map(\.period)),
+            height: 90
+          )
+        }
 
         HStack(spacing: 16) {
           legendDot(colour: Theme.inflow, label: "Income")
@@ -201,6 +212,57 @@ struct ReflectView: View {
         }
       }
     }
+  }
+
+  @ViewBuilder
+  private func headlinePair(
+    monthName: String,
+    monthNet: Int,
+    monthActive: Bool,
+    year: Int,
+    yearNet: Int,
+    yearActive: Bool
+  ) -> some View {
+    let stacked = dynamicTypeSize.isAccessibilitySize
+    let pair = (monthName, monthNet, monthActive, year, yearNet, yearActive)
+    Group {
+      if stacked {
+        VStack(alignment: .leading, spacing: 12) {
+          headlineStat(label: pair.0, net: pair.1, hasActivity: pair.2)
+          headlineStat(label: "\(pair.3) so far", net: pair.4, hasActivity: pair.5)
+        }
+      } else {
+        ViewThatFits(in: .horizontal) {
+          HStack(alignment: .top, spacing: 12) {
+            headlineStat(label: pair.0, net: pair.1, hasActivity: pair.2)
+            headlineStat(label: "\(pair.3) so far", net: pair.4, hasActivity: pair.5)
+          }
+          VStack(alignment: .leading, spacing: 12) {
+            headlineStat(label: pair.0, net: pair.1, hasActivity: pair.2)
+            headlineStat(label: "\(pair.3) so far", net: pair.4, hasActivity: pair.5)
+          }
+        }
+      }
+    }
+  }
+
+  private func headlineStat(label: String, net: Int, hasActivity: Bool) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(label)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      Text(MoneyCodec.signedDisplayString(for: net, currencyFormat: model.currencyFormat))
+        .font(.title2.weight(.bold))
+        .monospacedDigit()
+        .foregroundStyle(Theme.signedReportColour(net))
+        .rollingNumber(net)
+      if !hasActivity {
+        Text("No activity yet")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   @ViewBuilder

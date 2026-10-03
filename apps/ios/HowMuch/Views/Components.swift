@@ -241,6 +241,57 @@ struct MonthStepper: View {
   }
 }
 
+/// `‹ September 2026 ›` stepper for any report period, with 44pt chevrons.
+struct PeriodStepper: View {
+  let label: String
+  var canGoBack: Bool
+  var canGoForward: Bool
+  var onBack: () -> Void
+  var onForward: () -> Void
+  @State private var steppedBack = false
+  @State private var steps = 0
+
+  var body: some View {
+    HStack {
+      stepButton(systemName: "chevron.left", enabled: canGoBack, back: true)
+      Spacer()
+      Text(label)
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(Theme.accent)
+        .multilineTextAlignment(.center)
+        .contentTransition(.numericText(countsDown: steppedBack))
+        .animation(Theme.Motion.standard, value: label)
+      Spacer()
+      stepButton(systemName: "chevron.right", enabled: canGoForward, back: false)
+    }
+    .padding(.horizontal, 8)
+    .sensoryFeedback(.selection, trigger: steps)
+  }
+
+  private func stepButton(systemName: String, enabled: Bool, back: Bool) -> some View {
+    Button {
+      steppedBack = back
+      steps += 1
+      if back {
+        onBack()
+      } else {
+        onForward()
+      }
+    } label: {
+      Image(systemName: systemName)
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(Theme.accent)
+        .frame(minWidth: 44, minHeight: 44)
+        .background(Theme.surfaceMuted, in: Circle())
+        .contentShape(Circle())
+    }
+    .disabled(!enabled)
+    .opacity(enabled ? 1 : 0.3)
+    .buttonStyle(.pressable)
+    .accessibilityLabel(back ? "Previous period" : "Next period")
+  }
+}
+
 enum AppTab: Hashable, CaseIterable {
   case accounts
   case rewards

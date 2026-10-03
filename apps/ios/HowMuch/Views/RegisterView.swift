@@ -121,12 +121,129 @@ private struct RegisterSearchDrawer: ViewModifier {
   }
 }
 
+enum RegisterAmountFilter: Hashable {
+  case income
+  case spending
+}
+
+/// Matches a register row to an Income vs Spending figure: sign, category,
+/// payee, and plain-transfer exclusion. Split parents stay whole rows.
+enum RegisterReportFilter {
+  static func include(
+    _ transaction: Transaction,
+    categoryID: String? = nil,
+    payeeID: String? = nil,
+    payeeName: String? = nil,
+    missingPayee: Bool = false,
+    dateRange: ClosedRange<String>? = nil,
+    accountIDs: Set<String>? = nil,
+    amountFilter: RegisterAmountFilter? = nil,
+    excludePlainTransfers: Bool = false
+  ) -> Bool {
+    if let accountIDs, !accountIDs.isEmpty, !accountIDs.contains(transaction.accountID) {
+      return false
+    }
+    if let dateRange, !dateRange.contains(transaction.date) {
+      return false
+    }
+    if let amountFilter {
+      switch amountFilter {
+      case .income:
+        if matchingAmount(transaction, positive: true) == false { return false }
+      case .spending:
+        if matchingAmount(transaction, positive: false) == false { return false }
+      }
+    }
+    if excludePlainTransfers, isOnlyPlainTransfer(transaction) {
+      return false
+    }
+    if let categoryID {
+      if !matchesCategory(transaction, categoryID: categoryID) {
+        return false
+      }
+    }
+    if missingPayee || payeeName == "No payee" {
+      if hasPayee(transaction) { return false }
+    } else if let payeeID {
+      if !matchesPayeeID(transaction, payeeID) { return false }
+    } else if let payeeName, !payeeName.isEmpty {
+      if !matchesPayeeName(transaction, payeeName) { return false }
+    }
+    return true
+  }
+
+  private static func matchingAmount(_ transaction: Transaction, positive: Bool) -> Bool {
+    if positive {
+      return transaction.amount > 0 || transaction.subtransactions.contains { !$0.deleted && $0.amount > 0 }
+    }
+    return transaction.amount < 0 || transaction.subtransactions.contains { !$0.deleted && $0.amount < 0 }
+  }
+
+  private static func isPlainTransfer(categoryID: String?, transferAccountID: String?, transferTransactionID: String?) -> Bool {
+    categoryID == nil && (transferAccountID != nil || transferTransactionID != nil)
+  }
+
+  private static func isOnlyPlainTransfer(_ transaction: Transaction) -> Bool {
+    let live = transaction.subtransactions.filter { !$0.deleted }
+    if live.isEmpty {
+      return isPlainTransfer(
+        categoryID: transaction.categoryID,
+        transferAccountID: transaction.transferAccountID,
+        transferTransactionID: transaction.transferTransactionID
+      )
+    }
+    return live.allSatisfy {
+      isPlainTransfer(
+        categoryID: $0.categoryID ?? transaction.categoryID,
+        transferAccountID: $0.transferAccountID ?? transaction.transferAccountID,
+        transferTransactionID: $0.transferTransactionID ?? transaction.transferTransactionID
+      )
+    }
+  }
+
+  private static func matchesCategory(_ transaction: Transaction, categoryID: String) -> Bool {
+    if categoryID == CategoryGroup.uncategorisedCategoryID {
+      let live = transaction.subtransactions.filter { !$0.deleted }
+      if live.isEmpty {
+        return transaction.categoryID == nil
+      }
+      return live.contains { $0.categoryID == nil }
+    }
+    return transaction.categoryID == categoryID
+      || transaction.subtransactions.contains { !$0.deleted && $0.categoryID == categoryID }
+  }
+
+  private static func hasPayee(_ transaction: Transaction) -> Bool {
+    if let payeeID = transaction.payeeID, !payeeID.isEmpty { return true }
+    if let name = transaction.payeeName, !name.isEmpty { return true }
+    return transaction.subtransactions.contains {
+      !$0.deleted && (($0.payeeID?.isEmpty == false) || ($0.payeeName?.isEmpty == false))
+    }
+  }
+
+  private static func matchesPayeeID(_ transaction: Transaction, _ payeeID: String) -> Bool {
+    transaction.payeeID == payeeID
+      || transaction.subtransactions.contains { !$0.deleted && $0.payeeID == payeeID }
+  }
+
+  private static func matchesPayeeName(_ transaction: Transaction, _ payeeName: String) -> Bool {
+    transaction.payeeName == payeeName
+      || transaction.importPayeeName == payeeName
+      || transaction.subtransactions.contains { !$0.deleted && $0.payeeName == payeeName }
+  }
+}
+
 struct RegisterView: View {
   @Environment(AppModel.self) private var model
   let scope: RegisterScope
   var categoryID: String?
+  var payeeID: String?
+  var payeeName: String?
+  var missingPayee = false
   var dateRange: ClosedRange<String>?
   var accountIDs: Set<String>?
+  var amountFilter: RegisterAmountFilter?
+  var excludePlainTransfers = false
 
   @State private var searchText = ""
   /// The search drawer exists only once the magnifier asks for it; see
@@ -152,13 +269,23 @@ struct RegisterView: View {
   init(
     scope: RegisterScope,
     categoryID: String? = nil,
+    payeeID: String? = nil,
+    payeeName: String? = nil,
+    missingPayee: Bool = false,
     dateRange: ClosedRange<String>? = nil,
-    accountIDs: Set<String>? = nil
+    accountIDs: Set<String>? = nil,
+    amountFilter: RegisterAmountFilter? = nil,
+    excludePlainTransfers: Bool = false
   ) {
     self.scope = scope
     self.categoryID = categoryID
+    self.payeeID = payeeID
+    self.payeeName = payeeName
+    self.missingPayee = missingPayee
     self.dateRange = dateRange
     self.accountIDs = accountIDs
+    self.amountFilter = amountFilter
+    self.excludePlainTransfers = excludePlainTransfers
   }
 
   var body: some View {
@@ -873,6 +1000,15 @@ struct RegisterView: View {
   }
 
   private var title: String {
+    if missingPayee || payeeName == "No payee" {
+      return "No payee"
+    }
+    if let payeeName, !payeeName.isEmpty {
+      return payeeName
+    }
+    if categoryID == CategoryGroup.uncategorisedCategoryID {
+      return "Uncategorised"
+    }
     if categoryID != nil, let name = model.categoryName(forID: categoryID) {
       return name
     }
@@ -1136,18 +1272,17 @@ struct RegisterView: View {
       if let accountID = scope.accountID, transaction.accountID != accountID {
         return false
       }
-      if let accountIDs, !accountIDs.isEmpty, !accountIDs.contains(transaction.accountID) {
-        return false
-      }
-      if let categoryID,
-         transaction.categoryID != categoryID,
-         !transaction.subtransactions.contains(where: { $0.categoryID == categoryID }) {
-        return false
-      }
-      if let dateRange, !dateRange.contains(transaction.date) {
-        return false
-      }
-      return true
+      return RegisterReportFilter.include(
+        transaction,
+        categoryID: categoryID,
+        payeeID: payeeID,
+        payeeName: payeeName,
+        missingPayee: missingPayee,
+        dateRange: dateRange,
+        accountIDs: accountIDs,
+        amountFilter: amountFilter,
+        excludePlainTransfers: excludePlainTransfers
+      )
     }
   }
 
@@ -1157,8 +1292,13 @@ struct RegisterView: View {
       || uncategorisedOnly
       || showingUnapprovedQueue
       || categoryID != nil
+      || payeeID != nil
+      || missingPayee
+      || payeeName != nil
       || dateRange != nil
       || accountIDs?.isEmpty == false
+      || amountFilter != nil
+      || excludePlainTransfers
   }
 
   private func totalsSummary(_ snapshot: RegisterSnapshot) -> some View {

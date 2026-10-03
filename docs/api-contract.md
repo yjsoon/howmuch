@@ -608,6 +608,8 @@ The import is one atomic write. Each table's rows are bound as JSON chunks of at
 
 `GET /api/reports/income-vs-spending`
 
+`GET /api/reports/income-vs-spending-groups`
+
 `GET /api/reports/net-worth`
 
 `GET /api/reports/age-of-money`
@@ -645,6 +647,14 @@ By default reports count categorised transfer lines (for example a categorised
 payment to a tracking account) as spending, matching YNAB; only uncategorised
 transfer legs are excluded. `include_transfers=true` includes every transfer
 line.
+
+`income-vs-spending-groups` uses those same line-item rules for one `from`/`to`
+window and returns `income`, `spending`, `net`, `income_by_payee`,
+`income_by_category`, and `spending_by_category`. Each group carries `amount`,
+`share`, and `transaction_count`. Payee rows add `category_count` and either
+the single category or `Multiple categories`. Empty windows return zeros and
+empty arrays — they do not invent period rows. The period list on
+`income-vs-spending` still omits months, weeks, and years with no activity.
 
 Extra filters:
 

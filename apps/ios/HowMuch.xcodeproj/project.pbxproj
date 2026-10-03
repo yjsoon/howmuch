@@ -28,6 +28,9 @@
 		A10000000000000000000026 /* AccountIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* AccountIcon.swift */; };
 		A10000000000000000000023 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* APIClient.swift */; };
 		A10000000000000000000024 /* Formatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* Formatting.swift */; };
+		C10000000000000000000011 /* IncomeVsSpendingMaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000010 /* IncomeVsSpendingMaths.swift */; };
+		C10000000000000000000013 /* IncomeVsSpendingPeriodDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000012 /* IncomeVsSpendingPeriodDetailView.swift */; };
+		C10000000000000000000021 /* IncomeVsSpendingMathsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000020 /* IncomeVsSpendingMathsTests.swift */; };
 		A10000000000000000000027 /* RegisterHorizon.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* RegisterHorizon.swift */; };
 		A1000000000000000000002C /* RegisterCurrent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001C /* RegisterCurrent.swift */; };
 		A1000000000000000000002D /* RegisterQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001D /* RegisterQuery.swift */; };
@@ -210,6 +213,9 @@
 		A10000000000000000000016 /* AccountIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountIcon.swift; sourceTree = "<group>"; };
 		A10000000000000000000013 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		A10000000000000000000014 /* Formatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Formatting.swift; sourceTree = "<group>"; };
+		C10000000000000000000010 /* IncomeVsSpendingMaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncomeVsSpendingMaths.swift; sourceTree = "<group>"; };
+		C10000000000000000000012 /* IncomeVsSpendingPeriodDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncomeVsSpendingPeriodDetailView.swift; sourceTree = "<group>"; };
+		C10000000000000000000020 /* IncomeVsSpendingMathsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncomeVsSpendingMathsTests.swift; sourceTree = "<group>"; };
 		A10000000000000000000017 /* RegisterHorizon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterHorizon.swift; sourceTree = "<group>"; };
 		A1000000000000000000001C /* RegisterCurrent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterCurrent.swift; sourceTree = "<group>"; };
 		A1000000000000000000001D /* RegisterQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterQuery.swift; sourceTree = "<group>"; };
@@ -374,6 +380,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000014 /* Formatting.swift */,
+				C10000000000000000000010 /* IncomeVsSpendingMaths.swift */,
 				A10000000000000000000017 /* RegisterHorizon.swift */,
 				A1000000000000000000001C /* RegisterCurrent.swift */,
 				B90000000000000000000003 /* OutboxPlanner.swift */,
@@ -412,6 +419,7 @@
 				A10000000000000000000074 /* Pickers.swift */,
 				A10000000000000000000075 /* ReflectView.swift */,
 				A10000000000000000000076 /* ReflectDetails.swift */,
+				C10000000000000000000012 /* IncomeVsSpendingPeriodDetailView.swift */,
 				A10000000000000000000018 /* SettingsView.swift */,
 				A60000000000000000000014 /* CaptureAISettingsView.swift */,
 			);
@@ -478,6 +486,7 @@
 				A200000000000000000000A2 /* ScreenshotOfferTests.swift */,
 				A200000000000000000000B0 /* RegisterSnapshotTests.swift */,
 				A200000000000000000000B2 /* RegisterQueryTests.swift */,
+				C10000000000000000000020 /* IncomeVsSpendingMathsTests.swift */,
 				A200000000000000000000C2 /* RegisterApprovalTests.swift */,
 				A200000000000000000000C4 /* APISettingsTests.swift */,
 				A50000000000000000000020 /* RewardsReportTests.swift */,
@@ -665,6 +674,8 @@
 				A10000000000000000000026 /* AccountIcon.swift in Sources */,
 				A10000000000000000000023 /* APIClient.swift in Sources */,
 				A10000000000000000000024 /* Formatting.swift in Sources */,
+				C10000000000000000000011 /* IncomeVsSpendingMaths.swift in Sources */,
+				C10000000000000000000013 /* IncomeVsSpendingPeriodDetailView.swift in Sources */,
 				A10000000000000000000027 /* RegisterHorizon.swift in Sources */,
 				A1000000000000000000002C /* RegisterCurrent.swift in Sources */,
 				A1000000000000000000002D /* RegisterQuery.swift in Sources */,
@@ -751,6 +762,7 @@
 				A200000000000000000000A3 /* ScreenshotOfferTests.swift in Sources */,
 				A200000000000000000000B1 /* RegisterSnapshotTests.swift in Sources */,
 				A200000000000000000000B3 /* RegisterQueryTests.swift in Sources */,
+				C10000000000000000000021 /* IncomeVsSpendingMathsTests.swift in Sources */,
 				A200000000000000000000C3 /* RegisterApprovalTests.swift in Sources */,
 				A200000000000000000000C5 /* APISettingsTests.swift in Sources */,
 				A50000000000000000000021 /* RewardsReportTests.swift in Sources */,
