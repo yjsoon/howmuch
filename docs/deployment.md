@@ -77,21 +77,58 @@ environment `tk` in `wrangler.jsonc`:
   `scripts/check-d1-migrations.sh --env tk --remote`. It reads the
   `d1_migrations` table with a single `SELECT` and fails the run, without
   deploying, when any `*.sql` file in `apps/api/d1-migrations` is not recorded
-  there. It also fails when it cannot read D1 at all, so the
-  `CLOUDFLARE_API_TOKEN` secret needs Account > D1 > Read in addition to its
-  Workers permissions (see [CI deploy token](#ci-deploy-token)). It uses a
+  there. It also fails when it cannot read D1 at all. This step uses the separate
+  `CLOUDFLARE_D1_READ_TOKEN` secret with only Account > D1 > Read, mapped to
+  Wrangler's `CLOUDFLARE_API_TOKEN` environment variable for that step only
+  (see [CI migration-check token](#ci-migration-check-token)). It uses a
   plain query rather than
   `wrangler d1 migrations list` because that command exits 0 even when
   migrations are pending and first runs a `CREATE TABLE IF NOT EXISTS` against
   the database. To check before tagging, run the same script from the repo
   root with `--env tk --remote --profile tinkertanker`; it is read-only.
 
-### CI deploy token
+### CI migration-check token
 
-**Required before the next `v*` tag:** add Account > D1 > Read to this token,
-either by editing its permissions or as part of the first rotation. The
-pending-migrations check fails closed without it, so every deploy stops at
-that step until it is added.
+**Required before the next deploy:** an owner must create and store the separate
+`CLOUDFLARE_D1_READ_TOKEN` repository secret. Do not broaden the deploy token.
+The check fails closed if this secret is missing, expired, invalid, or lacks D1
+Read; it never falls back to the deployment credential.
+
+1. In the **Tinkertanker** Cloudflare dashboard, create an account API token
+   named `howmuch-d1-read (GitHub Actions)` with **only Account > D1 > Read**.
+   Scope it to Tinkertanker (`b8b1032c61d9475cd00229c74db7ec72`), not all accounts
+   or YJ. Do not grant D1 Edit or any Workers permissions.
+2. In `yjsoon/howmuch`, open Settings > Secrets and variables > Actions >
+   New repository secret, name it **`CLOUDFLARE_D1_READ_TOKEN`**, and paste the
+   token value. Alternatively, run
+   `gh secret set CLOUDFLARE_D1_READ_TOKEN --repo yjsoon/howmuch` and paste it
+   at the private prompt. Leave `CLOUDFLARE_API_TOKEN` unchanged.
+3. Verify access read-only from the repo root in a Bash subshell, without
+   putting the value in shell history (paste the **D1 Read** token at the prompt):
+
+   ```bash
+   (
+     read -rsp 'D1 Read token: ' CLOUDFLARE_API_TOKEN; printf '\n'
+     export CLOUDFLARE_API_TOKEN
+     export CLOUDFLARE_ACCOUNT_ID=b8b1032c61d9475cd00229c74db7ec72
+     scripts/check-d1-migrations.sh --env tk --remote
+   )
+   ```
+
+   Expect `D1 migrations up to date: ... applied, none pending.` If migrations
+   are pending, apply them separately using the authorized migration procedure
+   before releasing; do not grant this token write access to bypass the check.
+4. On the next **authorized** release, confirm the check, deploy, and `/health`
+   steps pass. Re-running Deploy or pushing a `v*` tag deploys production;
+   neither is needed merely to create or verify this secret.
+
+Cloudflare shows the token value once. Keep it only in the repository secret
+and private local input, never in source control, issues, PRs, logs, or chat.
+Rotate it independently by creating a replacement with the same D1 Read-only
+permission, updating `CLOUDFLARE_D1_READ_TOKEN`, verifying read access, then
+revoking the old token. The expiry/exposure policy below applies to both tokens.
+
+### CI deploy token
 
 The `CLOUDFLARE_API_TOKEN` repository secret is a Tinkertanker **account** API
 token named `howmuch-deploy (GitHub Actions)`. Because it is account-scoped it
@@ -100,9 +137,9 @@ cannot act on the YJ account, and the workflow also pins
 as a second guard. The current token was created with no expiry.
 
 - Permissions: the Workers permission set that `wrangler deploy` needs (the
-  "Edit Cloudflare Workers" style set it was created with), plus
-  Account > D1 > Read for the pending-migrations check. The workflow never
-  writes to D1, so D1 Edit is not required.
+  "Edit Cloudflare Workers" style set it was created with). Do not add D1 Read
+  for the pending-migrations check; that step uses its own token. The workflow
+  never writes to D1, so D1 Edit is not required.
 - Where it lives: only in the `yjsoon/howmuch` repository secrets (Settings >
   Secrets and variables > Actions) and in the Tinkertanker account's API token
   list. Cloudflare shows the value once at creation; never write it into the
@@ -111,15 +148,12 @@ as a second guard. The current token was created with no expiry.
 Rotation is an owner action, because step 3 deploys production:
 
 1. In the Tinkertanker dashboard, create a replacement account API token with
-   the same permissions (including D1 Read) and the expiry set by the policy
+   the same deployment permissions and the expiry set by the policy
    below. Keep it scoped to the Tinkertanker account.
 2. Store it without putting it on the command line: run
    `gh secret set CLOUDFLARE_API_TOKEN --repo yjsoon/howmuch` and paste the
-   value at the prompt. Before deploying, you can check the new token's D1
-   Read access read-only from the repo root, again without putting the value
-   in shell history: `read -rs CLOUDFLARE_API_TOKEN && export
-   CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID=b8b1032c61d9475cd00229c74db7ec72`,
-   paste the value, then run `scripts/check-d1-migrations.sh --env tk --remote`.
+   value at the prompt. Leave `CLOUDFLARE_D1_READ_TOKEN` unchanged; the migration
+   check does not validate the replacement deploy token's permissions.
 3. Run the Deploy workflow via `workflow_dispatch` (Actions > Deploy > Run
    workflow, or `gh workflow run deploy.yml --repo yjsoon/howmuch --ref main`)
    from a ref that is safe to ship, and confirm the migrations check, the
@@ -129,7 +163,7 @@ Rotation is an owner action, because step 3 deploys production:
 
 Recommended policy, pending owner confirmation:
 
-- Give the next token a 12-month expiry and set a calendar reminder about a
+- Give each new token a 12-month expiry and set a calendar reminder about a
   month before it lapses, then rotate with the steps above. An expired token
   only stops CI deploys; the running Worker is unaffected, and
   `bun run deploy:tk` still works through the `tinkertanker` profile.
