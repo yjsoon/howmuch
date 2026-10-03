@@ -148,6 +148,20 @@ struct RewardTonePalette {
 }
 
 extension Theme {
+  /// Shared metrics for Add/Edit transaction card rows. Matches the intake
+  /// mockup (`docs/frontend/intake-ui.html`): 28pt icon column, 12pt gap,
+  /// 13/16 padding, 52pt minimum height. Minimum, not a cap — accessibility
+  /// sizes may wrap the value under the label and grow the row.
+  enum FormRow {
+    static let iconColumn: CGFloat = 28
+    static let iconSpacing: CGFloat = 12
+    static let horizontalPadding: CGFloat = 16
+    static let verticalPadding: CGFloat = 13
+    static let height: CGFloat = 52
+    /// Divider inset past the icon column: padding + icon + gap.
+    static let dividerLeading: CGFloat = horizontalPadding + iconColumn + iconSpacing
+  }
+
   /// Corner radii, all drawn with continuous corners. Nest smaller radii
   /// inside larger ones so inner shapes stay concentric with their card.
   enum Radius {

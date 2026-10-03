@@ -144,6 +144,21 @@ enum KeypadPrimaryAction {
   }
 }
 
+/// Accessibility identifiers for Add/Edit transaction card rows. Snapshot
+/// tests measure these so empty and filled states can share one height.
+enum TransactionFormRowID {
+  static let payee = "transaction-form.row.payee"
+  static let category = "transaction-form.row.category"
+  static let account = "transaction-form.row.account"
+  static let date = "transaction-form.row.date"
+  static let flag = "transaction-form.row.flag"
+  static let memo = "transaction-form.row.memo"
+  static let split = "transaction-form.row.split"
+  static let cleared = "transaction-form.row.cleared"
+
+  static let fieldOrder = [payee, category, account, date, flag, memo, split, cleared]
+}
+
 struct TransactionFormView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
@@ -210,7 +225,6 @@ struct TransactionFormView: View {
             amountHeader
             detailCard
             splitCard
-            extrasCard
 
             if isEditing && allowsDeletion {
               Button(role: .destructive) {
@@ -436,9 +450,10 @@ struct TransactionFormView: View {
   /// Amount tap resigns memo focus and shows CalculatorKeypad again.
   private var amountHeader: some View {
     VStack(spacing: 14) {
-      if !draft.isSplit {
-        directionToggle
-      }
+      directionToggle
+        .opacity(draft.isSplit ? 0 : 1)
+        .allowsHitTesting(!draft.isSplit)
+        .accessibilityHidden(draft.isSplit)
 
       Button {
         guard !draft.isSplit else {
@@ -536,7 +551,8 @@ struct TransactionFormView: View {
           icon: "person.crop.circle",
           caption: "Payee",
           value: "Set on each split line",
-          placeholder: ""
+          placeholder: "",
+          rowIdentifier: TransactionFormRowID.payee
         )
       } else {
         NavigationLink {
@@ -546,45 +562,16 @@ struct TransactionFormView: View {
             icon: "person.crop.circle",
             caption: "Payee",
             value: draft.payeeName,
-            placeholder: "Choose Payee"
+            placeholder: "Choose Payee",
+            rowIdentifier: TransactionFormRowID.payee
           )
         }
         .buttonStyle(.plain)
       }
       CardDivider()
 
-      if draft.isSplit {
-        DisclosureValueRow(
-          icon: "tray.full",
-          caption: "Category",
-          value: "Split (\(draft.subtransactions.count))",
-          placeholder: ""
-        )
-        CardDivider()
-      } else if !hidesCategory {
-        NavigationLink {
-          CategoryPickerView(draft: $draft)
-        } label: {
-          DisclosureValueRow(
-            icon: "tray.full",
-            caption: "Category",
-            value: model.categoryName(forID: draft.categoryID),
-            placeholder: "Choose Category"
-          )
-        }
-        .buttonStyle(.plain)
-        if showCategoryPrompt {
-          ambiguousRail(
-            prompt: "Which category?",
-            candidates: categoryCandidates
-          ) { candidate in
-            draft.categoryID = candidate.id
-            categoryCandidates = []
-            showCategoryPrompt = false
-          }
-        }
-        CardDivider()
-      }
+      categoryRow
+      CardDivider()
 
       NavigationLink {
         AccountPickerView(
@@ -600,7 +587,8 @@ struct TransactionFormView: View {
           icon: "building.columns",
           caption: "Account",
           value: model.account(withID: draft.accountID)?.name,
-          placeholder: "Choose Account"
+          placeholder: "Choose Account",
+          rowIdentifier: TransactionFormRowID.account
         )
       }
       .buttonStyle(.plain)
@@ -622,16 +610,70 @@ struct TransactionFormView: View {
           icon: "calendar",
           caption: "Date",
           value: draft.date.formatted(date: .long, time: .omitted),
-          placeholder: "Date"
+          placeholder: "Date",
+          rowIdentifier: TransactionFormRowID.date
         )
       }
       .buttonStyle(.plain)
+      CardDivider()
+
+      flagRow
+      CardDivider()
+      memoRow
     }
     .ynabCard()
   }
 
-  /// Transfers between two budget accounts carry no category (YNAB); the row
-  /// disappears rather than inviting a value the API would discard.
+  /// Category stays in the card even for splits and on-budget transfers so
+  /// Account / Date cannot jump when the field stops being editable.
+  @ViewBuilder
+  private var categoryRow: some View {
+    if draft.isSplit {
+      DisclosureValueRow(
+        icon: "tray.full",
+        caption: "Category",
+        value: "Split (\(draft.subtransactions.count))",
+        placeholder: "",
+        rowIdentifier: TransactionFormRowID.category
+      )
+    } else if hidesCategory {
+      DisclosureValueRow(
+        icon: "tray.full",
+        caption: "Category",
+        value: "Transfer",
+        placeholder: "Choose Category",
+        showsChevron: false,
+        appliesCardMetrics: true,
+        rowIdentifier: TransactionFormRowID.category
+      )
+    } else {
+      NavigationLink {
+        CategoryPickerView(draft: $draft)
+      } label: {
+        DisclosureValueRow(
+          icon: "tray.full",
+          caption: "Category",
+          value: model.categoryName(forID: draft.categoryID),
+          placeholder: "Choose Category",
+          rowIdentifier: TransactionFormRowID.category
+        )
+      }
+      .buttonStyle(.plain)
+      if showCategoryPrompt {
+        ambiguousRail(
+          prompt: "Which category?",
+          candidates: categoryCandidates
+        ) { candidate in
+          draft.categoryID = candidate.id
+          categoryCandidates = []
+          showCategoryPrompt = false
+        }
+      }
+    }
+  }
+
+  /// Transfers between two budget accounts carry no category (YNAB). The row
+  /// stays visible and read-only so the rows below cannot jump.
   private var hidesCategory: Bool {
     draft.isTransfer && model.accountsBothOnBudget(draft.accountID, draft.transferAccountID)
   }
@@ -673,8 +715,8 @@ struct TransactionFormView: View {
         }
       }
     }
-    .padding(.leading, 56)
-    .padding(.trailing, 16)
+    .padding(.leading, Theme.FormRow.dividerLeading)
+    .padding(.trailing, Theme.FormRow.horizontalPadding)
     .padding(.vertical, 8)
   }
 
@@ -685,15 +727,17 @@ struct TransactionFormView: View {
         CardDivider()
         splitAllocations
       }
+      CardDivider()
+      clearedRow
     }
     .ynabCard()
   }
 
   private var splitToggleRow: some View {
-    HStack(spacing: 12) {
-      Image(systemName: draft.isSplit ? "square.split.1x2.fill" : "square.split.1x2")
-        .foregroundStyle(Theme.accent)
-        .frame(width: 28)
+    FormCardRow(
+      icon: draft.isSplit ? "square.split.1x2.fill" : "square.split.1x2",
+      rowIdentifier: TransactionFormRowID.split
+    ) {
       Toggle("Split transaction", isOn: Binding(
         get: { draft.isSplit },
         set: setSplit
@@ -701,8 +745,6 @@ struct TransactionFormView: View {
       .tint(Theme.accent)
       .foregroundStyle(Theme.textPrimary)
     }
-    .padding(.horizontal, 16)
-    .padding(.vertical, 13)
     .accessibilityElement(children: .combine)
   }
 
@@ -717,10 +759,10 @@ struct TransactionFormView: View {
             onRemove: { removeSplitLine(at: index) }
           )
         } label: {
-          HStack(spacing: 12) {
+          HStack(spacing: Theme.FormRow.iconSpacing) {
             Image(systemName: draft.subtransactions[index].transferAccountID != nil ? "arrow.left.arrow.right" : "tray.full")
               .foregroundStyle(.secondary)
-              .frame(width: 28)
+              .frame(width: Theme.FormRow.iconColumn)
             VStack(alignment: .leading, spacing: 2) {
               Text(splitLineTitle(draft.subtransactions[index]))
                 .foregroundStyle(Theme.textPrimary)
@@ -738,7 +780,7 @@ struct TransactionFormView: View {
               .font(.footnote.weight(.semibold))
               .foregroundStyle(.tertiary)
           }
-          .padding(.horizontal, 16)
+          .padding(.horizontal, Theme.FormRow.horizontalPadding)
           .padding(.vertical, 10)
         }
         .buttonStyle(.plain)
@@ -754,7 +796,7 @@ struct TransactionFormView: View {
         Label("Add Split Line", systemImage: "plus")
           .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .padding(.horizontal, 16)
+      .padding(.horizontal, Theme.FormRow.horizontalPadding)
       .padding(.vertical, 11)
       CardDivider()
       VStack(alignment: .leading, spacing: 4) {
@@ -770,7 +812,7 @@ struct TransactionFormView: View {
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, Theme.FormRow.horizontalPadding)
         .padding(.vertical, 10)
     }
   }
@@ -815,62 +857,54 @@ struct TransactionFormView: View {
     return RewardCardDraft.colourNames(from: card)
   }
 
-  /// Cleared, flag, and memo. Memo is a system text field, so it owns the QWERTY keyboard.
-  private var extrasCard: some View {
-    VStack(spacing: 0) {
-      clearedRow
-      CardDivider()
-
-      HStack(spacing: 12) {
-        Image(systemName: draft.flag == .none ? "flag" : "flag.fill")
-          .foregroundStyle(Theme.flagColour(named: draft.flag.rawValue) ?? .secondary)
-          .frame(width: 28)
-        Text("Flag")
-          .foregroundStyle(Theme.textPrimary)
-        Spacer()
-        Picker("Flag", selection: $draft.flag) {
-          ForEach(FlagColour.allCases) { flag in
-            Text(flagNames[RewardFlagColour(ledgerColour: flag)] ?? flag.title).tag(flag)
-          }
+  /// Flag sits with the details card, directly under Date.
+  private var flagRow: some View {
+    FormCardRow(
+      icon: draft.flag == .none ? "flag" : "flag.fill",
+      iconColor: Theme.flagColour(named: draft.flag.rawValue) ?? .secondary,
+      rowIdentifier: TransactionFormRowID.flag
+    ) {
+      Text("Flag")
+        .foregroundStyle(Theme.textPrimary)
+      Spacer(minLength: 8)
+      Picker("Flag", selection: $draft.flag) {
+        ForEach(FlagColour.allCases) { flag in
+          Text(flagNames[RewardFlagColour(ledgerColour: flag)] ?? flag.title).tag(flag)
         }
-        .tint(.secondary)
       }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 6)
-      CardDivider()
-
-      HStack(alignment: .top, spacing: 12) {
-        Image(systemName: "note.text")
-          .foregroundStyle(.secondary)
-          .frame(width: 28)
-        TextField("Enter a memo…", text: $draft.memo, axis: .vertical)
-          .lineLimit(1 ... 3)
-          .foregroundStyle(Theme.textPrimary)
-          .focused($isTextInputFocused)
-      }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 13)
+      .tint(.secondary)
     }
-    .ynabCard()
+  }
+
+  /// Memo is a system text field, so it owns the QWERTY keyboard.
+  private var memoRow: some View {
+    FormCardRow(
+      icon: "note.text",
+      iconColor: .secondary,
+      alignment: .top,
+      rowIdentifier: TransactionFormRowID.memo
+    ) {
+      TextField("Enter a memo…", text: $draft.memo, axis: .vertical)
+        .lineLimit(1 ... 3)
+        .foregroundStyle(Theme.textPrimary)
+        .focused($isTextInputFocused)
+    }
   }
 
   /// Same Cleared switch as a new capture. Reconciled rows stay locked — the
   /// API will not accept an uncleared write after reconciliation.
   private var clearedRow: some View {
-    HStack(spacing: 12) {
-      Image(systemName: draft.wasReconciled ? "lock.fill" : draft.isCleared ? "c.circle.fill" : "c.circle")
-        .foregroundStyle(draft.isCleared ? Theme.inflow : Color.secondary)
-        .frame(width: 28)
-
+    FormCardRow(
+      icon: draft.wasReconciled ? "lock.fill" : draft.isCleared ? "c.circle.fill" : "c.circle",
+      iconColor: draft.isCleared ? Theme.inflow : Color.secondary,
+      rowIdentifier: TransactionFormRowID.cleared
+    ) {
       if draft.wasReconciled {
-        VStack(alignment: .leading, spacing: 2) {
-          Text("Cleared")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          Text("Reconciled")
-            .foregroundStyle(Theme.textPrimary)
-        }
-        Spacer()
+        Text("Cleared")
+          .foregroundStyle(Theme.textPrimary)
+        Spacer(minLength: 8)
+        Text("Reconciled")
+          .foregroundStyle(.secondary)
         Toggle("Cleared", isOn: .constant(true))
           .labelsHidden()
           .disabled(true)
@@ -881,8 +915,6 @@ struct TransactionFormView: View {
           .foregroundStyle(Theme.textPrimary)
       }
     }
-    .padding(.horizontal, 16)
-    .padding(.vertical, 10)
     .accessibilityElement(children: .combine)
     .accessibilityValue(draft.wasReconciled ? "Reconciled" : (draft.isCleared ? "On" : "Off"))
     .accessibilityHint(draft.wasReconciled ? "Reconciled transactions stay locked." : "Marks this transaction cleared when on.")
