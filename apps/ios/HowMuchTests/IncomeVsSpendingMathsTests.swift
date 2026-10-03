@@ -24,10 +24,15 @@ final class IncomeVsSpendingMathsTests: XCTestCase {
     XCTAssertFalse(IncomeVsSpendingMaths.hasActivity(periods: trailing, matching: "2026"))
   }
 
+  /// Zero income and rates below -100% become an em dash. Ordinary negatives stay.
+  /// The demo YTD path is ~80% saved, so E2E never sees a month like $26.40 in / $525.31 out.
   func testSavingsRateAndZeroIncomeDash() {
     XCTAssertEqual(IncomeVsSpendingMaths.savingsRateLabel(net: 1_750_000, income: 8_200_000), "21.3%")
     XCTAssertEqual(IncomeVsSpendingMaths.savingsRateLabel(net: -450_000, income: 3_630_000), "-12.4%")
     XCTAssertEqual(IncomeVsSpendingMaths.savingsRateLabel(net: -100, income: 0), "—")
+    XCTAssertEqual(IncomeVsSpendingMaths.savingsRateLabel(net: -100, income: 100), "-100.0%")
+    XCTAssertEqual(IncomeVsSpendingMaths.savingsRateLabel(net: -101, income: 100), "—")
+    XCTAssertEqual(IncomeVsSpendingMaths.savingsRateLabel(net: 26_400 - 525_310, income: 26_400), "—")
   }
 
   func testZeroFillInsertsEmptyMonthsBetweenFirstAndLastInRange() {

@@ -2,7 +2,7 @@ import { api, useApi } from "../api/client";
 import { FilterRail } from "../components/FilterRail";
 import { PairedColumns } from "../components/charts";
 import { formatPeriod, ytdRange } from "../lib/dates";
-import { formatAmount, formatMoney } from "../lib/money";
+import { formatAmount, formatMoney, formatSavingsRate } from "../lib/money";
 import { useFilters } from "../state/filters";
 
 export function IncomePage() {
@@ -18,8 +18,7 @@ export function IncomePage() {
     { income: 0, spending: 0 },
   );
   const net = totals.income - totals.spending;
-  const savingsRate =
-    totals.income > 0 ? `${net < 0 ? "−" : ""}${((Math.abs(net) / totals.income) * 100).toFixed(1)}%` : null;
+  const savingsRate = formatSavingsRate(net, totals.income);
 
   return (
     <>
@@ -49,7 +48,7 @@ export function IncomePage() {
           <div className="headline-figure">
             <span className="figure-label">Savings rate</span>
             <span className={net >= 0 ? "figure-value figure-positive" : "figure-value figure-negative"}>
-              {savingsRate ?? "—"}
+              {savingsRate}
             </span>
           </div>
         </div>

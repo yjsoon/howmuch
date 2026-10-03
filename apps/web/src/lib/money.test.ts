@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatMilliunitsInput, parseMilliunits } from "./money";
+import { formatMilliunitsInput, formatSavingsRate, parseMilliunits } from "./money";
 
 describe("parseMilliunits", () => {
   test("parses whole numbers and up to three decimal places exactly", () => {
@@ -31,5 +31,18 @@ describe("formatMilliunitsInput", () => {
     expect(formatMilliunitsInput(-290)).toBe("-0.29");
     expect(formatMilliunitsInput(1_000)).toBe("1");
     expect(parseMilliunits(formatMilliunitsInput(1_135))).toBe(1_135);
+  });
+});
+
+describe("formatSavingsRate", () => {
+  // Demo YTD is ~80% saved. Zero income and rates below -100% (e.g. $26.40 in /
+  // $525.31 out) are the cases the Income page recipe never exercises.
+  test("dashes zero income and rates below -100 percent, keeps ordinary negatives", () => {
+    expect(formatSavingsRate(1_750_000, 8_200_000)).toBe("21.3%");
+    expect(formatSavingsRate(-450_000, 3_630_000)).toBe("−12.4%");
+    expect(formatSavingsRate(-100, 0)).toBe("—");
+    expect(formatSavingsRate(-100, 100)).toBe("−100.0%");
+    expect(formatSavingsRate(-101, 100)).toBe("—");
+    expect(formatSavingsRate(26_400 - 525_310, 26_400)).toBe("—");
   });
 });
