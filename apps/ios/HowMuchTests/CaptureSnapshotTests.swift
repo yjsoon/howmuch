@@ -694,7 +694,9 @@ final class CaptureSnapshotTests: XCTestCase {
       "amount header missing: \(surface.accessibilityLabels())"
     )
     XCTAssertTrue(surface.activate(amount))
-    let restored = await surface.waitUntil { surface.calculatorKeypadDigitOne() != nil }
+    let restored = await surface.waitUntil {
+      surface.calculatorKeypadDigitOne() != nil && !memo.isFirstResponder
+    }
     XCTAssertTrue(
       restored,
       "amount focus must restore CalculatorKeypad: \(surface.accessibilityLabels())"
