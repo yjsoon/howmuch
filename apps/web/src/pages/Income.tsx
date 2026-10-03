@@ -47,7 +47,17 @@ export function IncomePage() {
           </div>
           <div className="headline-figure">
             <span className="figure-label">Savings rate</span>
-            <span className={net >= 0 ? "figure-value figure-positive" : "figure-value figure-negative"}>
+            {/* An em dash means "no meaningful rate", so it stays neutral
+                rather than being coloured by a sign it does not show. */}
+            <span
+              className={
+                savingsRate === "—"
+                  ? "figure-value"
+                  : net >= 0
+                    ? "figure-value figure-positive"
+                    : "figure-value figure-negative"
+              }
+            >
               {savingsRate}
             </span>
           </div>

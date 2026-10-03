@@ -101,7 +101,7 @@ struct IncomeVsSpendingPeriodRow: View {
 
   @ViewBuilder
   private func destinationLink<Label: View>(tab: IncomeSpendingTab, @ViewBuilder label: () -> Label) -> some View {
-    let dateRange = row.from ... min(row.to, Date.now.isoDateString)
+    let dateRange = IncomeVsSpendingMaths.drillDownRange(row)
     NavigationLink {
       Group {
         if interval == .day {
@@ -444,7 +444,7 @@ struct IncomeVsSpendingPeriodDetailView: View {
   @ViewBuilder
   private func registerLink(categoryID: String? = nil, payee: IncomeVsSpendingPayeeGroup? = nil, amountFilter: RegisterAmountFilter) -> some View {
     if let selected = rows.first(where: { $0.period == selectedPeriod }) ?? rows.first {
-      let dateRange = selected.from ... min(selected.to, Date.now.isoDateString)
+      let dateRange = IncomeVsSpendingMaths.drillDownRange(selected)
       RegisterView(
         scope: .all,
         categoryID: categoryID,
@@ -486,11 +486,14 @@ struct IncomeVsSpendingPeriodDetailView: View {
       phase = .loaded
       return
     }
+    // The same window as the row and its register links, so the tabs reconcile
+    // to the headline figures instead of silently dropping future-dated lines.
+    let window = IncomeVsSpendingMaths.drillDownRange(selected)
     do {
       let next = try await model.apiClient.fetchIncomeVsSpendingGroups(
         planID: model.settings.planID,
-        from: selected.from,
-        to: min(selected.to, Date.now.isoDateString),
+        from: window.lowerBound,
+        to: window.upperBound,
         accountIDs: Array(scope.accountIDs),
         categoryIDs: Array(scope.categoryIDs)
       )

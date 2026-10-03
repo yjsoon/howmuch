@@ -162,7 +162,10 @@ enum RegisterReportFilter {
         return false
       }
     }
-    if missingPayee || payeeName == "No payee" {
+    // `missingPayee` is the only signal for the report's missing-payee bucket.
+    // "No payee" is that bucket's label, not a reserved name, so a real payee
+    // called that still matches by id or snapshot name.
+    if missingPayee {
       if hasPayee(transaction) { return false }
     } else if let payeeID {
       if !matchesPayeeID(transaction, payeeID) { return false }
@@ -207,7 +210,9 @@ enum RegisterReportFilter {
       if live.isEmpty {
         return transaction.categoryID == nil
       }
-      return live.contains { $0.categoryID == nil }
+      // The report coalesces a split line's category to the parent's, so an
+      // uncategorised line only exists when the parent has no category either.
+      return live.contains { ($0.categoryID ?? transaction.categoryID) == nil }
     }
     return transaction.categoryID == categoryID
       || transaction.subtransactions.contains { !$0.deleted && $0.categoryID == categoryID }
@@ -1000,7 +1005,7 @@ struct RegisterView: View {
   }
 
   private var title: String {
-    if missingPayee || payeeName == "No payee" {
+    if missingPayee {
       return "No payee"
     }
     if let payeeName, !payeeName.isEmpty {

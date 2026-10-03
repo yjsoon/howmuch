@@ -98,6 +98,28 @@ final class IncomeVsSpendingMathsTests: XCTestCase {
     XCTAssertEqual(IncomeVsSpendingMaths.runningNet(rows: rows, through: "2026-02"), 11)
   }
 
+  /// A row's own bounds already match the window that produced its figures, so
+  /// the drill-down must cover the whole row. Clamping to today dropped
+  /// future-dated activity the row counts, and trapped outright on a period
+  /// that starts after today (All Time or a custom range reaching forward,
+  /// plus any future-dated transaction).
+  func testDrillDownRangeCoversTheWholeRowAndNeverTraps() {
+    let future = IncomeVsSpendingMaths.PeriodRow(
+      period: "2026-12", from: "2026-12-01", to: "2026-12-31", income: 0, spending: 500, net: -500, isEmpty: false
+    )
+    XCTAssertEqual(IncomeVsSpendingMaths.drillDownRange(future), ("2026-12-01" ... "2026-12-31"))
+
+    let current = IncomeVsSpendingMaths.PeriodRow(
+      period: "2026-10", from: "2026-10-01", to: "2026-10-31", income: 100, spending: 0, net: 100, isEmpty: false
+    )
+    XCTAssertEqual(IncomeVsSpendingMaths.drillDownRange(current), ("2026-10-01" ... "2026-10-31"))
+
+    let inverted = IncomeVsSpendingMaths.PeriodRow(
+      period: "2026-11", from: "2026-11-30", to: "2026-11-01", income: 0, spending: 0, net: 0, isEmpty: true
+    )
+    XCTAssertEqual(IncomeVsSpendingMaths.drillDownRange(inverted), ("2026-11-30" ... "2026-11-30"))
+  }
+
   func testFilterLineAndInProgressCaption() {
     XCTAssertEqual(IncomeVsSpendingMaths.filterLine(accountCount: 2, categoryCount: 3), "Filtered: 2 accounts, 3 categories")
     XCTAssertEqual(IncomeVsSpendingMaths.filterLine(accountCount: 1, categoryCount: 0), "Filtered: 1 account")
@@ -135,6 +157,51 @@ final class IncomeVsSpendingMathsTests: XCTestCase {
     XCTAssertFalse(RegisterReportFilter.include(salary, missingPayee: true, amountFilter: .income, excludePlainTransfers: true))
   }
 
+  /// `No payee` is the API's label for the missing-payee bucket, not a reserved
+  /// name. A real payee called that must still match by id, and a snapshot name
+  /// must still match by name.
+  func testRegisterFilterMatchesARealPayeeNamedNoPayee() throws {
+    let awkward = try transaction(id: "awkward", amount: 9_000, categoryID: "salary", payeeID: "p-no-payee")
+    let anonymous = try transaction(id: "anon", amount: 7_000, categoryID: "salary", payeeID: nil)
+
+    XCTAssertTrue(RegisterReportFilter.include(
+      awkward, payeeID: "p-no-payee", payeeName: "No payee", amountFilter: .income, excludePlainTransfers: true
+    ))
+    XCTAssertFalse(RegisterReportFilter.include(
+      anonymous, payeeID: "p-no-payee", payeeName: "No payee", amountFilter: .income, excludePlainTransfers: true
+    ))
+    XCTAssertTrue(RegisterReportFilter.include(
+      anonymous, payeeName: "No payee", missingPayee: true, amountFilter: .income, excludePlainTransfers: true
+    ))
+    XCTAssertFalse(RegisterReportFilter.include(
+      awkward, payeeName: "No payee", missingPayee: true, amountFilter: .income, excludePlainTransfers: true
+    ))
+  }
+
+  /// The report coalesces a split line's category to the parent's, so a split
+  /// whose lines inherit a real category is not Uncategorised spending.
+  func testRegisterFilterUncategorisedFollowsTheParentCategoryOnSplits() throws {
+    let inheriting = try transaction(
+      id: "split-inherit", amount: -8_000, categoryID: "groceries", payeeID: "market",
+      subtransactions: [["id": "a", "amount": -5_000], ["id": "b", "amount": -3_000]]
+    )
+    let genuinelyUncategorised = try transaction(
+      id: "split-uncat", amount: -8_000, categoryID: nil, payeeID: "market",
+      subtransactions: [["id": "a", "amount": -5_000], ["id": "b", "amount": -3_000, "categoryId": "dining"]]
+    )
+
+    XCTAssertFalse(RegisterReportFilter.include(
+      inheriting, categoryID: CategoryGroup.uncategorisedCategoryID, amountFilter: .spending, excludePlainTransfers: true
+    ))
+    XCTAssertTrue(RegisterReportFilter.include(
+      inheriting, categoryID: "groceries", amountFilter: .spending, excludePlainTransfers: true
+    ))
+    XCTAssertTrue(RegisterReportFilter.include(
+      genuinelyUncategorised, categoryID: CategoryGroup.uncategorisedCategoryID, amountFilter: .spending,
+      excludePlainTransfers: true
+    ))
+  }
+
   private func period(_ key: String, income: Int, spending: Int, net: Int, cumulative: Int) -> IncomeVsSpendingPeriod {
     IncomeVsSpendingPeriod(period: key, income: income, spending: spending, net: net, cumulativeNet: cumulative)
   }
@@ -145,11 +212,18 @@ final class IncomeVsSpendingMathsTests: XCTestCase {
     categoryID: String?,
     payeeID: String?,
     transferAccountID: String? = nil,
-    transferTransactionID: String? = nil
+    transferTransactionID: String? = nil,
+    subtransactions: [[String: Any]] = []
   ) throws -> Transaction {
+    let lines = subtransactions.map { line -> [String: Any] in
+      var line = line
+      line["transactionId"] = id
+      line["deleted"] = line["deleted"] ?? false
+      return line
+    }
     var object: [String: Any] = [
       "id": id, "date": "2026-06-10", "amount": amount, "cleared": "uncleared", "approved": true,
-      "accountId": "cash", "accountName": "Cash", "deleted": false, "subtransactions": [],
+      "accountId": "cash", "accountName": "Cash", "deleted": false, "subtransactions": lines,
     ]
     if let categoryID { object["categoryId"] = categoryID }
     if let payeeID { object["payeeId"] = payeeID }
