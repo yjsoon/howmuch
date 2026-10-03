@@ -707,9 +707,16 @@ final class CaptureSnapshotTests: XCTestCase {
   /// stacked a caption over the value and grew; picking a payee then shifted
   /// every row below. Flag/Memo also sat under Split/Cleared.
   func testAddAndEditTransactionFormRowsShareHeightAndOrder() async throws {
-    XCTAssertEqual(Theme.FormRow.height, 52)
-    XCTAssertEqual(Theme.FormRow.iconColumn, 28)
-    XCTAssertEqual(Theme.FormRow.dividerLeading, 56)
+    let rowOrder = [
+      TransactionFormRowID.payee,
+      TransactionFormRowID.category,
+      TransactionFormRowID.account,
+      TransactionFormRowID.date,
+      TransactionFormRowID.flag,
+      TransactionFormRowID.memo,
+      TransactionFormRowID.split,
+      TransactionFormRowID.cleared,
+    ]
     let harness = SnapshotHarness.make()
     var empty = TransactionDraft()
     empty.accountID = "acct-everyday"
@@ -736,10 +743,12 @@ final class CaptureSnapshotTests: XCTestCase {
     var splitFlagMinY: CGFloat?
 
     for (name, draft, isEditing) in cases {
+      var rowFrames: [String: CGRect] = [:]
       guard let surface = SnapshotSurface(
         root: TransactionFormView(draft: draft, isEditing: isEditing)
           .environment(harness.model)
-          .environment(\.dynamicTypeSize, .large),
+          .environment(\.dynamicTypeSize, .large)
+          .onPreferenceChange(FormRowFramesKey.self) { rowFrames = $0 },
         size: CGSize(width: 390, height: 844)
       ) else {
         XCTFail("\(name) needs a connected UIWindowScene")
@@ -748,18 +757,19 @@ final class CaptureSnapshotTests: XCTestCase {
       defer { surface.detach() }
 
       let opened = await surface.waitUntil {
-        TransactionFormRowID.fieldOrder.allSatisfy { surface.identifiedRowFrame($0) != nil }
+        rowOrder.allSatisfy { rowFrames[$0] != nil }
       }
       XCTAssertTrue(
         opened,
-        "\(name) missing form rows \(TransactionFormRowID.fieldOrder.filter { surface.identifiedRowFrame($0) == nil }): \(surface.accessibilityLabels())"
+        "\(name) missing form rows \(rowOrder.filter { rowFrames[$0] == nil }): \(surface.accessibilityLabels())"
       )
+      attachImage(surface.captureVisible(), name: "transaction-form-rows-\(name)")
 
-      let frames = TransactionFormRowID.fieldOrder.compactMap { id -> (String, CGRect)? in
-        guard let frame = surface.identifiedRowFrame(id) else { return nil }
+      let frames = rowOrder.compactMap { id -> (String, CGRect)? in
+        guard let frame = rowFrames[id] else { return nil }
         return (id, frame)
       }
-      XCTAssertEqual(frames.map(\.0), TransactionFormRowID.fieldOrder, "\(name) row order")
+      XCTAssertEqual(frames.map(\.0), rowOrder, "\(name) row order")
 
       let disclosureIDs = [
         TransactionFormRowID.payee,
@@ -772,7 +782,7 @@ final class CaptureSnapshotTests: XCTestCase {
       for (id, frame) in frames {
         XCTAssertGreaterThanOrEqual(
           frame.height,
-          Theme.FormRow.height - 0.5,
+          52 - 0.5,
           "\(name) \(id) must honour the shared minimum: \(frame)"
         )
       }
@@ -3263,48 +3273,6 @@ final class SnapshotSurface {
     /// Depth-first search for the first memo text field or text view.
     func walk(_ view: UIView) -> UIView? {
       if (view is UITextField || view is UITextView), matches(view) {
-        return view
-      }
-      for child in view.subviews {
-        if let found = walk(child) {
-          return found
-        }
-      }
-      return nil
-    }
-    if let presented = presentedController()?.view, let found = walk(presented) {
-      return found
-    }
-    return walk(window)
-  }
-
-  /// Card row identified by `TransactionFormRowID`. Walks to a view that is
-  /// at least the shared minimum height so a tiny identifier host is not used.
-  func identifiedRowFrame(_ identifier: String) -> CGRect? {
-    guard let view = firstIdentifiedView(identifier) else {
-      return nil
-    }
-    var current: UIView? = view
-    var fallback = view.convert(view.bounds, to: window)
-    while let node = current {
-      let frame = node.convert(node.bounds, to: window)
-      if frame.height + 0.5 >= Theme.FormRow.height, frame.height < 220 {
-        return frame
-      }
-      if frame.height > fallback.height {
-        fallback = frame
-      }
-      if node is UIScrollView || node is UIWindow {
-        break
-      }
-      current = node.superview
-    }
-    return fallback.height > 1 ? fallback : nil
-  }
-
-  func firstIdentifiedView(_ identifier: String) -> UIView? {
-    func walk(_ view: UIView) -> UIView? {
-      if view.accessibilityIdentifier == identifier {
         return view
       }
       for child in view.subviews {

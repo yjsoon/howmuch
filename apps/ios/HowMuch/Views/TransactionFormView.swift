@@ -155,8 +155,6 @@ enum TransactionFormRowID {
   static let memo = "transaction-form.row.memo"
   static let split = "transaction-form.row.split"
   static let cleared = "transaction-form.row.cleared"
-
-  static let fieldOrder = [payee, category, account, date, flag, memo, split, cleared]
 }
 
 struct TransactionFormView: View {

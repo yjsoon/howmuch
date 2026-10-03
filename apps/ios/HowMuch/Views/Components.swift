@@ -60,11 +60,32 @@ private struct OptionalAccessibilityIdentifier: ViewModifier {
   func body(content: Content) -> some View {
     if let identifier, !identifier.isEmpty {
       content.accessibilityIdentifier(identifier)
+#if DEBUG
+        .background {
+          GeometryReader { geometry in
+            Color.clear
+              .preference(key: FormRowFramesKey.self, value: [identifier: geometry.frame(in: .global)])
+          }
+          .accessibilityHidden(true)
+        }
+#endif
     } else {
       content
     }
   }
 }
+
+#if DEBUG
+/// Observe the padded SwiftUI row itself, not a native control or an ancestor
+/// selected by the minimum height the snapshot test is supposed to verify.
+struct FormRowFramesKey: PreferenceKey {
+  static var defaultValue: [String: CGRect] { [:] }
+
+  static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+    value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+  }
+}
+#endif
 
 /// Form row with a leading icon. Empty rows show a single-line placeholder;
 /// filled rows put the field label on the left and the value on the right.
