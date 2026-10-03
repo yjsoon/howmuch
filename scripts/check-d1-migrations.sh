@@ -9,6 +9,7 @@
 #
 # Arguments are passed to `wrangler d1 execute DB`. Authentication comes from
 # the environment (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID) or --profile.
+# CI maps the separate CLOUDFLARE_D1_READ_TOKEN secret to CLOUDFLARE_API_TOKEN.
 #
 # Read-only: it runs one SELECT on the d1_migrations table. It deliberately
 # avoids `wrangler d1 migrations list`, which exits 0 whether or not
@@ -59,7 +60,7 @@ set -e
 if [ "$status" -ne 0 ]; then
   printf '%s\n' "$output" >&2
   cat "$err_file" >&2
-  fail "could not read d1_migrations (wrangler exit $status). If the error above is an authentication or permission error, the CLOUDFLARE_API_TOKEN secret probably lacks Account > D1 > Read; see 'CI deploy token' in docs/deployment.md. If it is 'no such table: d1_migrations', the database has never been migrated or the binding points at the wrong database."
+  fail "could not read d1_migrations (wrangler exit $status). If the error above is an authentication or permission error, verify the token has Account > D1 > Read (CI uses the CLOUDFLARE_D1_READ_TOKEN secret); see 'CI migration-check token' in docs/deployment.md. If it is 'no such table: d1_migrations', the database has never been migrated or the binding points at the wrong database."
 fi
 
 applied="$(jq -r '.[0].results | if type == "array" then .[].name else error("no results array") end' <<<"$output")" ||
