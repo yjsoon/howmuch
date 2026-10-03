@@ -42,6 +42,15 @@ enum IncomeVsSpendingMaths {
     calendar.monthSymbols[calendar.component(.month, from: date) - 1]
   }
 
+  /// The register / groups window behind one period row. The row's bounds were
+  /// already cut to the report window that produced its figures, so the
+  /// drill-down covers the whole row: clamping it to today would drop
+  /// future-dated activity the row counts, and would trap on a period that
+  /// starts after today.
+  static func drillDownRange(_ row: PeriodRow) -> ClosedRange<String> {
+    row.from ... max(row.from, row.to)
+  }
+
   static func savingsRateLabel(net: Int, income: Int) -> String {
     guard income > 0 else {
       return "—"
