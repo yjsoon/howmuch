@@ -910,6 +910,7 @@ describe("D1 foundation", () => {
     expect(await actual.spendingBreakdown("p")).toEqual(expected.spendingBreakdown("p"));
     expect(await actual.incomeVsSpending("p")).toEqual(expected.incomeVsSpending("p"));
     expect(await actual.incomeVsSpending("p", { interval: "week" })).toEqual(expected.incomeVsSpending("p", { interval: "week" }));
+    expect(await actual.incomeVsSpendingGroups("p")).toEqual(expected.incomeVsSpendingGroups("p"));
     expect(await actual.netWorth("p", { from: "2026-01-01", to: "2026-01-31" })).toEqual(expected.netWorth("p", { from: "2026-01-01", to: "2026-01-31" }));
     expect(await actual.ageOfMoney("p", { from: "2026-01-01", to: "2026-01-31" })).toEqual(expected.ageOfMoney("p", { from: "2026-01-01", to: "2026-01-31" }));
   });

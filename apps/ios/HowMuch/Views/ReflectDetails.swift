@@ -907,19 +907,32 @@ struct IncomeVsSpendingDetailView: View {
   @State private var fetchGate = ReportFetchGate()
 
   var body: some View {
+    let filled = report.map { displayRows(report: $0) } ?? []
+    let sections = IncomeVsSpendingMaths.yearSections(rows: filled)
+    let showYears = Set(sections.map(\.year)).count > 1
     ScrollView {
-      VStack(alignment: .leading, spacing: 16) {
+      LazyVStack(alignment: .leading, spacing: 16, pinnedViews: showYears ? [.sectionHeaders] : []) {
         ReportFilterBar(
           range: $range,
           interval: $interval,
-          intervalChoices: [.week, .month, .year],
+          intervalChoices: [.day, .week, .month, .year],
           scope: $scope,
           showsCategories: true
         )
 
         if let report, !report.periods.isEmpty {
           totalsCard(report: report)
-          periodsCard(report: report)
+          if showYears {
+            ForEach(sections) { section in
+              Section {
+                periodList(section.rows, allRows: filled)
+              } header: {
+                yearHeader(section)
+              }
+            }
+          } else {
+            periodList(filled, allRows: filled)
+          }
         } else if report != nil, phase != .loading {
           ReflectMaths.emptyRange(title: "No Income or Spending", systemImage: "chart.bar")
         } else {
@@ -950,7 +963,7 @@ struct IncomeVsSpendingDetailView: View {
         Spacer()
         statColumn("Spending", MoneyCodec.displayString(for: spending, currencyFormat: model.currencyFormat), colour: Theme.outflow)
         Spacer()
-        statColumn("Net", MoneyCodec.signedDisplayString(for: net, currencyFormat: model.currencyFormat), colour: Theme.amountColour(net))
+        statColumn("Net", MoneyCodec.signedDisplayString(for: net, currencyFormat: model.currencyFormat), colour: Theme.signedReportColour(net))
         Spacer()
         statColumn("Savings Rate", savingsRate(net: net, income: income), colour: Theme.amountColour(net))
       }
@@ -969,31 +982,78 @@ struct IncomeVsSpendingDetailView: View {
     .ynabCard()
   }
 
-  private func periodsCard(report: IncomeVsSpendingReport) -> some View {
+  private func displayRows(report: IncomeVsSpendingReport) -> [IncomeVsSpendingMaths.PeriodRow] {
+    Array(
+      IncomeVsSpendingMaths.zeroFill(
+        periods: report.periods,
+        interval: interval,
+        from: range.fromISO,
+        to: range.toISO
+      ).reversed()
+    )
+  }
+
+  private func yearHeader(_ section: IncomeVsSpendingMaths.YearSection) -> some View {
+    HStack {
+      Text(section.year)
+      Spacer()
+      Text("Net \(MoneyCodec.signedDisplayString(for: section.net, currencyFormat: model.currencyFormat))")
+        .foregroundStyle(Theme.signedReportColour(section.net))
+        .monospacedDigit()
+    }
+    .font(.footnote.weight(.semibold))
+    .foregroundStyle(Theme.textPrimary)
+    .padding(.horizontal, 4)
+    .padding(.vertical, 6)
+    .background(Theme.canvas)
+  }
+
+  private func periodList(_ rows: [IncomeVsSpendingMaths.PeriodRow], allRows: [IncomeVsSpendingMaths.PeriodRow]) -> some View {
     VStack(spacing: 0) {
-      ForEach(report.periods.reversed().enumerated(), id: \.element.id) { index, period in
-        VStack(alignment: .leading, spacing: 6) {
-          Text(LedgerDate.periodLabel(period.period))
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Theme.textPrimary)
-          HStack {
-            amountColumn("Income", MoneyCodec.displayString(for: period.income, currencyFormat: model.currencyFormat), colour: Theme.inflow)
-            Spacer()
-            amountColumn("Spending", MoneyCodec.displayString(for: abs(period.spending), currencyFormat: model.currencyFormat), colour: Theme.outflow)
-            Spacer()
-            amountColumn("Net", MoneyCodec.signedDisplayString(for: period.net, currencyFormat: model.currencyFormat), colour: Theme.amountColour(period.net))
-            Spacer()
-            amountColumn("Cumulative", MoneyCodec.signedDisplayString(for: period.cumulativeNet, currencyFormat: model.currencyFormat), colour: .secondary)
-          }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 11)
-        if index < report.periods.count - 1 {
-          Divider().padding(.leading, 16)
+      ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+        periodRow(row, allRows: allRows)
+        if index < rows.count - 1 {
+          Divider()
         }
       }
     }
     .ynabCard()
+  }
+
+  @ViewBuilder
+  private func periodRow(_ row: IncomeVsSpendingMaths.PeriodRow, allRows: [IncomeVsSpendingMaths.PeriodRow]) -> some View {
+    if row.isEmpty {
+      emptyPeriodRow(row)
+    } else {
+      IncomeVsSpendingPeriodRow(
+        row: row,
+        interval: interval,
+        allRows: allRows,
+        scope: scope,
+        currencyFormat: model.currencyFormat
+      )
+    }
+  }
+
+  private func emptyPeriodRow(_ row: IncomeVsSpendingMaths.PeriodRow) -> some View {
+    let today = Date.now.isoDateString
+    let current = IncomeVsSpendingMaths.isCurrentPeriod(row.period, interval: interval, today: today)
+    return HStack {
+      Text(periodTitle(row.period, current: current))
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(.secondary)
+      Spacer()
+      Text("No activity")
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 10)
+  }
+
+  private func periodTitle(_ period: String, current: Bool) -> String {
+    let label = LedgerDate.periodLabel(period)
+    return current ? "\(label) · so far" : label
   }
 
   /// Net over income for the range, as on the web ("−12.3%" when overspent).
@@ -1015,18 +1075,6 @@ struct IncomeVsSpendingDetailView: View {
         .foregroundStyle(colour)
         .lineLimit(1)
         .minimumScaleFactor(0.8)
-    }
-  }
-
-  private func amountColumn(_ label: String, _ value: String, colour: Color) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text(label)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-      Text(value)
-        .font(.footnote.weight(.medium))
-        .monospacedDigit()
-        .foregroundStyle(colour)
     }
   }
 

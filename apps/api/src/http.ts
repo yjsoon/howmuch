@@ -728,6 +728,9 @@ async function handleNative(
     if (segments[2] === "income-vs-spending") {
       return json({ data: await reports.incomeVsSpending(planId, filters) });
     }
+    if (segments[2] === "income-vs-spending-groups") {
+      return json({ data: await reports.incomeVsSpendingGroups(planId, filters) });
+    }
     if (segments[2] === "net-worth") {
       return json({ data: await reports.netWorth(planId, filters) });
     }

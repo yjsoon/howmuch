@@ -1935,6 +1935,79 @@ struct IncomeVsSpendingPeriod: Codable, Identifiable {
   let cumulativeNet: Int
 }
 
+struct IncomeVsSpendingGroupsReport: Codable {
+  let income: Int
+  let spending: Int
+  let net: Int
+  let incomeByPayee: [IncomeVsSpendingPayeeGroup]
+  let incomeByCategory: [IncomeVsSpendingCategoryGroup]
+  let spendingByCategory: [IncomeVsSpendingSpendingGroup]
+}
+
+struct IncomeVsSpendingPayeeGroup: Codable, Identifiable {
+  var id: String { payeeID ?? "no-payee:\(payeeName)" }
+
+  let payeeID: String?
+  let payeeName: String
+  let amount: Int
+  let share: Double
+  let transactionCount: Int
+  let categoryID: String?
+  let categoryName: String
+  let categoryCount: Int
+
+  private enum CodingKeys: String, CodingKey {
+    case payeeID = "payeeId"
+    case payeeName
+    case amount
+    case share
+    case transactionCount
+    case categoryID = "categoryId"
+    case categoryName
+    case categoryCount
+  }
+}
+
+struct IncomeVsSpendingCategoryGroup: Codable, Identifiable {
+  var id: String { categoryID }
+
+  let categoryID: String
+  let categoryName: String
+  let amount: Int
+  let share: Double
+  let transactionCount: Int
+
+  private enum CodingKeys: String, CodingKey {
+    case categoryID = "categoryId"
+    case categoryName
+    case amount
+    case share
+    case transactionCount
+  }
+}
+
+struct IncomeVsSpendingSpendingGroup: Codable, Identifiable {
+  var id: String { categoryID }
+
+  let categoryID: String
+  let categoryName: String
+  let categoryGroupID: String
+  let categoryGroupName: String
+  let amount: Int
+  let share: Double
+  let transactionCount: Int
+
+  private enum CodingKeys: String, CodingKey {
+    case categoryID = "categoryId"
+    case categoryName
+    case categoryGroupID = "categoryGroupId"
+    case categoryGroupName
+    case amount
+    case share
+    case transactionCount
+  }
+}
+
 struct NetWorthReport: Codable {
   let periods: [NetWorthPeriod]
 }
@@ -3324,6 +3397,7 @@ enum ReportPreset: String, CaseIterable, Identifiable {
 }
 
 enum ReportInterval: String, CaseIterable, Identifiable {
+  case day
   case week
   case month
   case year
@@ -3332,6 +3406,8 @@ enum ReportInterval: String, CaseIterable, Identifiable {
 
   var title: String {
     switch self {
+    case .day:
+      return "By day"
     case .week:
       return "By week"
     case .month:

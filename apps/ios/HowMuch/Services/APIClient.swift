@@ -440,6 +440,19 @@ struct APIClient {
     )
   }
 
+  func fetchIncomeVsSpendingGroups(
+    planID: String,
+    from: String?,
+    to: String?,
+    accountIDs: [String] = [],
+    categoryIDs: [String] = []
+  ) async throws -> IncomeVsSpendingGroupsReport {
+    try await report(
+      path: "/api/reports/income-vs-spending-groups", planID: planID, from: from, to: to,
+      interval: nil, accountIDs: accountIDs, categoryIDs: categoryIDs
+    )
+  }
+
   func fetchNetWorth(
     planID: String,
     from: String?,

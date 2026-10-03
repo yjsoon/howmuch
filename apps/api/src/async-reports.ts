@@ -4,6 +4,7 @@ import {
   monthOf,
 } from "./account-month-balances";
 import type { AsyncSqlDatabase } from "./async-sql";
+import { assembleIncomeVsSpendingGroups } from "./income-vs-spending-groups";
 import { buildRewardsReport } from "./rewards/build";
 import { parseAppSettings, parseCreditCards, parseRewardGroupBy } from "./rewards/parse";
 import { mapRewardTransactionRow } from "./rewards/rows";
@@ -97,6 +98,78 @@ export class AsyncReportService {
         return { period: row.period, income, spending, net, cumulative_net: cumulativeNet };
       }),
     };
+  }
+
+  /**
+   * Per-window income/spending groups using the same line-item rules as
+   * `incomeVsSpending`: sign-based, plain transfers out, categorised
+   * transfers in, split lines as lines, no quiet-group exclusion.
+   */
+  async incomeVsSpendingGroups(planId: string, filters: ReportFilters = {}): Promise<any> {
+    const { linesSql, where, params } = this.lineFilters(planId, filters);
+    const totals = await this.db.get<Row>(
+      `WITH lines AS (${linesSql})
+       SELECT
+         SUM(CASE WHEN lines.amount_milli > 0 THEN lines.amount_milli ELSE 0 END) AS income,
+         SUM(CASE WHEN lines.amount_milli < 0 THEN ABS(lines.amount_milli) ELSE 0 END) AS spending
+       FROM lines
+       WHERE ${where}`,
+      params,
+    );
+    const incomeByPayee = await this.db.all<Row>(
+      `WITH lines AS (${linesSql})
+       SELECT
+         lines.payee_id AS payee_id,
+         COALESCE(p.name, lines.payee_name_snapshot, 'No payee') AS payee_name,
+         SUM(lines.amount_milli) AS amount,
+         COUNT(*) AS transaction_count,
+         COUNT(DISTINCT COALESCE(c.id, 'uncategorised')) AS category_count,
+         MIN(COALESCE(c.id, 'uncategorised')) AS category_id,
+         MIN(COALESCE(c.name, 'Uncategorised')) AS category_name
+       FROM lines
+       LEFT JOIN payees p ON p.id = lines.payee_id
+       LEFT JOIN categories c ON c.id = lines.category_id
+       WHERE ${where} AND lines.amount_milli > 0
+       GROUP BY 1, 2`,
+      params,
+    );
+    const incomeByCategory = await this.db.all<Row>(
+      `WITH lines AS (${linesSql})
+       SELECT
+         COALESCE(c.id, 'uncategorised') AS category_id,
+         COALESCE(c.name, 'Uncategorised') AS category_name,
+         SUM(lines.amount_milli) AS amount,
+         COUNT(*) AS transaction_count
+       FROM lines
+       LEFT JOIN categories c ON c.id = lines.category_id
+       WHERE ${where} AND lines.amount_milli > 0
+       GROUP BY 1, 2`,
+      params,
+    );
+    const spendingByCategory = await this.db.all<Row>(
+      `WITH lines AS (${linesSql})
+       SELECT
+         COALESCE(c.id, 'uncategorised') AS category_id,
+         COALESCE(c.name, 'Uncategorised') AS category_name,
+         COALESCE(cg.id, 'uncategorised-group') AS category_group_id,
+         COALESCE(cg.name, 'Uncategorised') AS category_group_name,
+         SUM(ABS(lines.amount_milli)) AS amount,
+         COUNT(*) AS transaction_count
+       FROM lines
+       LEFT JOIN categories c ON c.id = lines.category_id
+       LEFT JOIN category_groups cg ON cg.id = c.category_group_id
+       WHERE ${where} AND lines.amount_milli < 0
+       GROUP BY 1, 2, 3, 4`,
+      params,
+    );
+
+    return assembleIncomeVsSpendingGroups({
+      income: Number(totals?.income ?? 0),
+      spending: Number(totals?.spending ?? 0),
+      incomeByPayee,
+      incomeByCategory,
+      spendingByCategory,
+    });
   }
 
   async netWorth(planId: string, filters: ReportFilters = {}): Promise<any> {

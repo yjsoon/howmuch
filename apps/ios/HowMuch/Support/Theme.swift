@@ -88,6 +88,17 @@ enum Theme {
     milliunits < 0 ? outflow : inflow
   }
 
+  /// Report nets: zero is secondary, never green.
+  static func signedReportColour(_ milliunits: Int) -> Color {
+    milliunits == 0 ? Color.secondary : amountColour(milliunits)
+  }
+
+  /// Inflow tints for income share bars so they never look like spending.
+  static func inflowChartColour(_ index: Int) -> Color {
+    let steps: [Double] = [1, 0.82, 0.66, 0.52, 0.4, 0.3]
+    return inflow.opacity(steps[index % steps.count])
+  }
+
   static func flagColour(named name: String?) -> Color? {
     switch name {
     case "red": .red

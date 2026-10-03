@@ -588,6 +588,8 @@ private final class NarrowRefreshProtocol: URLProtocol {
       return #"{"data":{"total":0,"groups":[]}}"#
     case "/api/reports/income-vs-spending":
       return #"{"data":{"interval":"month","periods":[]}}"#
+    case "/api/reports/income-vs-spending-groups":
+      return #"{"data":{"income":0,"spending":0,"net":0,"income_by_payee":[],"income_by_category":[],"spending_by_category":[]}}"#
     case "/api/reports/net-worth":
       return #"{"data":{"periods":[]}}"#
     case "/api/reports/age-of-money":
