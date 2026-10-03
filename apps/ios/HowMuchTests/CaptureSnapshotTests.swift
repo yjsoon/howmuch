@@ -668,10 +668,11 @@ final class CaptureSnapshotTests: XCTestCase {
       "blank Add Transaction must show CalculatorKeypad: \(surface.accessibilityLabels())"
     )
 
+    let revealed = await revealControl(on: surface, label: "Enter a memo…", requireTimelineVisible: true)
+    XCTAssertNotNil(revealed, "memo must be visible above the calculator before focusing")
+    await surface.settleVisible()
     let memo = try XCTUnwrap(
-      surface.memoTextInput()
-        ?? surface.firstControl(label: "Enter a memo…")?.object as? UIView
-        ?? surface.firstControl(labelContains: "memo")?.object as? UIView,
+      surface.memoTextInput(),
       "memo field missing: \(surface.accessibilityLabels())"
     )
     if !SnapshotSurface.activate(memo) {
@@ -685,6 +686,7 @@ final class CaptureSnapshotTests: XCTestCase {
       hidden,
       "memo focus must hide CalculatorKeypad: \(surface.accessibilityLabels())"
     )
+    attachImage(surface.captureVisible(), name: "transaction-memo-keyboard")
 
     let amount = try XCTUnwrap(
       surface.firstControl(labelContains: "0.00")
@@ -3263,12 +3265,16 @@ final class SnapshotSurface {
 
   /// Finds the Add Transaction memo field in the hosted window or a presented sheet.
   func memoTextInput() -> UIView? {
-    /// True when a text control's placeholder or accessibility label names memo.
+    /// A vertical SwiftUI TextField puts its placeholder in a child UILabel,
+    /// not UITextView.accessibilityLabel. Return the input, never that label.
     func matches(_ view: UIView) -> Bool {
       let placeholder = (view as? UITextField)?.placeholder ?? ""
       let label = view.accessibilityLabel ?? ""
+      let text = (view as? UILabel)?.text ?? ""
       return placeholder.localizedStandardContains("memo")
         || label.localizedStandardContains("memo")
+        || text.localizedStandardContains("memo")
+        || view.subviews.contains(where: matches)
     }
     /// Depth-first search for the first memo text field or text view.
     func walk(_ view: UIView) -> UIView? {
