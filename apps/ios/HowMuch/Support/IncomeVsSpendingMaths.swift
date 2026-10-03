@@ -46,7 +46,11 @@ enum IncomeVsSpendingMaths {
     guard income > 0 else {
       return "—"
     }
-    return (Double(net) / Double(income)).formatted(.percent.precision(.fractionLength(1)))
+    let rate = Double(net) / Double(income)
+    if rate < -1 {
+      return "—"
+    }
+    return rate.formatted(.percent.precision(.fractionLength(1)))
   }
 
   static func zeroFill(

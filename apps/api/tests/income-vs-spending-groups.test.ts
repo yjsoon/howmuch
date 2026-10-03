@@ -192,6 +192,39 @@ describe("income vs spending groups", () => {
     });
   }
 
+  test("authenticated groups route is mounted; missing names 404; bad token 401", async () => {
+    const harness = await nativeHarness("SQLite");
+    harnesses.push(harness);
+
+    const groups = await harness.request(
+      `/api/reports/income-vs-spending-groups?plan_id=${PLAN}&from=2026-01-01&to=2026-01-31`,
+    );
+    expect(groups.status).toBe(200);
+    expect(Object.keys((await groups.json()).data).sort()).toEqual([
+      "income",
+      "income_by_category",
+      "income_by_payee",
+      "net",
+      "spending",
+      "spending_by_category",
+    ]);
+
+    const missing = await harness.request(`/api/reports/income-vs-spending-groupz?plan_id=${PLAN}`);
+    expect(missing.status).toBe(404);
+    expect((await missing.json()).error.detail).toBe("Route not found");
+
+    const unauth = await harness.request(
+      `/api/reports/income-vs-spending-groups?plan_id=${PLAN}`,
+      { token: "nope" },
+    );
+    expect(unauth.status).toBe(401);
+    expect((await unauth.json()).error).toEqual({
+      id: "401",
+      name: "not_authorized",
+      detail: "Invalid credentials",
+    });
+  });
+
   test("SQLite service matches the HTTP envelope for an empty window", async () => {
     const harness = await nativeHarness("SQLite");
     harnesses.push(harness);

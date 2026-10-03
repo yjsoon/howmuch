@@ -956,6 +956,7 @@ struct IncomeVsSpendingDetailView: View {
     let income = report.periods.reduce(0) { $0 + $1.income }
     let spending = report.periods.reduce(0) { $0 + abs($1.spending) }
     let net = income - spending
+    let saved = IncomeVsSpendingMaths.savingsRateLabel(net: net, income: income)
 
     return VStack(spacing: 12) {
       HStack {
@@ -965,7 +966,7 @@ struct IncomeVsSpendingDetailView: View {
         Spacer()
         statColumn("Net", MoneyCodec.signedDisplayString(for: net, currencyFormat: model.currencyFormat), colour: Theme.signedReportColour(net))
         Spacer()
-        statColumn("Savings Rate", savingsRate(net: net, income: income), colour: Theme.amountColour(net))
+        statColumn("Savings Rate", saved, colour: saved == "—" ? .secondary : Theme.amountColour(net))
       }
 
       PairedColumnChart(
@@ -1054,14 +1055,6 @@ struct IncomeVsSpendingDetailView: View {
   private func periodTitle(_ period: String, current: Bool) -> String {
     let label = LedgerDate.periodLabel(period)
     return current ? "\(label) · so far" : label
-  }
-
-  /// Net over income for the range, as on the web ("−12.3%" when overspent).
-  private func savingsRate(net: Int, income: Int) -> String {
-    guard income > 0 else {
-      return "—"
-    }
-    return (Double(net) / Double(income)).formatted(.percent.precision(.fractionLength(1)))
   }
 
   private func statColumn(_ label: String, _ value: String, colour: Color) -> some View {

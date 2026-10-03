@@ -236,7 +236,7 @@ struct IncomeVsSpendingPeriodDetailView: View {
         Spacer()
         headerStat("Net", MoneyCodec.signedDisplayString(for: selected.net, currencyFormat: model.currencyFormat), colour: Theme.signedReportColour(selected.net))
         Spacer()
-        headerStat("Saved", saved, colour: selected.income == 0 ? .secondary : Theme.signedReportColour(selected.net))
+        headerStat("Saved", saved, colour: saved == "—" ? .secondary : Theme.signedReportColour(selected.net))
       }
       if current {
         Text(IncomeVsSpendingMaths.inProgressCaption(from: selected.from, to: min(selected.to, today)))

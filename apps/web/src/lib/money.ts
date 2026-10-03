@@ -60,3 +60,15 @@ export function formatAmount(milliunits: number): string {
 export function formatShare(share: number): string {
   return `${(share * 100).toFixed(1)}%`;
 }
+
+/** Net over income. Zero income or a rate below -100% is an em dash. */
+export function formatSavingsRate(net: number, income: number): string {
+  if (income <= 0) {
+    return "—";
+  }
+  const rate = net / income;
+  if (rate < -1) {
+    return "—";
+  }
+  return `${rate < 0 ? "−" : ""}${((Math.abs(net) / income) * 100).toFixed(1)}%`;
+}
