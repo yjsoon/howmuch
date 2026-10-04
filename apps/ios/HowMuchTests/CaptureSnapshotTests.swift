@@ -668,10 +668,11 @@ final class CaptureSnapshotTests: XCTestCase {
       "blank Add Transaction must show CalculatorKeypad: \(surface.accessibilityLabels())"
     )
 
+    let revealed = await revealControl(on: surface, label: "Enter a memo…", requireTimelineVisible: true)
+    XCTAssertNotNil(revealed, "memo must be visible above the calculator before focusing")
+    await surface.settleVisible()
     let memo = try XCTUnwrap(
-      surface.memoTextInput()
-        ?? surface.firstControl(label: "Enter a memo…")?.object as? UIView
-        ?? surface.firstControl(labelContains: "memo")?.object as? UIView,
+      surface.memoTextInput(),
       "memo field missing: \(surface.accessibilityLabels())"
     )
     if !SnapshotSurface.activate(memo) {
@@ -685,6 +686,7 @@ final class CaptureSnapshotTests: XCTestCase {
       hidden,
       "memo focus must hide CalculatorKeypad: \(surface.accessibilityLabels())"
     )
+    attachImage(surface.captureVisible(), name: "transaction-memo-keyboard")
 
     let amount = try XCTUnwrap(
       surface.firstControl(labelContains: "0.00")
@@ -692,7 +694,9 @@ final class CaptureSnapshotTests: XCTestCase {
       "amount header missing: \(surface.accessibilityLabels())"
     )
     XCTAssertTrue(surface.activate(amount))
-    let restored = await surface.waitUntil { surface.calculatorKeypadDigitOne() != nil }
+    let restored = await surface.waitUntil {
+      surface.calculatorKeypadDigitOne() != nil && !memo.isFirstResponder
+    }
     XCTAssertTrue(
       restored,
       "amount focus must restore CalculatorKeypad: \(surface.accessibilityLabels())"
@@ -701,6 +705,130 @@ final class CaptureSnapshotTests: XCTestCase {
       memo.isFirstResponder,
       "amount focus must resign the memo field so the keyboards do not overlap"
     )
+  }
+
+  /// Empty payee/category used to be a short single line while Account/Date
+  /// stacked a caption over the value and grew; picking a payee then shifted
+  /// every row below. Flag/Memo also sat under Split/Cleared.
+  func testAddAndEditTransactionFormRowsShareHeightAndOrder() async throws {
+    let rowOrder = [
+      TransactionFormRowID.payee,
+      TransactionFormRowID.category,
+      TransactionFormRowID.account,
+      TransactionFormRowID.date,
+      TransactionFormRowID.flag,
+      TransactionFormRowID.memo,
+      TransactionFormRowID.split,
+      TransactionFormRowID.cleared,
+    ]
+    let harness = SnapshotHarness.make()
+    var empty = TransactionDraft()
+    empty.accountID = "acct-everyday"
+    empty.amountMagnitudeMilli = 10_000
+    var filled = empty
+    filled.payeeName = "Lunch Shop"
+    filled.categoryID = "cat-groceries"
+    filled.flag = .red
+    filled.memo = "Office lunch"
+    var split = empty
+    split.enableSplit()
+    var editing = filled
+    editing.id = "txn-edit-rows"
+    editing.wasReconciled = true
+
+    let cases: [(String, TransactionDraft, Bool)] = [
+      ("add-empty", empty, false),
+      ("add-filled", filled, false),
+      ("add-split", split, false),
+      ("edit-filled", editing, true),
+    ]
+    var emptyPayeeHeight: CGFloat?
+    var emptyFlagMinY: CGFloat?
+    var splitFlagMinY: CGFloat?
+
+    for (name, draft, isEditing) in cases {
+      var rowFrames: [String: CGRect] = [:]
+      guard let surface = SnapshotSurface(
+        root: TransactionFormView(draft: draft, isEditing: isEditing)
+          .environment(harness.model)
+          .environment(\.dynamicTypeSize, .large)
+          .onPreferenceChange(FormRowFramesKey.self) { rowFrames = $0 },
+        size: CGSize(width: 390, height: 844)
+      ) else {
+        XCTFail("\(name) needs a connected UIWindowScene")
+        continue
+      }
+      defer { surface.detach() }
+
+      let opened = await surface.waitUntil {
+        rowOrder.allSatisfy { rowFrames[$0] != nil }
+      }
+      XCTAssertTrue(
+        opened,
+        "\(name) missing form rows \(rowOrder.filter { rowFrames[$0] == nil }): \(surface.accessibilityLabels())"
+      )
+      attachImage(surface.captureVisible(), name: "transaction-form-rows-\(name)")
+
+      let frames = rowOrder.compactMap { id -> (String, CGRect)? in
+        guard let frame = rowFrames[id] else { return nil }
+        return (id, frame)
+      }
+      XCTAssertEqual(frames.map(\.0), rowOrder, "\(name) row order")
+
+      let disclosureIDs = [
+        TransactionFormRowID.payee,
+        TransactionFormRowID.category,
+        TransactionFormRowID.account,
+        TransactionFormRowID.date,
+      ]
+      let disclosureHeights = frames.filter { disclosureIDs.contains($0.0) }.map(\.1.height)
+      XCTAssertFalse(frames.isEmpty, "\(name) must expose row frames")
+      for (id, frame) in frames {
+        XCTAssertGreaterThanOrEqual(
+          frame.height,
+          52 - 0.5,
+          "\(name) \(id) must honour the shared minimum: \(frame)"
+        )
+      }
+      XCTAssertLessThan(
+        (disclosureHeights.max() ?? 0) - (disclosureHeights.min() ?? 0),
+        0.5,
+        "\(name) Payee/Category/Account/Date must share one height empty or filled: \(frames)"
+      )
+
+      for pair in zip(frames, frames.dropFirst()) {
+        XCTAssertLessThan(
+          pair.0.1.maxY - 0.5,
+          pair.1.1.minY,
+          "\(name) \(pair.1.0) must sit below \(pair.0.0): \(pair.0.1) \(pair.1.1)"
+        )
+      }
+
+      if name == "add-empty" {
+        emptyPayeeHeight = frames.first { $0.0 == TransactionFormRowID.payee }?.1.height
+        emptyFlagMinY = frames.first { $0.0 == TransactionFormRowID.flag }?.1.minY
+      }
+      if name == "add-filled", let emptyPayeeHeight {
+        let filledPayee = try XCTUnwrap(frames.first { $0.0 == TransactionFormRowID.payee }?.1.height)
+        XCTAssertEqual(
+          filledPayee,
+          emptyPayeeHeight,
+          accuracy: 0.5,
+          "\(name) payee row must not grow once a payee is chosen"
+        )
+      }
+      if name == "add-split" {
+        splitFlagMinY = frames.first { $0.0 == TransactionFormRowID.flag }?.1.minY
+        if let emptyFlagMinY, let splitFlagMinY {
+          XCTAssertEqual(
+            splitFlagMinY,
+            emptyFlagMinY,
+            accuracy: 0.5,
+            "split expansion must not move Flag/Memo, which sit above Split"
+          )
+        }
+      }
+    }
   }
 
   func testManualShortcutTransferRequiresDistinctInheritedSource() async throws {
@@ -3139,12 +3267,16 @@ final class SnapshotSurface {
 
   /// Finds the Add Transaction memo field in the hosted window or a presented sheet.
   func memoTextInput() -> UIView? {
-    /// True when a text control's placeholder or accessibility label names memo.
+    /// A vertical SwiftUI TextField puts its placeholder in a child UILabel,
+    /// not UITextView.accessibilityLabel. Return the input, never that label.
     func matches(_ view: UIView) -> Bool {
       let placeholder = (view as? UITextField)?.placeholder ?? ""
       let label = view.accessibilityLabel ?? ""
+      let text = (view as? UILabel)?.text ?? ""
       return placeholder.localizedStandardContains("memo")
         || label.localizedStandardContains("memo")
+        || text.localizedStandardContains("memo")
+        || view.subviews.contains(where: matches)
     }
     /// Depth-first search for the first memo text field or text view.
     func walk(_ view: UIView) -> UIView? {

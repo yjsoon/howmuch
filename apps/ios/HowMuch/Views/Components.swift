@@ -26,8 +26,72 @@ extension View {
   }
 }
 
-/// Form row with a leading icon that shows a caption + value once filled,
-/// or just a placeholder before that.
+/// Leading icon + trailing content inside a transaction-form card row.
+/// Same column, padding, and minimum height as `DisclosureValueRow`.
+struct FormCardRow<Content: View>: View {
+  let icon: String
+  var iconColor: Color = Theme.accent
+  var alignment: VerticalAlignment = .center
+  var rowIdentifier: String?
+  @ViewBuilder var content: () -> Content
+
+  var body: some View {
+    HStack(alignment: alignment, spacing: Theme.FormRow.iconSpacing) {
+      Image(systemName: icon)
+        .foregroundStyle(iconColor)
+        .frame(width: Theme.FormRow.iconColumn, alignment: .center)
+      content()
+    }
+    .padding(.horizontal, Theme.FormRow.horizontalPadding)
+    .padding(.vertical, Theme.FormRow.verticalPadding)
+    .frame(minHeight: Theme.FormRow.height, alignment: .center)
+    .contentShape(Rectangle())
+    .modifier(OptionalAccessibilityIdentifier(rowIdentifier))
+  }
+}
+
+private struct OptionalAccessibilityIdentifier: ViewModifier {
+  var identifier: String?
+
+  init(_ identifier: String?) {
+    self.identifier = identifier
+  }
+
+  func body(content: Content) -> some View {
+    if let identifier, !identifier.isEmpty {
+      content.accessibilityIdentifier(identifier)
+#if DEBUG
+        .background {
+          GeometryReader { geometry in
+            Color.clear
+              .preference(key: FormRowFramesKey.self, value: [identifier: geometry.frame(in: .global)])
+          }
+          .accessibilityHidden(true)
+        }
+#endif
+    } else {
+      content
+    }
+  }
+}
+
+#if DEBUG
+/// Observe the padded SwiftUI row itself, not a native control or an ancestor
+/// selected by the minimum height the snapshot test is supposed to verify.
+struct FormRowFramesKey: PreferenceKey {
+  static var defaultValue: [String: CGRect] { [:] }
+
+  static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+    value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+  }
+}
+#endif
+
+/// Form row with a leading icon. Empty rows show a single-line placeholder;
+/// filled rows put the field label on the left and the value on the right.
+/// Card rows share `Theme.FormRow.height` so choosing a value cannot grow
+/// the row at default sizes. Accessibility sizes may stack the value under
+/// the label and grow.
 struct DisclosureValueRow: View {
   let icon: String
   let caption: String
@@ -36,27 +100,38 @@ struct DisclosureValueRow: View {
   /// Card layouts draw this trailing chevron. Form and List `NavigationLink`s
   /// already supply one, so pass `false` there or the row shows a double `>`.
   var showsChevron = true
+  /// Card rows apply the shared insets and minimum height. Form/List links
+  /// inherit the list's own chrome, so they pass `false` with `showsChevron`.
+  var appliesCardMetrics = true
+  var rowIdentifier: String?
+
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+  init(
+    icon: String,
+    caption: String,
+    value: String?,
+    placeholder: String,
+    showsChevron: Bool = true,
+    appliesCardMetrics: Bool? = nil,
+    rowIdentifier: String? = nil
+  ) {
+    self.icon = icon
+    self.caption = caption
+    self.value = value
+    self.placeholder = placeholder
+    self.showsChevron = showsChevron
+    self.appliesCardMetrics = appliesCardMetrics ?? showsChevron
+    self.rowIdentifier = rowIdentifier
+  }
 
   var body: some View {
-    HStack(spacing: 12) {
+    HStack(alignment: .center, spacing: Theme.FormRow.iconSpacing) {
       Image(systemName: icon)
         .foregroundStyle(Theme.accent)
-        .frame(width: 28)
+        .frame(width: Theme.FormRow.iconColumn, alignment: .center)
 
-      if let value, !value.isEmpty {
-        VStack(alignment: .leading, spacing: 2) {
-          Text(caption)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          Text(value)
-            .foregroundStyle(Theme.textPrimary)
-        }
-      } else {
-        Text(placeholder)
-          .foregroundStyle(Theme.textPrimary.opacity(0.75))
-      }
-
-      Spacer(minLength: 0)
+      titleAndValue
 
       if showsChevron {
         Image(systemName: "chevron.right")
@@ -64,9 +139,47 @@ struct DisclosureValueRow: View {
           .foregroundStyle(.tertiary)
       }
     }
-    .padding(.horizontal, showsChevron ? 16 : 0)
-    .padding(.vertical, showsChevron ? 13 : 0)
+    .padding(.horizontal, appliesCardMetrics ? Theme.FormRow.horizontalPadding : 0)
+    .padding(.vertical, appliesCardMetrics ? Theme.FormRow.verticalPadding : 0)
+    .frame(minHeight: appliesCardMetrics ? Theme.FormRow.height : nil, alignment: .center)
     .contentShape(Rectangle())
+    .modifier(OptionalAccessibilityIdentifier(rowIdentifier))
+  }
+
+  private var hasValue: Bool {
+    if let value, !value.isEmpty { return true }
+    return false
+  }
+
+  @ViewBuilder
+  private var titleAndValue: some View {
+    if hasValue, let value {
+      if dynamicTypeSize.isAccessibilitySize {
+        VStack(alignment: .leading, spacing: 2) {
+          Text(caption)
+            .foregroundStyle(Theme.textPrimary)
+          Text(value)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      } else {
+        HStack(spacing: 8) {
+          Text(caption)
+            .foregroundStyle(Theme.textPrimary)
+            .layoutPriority(1)
+          Spacer(minLength: 8)
+          Text(value)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.trailing)
+            .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+      }
+    } else {
+      Text(placeholder)
+        .foregroundStyle(Theme.textPrimary.opacity(0.75))
+      Spacer(minLength: 0)
+    }
   }
 }
 
@@ -120,7 +233,7 @@ extension ButtonStyle where Self == CardRowButtonStyle {
 /// Divider aligned past the leading icon column of `DisclosureValueRow`.
 struct CardDivider: View {
   var body: some View {
-    Divider().padding(.leading, 56)
+    Divider().padding(.leading, Theme.FormRow.dividerLeading)
   }
 }
 
