@@ -214,7 +214,7 @@ struct TransactionFormView: View {
     self.isKeypadVisible = !isEditing && draft.amountMagnitudeMilli == 0
   }
 
-  /// Hosts the form and collapses CalculatorKeypad when any text field begins editing.
+  /// Hosts the form and collapses CalculatorKeypad when the memo takes focus.
   var body: some View {
     wrappedForm {
       VStack(spacing: 0) {
@@ -357,6 +357,10 @@ struct TransactionFormView: View {
         withAnimation(Theme.Motion.standard) {
           draft.disableSplit()
         }
+        // disableSplit recomputes the parent amount from the split lines;
+        // re-sync the keypad so Save and a reopened keypad cannot commit a
+        // stale pre-split value over the recomputed total.
+        keypad.setValue(draft.amountMagnitudeMilli)
       }
       .onChange(of: keypad) {
         commitHook?.keypad = keypad
@@ -372,12 +376,6 @@ struct TransactionFormView: View {
         if focused {
           collapseKeypad()
         }
-      }
-      .onReceive(NotificationCenter.default.publisher(for: UITextView.textDidBeginEditingNotification)) { _ in
-        collapseKeypad()
-      }
-      .onReceive(NotificationCenter.default.publisher(for: UITextField.textDidBeginEditingNotification)) { _ in
-        collapseKeypad()
       }
       .task(id: model.settings.planID) {
         rewardCards = []
@@ -683,6 +681,12 @@ struct TransactionFormView: View {
   }
 
   private func collapseKeypad() {
+    // Hidden means already committed: every hide path commits first, so
+    // recommitting would overwrite amounts the draft changed elsewhere,
+    // such as a split total recomputed by disableSplit.
+    guard isKeypadVisible else {
+      return
+    }
     draft.amountMagnitudeMilli = keypad.commitValue()
     var transaction = SwiftUI.Transaction()
     transaction.disablesAnimations = true
@@ -835,6 +839,10 @@ struct TransactionFormView: View {
 
   private func setSplit(_ shouldSplit: Bool) {
     if shouldSplit {
+      // Splitting seeds line 1 from the draft amount, so commit the keypad
+      // first; it also stops the keypad sitting over the split editor with
+      // keys that do nothing there.
+      collapseKeypad()
       withAnimation(Theme.Motion.standard) {
         draft.enableSplit()
       }
