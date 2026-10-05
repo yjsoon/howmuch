@@ -1769,7 +1769,6 @@ private struct AccountReconciliationSheet: View {
         await fetchPreview()
       }
     }
-    .howmuchFormSheet()
   }
 
   private var selectedAccount: Account? {

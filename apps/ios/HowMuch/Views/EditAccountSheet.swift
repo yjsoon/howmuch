@@ -76,7 +76,6 @@ struct EditAccountSheet: View {
       }
       .interactiveDismissDisabled(isSaving)
     }
-    .howmuchFormSheet()
   }
 
   private var trimmedName: String {

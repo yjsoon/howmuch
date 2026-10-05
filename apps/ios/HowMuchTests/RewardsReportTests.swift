@@ -584,9 +584,6 @@ final class RewardsBoardPreferencesTests: XCTestCase {
 @MainActor
 final class RewardsSnapshotTests: XCTestCase {
   override func tearDown() async throws {
-    while CaptureRouter.shared.hidingTabBarCount > 0 {
-      CaptureRouter.shared.endHidingTabBar()
-    }
     while CaptureRouter.shared.blockingSheetCount > 0 {
       CaptureRouter.shared.endBlockingSheet()
     }
@@ -975,7 +972,7 @@ final class RewardsSnapshotTests: XCTestCase {
         "compact tab bar must hide so merged buttons cannot overlap the sheet"
       )
     }
-    XCTAssertTrue(CaptureRouter.shared.hidesCompactTabBar)
+    XCTAssertTrue(CaptureRouter.shared.hidesTabRowOverlay)
   }
 
   private func attach(_ image: UIImage, _ name: String) {

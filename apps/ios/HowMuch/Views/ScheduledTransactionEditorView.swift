@@ -496,7 +496,6 @@ struct ScheduledTransactionEditorView: View {
         }
       }
     }
-    .howmuchFormSheet()
   }
 
   private var flagNames: [RewardFlagColour: String] {

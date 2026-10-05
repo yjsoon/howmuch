@@ -80,7 +80,6 @@ struct NewAccountSheet: View {
         nameFocused = true
       }
     }
-    .howmuchFormSheet()
   }
 
   private var balanceCard: some View {

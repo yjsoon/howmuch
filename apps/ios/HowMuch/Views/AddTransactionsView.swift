@@ -145,7 +145,6 @@ struct AddTransactionsView: View {
           allowsDeletion: false
         )
         .presentationDetents([.large])
-        .howmuchFormSheet()
         .blocksCapturePresentation()
       }
       .navigationDestination(isPresented: Binding(

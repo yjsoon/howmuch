@@ -953,6 +953,7 @@ private struct ManageAccountGroupsSheet: View {
       }
       .sheet(isPresented: $isCreatingGroup) {
         NewCustomAccountGroupSheet(prefilledAccountID: nil)
+          .blocksCapturePresentation()
       }
     }
   }
@@ -1106,6 +1107,7 @@ struct AccountMembershipSheet: View {
       }
       .sheet(isPresented: $isCreatingGroup) {
         NewCustomAccountGroupSheet(prefilledAccountID: accountID)
+          .blocksCapturePresentation()
       }
     }
   }

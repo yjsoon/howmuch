@@ -9,16 +9,11 @@ final class CaptureRouter {
   var pending: CaptureRequest?
   var presented: CaptureRequest?
   private(set) var blockingSheetCount = 0
-  private(set) var hidingTabBarCount = 0
 
+  /// One rule for compact chrome: a capture session or any blocking sheet
+  /// hides the destination pill, circular Add, and the window-level Assistant.
   var hidesTabRowOverlay: Bool {
-    presented != nil || pending != nil || blockingSheetCount > 0 || hidingTabBarCount > 0
-  }
-
-  /// Full-page form sheets hide the compact destination pill and circular Add
-  /// so that merged tab-row chrome cannot sit on the sheet's bottom edge.
-  var hidesCompactTabBar: Bool {
-    hidingTabBarCount > 0
+    presented != nil || pending != nil || blockingSheetCount > 0
   }
 
   private init() {}
@@ -41,14 +36,6 @@ final class CaptureRouter {
 
   func endBlockingSheet() {
     blockingSheetCount = max(0, blockingSheetCount - 1)
-  }
-
-  func beginHidingTabBar() {
-    hidingTabBarCount += 1
-  }
-
-  func endHidingTabBar() {
-    hidingTabBarCount = max(0, hidingTabBarCount - 1)
   }
 
   func consume(isAuthenticated: Bool, currentFingerprint: String) {
@@ -96,27 +83,8 @@ struct CaptureBlockingSheetModifier: ViewModifier {
   }
 }
 
-/// Hides the compact iOS 26 tab row (merged destination pill + circular Add)
-/// while a full-page sheet is up. That chrome is window-level and otherwise
-/// stays on top of the sheet, which is the Edit Rewards bottom blob.
-struct HowMuchFormSheet: ViewModifier {
-  func body(content: Content) -> some View {
-    content
-      .onAppear {
-        CaptureRouter.shared.beginHidingTabBar()
-      }
-      .onDisappear {
-        CaptureRouter.shared.endHidingTabBar()
-      }
-  }
-}
-
 extension View {
   func blocksCapturePresentation() -> some View {
     modifier(CaptureBlockingSheetModifier())
-  }
-
-  func howmuchFormSheet() -> some View {
-    modifier(HowMuchFormSheet())
   }
 }

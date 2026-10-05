@@ -195,7 +195,6 @@ private struct RootView: View {
       .environment(model)
       .interactiveDismissDisabled(!model.settings.isAuthenticated || model.isConnectingToServer)
       .blocksCapturePresentation()
-      .howmuchFormSheet()
     }
     .sheet(item: $capture.presented) { request in
       CaptureIntakeHost(request: request)
@@ -335,7 +334,6 @@ struct CaptureIntakeHost: View {
       }
     }
     .presentationDetents([.large])
-    .howmuchFormSheet()
     .task(id: request.id) {
       claimedInboxIDs = []
       didAdmit = false

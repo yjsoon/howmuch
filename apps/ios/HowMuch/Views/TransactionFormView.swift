@@ -122,7 +122,6 @@ struct TransactionEditorSheet: View {
       isEditing: true,
       allowsDeletion: true
     )
-    .howmuchFormSheet()
   }
 }
 
