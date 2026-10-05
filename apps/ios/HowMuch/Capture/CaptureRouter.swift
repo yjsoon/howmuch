@@ -15,8 +15,8 @@ final class CaptureRouter {
     presented != nil || pending != nil || blockingSheetCount > 0 || hidingTabBarCount > 0
   }
 
-  /// Full-page form sheets opt into this so the compact Liquid Glass tab row
-  /// is not left showing through iOS 26's inset sheet corners.
+  /// Full-page form sheets hide the compact destination pill and circular Add
+  /// so that merged tab-row chrome cannot sit on the sheet's bottom edge.
   var hidesCompactTabBar: Bool {
     hidingTabBarCount > 0
   }
@@ -96,25 +96,12 @@ struct CaptureBlockingSheetModifier: ViewModifier {
   }
 }
 
-/// Full-page form sheet: edge-attached at the bottom, cream through the home
-/// indicator, rounded corners on top only. iOS 26's default sheet is inset
-/// Liquid Glass with a device-matching radius on every corner, so the page
-/// underneath (compact tab row, circular Add) shows in the bottom gap.
+/// Hides the compact iOS 26 tab row (merged destination pill + circular Add)
+/// while a full-page sheet is up. That chrome is window-level and otherwise
+/// stays on top of the sheet, which is the Edit Rewards bottom blob.
 struct HowMuchFormSheet: ViewModifier {
   func body(content: Content) -> some View {
     content
-      .presentationDetents([.large])
-      .presentationBackground {
-        UnevenRoundedRectangle(
-          topLeadingRadius: Theme.Radius.panel,
-          bottomLeadingRadius: 0,
-          bottomTrailingRadius: 0,
-          topTrailingRadius: Theme.Radius.panel,
-          style: .continuous
-        )
-        .fill(Theme.canvas)
-        .ignoresSafeArea()
-      }
       .onAppear {
         CaptureRouter.shared.beginHidingTabBar()
       }

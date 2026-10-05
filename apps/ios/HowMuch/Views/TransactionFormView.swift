@@ -285,7 +285,7 @@ struct TransactionFormView: View {
           .transition(.move(edge: .bottom))
         }
       }
-      .background(Theme.canvas.ignoresSafeArea())
+      .background(Theme.canvas)
       .navigationDestination(isPresented: $isAutoAdvancingToPayee) {
         PayeePickerView(draft: $draft)
       }

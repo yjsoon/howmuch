@@ -955,33 +955,24 @@ final class RewardsSnapshotTests: XCTestCase {
     XCTAssertTrue(bottom.text.contains("remove rewards"), bottom.text)
     XCTAssertFalse(
       bottom.text.contains("add transaction"),
-      "compact Add control must not peek under Edit Rewards: \(bottom.text)"
+      "merged Add control must not sit on Edit Rewards: \(bottom.text)"
     )
     XCTAssertFalse(
       bottom.text.contains("reflect"),
-      "compact tab row must not peek under Edit Rewards: \(bottom.text)"
+      "merged destination pill must not sit on Edit Rewards: \(bottom.text)"
     )
-
-    let frame = try XCTUnwrap(surface.presentedSheetFrame())
-    let homeIndicator = surface.windowSafeAreaInsets.bottom
-    XCTAssertGreaterThanOrEqual(
-      frame.maxY,
-      surface.windowBounds.maxY - 2,
-      "sheet must fill to the bottom edge under the home indicator: \(frame)"
+    XCTAssertNil(
+      surface.tabRowControl(label: CompactRootBar.action.title),
+      "search-role Add must hide with the compact tab row"
     )
-    let remove = try XCTUnwrap(surface.firstControl(labelContains: "Remove Rewards"))
-    let spaceBelowRemove = (surface.windowBounds.maxY - homeIndicator) - remove.frame.maxY
-    XCTAssertGreaterThanOrEqual(
-      spaceBelowRemove,
-      20,
-      "Remove Rewards needs ~24pt above the home indicator: \(remove.frame) space=\(spaceBelowRemove)"
+    XCTAssertNil(
+      surface.tabRowOverlayButton(label: "Assistant"),
+      "window-level Assistant must not remain over the sheet"
     )
-    if let tabBar = surface.tabBarOwningRow(), !tabBar.isHidden, tabBar.alpha > 0.01 {
-      let tabFrame = surface.windowFrame(of: tabBar)
-      XCTAssertLessThanOrEqual(
-        tabFrame.maxY,
-        frame.maxY + 1,
-        "tab bar must not extend past the sheet: sheet=\(frame) tab=\(tabFrame)"
+    if let tabBar = surface.tabBarOwningRow() {
+      XCTAssertTrue(
+        tabBar.isHidden || tabBar.alpha <= 0.01,
+        "compact tab bar must hide so merged buttons cannot overlap the sheet"
       )
     }
     XCTAssertTrue(CaptureRouter.shared.hidesCompactTabBar)

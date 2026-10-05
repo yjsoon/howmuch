@@ -445,7 +445,7 @@ struct ScheduledTransactionEditorView: View {
         }
       }
       .scrollContentBackground(.hidden)
-      .background(Theme.canvas.ignoresSafeArea())
+      .background(Theme.canvas)
       .navigationTitle(isEditing ? "Scheduled Transaction" : "New Schedule")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {

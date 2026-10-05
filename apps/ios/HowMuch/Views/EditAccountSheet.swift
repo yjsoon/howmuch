@@ -42,7 +42,7 @@ struct EditAccountSheet: View {
         }
         .padding(16)
       }
-      .background(Theme.canvas.ignoresSafeArea())
+      .background(Theme.canvas)
       .navigationTitle("Edit Account")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {

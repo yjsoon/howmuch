@@ -34,7 +34,7 @@ struct NewAccountSheet: View {
         }
         .padding(16)
       }
-      .background(Theme.canvas.ignoresSafeArea())
+      .background(Theme.canvas)
       .scrollDismissesKeyboard(.interactively)
       .navigationTitle("New Account")
       .navigationBarTitleDisplayMode(.inline)

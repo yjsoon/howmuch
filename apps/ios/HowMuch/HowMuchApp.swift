@@ -334,6 +334,7 @@ struct CaptureIntakeHost: View {
         Theme.canvas
       }
     }
+    .presentationDetents([.large])
     .howmuchFormSheet()
     .task(id: request.id) {
       claimedInboxIDs = []

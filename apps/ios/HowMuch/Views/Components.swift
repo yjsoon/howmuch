@@ -779,7 +779,10 @@ struct RootTabView: View {
         RootCaptureTab()
       }
       .tabViewStyle(.tabBarOnly)
-      .tabBarMinimizeBehavior(.onScrollDown)
+      // Full-page sheets hide this row. On iOS 26 the destination pill and
+      // circular Add stay window-level and otherwise merge into the sheet.
+      .tabBarMinimizeBehavior(CaptureRouter.shared.hidesCompactTabBar ? .never : .onScrollDown)
+      .toolbar(CaptureRouter.shared.hidesCompactTabBar ? .hidden : .automatic, for: .tabBar)
       .overlay {
         RootTabBarFloatingAssistant(
           // The button lives on the window, above every SwiftUI overlay, so
