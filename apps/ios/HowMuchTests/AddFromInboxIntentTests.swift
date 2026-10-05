@@ -16,6 +16,9 @@ final class AddFromInboxIntentTests: XCTestCase {
     while CaptureRouter.shared.blockingSheetCount > 0 {
       CaptureRouter.shared.endBlockingSheet()
     }
+    while CaptureRouter.shared.hidingTabBarCount > 0 {
+      CaptureRouter.shared.endHidingTabBar()
+    }
   }
 
   override func tearDown() async throws {
@@ -23,6 +26,9 @@ final class AddFromInboxIntentTests: XCTestCase {
     CaptureRouter.shared.dropForSignOut()
     while CaptureRouter.shared.blockingSheetCount > 0 {
       CaptureRouter.shared.endBlockingSheet()
+    }
+    while CaptureRouter.shared.hidingTabBarCount > 0 {
+      CaptureRouter.shared.endHidingTabBar()
     }
     try? FileManager.default.removeItem(at: directory)
   }

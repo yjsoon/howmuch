@@ -2412,6 +2412,9 @@ final class CaptureSnapshotTests: XCTestCase {
     while CaptureRouter.shared.blockingSheetCount > 0 {
       CaptureRouter.shared.endBlockingSheet()
     }
+    while CaptureRouter.shared.hidingTabBarCount > 0 {
+      CaptureRouter.shared.endHidingTabBar()
+    }
     CaptureWorkspace.shared.pendingAssistantSessionID = nil
   }
 

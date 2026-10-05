@@ -583,6 +583,16 @@ final class RewardsBoardPreferencesTests: XCTestCase {
 
 @MainActor
 final class RewardsSnapshotTests: XCTestCase {
+  override func tearDown() async throws {
+    while CaptureRouter.shared.hidingTabBarCount > 0 {
+      CaptureRouter.shared.endHidingTabBar()
+    }
+    while CaptureRouter.shared.blockingSheetCount > 0 {
+      CaptureRouter.shared.endBlockingSheet()
+    }
+    try await super.tearDown()
+  }
+
   private func categoryFixture(values: [(String, String, Double, Double)]? = nil, minimumSpend: Double = 0) throws -> RewardsCardRow {
     let values = values ?? [
       ("Telcos", "blue", 60.51, 375), ("Groceries", "gray", 695.63, 500),
@@ -903,6 +913,77 @@ final class RewardsSnapshotTests: XCTestCase {
     }, "The retained rule must still earn 4 miles: \(editor.accessibilityLabels())")
     // The retained disabled switch is visually inspected in this attachment;
     // navigating to it does not claim switch-toggle or save coverage.
+  }
+
+  func testEditRewardsSheetCoversCompactTabBarAtBottom() async throws {
+    XCTAssertTrue(URLProtocol.registerClass(RewardsSnapshotProtocol.self))
+    defer { URLProtocol.unregisterClass(RewardsSnapshotProtocol.self) }
+    let harness = SnapshotHarness.make(baseURLString: "https://rewards-snapshot.test")
+    let chrome = RootChromeState()
+    chrome.tab = .rewards
+    let surface = try XCTUnwrap(SnapshotSurface(
+      root: RootTabView(chrome: chrome, usesSidebar: false, workspace: harness.workspace)
+        .sheet(isPresented: .constant(true)) {
+          RewardCardEditorView(cardID: "travel")
+            .environment(harness.model)
+            .environment(chrome)
+            .blocksCapturePresentation()
+        }
+        .environment(harness.model)
+        .environment(chrome)
+        .environment(\.horizontalSizeClass, .compact),
+      size: CGSize(width: 390, height: 844)
+    ))
+    defer { surface.detach() }
+
+    _ = await surface.captureUntilOCR(
+      contains: ["Edit Rewards", "Remove Rewards"],
+      timeoutNanoseconds: 5_000_000_000
+    )
+    if let scroll = surface.presentedContentScrollView() {
+      let bottomY = max(
+        0,
+        scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom
+      )
+      scroll.setContentOffset(CGPoint(x: 0, y: bottomY), animated: false)
+    }
+    let bottom = await surface.captureUntilOCR(
+      contains: ["Remove Rewards"],
+      timeoutNanoseconds: 3_000_000_000
+    )
+    attach(bottom.image, "edit-rewards-sheet-bottom")
+    XCTAssertTrue(bottom.text.contains("remove rewards"), bottom.text)
+    XCTAssertFalse(
+      bottom.text.contains("add transaction"),
+      "compact Add control must not peek under Edit Rewards: \(bottom.text)"
+    )
+    XCTAssertFalse(
+      bottom.text.contains("reflect"),
+      "compact tab row must not peek under Edit Rewards: \(bottom.text)"
+    )
+
+    let frame = try XCTUnwrap(surface.presentedSheetFrame())
+    let homeIndicator = surface.windowSafeAreaInsets.bottom
+    XCTAssertGreaterThan(
+      frame.maxY,
+      surface.windowBounds.maxY - homeIndicator - 8,
+      "sheet must reach the home indicator, not sit above the tab row: \(frame)"
+    )
+    let remove = try XCTUnwrap(surface.firstControl(labelContains: "Remove Rewards"))
+    XCTAssertLessThanOrEqual(
+      remove.frame.maxY,
+      surface.windowBounds.maxY - homeIndicator + 8,
+      "Remove Rewards needs padding above the home indicator: \(remove.frame)"
+    )
+    if let tabBar = surface.tabBarOwningRow(), !tabBar.isHidden, tabBar.alpha > 0.01 {
+      let tabFrame = surface.windowFrame(of: tabBar)
+      XCTAssertLessThanOrEqual(
+        tabFrame.maxY,
+        frame.maxY + 1,
+        "tab bar must not extend past the sheet: sheet=\(frame) tab=\(tabFrame)"
+      )
+    }
+    XCTAssertTrue(CaptureRouter.shared.hidesCompactTabBar)
   }
 
   private func attach(_ image: UIImage, _ name: String) {

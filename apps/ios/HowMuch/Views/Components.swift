@@ -1249,6 +1249,7 @@ struct RootTabHost<Content: View>: View {
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .animation(Theme.Motion.standard, value: overflow)
+      .toolbar(router.hidesCompactTabBar ? .hidden : .automatic, for: .tabBar)
       .safeAreaInset(edge: .bottom, spacing: 0) {
         if !usesSidebar,
            !router.hidesTabRowOverlay,

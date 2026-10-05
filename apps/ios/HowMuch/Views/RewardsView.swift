@@ -601,12 +601,14 @@ struct RewardsView: View {
       RewardCardEditorView(cardID: destination.cardID)
     case .customise:
       customiseSheet
+        .howmuchFormSheet()
     case .valuation:
       RewardsValuationSheet(current: currentReport?.milesValuation)
     case .importExport:
       NavigationStack {
         RewardsImportView()
       }
+      .howmuchFormSheet()
     case .accounts:
       AccountScopePicker(
         selection: $filter.scope.accountIDs,

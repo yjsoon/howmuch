@@ -652,7 +652,7 @@ struct RewardCardEditorView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
       }
-      .background(Theme.canvas)
+      .background(Theme.canvas.ignoresSafeArea())
       .navigationTitle(isEditing ? "Edit Rewards" : "Set Up Rewards")
       .navigationBarTitleDisplayMode(.inline)
       .navigationDestination(for: Destination.self) { destination in
@@ -712,6 +712,7 @@ struct RewardCardEditorView: View {
         await loadCard()
       }
     }
+    .howmuchFormSheet()
   }
 
   private var editorForm: some View {

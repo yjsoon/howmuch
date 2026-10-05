@@ -9,6 +9,9 @@ final class CaptureRouterTests: XCTestCase {
     while router.blockingSheetCount > 0 {
       router.endBlockingSheet()
     }
+    while router.hidingTabBarCount > 0 {
+      router.endHidingTabBar()
+    }
   }
 
   override func tearDown() async throws {
@@ -16,6 +19,9 @@ final class CaptureRouterTests: XCTestCase {
     router.dropForSignOut()
     while router.blockingSheetCount > 0 {
       router.endBlockingSheet()
+    }
+    while router.hidingTabBarCount > 0 {
+      router.endHidingTabBar()
     }
   }
 
@@ -87,5 +93,20 @@ final class CaptureRouterTests: XCTestCase {
     router.consume(isAuthenticated: true, currentFingerprint: "plan-b")
     XCTAssertNil(router.pending)
     XCTAssertNil(router.presented)
+  }
+
+  func testFormSheetHidesCompactTabBarUntilDismissed() {
+    let router = CaptureRouter.shared
+    XCTAssertFalse(router.hidesCompactTabBar)
+    XCTAssertFalse(router.hidesTabRowOverlay)
+    router.beginHidingTabBar()
+    XCTAssertTrue(router.hidesCompactTabBar)
+    XCTAssertTrue(router.hidesTabRowOverlay)
+    router.beginHidingTabBar()
+    router.endHidingTabBar()
+    XCTAssertTrue(router.hidesCompactTabBar)
+    router.endHidingTabBar()
+    XCTAssertFalse(router.hidesCompactTabBar)
+    XCTAssertFalse(router.hidesTabRowOverlay)
   }
 }
