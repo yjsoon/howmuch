@@ -89,11 +89,13 @@ final class CaptureRouterTests: XCTestCase {
     XCTAssertNil(router.presented)
   }
 
-  func testBlockingSheetHidesTheCompactTabRow() {
+  func testNestedBlockingSheetsNeedMatchingEnds() {
     let router = CaptureRouter.shared
-    XCTAssertFalse(router.hidesTabRowOverlay)
+    router.beginBlockingSheet()
     router.beginBlockingSheet()
     XCTAssertTrue(router.hidesTabRowOverlay)
+    router.endBlockingSheet()
+    XCTAssertTrue(router.hidesTabRowOverlay, "one remaining sheet must keep compact chrome hidden")
     router.endBlockingSheet()
     XCTAssertFalse(router.hidesTabRowOverlay)
   }

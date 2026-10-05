@@ -1,3 +1,4 @@
+import Observation
 import SwiftUI
 import UIKit
 import XCTest
@@ -583,11 +584,22 @@ final class RewardsBoardPreferencesTests: XCTestCase {
 
 @MainActor
 final class RewardsSnapshotTests: XCTestCase {
+  override func setUp() async throws {
+    try await super.setUp()
+    resetSharedCaptureChrome()
+  }
+
   override func tearDown() async throws {
+    resetSharedCaptureChrome()
+    try await super.tearDown()
+  }
+
+  private func resetSharedCaptureChrome() {
+    CaptureRouter.shared.dropForSignOut()
     while CaptureRouter.shared.blockingSheetCount > 0 {
       CaptureRouter.shared.endBlockingSheet()
     }
-    try await super.tearDown()
+    CaptureWorkspace.shared.pendingAssistantSessionID = nil
   }
 
   private func categoryFixture(values: [(String, String, Double, Double)]? = nil, minimumSpend: Double = 0) throws -> RewardsCardRow {
@@ -918,32 +930,38 @@ final class RewardsSnapshotTests: XCTestCase {
     let harness = SnapshotHarness.make(baseURLString: "https://rewards-snapshot.test")
     let chrome = RootChromeState()
     chrome.tab = .rewards
+    let presentation = SheetPresentation()
     let surface = try XCTUnwrap(SnapshotSurface(
-      root: RootTabView(chrome: chrome, usesSidebar: false, workspace: harness.workspace)
-        .sheet(isPresented: .constant(true)) {
-          RewardCardEditorView(cardID: "travel")
-            .environment(harness.model)
-            .environment(chrome)
-            .blocksCapturePresentation()
-        }
-        .environment(harness.model)
-        .environment(chrome)
-        .environment(\.horizontalSizeClass, .compact),
+      root: EditRewardsTabRowHost(
+        presentation: presentation,
+        model: harness.model,
+        chrome: chrome,
+        workspace: harness.workspace
+      ),
       size: CGSize(width: 390, height: 844)
     ))
     defer { surface.detach() }
 
+    let appeared = await surface.waitUntil {
+      surface.tabRowControl(label: "Accounts") != nil
+        && surface.tabRowControl(label: CompactRootBar.action.title) != nil
+        && surface.tabRowOverlayButton(label: "Assistant") != nil
+    }
+    XCTAssertTrue(appeared, "compact tab row must appear before the sheet: \(surface.accessibilityLabels())")
+    XCTAssertFalse(CaptureRouter.shared.hidesTabRowOverlay)
+
+    presentation.isPresented = true
+    surface.layoutNow()
     _ = await surface.captureUntilOCR(
-      contains: ["Edit Rewards", "Remove Rewards"],
+      contains: ["Edit Rewards"],
       timeoutNanoseconds: 5_000_000_000
     )
-    if let scroll = surface.presentedContentScrollView() {
-      let bottomY = max(
-        0,
-        scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom
-      )
-      scroll.setContentOffset(CGPoint(x: 0, y: bottomY), animated: false)
-    }
+    let scroll = try XCTUnwrap(surface.presentedContentScrollView())
+    let bottomY = max(
+      0,
+      scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom
+    )
+    scroll.setContentOffset(CGPoint(x: 0, y: bottomY), animated: false)
     let bottom = await surface.captureUntilOCR(
       contains: ["Remove Rewards"],
       timeoutNanoseconds: 3_000_000_000
@@ -958,21 +976,26 @@ final class RewardsSnapshotTests: XCTestCase {
       bottom.text.contains("reflect"),
       "merged destination pill must not sit on Edit Rewards: \(bottom.text)"
     )
-    XCTAssertNil(
-      surface.tabRowControl(label: CompactRootBar.action.title),
-      "search-role Add must hide with the compact tab row"
-    )
-    XCTAssertNil(
-      surface.tabRowOverlayButton(label: "Assistant"),
-      "window-level Assistant must not remain over the sheet"
-    )
-    if let tabBar = surface.tabBarOwningRow() {
-      XCTAssertTrue(
-        tabBar.isHidden || tabBar.alpha <= 0.01,
-        "compact tab bar must hide so merged buttons cannot overlap the sheet"
-      )
+    let hidden = await surface.waitUntil {
+      surface.tabRowControl(label: "Accounts") == nil
+        && surface.tabRowControl(label: CompactRootBar.action.title) == nil
+        && surface.tabRowOverlayButton(label: "Assistant") == nil
+    }
+    XCTAssertTrue(hidden, "compact tab row must hide over Edit Rewards: \(surface.accessibilityLabels())")
+    if let tabBar = surface.tabBarOwningRow(), !tabBar.isHidden, tabBar.alpha > 0.01 {
+      XCTFail("compact tab bar must hide so merged buttons cannot overlap the sheet")
     }
     XCTAssertTrue(CaptureRouter.shared.hidesTabRowOverlay)
+
+    presentation.isPresented = false
+    surface.layoutNow()
+    let restored = await surface.waitUntil {
+      surface.tabRowControl(label: "Accounts") != nil
+        && surface.tabRowControl(label: CompactRootBar.action.title) != nil
+        && surface.tabRowOverlayButton(label: "Assistant") != nil
+    }
+    XCTAssertTrue(restored, "compact tab row must return after Edit Rewards dismisses: \(surface.accessibilityLabels())")
+    XCTAssertFalse(CaptureRouter.shared.hidesTabRowOverlay)
   }
 
   private func attach(_ image: UIImage, _ name: String) {
@@ -980,6 +1003,33 @@ final class RewardsSnapshotTests: XCTestCase {
     attachment.name = name
     attachment.lifetime = .keepAlways
     add(attachment)
+  }
+}
+
+@MainActor
+@Observable
+private final class SheetPresentation {
+  var isPresented = false
+}
+
+@MainActor
+private struct EditRewardsTabRowHost: View {
+  @Bindable var presentation: SheetPresentation
+  var model: AppModel
+  var chrome: RootChromeState
+  var workspace: CaptureWorkspace
+
+  var body: some View {
+    RootTabView(chrome: chrome, usesSidebar: false, workspace: workspace)
+      .sheet(isPresented: $presentation.isPresented) {
+        RewardCardEditorView(cardID: "travel")
+          .environment(model)
+          .environment(chrome)
+          .blocksCapturePresentation()
+      }
+      .environment(model)
+      .environment(chrome)
+      .environment(\.horizontalSizeClass, .compact)
   }
 }
 

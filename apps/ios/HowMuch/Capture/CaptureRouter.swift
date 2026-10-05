@@ -1,6 +1,9 @@
 import Observation
 import SwiftUI
 
+/// Shared capture admission queue and blocking-sheet counter.
+/// Compact chrome hides while a capture is pending/presented or any
+/// `blocksCapturePresentation` sheet is counted (`blockingSheetCount > 0`).
 @MainActor
 @Observable
 final class CaptureRouter {
@@ -10,8 +13,6 @@ final class CaptureRouter {
   var presented: CaptureRequest?
   private(set) var blockingSheetCount = 0
 
-  /// One rule for compact chrome: a capture session or any blocking sheet
-  /// hides the destination pill, circular Add, and the window-level Assistant.
   var hidesTabRowOverlay: Bool {
     presented != nil || pending != nil || blockingSheetCount > 0
   }
@@ -72,19 +73,60 @@ final class CaptureRouter {
 }
 
 struct CaptureBlockingSheetModifier: ViewModifier {
+  @State private var isCounting = false
+
   func body(content: Content) -> some View {
     content
-      .onAppear {
-        CaptureRouter.shared.beginBlockingSheet()
+      .onAppear { sync(true) }
+      .onDisappear { sync(false) }
+  }
+
+  private func sync(_ presented: Bool) {
+    if presented {
+      guard !isCounting else { return }
+      isCounting = true
+      CaptureRouter.shared.beginBlockingSheet()
+    } else {
+      guard isCounting else { return }
+      isCounting = false
+      CaptureRouter.shared.endBlockingSheet()
+    }
+  }
+}
+
+struct CaptureBlockingPresentedModifier: ViewModifier {
+  var isPresented: Bool
+  @State private var isCounting = false
+
+  func body(content: Content) -> some View {
+    content
+      .onChange(of: isPresented, initial: true) { _, presented in
+        sync(presented)
       }
-      .onDisappear {
-        CaptureRouter.shared.endBlockingSheet()
-      }
+      .onDisappear { sync(false) }
+  }
+
+  private func sync(_ presented: Bool) {
+    if presented {
+      guard !isCounting else { return }
+      isCounting = true
+      CaptureRouter.shared.beginBlockingSheet()
+    } else {
+      guard isCounting else { return }
+      isCounting = false
+      CaptureRouter.shared.endBlockingSheet()
+    }
   }
 }
 
 extension View {
   func blocksCapturePresentation() -> some View {
     modifier(CaptureBlockingSheetModifier())
+  }
+
+  /// Counts the presentation binding so an item replacement (same sheet,
+  /// new identity) cannot drop `blockingSheetCount` to 0 mid-transition.
+  func blocksCapturePresentation(when isPresented: Bool) -> some View {
+    modifier(CaptureBlockingPresentedModifier(isPresented: isPresented))
   }
 }
