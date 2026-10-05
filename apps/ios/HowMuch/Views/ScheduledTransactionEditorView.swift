@@ -445,7 +445,7 @@ struct ScheduledTransactionEditorView: View {
         }
       }
       .scrollContentBackground(.hidden)
-      .background(Theme.canvas)
+      .background(Theme.canvas.ignoresSafeArea())
       .navigationTitle(isEditing ? "Scheduled Transaction" : "New Schedule")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -496,6 +496,7 @@ struct ScheduledTransactionEditorView: View {
         }
       }
     }
+    .howmuchFormSheet()
   }
 
   private var flagNames: [RewardFlagColour: String] {

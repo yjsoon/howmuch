@@ -96,13 +96,25 @@ struct CaptureBlockingSheetModifier: ViewModifier {
   }
 }
 
-/// Opaque HowMuch canvas for full-page form sheets. iOS 26's default sheet is
-/// inset Liquid Glass with rounded corners on every edge; without this, the
-/// compact tab row (and its circular Add control) shows through the bottom gap.
+/// Full-page form sheet: edge-attached at the bottom, cream through the home
+/// indicator, rounded corners on top only. iOS 26's default sheet is inset
+/// Liquid Glass with a device-matching radius on every corner, so the page
+/// underneath (compact tab row, circular Add) shows in the bottom gap.
 struct HowMuchFormSheet: ViewModifier {
   func body(content: Content) -> some View {
     content
-      .presentationBackground(Theme.canvas)
+      .presentationDetents([.large])
+      .presentationBackground {
+        UnevenRoundedRectangle(
+          topLeadingRadius: Theme.Radius.panel,
+          bottomLeadingRadius: 0,
+          bottomTrailingRadius: 0,
+          topTrailingRadius: Theme.Radius.panel,
+          style: .continuous
+        )
+        .fill(Theme.canvas)
+        .ignoresSafeArea()
+      }
       .onAppear {
         CaptureRouter.shared.beginHidingTabBar()
       }

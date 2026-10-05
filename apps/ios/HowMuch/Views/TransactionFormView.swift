@@ -122,6 +122,7 @@ struct TransactionEditorSheet: View {
       isEditing: true,
       allowsDeletion: true
     )
+    .howmuchFormSheet()
   }
 }
 
@@ -284,7 +285,7 @@ struct TransactionFormView: View {
           .transition(.move(edge: .bottom))
         }
       }
-      .background(Theme.canvas)
+      .background(Theme.canvas.ignoresSafeArea())
       .navigationDestination(isPresented: $isAutoAdvancingToPayee) {
         PayeePickerView(draft: $draft)
       }

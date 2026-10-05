@@ -34,7 +34,7 @@ struct NewAccountSheet: View {
         }
         .padding(16)
       }
-      .background(Theme.canvas)
+      .background(Theme.canvas.ignoresSafeArea())
       .scrollDismissesKeyboard(.interactively)
       .navigationTitle("New Account")
       .navigationBarTitleDisplayMode(.inline)
@@ -80,6 +80,7 @@ struct NewAccountSheet: View {
         nameFocused = true
       }
     }
+    .howmuchFormSheet()
   }
 
   private var balanceCard: some View {

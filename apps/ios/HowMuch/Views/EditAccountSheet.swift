@@ -42,7 +42,7 @@ struct EditAccountSheet: View {
         }
         .padding(16)
       }
-      .background(Theme.canvas)
+      .background(Theme.canvas.ignoresSafeArea())
       .navigationTitle("Edit Account")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -76,6 +76,7 @@ struct EditAccountSheet: View {
       }
       .interactiveDismissDisabled(isSaving)
     }
+    .howmuchFormSheet()
   }
 
   private var trimmedName: String {

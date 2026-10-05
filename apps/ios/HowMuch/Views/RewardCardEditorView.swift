@@ -1025,6 +1025,7 @@ struct RewardCardEditorView: View {
       }
       .disabled(isSaving || isDeleting)
       .scrollContentBackground(.hidden)
+      .contentMargins(.bottom, 24, for: .scrollContent)
       .onChange(of: errorRevision) { proxy.scrollTo("editor-error", anchor: .top) }
       .onAppear { if errorMessage != nil { proxy.scrollTo("editor-error", anchor: .top) } }
     }

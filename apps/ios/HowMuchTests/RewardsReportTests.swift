@@ -964,16 +964,17 @@ final class RewardsSnapshotTests: XCTestCase {
 
     let frame = try XCTUnwrap(surface.presentedSheetFrame())
     let homeIndicator = surface.windowSafeAreaInsets.bottom
-    XCTAssertGreaterThan(
+    XCTAssertGreaterThanOrEqual(
       frame.maxY,
-      surface.windowBounds.maxY - homeIndicator - 8,
-      "sheet must reach the home indicator, not sit above the tab row: \(frame)"
+      surface.windowBounds.maxY - 2,
+      "sheet must fill to the bottom edge under the home indicator: \(frame)"
     )
     let remove = try XCTUnwrap(surface.firstControl(labelContains: "Remove Rewards"))
-    XCTAssertLessThanOrEqual(
-      remove.frame.maxY,
-      surface.windowBounds.maxY - homeIndicator + 8,
-      "Remove Rewards needs padding above the home indicator: \(remove.frame)"
+    let spaceBelowRemove = (surface.windowBounds.maxY - homeIndicator) - remove.frame.maxY
+    XCTAssertGreaterThanOrEqual(
+      spaceBelowRemove,
+      20,
+      "Remove Rewards needs ~24pt above the home indicator: \(remove.frame) space=\(spaceBelowRemove)"
     )
     if let tabBar = surface.tabBarOwningRow(), !tabBar.isHidden, tabBar.alpha > 0.01 {
       let tabFrame = surface.windowFrame(of: tabBar)
