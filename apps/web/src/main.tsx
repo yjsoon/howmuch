@@ -1,16 +1,21 @@
-import "@fontsource/newsreader/500.css";
-import "@fontsource/newsreader/600-italic.css";
+import "@fontsource-variable/newsreader/opsz.css"; // "Newsreader Variable", wght 200-800 with optical sizing
+import "@fontsource-variable/newsreader/opsz-italic.css";
+import "@fontsource/instrument-serif/400.css"; // "Instrument Serif"; files load only when a rendered element uses it
+import "@fontsource/instrument-serif/400-italic.css";
 import "@fontsource/ibm-plex-sans/400.css";
 import "@fontsource/ibm-plex-sans/500.css";
 import "@fontsource/ibm-plex-sans/600.css";
 import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
+import "./styles/tokens.css";
 import "./app.css";
+import "./styles/motion.css";
 
 import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
 import { Shell } from "./components/Shell";
+import { applyTheme, currentTheme } from "./lib/theme";
 import { PlanProvider } from "./state/plan";
 
 const AgeOfMoneyPage = lazy(() => import("./pages/AgeOfMoney").then((module) => ({ default: module.AgeOfMoneyPage })));
@@ -60,6 +65,9 @@ const router = createBrowserRouter([
   { path: "/add", element: <PlanProvider><Suspense fallback={<RouteFallback />}><QuickEntryPage /></Suspense></PlanProvider> },
   { path: "/docs", element: <ApiDocsPage /> },
 ]);
+
+// theme-boot.js normally sets these before first paint; this covers it failing to load.
+applyTheme(currentTheme());
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

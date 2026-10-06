@@ -1,0 +1,55 @@
+/*
+ * Halation motion: keyframes and animation rules. Imported after app.css.
+ * Durations and easings are tokens (styles/tokens.css); under reduced motion
+ * they collapse to 0ms, except --dur-bloom, whose keyframes are colour only.
+ *
+ * Editor rules (acceptance criteria): on .register-compose-row td,
+ * .register-compose-actions-row td and idle tr > td only background-color,
+ * color, border-color, box-shadow and opacity may animate; nothing on the
+ * editor's inputs, selects or :focus; never transform a <tr>; no entry
+ * keyframes or @starting-style on idle row selectors.
+ */
+
+/* Keyframe library */
+@keyframes hl-fade-in  { from { opacity: 0; } }
+@keyframes hl-fade-out { to { opacity: 0; } }
+@keyframes hl-rise     { from { opacity: 0; transform: translateY(6px); } }
+@keyframes hl-drop     { from { opacity: 0; transform: translateY(-6px); } }
+@keyframes hl-wash-in  { from { background-color: transparent; } }
+@keyframes hl-bloom    { 0% { background-color: var(--glow-wash-strong); } 100% { background-color: transparent; } }
+@keyframes hl-settle   { from { opacity: .35; } }
+@keyframes hl-draw     { to { stroke-dashoffset: 0; } }
+@keyframes hl-grow-y   { from { transform: scaleY(0); } }
+@keyframes hl-grow-x   { from { transform: scaleX(0); } }
+@keyframes hl-pop      { from { transform: scale(0); } }
+@keyframes hl-tick     { from { transform: scale(.6); opacity: .3; } }
+@keyframes hl-breathe  { 50% { transform: scale(1.18); opacity: .7; } }
+@keyframes hl-halo     { from { opacity: 0; transform: scale(.7); } }
+
+/* Filter rail busy sweep: one of the two loops allowed (the other is the "Checking session" halo). */
+@keyframes rail-sweep {
+  0% {
+    left: 0;
+    width: 0;
+  }
+  50% {
+    width: 30%;
+  }
+  100% {
+    left: 100%;
+    width: 0;
+  }
+}
+
+/* Theme switch (lib/theme.ts → withViewTransition("theme")): everything cross-fades as one. */
+:root[data-vt="theme"] :is(.sidebar, .mobile-masthead, .sidebar-link-active) { view-transition-name: none !important; }
+:root[data-vt="theme"]::view-transition-old(root) { animation: hl-fade-out var(--dur-standard) linear both; }
+:root[data-vt="theme"]::view-transition-new(root) { animation: hl-fade-in var(--dur-standard) linear both; }
+
+/* Reduced motion: the duration tokens already collapse; the loops and view transitions stop outright. */
+@media (prefers-reduced-motion: reduce) {
+  .filter-rail-busy::after { animation: none; width: 100%; opacity: .4; }
+  .boot-message-checking::before { animation: none; }
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+  .rw-tile:hover .rw-face, .rw-tile:active .rw-face { translate: none; scale: none; }
+}

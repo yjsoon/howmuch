@@ -1,24 +1,24 @@
 .reward-tool { max-width: 1100px; }
 .reward-tool label { display: grid; gap: 6px; margin: 14px 0; font-weight: 500; }
-.reward-tool input, .reward-tool select, .reward-tool textarea { font: inherit; padding: 9px 10px; border: 1px solid #aaa; border-radius: 5px; min-width: 0; width: 100%; color: inherit; background: var(--surface, #fff); }
+.reward-tool input, .reward-tool select, .reward-tool textarea { font: inherit; padding: 9px 10px; border: 1px solid var(--rule-control); border-radius: 5px; min-width: 0; width: 100%; color: inherit; background: var(--paper-raised); }
 .reward-tool textarea { resize: vertical; }
 .reward-tool fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .reward-tool button { padding: 8px 14px; cursor: pointer; }
 .reward-tool button:disabled { cursor: default; opacity: .5; }
 .tool-provider { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 16px; }
 .tool-provider p { grid-column: 1 / -1; }
-.tool-drop { border: 1px dashed #888; border-radius: 8px; padding: 16px; margin: 16px 0; }
+.tool-drop { border: 1px dashed var(--ink-faint); border-radius: 8px; padding: 16px; margin: 16px 0; }
 .tool-images { display: flex; flex-wrap: wrap; gap: 16px; padding: 0; list-style: none; }
 .tool-images li { display: grid; gap: 8px; width: 160px; overflow-wrap: anywhere; }
-.tool-images img { width: 160px; height: 140px; object-fit: contain; background: #eee; }
+.tool-images img { width: 160px; height: 140px; object-fit: contain; background: var(--paper-sunk); }
 .reward-tool .tool-consent { display: flex; align-items: flex-start; gap: 10px; font-weight: 400; }
 .reward-tool .tool-consent input { width: auto; margin-top: 5px; }
 .tool-table { overflow-x: auto; margin: 16px 0; }
 .tool-table table { width: 100%; border-collapse: collapse; text-align: left; }
-.tool-table th, .tool-table td { padding: 8px; border-bottom: 1px solid #ddd; }
+.tool-table th, .tool-table td { padding: 8px; border-bottom: 1px solid var(--rule); }
 .tool-table input { min-width: 120px; }
 .tool-table small { display: block; }
 .tool-actions { display: flex; gap: 12px; }
-.tool-error { color: #a52c26; }
+.tool-error { color: var(--red); }
 .reward-tool pre { max-height: 220px; overflow: auto; white-space: pre-wrap; }
 @media (max-width: 650px) { .tool-provider { grid-template-columns: 1fr; } }
