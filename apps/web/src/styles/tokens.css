@@ -89,6 +89,7 @@
 :root {
   --dur-press: 90ms; --dur-fast: 120ms; --dur-base: 180ms; --dur-standard: 320ms; --dur-arrive: 400ms;
   --dur-fill: 600ms; --dur-bloom: 420ms; --dur-vt-out: 80ms; --dur-vt-in: 160ms; --dur-board: 280ms; --dur-sunrise: 600ms;
+  --dur-pulse: 700ms;   /* Rewards: one glow pulse on each card a batch apply updated */
   --stagger: 28ms;
   --ease-out: cubic-bezier(.22, 1, .36, 1);
   --ease-in-out: cubic-bezier(.65, 0, .35, 1);
@@ -98,7 +99,7 @@
 @media (prefers-reduced-motion: reduce), (update: slow) {
   :root {
     --dur-press: 0ms; --dur-fast: 0ms; --dur-base: 0ms; --dur-standard: 0ms; --dur-arrive: 0ms; --dur-fill: 0ms;
-    --dur-vt-out: 0ms; --dur-vt-in: 0ms; --dur-board: 0ms; --dur-sunrise: 0ms; --stagger: 0ms;
+    --dur-vt-out: 0ms; --dur-vt-in: 0ms; --dur-board: 0ms; --dur-sunrise: 0ms; --dur-pulse: 0ms; --stagger: 0ms;
     /* --dur-bloom stays 420ms: its keyframes are colour-only, the save cue must survive. */
   }
 }
