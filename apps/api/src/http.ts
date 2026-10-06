@@ -109,7 +109,7 @@ export function createHandler(options: HandlerOptions): (request: Request) => Pr
       }
 
       if (segments[0] === "api") {
-        return await handleNative(request, url, segments, repo, reports, principal, config.defaultPlanId, categoriser);
+        return await handleNative(request, url, segments, repo, reports, principal, config.defaultPlanId, categoriser, config.ynabBaseUrl);
       }
 
       return apiError(404, "not_found", "Route not found");
@@ -695,6 +695,7 @@ async function handleNative(
   principal: Principal,
   defaultPlanId: string,
   categoriser: CategoriserConfig,
+  ynabBaseUrl?: string,
 ): Promise<Response> {
   const method = request.method.toUpperCase();
   const planId = url.searchParams.get("plan_id") ?? defaultPlanId;
@@ -798,7 +799,7 @@ async function handleNative(
     const result = await importYnabFromApi(repo, {
       token: body.token,
       planId: targetPlanId,
-      baseUrl: body.base_url,
+      baseUrl: ynabBaseUrl,
       sinceDate: body.since_date,
     });
     return json({ data: result }, 201);

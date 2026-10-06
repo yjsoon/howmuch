@@ -29,3 +29,7 @@ The hosted runtime is a Cloudflare Worker using production and preview D1 databa
 YNAB API and export imports remain available through `import:ynab` and `import:ynab-export`.
 
 The iOS register supports signed split allocations, including split transfers; duplicating a split for today creates fresh child lines rather than reusing the original IDs.
+
+## Licence
+
+HowMuch is MIT-licensed. See [LICENSE](LICENSE).

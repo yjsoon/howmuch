@@ -4,14 +4,25 @@ export const DEFAULT_YNAB_SYNC_INTERVAL_MS = 60 * 60 * 1000;
 export const MIN_YNAB_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 export const DEFAULT_YNAB_MIN_SIMILARITY = 0.95;
 
+export const DEFAULT_HOSTNAME = "127.0.0.1";
+
+export function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  return host === "127.0.0.1" || host === "::1" || host === "localhost";
+}
+
 export type ApiConfig = {
   dbPath: string;
   port: number;
+  /** Interface the self-hosted Bun server binds to; loopback by default. */
+  hostname?: string;
   apiToken?: string;
   defaultPlanId: string;
   transitionReadOnly: boolean;
   ynabToken?: string;
   ynabPlanId?: string;
+  /** Operator-controlled YNAB API base URL for `/api/import/ynab`; never taken from request bodies. */
+  ynabBaseUrl?: string;
   ynabSyncIntervalMs?: number;
   ynabMinSimilarity?: number;
   /** TypeSafe API key for Jev category suggestions; the feature is off without it. */
@@ -24,11 +35,13 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env): A
   return {
     dbPath: env.HOWMUCH_DB_PATH ?? "data/howmuch.sqlite",
     port: Number(env.PORT ?? env.HOWMUCH_PORT ?? "8787"),
+    hostname: emptyToUndefined(env.HOWMUCH_HOST) ?? DEFAULT_HOSTNAME,
     apiToken: env.HOWMUCH_API_TOKEN,
     defaultPlanId: env.HOWMUCH_DEFAULT_PLAN_ID ?? "local-plan",
     transitionReadOnly: env.HOWMUCH_TRANSITION_READ_ONLY === "true",
     ynabToken: emptyToUndefined(env.HOWMUCH_YNAB_TOKEN),
     ynabPlanId: emptyToUndefined(env.HOWMUCH_YNAB_PLAN_ID),
+    ynabBaseUrl: emptyToUndefined(env.HOWMUCH_YNAB_BASE_URL),
     ynabSyncIntervalMs: Math.max(
       positiveNumber(env.HOWMUCH_YNAB_SYNC_INTERVAL_MS) ?? DEFAULT_YNAB_SYNC_INTERVAL_MS,
       MIN_YNAB_SYNC_INTERVAL_MS,

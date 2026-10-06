@@ -43,7 +43,7 @@ Required hardening before relying on it daily:
 - Keep backup-before-import behaviour.
 - Add a documented restore drill: stop API, copy the chosen backup over the active DB, start API, run smoke checks.
 - Avoid running more than one API process against the same writable DB file.
-- Set `HOWMUCH_API_TOKEN` for anything reachable beyond localhost.
+- Set `HOWMUCH_API_TOKEN` for anything reachable beyond localhost. The Bun server listens on `127.0.0.1` by default; set `HOWMUCH_HOST` (for example `0.0.0.0`) to serve other machines, and it refuses to start on a non-loopback host without `HOWMUCH_API_TOKEN`.
 
 ### Phase 2: Private Beta / Small Paid Users
 

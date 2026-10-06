@@ -2928,16 +2928,32 @@ describe("native reports and imports", () => {
       return new Response("not found", { status: 404 });
     }) as typeof fetch;
 
+    // The base URL is operator configuration; a request-body `base_url` must
+    // never steer the server's outbound fetches (SSRF).
+    handler = createHandler({
+      db,
+      config: {
+        dbPath: ":memory:",
+        port: 0,
+        apiToken: "test-token",
+        defaultPlanId: "plan-test",
+        transitionReadOnly: false,
+        ynabBaseUrl: "https://ynab.example/v1",
+      },
+    });
+
     try {
       const importResponse = await request("/api/import/ynab?plan_id=plan-test", {
         method: "POST",
         body: {
           token: "ynab-token",
-          base_url: "https://ynab.example/v1",
+          base_url: "https://evil.example/v1",
         },
       });
 
       expect(importResponse.status).toBe(201);
+      expect(calls.some((url) => url.startsWith("https://evil.example"))).toBe(false);
+      expect(calls.every((url) => url.startsWith("https://ynab.example/v1/"))).toBe(true);
       expect(calls).toContain("https://ynab.example/v1/plans/plan-test/settings");
       expect(calls).toContain("https://ynab.example/v1/plans/plan-test/transactions?since_date=1900-01-01");
       const importBody = await importResponse.json();

@@ -187,10 +187,10 @@ The payload is already close to an owned ledger schema. It is an account ledger 
 
 ### Script-Specific Inputs
 
-`uob-6718-gmail-monitor.sh`
+`uob-XXXX-gmail-monitor.sh`
 
 - Source: Gmail from `unialerts@uobgroup.com`.
-- Extracts card 6718 transactions from email snippets: currency, original amount, `DD/MM/YY` date, merchant.
+- Extracts card XXXX transactions from email snippets: currency, original amount, `DD/MM/YY` date, merchant.
 - Non-SGD amounts are estimated to SGD and memoed for later correction.
 - Writes `account_id`, `date`, `amount`, `payee_id` or `payee_name`, `category_id`, `memo`, `flag_color`.
 
