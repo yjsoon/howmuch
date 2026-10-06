@@ -167,8 +167,8 @@ export function QuickEntryPage() {
   return (
     <div className="quick-entry">
       <header className="quick-entry-head">
-        <Link to="/spending" className="back-link">
-          ‹ Reports
+        <Link to="/transactions?range=all&accounts=all" className="back-link">
+          ‹ Ledger
         </Link>
         <span className="quick-entry-title">Quick entry</span>
       </header>
@@ -194,6 +194,7 @@ export function QuickEntryPage() {
           <div className="segmented direction-toggle" role="group" aria-label="Direction">
             <button
               type="button"
+              aria-pressed={direction === "spend"}
               className={direction === "spend" ? "segment segment-active" : "segment"}
               onClick={() => switchDirection("spend")}
             >
@@ -201,6 +202,7 @@ export function QuickEntryPage() {
             </button>
             <button
               type="button"
+              aria-pressed={direction === "income"}
               className={direction === "income" ? "segment segment-active" : "segment"}
               onClick={() => switchDirection("income")}
             >
@@ -208,6 +210,7 @@ export function QuickEntryPage() {
             </button>
             <button
               type="button"
+              aria-pressed={direction === "transfer"}
               className={direction === "transfer" ? "segment segment-active" : "segment"}
               onClick={() => switchDirection("transfer")}
             >
@@ -410,6 +413,7 @@ export function QuickEntryPage() {
                 <div className="segmented date-presets" role="group" aria-label="Date shortcuts">
                   <button
                     type="button"
+                    aria-pressed={date === todayIso()}
                     className={date === todayIso() ? "segment segment-active" : "segment"}
                     onClick={() => {
                       clearStatus();
@@ -420,6 +424,7 @@ export function QuickEntryPage() {
                   </button>
                   <button
                     type="button"
+                    aria-pressed={date === yesterdayIso()}
                     className={date === yesterdayIso() ? "segment segment-active" : "segment"}
                     onClick={() => {
                       clearStatus();

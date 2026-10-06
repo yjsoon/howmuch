@@ -9,12 +9,12 @@ On a register, **+ Add transaction** opens an inline row. The posting account is
 - `compose-save` saves an outflow and shows the new row on that register.
 - `compose-flag` can set a colour on the compose actions row before Save.
 - `compose-add-another` keeps the row open after **Save and add another**.
-- `compose-all-accounts` on All Accounts requires an account in the row before Save.
+- `compose-all-accounts` on Ledger (every account) requires an account in the row before Save.
 
 ## How to get to it (user POV)
 
 - Choose **Everyday Account** in the sidebar, then **+ Add transaction** in the register toolbar.
-- Choose **All Accounts**, then **+ Add transaction**, then pick an account in the row.
+- Choose **Ledger**, then **+ Add transaction**, then pick an account in the row.
 
 ## Driving it with control-howmuch
 

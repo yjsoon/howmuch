@@ -17,7 +17,7 @@ Web recipes drive `{web_url}`. iOS recipes drive the Simulator against the same 
 ## Driving conventions
 
 - Start every recipe from the baseline unless its preconditions say otherwise.
-- Prefer accessible names and routes. On a viewport ≤720px, open **Open menu** before sidebar links.
+- Prefer accessible names and routes. Primary navigation is **Ledger**, **Scheduled**, **Rewards**, then the **Reports** group (**Spending**, **Income v spending**, **Net worth**, **Money age**). The group opens itself on a report route; open it by its summary otherwise. On a viewport ≤720px, open **Open menu** before sidebar links: the drawer also holds the accounts, **Organise**, **Settings** and **Sign out**.
 - Treat commands as literal. Keep quoted names unchanged.
 - Browser actions go through Cursor browser / computer-use against `{web_url}`.
 - iOS actions go through computer-use against the Simulator. Prefer tab titles and accessibility labels. The HTML prototype is not an entry point.
@@ -48,11 +48,11 @@ Keep implementation details out of the map. Name only user paths, stable handles
 ## Features
 
 - [First-owner setup](./first-owner-setup.md) covers the empty-database account form, sign-in on a later visit, sign out, and that signed-in home has no Plan.
-- [Spending breakdown](./spending-breakdown.md) covers the empty current-month default, All-range totals, and category drill-down.
-- [Income v Spending](./income-v-spending.md) covers the YTD default, This-month empty state, and income versus spending headlines.
-- [Net Worth](./net-worth.md) covers the trailing-year series and per-account balance columns.
-- [Age of Money](./age-of-money.md) covers the all-history default and the latest age in days.
-- [Transactions register](./transactions-register.md) covers All Accounts, payee search, and account-scoped register.
+- [Spending breakdown](./spending-breakdown.md) (nav **Spending**) covers the empty current-month default, All-range totals, and category drill-down.
+- [Income v spending](./income-v-spending.md) covers the YTD default, This-month empty state, and income versus spending headlines.
+- [Net worth](./net-worth.md) covers the trailing-year series and per-account balance columns.
+- [Money age](./age-of-money.md) covers the all-history default and the latest age in days.
+- [Transactions register](./transactions-register.md) covers Ledger, its working-balance header, payee search, and account-scoped register.
 - [Register compose](./register-compose.md) covers the inline add row on an account register.
 - [Register maintenance](./register-maintenance.md) covers the uncategorised pill, approval, inline edit, and opening Reconcile.
 - [Quick entry](./quick-entry.md) covers posting a spend from `/add` and seeing it in the register.
@@ -60,7 +60,7 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Settings](./settings.md) covers the footer Settings hub and that API tokens and Rewards import are not top-level nav.
 - [API tokens](./api-tokens.md) covers minting a personal token and revoking it.
 - [Rewards import](./rewards-tracker-import.md) covers uploading a Rewards Tracker settings export and replaying it without duplicates.
-- [Rewards](./rewards.md) covers the Reflect dashboard: Travel Card tiles, All-range spend, flags, grouping, and **Add card**.
+- [Rewards](./rewards.md) covers the Rewards board, now a top-level Primary navigation item: Travel Card tiles, All-range spend, flags, grouping, and **Add card**.
 - [Rewards card edit](./rewards-card-edit.md) covers `/rewards/new`, `/rewards/:cardId`, Save card, Delete card, and hiding a capped tile.
 - [Organise accounts](./organise-accounts.md) covers favourites, a custom group, and the sidebar after close.
 
