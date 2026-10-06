@@ -3106,6 +3106,32 @@ describe("password authentication", () => {
     expect(setup.status).toBe(200);
   });
 
+  // Failure modes: (1) DNS rebinding, where a hostile page resolves its own
+  // name to 127.0.0.1 so the browser sends Host/Origin of the attacker's name;
+  // (2) a tunnel or reverse proxy forwarding a public Host to the loopback
+  // server. Bun derives url.origin from the client-controlled Host header, so
+  // the same-origin check alone cannot tell these from a genuine local request.
+  test("refuses tokenless setup when the Host is not loopback", async () => {
+    const localHandler = createHandler({
+      db,
+      config: {
+        dbPath: ":memory:",
+        port: 0,
+        defaultPlanId: "plan-test",
+        transitionReadOnly: false,
+      },
+    });
+    for (const origin of ["http://rebind.attacker.example:8787", "https://howmuch-tunnel.example"]) {
+      const setup = await localHandler(new Request(`${origin}/api/auth/setup`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin },
+        body: JSON.stringify({ username: "owner", password }),
+      }));
+      expect(setup.status).toBe(403);
+    }
+    expect(db.query("SELECT COUNT(*) AS count FROM users").get()).toEqual({ count: 0 });
+  });
+
   test("logs in with browser cookie and native token, then revokes logout", async () => {
     const setup = await authRequest(
       "/api/auth/setup",

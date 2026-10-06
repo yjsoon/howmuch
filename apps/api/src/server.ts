@@ -8,11 +8,14 @@ const config = loadConfig();
 const hostname = config.hostname ?? DEFAULT_HOSTNAME;
 
 // First-time setup is open to any caller when no static token is configured,
-// so only loopback may be served without one.
+// so only loopback may be served without one. Anything that tunnels or
+// reverse-proxies to the loopback server must set HOWMUCH_API_TOKEN too; the
+// handler refuses tokenless setup for non-loopback Host headers.
 if (!isLoopbackHost(hostname) && !config.apiToken) {
   console.error(
     `Refusing to listen on ${hostname}: HOWMUCH_API_TOKEN is not set. ` +
-      "Set HOWMUCH_API_TOKEN to serve beyond this machine, or unset HOWMUCH_HOST to listen on 127.0.0.1 only.",
+      "Set HOWMUCH_API_TOKEN to serve beyond this machine, or unset HOWMUCH_HOST to listen on 127.0.0.1 only. " +
+      "Also set it if a tunnel or reverse proxy forwards to this server.",
   );
   process.exit(1);
 }

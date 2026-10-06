@@ -32,11 +32,12 @@ export type ApiConfig = {
 };
 
 export function loadConfig(env: Record<string, string | undefined> = Bun.env): ApiConfig {
+  const hostname = emptyToUndefined(env.HOWMUCH_HOST)?.replace(/^\[|\]$/g, "") || DEFAULT_HOSTNAME;
   return {
     dbPath: env.HOWMUCH_DB_PATH ?? "data/howmuch.sqlite",
     port: Number(env.PORT ?? env.HOWMUCH_PORT ?? "8787"),
-    hostname: emptyToUndefined(env.HOWMUCH_HOST) ?? DEFAULT_HOSTNAME,
-    apiToken: env.HOWMUCH_API_TOKEN,
+    hostname,
+    apiToken: emptyToUndefined(env.HOWMUCH_API_TOKEN),
     defaultPlanId: env.HOWMUCH_DEFAULT_PLAN_ID ?? "local-plan",
     transitionReadOnly: env.HOWMUCH_TRANSITION_READ_ONLY === "true",
     ynabToken: emptyToUndefined(env.HOWMUCH_YNAB_TOKEN),

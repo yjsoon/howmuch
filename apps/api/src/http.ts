@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { ApiConfig } from "./config";
+import { isLoopbackHost, type ApiConfig } from "./config";
 import { AccountPreferencesConflictError, LedgerRepository, NotFoundError, ReconciliationMismatchError, TransactionStateConflictError, ValidationError } from "./repository";
 import { MAX_REGISTER_QUERY_LENGTH } from "@howmuch/register-query";
 import { DEFAULT_TRANSACTION_PAGE_SIZE, MAX_TRANSACTION_PAGE_SIZE, type AccountPreferences, type TransactionFilters } from "./types";
@@ -1100,6 +1100,13 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
   if (path === "/api/auth/setup" && method === "POST") {
     if (!sameOrigin(request, url)) {
       return authError(403, "forbidden", "Origin validation failed");
+    }
+    if (!config.apiToken && !isLoopbackHost(url.hostname)) {
+      return authError(
+        403,
+        "forbidden",
+        "Tokenless setup is only allowed from this machine; set HOWMUCH_API_TOKEN",
+      );
     }
     const authorization = request.headers.get("authorization");
     const bootstrapToken = bearerToken(authorization);
