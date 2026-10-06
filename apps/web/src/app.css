@@ -2092,7 +2092,7 @@ a.page-eyebrow:hover {
   border-top: 0;
 }
 
-.section-heading > div {
+.section-heading > div:not(.segmented) {
   display: grid;
   gap: 2px;
 }
