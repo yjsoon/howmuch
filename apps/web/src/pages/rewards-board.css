@@ -1,0 +1,1161 @@
+/*
+ * Rewards board ("Exposure"). Imported by pages/Rewards.tsx.
+ *
+ * Each card is a frame of film, and spending exposes it: the sun rises over
+ * the ridge as --rw-p (progress toward the current target) goes from 0 to 1.
+ * Below the minimum the glow is weak; at a terminal cap the sun sets behind the
+ * ridge and the sky dims (done, not failed); a failed qualification desaturates.
+ *
+ * No colour literals here: the page inherits the app's tokens and the card
+ * faces use the --face-*, --ridge-* and --sun-* tokens in styles/tokens.css.
+ * This sheet loads after app.css and motion.css, so it wins specificity ties.
+ */
+
+.rw-page {
+  --face-aspect: 3 / 2;
+  --meter-track: color-mix(in srgb, var(--rule) 80%, transparent);
+}
+
+/* ---------- hero ---------- */
+
+.rw-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px 40px;
+  align-items: end;
+  margin: 4px 0 16px;
+  padding: 26px 28px 22px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--glow) 14%, var(--paper-raised)), var(--paper-raised));
+}
+
+/* Posterised sun in the corner: stepped rings, decorative. */
+.rw-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(circle at 90% -20%, var(--glow) 0 44px, var(--glow-ring-1) 0 92px, var(--glow-ring-2) 0 150px,
+    var(--glow-ring-3) 0 228px, var(--glow-ring-4) 0 330px, transparent 0);
+}
+
+.rw-hero h1 {
+  margin: 0;
+  font: 500 clamp(28px, 3vw, 40px) / 1.05 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+:root[data-theme="overexposed"] .rw-hero h1 {
+  font-style: italic;
+  font-size: clamp(34px, 3.6vw, 48px);
+}
+
+/* Instrument Serif has weight 400 only (styles beside the app.css overrides, §3.4). */
+:root[data-theme="overexposed"] :is(.rw-hero h1, .rw-face-name, .rw-group-name, .rw-stepper[data-past] .rw-date-face) {
+  font-weight: 400;
+}
+
+.rw-hero-scope,
+.rw-hero-status {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.rw-hero-figures {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 28px;
+  align-items: end;
+  padding-top: 34px;   /* clears the Add card button pinned to the top-right corner */
+}
+
+.rw-figure {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+}
+
+.rw-figure-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+}
+
+.rw-figure-value {
+  font: 500 22px / 1.1 var(--font-figures);
+  font-variant-numeric: tabular-nums;
+}
+
+/* M10: a changed figure settles in place (the span is keyed by its value). */
+.rw-figure .figure-settle {
+  animation: hl-settle var(--dur-base) var(--ease-out) backwards;
+}
+
+.rw-figure-primary .rw-figure-value {
+  font-size: clamp(30px, 3.6vw, 44px);
+  color: var(--green);
+}
+
+.rw-valuation {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.rw-valuation input {
+  width: 7ch;
+  padding: 1px 4px;
+  border: 0;
+  border-bottom: 1px dashed var(--rule-control);
+  background: transparent;
+  font: 500 16px var(--font-figures);
+  text-align: right;
+  color: var(--ink);
+}
+
+.rw-valuation input:focus-visible {
+  outline: none;
+  border-bottom: 1px solid var(--focus);
+}
+
+.rw-add {
+  position: absolute;
+  top: 18px;
+  right: 20px;
+}
+
+/* ---------- toolbar ---------- */
+
+.rw-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  margin: 0 0 6px;
+}
+
+.rw-toolbar .segment {
+  min-height: 32px;
+}
+
+.rw-toolbar .filter-trigger {
+  min-height: 34px;
+}
+
+.rw-toolbar-end {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.rw-tool-button,
+.rw-step {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--rule-control);
+  border-radius: 2px;
+  background: var(--paper-raised);
+  font-size: 13px;
+  transition: background-color var(--dur-fast), border-color var(--dur-fast);
+}
+
+.rw-tool-button:hover:not(:disabled),
+.rw-step:hover:not(:disabled) {
+  background: var(--accent-press);
+}
+
+.rw-tool-button[aria-pressed="true"] {
+  background: var(--inverse-bg);
+  color: var(--inverse-ink);
+  border-color: var(--inverse-bg);
+}
+
+.rw-stepper {
+  display: inline-flex;
+  border: 1px solid var(--rule-control);
+  border-radius: 2px;
+  background: var(--paper-raised);
+}
+
+.rw-stepper .rw-step {
+  border: 0;
+  min-width: 34px;
+  padding: 0;
+  font-size: 16px;
+}
+
+.rw-step:disabled,
+.rw-tool-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.rw-date {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 13ch;
+  padding: 0 10px;
+  border-inline: 1px solid var(--rule);
+}
+
+.rw-date-face {
+  font: 500 13.5px var(--font-figures);
+  pointer-events: none;
+}
+
+/* The native date input sits invisibly over the face: its picker, our type. */
+.rw-date input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.rw-date:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* A past as-of date reads as "not now": italic display face in the needs tone. */
+.rw-stepper[data-past] .rw-date-face {
+  font: italic 600 15px var(--font-display);
+  color: var(--tone-needs);
+}
+
+.rw-count {
+  margin-left: 4px;
+  font: 500 11px var(--font-figures);
+  color: var(--ink-faint);
+}
+
+.segment-active .rw-count {
+  color: inherit;
+  opacity: 0.7;
+}
+
+.rw-arrange {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rw-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--plan-accent);
+}
+
+.rw-mode-note {
+  margin: 0 0 4px;
+}
+
+/* ---------- popovers and the card menu ---------- */
+
+.rw-popover-wrap,
+.rw-menu {
+  position: relative;
+}
+
+.rw-popover,
+.rw-menu-list {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
+  margin: 0;
+  padding: 8px;
+  list-style: none;
+  color: var(--ink);
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-strong);
+  box-shadow: var(--shadow-2);
+  border-radius: var(--radius);
+  transform-origin: top right;
+  animation: hl-drop var(--dur-fast) var(--ease-out) both;
+}
+
+.rw-menu-list a,
+.rw-menu-list button,
+.rw-popover-link {
+  display: block;
+  width: 100%;
+  padding: 7px 8px;
+  font-size: 13px;
+  text-align: left;
+  text-decoration: none;
+  border-radius: 2px;
+}
+
+.rw-menu-list :is(a, button):hover:not(:disabled),
+.rw-popover-link:hover {
+  background: var(--row-hover);
+}
+
+.rw-menu-list button:disabled {
+  color: var(--ink-faint);
+  cursor: default;
+}
+
+.rw-menu-note {
+  display: block;
+  padding: 0 8px 4px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.rw-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.rw-fieldset legend {
+  padding: 2px 8px 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.rw-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.rw-option:hover {
+  background: var(--row-hover);
+}
+
+.rw-option input {
+  margin: 0;
+  accent-color: var(--plan-accent);
+}
+
+.rw-popover-rule {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--rule);
+}
+
+/* An open card menu rises above the neighbouring cards' action buttons. */
+.rw-card-actions:has(.rw-menu-list) {
+  z-index: 35;
+}
+
+/* ---------- board, groups, grid ---------- */
+
+.rw-board {
+  display: grid;
+  gap: 28px;
+  margin: 18px 0 28px;
+  /* The 120ms delay is deliberate: fast responses never flicker. */
+  transition: opacity var(--dur-fast) 120ms;
+}
+
+.rw-board[data-refreshing] {
+  opacity: 0.72;
+}
+
+.rw-empty {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin: 0;
+}
+
+.rw-empty .status-detail {
+  margin: 0;
+}
+
+.rw-group-head {
+  margin: 0 0 14px;
+  font: inherit;
+}
+
+.rw-group-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+}
+
+.rw-group-name {
+  font: 500 20px / 1.2 var(--font-display);
+}
+
+.rw-group-count {
+  font: 500 11px var(--font-figures);
+  color: var(--ink-faint);
+}
+
+.rw-group-sum {
+  margin-left: auto;
+  font: 13px var(--font-figures);
+  color: var(--ink-soft);
+}
+
+.rw-chevron {
+  color: var(--ink-faint);
+  transition: rotate var(--dur-standard) var(--ease-out);
+}
+
+.rw-group-toggle[aria-expanded="false"] .rw-chevron {
+  rotate: -90deg;
+}
+
+.rw-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+  gap: 22px 18px;
+}
+
+/* display: grid above would otherwise beat the hidden attribute. */
+.rw-grid[hidden] {
+  display: none;
+}
+
+.rw-hidden-footer {
+  justify-self: center;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+/* ---------- card ---------- */
+
+.rw-card {
+  position: relative;
+  min-width: 0;
+  transition: --rw-p var(--dur-fill) var(--ease-out);
+  animation: rw-arrive var(--dur-arrive) var(--ease-out) backwards, rw-expose var(--dur-fill) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * var(--stagger));
+}
+
+@keyframes rw-arrive {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+}
+
+@keyframes rw-expose {
+  from {
+    --rw-p: 0;
+  }
+}
+
+.rw-tile {
+  display: grid;
+  color: inherit;
+  text-decoration: none;
+  border-radius: 12px;
+}
+
+.rw-tile:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+}
+
+.rw-face {
+  position: relative;
+  z-index: 1;
+  isolation: isolate;
+  overflow: hidden;
+  /* clip, where supported, keeps the 3:2 frame but lets very long names grow it rather than be cut. */
+  overflow: clip;
+  container-type: inline-size;
+  aspect-ratio: var(--face-aspect);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  padding: 14px 16px 12px;
+  border-radius: 12px;
+  background: var(--face-day);
+  color: var(--face-day-ink);
+  box-shadow: var(--face-shadow);
+  transition: translate var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.rw-card[data-type="miles"] .rw-face {
+  background: var(--face-night);
+  color: var(--face-night-ink);
+}
+
+/* Stepped rings whose radius and strength grow with --rw-p, centred on the sun. */
+.rw-face-halo {
+  --r: calc((14 + var(--rw-p) * 46) * 1cqi);
+  --y: calc(70% - var(--rw-p) * 46%);
+  position: absolute;
+  inset: 0;
+  z-index: -3;
+  pointer-events: none;
+  background: radial-gradient(circle at 76% var(--y), var(--sun-core) 0 calc(var(--r) * 0.3), var(--glow-ring-1) 0 calc(var(--r) * 0.48),
+    var(--glow-ring-2) 0 calc(var(--r) * 0.66), var(--glow-ring-3) 0 calc(var(--r) * 0.84), var(--glow-ring-4) 0 var(--r), transparent 0);
+  opacity: calc(0.3 + var(--rw-p) * 0.7);
+}
+
+/* The sun rises from behind the back ridge (about 47% down at its x) as progress grows. */
+.rw-face-sun {
+  position: absolute;
+  z-index: -2;
+  left: 76%;
+  top: calc(70% - var(--rw-p) * 46%);
+  translate: -50% -50%;
+  width: 9cqi;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--sun-disc);
+  box-shadow: 0 0 0 0.8cqi color-mix(in srgb, var(--sun-rim) 60%, transparent);
+}
+
+.rw-face-ridge {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: -1;
+  width: 100%;
+  height: 58%;
+  pointer-events: none;
+}
+
+.rw-ridge-back {
+  fill: var(--ridge-back);
+}
+
+.rw-ridge-front {
+  fill: var(--ridge-front);
+}
+
+.rw-ridge-crest {
+  fill: none;
+  stroke: var(--ridge-crest);
+  stroke-opacity: 0.6;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.rw-face-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  max-width: 62%;
+  font: 600 10px / 1.5 var(--font-ui);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.rw-badge {
+  padding: 0 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.rw-face-name {
+  align-self: start;
+  margin: 6px 0 0;
+  max-width: 64%;
+  font: 500 21px / 1.15 var(--font-display);
+  text-wrap: balance;
+}
+
+.rw-face-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+  color: var(--face-foot-ink);
+}
+
+.rw-face-account {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 400 11px var(--font-figures);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.rw-face-earned {
+  flex: none;
+  font: 500 17px / 1.1 var(--font-figures);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tones. needs: underexposed, a weaker sun core. */
+.rw-card[data-tone="needs"] {
+  --sun-core: var(--glow-edge);
+}
+
+/* complete: the sun has set behind the ridge and the sky dims. Done, not failed. */
+.rw-card[data-tone="complete"] .rw-face::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--face-dim);
+  pointer-events: none;
+}
+
+.rw-card[data-tone="complete"] .rw-face-sun {
+  top: 82%;
+}
+
+.rw-card[data-tone="complete"] .rw-face-halo {
+  --y: 82%;
+}
+
+.rw-card[data-tone="failed"] .rw-face {
+  filter: saturate(0.35);
+}
+
+.rw-card[data-hidden] .rw-face {
+  opacity: 0.55;
+  filter: saturate(0.4);
+}
+
+/* Lift and press. Never under reduced motion (motion.css says the same; this sheet loads later). */
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .rw-tile:hover .rw-face {
+    translate: 0 -2px;
+    box-shadow: var(--face-shadow-lift);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rw-tile:active .rw-face {
+    translate: 0 0;
+    scale: 0.992;
+    transition-duration: var(--dur-press);
+  }
+}
+
+/* ---------- slip: the statement the card sits on ---------- */
+
+.rw-slip {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  margin: -10px 8px 0;
+  padding: 20px 14px 14px;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-top: 0;
+  border-radius: 0 0 10px 10px;
+}
+
+.rw-line {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.rw-line-strong {
+  font-weight: 600;
+  color: var(--tone-failed);
+}
+
+.rw-meter {
+  display: grid;
+  gap: 5px;
+  transition: --rw-m var(--dur-fill) var(--ease-out);
+  animation: rw-fill var(--dur-fill) var(--ease-out) backwards;
+  animation-delay: calc(var(--dur-fast) + var(--i, 0) * var(--stagger));
+}
+
+@keyframes rw-fill {
+  from {
+    --rw-m: 0;
+  }
+}
+
+.rw-meter-legend {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.rw-meter-legend > :last-child {
+  font-family: var(--font-figures);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rw-meter-track {
+  position: relative;
+  height: 2px;
+  background: var(--meter-track);
+}
+
+.rw-meter-primary .rw-meter-track {
+  height: 4px;
+}
+
+.rw-meter-fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: left;
+  transform: scaleX(var(--rw-m));
+  background: linear-gradient(90deg, var(--glow-edge), var(--glow));
+}
+
+.rw-meter[data-tone="needs"] .rw-meter-fill {
+  background: var(--tone-needs);
+}
+
+.rw-meter[data-tone="complete"] .rw-meter-fill {
+  background: var(--tone-complete);
+}
+
+.rw-meter-bead {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--rw-m) * 100%);
+  translate: -50% -50%;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--sun-disc);
+  box-shadow: 0 0 0 1.5px var(--sun-rim), 0 0 calc(4px + var(--rw-m) * 10px) calc(var(--rw-m) * 3px) var(--glow-wash-strong);
+}
+
+.rw-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0;
+}
+
+.rw-stats dt {
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.rw-stats dd {
+  margin: 2px 0 0;
+  font: 13px var(--font-figures);
+  font-variant-numeric: tabular-nums;
+}
+
+.rw-flags {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Flag rows carry a leading usage fill against their cap; red from 90%. */
+.rw-flag {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 4px 8px;
+  align-items: center;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.rw-flag::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--glow-wash) calc(var(--use, 0) * 100%), transparent 0);
+}
+
+.rw-flag[data-warn]::before {
+  background: linear-gradient(90deg, var(--red-wash) calc(var(--use) * 100%), transparent 0);
+}
+
+/* The tag keeps its own width instead of stretching into a slab. */
+.rw-flag .flag-tag {
+  justify-self: start;
+  margin-left: 0;
+}
+
+.rw-flag-cap {
+  grid-column: 1 / -1;
+  font: 11px var(--font-figures);
+  color: var(--ink-faint);
+}
+
+.rw-flag[data-warn] .rw-flag-cap {
+  color: var(--red);
+}
+
+.rw-more {
+  margin: 6px 8px 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.rw-more summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.rw-more p {
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+
+.rw-months {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.rw-months [data-status="failed"] {
+  color: var(--tone-failed);
+}
+
+/* ---------- actions, selection ---------- */
+
+.rw-card-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+}
+
+.rw-order {
+  display: flex;
+  gap: 4px;
+}
+
+.rw-icon-button {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--paper-raised) 80%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.rw-icon-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.rw-card-select {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  cursor: pointer;
+  border-radius: 12px;
+}
+
+/* Top-right, where the card actions sit outside select mode: clear of the issuer line. */
+.rw-card-select input {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--plan-accent);
+  animation: hl-pop var(--dur-standard) var(--ease-spring) both;
+  /* About 20ms apart; collapses with the stagger token under reduced motion. */
+  animation-delay: calc(var(--i, 0) * var(--stagger) * 0.7);
+}
+
+.rw-page[data-selecting] .rw-tile {
+  pointer-events: none;
+}
+
+.rw-card[data-selected] .rw-face {
+  box-shadow: var(--face-shadow), 0 0 0 2px var(--plan-accent), 0 0 0 6px var(--plan-accent-wash);
+}
+
+.rw-card[data-just-updated] .rw-face {
+  animation: rw-pulse var(--dur-pulse) var(--ease-out) 1;
+}
+
+@keyframes rw-pulse {
+  50% {
+    box-shadow: var(--face-shadow), 0 0 0 10px var(--glow-wash-strong);
+  }
+}
+
+/* ---------- bulk bar ---------- */
+
+.rw-bulk {
+  position: sticky;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 8px auto 0;
+  padding: 8px 10px 8px 16px;
+  color: var(--inverse-ink);
+  background: var(--inverse-bg);
+  border-radius: 12px;
+  box-shadow: var(--shadow-2);
+  animation: rw-rise var(--dur-standard) var(--ease-spring) both;
+}
+
+@keyframes rw-rise {
+  from {
+    translate: 0 calc(100% + 24px);
+    opacity: 0;
+  }
+}
+
+.rw-bulk-count {
+  min-width: 9ch;
+  font: 500 13px var(--font-figures);
+}
+
+.rw-bulk :is(button, select, input) {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--inverse-control);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  color-scheme: var(--inverse-scheme);
+}
+
+/* Selects and inputs keep the global 16px so iOS does not zoom on focus. */
+.rw-bulk button {
+  font-size: 13px;
+}
+
+.rw-bulk button:hover:not(:disabled) {
+  background: var(--inverse-hover);
+}
+
+.rw-bulk input {
+  width: 8ch;
+}
+
+.rw-bulk .rw-bulk-apply {
+  background: var(--plan-accent);
+  color: var(--on-accent);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.rw-bulk .rw-bulk-apply:hover:not(:disabled) {
+  background: var(--plan-accent);
+}
+
+.rw-bulk button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.rw-bulk-rule {
+  width: 1px;
+  height: 20px;
+  background: var(--inverse-rule);
+}
+
+.rw-bulk-verb {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+/* ---------- breakdown ---------- */
+
+.rw-breakdown .section-heading {
+  align-items: center;
+}
+
+.rw-breakdown .section-heading > div:not(.segmented) {
+  display: grid;
+  gap: 2px;
+}
+
+/* Keep the grouping control a row even if a global .section-heading > div rule makes divs grids. */
+.rw-breakdown .section-heading > .segmented {
+  display: inline-flex;
+}
+
+.rw-breakdown th.num {
+  text-align: right;
+}
+
+.rw-breakdown-empty {
+  color: var(--ink-soft);
+}
+
+/* ---------- board view transitions (names exist only during the 280ms window) ---------- */
+
+:root[data-vt="board"] .rw-card {
+  view-transition-name: var(--vt-name);
+  view-transition-class: rw-card;
+}
+
+:root[data-vt="board"]::view-transition-group(*) {
+  animation-duration: var(--dur-board);
+  animation-timing-function: var(--ease-out);
+}
+
+:root[data-vt="board"]::view-transition-old(root),
+:root[data-vt="board"]::view-transition-new(root) {
+  animation: none;
+}
+
+/* ---------- phones ---------- */
+
+@media (max-width: 720px) {
+  .rw-page {
+    --face-aspect: 21 / 9;
+  }
+
+  .rw-hero {
+    grid-template-columns: 1fr;
+    padding: 20px 16px 16px;
+  }
+
+  .rw-hero-figures {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    padding-top: 0;
+  }
+
+  .rw-figure {
+    justify-items: start;
+  }
+
+  .rw-figure-primary {
+    grid-column: 1 / -1;
+  }
+
+  .rw-add {
+    top: 16px;
+    right: 16px;
+  }
+
+  .rw-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .rw-toolbar > .segmented,
+  .rw-stepper {
+    grid-column: 1 / -1;
+  }
+
+  .rw-toolbar .segmented {
+    display: flex;
+  }
+
+  .rw-toolbar .segment {
+    flex: 1;
+    white-space: nowrap;
+  }
+
+  .rw-stepper .rw-date {
+    flex: 1;
+  }
+
+  .rw-toolbar-end {
+    grid-column: 2;
+    margin-left: 0;
+  }
+
+  .rw-grid {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .rw-face-name {
+    font-size: 19px;
+  }
+
+  .rw-page[data-selecting] {
+    padding-bottom: 132px;
+  }
+
+  .rw-bulk {
+    position: fixed;
+    inset: auto 8px max(8px, env(safe-area-inset-bottom));
+    width: auto;
+    margin: 0;
+    border-radius: 14px;
+  }
+
+  /* The rule becomes a line break: selection buttons, then "Set … to …", then Apply. */
+  .rw-bulk-rule {
+    flex-basis: 100%;
+    height: 0;
+    background: none;
+  }
+
+  .rw-bulk select,
+  .rw-bulk input {
+    flex: 1 1 110px;
+    min-width: 0;
+  }
+
+  /* Popovers become bottom sheets. */
+  .rw-popover,
+  .rw-menu-list {
+    position: fixed;
+    inset: auto 0 0;
+    top: auto;
+    min-width: 0;
+    border-radius: 16px 16px 0 0;
+    border-width: 1px 0 0;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    transform-origin: bottom center;
+    animation-name: hl-rise;
+  }
+
+  .rw-menu-list a,
+  .rw-menu-list button,
+  .rw-popover-link,
+  .rw-option {
+    min-height: 44px;
+  }
+
+  .rw-menu-list a,
+  .rw-popover-link {
+    display: flex;
+    align-items: center;
+  }
+}

@@ -368,6 +368,8 @@ export interface RewardsReport {
       type: "cashback" | "miles";
       ynabAccountId: string;
       featured: boolean;
+      /** The server sends the full CreditCard; the board reads the tiers for their labels. */
+      spendingTiers?: Array<{ id: string; spendThreshold: number; earningRate?: number | null; maximumSpend?: number | null }>;
     };
     account_id: string;
     account_name: string;
@@ -403,6 +405,12 @@ export interface RewardsReport {
         rewardEarned: number;
         rewardEarnedDollars?: number;
         rewardRate?: number;
+        countedSpend?: number;
+        minimumSpend?: number | null;
+        minimumSpendMet?: boolean;
+        maximumSpend?: number | null;
+        maximumSpendExceeded?: boolean;
+        blockSize?: number | null;
       }>;
     };
   }>;
