@@ -1,5 +1,7 @@
 # Deployment
 
+This is the owner's runbook. To run your own instance, see [self-hosting](self-hosting.md).
+
 The D1 databases (placement is per-database and fixed at creation):
 
 - Production (Tinkertanker account, env `tk`): `howmuch-production-sg` = `d13295f9-10d4-4ac0-bf62-b3e8c78cbf29` — primary in **SIN** since the 2026-09-12 #183 cutover

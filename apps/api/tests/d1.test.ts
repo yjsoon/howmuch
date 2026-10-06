@@ -215,6 +215,8 @@ describe("D1 foundation", () => {
       HOWMUCH_DEFAULT_PLAN_ID: "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
       HOWMUCH_TIME_ZONE: "Asia/Singapore",
       HOWMUCH_REDIRECT_TARGET: "https://howmuch.tk.sg",
+      // Apple fetches the association file from the redirect host and will not follow redirects.
+      HOWMUCH_APPLE_APP_IDS: "PQ6U5ESLN2.sg.soon.howmuch",
     });
     expect(wranglerConfig.triggers.crons).toEqual([]);
     expect(wranglerConfig.routes).toEqual([{ pattern: "howmuch.soon.sg", custom_domain: true }]);
@@ -227,6 +229,7 @@ describe("D1 foundation", () => {
       HOWMUCH_TIME_ZONE: "Asia/Singapore",
       HOWMUCH_YNAB_PLAN_ID: "",
       HOWMUCH_TRANSITION_READ_ONLY: "false",
+      HOWMUCH_APPLE_APP_IDS: "PQ6U5ESLN2.sg.soon.howmuch",
     });
     expect(wranglerConfig.env.tk.vars).not.toHaveProperty("HOWMUCH_REDIRECT_TARGET");
     // preview env stays in the YJ account.
@@ -237,6 +240,7 @@ describe("D1 foundation", () => {
       HOWMUCH_DEFAULT_PLAN_ID: "80bc6db0-d926-4635-a37a-1ba0787c4c4e",
       HOWMUCH_TIME_ZONE: "Asia/Singapore",
       HOWMUCH_TRANSITION_READ_ONLY: "false",
+      HOWMUCH_APPLE_APP_IDS: "PQ6U5ESLN2.sg.soon.howmuch",
     });
   });
 
@@ -294,12 +298,52 @@ describe("D1 foundation", () => {
       await expect(worker.scheduled(transitionController, writableYnabEnv as any)).resolves.toBeUndefined();
       expect(JSON.parse(logs[2])).toMatchObject({ event: "ynab_delta_sync", status: "duplicate" });
       await expect(worker.scheduled({ cron: "0 0 * * *", scheduledTime: transitionController.scheduledTime } as any, transitionEnv as any))
-        .rejects.toThrow("Unknown scheduled cron");
+        .rejects.toThrow("does not match transition read-only mode");
       await expect(worker.scheduled({ scheduledTime: transitionController.scheduledTime } as any, transitionEnv as any))
         .rejects.toThrow("Unknown scheduled cron: missing");
 
       await worker.scheduled({ cron: "5 16 * * *", scheduledTime: Date.UTC(2026, 7, 20, 16, 5) } as any, writableEnv as any);
       expect(db.query("SELECT COUNT(*) count FROM transactions WHERE source_kind='scheduled-transaction'").get()).toEqual({ count: 1 });
+    } finally {
+      console.log = originalLog;
+    }
+  });
+
+  // Failure modes guarded here, for self-hosted crons that differ from production's `5 16 * * *`:
+  //  1. a self-hoster's local-midnight cron is rejected as "Unknown scheduled cron", so schedules never materialise;
+  //  2. a custom cron is mistaken for the YNAB sync and runs it (or the YNAB sync cron is mistaken for materialisation);
+  //  3. the transition read-only guard stops protecting a read-only instance from materialising on a custom cron.
+  test("Worker runs materialisation for any cron except the YNAB sync cron, which stays configurable", async () => {
+    const db = await ledgerSqlite();
+    const setup = new D1LedgerRepository(new D1Database(fakeD1(db)), "p");
+    await setup.createScheduledTransaction("p", {
+      id: "custom-cron-schedule", account_id: "a", date_first: "2026-08-20", frequency: "never", amount: -200,
+    });
+    const env = {
+      ASSETS: { fetch: async () => new Response("asset") }, DB: fakeD1(db), HOWMUCH_API_TOKEN: "worker-token",
+      HOWMUCH_DEFAULT_PLAN_ID: "p", HOWMUCH_TIME_ZONE: "Asia/Singapore", HOWMUCH_TRANSITION_READ_ONLY: "false",
+    };
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (value: string) => { logs.push(value); };
+    try {
+      await expect(worker.scheduled({ cron: "0 15 * * *", scheduledTime: Date.UTC(2026, 7, 20, 15, 0) } as any, env as any)).resolves.toBeUndefined();
+      expect(JSON.parse(logs[0])).toMatchObject({ event: "scheduled_materialization", occurrence_count: 1 });
+      expect(db.query("SELECT COUNT(*) count FROM transactions WHERE source_kind='scheduled-transaction'").get()).toEqual({ count: 1 });
+
+      // The documented production cron keeps materialising exactly as before.
+      await expect(worker.scheduled({ cron: "5 16 * * *", scheduledTime: Date.UTC(2026, 7, 20, 16, 5) } as any, env as any)).resolves.toBeUndefined();
+      expect(JSON.parse(logs[1])).toMatchObject({ event: "scheduled_materialization" });
+
+      // A missing cron is still refused rather than silently materialising.
+      await expect(worker.scheduled({ scheduledTime: Date.UTC(2026, 7, 20, 15, 0) } as any, env as any)).rejects.toThrow("Unknown scheduled cron: missing");
+
+      // Read-only instances still refuse non-YNAB crons; a custom YNAB cron replaces the default.
+      const readOnlyEnv = { ...env, HOWMUCH_TRANSITION_READ_ONLY: "true", HOWMUCH_YNAB_SYNC_CRON: "30 3 * * *" };
+      await expect(worker.scheduled({ cron: "0 15 * * *", scheduledTime: Date.UTC(2026, 7, 20, 15, 0) } as any, readOnlyEnv as any))
+        .rejects.toThrow("does not match transition read-only mode");
+      await expect(worker.scheduled({ cron: "10 16 * * *", scheduledTime: Date.UTC(2026, 7, 20, 16, 10) } as any, readOnlyEnv as any))
+        .rejects.toThrow("does not match transition read-only mode");
     } finally {
       console.log = originalLog;
     }

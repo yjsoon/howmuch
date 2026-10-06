@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { CATEGORY_SUGGESTION_BATCH, type CategorySuggestion, type CategorySuggestionRequestItem } from "../lib/category-suggestions";
+import { localePlanSeed } from "../lib/locale-plan-seed";
 import type {
   Account,
   AccountPreferences,
@@ -373,7 +374,7 @@ export const api = {
     request<AuthSession>("/api/auth/setup", {
       method: "POST",
       headers: bootstrapToken ? { authorization: `Bearer ${bootstrapToken}` } : undefined,
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, ...localePlanSeed() }),
     }),
   login: (username: string, password: string) =>
     request<AuthSession>("/api/auth/login", {
