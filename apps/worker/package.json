@@ -6,7 +6,7 @@
   "scripts": {
     "build:web": "bun run --cwd ../web build",
     "build": "bun run build:web && wrangler deploy --dry-run --outdir dist",
-    "deploy": "echo 'Refusing unqualified deploy. Use deploy:tk or deploy:yj-redirect.' >&2; exit 1",
+    "deploy": "echo 'Refusing unqualified deploy. Use deploy:tk, deploy:yj-redirect or deploy:self-host.' >&2; exit 1",
     "deploy:self-host": "bun run build:web && wrangler deploy --config wrangler.self-host.jsonc",
     "deploy:preview": "bun run build:web && wrangler deploy --env preview --profile yj",
     "deploy:tk": "bun run build:web && wrangler deploy --env tk --profile tinkertanker",

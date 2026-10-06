@@ -15,4 +15,5 @@ data/
 apps/ios/build/
 apps/worker/.wrangler/
 *.log
-apps/worker/wrangler.self-host.jsonc
+apps/worker/wrangler.self-host.*
+!apps/worker/wrangler.self-host.example.jsonc

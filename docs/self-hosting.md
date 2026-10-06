@@ -12,7 +12,7 @@ Halation runs as one Cloudflare Worker (web app and API on the same address) wit
 
 ## Prerequisites
 
-- A Cloudflare account (the free plan is enough to start).
+- A Cloudflare account with the Workers Paid plan (US$5 a month). See [Costs](#costs) for why the free Workers plan is not enough.
 - [Bun](https://bun.sh) installed.
 - Git and `openssl` (or any way to produce a long random string).
 
@@ -39,8 +39,10 @@ cp wrangler.self-host.example.jsonc wrangler.self-host.jsonc
 Create the database and note the `database_id` it prints:
 
 ```sh
-bunx wrangler d1 create halation
+bunx wrangler d1 create <db-name> --config wrangler.self-host.jsonc
 ```
+
+Choose any name for `<db-name>` and use it wherever this guide says "the database name you chose". Passing `--config` stops Wrangler reading another `wrangler.jsonc` in the repository. Wrangler may offer to add the D1 binding to your config for you; either accept or fill it in by hand as described next.
 
 Then edit `wrangler.self-host.jsonc`:
 
@@ -51,29 +53,41 @@ Then edit `wrangler.self-host.jsonc`:
 - `triggers.crons`: the daily materialisation of due scheduled transactions. Cron uses UTC, so convert your local 00:05 (the example explains how).
 - Optional: uncomment `routes` for a custom domain on a zone in your account. Without it, the `workers.dev` address works.
 
-## 3. Create the schema and the token
+## 3. Create the schema and deploy
 
 ```sh
-bunx wrangler d1 migrations apply halation --remote --config wrangler.self-host.jsonc
+bunx wrangler d1 migrations apply <db-name> --remote --config wrangler.self-host.jsonc
+bun run deploy:self-host
+```
+
+The deploy builds the web app and runs `wrangler deploy` with your config. Wrangler prints the address of your Worker. Deploy before creating the secret below, so the Worker already exists when the secret is added.
+
+## 4. Create the setup token
+
+```sh
 openssl rand -hex 32
 bunx wrangler secret put HOWMUCH_API_TOKEN --config wrangler.self-host.jsonc
 ```
 
-Paste the random string when prompted. Keep a copy in a password manager: it is the setup token, and it also authorises default-plan integrations, so treat it like a password.
-
-## 4. Deploy
-
-```sh
-bun run deploy:self-host
-```
-
-This builds the web app and runs `wrangler deploy` with your config. Wrangler prints the address of your Worker.
+Paste the random string when prompted. Keep a copy in a password manager: it is the setup token, and it also authorises default-plan integrations, so treat it like a password. Until this secret exists, setup fails closed.
 
 ## 5. First-owner setup
 
-Open your Worker's address in a browser. The app shows the setup form. Enter a username, a password of at least 15 characters, and the setup token from step 3. The new plan takes its currency and date order from your browser's locale (for example GBP and day/month/year for `en-GB`); if the browser cannot say, it starts as SGD with day/month/year.
+Open your Worker's address in a browser. The app shows the setup form. Enter a username, a password of at least 15 characters, and the setup token from step 4.
+
+The form also asks for a currency and a date format, prefilled from your browser's language. That guess is only a guess: browsers often report US English whatever the person's country, so check both before you continue. They cannot be changed in the app yet.
 
 Setup works once. A second attempt returns "Setup has already completed".
+
+### Changing the currency or date format afterwards
+
+Until the app can do this itself, update the plan row directly. This example switches to Singapore dollars with day/month/year dates. Replace `<HOWMUCH_DEFAULT_PLAN_ID>` with the value in your config, and adapt the currency JSON for another currency. The separators must stay `.` and `,`.
+
+```sh
+bunx wrangler d1 execute <db-name> --remote --config wrangler.self-host.jsonc --command "UPDATE plans SET currency_format_json='{\"iso_code\":\"SGD\",\"example_format\":\"\$123,456.78\",\"decimal_digits\":2,\"decimal_separator\":\".\",\"symbol_first\":true,\"group_separator\":\",\",\"currency_symbol\":\"\$\",\"display_symbol\":true}', date_format_json='{\"format\":\"DD/MM/YYYY\"}', updated_at=CURRENT_TIMESTAMP WHERE id='<HOWMUCH_DEFAULT_PLAN_ID>'"
+```
+
+Then reload the app. The date format is one of `DD/MM/YYYY`, `MM/DD/YYYY` or `YYYY-MM-DD`.
 
 ## 6. Connect the iOS app
 
@@ -81,26 +95,31 @@ The iOS app is not on the App Store. If you have a build, open **More, then Conn
 
 ## Updating
 
+From the root of your clone, move to the latest release tag rather than the default branch, which may hold unreleased work:
+
 ```sh
-git pull
+cd <path-to-your-clone>
+git fetch --tags
+git checkout "$(git tag --list 'v*' --sort=-v:refname | head -n 1)"
 bun install
 cd apps/worker
-bunx wrangler d1 migrations apply halation --remote --config wrangler.self-host.jsonc
+bunx wrangler d1 migrations apply <db-name> --remote --config wrangler.self-host.jsonc
 bun run deploy:self-host
 ```
 
-Apply migrations before deploying so the new code never meets an old schema. Check the release notes for anything that needs more than this.
+Apply migrations before deploying so the new code never meets an old schema. Read the tag's commit log (`git log --oneline <previous-tag>..<new-tag>`) for anything that needs more than this.
 
 ## Backups
 
 D1 keeps point-in-time history, but take your own copy before migrations and at least monthly:
 
 ```sh
-bunx wrangler d1 export halation --remote --output halation-backup.sql --config wrangler.self-host.jsonc
+mkdir -p ../../data/backups
+bunx wrangler d1 export <db-name> --remote --output ../../data/backups/backup-$(date +%F).sql --config wrangler.self-host.jsonc
 ```
 
-The file contains your financial data and password hashes. Keep it private and never commit or share it.
+`data/` is gitignored. The file contains your financial data and password hashes: keep it private and never commit or share it.
 
 ## Costs
 
-A single household will likely fit inside the Workers Free plan and the D1 free tier, but check Cloudflare's current limits yourself. Workers Free has a daily request cap, and D1's free tier has daily row-read and row-write caps; once a daily cap is reached, requests and D1 queries fail until the allowance resets. Free Workers also have a small per-request CPU limit, and password hashing is CPU-heavy. If setup or sign-in fails with a CPU-limit error, move to the Workers Paid plan, which has far higher limits.
+Expect to need the Workers Paid plan (US$5 a month). Password hashing (scrypt) takes roughly 200 ms of CPU for each sign-in and for setup, far above the 10 ms per-request CPU limit on Workers Free, so those requests fail there with a CPU-limit error. D1's free tier is enough for one household, but check Cloudflare's current limits and pricing yourself.

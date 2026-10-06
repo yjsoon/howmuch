@@ -36,7 +36,9 @@ export function parseSeedCurrencyFormat(value: unknown): SeedCurrencyFormat | nu
   if (typeof v.iso_code !== "string" || !/^[A-Z]{3}$/.test(v.iso_code)) return null;
   if (!shortString(v.example_format, 1, 40)) return null;
   if (typeof v.decimal_digits !== "number" || !Number.isInteger(v.decimal_digits) || v.decimal_digits < 0 || v.decimal_digits > 4) return null;
-  if (!shortString(v.decimal_separator, 1, 3) || !shortString(v.group_separator, 0, 3)) return null;
+  // The web and iOS amount parsers only understand "." as the decimal mark and
+  // "," as the group mark, so any other seed would make typed amounts misparse.
+  if (v.decimal_separator !== "." || v.group_separator !== ",") return null;
   if (!shortString(v.currency_symbol, 1, 8)) return null;
   if (typeof v.symbol_first !== "boolean" || typeof v.display_symbol !== "boolean") return null;
   return {

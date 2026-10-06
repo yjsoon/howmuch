@@ -57,7 +57,10 @@ environment `tk` in `wrangler.jsonc`:
   `https://howmuch.tk.sg`, serving the web front-end and API on one hostname.
 - One cron, `5 16 * * *` (00:05 Asia/Singapore), materialises due scheduled
   transactions; it catches up overdue occurrences (25 per run, idempotent via
-  deterministic operation IDs). No YNAB configuration. Keep
+  deterministic operation IDs). No YNAB configuration. A cron equal to the YNAB
+  sync cron (`HOWMUCH_YNAB_SYNC_CRON`, default `10 16 * * *`) runs the YNAB
+  sync only when that variable is set, a YNAB token or plan ID is configured,
+  or transition read-only mode is on; otherwise it materialises. Keep
   `HOWMUCH_API_TOKEN` as an encrypted secret on this Worker.
 - Optional: `TYPESAFE_API_KEY` (encrypted secret) turns on Jev category
   suggestions (`POST /api/tools/categorise`); without it the route returns 503.

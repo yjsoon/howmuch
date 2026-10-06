@@ -8,7 +8,7 @@ To run your own instance on Cloudflare, see [self-hosting](docs/self-hosting.md)
 
 Public API documentation is available at [howmuch.tk.sg/docs](https://howmuch.tk.sg/docs). Its source is [the API contract](docs/api-contract.md).
 
-Local development uses Bun and SQLite. The Bun server is for local development only, not a supported way to self-host:
+Local development uses Bun and SQLite. The Bun server is for local development only and is not a supported way to self-host:
 
 ```sh
 bun run demo:seed

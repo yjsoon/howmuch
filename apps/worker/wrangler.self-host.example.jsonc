@@ -26,6 +26,8 @@
     "HOWMUCH_TIME_ZONE": "Europe/London",
     // Must be "false" so the instance accepts writes.
     "HOWMUCH_TRANSITION_READ_ONLY": "false"
+    // HOWMUCH_YNAB_SYNC_CRON is only relevant if you configure YNAB sync, which
+    // a fresh instance does not have. Leave it out.
     // Deliberately absent:
     //  - No YNAB variables: a fresh instance has no YNAB sync.
     //  - No HOWMUCH_REDIRECT_TARGET: it would redirect every request elsewhere.

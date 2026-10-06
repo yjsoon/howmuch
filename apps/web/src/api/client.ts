@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { CATEGORY_SUGGESTION_BATCH, type CategorySuggestion, type CategorySuggestionRequestItem } from "../lib/category-suggestions";
-import { localePlanSeed } from "../lib/locale-plan-seed";
+import type { LocalePlanSeed } from "../lib/locale-plan-seed";
 import type {
   Account,
   AccountPreferences,
@@ -370,11 +370,11 @@ async function approveTransactionBatch(planId: string, transactionIds: readonly 
 
 export const api = {
   authStatus: (options?: ApiRequestOptions) => request<AuthStatus>("/api/auth/status", undefined, options),
-  setup: (username: string, password: string, bootstrapToken: string) =>
+  setup: (username: string, password: string, bootstrapToken: string, seed?: LocalePlanSeed) =>
     request<AuthSession>("/api/auth/setup", {
       method: "POST",
       headers: bootstrapToken ? { authorization: `Bearer ${bootstrapToken}` } : undefined,
-      body: JSON.stringify({ username, password, ...localePlanSeed() }),
+      body: JSON.stringify({ username, password, ...seed }),
     }),
   login: (username: string, password: string) =>
     request<AuthSession>("/api/auth/login", {

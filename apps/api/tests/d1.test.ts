@@ -335,6 +335,15 @@ describe("D1 foundation", () => {
       await expect(worker.scheduled({ cron: "5 16 * * *", scheduledTime: Date.UTC(2026, 7, 20, 16, 5) } as any, env as any)).resolves.toBeUndefined();
       expect(JSON.parse(logs[1])).toMatchObject({ event: "scheduled_materialization" });
 
+      // A self-hoster may pick the default YNAB cron time. Without any YNAB configuration it must still materialise.
+      const dbCollision = await ledgerSqlite();
+      await new D1LedgerRepository(new D1Database(fakeD1(dbCollision)), "p").createScheduledTransaction("p", {
+        id: "collision-schedule", account_id: "a", date_first: "2026-08-20", frequency: "never", amount: -200,
+      });
+      await expect(worker.scheduled({ cron: "10 16 * * *", scheduledTime: Date.UTC(2026, 7, 20, 16, 10) } as any, { ...env, DB: fakeD1(dbCollision) } as any)).resolves.toBeUndefined();
+      expect(JSON.parse(logs[logs.length - 1])).toMatchObject({ event: "scheduled_materialization" });
+      expect(dbCollision.query("SELECT COUNT(*) count FROM transactions WHERE source_kind='scheduled-transaction'").get()).toEqual({ count: 1 });
+
       // A missing cron is still refused rather than silently materialising.
       await expect(worker.scheduled({ scheduledTime: Date.UTC(2026, 7, 20, 15, 0) } as any, env as any)).rejects.toThrow("Unknown scheduled cron: missing");
 

@@ -72,10 +72,15 @@ export default {
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     const config = workerConfig(env);
     const database = new HowMuchD1Database(requiredBinding(env.DB, "DB"));
-    const ynabSyncCron = optional(env.HOWMUCH_YNAB_SYNC_CRON) ?? DEFAULT_YNAB_SYNC_CRON;
+    const explicitYnabCron = optional(env.HOWMUCH_YNAB_SYNC_CRON);
+    const ynabSyncCron = explicitYnabCron ?? DEFAULT_YNAB_SYNC_CRON;
     assertCronMatchesMode(controller.cron, ynabSyncCron, config.transitionReadOnly);
 
-    if (controller.cron === ynabSyncCron) {
+    // The default YNAB cron time is also a plausible materialisation time for a
+    // self-hoster, so it only means "YNAB sync" when YNAB is actually in play.
+    const ynabInPlay = explicitYnabCron !== undefined || config.transitionReadOnly
+      || config.ynabToken !== undefined || config.ynabPlanId !== undefined;
+    if (controller.cron === ynabSyncCron && ynabInPlay) {
       const result = await runD1ScheduledYnabSync({
         db: database,
         config,
