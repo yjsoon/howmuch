@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<defs>
+<linearGradient id="skyD" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#10140c"/>
+      <stop offset="0.45" stop-color="#1c2013"/>
+      <stop offset="1" stop-color="#332f1d"/>
+    </linearGradient>
+<radialGradient id="bandD" gradientUnits="userSpaceOnUse" cx="715" cy="477" r="580">
+      <stop offset="0" stop-color="#ffc670" stop-opacity="0.42"/>
+      <stop offset="0.24" stop-color="#ffc670" stop-opacity="0.37"/>
+      <stop offset="0.38" stop-color="#ffc670" stop-opacity="0.19"/>
+      <stop offset="0.56" stop-color="#ffc670" stop-opacity="0.16"/>
+      <stop offset="0.72" stop-color="#ffc670" stop-opacity="0.06"/>
+      <stop offset="0.9" stop-color="#ffc670" stop-opacity="0.03"/>
+      <stop offset="1" stop-color="#ffc670" stop-opacity="0"/>
+    </radialGradient>
+<radialGradient id="coreD" gradientUnits="userSpaceOnUse" cx="715" cy="477" r="215">
+      <stop offset="0" stop-color="#ffd98c" stop-opacity="0.6"/>
+      <stop offset="0.55" stop-color="#ffd98c" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#ffd98c" stop-opacity="0"/>
+    </radialGradient>
+</defs>
+<rect width="1024" height="1024" fill="url(#skyD)"/>
+<rect width="1024" height="1024" fill="url(#bandD)"/>
+<circle cx="715" cy="477" r="215" fill="url(#coreD)"/>
+<line x1="715" y1="168" x2="715" y2="368" stroke="#e8b06a" stroke-width="4" stroke-linecap="round" opacity="0.4"/>
+</svg>

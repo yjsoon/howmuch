@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<defs>
+<radialGradient id="haloD" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#f4b96a" stop-opacity="0.5"/>
+      <stop offset="0.55" stop-color="#f4b96a" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#f4b96a" stop-opacity="0"/>
+    </radialGradient>
+<linearGradient id="discD" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fdf3d6"/>
+      <stop offset="1" stop-color="#eccd93"/>
+    </linearGradient>
+</defs>
+<circle cx="715" cy="477" r="185" fill="url(#haloD)"/>
+<circle cx="715" cy="477" r="94" fill="none" stroke="#d99a4e" stroke-width="4" opacity="0.55"/>
+<circle cx="715" cy="477" r="62" fill="url(#discD)" stroke="#d99a4e" stroke-width="7"/>
+</svg>
