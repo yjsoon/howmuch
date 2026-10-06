@@ -2,12 +2,7 @@
 
 Date: 2026-06-10
 
-This audit covers YNAB-related code found under:
-
-- `/Users/yingjie/Developer/tt-projects`
-- `/Users/yingjie/Developer/personal-projects`
-- `/Users/yingjie/Developer/work`
-- `mbpro:~/.openclaw`
+This audit covers YNAB-related code in the owner's private projects folders and in a set of automation scripts on a personal machine. Only the API-surface conclusions are kept here; paths, hosts, institutions and message sources are deliberately omitted.
 
 The current replacement should optimise for the YNAB surface that is actually used: transaction ingestion, transaction reports, account balances, payee/category lookup, and a few update flows. It should not model envelope budgeting, target assignment, or YNAB credit-card mechanics as first-class product concepts.
 
@@ -15,7 +10,7 @@ The current replacement should optimise for the YNAB surface that is actually us
 
 Current YNAB docs describe a REST JSON API at `https://api.ynab.com/v1`, authenticated with bearer tokens. Amounts are integer milliunits where `1000` equals one currency unit, and dates are ISO `YYYY-MM-DD`.
 
-The current docs use `/plans/{plan_id}`. The changelog says the old `/budgets/{budget_id}` paths remain supported even though they are no longer the documented path. Local code still uses both, so this service should expose both aliases.
+The current docs use `/plans/{plan_id}`. The changelog says the old `/budgets/{budget_id}` paths remain supported even though they are no longer the documented path. The audited code still uses both, so this service should expose both aliases.
 
 The transaction list endpoint now defaults `since_date` to one year ago when omitted, so any historical importer must explicitly request the full range.
 
@@ -25,9 +20,9 @@ Sources checked:
 - https://api.ynab.com/v1
 - https://api.ynab.com/papi/open_api_spec.yaml
 
-## Local Projects
+## Private Projects
 
-### `personal-projects/ynab-rewards-tracker`
+### Rewards tracker (web and mobile)
 
 Purpose: reward optimisation and transaction review across web and mobile clients.
 
@@ -62,7 +57,7 @@ Model dependency verdict:
 - Uses transactions, accounts, payees, categories, flags, settings.
 - Does not use assigned/available envelope values, goals, targets, scheduled transactions, loans, direct import metadata beyond display fields, or YNAB credit-card payment behaviour.
 
-### `work/tools/claim-manager`
+### Receipt claim tool
 
 Purpose: find YNAB transactions marked as receipt TODOs and link/claim receipts.
 
@@ -101,7 +96,7 @@ Model dependency verdict:
 - Uses memo, category, transfer link, and subtransaction detail.
 - Does not use budget month assignment, goals, approvals, cleared state, flags, or credit-card features.
 
-### `personal-projects/ynab-formatter`
+### Statement formatter
 
 Purpose: OCR/vision extraction of credit card statement images into a YNAB CSV-style import table.
 
@@ -127,7 +122,7 @@ Model dependency verdict:
 - This is importer input, not live API compatibility.
 - The new service should accept this shape for manual/import fallback.
 
-### `personal-projects/expense-tracker`
+### Expense tracker spec
 
 Purpose: older product/spec exploration for a YNAB-inspired tracker.
 
@@ -145,19 +140,19 @@ Model dependency verdict:
 
 - Confirms the replacement should be transaction/report-led rather than envelope-led.
 
-### `tt-projects`
+### Other project folders
 
-No active YNAB integration was found. Matches were package-lock noise or unrelated `category_id` style fields.
+No active YNAB integration was found in the remaining folders. Matches were package-lock noise or unrelated `category_id` style fields.
 
-## OpenClaw On `mbpro`
+## Alert-Driven Automation Scripts
 
-Active jobs are shell scripts under `~/.openclaw/workspace/scripts`, with an older PDF reconciliation script under `~/.openclaw/scripts`.
+A set of shell scripts on a personal machine create YNAB transactions from card and bank alerts. Their sources (email and message alerts from several card issuers and banks, plus one receipt email and one PDF statement) are irrelevant to the API surface and are not listed. One script is read-only (a daily summary) and one reconciles a PDF statement.
 
 ### Common Read/Write Pattern
 
 Most monitors do this:
 
-1. Read recent Gmail or iMessage alerts.
+1. Read recent alerts from email or messages.
 2. Extract merchant, card/account, date, amount, and sometimes original currency.
 3. Convert outflows to negative YNAB milliunits.
 4. Fetch payees and fuzzy-match merchant names.
@@ -185,94 +180,23 @@ Common transaction-create payload:
 
 The payload is already close to an owned ledger schema. It is an account ledger entry with optional normalised payee/category references, a source memo, and an optional review flag.
 
-### Script-Specific Inputs
+### Fields Written By The Scripts
 
-`uob-6718-gmail-monitor.sh`
+Across the scripts the write payload is always a subset of `account_id`, `date`, `amount`, `payee_id` or `payee_name`, `category_id`, `memo` and `flag_color`. Notable behaviours that matter for API parity:
 
-- Source: Gmail from `unialerts@uobgroup.com`.
-- Extracts card 6718 transactions from email snippets: currency, original amount, `DD/MM/YY` date, merchant.
-- Non-SGD amounts are estimated to SGD and memoed for later correction.
-- Writes `account_id`, `date`, `amount`, `payee_id` or `payee_name`, `category_id`, `memo`, `flag_color`.
+- Card or account identification comes from a card-ending-to-account mapping held by the script, so `account_id` is always supplied.
+- Foreign-currency alerts are converted to an estimated home-currency amount, with the original currency and amount recorded in `memo` for later correction.
+- Some scripts set `flag_color` to mark estimated or review-needed entries.
+- Reversals and cancellations are written as positive amounts.
 
-`uob-monitor.sh`
+### Read-Only And Reconciliation Scripts
 
-- Source: iMessage chat 1343.
-- Extracts UOB card alerts and some PayNow-style transfers.
-- Card ending maps to YNAB account.
-- Writes the common payload, with `memo` always present as a string.
-
-`dbs-monitor.sh`
-
-- Source: iMessage chat 1279.
-- Extracts DBS/POSB card alerts with amount, card ending, merchant, and date.
-- Skips tiny transit authorisations and some likely pre-charges.
-- Writes `account_id`, `date`, `amount`, `payee_id` or `payee_name`, `category_id`, `memo`.
-
-`citi-monitor.sh`
-
-- Source: Citibank iMessages.
-- Extracts card ending, date, amount, merchant.
-- Writes `account_id`, `date`, `amount`, `payee_id` or `payee_name`, `category_id`.
-
-`dcs-monitor.sh`
-
-- Source: DCSCards iMessages.
-- Extracts card notification data.
-- Writes `account_id`, `date`, `amount`, `payee_id` or `payee_name`, `category_id`, `memo`, `flag_color`.
-
-`maybank-monitor.sh`
-
-- Source: iMessage chat 1311.
-- Extracts `Your Maybank Card ending XXXX was used at MERCHANT on DD/MM/YY for SGD/USDXX.XX`.
-- Card ending maps to account.
-- USD is estimated to SGD and memoed.
-- Writes `account_id`, `date`, `amount`, `payee_id` or `payee_name`, `category_id`, `flag_color`.
-
-`paylah-monitor.sh`
-
-- Source: Gmail from `paylah.alert@dbs.com`.
-- Parses HTML rows for transaction type, date/time, amount, and recipient.
-- Uses a fixed POSB Savings account.
-- Writes `account_id`, `date`, `amount`, `payee_id` or `payee_name`, `category_id`, `memo`.
-
-`trust-monitor.sh`
-
-- Source: Gmail from Trust Bank.
-- Parses MIME email subject/body for amount, currency, merchant, email date, and reversals/cancellations.
-- Non-SGD amounts are estimated to SGD with memo text noting the source currency/rate.
-- Writes `account_id`, `date`, `amount`, `payee_id` or `payee_name`, `category_id`, `memo`.
-
-`fairprice-monitor.sh`
-
-- Source: FairPrice Group receipt/payment emails.
-- Parses HTML for paid amount, card ending, store image URL, and receipt text.
-- Infers account from card ending.
-- Classifies merchant as `FairPrice` or `Kopitiam`, sets category and optional yellow flag.
-- Writes `account_id`, `date`, `amount`, `payee_id` or `payee_name`, `category_id`, `memo`, `flag_color`.
-
-`amaze-monitor.sh`
-
-- Source: Instarem Amaze Gmail emails.
-- Parses MIME email for transaction amount/currency, SGD amount paid, merchant, payment source last four, and date.
-- Maps source card last four to account.
-- Writes `account_id`, `date`, `amount`, `payee_id` or `payee_name`, `category_id`, `memo`, `flag_color`.
-
-`ynab-daily-summary.sh`
-
-- Read-only summary.
-- Reads `GET /plans/{id}/months/{YYYY-MM-01}` for category activity.
-- Reads `GET /plans/{id}/transactions?since_date=today`.
-- Uses negative category activity and negative categorised transaction/subtransaction amounts.
-
-`pdf-ynab-reconcile.sh`
-
-- Source: local PDF statement text extracted with `pdftotext`.
-- Reads account transactions with `since_date` and `until_date`.
-- Optionally clears matched transactions by updating `cleared` to `cleared`.
+- Daily summary: reads `GET /plans/{id}/months/{YYYY-MM-01}` for category activity and `GET /plans/{id}/transactions?since_date=today`, using negative category activity and negative categorised transaction/subtransaction amounts.
+- PDF reconciliation: reads account transactions with `since_date` and `until_date` against text extracted from a statement, and optionally clears matched transactions by updating `cleared` to `cleared`.
 
 ### Screenshots/OCR
 
-No active OpenClaw screenshot or OCR path was found for writing to YNAB. There are email HTML parsers, iMessage parsers, and a PDF text reconciliation script. The local `ynab-formatter` project handles image-to-CSV extraction, but it does not call the YNAB API directly.
+No active screenshot or OCR path writes to YNAB. There are email HTML parsers, message parsers, and a PDF text reconciliation script. The statement formatter project handles image-to-CSV extraction, but it does not call the YNAB API directly.
 
 ## Union Of Actual API Surface
 

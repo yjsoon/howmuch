@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { ApiConfig } from "./config";
+import { isLoopbackHost, type ApiConfig } from "./config";
 import { AccountPreferencesConflictError, LedgerRepository, NotFoundError, ReconciliationMismatchError, TransactionStateConflictError, ValidationError } from "./repository";
 import { MAX_REGISTER_QUERY_LENGTH } from "@howmuch/register-query";
 import { DEFAULT_TRANSACTION_PAGE_SIZE, MAX_TRANSACTION_PAGE_SIZE, type AccountPreferences, type TransactionFilters } from "./types";
@@ -109,7 +109,7 @@ export function createHandler(options: HandlerOptions): (request: Request) => Pr
       }
 
       if (segments[0] === "api") {
-        return await handleNative(request, url, segments, repo, reports, principal, config.defaultPlanId, categoriser);
+        return await handleNative(request, url, segments, repo, reports, principal, config.defaultPlanId, categoriser, config.ynabBaseUrl);
       }
 
       return apiError(404, "not_found", "Route not found");
@@ -695,6 +695,7 @@ async function handleNative(
   principal: Principal,
   defaultPlanId: string,
   categoriser: CategoriserConfig,
+  ynabBaseUrl?: string,
 ): Promise<Response> {
   const method = request.method.toUpperCase();
   const planId = url.searchParams.get("plan_id") ?? defaultPlanId;
@@ -798,7 +799,7 @@ async function handleNative(
     const result = await importYnabFromApi(repo, {
       token: body.token,
       planId: targetPlanId,
-      baseUrl: body.base_url,
+      baseUrl: ynabBaseUrl,
       sinceDate: body.since_date,
     });
     return json({ data: result }, 201);
@@ -1099,6 +1100,13 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
   if (path === "/api/auth/setup" && method === "POST") {
     if (!sameOrigin(request, url)) {
       return authError(403, "forbidden", "Origin validation failed");
+    }
+    if (!config.apiToken && !isLoopbackHost(url.hostname)) {
+      return authError(
+        403,
+        "forbidden",
+        "Tokenless setup is only allowed from this machine; set HOWMUCH_API_TOKEN",
+      );
     }
     const authorization = request.headers.get("authorization");
     const bootstrapToken = bearerToken(authorization);

@@ -1,6 +1,6 @@
 # iOS capture typed replies
 
-Date: 2026-09-11. Darwin `yjmbpro.local`, arm64, Xcode 26.6 (17F113).
+Date: 2026-09-11. Darwin `<host>.local`, arm64, Xcode 26.6 (17F113).
 Simulator: HowMuch Verification `BA2CAD1A-0977-4290-8486-760091B333AE` (iOS 26.5).
 API: `http://127.0.0.1:60500` (verify stack `20260908T084259-43409`). Never `howmuch.soon.sg`.
 Signed in as `verifier`. Plan HowMuch Demo.

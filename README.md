@@ -14,6 +14,11 @@ bun run dev:stack
 bun test
 ```
 
+The local API binds `127.0.0.1` by default. To serve beyond the machine, set
+`HOWMUCH_HOST` (for example `0.0.0.0`) together with `HOWMUCH_API_TOKEN`; the
+server refuses to start on a non-loopback host without a token, and anything
+tunnelling or reverse-proxying to the loopback server needs the token too.
+
 For a checked web build, run `bun run --cwd apps/web build`. It runs TypeScript
 checking and Vite bundling concurrently and fails if either fails. Use `typecheck`
 in that package for checking alone; `bundle` alone is not a validation gate.
@@ -29,3 +34,12 @@ The hosted runtime is a Cloudflare Worker using production and preview D1 databa
 YNAB API and export imports remain available through `import:ynab` and `import:ynab-export`.
 
 The iOS register supports signed split allocations, including split transfers; duplicating a split for today creates fresh child lines rather than reusing the original IDs.
+
+## Licence
+
+Halation is MIT-licensed. See [LICENSE](LICENSE).
+
+Halation is not affiliated with or endorsed by YNAB.
+
+The bundled web fonts (IBM Plex Sans, IBM Plex Mono and Newsreader, via
+`@fontsource`) are licensed under the SIL Open Font License 1.1.

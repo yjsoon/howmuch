@@ -1,7 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-const apiTarget = process.env.HOWMUCH_API_URL ?? "http://localhost:8787";
+const apiTarget = process.env.HOWMUCH_API_URL ?? "http://127.0.0.1:8787";
 const apiOrigin = new URL(apiTarget).origin;
 
 const apiProxy = {

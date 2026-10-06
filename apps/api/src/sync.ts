@@ -45,12 +45,12 @@ export function startYnabSync(
     }
     try {
       if (!planId) {
-        planId = await discoverPlanId(token, logger);
+        planId = await discoverPlanId(token, logger, config.ynabBaseUrl);
         if (!planId) {
           return null;
         }
       }
-      const result = await importYnabFromApi(repo, { token, planId, minSimilarity, warn });
+      const result = await importYnabFromApi(repo, { token, planId, baseUrl: config.ynabBaseUrl, minSimilarity, warn });
       if (result.skipped) {
         logger.warn(
           `YNAB sync skipped for plan ${planId}: fetched data is only ${Math.round((result.similarity ?? 0) * 100)}% similar to the existing ledger (needs ${Math.round(minSimilarity * 100)}%)`,
@@ -94,8 +94,8 @@ export function startYnabSync(
   };
 }
 
-async function discoverPlanId(token: string, logger: YnabSyncLogger): Promise<string | undefined> {
-  const plans = await listYnabPlans({ token, warn: (message) => logger.warn(message) });
+async function discoverPlanId(token: string, logger: YnabSyncLogger, baseUrl?: string): Promise<string | undefined> {
+  const plans = await listYnabPlans({ token, baseUrl, warn: (message) => logger.warn(message) });
   if (plans.length === 1) {
     logger.log(`YNAB sync using the only available plan: ${plans[0].name ?? plans[0].id} (${plans[0].id})`);
     return plans[0].id;

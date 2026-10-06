@@ -2928,16 +2928,32 @@ describe("native reports and imports", () => {
       return new Response("not found", { status: 404 });
     }) as typeof fetch;
 
+    // The base URL is operator configuration; a request-body `base_url` must
+    // never steer the server's outbound fetches (SSRF).
+    handler = createHandler({
+      db,
+      config: {
+        dbPath: ":memory:",
+        port: 0,
+        apiToken: "test-token",
+        defaultPlanId: "plan-test",
+        transitionReadOnly: false,
+        ynabBaseUrl: "https://ynab.example/v1",
+      },
+    });
+
     try {
       const importResponse = await request("/api/import/ynab?plan_id=plan-test", {
         method: "POST",
         body: {
           token: "ynab-token",
-          base_url: "https://ynab.example/v1",
+          base_url: "https://evil.example/v1",
         },
       });
 
       expect(importResponse.status).toBe(201);
+      expect(calls.some((url) => url.startsWith("https://evil.example"))).toBe(false);
+      expect(calls.every((url) => url.startsWith("https://ynab.example/v1/"))).toBe(true);
       expect(calls).toContain("https://ynab.example/v1/plans/plan-test/settings");
       expect(calls).toContain("https://ynab.example/v1/plans/plan-test/transactions?since_date=1900-01-01");
       const importBody = await importResponse.json();
@@ -3088,6 +3104,32 @@ describe("password authentication", () => {
       body: JSON.stringify({ username: "owner", password }),
     }));
     expect(setup.status).toBe(200);
+  });
+
+  // Failure modes: (1) DNS rebinding, where a hostile page resolves its own
+  // name to 127.0.0.1 so the browser sends Host/Origin of the attacker's name;
+  // (2) a tunnel or reverse proxy forwarding a public Host to the loopback
+  // server. Bun derives url.origin from the client-controlled Host header, so
+  // the same-origin check alone cannot tell these from a genuine local request.
+  test("refuses tokenless setup when the Host is not loopback", async () => {
+    const localHandler = createHandler({
+      db,
+      config: {
+        dbPath: ":memory:",
+        port: 0,
+        defaultPlanId: "plan-test",
+        transitionReadOnly: false,
+      },
+    });
+    for (const origin of ["http://rebind.attacker.example:8787", "https://howmuch-tunnel.example"]) {
+      const setup = await localHandler(new Request(`${origin}/api/auth/setup`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin },
+        body: JSON.stringify({ username: "owner", password }),
+      }));
+      expect(setup.status).toBe(403);
+    }
+    expect(db.query("SELECT COUNT(*) AS count FROM users").get()).toEqual({ count: 0 });
   });
 
   test("logs in with browser cookie and native token, then revokes logout", async () => {
