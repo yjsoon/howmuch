@@ -22,7 +22,6 @@
 @keyframes hl-grow-y   { from { transform: scaleY(0); } }
 @keyframes hl-grow-x   { from { transform: scaleX(0); } }
 @keyframes hl-pop      { from { transform: scale(0); } }
-@keyframes hl-tick     { from { transform: scale(.6); opacity: .3; } }
 @keyframes hl-breathe  { 50% { transform: scale(1.18); opacity: .7; } }
 @keyframes hl-halo     { from { opacity: 0; transform: scale(.7); } }
 
@@ -60,7 +59,8 @@
 
 /* M5. Small state flips. Table hover stays instant: no transition on row hover. */
 .cleared-status-toggle { transition: color var(--dur-fast), background-color var(--dur-fast), border-color var(--dur-fast); }
-.cleared-status-toggle.cleared-status-cleared .cleared-glyph { animation: hl-tick var(--dur-fast) var(--ease-out) backwards; }
+/* A transition, not a keyframe: it runs on an actual toggle, never when the ledger remounts after a save. */
+.cleared-glyph { transition: background-color var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast); }
 
 /* M6. Enter-only reveals. */
 @keyframes hl-bulk-in { from { opacity: 0; transform: translate(-50%, 8px); } to { transform: translate(-50%, 0); } }

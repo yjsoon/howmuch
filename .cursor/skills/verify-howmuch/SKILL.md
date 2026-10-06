@@ -9,7 +9,7 @@ The product is now **Halation**. In older feature recipes, read user-visible “
 
 HowMuch has two user surfaces in this repo. Drive the one the change actually touched. Both talk to the same disposable local API from `control-howmuch launch`. Never point either at production (`howmuch.tk.sg`, or the legacy `howmuch.soon.sg` that redirects to it).
 
-**Web** (`apps/web`) is the React ledger: first-owner setup, five Reflect reports (including Rewards), register, `/add` quick entry, schedules, tokens, sidebar accounts. There is no monthly Plan edit on the web.
+**Web** (`apps/web`) is the React ledger: first-owner setup, Ledger (the register), Scheduled, Rewards and four Reports (Spending, Income v spending, Net worth, Money age), `/add` quick entry, schedules, tokens, sidebar accounts. There is no monthly Plan edit on the web.
 
 **iOS** (`apps/ios`) is the SwiftUI companion: Accounts / Rewards / Reflect on iPhone, Plan in trailing **More**, a trailing **Add Transaction** button on the iPhone tab bar, a floating **Assistant** (speech bubble with a plus) above that Add button, Plan and Assistant in the iPad sidebar (with the floating plus on regular width), the **Add Transaction** capture sheet, Duplicate for Today, and (when built) typed intake, the `N > 1` review list, Shortcuts App Intents, share, and the screenshot offer. Specs: `docs/frontend/intake-ui.md`, `docs/frontend/app-intents.md`. Issues: [#87](https://github.com/yjsoon/howmuch/issues/87), [#96](https://github.com/yjsoon/howmuch/issues/96) and their children.
 

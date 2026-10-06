@@ -40,39 +40,49 @@ export function applyTheme(prefs: ThemePrefs): void {
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", look.meta[dark ? 1 : 0]);
 }
 
-/** Saves the choice on this device (not cleared on sign-out: it is not ledger data) and cross-fades to it. */
-export function setTheme(next: ThemePrefs): void {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    /* storage blocked: the choice lasts for this session only */
-  }
+/**
+ * Saves the choice on this device (not cleared on sign-out: it is not ledger
+ * data) and cross-fades to it. The patch merges into the prefs current when the
+ * transition applies it, so quick successive picks land in order.
+ */
+export function setTheme(patch: Partial<ThemePrefs>): void {
   withViewTransition("theme", () => {
-    current = next;
-    applyTheme(next);
+    current = { ...current, ...patch };
+    try {
+      localStorage.setItem(KEY, JSON.stringify(current));
+    } catch {
+      /* storage blocked: the choice lasts for this session only */
+    }
+    applyTheme(current);
+    listeners.forEach((listener) => listener());
+  });
+}
+
+let syncing = false;
+
+/**
+ * Keeps the page in step for its whole life, not only while Settings is open:
+ * "Match system" follows OS light/dark changes, and a change made in another
+ * tab applies here. Called once from main.tsx.
+ */
+export function startThemeSync(): void {
+  if (syncing || typeof window === "undefined") return;
+  syncing = true;
+  window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", () => {
+    if (current.mode === "system") applyTheme(current);
+  });
+  window.addEventListener("storage", (event) => {
+    if (event.key !== KEY && event.key !== null) return;
+    current = read();
+    applyTheme(current);
     listeners.forEach((listener) => listener());
   });
 }
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
-  const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
-  const onSystem = () => {
-    if (current.mode === "system") applyTheme(current);
-  };
-  const onStorage = (event: StorageEvent) => {
-    if (event.key === KEY) {
-      current = read();
-      applyTheme(current);
-      listener();
-    }
-  };
-  mq?.addEventListener("change", onSystem);
-  window.addEventListener("storage", onStorage);
   return () => {
     listeners.delete(listener);
-    mq?.removeEventListener("change", onSystem);
-    window.removeEventListener("storage", onStorage);
   };
 }
 

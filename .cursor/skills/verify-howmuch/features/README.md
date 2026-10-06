@@ -28,7 +28,7 @@ Web recipes drive `{web_url}`. iOS recipes drive the Simulator against the same 
 ## Proof and skip reporting
 
 - Capture the user action and the resulting state, not only the final screen.
-- UI proof: screenshot with HowMuch identity visible (`HowMuch` masthead, `{page} · HowMuch` title, or iOS navigation title `Accounts` / `Add Transaction`) plus a note of the heading and key figures.
+- UI proof: screenshot with Halation identity visible (`Halation` brand in the sidebar or phone masthead, `{page} · Halation` title, or iOS navigation title `Accounts` / `Add Transaction`) plus a note of the heading and key figures.
 - Mutation proof: a second view — register row, **Saved this session**, iOS Saved toast plus register, or `control-howmuch http` JSON.
 - Record the feature id and entry point with every artifact.
 - Report an unreachable path with the attempted handle and the unmet precondition.

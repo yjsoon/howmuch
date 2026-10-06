@@ -60,7 +60,7 @@
   /* Secondary text and errors on the phone masthead, which uses chrome colours in the dark-chrome looks. */
   --masthead-ink-soft: var(--sidebar-ink-soft); --masthead-negative: var(--sidebar-negative);
   --sidebar-motif:
-    radial-gradient(circle closest-side, #ffd98c2e 0 22%, #ffd98c1f 22% 44%, #ffd98c14 44% 66%, #ffd98c0a 66% 88%, transparent 88%) -132px -134px / 340px 340px no-repeat,
+    radial-gradient(circle closest-side, #ffd98c2e 0 22%, #ffd98c1f 22% 44%, #ffd98c14 44% 66%, #ffd98c0a 66% 88%, transparent 88%) -150px -170px / 300px 300px no-repeat,
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 584 1024 440' preserveAspectRatio='none'%3E%3Cpath d='M0 820 C96 806 176 782 258 792 C336 801 372 738 462 722 C534 709 574 748 648 728 C758 698 818 634 898 612 C950 598 988 602 1024 584 L1024 1024 L0 1024 Z' fill='%231a121b'/%3E%3Cpath d='M0 820 C96 806 176 782 258 792 C336 801 372 738 462 722 C534 709 574 748 648 728 C758 698 818 634 898 612 C950 598 988 602 1024 584' fill='none' stroke='%23ffd98c' stroke-opacity='.35' stroke-width='2' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E") left bottom / 100% 88px no-repeat,
     linear-gradient(to top, #9a64864d, transparent 42%);
 
@@ -80,6 +80,9 @@
   --face-day-ink: #1c1b18; --face-night-ink: #f7f5ef; --face-foot-ink: #f7f5ef;   /* 11.9 / 10.0 on the ridge */
   --ridge-back: #2a6648; --ridge-front: #1e4433; --ridge-crest: #ffd98c;
   --sun-core: #ffd382; --sun-disc: linear-gradient(#fffdf6, #f8e6ba); --sun-rim: #dfa050;
+  /* Halation: gold at the sun warming to red-orange outward, fading fast, so it reads as light, not olive bands. */
+  --face-ring-1: #ffd27ac7; --face-ring-2: #ffa45247; --face-ring-3: #f0844624; --face-ring-4: #d8604a12;   /* inner to outer */
+  --face-horizon: #ffad5c2b;   /* pre-dawn warmth along the ridge, whatever the progress */
   --face-shadow: 0 0 0 1px #1c1b1814, 0 14px 28px -18px #1c1b1866, 0 2px 4px -2px #1c1b182e;
   --face-shadow-lift: 0 0 0 1px #1c1b181a, 0 22px 36px -18px #1c1b1880, 0 4px 8px -4px #1c1b1840;
   --face-dim: linear-gradient(#1c1b1800, #1c1b182e);
@@ -116,7 +119,7 @@
   --green-panel: #1f4a35; --green-deep: #12291d; --on-green: #cfe6d8; --on-green-soft: #e1efe6;
   --plan-accent: #d1a3c6; --plan-accent-wash: #d1a3c624; --on-accent: #1c161c; --accent-press: #2f2531;   /* 8.3 / 8.3 */
   --glow: #ffc670; --glow-ink: #ffd98c; --glow-wash: #ffc67026; --glow-wash-strong: #ffc67059;
-  --glow-ring-1: #ffc67052; --glow-ring-2: #ffc6703d; --glow-ring-3: #ffc6702e; --glow-ring-4: #ffc6701a;
+  --glow-ring-1: #ffc67029; --glow-ring-2: #ffc6701f; --glow-ring-3: #ffc67014; --glow-ring-4: #ffc6700a;   /* half the light alphas: rings stay subtle on dark paper */
   --crest: linear-gradient(90deg, transparent, #3a2f1c 50%, var(--glow) 70%, #3a2f1c 88%, transparent);
   --inverse-hover: #0000001a; --inverse-rule: #00000026; --inverse-control: #00000047; --inverse-scheme: light;
   --sidebar-bg: #120d13; --sidebar-edge: #000000; --sidebar-ink: #f3eaec; --sidebar-ink-soft: #cdbfc7;
@@ -124,7 +127,7 @@
   --sidebar-hover: #ffffff10; --sidebar-active: #ffffff1a; --sidebar-rule: #2a2029;
   --sidebar-popover-bg: #1f1720; --sidebar-input-bg: #160f17; --sidebar-scrollbar: #5a4d58;
   --sidebar-motif:
-    radial-gradient(circle closest-side, #ffc67024 0 22%, #ffc67018 22% 44%, #ffc6700f 44% 66%, #ffc67008 66% 88%, transparent 88%) -132px -134px / 340px 340px no-repeat,
+    radial-gradient(circle closest-side, #ffc67024 0 22%, #ffc67018 22% 44%, #ffc6700f 44% 66%, #ffc67008 66% 88%, transparent 88%) -150px -170px / 300px 300px no-repeat,
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 584 1024 440' preserveAspectRatio='none'%3E%3Cpath d='M0 820 C96 806 176 782 258 792 C336 801 372 738 462 722 C534 709 574 748 648 728 C758 698 818 634 898 612 C950 598 988 602 1024 584 L1024 1024 L0 1024 Z' fill='%23070508'/%3E%3C/svg%3E") left bottom / 100% 88px no-repeat,
     linear-gradient(to top, #9a648633, transparent 42%);
   --select-chevron: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23bcaeb4' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -136,10 +139,10 @@
 
 /* 3. Ridge Charcoal: the conservative look, with a single amber safelight */
 :root[data-theme="ridge-charcoal"]:not([data-mode="dark"]) {
-  --paper: #f7f5ef; --paper-raised: #fdfcf8; --paper-sunk: #f3efe5; --paper-sunk-hover: #ece5d7; --row-hover: #efebe0;
+  --paper: #f6f5f1; --paper-raised: #fdfdfb; --paper-sunk: #efeee9; --paper-sunk-hover: #e8e7e1; --row-hover: #eeede8;
   --paper-grain: #1c1b1803;
-  --ink: #1c1b18; --ink-soft: #5d5a52; --ink-faint: #6f6b61;              /* 15.8 / 6.3 / 4.9 */
-  --rule: #d9d4c7; --rule-sunk: #d9d1c2; --rule-control: #8e887a;
+  --ink: #1c1b18; --ink-soft: #5d5a52; --ink-faint: #6b675e;              /* 15.8 / 6.3 / 5.2 */
+  --rule: #d7d6cf; --rule-sunk: #d3d2ca; --rule-control: #8e887a;
   --red: #a8322a; --red-wash: #a8322a14;
   --sidebar-bg: #242722; --sidebar-edge: #121411; --sidebar-ink: #f7f5ef; --sidebar-ink-soft: #d5d4ce;
   --sidebar-ink-muted: #c4c5be; --sidebar-ink-faint: #9a9c94;             /* 10.2 / 8.7 / 5.4 */
@@ -206,12 +209,12 @@
   --nav-active-bg: #ffffff14; --nav-active-shadow: 0 0 0 1px #ffffff1f;
   --masthead-bg: var(--paper); --masthead-ink: var(--ink); --masthead-rule: var(--rule);
   --masthead-ink-soft: var(--ink-soft); --masthead-negative: var(--red);
-  --sidebar-motif: radial-gradient(circle closest-side, var(--glow-ring-1) 0 30%, var(--glow-ring-2) 30% 52%, var(--glow-ring-3) 52% 74%, var(--glow-ring-4) 74% 96%, transparent 96%) right -230px top -250px / 560px 560px no-repeat;
+  --sidebar-motif: radial-gradient(circle closest-side, #ffc67018 0 30%, #ffc67010 30% 52%, #ffc6700a 52% 74%, #ffc67005 74% 96%, transparent 96%) right -230px top -250px / 560px 560px no-repeat;
   --select-chevron: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23b8aa9a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --tone-needs: #e3a6c4;
 }
 
 /* Appearance picker swatches (Settings). Fixed per look: they preview a look, not the current one. */
-.theme-option[data-look="dusk-ridge"]     { --sw-chrome: #2b1f2c; --sw-paper: #f8f4ee; --sw-ink: #231d1f; --sw-accent: #7d4f72; --sw-glow: #ffd98c; }
-.theme-option[data-look="ridge-charcoal"] { --sw-chrome: #242722; --sw-paper: #f7f5ef; --sw-ink: #1c1b18; --sw-accent: #7d4f72; --sw-glow: #ffd98c; }
+.theme-option[data-look="dusk-ridge"]     { --sw-chrome: #2b1f2c; --sw-paper: #f8f4ee; --sw-ink: #231d1f; --sw-accent: #7d4f72; --sw-glow: #ffd98c; --sw-ring-1: #ffd98c2e; --sw-ring-2: #ffd98c1a; }
+.theme-option[data-look="ridge-charcoal"] { --sw-chrome: #242722; --sw-paper: #f6f5f1; --sw-ink: #1c1b18; --sw-accent: #7d4f72; --sw-glow: #ffd98c; }
 .theme-option[data-look="overexposed"]    { --sw-chrome: #f3e9d6; --sw-paper: #fbf7ef; --sw-ink: #2a2422; --sw-accent: #9a5a12; --sw-glow: #ffd98c; }

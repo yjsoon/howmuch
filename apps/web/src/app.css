@@ -826,6 +826,18 @@ textarea {
   color: var(--ink-soft);
 }
 
+/* The summary gives way on narrow screens; the two buttons never wrap. */
+.filter-bar .filter-summary-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.filter-toggle,
+.filter-bar .text-button {
+  flex: none;
+  white-space: nowrap;
+}
+
 .filter-toggle {
   padding: 2px 8px;
   border: 1px solid var(--rule-control);
@@ -893,6 +905,11 @@ textarea {
 
 .segment-active:hover {
   color: var(--inverse-ink);
+}
+
+/* The inset ring would be ink on ink here (--focus and --inverse-bg are both --ink). */
+.segment-active:focus-visible {
+  outline-color: var(--inverse-ink);
 }
 
 .month-stepper {
@@ -1151,16 +1168,9 @@ textarea {
   font-size: 30px;
 }
 
-/* The crest: once, here only. */
-:root[data-theme="overexposed"] .report-header {
+/* The crest: once, under the page header, in every look. */
+.report-header {
   background: var(--crest) 0 100% / 100% 2px no-repeat;
-}
-
-:root[data-theme="overexposed"] .ledger-table th {
-  text-transform: none;
-  letter-spacing: 0.01em;
-  font-size: 11.5px;
-  color: var(--ink-soft);
 }
 
 @media (max-width: 720px) {
@@ -1449,8 +1459,10 @@ a.page-eyebrow:hover {
   background: var(--row-hover);
 }
 
+/* A real ring, not only the tint: an unapproved row already carries a wash and an accent bar. */
 .register-table tbody tr[tabindex="0"]:not(.register-row-targeted):focus-visible {
-  outline: none;
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
 }
 
 .register-table tbody tr[tabindex="0"]:not(.register-row-targeted):focus-visible > td {
@@ -1746,16 +1758,27 @@ a.page-eyebrow:hover {
 
 .cleared-glyph {
   display: inline-block;
-  width: 9px;
-  height: 9px;
-  border: 1.5px solid var(--ink-faint);
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--ink-soft);
   border-radius: 50%;
 }
 
 .cleared-status-cleared .cleared-glyph {
   border-color: var(--green);
   background: var(--green);
-  box-shadow: 0 0 0 2px var(--green-wash);
+  box-shadow: 0 0 0 2.5px var(--green-wash);
+}
+
+/* The column's header shows the same ring, so the column reads without hovering. */
+.register-status-heading::after {
+  content: "";
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--ink-faint);
+  border-radius: 50%;
+  vertical-align: middle;
 }
 
 .cleared-status-toggle:disabled {
@@ -1822,9 +1845,24 @@ a.page-eyebrow:hover {
   background: linear-gradient(var(--red-wash), var(--red-wash)), var(--paper-raised);
 }
 
-/* A long review must never stick taller than the screen, or its actions would be out of reach. */
+/* Keyboard focus scrolls a row clear of the sticky phone masthead and of these
+   sticky panels instead of under them (WCAG 2.2 SC 2.4.11). */
+:root {
+  scroll-padding-top: calc(var(--masthead-h) + 8px);
+}
+
+:root:has(.transaction-delete-confirm, .status-panel-error.compact-panel) {
+  scroll-padding-top: calc(var(--masthead-h) + 160px);
+}
+
+:root:has(.category-suggestions) {
+  scroll-padding-top: calc(var(--masthead-h) + 50vh + 16px);
+}
+
+/* A long review scrolls inside itself: it never sticks taller than half the
+   screen, so its actions stay in reach and the scroll padding above clears it. */
 .category-suggestions {
-  max-height: calc(100vh - var(--masthead-h) - 16px);
+  max-height: min(calc(100vh - var(--masthead-h) - 16px), 50vh);
   overflow-y: auto;
 }
 
@@ -3506,6 +3544,15 @@ tr:hover .share-bar {
 
 .theme-swatch-chrome {
   background: radial-gradient(circle at 34% 22%, var(--sw-glow) 0 5px, transparent 6px), var(--sw-chrome);
+}
+
+/* Each swatch shows its look's signature: Dusk Ridge the stepped rings, Ridge Charcoal the safelight bar. */
+.theme-option[data-look="dusk-ridge"] .theme-swatch-chrome {
+  background: radial-gradient(circle at 34% 22%, var(--sw-glow) 0 5px, var(--sw-ring-1) 6px 12px, var(--sw-ring-2) 12px 18px, transparent 19px), var(--sw-chrome);
+}
+
+.theme-option[data-look="ridge-charcoal"] .theme-swatch-chrome {
+  background: linear-gradient(90deg, var(--sw-glow) 0 2px, transparent 2px) 0 62% / 100% 12px no-repeat, var(--sw-chrome);
 }
 
 .theme-swatch-paper {

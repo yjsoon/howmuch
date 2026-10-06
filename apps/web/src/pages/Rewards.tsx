@@ -78,10 +78,14 @@ function RewardsBoard({ planId }: { planId: string }) {
   const [selecting, setSelecting] = useState(false);
   // Cards a batch apply just wrote: each pulses once, then the list clears.
   const [justUpdated, setJustUpdated] = useState<string[]>([]);
+  // Functional, so a patch queued behind a running board transition merges into
+  // the latest preferences rather than the ones captured at its render.
   const updatePreferences = (patch: Partial<BoardPreferences>) => {
-    const next = { ...preferences, ...patch };
-    setPreferences(next);
-    try { localStorage.setItem(`howmuch:rewards:${planId}`, JSON.stringify(next)); } catch { /* Session-only when storage is unavailable. */ }
+    setPreferences((prev) => {
+      const next = { ...prev, ...patch };
+      try { localStorage.setItem(`howmuch:rewards:${planId}`, JSON.stringify(next)); } catch { /* Session-only when storage is unavailable. */ }
+      return next;
+    });
   };
   const arrange = (patch: Partial<BoardPreferences>) => withViewTransition("board", () => updatePreferences(patch));
   const [refresh, setRefresh] = useState(0);
@@ -462,7 +466,7 @@ function Figure({ label, value, primary = false }: { label: string; value: strin
     <div className={primary ? "rw-figure rw-figure-primary" : "rw-figure"}>
       <span className="rw-figure-label">{label}</span>
       {/* Keyed by value: a changed figure settles in place (no rolling digits). */}
-      <span key={value} className="rw-figure-value figure-settle">{value}</span>
+      <span key={value} className="rw-figure-value figure-settle" data-zero={/[1-9]/.test(value) ? undefined : true}>{value}</span>
     </div>
   );
 }

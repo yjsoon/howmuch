@@ -15,7 +15,7 @@ import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
 import { Shell } from "./components/Shell";
-import { applyTheme, currentTheme } from "./lib/theme";
+import { applyTheme, currentTheme, startThemeSync } from "./lib/theme";
 import { PlanProvider } from "./state/plan";
 
 const AgeOfMoneyPage = lazy(() => import("./pages/AgeOfMoney").then((module) => ({ default: module.AgeOfMoneyPage })));
@@ -68,6 +68,7 @@ const router = createBrowserRouter([
 
 // theme-boot.js normally sets these before first paint; this covers it failing to load.
 applyTheme(currentTheme());
+startThemeSync();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

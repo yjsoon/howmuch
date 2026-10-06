@@ -31,17 +31,19 @@
   border: 1px solid var(--rule);
   border-radius: var(--radius-lg);
   background: linear-gradient(180deg, color-mix(in srgb, var(--glow) 14%, var(--paper-raised)), var(--paper-raised));
+  container-type: inline-size;
 }
 
-/* Posterised sun in the corner: stepped rings, decorative. */
+/* Light from a sun just above the frame's corner: stepped rings only, no clipped disc.
+   Radii scale with the hero, so a phone-width hero is not flooded. */
 .rw-hero::before {
   content: "";
   position: absolute;
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background: radial-gradient(circle at 90% -20%, var(--glow) 0 44px, var(--glow-ring-1) 0 92px, var(--glow-ring-2) 0 150px,
-    var(--glow-ring-3) 0 228px, var(--glow-ring-4) 0 330px, transparent 0);
+  background: radial-gradient(circle at 100% 0, var(--glow-ring-1) 0 min(92px, 22cqi), var(--glow-ring-2) 0 min(150px, 36cqi),
+    var(--glow-ring-3) 0 min(228px, 54cqi), var(--glow-ring-4) 0 min(330px, 78cqi), transparent 0);
 }
 
 .rw-hero h1 {
@@ -101,6 +103,11 @@
 .rw-figure-primary .rw-figure-value {
   font-size: clamp(30px, 3.6vw, 44px);
   color: var(--green);
+}
+
+/* Nothing earned yet: no success green for a zero. */
+.rw-figure-primary .rw-figure-value[data-zero] {
+  color: var(--ink-soft);
 }
 
 .rw-valuation {
@@ -447,8 +454,12 @@
 
 /* ---------- card ---------- */
 
+/* Tile, then the slip's "Periods and tiers" footer. Cards in a row stretch to one
+   height and the slip takes the slack, so the row's bottoms line up. */
 .rw-card {
   position: relative;
+  display: grid;
+  grid-template-rows: 1fr auto;
   min-width: 0;
   transition: --rw-p var(--dur-fill) var(--ease-out);
   animation: rw-arrive var(--dur-arrive) var(--ease-out) backwards, rw-expose var(--dur-fill) var(--ease-out) backwards;
@@ -470,6 +481,7 @@
 
 .rw-tile {
   display: grid;
+  grid-template-rows: auto 1fr;
   color: inherit;
   text-decoration: none;
   border-radius: 12px;
@@ -504,31 +516,52 @@
   color: var(--face-night-ink);
 }
 
-/* Stepped rings whose radius and strength grow with --rw-p, centred on the sun. */
+/* Pre-dawn warmth along the ridge line, so even an unexposed frame has a lit horizon. */
+.rw-face::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -4;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--face-horizon) 45%, transparent 80%);
+}
+
+/* Stepped rings whose radius and strength grow with --rw-p, centred on the sun.
+   Each step is posterised but its edge is soft (a gap the browser blends), the
+   bright steps hug the sun and the outer ones fade fast, and the radius is capped
+   so the light never floods the frame. */
 .rw-face-halo {
-  --r: calc((14 + var(--rw-p) * 46) * 1cqi);
-  --y: calc(70% - var(--rw-p) * 46%);
+  --r: calc((18 + var(--rw-p) * 20) * 1cqi);
+  --y: calc(49% - var(--rw-p) * 27%);
   position: absolute;
   inset: 0;
   z-index: -3;
   pointer-events: none;
-  background: radial-gradient(circle at 76% var(--y), var(--sun-core) 0 calc(var(--r) * 0.3), var(--glow-ring-1) 0 calc(var(--r) * 0.48),
-    var(--glow-ring-2) 0 calc(var(--r) * 0.66), var(--glow-ring-3) 0 calc(var(--r) * 0.84), var(--glow-ring-4) 0 var(--r), transparent 0);
-  opacity: calc(0.3 + var(--rw-p) * 0.7);
+  background: radial-gradient(circle at 76% var(--y), var(--sun-core) 0 calc(var(--r) * 0.15),
+    var(--face-ring-1) calc(var(--r) * 0.19) calc(var(--r) * 0.27), var(--face-ring-2) calc(var(--r) * 0.33) calc(var(--r) * 0.46),
+    var(--face-ring-3) calc(var(--r) * 0.52) calc(var(--r) * 0.68), var(--face-ring-4) calc(var(--r) * 0.74) calc(var(--r) * 0.92),
+    transparent var(--r));
+  opacity: calc(0.45 + var(--rw-p) * 0.55);
 }
 
-/* The sun rises from behind the back ridge (about 47% down at its x) as progress grows. */
+/* Light adds on the night sky instead of averaging to olive with it. */
+.rw-card[data-type="miles"] .rw-face-halo {
+  mix-blend-mode: screen;
+}
+
+/* The sun rises from behind the back ridge (its crest is about 47% down at this x).
+   At zero progress a sliver of it still breaks the crest. */
 .rw-face-sun {
   position: absolute;
   z-index: -2;
   left: 76%;
-  top: calc(70% - var(--rw-p) * 46%);
+  top: calc(49% - var(--rw-p) * 27%);
   translate: -50% -50%;
   width: 9cqi;
   aspect-ratio: 1;
   border-radius: 50%;
   background: var(--sun-disc);
-  box-shadow: 0 0 0 0.8cqi color-mix(in srgb, var(--sun-rim) 60%, transparent);
+  box-shadow: 0 0 0 0.3cqi color-mix(in srgb, var(--sun-rim) 60%, transparent);
 }
 
 .rw-face-ridge {
@@ -815,8 +848,19 @@
   color: var(--red);
 }
 
+/* "Periods and tiers" is the slip's footer, below a perforation, not a link floating under the card. */
+.rw-tile:has(+ .rw-more) .rw-slip {
+  border-bottom: 0;
+  border-radius: 0;
+}
+
 .rw-more {
-  margin: 6px 8px 0;
+  margin: 0 8px;
+  padding: 4px 14px 8px;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-top: 1px dashed var(--rule);
+  border-radius: 0 0 10px 10px;
   font-size: 12px;
   color: var(--ink-soft);
 }
@@ -1070,14 +1114,15 @@
     right: 16px;
   }
 
+  /* Three rows on a phone: the period mode; the as-of stepper with Today and
+     accounts; the card filter with Arrange and Select. On the narrowest screens
+     a row's trailing controls wrap rather than overflow. */
   .rw-toolbar {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
   }
 
-  .rw-toolbar > .segmented,
-  .rw-stepper {
-    grid-column: 1 / -1;
+  .rw-toolbar > .segmented:first-child {
+    flex: 1 1 100%;
   }
 
   .rw-toolbar .segmented {
@@ -1086,16 +1131,27 @@
 
   .rw-toolbar .segment {
     flex: 1;
+    padding-inline: 8px;
     white-space: nowrap;
+  }
+
+  .rw-toolbar > .segmented:not(:first-child),
+  .rw-stepper {
+    flex: 1 1 auto;
+    width: auto;
   }
 
   .rw-stepper .rw-date {
     flex: 1;
+    min-width: 11ch;
+  }
+
+  .rw-toolbar .rw-tool-button {
+    padding-inline: 10px;
   }
 
   .rw-toolbar-end {
-    grid-column: 2;
-    margin-left: 0;
+    flex: none;
   }
 
   .rw-grid {

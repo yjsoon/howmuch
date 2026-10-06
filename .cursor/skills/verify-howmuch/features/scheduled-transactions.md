@@ -24,7 +24,7 @@ Preconditions:
 - Everyday Account is seeded.
 - Use memo `Verify schedule` so the row is unique.
 
-- **Open page.** Choose `Scheduled`. Title is `Scheduled transactions · HowMuch`. Heading is `Scheduled transactions`. Region `Schedule summary` shows `Active schedules` `0` and `Next due` `—`. Status title is `No active schedules.`
+- **Open page.** Choose `Scheduled`. Title is `Scheduled transactions · Halation`. Heading is `Scheduled transactions`. Region `Schedule summary` shows `Active schedules` `0` and `Next due` `—`. Status title is `No active schedules.`
 - **Open editor.** Choose `Add schedule`. Section title is `Add scheduled transaction`.
 - **Fill monthly outflow.** Account `Everyday Account`. Amount `-18.50`. First date and Next date `Today`. Repeat `Monthly`. Payee `FairPrice Finest` if listed, otherwise leave `No payee`. Memo `Verify schedule`. Choose the submit `Add schedule`.
 - **Listed.** `Active schedules` is `1`. `Next due` is today. A table row shows memo `Verify schedule` and amount `-18.50`.

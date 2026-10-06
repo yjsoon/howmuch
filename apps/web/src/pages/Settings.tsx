@@ -57,7 +57,7 @@ export function SettingsPage() {
                 name="halation-look"
                 value={look.id}
                 checked={theme.look === look.id}
-                onChange={() => setTheme({ ...theme, look: look.id })}
+                onChange={() => setTheme({ look: look.id })}
               />
               <span className="theme-swatch" aria-hidden="true">
                 <span className="theme-swatch-chrome" />
@@ -78,7 +78,7 @@ export function SettingsPage() {
               type="button"
               aria-pressed={theme.mode === mode.id}
               className={theme.mode === mode.id ? "segment segment-active" : "segment"}
-              onClick={() => setTheme({ ...theme, mode: mode.id })}
+              onClick={() => setTheme({ mode: mode.id })}
             >
               {mode.label}
             </button>
