@@ -249,14 +249,21 @@ textarea {
   display: none;
 }
 
+/* One chevron that turns, rather than a ▾/▴ swap (its timing lives in motion.css). */
 .sidebar-reflect-summary::after {
   content: "▾";
+  display: inline-block;
   margin-left: auto;
   opacity: 0.6;
 }
 
 .sidebar-reflect[open] .sidebar-reflect-summary::after {
-  content: "▴";
+  transform: rotate(180deg);
+}
+
+/* A closed Reports group still says where you are. */
+.sidebar-reflect:has(.sidebar-link-active) > .sidebar-reflect-summary {
+  color: var(--sidebar-ink-strong);
 }
 
 .account-list {
@@ -706,6 +713,25 @@ textarea {
   margin: 0;
 }
 
+.auth-form h1 {
+  font: 500 28px/1.1 var(--font-display);
+  color: var(--ink);
+}
+
+/* Instrument Serif has weight 400 only: never fake a bold. */
+:root[data-theme="overexposed"] .auth-form h1 {
+  font-size: 32px;
+  font-style: italic;
+  font-weight: 400;
+}
+
+.auth-form .auth-field-note {
+  width: min(320px, 80vw);
+  margin-top: -6px;
+  color: var(--ink-soft);
+  text-align: left;
+}
+
 .auth-form label {
   display: grid;
   gap: 4px;
@@ -802,7 +828,7 @@ textarea {
 
 .filter-toggle {
   padding: 2px 8px;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-control);
   border-radius: 4px;
   background: var(--paper-raised);
   font-size: 12px;
@@ -830,7 +856,7 @@ textarea {
 
 .segmented {
   display: inline-flex;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-control);
   border-radius: 2px;
   background: var(--paper-raised);
   overflow: hidden;
@@ -850,6 +876,11 @@ textarea {
   border-right: none;
 }
 
+/* Inside the segmented clip, an outset outline would be cut off. */
+.segment:focus-visible {
+  outline-offset: -3px;
+}
+
 .segment:hover {
   color: var(--ink);
 }
@@ -867,7 +898,7 @@ textarea {
 .month-stepper {
   display: inline-flex;
   align-items: center;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-control);
   border-radius: 2px;
   background: var(--paper-raised);
 }
@@ -903,7 +934,7 @@ textarea {
   font-family: var(--font-figures);
   font-size: 16px;
   padding: 3px 6px;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-control);
   border-radius: 2px;
   background: var(--paper-raised);
   color: var(--ink-soft);
@@ -917,7 +948,7 @@ textarea {
 .filter-trigger {
   font-size: 12px;
   padding: 4px 10px;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-control);
   border-radius: 2px;
   background: var(--paper-raised);
   color: var(--ink-soft);
@@ -1192,26 +1223,34 @@ a.page-eyebrow:hover {
   color: var(--red);
 }
 
+/* Register header: working balance is the hero; cleared and uncleared sit on one line beneath it. */
 .register-balances {
   flex-wrap: nowrap;
 }
 
-.register-balances .headline-figure {
-  min-width: 128px;
-}
-
 .register-balances .figure-value {
-  font-size: 16px;
+  font-size: 24px;
+  line-height: 1.15;
 }
 
 .register-balances .figure-label {
   font-size: 10px;
 }
 
-.balance-operator {
-  align-self: center;
+.register-balance-breakdown,
+.register-balance-note {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.register-balance-breakdown {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.register-balance-note {
+  font-size: 11.5px;
   color: var(--ink-faint);
-  font: 500 18px var(--font-figures);
 }
 
 .register-toolbar {
@@ -1232,30 +1271,37 @@ a.page-eyebrow:hover {
 
 .register-add-link {
   flex: 0 0 auto;
-  padding: 0;
+  padding: 5px 12px;
   border: 0;
-  background: none;
-  color: var(--green);
+  border-radius: var(--radius);
+  background: var(--plan-accent);
+  color: var(--on-accent);
   font: inherit;
   font-size: 13px;
   font-weight: 600;
   text-decoration: none;
   cursor: pointer;
+  transition: background-color var(--dur-fast), border-color var(--dur-fast);
 }
 
-.register-add-link:disabled {
-  color: var(--ink-faint);
-  cursor: default;
-  text-decoration: none;
+.register-add-link:not(.register-secondary-action):hover:not(:disabled) {
+  background: color-mix(in srgb, var(--plan-accent) 86%, var(--ink));
 }
 
 .register-secondary-action {
+  padding: 4px 11px;
+  border: 1px solid var(--rule-control);
+  background: var(--paper-raised);
   color: var(--ink);
 }
 
-.register-add-link:hover {
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
+.register-secondary-action:hover:not(:disabled) {
+  border-color: var(--ink);
+}
+
+.register-add-link:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .register-toolbar .headline-row {
@@ -1277,6 +1323,9 @@ a.page-eyebrow:hover {
   align-items: center;
   flex-wrap: wrap;
   gap: 12px;
+  /* Fixed at left: 50%, the bar would otherwise shrink to the half-width left of
+     its centre and stack every action on a phone. */
+  width: max-content;
   max-width: calc(100vw - 32px);
   padding: 8px 14px;
   border: 0;
@@ -1344,6 +1393,18 @@ a.page-eyebrow:hover {
   color: var(--ink-soft);
 }
 
+.register-hint {
+  margin-left: auto;
+  color: var(--ink-faint);
+}
+
+/* Keyboard and double-click advice means nothing on a touch screen. */
+@media (pointer: coarse) {
+  .register-hint {
+    display: none;
+  }
+}
+
 .register-load-more-button {
   padding: 7px 11px;
   border: 1px solid var(--rule-strong);
@@ -1379,6 +1440,29 @@ a.page-eyebrow:hover {
 .register-row-unapproved {
   background: var(--plan-accent-wash);
   box-shadow: inset 3px 0 var(--plan-accent);
+}
+
+/* Idle-row hover, keyboard focus and selection. Colour only and never animated.
+   tabindex="0" marks idle ledger rows: the editor rows (tabindex -1), the compose
+   row, scheduled rows and deep-link targets keep their own treatment. */
+.register-table tbody tr[tabindex="0"]:not(.register-row-targeted):hover > td {
+  background: var(--row-hover);
+}
+
+.register-table tbody tr[tabindex="0"]:not(.register-row-targeted):focus-visible {
+  outline: none;
+}
+
+.register-table tbody tr[tabindex="0"]:not(.register-row-targeted):focus-visible > td {
+  background: color-mix(in srgb, var(--plan-accent) 10%, var(--paper));
+}
+
+.register-table tbody tr[tabindex="0"]:not(.register-row-targeted):focus-visible > td:first-child {
+  box-shadow: inset 3px 0 var(--plan-accent);
+}
+
+.register-table tbody tr[tabindex="0"]:not(.register-row-targeted):has(.register-select input:checked) > td {
+  background: color-mix(in srgb, var(--plan-accent) 9%, var(--paper));
 }
 
 .register-table tbody tr.register-row-targeted td,
@@ -1650,9 +1734,28 @@ a.page-eyebrow:hover {
   background: var(--green-wash);
 }
 
+/* The glyph is the ring or the dot; the button's own circle shows only on hover and focus. */
+.cleared-status-toggle:not(:hover, :focus-visible) {
+  border-color: transparent;
+}
+
 .cleared-status-cleared,
 .cleared-status-reconciled {
   color: var(--green);
+}
+
+.cleared-glyph {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--ink-faint);
+  border-radius: 50%;
+}
+
+.cleared-status-cleared .cleared-glyph {
+  border-color: var(--green);
+  background: var(--green);
+  box-shadow: 0 0 0 2px var(--green-wash);
 }
 
 .cleared-status-toggle:disabled {
@@ -1701,6 +1804,28 @@ a.page-eyebrow:hover {
   margin-top: 2px;
   color: var(--ink-soft);
   font-size: 12px;
+}
+
+/* Confirmations and errors stay in view while the ledger scrolls beneath them,
+   so their washes are laid over solid paper. */
+.transaction-delete-confirm,
+.category-suggestions,
+.status-panel-error.compact-panel {
+  position: sticky;
+  top: calc(var(--masthead-h) + 8px);
+  z-index: 15;
+  box-shadow: var(--shadow-2);
+}
+
+.transaction-delete-confirm,
+.status-panel-error.compact-panel {
+  background: linear-gradient(var(--red-wash), var(--red-wash)), var(--paper-raised);
+}
+
+/* A long review must never stick taller than the screen, or its actions would be out of reach. */
+.category-suggestions {
+  max-height: calc(100vh - var(--masthead-h) - 16px);
+  overflow-y: auto;
 }
 
 .transaction-delete-confirm-actions {
@@ -1958,6 +2083,22 @@ a.page-eyebrow:hover {
 .section-meta {
   font-size: 12px;
   color: var(--ink-soft);
+}
+
+/* The register table already has its own top rule. */
+.report-section:has(> .table-wrap .register-table) {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.section-heading > div {
+  display: grid;
+  gap: 2px;
+}
+
+.text-button + .text-button {
+  margin-left: 14px;
 }
 
 .table-wrap {
@@ -2298,6 +2439,11 @@ th.num {
   font-family: var(--font-ui);
 }
 
+/* .ledger-table th sets text-align: left and outranks th.num. */
+.ledger-table th.num {
+  text-align: right;
+}
+
 .amount-negative {
   color: var(--red);
 }
@@ -2432,6 +2578,37 @@ tr:hover .share-bar {
   stroke-linecap: round;
 }
 
+.chart-legend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.chart-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.chart-swatch-income {
+  background: var(--green);
+}
+
+.chart-swatch-spending {
+  background: var(--red);
+}
+
 .chart-empty {
   padding: 48px 0;
   text-align: center;
@@ -2459,6 +2636,54 @@ tr:hover .share-bar {
 
 .compact-panel {
   margin-top: 12px;
+}
+
+/* Register save toast: fixed, so a save never shifts the ledger. It stays until
+   the next change or Dismiss; nothing times it out. */
+.register-toast {
+  position: fixed;
+  top: 16px;
+  right: 20px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(420px, calc(100vw - 40px));
+  margin: 0;
+  padding: 6px 6px 6px 14px;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-strong);
+  border-top: 2px solid var(--glow-edge);
+  box-shadow: var(--shadow-2);
+}
+
+.register-toast .status-title {
+  flex: 1;
+  font-size: 12.5px;
+}
+
+.register-toast-dismiss {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.register-toast-dismiss:hover {
+  color: var(--ink);
+  background: var(--accent-press);
+}
+
+@media (max-width: 720px) {
+  .register-toast {
+    top: calc(var(--masthead-h) + 8px);
+    left: 12px;
+    right: 12px;
+    max-width: none;
+  }
 }
 
 .status-title {
@@ -2543,7 +2768,7 @@ tr:hover .share-bar {
   font-size: 16px;
   height: 28px;
   padding: 0 10px;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-control);
   border-radius: 4px;
   background: var(--paper-raised);
   min-width: 240px;
@@ -2653,7 +2878,7 @@ tr:hover .share-bar {
   font: inherit;
   font-size: 16px;
   padding: 9px 10px;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-control);
   border-radius: 2px;
   background: var(--paper-raised);
   color: var(--ink);
@@ -2800,6 +3025,18 @@ tr:hover .share-bar {
 
 .date-presets .segment {
   padding: 0 10px;
+}
+
+.date-row .date-presets {
+  width: auto;
+}
+
+.quick-entry .field-row-compact {
+  flex-wrap: wrap;
+}
+
+.quick-entry .field-row-compact > .field:last-child {
+  flex-basis: 100%;
 }
 
 .recent-entries {
@@ -3894,6 +4131,17 @@ tr:hover .share-bar {
   text-underline-offset: 2px;
 }
 
+/* Touch: 44px targets for the small controls, never inside the in-row editor.
+   :where() keeps this at zero specificity, so a control another rule hides stays hidden. */
+@media (pointer: coarse) {
+  :where(.segment, .filter-trigger, .filter-toggle, .text-button, .mobile-actions > *):where(:not(.register-compose-row *, .register-compose-actions-row *)) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+  }
+}
+
 @media (max-width: 720px) {
   .api-docs-header {
     padding-inline: 16px;
@@ -3931,16 +4179,45 @@ tr:hover .share-bar {
     display: none;
   }
 
+  /* The drawer carries the accounts and the footer (Settings, Sign out), so the
+     masthead no longer needs its own Organise and Sign out. */
+  .mobile-nav-open .account-list {
+    display: block;
+  }
+
+  .mobile-nav-open .sidebar-footer {
+    display: flex;
+  }
+
+  .mobile-nav-open .account-link {
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .mobile-nav-open .account-organizer-entry {
+    min-height: 44px;
+    padding: 0 14px;
+    font-size: 13px;
+  }
+
+  .mobile-nav-open .sidebar-footer :is(.sidebar-settings-link, .sign-out-button) {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    margin-block: 0;
+  }
+
+  .mobile-organizer-entry,
+  .mobile-actions .sign-out-button {
+    display: none;
+  }
+
   .sidebar-nav {
     display: flex;
     flex-direction: column;
     gap: 2px;
     padding: 8px 10px 12px;
     overflow: visible;
-  }
-
-  .sidebar-settings-nav {
-    display: flex;
   }
 
   .sidebar-primary-link,
@@ -3971,12 +4248,20 @@ tr:hover .share-bar {
     display: none;
   }
 
+  :root {
+    --masthead-h: 64px;
+  }
+
   .mobile-masthead {
+    position: sticky;
+    top: 0;
+    z-index: 30;
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 8px;
     padding: 12px;
+    padding-top: max(12px, env(safe-area-inset-top));
     color: var(--masthead-ink);
     background: var(--masthead-bg);
     border-bottom: 1px solid var(--masthead-rule);
@@ -4012,10 +4297,6 @@ tr:hover .share-bar {
 
   .mobile-actions {
     gap: 10px;
-  }
-
-  .account-organizer-entry {
-    display: none;
   }
 
   .account-organizer {
@@ -4197,26 +4478,31 @@ tr:hover .share-bar {
     font-size: 18px;
   }
 
-  .register-balances {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr auto 1fr;
-    gap: 8px;
-  }
-
   .register-balances .headline-figure {
     min-width: 0;
-    width: auto;
   }
 
   .register-balances .figure-value {
-    font-size: 13px;
-    white-space: nowrap;
+    font-size: 20px;
   }
 
   .register-balances .figure-label {
-    font-size: 7px;
-    letter-spacing: 0;
+    font-size: 9.5px;
+    letter-spacing: 0.04em;
     white-space: nowrap;
+  }
+
+  .register-balance-breakdown,
+  .register-balance-note {
+    text-align: left;
+  }
+
+  /* Report headlines pair up instead of stacking one per line. The register
+     toolbar's pill row is also a .headline-row, so stay inside the header. */
+  .report-header .headline-row:not(.register-balances) {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px 16px;
   }
 
   .register-toolbar {
@@ -4323,6 +4609,26 @@ tr:hover .share-bar {
 
   .table-wrap-wide .ledger-table {
     min-width: 680px;
+  }
+
+  /* Scroll shadows: paper covers that travel with the content hide a shadow
+     pinned to each edge until there is more table to scroll to. */
+  .table-wrap-wide {
+    background:
+      linear-gradient(to right, var(--paper) 40%, transparent) left center / 32px 100% no-repeat local,
+      linear-gradient(to left, var(--paper) 40%, transparent) right center / 32px 100% no-repeat local,
+      radial-gradient(farthest-side at 0 50%, var(--scroll-shadow), transparent) left center / 12px 100% no-repeat scroll,
+      radial-gradient(farthest-side at 100% 50%, var(--scroll-shadow), transparent) right center / 12px 100% no-repeat scroll;
+  }
+
+  /* The charts are drawn 960 units wide, so their labels need scaling up to stay legible. */
+  .chart-axis text,
+  .chart-grid text {
+    font-size: 22px;
+  }
+
+  .chart-axis text:nth-of-type(even) {
+    display: none;
   }
 
   .register-scheduled-disclosure {

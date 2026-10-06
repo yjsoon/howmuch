@@ -129,7 +129,7 @@ Web browser:
 - Open `{web_url}` from `control-howmuch state`.
 - Prefer visible names, `aria-label`s, and routes over CSS or coordinates.
 - Viewport ≤720px hides the sidebar. Click the button named **Open menu** before any nav link.
-- After setup, `document.title` is `{page} · Halation` (e.g. `All Accounts · Halation`).
+- After setup, `document.title` is `{page} · Halation` (e.g. `Ledger · Halation`).
 - Demo rows are dated **2026-03-01 through 2026-05-24**. Default report/register windows follow today's calendar, so they are empty until you choose **All** or set From/To to that span.
 
 iOS Simulator:
@@ -148,10 +148,10 @@ Stable web handles:
 | Auth fields | labels `Username`, `Password`, `Setup token` |
 | Auth submit | `Create account` / `Sign in` |
 | Primary nav | `nav` named `Primary navigation` |
-| Nav links | `Scheduled`, Reflect reports (`Spending breakdown`, `Income v Spending`, `Net Worth`, `Age of Money`, `Rewards`), `All Accounts`, `Organise accounts` |
-| Reflect | `Reflect` is a disclosure summary inside Primary navigation, open by default. Click Reflect only when the five report names are not visible. Do not click it when the group is already open |
-| Settings | sidebar footer link `Settings` (drawer bottom on viewport ≤720px). Hub lists `API tokens` and `Rewards import` |
-| Quick entry | sidebar `+ Add transaction` or route `/add` |
+| Nav links | `Ledger`, `Scheduled`, `Rewards`, then the Reports group (`Spending`, `Income v spending`, `Net worth`, `Money age`); account list button `Organise` |
+| Reports | `Reports` is a disclosure summary inside Primary navigation. It opens itself on a report route and is otherwise closed until clicked. Click it only when the four report names are not visible |
+| Settings | sidebar footer link `Settings` (drawer footer, under the accounts, on viewport ≤720px). Hub has `Appearance` and lists `API tokens` and `Rewards import` |
+| Quick entry | route `/add`, or masthead `+ Add` on viewport ≤720px |
 | Register compose | account register toolbar `+ Add transaction` |
 | Sign out | button `Sign out` |
 | Date range | group `Date range`, buttons `This month`, `Last month`, `2M`, `3M`, `YTD`, `1Y`, `All` |

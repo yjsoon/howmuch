@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 export interface MultiSelectOption {
   id: string;
@@ -21,6 +21,8 @@ export function MultiSelect({ label, options, selected, onChange }: Props) {
   const [needle, setNeedle] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
 
   useEffect(() => {
     if (!open) {
@@ -44,6 +46,10 @@ export function MultiSelect({ label, options, selected, onChange }: Props) {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setOpen(false);
+        // Hand focus back to the trigger, unless it was already somewhere outside the menu.
+        if (rootRef.current?.contains(document.activeElement)) {
+          triggerRef.current?.focus();
+        }
       }
     };
     document.addEventListener("keydown", onKeyDown);
@@ -87,15 +93,16 @@ export function MultiSelect({ label, options, selected, onChange }: Props) {
     <div className="multi-select" ref={rootRef}>
       <button
         type="button"
+        ref={triggerRef}
         className={selected.length ? "filter-trigger filter-trigger-set" : "filter-trigger"}
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        aria-haspopup="listbox"
+        aria-controls={open ? menuId : undefined}
       >
         {summary} <span className="caret">▾</span>
       </button>
       {open && (
-        <div className="multi-select-menu" role="listbox" aria-label={label}>
+        <div className="multi-select-menu" id={menuId} role="group" aria-label={label}>
           {searchable && (
             <div className="menu-search">
               <input

@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { api } from "../api/client";
 import type { AccountPreferences } from "../api/types";
@@ -16,13 +16,35 @@ import { AccountOrganizationDialog, type AccountUsageState } from "./AccountOrga
 import { AccountIconButton } from "./AccountIconPicker";
 import { BrandLockup } from "./Brand";
 
-const REPORTS = [
-  { to: "/spending", label: "Spending breakdown" },
-  { to: "/income", label: "Income v Spending" },
-  { to: "/net-worth", label: "Net Worth" },
-  { to: "/age-of-money", label: "Age of Money" },
-  { to: "/rewards", label: "Rewards" },
+type ChunkLoader = () => Promise<unknown>;
+
+// The same specifiers main.tsx lazy-loads, so a prefetch warms the very chunk
+// the route will render and a view transition never cross-fades into "Loading…".
+const loadTransactions: ChunkLoader = () => import("../pages/Transactions");
+const loadScheduled: ChunkLoader = () => import("../pages/ScheduledTransactions");
+const loadRewards: ChunkLoader = () => import("../pages/Rewards");
+const loadSettings: ChunkLoader = () => import("../pages/Settings");
+
+const REPORTS: ReadonlyArray<{ to: string; label: string; title?: string; load: ChunkLoader }> = [
+  { to: "/spending", label: "Spending", title: "Spending breakdown", load: () => import("../pages/Spending") },
+  { to: "/income", label: "Income v spending", load: () => import("../pages/Income") },
+  { to: "/net-worth", label: "Net worth", load: () => import("../pages/NetWorth") },
+  { to: "/age-of-money", label: "Money age", load: () => import("../pages/AgeOfMoney") },
 ];
+
+function isReportPath(pathname: string): boolean {
+  return REPORTS.some((report) => report.to === pathname);
+}
+
+function isRewardsPath(pathname: string): boolean {
+  return pathname === "/rewards" || pathname.startsWith("/rewards/");
+}
+
+/** Warms a page chunk when the pointer, a touch or focus shows intent to open it. */
+function prefetch(load: ChunkLoader) {
+  const run = () => void load().catch(() => undefined);
+  return { onPointerEnter: run, onFocus: run, onTouchStart: run };
+}
 
 const COLLAPSED_KEY = "howmuch.sidebar-collapsed.v1";
 
@@ -94,7 +116,7 @@ export function Shell() {
     ? accounts.find((account) => account.id === filters.accountIds[0])
     : undefined;
   const registerLabel = filters.accountIds.length === 0
-    ? "All Accounts"
+    ? "Ledger"
     : selectedAccount?.name ?? (filters.accountIds.length === 1 ? "Account unavailable" : "Selected Accounts");
   const handleLogout = async () => {
     setLogoutError(null);
@@ -118,6 +140,12 @@ export function Shell() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [mobileNav]);
 
+  // The Reports group opens itself on a report route; otherwise the browser owns its toggles.
+  const reportsRef = useRef<HTMLDetailsElement>(null);
+  useLayoutEffect(() => {
+    if (isReportPath(location.pathname) && reportsRef.current) reportsRef.current.open = true;
+  }, [location.pathname]);
+
   useEffect(() => {
     const report = REPORTS.find((entry) => entry.to === location.pathname);
     const label = (location.pathname === "/transactions" ? registerLabel : null)
@@ -129,7 +157,8 @@ export function Shell() {
       ?? (location.pathname === "/tools/statement-formatter" ? "Statement formatter" : null)
       ?? (location.pathname === "/rewards/new" ? "Add card" : null)
       ?? (location.pathname.startsWith("/rewards/") ? "Edit card" : null)
-      ?? report?.label;
+      ?? (location.pathname === "/rewards" ? "Rewards" : null)
+      ?? (report ? report.title ?? report.label : null);
     document.title = label ? `${label} · Halation` : "Halation";
   }, [location.pathname, registerLabel]);
 
@@ -207,42 +236,51 @@ export function Shell() {
 
         <nav id="primary-navigation" className="sidebar-nav" aria-label="Primary navigation">
           <NavLink
-            to={{ pathname: "/scheduled", search: location.search }}
-            className={({ isActive }) => isActive ? "sidebar-primary-link sidebar-link-active" : "sidebar-primary-link"}
-          >
-            <span aria-hidden="true">◷</span> Scheduled
-          </NavLink>
-          {/* The reflect group starts closed; the browser owns later toggles. */}
-          <details className="sidebar-reflect">
-            <summary className="sidebar-section-label sidebar-reflect-summary">
-              <span aria-hidden="true">◫</span> Reflect
-            </summary>
-            {REPORTS.map((report) => (
-              <NavLink
-                key={report.to}
-                to={{ pathname: report.to, search: location.search }}
-                className={({ isActive }) => {
-                  const active = report.to === "/rewards"
-                    ? location.pathname === "/rewards" || location.pathname.startsWith("/rewards/")
-                    : isActive;
-                  return active ? "sidebar-report-link sidebar-link-active" : "sidebar-report-link";
-                }}
-              >
-                {report.label}
-              </NavLink>
-            ))}
-          </details>
-          <NavLink
             to="/transactions?range=all&accounts=all"
+            viewTransition={location.pathname !== "/transactions"}
+            {...prefetch(loadTransactions)}
             className={({ isActive }) =>
               isActive && filters.accountIds.length === 0
                 ? "sidebar-primary-link sidebar-link-active"
                 : "sidebar-primary-link"
             }
           >
-            <span aria-hidden="true">▤</span> All Accounts
+            <span aria-hidden="true">▤</span> Ledger
             <span className="sidebar-balance" title="Open-account working balance">{formatMoney(openAccounts.reduce((sum, account) => sum + account.balance, 0))}</span>
           </NavLink>
+          <NavLink
+            to={{ pathname: "/scheduled", search: location.search }}
+            viewTransition={location.pathname !== "/scheduled"}
+            {...prefetch(loadScheduled)}
+            className={({ isActive }) => isActive ? "sidebar-primary-link sidebar-link-active" : "sidebar-primary-link"}
+          >
+            <span aria-hidden="true">◷</span> Scheduled
+          </NavLink>
+          <NavLink
+            to={{ pathname: "/rewards", search: location.search }}
+            viewTransition={location.pathname !== "/rewards"}
+            {...prefetch(loadRewards)}
+            className={() => isRewardsPath(location.pathname) ? "sidebar-primary-link sidebar-link-active" : "sidebar-primary-link"}
+          >
+            <span aria-hidden="true">◎</span> Rewards
+          </NavLink>
+          <details className="sidebar-reflect" ref={reportsRef}>
+            <summary className="sidebar-section-label sidebar-reflect-summary">
+              <span aria-hidden="true">◫</span> Reports
+            </summary>
+            {REPORTS.map((report, index) => (
+              <NavLink
+                key={report.to}
+                to={{ pathname: report.to, search: location.search }}
+                viewTransition={location.pathname !== report.to}
+                {...prefetch(report.load)}
+                style={{ "--i": index } as CSSProperties}
+                className={({ isActive }) => isActive ? "sidebar-report-link sidebar-link-active" : "sidebar-report-link"}
+              >
+                {report.label}
+              </NavLink>
+            ))}
+          </details>
           <SettingsLink
             className={({ isActive }) =>
               isActive ? "sidebar-primary-link sidebar-settings-nav sidebar-link-active" : "sidebar-primary-link sidebar-settings-nav"
@@ -322,7 +360,12 @@ function isSettingsPath(pathname: string): boolean {
 function SettingsLink({ className }: { className: (state: { isActive: boolean }) => string }) {
   const { pathname } = useLocation();
   return (
-    <NavLink to="/settings" className={() => className({ isActive: isSettingsPath(pathname) })}>
+    <NavLink
+      to="/settings"
+      viewTransition={pathname !== "/settings"}
+      {...prefetch(loadSettings)}
+      className={() => className({ isActive: isSettingsPath(pathname) })}
+    >
       Settings
     </NavLink>
   );

@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { formatAmount, formatMoney } from "../lib/money";
 import { formatPeriod } from "../lib/dates";
 
@@ -101,31 +102,35 @@ export function PairedColumns({
   return (
     <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="chart" role="img" aria-label="Income versus spending by period">
       <Gridlines frame={frame} />
-      {periods.map((period, index) => {
-        const centre = frame.x(index, periods.length);
-        return (
-          <g key={period.period}>
-            <rect
-              className="bar-income"
-              x={centre - bar - 1}
-              width={bar}
-              y={frame.y(period.income)}
-              height={Math.max(0, frame.y(0) - frame.y(period.income))}
-            >
-              <title>{`${formatPeriod(period.period)} income ${formatAmount(period.income)}`}</title>
-            </rect>
-            <rect
-              className="bar-spending"
-              x={centre + 1}
-              width={bar}
-              y={frame.y(period.spending)}
-              height={Math.max(0, frame.y(0) - frame.y(period.spending))}
-            >
-              <title>{`${formatPeriod(period.period)} spending ${formatAmount(period.spending)}`}</title>
-            </rect>
-          </g>
-        );
-      })}
+      <g className="chart-plot" key={plotKey(periods)}>
+        {periods.map((period, index) => {
+          const centre = frame.x(index, periods.length);
+          return (
+            <g key={period.period}>
+              <rect
+                className="bar-income"
+                style={stagger(index)}
+                x={centre - bar - 1}
+                width={bar}
+                y={frame.y(period.income)}
+                height={Math.max(0, frame.y(0) - frame.y(period.income))}
+              >
+                <title>{`${formatPeriod(period.period)} income ${formatAmount(period.income)}`}</title>
+              </rect>
+              <rect
+                className="bar-spending"
+                style={stagger(index)}
+                x={centre + 1}
+                width={bar}
+                y={frame.y(period.spending)}
+                height={Math.max(0, frame.y(0) - frame.y(period.spending))}
+              >
+                <title>{`${formatPeriod(period.period)} spending ${formatAmount(period.spending)}`}</title>
+              </rect>
+            </g>
+          );
+        })}
+      </g>
       <XLabels labels={periods.map((p) => p.period)} frame={frame} />
     </svg>
   );
@@ -156,13 +161,15 @@ export function SteppedArea({
   return (
     <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="chart" role="img" aria-label="Net worth over time">
       <Gridlines frame={frame} />
-      <path className="area-fill" d={area} />
-      <path className="area-line" d={path} />
-      {periods.map((period, index) => (
-        <circle key={period.period} className="dot" cx={points[index].x} cy={points[index].y} r={2.5}>
-          <title>{`${formatPeriod(period.period)} ${formatMoney(period.net_worth)}`}</title>
-        </circle>
-      ))}
+      <g className="chart-plot" key={plotKey(periods)}>
+        <path className="area-fill" d={area} />
+        <path className="area-line" d={path} pathLength={1} />
+        {periods.map((period, index) => (
+          <circle key={period.period} className="dot" style={stagger(index)} cx={points[index].x} cy={points[index].y} r={2.5}>
+            <title>{`${formatPeriod(period.period)} ${formatMoney(period.net_worth)}`}</title>
+          </circle>
+        ))}
+      </g>
       <XLabels labels={periods.map((p) => p.period)} frame={frame} />
     </svg>
   );
@@ -205,12 +212,14 @@ export function DottedLine({
           </g>
         ))}
       </g>
-      <path className="dotted-line" d={path} />
-      {points.map((point) => (
-        <circle key={point.period.period} className="dot dot-ink" cx={point.x} cy={point.y} r={3}>
-          <title>{`${formatPeriod(point.period.period)} · ${Math.round(point.period.value ?? 0)} days`}</title>
-        </circle>
-      ))}
+      <g className="chart-plot" key={plotKey(periods)}>
+        <path className="dotted-line" d={path} />
+        {points.map((point, index) => (
+          <circle key={point.period.period} className="dot dot-ink" style={stagger(index)} cx={point.x} cy={point.y} r={3}>
+            <title>{`${formatPeriod(point.period.period)} · ${Math.round(point.period.value ?? 0)} days`}</title>
+          </circle>
+        ))}
+      </g>
       <g className="chart-axis">
         {periods.map((period, index) =>
           index % Math.ceil(periods.length / 10) === 0 ? (
@@ -223,6 +232,17 @@ export function DottedLine({
     </svg>
   );
 }
+
+/**
+ * Keys the chart marks by the period set, so their reveal (motion.css M9)
+ * replays when the periods change and not when the same range refetches.
+ */
+function plotKey(periods: ReadonlyArray<{ period: string }>): string {
+  return `${periods[0]?.period}:${periods.length}`;
+}
+
+/** Stagger index for a mark's entrance, capped so a long series does not trail on. */
+const stagger = (index: number) => ({ "--i": Math.min(index, 24) }) as CSSProperties;
 
 function EmptyChart() {
   return <div className="chart-empty">No data in this range.</div>;

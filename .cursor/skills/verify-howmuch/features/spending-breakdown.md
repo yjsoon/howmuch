@@ -4,7 +4,7 @@ Spending breakdown totals outflows by category. The default range is this calend
 
 ## Sub-features
 
-- `spending-open` opens the report from Primary navigation and from `/spending`.
+- `spending-open` opens the report from **Spending** in the **Reports** group of Primary navigation and from `/spending`.
 - `spending-default-empty` shows a zero/empty current-month report when today is outside the demo span.
 - `spending-all` shows demo outflows after choosing **All**.
 - `spending-custom-range` matches **All** when From/To cover 2026-03-01 … 2026-05-31.
@@ -12,9 +12,9 @@ Spending breakdown totals outflows by category. The default range is this calend
 
 ## How to get to it (user POV)
 
-- Choose **Spending breakdown** in Primary navigation.
+- Choose **Spending** in the **Reports** group of Primary navigation (open the group by its summary if it is closed).
 - Open `{web_url}/spending`.
-- Keep the current query string when moving from another report tab.
+- Keep the current query string when moving from another Reports link.
 
 ## Driving it with control-howmuch
 
@@ -24,7 +24,7 @@ Preconditions:
 - Owner `verifier` is signed in.
 - Demo ledger still contains the seeded March–May 2026 outflows.
 
-- **Open report.** Choose `Spending breakdown`. Title is `Spending breakdown · HowMuch`. Heading is `Spending breakdown`. Filter rail shows group `Date range`.
+- **Open report.** Choose `Spending` under `Reports`. Title is `Spending breakdown · Halation`. Heading is `Spending breakdown`. The nav link reads `Spending`. Filter rail shows group `Date range`.
 - **Default empty.** If today is 2026-08 (or any month outside March–May 2026) and the active preset is `This month`, `Total spending` is `$0.00` and largest line is `-`. Status title `No spending in this range.` with detail `Adjust the dates or clear category filters to show more transactions.` Groceries is absent. This is the correct empty state. Headline `Average transaction` is also present.
 - **All range.** Choose `All` in `Date range`. URL becomes `/spending?range=all`. `Total spending` is `$3,292.30`. Largest line is `Utilities`. Category detail lists Home (`Utilities` `$1,974.50`, `Groceries` `$357.10`, `Dining Out` `$125.40`), Travel (`Holiday` `$488.90`), and Living (`Shopping`, `Health`, `Transport`).
 - **Custom range.** Choose `From date` `2026-03-01` and `To date` `2026-05-31`. Groceries remains visible. Summary text includes those dates.
@@ -36,5 +36,6 @@ Preconditions:
 
 - Proving spending on `This month` in 2026-08 is a false fail. Switch to `All` or the demo dates first.
 - `Include` / `Exclude` toggles hidden & non-personal categories. Demo groups are ordinary (Home, Living, Travel); leave the toggle alone unless you are proving it.
-- Filter query strings persist across Reflect tabs. Leftover `from`/`to` from another report can hide the empty-default sub-feature. Use `This month` or a fresh load of `/spending` with no query to prove that path.
+- On a viewport ≤720px the filter rail sits behind **Filters ▾**. Open it before choosing `All` or dates.
+- Filter query strings persist across Reports links. Leftover `from`/`to` from another report can hide the empty-default sub-feature. Use `This month` or a fresh load of `/spending` with no query to prove that path.
 - Report amounts are absolute outflows. Income (Tinkermind Payroll) does not appear here.

@@ -3,6 +3,7 @@ import { FilterRail } from "../components/FilterRail";
 import { DottedLine } from "../components/charts";
 import { formatPeriod } from "../lib/dates";
 import { formatAmount } from "../lib/money";
+import { useIsPhone } from "../lib/use-is-phone";
 import { useFilters } from "../state/filters";
 
 // Age of money replays income lots from the start of the range, so a clipped
@@ -22,6 +23,8 @@ export function AgeOfMoneyPage() {
     latest && previous ? Math.round(latest.age_of_money_days! - previous.age_of_money_days!) : null;
   const unmatchedTotal = periods.reduce((sum, period) => sum + period.unmatched_spending, 0);
   const matchedTotal = periods.reduce((sum, period) => sum + period.spent, 0);
+  const latestDays = latest?.age_of_money_days != null ? `${Math.round(latest.age_of_money_days)} days` : "—";
+  const isPhone = useIsPhone();
 
   return (
     <>
@@ -31,27 +34,28 @@ export function AgeOfMoneyPage() {
         intervals={["week", "month"]}
         showCategories={false}
         busy={report.loading}
+        collapsible={isPhone}
       />
       <div className="report-header">
-        <h1>Age of money</h1>
+        <h1>Money age</h1>
         <div className="headline-row">
           <div className="headline-figure">
             <span className="figure-label">
               {latest ? `Latest (${formatPeriod(latest.period)})` : "Latest"}
             </span>
-            <span className="figure-value">
-              {latest?.age_of_money_days != null ? `${Math.round(latest.age_of_money_days)} days` : "—"}
+            <span key={latestDays} className="figure-value figure-settle">
+              {latestDays}
             </span>
           </div>
           <div className="headline-figure">
             <span className="figure-label">Change on previous period</span>
-            <span className={delta === null || delta >= 0 ? "figure-value figure-positive" : "figure-value figure-negative"}>
+            <span key={delta ?? "none"} className={delta === null || delta >= 0 ? "figure-value figure-settle figure-positive" : "figure-value figure-settle figure-negative"}>
               {delta === null ? "—" : `${delta > 0 ? "+" : ""}${delta} days`}
             </span>
           </div>
           <div className="headline-figure">
             <span className="figure-label">Spending matched</span>
-            <span className="figure-value">{matchedTotal > 0 ? formatAmount(matchedTotal) : "—"}</span>
+            <span key={matchedTotal} className="figure-value figure-settle">{matchedTotal > 0 ? formatAmount(matchedTotal) : "—"}</span>
           </div>
         </div>
       </div>
