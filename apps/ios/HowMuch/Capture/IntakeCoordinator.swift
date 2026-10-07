@@ -870,6 +870,18 @@ final class IntakeCoordinator {
           model.openAccounts.contains(where: { $0.id == accountID }) else {
       return
     }
+    if job.failureMessage == Self.addAccountMessage {
+      // Never read: there was no account to file against. Read it now.
+      var waiting = job
+      waiting.accountID = accountID
+      waiting.decideAccount = false
+      waiting.state = .reading
+      waiting.failureMessage = nil
+      if save(waiting) {
+        drain(model: model)
+      }
+      return
+    }
     var extracted = job.extractions
     for index in extracted.indices {
       SlipAccountPick.apply(accountID, to: &extracted[index].draft)
@@ -929,7 +941,11 @@ final class IntakeCoordinator {
       }
       if let snapshot = current.targetSnapshot {
         let changed = IntakeMatcher.editedDifferences(
-          draft: draft, proposed: current.proposedDraft, parsedCategory: draft.categoryID != nil, live: snapshot
+          draft: draft,
+          proposed: current.proposedDraft,
+          parsedCategory: draft.categoryID != nil,
+          live: snapshot,
+          allowContainment: job.hint != .fix
         )
         if let refusal = Self.fixRefusal(fields: changed, live: snapshot) {
           mutateProposal(proposalID, in: id, model: model) { $0.issue = refusal }
@@ -1006,6 +1022,7 @@ final class IntakeCoordinator {
       return false
     }
     var flipped = false
+    let allowContainment = self.job(id)?.hint != .fix
     mutateProposal(proposalID, in: id, model: model) { proposal in
       guard proposal.kind == .add || proposal.kind == .possibleDuplicate, proposal.candidateIDs.contains(candidateID) else {
         return
@@ -1019,7 +1036,8 @@ final class IntakeCoordinator {
         draft: proposal.draft,
         proposed: proposal.proposedDraft,
         parsedCategory: proposal.draft.categoryID != nil,
-        live: live
+        live: live,
+        allowContainment: allowContainment
       )
       proposal.reasons.removeAll { $0.hasPrefix("Reconciled") }
       if live.cleared == .reconciled {

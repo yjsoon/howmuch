@@ -94,6 +94,10 @@ enum IntakeLineParser {
         rowDate = leading.date
         line = leading.rest
       }
+      if matches(currencyName, line) {
+        // A foreign amount in words: the pending row keeps waiting for its SGD figure.
+        continue
+      }
       let amount: ParsedAmount
       switch parseAmount(line) {
       case .none:
@@ -155,6 +159,14 @@ enum IntakeLineParser {
   private static let ignored = regex(
     #"\b(?:balance|bal|avail|available|opening|closing|statement|subtotal|total|credit limit|minimum payment|amount due|due date|brought forward|carried forward)\b|\b[bc]/f\b|\bpage \d+(?: of \d+)?\b"#
   )
+  /// A line that is a currency written out ("US DOLLAR 15.99", "JAPANESE YEN 1,500").
+  private static let currencyName = regex(
+    #"^(?:u\.?\s*s\.?\s*dollars?|euros?|japanese yen|pounds? sterling|british pounds?|australian dollars?|malaysian ringgit|ringgit|thai baht|rupiah|renminbi|yuan|korean won)\b.*\d"#
+  )
+  /// A code between two amounts ("12.00 USD 16.20"): it belongs to the first.
+  private static let codeBetweenAmounts = regex(
+    #"(\d\.\d{1,2})\s*("# + #"(?:USD|EUR|GBP|AUD|MYR|JPY|HKD|CNY|RMB|THB|IDR|NZD|CAD|CHF|KRW|INR|PHP|TWD|VND)"# + #")\s+(?=(?:[-+]\s*)?\d)"#
+  )
   private static let time = regex(#"\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\b"#)
   private static let foreignAmount = regex(
     #"\b(?:USD|EUR|GBP|AUD|MYR|JPY|HKD|CNY|RMB|THB|IDR|NZD|CAD|CHF|KRW|INR|PHP|TWD|VND)\s*[\d,]+(?:\.\d+)?"#
@@ -181,7 +193,7 @@ enum IntakeLineParser {
   /// marker before the number, the number, then an optional `CR`, `DR` or
   /// currency code. The amount must not start inside a word or number.
   private static let amountTail = regex(
-    #"^(.*?)(?<![A-Za-z0-9,.])([-+\u2212\u2013])?\s*("# + currencyPrefix + #")?\s*([-+\u2212\u2013])?\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)\s*(CR|DR|"#
+    #"^(.*?)(?:(?<![A-Za-z0-9,.])|(?=[\u20AC\u00A3\u00A5\u20A9\u0E3F\u20B9\u20B1\u20AB])|(?=(?:RM|Rp)\d))([-+\u2212\u2013])?\s*("# + currencyPrefix + #")?\s*([-+\u2212\u2013])?\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)\s*(CR|DR|"#
       + currencyCode + #")?$"#
   )
 
@@ -250,7 +262,7 @@ enum IntakeLineParser {
       in: text, options: [], range: range(text), withTemplate: ""
     )
     payee = payee.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-    return payee.trimmingCharacters(in: CharacterSet(charactersIn: " -:\u{2022}|\u{00B7}*,"))
+    return payee.trimmingCharacters(in: CharacterSet(charactersIn: " -:\u{2022}|\u{00B7}*,;"))
   }
 
   /// A date at the start of the line, as `yyyy-MM-dd` (or `today` /
@@ -379,7 +391,9 @@ enum IntakeLineParser {
   ///   leaves a foreign row that waits for one, and several drop the row.
   private static func parseAmount(_ line: String) -> AmountResult {
     var tokens: [Token] = []
-    var rest = line
+    var rest = codeBetweenAmounts.stringByReplacingMatches(
+      in: line, options: [], range: range(line), withTemplate: "$1 $2 ; "
+    )
     while tokens.count < 4, let match = amountTail.firstMatch(in: rest, options: [], range: range(rest)) {
       guard let number = group(match, 5, in: rest) else {
         break
@@ -395,7 +409,7 @@ enum IntakeLineParser {
         || (marker.map { $0 != "CR" && $0 != "DR" && $0 != "SGD" } ?? false)
       let inflow = group(match, 2, in: rest) == "+" || group(match, 4, in: rest) == "+" || marker == "CR"
       tokens.insert(Token(magnitude: magnitude, isInflow: inflow, isForeign: foreign), at: 0)
-      rest = (group(match, 1, in: rest) ?? "").trimmingCharacters(in: .whitespaces)
+      rest = (group(match, 1, in: rest) ?? "").trimmingCharacters(in: CharacterSet(charactersIn: " ;"))
     }
     guard !tokens.isEmpty else {
       return .none

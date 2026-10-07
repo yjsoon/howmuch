@@ -313,9 +313,15 @@ struct IntakeMatcher: Sendable {
     draft: TransactionDraft,
     proposed: TransactionDraft,
     parsedCategory: Bool,
-    live: Transaction
+    live: Transaction,
+    allowContainment: Bool = true
   ) -> [IntakeField] {
-    let base = differences(draft: draft, parsedCategory: parsedCategory, row: IntakeCandidateRow(transaction: live))
+    let base = differences(
+      draft: draft,
+      parsedCategory: parsedCategory,
+      row: IntakeCandidateRow(transaction: live),
+      allowContainment: allowContainment
+    )
     var fields: [IntakeField] = base.filter { $0 == .payee || $0 == .category }
     if draft.signedMilliunits != proposed.signedMilliunits, draft.signedMilliunits != live.amount {
       fields.append(.amount)

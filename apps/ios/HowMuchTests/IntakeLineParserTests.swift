@@ -242,6 +242,33 @@ final class IntakeLineParserTests: XCTestCase {
     XCTAssertEqual(extract("Grab\n12.00 USD\n-$8.90"), [Row("Grab", "8.90", .outflow, nil)])
   }
 
+  func testForeignCodeBetweenTwoAmountsMarksTheFirstAsForeign() {
+    XCTAssertEqual(
+      extract("05 OCT ADOBE 12.00 USD 16.20"),
+      [Row("ADOBE", "16.20", .outflow, "2026-10-05")]
+    )
+  }
+
+  func testCurrencySymbolStuckToTheWordIsStillForeign() {
+    for line in ["HARRODS\u{00A3}12.50", "HARRODS\u{20AC}12.50", "SHOP\u{00A5}1200.00", "SHOP\u{20A9}12000.00", "KEDAI JBRM45.00"] {
+      XCTAssertEqual(extract("05 OCT \(line)"), [], line)
+    }
+    // A word that merely ends in RM, with a space before the amount, is SGD.
+    XCTAssertEqual(extract("05 OCT FARM 45.00"), [Row("FARM", "45.00", .outflow, "2026-10-05")])
+  }
+
+  func testSpelledOutCurrencyLinesAreForeignAmountsNotSGD() {
+    for line in ["U. S. DOLLAR 15.99", "US DOLLAR 15.99", "EURO 12.00", "JAPANESE YEN 1,500"] {
+      XCTAssertEqual(extract("NETFLIX\n\(line)"), [], line)
+      XCTAssertEqual(
+        extract("NETFLIX\n\(line)\nS$21.70"),
+        [Row("NETFLIX", "21.70", .outflow, nil)],
+        line
+      )
+    }
+    XCTAssertEqual(extract("EURO 12.00"), [])
+  }
+
   // MARK: Dates
 
   func testYearlessDateMoreThanAWeekAheadUsesThePreviousYear() {
