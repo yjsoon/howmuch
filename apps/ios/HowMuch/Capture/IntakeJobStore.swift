@@ -3,6 +3,11 @@ import Foundation
 /// Persists intake jobs in the app group as `Jobs/{id}/job.json`, with the
 /// shared files under `Jobs/{id}/sources/`. Main app only: the share extension
 /// writes the inbox, never jobs. Use from the main actor.
+enum IntakeJobStoreError: Error {
+  /// A shared file is missing from both the Reading folder and the job.
+  case missingSource
+}
+
 final class IntakeJobStore {
   static let shared = IntakeJobStore(container: IntakeJobStore.sharedContainer)
 
@@ -140,6 +145,16 @@ final class IntakeJobStore {
   /// The caller discards the (now empty) Reading folder afterwards.
   func adopt(_ item: InboxItem, planID: String? = nil, connectionFingerprint: String? = nil) throws -> IntakeJob {
     let sources = sourcesDirectory(for: item.id)
+    // Every file must be somewhere we can reach (still in Reading, or already
+    // moved). A job is never made for a partial set, which would be read as if
+    // it were the whole share.
+    func isMissing(_ file: InboxSourceFile) -> Bool {
+      !fileManager.fileExists(atPath: item.payloadURL(for: file).path)
+        && !fileManager.fileExists(atPath: sources.appendingPathComponent(file.filename).path)
+    }
+    guard !item.sources.contains(where: isMissing) else {
+      throw IntakeJobStoreError.missingSource
+    }
     try fileManager.createDirectory(at: sources, withIntermediateDirectories: true)
     let job: IntakeJob
     if let existing = load(item.id) {

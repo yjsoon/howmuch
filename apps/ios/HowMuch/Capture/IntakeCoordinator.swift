@@ -43,6 +43,8 @@ final class IntakeCoordinator {
   /// Account names by ID, refreshed on each drain, for notification copy.
   @ObservationIgnored private var accountNames: [String: String] = [:]
   @ObservationIgnored private let hashIndex: IntakeHashIndex
+  /// Shares whose files could not all be found; left alone until the next drain re-adopts them.
+  @ObservationIgnored private var unadoptable: Set<UUID> = []
 
   /// Applied and discarded jobs (and quarantined folders) are kept this long, then pruned.
   private static let retention: TimeInterval = 30 * 24 * 3600
@@ -248,6 +250,7 @@ final class IntakeCoordinator {
   /// Moves claimed `Reading/` entries into `Jobs/`. Also picks up entries an
   /// earlier launch claimed but never turned into a job.
   private func adoptInbox(model: AppModel) {
+    unadoptable = []
     _ = try? inbox.claimInbox(where: { $0.isIntakeJobSource })
     let planID = model.settings.planID
     var adoptedAny = false
@@ -267,6 +270,7 @@ final class IntakeCoordinator {
         inbox.discardReading(item.id)
         adoptedAny = true
       } catch {
+        unadoptable.insert(item.id)
         Self.logger.error("Couldn't adopt share \(item.id.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)")
       }
     }
@@ -283,7 +287,7 @@ final class IntakeCoordinator {
       }
     }
     let pending = jobs
-      .filter { $0.state == .reading || $0.state == .queued }
+      .filter { ($0.state == .reading || $0.state == .queued) && !unadoptable.contains($0.id) }
       .sorted { $0.createdAt < $1.createdAt }
     for job in pending {
       if Task.isCancelled || drainEpoch != epoch {
@@ -543,7 +547,7 @@ final class IntakeCoordinator {
   /// A job matched while offline is matched again once the register can be
   /// searched in full, so long as the owner has not touched any row.
   private func rematchAfterOffline(_ id: UUID, model: AppModel) async {
-    guard let job = self.job(id), job.state == .proposed, job.duplicateCheckLimited, !approving.contains(id),
+    guard !approving.contains(id), let job = self.job(id), job.state == .proposed, job.duplicateCheckLimited,
           !job.extractions.isEmpty,
           job.proposals.allSatisfy(\.isUntouched) else {
       return
@@ -555,8 +559,8 @@ final class IntakeCoordinator {
       hint: job.hint,
       model: model
     )
-    guard !result.limited, var current = self.job(id), current.state == .proposed,
-          current.duplicateCheckLimited, !approving.contains(id), current.proposals.allSatisfy(\.isUntouched) else {
+    guard !result.limited, !approving.contains(id), var current = self.job(id), current.state == .proposed,
+          current.duplicateCheckLimited, current.proposals.allSatisfy(\.isUntouched) else {
       return
     }
     current.proposals = result.proposals
@@ -658,9 +662,19 @@ final class IntakeCoordinator {
           plans[proposal.id] = .decline
           continue
         }
-        guard let target = proposal.targetTransactionID,
-              let live = await model.intakeLiveTransaction(id: target) else {
+        guard let target = proposal.targetTransactionID else {
           plans[proposal.id] = .skip("Couldn’t find the original transaction")
+          continue
+        }
+        let live: Transaction
+        switch await model.intakeLiveTransaction(id: target) {
+        case .found(let row):
+          live = row
+        case .gone:
+          plans[proposal.id] = .skip("Couldn’t find the original transaction")
+          continue
+        case .unavailable:
+          plans[proposal.id] = .skip("Couldn’t check the original transaction. Try again when you’re online.")
           continue
         }
         let fields = IntakeMatcher.pendingFixFields(
@@ -686,7 +700,7 @@ final class IntakeCoordinator {
       }
     }
 
-    // The job may have been discarded while the live rows were read.
+    // The job may have been discarded or changed while the live rows were read.
     guard var job = self.job(id), job.state == .proposed else {
       return false
     }
@@ -969,7 +983,15 @@ final class IntakeCoordinator {
   /// it does nothing when that cannot be read.
   @discardableResult
   func flipToFix(_ proposalID: UUID, candidate candidateID: String, in id: UUID, model: AppModel) async -> Bool {
-    guard let live = await model.intakeLiveTransaction(id: candidateID) else {
+    let live: Transaction
+    switch await model.intakeLiveTransaction(id: candidateID) {
+    case .found(let row):
+      live = row
+    case .gone:
+      model.showSaveMessage("Couldn’t read that transaction. Try again.", kind: .failure)
+      return false
+    case .unavailable:
+      model.showSaveMessage("Couldn’t check that transaction. Try again when you’re online.", kind: .failure)
       return false
     }
     var flipped = false
