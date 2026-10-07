@@ -251,14 +251,10 @@ final class IntakeCoordinator {
       return
     }
 
-    guard await awaitReferenceData(model) else {
-      // A cancelled read leaves the job reading to be drained again.
-      guard var current = readable(id) else {
-        return
-      }
-      current.state = .failed
-      current.failureMessage = CaptureAdmissionGate.stalledMessage
-      save(current)
+    // Reading is on this device and the document is fine, so missing reference
+    // data (offline at launch, a headless run) is not a failure. The job keeps
+    // its state and is read on the next drain.
+    guard await awaitReferenceData(model), !model.openAccounts.isEmpty else {
       return
     }
     guard var reading = readable(id) else {
