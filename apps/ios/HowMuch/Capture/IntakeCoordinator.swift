@@ -34,6 +34,8 @@ final class IntakeCoordinator {
   @ObservationIgnored private var redrainRequested = false
   @ObservationIgnored private var jobTasks: [UUID: Task<Void, Never>] = [:]
   @ObservationIgnored private var approving: Set<UUID> = []
+  /// Shares whose files could not all be found; left alone until the next drain re-adopts them.
+  @ObservationIgnored private var unadoptable: Set<UUID> = []
 
   /// Applied and discarded jobs (and quarantined folders) are kept this long, then pruned.
   private static let retention: TimeInterval = 30 * 24 * 3600
@@ -168,6 +170,7 @@ final class IntakeCoordinator {
   /// Moves claimed `Reading/` entries into `Jobs/`. Also picks up entries an
   /// earlier launch claimed but never turned into a job.
   private func adoptInbox(model: AppModel) {
+    unadoptable = []
     _ = try? inbox.claimInbox(where: { $0.isIntakeJobSource })
     let planID = model.settings.planID
     for item in inbox.loadReading(where: { $0.isIntakeJobSource }) {
@@ -179,6 +182,7 @@ final class IntakeCoordinator {
         )
         inbox.discardReading(item.id)
       } catch {
+        unadoptable.insert(item.id)
         Self.logger.error("Couldn't adopt share \(item.id.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)")
       }
     }
@@ -195,7 +199,7 @@ final class IntakeCoordinator {
       }
     }
     let pending = jobs
-      .filter { $0.state == .reading || $0.state == .queued }
+      .filter { ($0.state == .reading || $0.state == .queued) && !unadoptable.contains($0.id) }
       .sorted { $0.createdAt < $1.createdAt }
     for job in pending {
       await run(job.id, model: model).value
@@ -424,7 +428,7 @@ final class IntakeCoordinator {
   /// A job matched while offline is matched again once the register can be
   /// searched in full, so long as the owner has not touched any row.
   private func rematchAfterOffline(_ id: UUID, model: AppModel) async {
-    guard let job = self.job(id), job.state == .proposed, job.duplicateCheckLimited,
+    guard !approving.contains(id), let job = self.job(id), job.state == .proposed, job.duplicateCheckLimited,
           !job.extractions.isEmpty,
           job.proposals.allSatisfy({ $0.decision == .pending && !$0.isApplied }) else {
       return
@@ -436,7 +440,7 @@ final class IntakeCoordinator {
       hint: job.hint,
       model: model
     )
-    guard !result.limited, var current = self.job(id), current.state == .proposed,
+    guard !result.limited, !approving.contains(id), var current = self.job(id), current.state == .proposed,
           current.duplicateCheckLimited, current.proposals.allSatisfy({ $0.decision == .pending && !$0.isApplied }) else {
       return
     }
@@ -519,9 +523,19 @@ final class IntakeCoordinator {
           plans[proposal.id] = .decline
           continue
         }
-        guard let target = proposal.targetTransactionID,
-              let live = await model.intakeLiveTransaction(id: target) else {
+        guard let target = proposal.targetTransactionID else {
           plans[proposal.id] = .skip("Couldn’t find the original transaction")
+          continue
+        }
+        let live: Transaction
+        switch await model.intakeLiveTransaction(id: target) {
+        case .found(let row):
+          live = row
+        case .gone:
+          plans[proposal.id] = .skip("Couldn’t find the original transaction")
+          continue
+        case .unavailable:
+          plans[proposal.id] = .skip("Couldn’t check the original transaction. Try again when you’re online.")
           continue
         }
         let wanted = proposal.changedFields
@@ -544,8 +558,12 @@ final class IntakeCoordinator {
       }
     }
 
-    // The job may have been discarded while the live rows were read.
+    // The job may have been discarded or changed while the live rows were read.
     guard var job = self.job(id), job.state == .proposed else {
+      return false
+    }
+    guard job.proposals.map(\.id) == start.proposals.map(\.id) else {
+      model.showSaveMessage("The batch changed. Review it and approve again.", kind: .failure)
       return false
     }
     var drafts: [TransactionDraft] = []

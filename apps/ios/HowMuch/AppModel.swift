@@ -4612,23 +4612,38 @@ extension AppModel {
   }
 
   /// The row as it is now, for approving a Fix: the server's copy with queued
-  /// changes applied. `nil` when the server says it is gone, or when it cannot
-  /// be reached and the register does not hold it either.
-  func intakeLiveTransaction(id: String) async -> Transaction? {
-    if settings.isAuthenticated {
-      do {
-        let row = try await apiClient.fetchTransaction(planID: settings.planID, transactionID: id)
-        return row.deleted ? nil : overlaying([row]).first
-      } catch APIClientError.httpStatus(404) {
-        return nil
-      } catch APIClientError.server {
-        // A JSON error body (404 `resource_not_found` and friends): the server
-        // answered and has no row to give, so treat it as gone, never stale.
-        return nil
-      } catch {
-        // Unreachable: fall back to what the register shows.
-      }
+  /// changes applied. Never the cached copy when a server is in play, because
+  /// an edit is sent as a whole row and stale data would overwrite newer changes.
+  func intakeLiveTransaction(id: String) async -> IntakeLiveRow {
+    guard settings.isAuthenticated, !settings.isLocal else {
+      // On-device data is the only copy there is.
+      let local = transactions.first { $0.id == id } ?? unapprovedTransactions.first { $0.id == id }
+      return local.map(IntakeLiveRow.found) ?? .gone
     }
-    return transactions.first { $0.id == id } ?? unapprovedTransactions.first { $0.id == id }
+    do {
+      let row = try await apiClient.fetchTransaction(planID: settings.planID, transactionID: id)
+      if row.deleted {
+        return .gone
+      }
+      return overlaying([row]).first.map(IntakeLiveRow.found) ?? .gone
+    } catch APIClientError.httpStatus(404) {
+      return .gone
+    } catch APIClientError.server {
+      // A JSON error body (404 `resource_not_found` and friends): the server
+      // answered and has no row to give.
+      return .gone
+    } catch {
+      // Unreachable or failing: the row cannot be checked right now.
+      return .unavailable
+    }
   }
+}
+
+/// The result of looking a Fix target up on the server.
+enum IntakeLiveRow {
+  case found(Transaction)
+  /// The server answered and the row is not there.
+  case gone
+  /// The server could not be asked (offline, a failing request).
+  case unavailable
 }
