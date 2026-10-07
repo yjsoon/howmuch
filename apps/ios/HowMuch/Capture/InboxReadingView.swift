@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import ImageIO
+import PDFKit
 #if canImport(Vision)
 import Vision
 #endif
@@ -15,6 +16,7 @@ struct InboxReadingView: View {
   var onResolved: ([SlipMappedDraft]) -> Void
   var onAttachments: ([CaptureAttachment]) -> Void = { _ in }
   var onClaimed: ([UUID]) -> Void = { _ in }
+  var onNote: (String) -> Void = { _ in }
 
   @State private var thumbnail: UIImage?
   @State private var readingTask: Task<Void, Never>?
@@ -119,30 +121,51 @@ struct InboxReadingView: View {
       var mapped: [SlipMappedDraft] = []
       for item in items {
         try Task.checkCancellation()
-        switch item.kind {
-        case .image:
-          guard let data = try await inboxBackgroundWork({ try? item.payloadData() }) else {
-            continue
-          }
-          let attachmentID = UUID()
-          onAttachments([
-            CaptureAttachment(id: attachmentID, filename: item.filename, data: data, isReading: true)
-          ])
-          let text = await SlipImageText.recognize(data)
-          onAttachments([
-            CaptureAttachment(
-              id: attachmentID,
-              filename: item.filename,
-              data: data,
-              recognizedText: text,
-              isReading: false,
-              errorMessage: text.isEmpty ? "I could not read text from that image. It is still attached." : nil
-            )
-          ])
-          mapped.append(contentsOf: await interpretDrafts(from: text))
-        case .text:
-          mapped.append(contentsOf: await interpretDrafts(from: item.payloadText()))
+        if let note = item.note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
+          onNote(note)
         }
+        var itemDrafts: [SlipMappedDraft] = []
+        for file in item.sources {
+          try Task.checkCancellation()
+          let url = item.payloadURL(for: file)
+          switch file.kind {
+          case .image:
+            guard let data = try await inboxBackgroundWork({ try? Data(contentsOf: url) }) else {
+              continue
+            }
+            let attachmentID = UUID()
+            onAttachments([
+              CaptureAttachment(id: attachmentID, filename: file.filename, data: data, isReading: true)
+            ])
+            let text = await SlipImageText.recognize(data)
+            onAttachments([
+              CaptureAttachment(
+                id: attachmentID,
+                filename: file.filename,
+                data: data,
+                recognizedText: text,
+                isReading: false,
+                errorMessage: text.isEmpty ? "I could not read text from that image. It is still attached." : nil
+              )
+            ])
+            itemDrafts.append(contentsOf: await interpretDrafts(from: text))
+          case .text:
+            itemDrafts.append(contentsOf: await interpretDrafts(from: item.text(of: file)))
+          case .pdf:
+            let text = await SlipPDFText.recognize(url)
+            try Task.checkCancellation()
+            itemDrafts.append(contentsOf: await interpretDrafts(from: text))
+          }
+        }
+        if let accountID = item.accountID {
+          for index in itemDrafts.indices where !itemDrafts[index].parsedAccount {
+            itemDrafts[index].draft.seedIfNeeded(
+              accounts: model.openAccounts,
+              preferredAccountID: accountID
+            )
+          }
+        }
+        mapped.append(contentsOf: itemDrafts)
       }
       try Task.checkCancellation()
       if mapped.count == 1, !mapped[0].parsedAccount {
@@ -179,21 +202,22 @@ enum InboxPreview {
       let maximumPixelSize = ceil(168 * scale)
       for item in items {
         try Task.checkCancellation()
-        guard item.kind == .image else { continue }
-        let image: UIImage? = autoreleasepool {
-          guard let source = CGImageSourceCreateWithURL(
-            item.payloadURL as CFURL,
-            [kCGImageSourceShouldCache: false] as CFDictionary
-          ), let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize,
-            kCGImageSourceShouldCacheImmediately: true
-          ] as CFDictionary) else { return nil }
-          return UIImage(cgImage: thumbnail, scale: scale, orientation: .up)
+        for file in item.sources where file.kind == .image {
+          let image: UIImage? = autoreleasepool {
+            guard let source = CGImageSourceCreateWithURL(
+              item.payloadURL(for: file) as CFURL,
+              [kCGImageSourceShouldCache: false] as CFDictionary
+            ), let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+              kCGImageSourceCreateThumbnailFromImageAlways: true,
+              kCGImageSourceCreateThumbnailWithTransform: true,
+              kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize,
+              kCGImageSourceShouldCacheImmediately: true
+            ] as CFDictionary) else { return nil }
+            return UIImage(cgImage: thumbnail, scale: scale, orientation: .up)
+          }
+          try Task.checkCancellation()
+          if let image { return image }
         }
-        try Task.checkCancellation()
-        if let image { return image }
       }
       return nil
     }
@@ -237,5 +261,40 @@ enum SlipImageText {
     #else
     return ""
     #endif
+  }
+}
+
+enum SlipPDFText {
+  static let maxOCRPages = 8
+
+  /// The text layer when there is one; otherwise OCR of up to eight rendered pages.
+  static func recognize(_ url: URL) async -> String {
+    let layer = try? await inboxBackgroundWork { () throws -> String in
+      PDFDocument(url: url)?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+    if let layer, !layer.isEmpty {
+      return layer
+    }
+    let pageCount = (try? await inboxBackgroundWork { () throws -> Int in PDFDocument(url: url)?.pageCount ?? 0 }) ?? 0
+    var pages: [String] = []
+    for index in 0..<min(pageCount, maxOCRPages) {
+      if Task.isCancelled { break }
+      let png: Data? = try? await inboxBackgroundWork { () throws -> Data? in
+        autoreleasepool { () -> Data? in
+          guard let page = PDFDocument(url: url)?.page(at: index) else { return nil }
+          let bounds = page.bounds(for: .mediaBox)
+          guard bounds.width > 0, bounds.height > 0 else { return nil }
+          let width: CGFloat = 1600
+          let size = CGSize(width: width, height: ceil(width * bounds.height / bounds.width))
+          return page.thumbnail(of: size, for: .mediaBox).pngData()
+        }
+      }
+      guard let png else { continue }
+      let text = await SlipImageText.recognize(png)
+      if !text.isEmpty {
+        pages.append(text)
+      }
+    }
+    return pages.joined(separator: "\n")
   }
 }

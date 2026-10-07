@@ -2727,10 +2727,29 @@ final class AppModel {
       payees: payees
     )
     store.scheduleWrite(snapshot)
+    publishShareContext()
   }
 
   func wipeIntentCatalog(using store: IntentCatalogStore = .shared) {
     store.wipeAll()
+    ShareContextStore.shared.remove()
+  }
+
+  /// Gives the share extension the open accounts and the last-used one.
+  /// The extension never sees a token; it only reads this file.
+  func publishShareContext(using store: ShareContextStore = .shared) {
+    guard settings.isAuthenticated else {
+      store.remove()
+      return
+    }
+    store.write(ShareContext(
+      isSignedIn: true,
+      lastUsedOpenAccountID: lastUsedOpenAccountID,
+      accounts: accounts.filter { !$0.deleted }.map {
+        ShareAccount(id: $0.id, name: $0.name, isClosed: $0.closed)
+      },
+      writtenAt: Date()
+    ))
   }
 
   func refreshScheduledTransactions(quiet: Bool = false) async {
@@ -3182,6 +3201,7 @@ final class AppModel {
     }
     viewPrefs.lastUsedAccountID = last.accountID
     saveViewPrefs()
+    publishShareContext()
   }
 
   private func savedMessage(for drafts: [TransactionDraft]) -> String {

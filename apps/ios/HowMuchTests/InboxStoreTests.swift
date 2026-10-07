@@ -304,4 +304,83 @@ final class InboxStoreTests: XCTestCase {
       )
     )
   }
+
+  // Failure mode: manifests already on disk from an older app or extension build
+  // (v1 shape, or a newer build's extra keys) must still load. E2E cannot plant these.
+  func testV1ManifestOnDiskLoadsAsOneAutoSource() throws {
+    let id = UUID()
+    let folder = try plantManifest(id: id, json: """
+      {"id":"\(id.uuidString)","source":"shareSheet","kind":"image",
+       "filename":"payload.png","createdAt":"2026-01-01T00:00:00Z"}
+      """, files: ["payload.png": Data([1, 2, 3])])
+    XCTAssertTrue(FileManager.default.fileExists(atPath: folder.path))
+    let item = try XCTUnwrap(try store.claim(id))
+    XCTAssertEqual(item.sources.map(\.filename), ["payload.png"])
+    XCTAssertEqual(item.sources.map(\.kind), [.image])
+    XCTAssertEqual(item.kind, .image)
+    XCTAssertEqual(item.hint, .auto)
+    XCTAssertNil(item.accountID)
+    XCTAssertFalse(item.decideAccount)
+    XCTAssertNil(item.note)
+    XCTAssertEqual(try item.payloadData(), Data([1, 2, 3]))
+  }
+
+  func testV2ManifestWithUnknownFutureKeyStillLoads() throws {
+    let id = UUID()
+    try plantManifest(id: id, json: """
+      {"version":2,"id":"\(id.uuidString)","source":"shareSheet",
+       "sources":[{"filename":"a.pdf","kind":"pdf","bytes":3,"sha256":null,"future":1}],
+       "accountID":"acct-1","decideAccount":false,"hint":"fix","note":"hello",
+       "createdAt":"2026-01-01T00:00:00Z","somethingNew":{"nested":[1,2]}}
+      """, files: ["a.pdf": Data([1, 2, 3])])
+    let item = try XCTUnwrap(try store.claim(id))
+    XCTAssertEqual(item.sources.map(\.kind), [.pdf])
+    XCTAssertEqual(item.accountID, "acct-1")
+    XCTAssertEqual(item.hint, .fix)
+    XCTAssertEqual(item.note, "hello")
+  }
+
+  func testMultiSourceWriteRoundTripsOrderAccountHintAndNote() throws {
+    let id = UUID()
+    let names = ["b.png", "a.png", "c.pdf"]
+    let kinds: [InboxPayloadKind] = [.image, .image, .pdf]
+    var sources: [InboxFileSource] = []
+    for (name, kind) in zip(names, kinds) {
+      let url = directory.appendingPathComponent("tmp-\(name)")
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      try Data(name.utf8).write(to: url)
+      sources.append(InboxFileSource(filename: name, kind: kind, fileURL: url, sha256: "hash-\(name)"))
+    }
+    try store.write(InboxFileWrite(
+      id: id,
+      source: .shareSheet,
+      sources: sources,
+      accountID: "acct-9",
+      decideAccount: false,
+      hint: .new,
+      note: "Grab, split with Sam",
+      contentHash: "abc"
+    ))
+    let item = try XCTUnwrap(try store.claim(id))
+    XCTAssertEqual(item.sources.map(\.filename), names)
+    XCTAssertEqual(item.sources.map(\.kind), kinds)
+    XCTAssertEqual(item.sources.map(\.sha256), names.map { Optional("hash-\($0)") })
+    XCTAssertEqual(item.sources.map(\.bytes), names.map { $0.utf8.count })
+    XCTAssertEqual(item.accountID, "acct-9")
+    XCTAssertEqual(item.hint, .new)
+    XCTAssertEqual(item.note, "Grab, split with Sam")
+    XCTAssertEqual(item.contentHash, "abc")
+    XCTAssertEqual(try Data(contentsOf: item.payloadURL(for: item.sources[2])), Data("c.pdf".utf8))
+  }
+
+  @discardableResult
+  private func plantManifest(id: UUID, json: String, files: [String: Data]) throws -> URL {
+    let folder = store.inboxDirectory.appendingPathComponent(id.uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try Data(json.utf8).write(to: folder.appendingPathComponent("manifest.json"))
+    for (name, data) in files {
+      try data.write(to: folder.appendingPathComponent(name))
+    }
+    return folder
+  }
 }
