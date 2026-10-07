@@ -3,10 +3,10 @@ import Observation
 import os
 
 extension InboxItem {
-  /// Share-sheet entries become intake jobs. Every other source (App Intents,
-  /// the clipboard offer) keeps the conversation flow.
+  /// Share-sheet entries and the clipboard offer's "Add these transactions?"
+  /// become intake jobs. App Intents keep the conversation flow.
   var isIntakeJobSource: Bool {
-    source == .shareSheet
+    source == .shareSheet || source == .detectedScreenshot
   }
 }
 
@@ -34,6 +34,9 @@ final class IntakeCoordinator {
   @ObservationIgnored private var redrainRequested = false
   @ObservationIgnored private var jobTasks: [UUID: Task<Void, Never>] = [:]
   @ObservationIgnored private var approving: Set<UUID> = []
+  /// Account names by ID, refreshed on each drain, for notification copy.
+  @ObservationIgnored private var accountNames: [String: String] = [:]
+  @ObservationIgnored private let hashIndex: IntakeHashIndex
 
   /// Applied and discarded jobs (and quarantined folders) are kept this long, then pruned.
   private static let retention: TimeInterval = 30 * 24 * 3600
@@ -42,9 +45,14 @@ final class IntakeCoordinator {
   /// "Likely" is 0.75 up to 0.9; lines read by the fallback never reach "Sure".
   static let fallbackConfidenceCap = 0.85
 
-  init(inbox: InboxStore = .shared, store: IntakeJobStore = .shared) {
+  init(
+    inbox: InboxStore = .shared,
+    store: IntakeJobStore = .shared,
+    hashIndex: IntakeHashIndex = .shared
+  ) {
     self.inbox = inbox
     self.store = store
+    self.hashIndex = hashIndex
     reload()
   }
 
@@ -84,6 +92,17 @@ final class IntakeCoordinator {
 
   func reload() {
     jobs = store.list().filter { $0.state != .discarded }
+    publishAttention()
+  }
+
+  /// A read is under way or waiting: the app should ask iOS for time to finish it.
+  var isBusy: Bool {
+    drainTask != nil || jobs.contains { $0.state == .reading || $0.state == .queued }
+  }
+
+  /// Keeps the app icon badge at Ready plus Needs you.
+  private func publishAttention() {
+    IntakeNotifier.shared.updateBadge(attentionCount)
   }
 
   // MARK: Draining the inbox
@@ -96,6 +115,7 @@ final class IntakeCoordinator {
     guard model.settings.isAuthenticated else {
       return
     }
+    accountNames = Dictionary(model.accounts.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
     prepareJobs(model: model)
     guard drainTask == nil else {
       redrainRequested = true
@@ -108,8 +128,23 @@ final class IntakeCoordinator {
       repeat {
         self.redrainRequested = false
         await self.processPending(model: model)
-      } while self.redrainRequested
+      } while self.redrainRequested && !Task.isCancelled
       self.drainTask = nil
+    }
+  }
+
+  /// Resolves once the drain in flight (if any) has finished or been cancelled.
+  func waitForDrain() async {
+    await drainTask?.value
+  }
+
+  /// Stops reading. A job being read stays `reading` (a cancelled read saves
+  /// nothing) and is picked up by the next drain. Used when iOS ends the
+  /// time it gave the app in the background.
+  func cancelDrain() {
+    drainTask?.cancel()
+    for task in jobTasks.values {
+      task.cancel()
     }
   }
 
@@ -157,6 +192,29 @@ final class IntakeCoordinator {
       }
     }
     jobs = all.filter { $0.state != .discarded }
+    publishAttention()
+    syncHashIndex()
+  }
+
+  /// Rewrites the duplicate-share index for the extension: every job from the
+  /// last 30 days that is still worth warning about. A discarded or failed job
+  /// is not (sharing it again is the point), and neither is one with no hash.
+  private func syncHashIndex() {
+    var contents = IntakeHashIndex.Contents()
+    for job in store.list() where job.state != .discarded && job.state != .failed {
+      let entry = IntakeHashEntry(jobID: job.id, sharedAt: job.createdAt)
+      if let hash = job.contentHash, !hash.isEmpty,
+         contents.content[hash].map({ $0.sharedAt < job.createdAt }) ?? true {
+        contents.content[hash] = entry
+      }
+      for file in job.sourceFiles {
+        if let hash = file.sha256, !hash.isEmpty,
+           contents.sources[hash].map({ $0.sharedAt < job.createdAt }) ?? true {
+          contents.sources[hash] = entry
+        }
+      }
+    }
+    hashIndex.replace(contents)
   }
 
   /// Moves claimed `Reading/` entries into `Jobs/`. Also picks up entries an
@@ -183,6 +241,9 @@ final class IntakeCoordinator {
       .filter { $0.state == .reading || $0.state == .queued }
       .sorted { $0.createdAt < $1.createdAt }
     for job in pending {
+      if Task.isCancelled {
+        return
+      }
       await run(job.id, model: model).value
     }
     for job in jobs where job.state == .proposed && job.duplicateCheckLimited {
@@ -633,6 +694,7 @@ final class IntakeCoordinator {
     job.extractionSourceIndexes = []
     if save(job) {
       store.deleteSources(id)
+      syncHashIndex()
     }
   }
 
@@ -948,6 +1010,7 @@ final class IntakeCoordinator {
   func remove(_ id: UUID) {
     store.delete(id)
     reload()
+    syncHashIndex()
   }
 
   func clearApplied() {
@@ -1016,6 +1079,7 @@ final class IntakeCoordinator {
   private func save(_ job: IntakeJob) -> Bool {
     var next = job
     next.updatedAt = Date()
+    let previous = jobs.first { $0.id == job.id }?.state
     do {
       try store.save(next)
     } catch {
@@ -1030,6 +1094,12 @@ final class IntakeCoordinator {
       jobs.insert(next, at: 0)
       jobs.sort { $0.createdAt > $1.createdAt }
     }
+    publishAttention()
+    IntakeNotifier.shared.jobDidChange(
+      next,
+      previous: previous,
+      accountName: next.accountID.flatMap { accountNames[$0] }
+    )
     return true
   }
 }

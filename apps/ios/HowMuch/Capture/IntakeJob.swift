@@ -448,28 +448,36 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
     state == .proposed ? (spokenProposalSummary ?? "Nothing to add") : statusSummary
   }
 
-  /// "DBS Altitude screenshots", "2 screenshots", "PDF".
-  func title(accountName: String?) -> String {
+  private var payloadNoun: (noun: String, count: Int) {
     let images = sourceFiles.filter { $0.kind == .image }.count
     let pdfs = sourceFiles.filter { $0.kind == .pdf }.count
     let texts = sourceFiles.filter { $0.kind == .text }.count
-    let noun: String
-    let count: Int
     if images > 0 {
-      noun = images == 1 ? "screenshot" : "screenshots"
-      count = images
-    } else if pdfs > 0 {
-      noun = pdfs == 1 ? "PDF" : "PDFs"
-      count = pdfs
-    } else {
-      noun = texts == 1 ? "text" : "texts"
-      count = max(texts, 1)
+      return (images == 1 ? "screenshot" : "screenshots", images)
     }
+    if pdfs > 0 {
+      return (pdfs == 1 ? "PDF" : "PDFs", pdfs)
+    }
+    return (texts == 1 ? "text" : "texts", max(texts, 1))
+  }
+
+  /// "DBS Altitude screenshots", "2 screenshots", "PDF".
+  func title(accountName: String?) -> String {
+    let (noun, count) = payloadNoun
     if let accountName, !accountName.isEmpty {
       return "\(accountName) \(noun)"
     }
     if count == 1 {
       return noun == "text" ? "Pasted text" : noun.prefix(1).uppercased() + String(noun.dropFirst())
+    }
+    return "\(count) \(noun)"
+  }
+
+  /// For a sentence: "2 DBS Altitude screenshots", "1 screenshot", "1 PDF".
+  func sourceDescription(accountName: String?) -> String {
+    let (noun, count) = payloadNoun
+    if let accountName, !accountName.isEmpty {
+      return "\(count) \(accountName) \(noun)"
     }
     return "\(count) \(noun)"
   }

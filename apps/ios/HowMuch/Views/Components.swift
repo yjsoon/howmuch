@@ -665,6 +665,14 @@ final class RootChromeState {
   /// receiving tab consumes (clears) the request once it has acted on it.
   var pendingAccountID: String?
   var pendingRewardsCardID: String?
+  /// An Inbox notification tap or link; Accounts consumes it.
+  var pendingIntakeRoute: IntakeRoute?
+
+  func showIntake(_ route: IntakeRoute) {
+    overflowByTab[.accounts] = nil
+    pendingIntakeRoute = route
+    tab = .accounts
+  }
 
   func showAccount(_ accountID: String) {
     overflowByTab[.accounts] = nil
@@ -743,6 +751,7 @@ struct RootTabView: View {
             }
           }
         }
+        .badge(IntakeCoordinator.shared.attentionCount)
         Tab(AppTab.rewards.title, systemImage: AppTab.rewards.systemImage, value: AppTab.rewards) {
           RootChromeScope(chrome: chrome) {
             RootTabHost(for: .rewards, workspace: workspace) {
@@ -802,6 +811,8 @@ struct RootTabView: View {
         }
       }
     }
+    // Ready plus Needs you; zero hides the badge.
+    .badge(tab == .accounts ? IntakeCoordinator.shared.attentionCount : 0)
   }
 
   @ViewBuilder

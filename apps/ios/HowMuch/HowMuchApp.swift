@@ -4,7 +4,14 @@ import UIKit
 @main
 struct HowMuchApp: App {
   @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-  @State private var model = AppModel()
+  @State private var model: AppModel
+
+  init() {
+    let model = AppModel()
+    _model = State(initialValue: model)
+    // A background refresh can launch the app without ever building a view.
+    IntakeBackgroundRefresh.shared.model = model
+  }
 
   var body: some Scene {
     WindowGroup {
@@ -43,8 +50,18 @@ enum QuickAction {
     )
   }
 
+  /// App Intent and clipboard entries (not share jobs) waiting for the conversation flow.
+  static var hasConversationInboxEntries: Bool {
+    let store = InboxStore.shared
+    let conversationEntry: (InboxItem) -> Bool = { !$0.isIntakeJobSource }
+    return store.hasReadyInboxItems(matching: conversationEntry)
+      || store.hasReadingItems(matching: conversationEntry)
+  }
+
   static func handleOpenURL(_ url: URL) {
-    if HowMuchDeepLink.parse(url) == .inbox {
+    // `howmuch://inbox` opens the conversation only for App Intent entries.
+    // Otherwise the root view opens the Inbox list.
+    if HowMuchDeepLink.parse(url) == .inbox, hasConversationInboxEntries {
       enqueueInboxCapture()
     }
   }
@@ -52,19 +69,22 @@ enum QuickAction {
 
 enum HowMuchDeepLink: Equatable {
   case launch
+  /// `howmuch://inbox`
   case inbox
+  /// `howmuch://inbox/{jobID}`, from an Inbox notification.
+  case inboxBatch(UUID)
 
   static func parse(_ url: URL) -> HowMuchDeepLink? {
     guard url.scheme?.lowercased() == "howmuch" else {
       return nil
     }
     let host = (url.host ?? "").lowercased()
+    let path = url.path.split(separator: "/").map(String.init)
     if host == "inbox" {
-      return .inbox
+      return path.first.flatMap { UUID(uuidString: $0) }.map { HowMuchDeepLink.inboxBatch($0) } ?? .inbox
     }
-    let path = url.path.lowercased().split(separator: "/").map(String.init)
-    if path.first == "inbox" {
-      return .inbox
+    if path.first?.lowercased() == "inbox" {
+      return path.dropFirst().first.flatMap { UUID(uuidString: $0) }.map { HowMuchDeepLink.inboxBatch($0) } ?? .inbox
     }
     return .launch
   }
@@ -76,6 +96,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     QuickAction.register()
+    IntakeNotifier.shared.activate()
+    IntakeBackgroundRefresh.shared.register()
     return true
   }
 
@@ -211,6 +233,14 @@ private struct RootView: View {
     .onChange(of: capture.blockingSheetCount) { _, _ in
       consumePendingCapture()
     }
+    .onChange(of: IntakeNotifier.shared.pendingRoute, initial: true) { _, route in
+      // A notification tap or link: open the Inbox or that batch on Accounts.
+      guard let route else {
+        return
+      }
+      IntakeNotifier.shared.pendingRoute = nil
+      chrome.showIntake(route)
+    }
     .onChange(of: scenePhase) { _, phase in
       if phase == .active {
         drainIntakeInbox()
@@ -221,6 +251,7 @@ private struct RootView: View {
         model.sceneDidBecomeActive()
       } else if phase == .background {
         CaptureWorkspace.shared.persistCurrentIfNeeded()
+        IntakeBackgroundRefresh.shared.appDidEnterBackground()
       }
     }
     .onChange(of: model.settings.isAuthenticated) { _, isAuthenticated in
@@ -233,11 +264,20 @@ private struct RootView: View {
       }
     }
     .onOpenURL { url in
-      guard HowMuchDeepLink.parse(url) == .inbox else {
-        return
+      switch HowMuchDeepLink.parse(url) {
+      case .inboxBatch(let id):
+        drainIntakeInbox()
+        IntakeNotifier.shared.pendingRoute = .batch(id)
+      case .inbox:
+        drainIntakeInbox()
+        if QuickAction.hasConversationInboxEntries {
+          enqueueInboxIfNeeded(force: true)
+        } else {
+          IntakeNotifier.shared.pendingRoute = .list
+        }
+      case .launch, nil:
+        break
       }
-      drainIntakeInbox()
-      enqueueInboxIfNeeded(force: true)
     }
     .environment(chrome)
   }

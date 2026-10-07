@@ -188,7 +188,8 @@ final class ScreenshotOfferTests: XCTestCase {
     await controller.setEnabled(true)
     try controller.review()
     XCTAssertNil(controller.offer)
-    XCTAssertEqual(CaptureRouter.shared.pending?.kind, .inbox)
+    // The offer is an Inbox batch for the intake coordinator, not a conversation.
+    XCTAssertNil(CaptureRouter.shared.pending)
     let claimed = try store.claimInbox()
     XCTAssertEqual(claimed.count, 1)
     XCTAssertEqual(claimed.first?.source, .detectedScreenshot)
