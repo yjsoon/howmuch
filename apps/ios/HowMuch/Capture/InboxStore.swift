@@ -554,6 +554,14 @@ final class InboxStore: @unchecked Sendable {
     discardReadingLocked(id)
   }
 
+  /// Moves a Reading folder out of the way (kept for inspection) when its
+  /// files can never be read.
+  func quarantineReading(_ id: UUID) {
+    lock.lock()
+    defer { lock.unlock() }
+    quarantineLocked(readingDirectory.appendingPathComponent(id.uuidString, isDirectory: true))
+  }
+
   func discardReading(ids: [UUID]) {
     lock.lock()
     defer { lock.unlock() }

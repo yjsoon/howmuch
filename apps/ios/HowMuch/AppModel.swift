@@ -4615,10 +4615,10 @@ extension AppModel {
   /// changes applied. Never the cached copy when a server is in play, because
   /// an edit is sent as a whole row and stale data would overwrite newer changes.
   func intakeLiveTransaction(id: String) async -> IntakeLiveRow {
-    guard settings.isAuthenticated, !settings.isLocal else {
-      // On-device data is the only copy there is.
-      let local = transactions.first { $0.id == id } ?? unapprovedTransactions.first { $0.id == id }
-      return local.map(IntakeLiveRow.found) ?? .gone
+    // On-device mode answers from the engine, which is the authoritative read;
+    // signed out there is nothing to ask, and the cached page is not a source.
+    guard settings.isAuthenticated else {
+      return .unavailable
     }
     do {
       let row = try await apiClient.fetchTransaction(planID: settings.planID, transactionID: id)

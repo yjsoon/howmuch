@@ -42,6 +42,9 @@ final class IntakeCoordinator {
   static let differentBudgetMessage = "From a different budget"
   static let statementMessage = "Statements come in a later version."
   static let addAccountMessage = "Add an account to continue"
+  static let missingFilesMessage = "Some shared files are missing. Share it again."
+  /// How long a share with missing files is retried before it is given up on.
+  private static let missingFilesGrace: TimeInterval = 3600
   /// "Likely" is 0.75 up to 0.9; lines read by the fallback never reach "Sure".
   static let fallbackConfidenceCap = 0.85
 
@@ -181,11 +184,49 @@ final class IntakeCoordinator {
           connectionFingerprint: planID.isEmpty ? nil : model.settings.connectionFingerprint
         )
         inbox.discardReading(item.id)
+      } catch IntakeJobStoreError.missingSource {
+        unadoptable.insert(item.id)
+        giveUpOnMissingFiles(
+          item,
+          planID: planID.isEmpty ? nil : planID,
+          connectionFingerprint: planID.isEmpty ? nil : model.settings.connectionFingerprint
+        )
       } catch {
         unadoptable.insert(item.id)
         Self.logger.error("Couldn't adopt share \(item.id.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)")
       }
     }
+  }
+
+  /// A share whose files are gone is not retried for ever. A leftover Reading
+  /// folder of a job that is already past reading is just removed. Otherwise,
+  /// after a grace period, the folder is quarantined and the batch is shown as failed.
+  private func giveUpOnMissingFiles(_ item: InboxItem, planID: String?, connectionFingerprint: String?) {
+    let existing = store.load(item.id)
+    if let existing, existing.state != .reading, existing.state != .queued {
+      inbox.discardReading(item.id)
+      return
+    }
+    guard Date().timeIntervalSince(item.createdAt) > Self.missingFilesGrace else {
+      return
+    }
+    inbox.quarantineReading(item.id)
+    var job = existing ?? IntakeJob(
+      id: item.id,
+      createdAt: item.createdAt,
+      origin: IntakeOrigin(source: item.source),
+      sourceFiles: item.sources,
+      accountID: item.accountID,
+      decideAccount: item.decideAccount,
+      hint: item.hint,
+      note: item.note,
+      contentHash: item.contentHash,
+      planID: planID,
+      connectionFingerprint: connectionFingerprint
+    )
+    job.state = .failed
+    job.failureMessage = Self.missingFilesMessage
+    save(job)
   }
 
   private func processPending(model: AppModel) async {
@@ -671,6 +712,12 @@ final class IntakeCoordinator {
   func retry(_ id: UUID, model: AppModel) {
     guard var job = self.job(id), job.state == .failed,
           !Self.isFromAnotherBudget(job, model: model) else {
+      return
+    }
+    // The files are gone: reading again cannot help, so it stays failed.
+    guard !job.sourceFiles.contains(where: {
+      !FileManager.default.fileExists(atPath: store.sourceURL($0, jobID: id).path)
+    }) else {
       return
     }
     job.state = .reading
