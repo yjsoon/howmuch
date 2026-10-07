@@ -959,7 +959,7 @@ struct RewardExposureAnimator: View {
       .onAppear {
         let last = memory.shown[key]
         let start = last.map { $0.target == exposure.target ? $0.pose : exposure.pose } ?? exposure.journeyStart
-        faceID = exposure.target
+        faceID = "\(exposure.target)|\(exposure.light)"
         shown = reduceMotion ? exposure.pose : start
         memory.shown[key] = (exposure.target, exposure.pose)
         guard !reduceMotion, start != exposure.pose else { return }
@@ -967,9 +967,10 @@ struct RewardExposureAnimator: View {
       }
       .onChange(of: exposure) { old, new in
         memory.shown[key] = (new.target, new.pose)
-        if new.target != old.target, new.pose.falls(from: old.pose) || new.light != old.light {
+        // A changed light always swaps (failed, calm and journey can share a target); a changed target only where it would fall.
+        if new.light != old.light || (new.target != old.target && new.pose.falls(from: old.pose)) {
           // Never glide backwards or sink the sun: swap the face and crossfade.
-          withAnimation(reduceMotion ? nil : Theme.Motion.standard) { faceID = new.target; shown = new.pose }
+          withAnimation(reduceMotion ? nil : Theme.Motion.standard) { faceID = "\(new.target)|\(new.light)"; shown = new.pose }
         } else {
           withAnimation(reduceMotion ? nil : Theme.Motion.chart) { shown = new.pose }
         }

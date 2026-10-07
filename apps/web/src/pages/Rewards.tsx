@@ -2,13 +2,17 @@ import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { api, useApi } from "../api/client";
 import type { CreditCard, RewardsReport } from "../api/types";
+import { ExposureFace } from "../components/ExposureFace";
 import { FlagTag } from "../components/FlagTag";
 import { isFlagColour } from "../lib/flags";
 import { FilterRail } from "../components/FilterRail";
 import { MultiSelect } from "../components/MultiSelect";
 import { formatDate, formatDateRange } from "../lib/dates";
 import { formatAmount } from "../lib/money";
+import { exposure, stillExposure } from "../lib/reward-exposure";
+import { boardSummary, projectRow, rowText, type RewardRowProjection, type RowText, type Tone } from "../lib/reward-row-projection";
 import { useDismiss } from "../lib/use-dismiss";
+import { useIsPhone } from "../lib/use-is-phone";
 import { withViewTransition } from "../lib/view-transition";
 import { useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
@@ -19,7 +23,9 @@ const GROUPS = ["flag", "payee", "category", "memo"] as const;
 const GROUP_LABEL: Record<(typeof GROUPS)[number], string> = { flag: "Flag", payee: "Payee", category: "Category", memo: "Memo" };
 
 type Row = RewardsReport["cards"][number];
-type Tone = "needs" | "earning" | "complete" | "failed" | "neutral";
+
+/** Range-attributed rows are labelled `from:asOf` (card-period rows carry the period's own label). */
+const RANGE_PERIOD = /^\d{4}-\d{2}-\d{2}:\d{4}-\d{2}-\d{2}$/;
 
 function dollars(value: number): string {
   return formatAmount(Math.round(value * 1000));
@@ -122,6 +128,9 @@ function RewardsBoard({ planId }: { planId: string }) {
   const hiddenCount = storedCards.filter((row) => isHidden(row.card.id)).length;
   const featuredCount = storedCards.filter((row) => row.card.featured).length;
   const range = Boolean(filters.from);
+  // One projection per card, for the whole report: Featured and hidden choices never change the summary.
+  const projections = new Map(storedCards.map((row) => [row.card.id, projectRow(row, shown?.as_of, range, today)]));
+  const summary = shown ? boardSummary(shown, [...projections.values()]) : null;
   const scopeLabel = filters.accountIds.length === 0 ? "All accounts"
     : filters.accountIds.length === 1 ? (accounts.find((account) => account.id === filters.accountIds[0])?.name ?? "1 account")
     : `${filters.accountIds.length} accounts`;
@@ -207,7 +216,7 @@ function RewardsBoard({ planId }: { planId: string }) {
           {storedCards.length > 0 && (
             <p className="rw-hero-status">Showing {visibleCards.length} of {storedCards.length} cards · totals include hidden and non-featured cards</p>
           )}
-          {/* R2: replace with RewardsBoardSummary, e.g. "2 below minimum · 1 capped" (data-tone spans) */}
+          {summary && summary.statusCounts.length > 0 && <p className="rw-hero-summary">{summary.statusCounts.join(" · ")}</p>}
         </div>
         <div className="rw-hero-figures">
           <Figure primary label="Value earned" value={dollars(shown?.totals.reward_dollars ?? 0)} />
@@ -353,6 +362,8 @@ function RewardsBoard({ planId }: { planId: string }) {
                     <RewardCard
                       key={row.card.id}
                       row={row}
+                      projection={projections.get(row.card.id)!}
+                      memoryKey={`${planId}|${row.card.id}`}
                       index={index}
                       search={location.search}
                       asOf={shown?.as_of}
@@ -477,33 +488,6 @@ function groupSubtotal(rows: readonly Row[]): string {
   return miles > 0 ? `${formatReward(miles, "miles")} · ${dollars(value)}` : dollars(value);
 }
 
-// R1 tone. R2 replaces cardTone and cardFill with the ported RewardRowProjection.
-function cardTone(row: Row): Tone {
-  const calc = row.calculation;
-  const min = calc.minimum_spend ?? 0;
-  const max = calc.maximum_spend ?? 0;
-  if (calc.maximum_spend_exceeded) return "complete";
-  if (calc.qualification_status === "failed") return "failed";
-  if (min > 0 && !calc.minimum_spend_met) return "needs";
-  if (min > 0 || max > 0) return "earning";
-  return "neutral";
-}
-
-/** Which meter leads the slip: the minimum until it is met, then the bonus cap. R2: use projection.basisKind. */
-function capIsPrimary(calc: Row["calculation"]): boolean {
-  const min = calc.minimum_spend;
-  return !(min != null && min > 0 && !calc.minimum_spend_met) && (calc.maximum_spend ?? 0) > 0;
-}
-
-/** The primary meter's value, 0 to 1: how far the sun has risen on the face. */
-function cardFill(row: Row): number {
-  const calc = row.calculation;
-  const max = calc.maximum_spend ?? 0;
-  const value = capIsPrimary(calc) ? calc.counted_spend / max
-    : (calc.minimum_spend ?? 0) > 0 ? (calc.minimum_spend_progress ?? 0) / 100 : 0;
-  return clampUnit(value);
-}
-
 function clampUnit(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
 }
@@ -519,6 +503,9 @@ function tierLabel(tiers: Row["card"]["spendingTiers"], id: string, type: "cashb
 
 type RewardCardProps = {
   row: Row;
+  projection: RewardRowProjection;
+  /** Plan and card: the session memory that keeps a card's rise from replaying. */
+  memoryKey: string;
   index: number;
   search: string;
   asOf?: string;
@@ -545,11 +532,13 @@ function RewardCard(p: RewardCardProps) {
   // View-transition names must be idents; ids can start with a digit. Used only while html[data-vt="board"].
   const vt = `rw-${row.card.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
   const until = !p.permanentlyHidden && (p.hiddenUntil ?? "") > p.today ? p.hiddenUntil : undefined;
+  const picture = exposure(p.projection);
   return (
-    <article className="rw-card" data-type={row.card.type} data-tone={cardTone(row)} data-selected={selected || undefined}
+    <article className="rw-card" data-type={row.card.type} data-tone={p.projection.tone} data-stage={picture?.stage ?? "range"}
+      data-mono={picture?.stage === "failed" || undefined} data-selected={selected || undefined}
       data-hidden={p.hidden || undefined} data-just-updated={p.justUpdated || undefined}
-      style={{ "--rw-p": cardFill(row), "--i": Math.min(index, 12), "--vt-name": vt } as CSSProperties}>
-      <RewardTile row={row} search={p.search} asOf={p.asOf} hiddenUntil={until} />
+      style={{ "--rw-h": picture?.pose.h ?? 1, "--rw-v": picture?.pose.v ?? 0, "--i": Math.min(index, 12), "--vt-name": vt } as CSSProperties}>
+      <RewardTile row={row} search={p.search} asOf={p.asOf} hiddenUntil={until} projection={p.projection} index={index} memoryKey={p.memoryKey} />
       {selecting
         ? <label className="rw-card-select">
             <input type="checkbox" disabled={p.busy} checked={selected} onChange={(event) => p.onSelect(event.target.checked)} />
@@ -678,103 +667,156 @@ function ExposureMeter({ primary, tone, label, figure, value, ariaLabel }: {
   );
 }
 
+/** The headline and the basis line: under the face on desktop, on the spend ridge on a phone. */
+function Statement({ text }: { text: RowText }) {
+  return (
+    <>
+      <p className="rw-headline">
+        {text.amount != null && <b className="rw-amount">{text.amount}</b>}
+        <span className="rw-action">{text.actionLabel}</span>
+        {text.deadline && <span className="rw-deadline" data-urgent={text.isUrgent || undefined}>{text.deadline}</span>}
+      </p>
+      <p className="rw-basis">{text.basisLine}</p>
+    </>
+  );
+}
+
+/** At most two exceptions, then "+N more" (RewardRowText already folds them). */
+function Exceptions({ lines }: { lines: readonly string[] }) {
+  if (!lines.length) return null;
+  return <ul className="rw-exceptions">{lines.map((line) => <li key={line}>{line}</li>)}</ul>;
+}
+
+function FlagList({ calc }: { calc: Row["calculation"] }) {
+  if (!calc.flags.length) return null;
+  return (
+    <ul className="rw-flags">
+      {calc.flags.map((flag) => {
+        const cap = flag.maximumSpend ?? 0;
+        const counted = flag.countedSpend ?? flag.totalSpend;
+        const use = cap > 0 ? clampUnit(counted / cap) : 0;
+        return (
+          <li key={flag.subcategoryId} className="rw-flag" data-warn={use >= 0.9 || undefined} style={{ "--use": use } as CSSProperties}>
+            {isFlagColour(flag.flagColor)
+              ? <FlagTag colour={flag.flagColor} name={flag.name} />
+              : <span>{flag.name}</span>}
+            <span>{flag.rewardRate != null ? `${flag.rewardRate}${calc.reward_type === "cashback" ? "%" : " miles/unit"}` : ""}</span>
+            <span className="num">{formatReward(flag.rewardEarned, calc.reward_type)}</span>
+            {cap > 0 && <span className="rw-flag-cap">{dollars(counted)} / {dollars(cap)} cap</span>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 // Signature stays compatible with lib/rewards-tile.test.ts: ({ row, search, asOf }) still works.
-export function RewardTile({ row, search, asOf, hiddenUntil }: { row: Row; search: string; asOf?: string; hiddenUntil?: string }) {
+export function RewardTile({ row, search, asOf, hiddenUntil, projection, range, index = 0, memoryKey }: {
+  row: Row;
+  search: string;
+  asOf?: string;
+  hiddenUntil?: string;
+  /** The board builds one projection per card; a tile used alone builds its own. */
+  projection?: RewardRowProjection;
+  /** Historical range mode. Defaults to what the row says: range rows are labelled `from:asOf`. */
+  range?: boolean;
+  index?: number;
+  memoryKey?: string;
+}) {
   const calc = row.calculation;
   const id = useId();
+  const phone = useIsPhone();
+  const p = projection ?? projectRow(row, asOf, range ?? RANGE_PERIOD.test(calc.period));
+  const text = rowText(p);
+  // A range row draws no picture: a still sky and the brand ridges, with no sun.
+  const picture = exposure(p) ?? stillExposure(p.rewardType === "miles");
   // Historical amounts are range-attributed, while qualification belongs to the
   // cutoff period. An earlier promotion may sort after that calendar period.
   const fullPeriod = calc.periods?.filter((period) => asOf && period.start <= asOf && period.end >= asOf).at(-1)?.calculation;
   const min = calc.minimum_spend;
   const max = calc.maximum_spend ?? 0;
-  const capPrimary = capIsPrimary(calc);
+  // The minimum leads until it is met, then the bonus cap.
+  const minimumLeads = p.action.kind === "minimum" || p.action.kind === "monthlyMinimum";
+  const capDone = p.action.kind === "capReached" && p.action.terminal;
+  const caps = [row.card.issuer, row.card.type === "miles" ? "Miles" : "Cashback", !phone && row.card.featured ? "Featured" : null]
+    .filter(Boolean).join(" · ");
+  const badge = hiddenUntil && (
+    <span className={phone ? "rw-badge rw-badge-pin" : "rw-badge"} title={`Hidden until ${hiddenUntil} (Singapore)`}>
+      Back {formatDate(hiddenUntil)}<span className="sr-only"> Hidden until {hiddenUntil} (Singapore)</span>
+    </span>
+  );
   return (
     <>
-      <Link to={{ pathname: `/rewards/${row.card.id}`, search }} className="rw-tile" aria-labelledby={`${id}-name`}>
-        <div className="rw-face">
-          <span className="rw-face-halo" aria-hidden="true" />
-          <span className="rw-face-sun" aria-hidden="true" />
-          <svg className="rw-face-ridge" viewBox="0 400 1024 624" preserveAspectRatio="none" aria-hidden="true">
-            <path className="rw-ridge-back" d="M0 664 C110 646 196 606 296 612 C396 618 452 546 556 524 C656 502 724 470 822 444 C898 424 962 434 1024 402 L1024 1024 L0 1024 Z" />
-            <path className="rw-ridge-front" d="M0 820 C96 806 176 782 258 792 C336 801 372 738 462 722 C534 709 574 748 648 728 C758 698 818 634 898 612 C950 598 988 602 1024 584 L1024 1024 L0 1024 Z" />
-            <path className="rw-ridge-crest" d="M0 820 C96 806 176 782 258 792 C336 801 372 738 462 722 C534 709 574 748 648 728 C758 698 818 634 898 612 C950 598 988 602 1024 584" />
-          </svg>
-          <p className="rw-face-top">
-            <span>{[row.card.issuer, row.card.type === "miles" ? "Miles" : "Cashback"].filter(Boolean).join(" · ")}</span>
-            {row.card.featured && <span className="rw-badge" title="Featured">✦<span className="sr-only"> Featured</span></span>}
-            {hiddenUntil && (
-              <span className="rw-badge" title={`Hidden until ${hiddenUntil} (Singapore)`}>
-                Back {formatDate(hiddenUntil)}<span className="sr-only"> Hidden until {hiddenUntil} (Singapore)</span>
-              </span>
-            )}
-          </p>
-          <h3 className="rw-face-name" id={`${id}-name`}>{row.card.name}</h3>
-          <p className="rw-face-foot">
-            <span className="rw-face-account">{row.account_name}</span>
-            <span className="rw-face-earned">{formatReward(calc.reward_earned, calc.reward_type)}</span>
-          </p>
-        </div>
-        <div className="rw-slip">
-          {/* R2: <p className="rw-headline" data-urgent>…amount… actionLabel <span className="rw-deadline">…</span></p> */}
-          {min != null && min > 0 && (
-            <ExposureMeter
-              primary={!capPrimary}
-              tone={calc.minimum_spend_met ? "earning" : "needs"}
-              label={fullPeriod ? (calc.minimum_spend_met ? "Full-period minimum met" : "Full-period minimum") : (calc.minimum_spend_met ? "Minimum met" : "Minimum spend")}
-              figure={`${dollars(fullPeriod?.total_spend ?? calc.total_spend)} / ${dollars(min)}`}
-              value={(calc.minimum_spend_progress ?? 0) / 100}
-              ariaLabel="Minimum spend progress"
-            />
+      <Link to={{ pathname: `/rewards/${row.card.id}`, search }} className="rw-tile" aria-labelledby={`${id}-name`} aria-describedby={`${id}-value`}>
+        <ExposureFace exposure={picture} variant={phone ? "strip" : "face"} index={index} memoryKey={memoryKey}>
+          {phone ? (
+            <>
+              <h3 className="rw-face-name" id={`${id}-name`} data-rw="name">{row.card.name}</h3>
+              {badge}
+              <div className="rw-strip-foot" data-rw="foot"><Statement text={text} /></div>
+            </>
+          ) : (
+            <>
+              <p className="rw-face-top"><span>{caps}</span>{badge}</p>
+              <h3 className="rw-face-name" id={`${id}-name`}>{row.card.name}</h3>
+              <p className="rw-face-foot">
+                <span className="rw-face-account">{row.account_name}</span>
+                <span className="rw-face-earned">{formatReward(calc.reward_earned, calc.reward_type)}</span>
+              </p>
+            </>
           )}
-          {max > 0 && (
-            <ExposureMeter
-              primary={capPrimary}
-              tone={calc.maximum_spend_exceeded ? "complete" : "earning"}
-              label={calc.maximum_spend_exceeded ? "Cap reached" : "Bonus cap"}
-              figure={`${dollars(Math.min(calc.counted_spend, max))} / ${dollars(max)}`}
-              value={calc.counted_spend / max}
-              ariaLabel="Bonus cap used"
-            />
+        </ExposureFace>
+        {/* What a screen reader says in place of the picture, which is decorative: the same words as iOS's VoiceOver value. */}
+        <span id={`${id}-value`} className="sr-only">{text.accessibilityValue}</span>
+        {phone
+          ? text.exceptionLines.length > 0 && <div className="rw-slip"><Exceptions lines={text.exceptionLines} /></div>
+          : (
+            <div className="rw-slip">
+              <Statement text={text} />
+              <Exceptions lines={text.exceptionLines} />
+              <FlagList calc={calc} />
+            </div>
           )}
-          {calc.has_next_spending_tier && calc.next_spending_tier_threshold != null && <p className="rw-line">Next tier at {dollars(calc.next_spending_tier_threshold)}</p>}
-          {calc.should_stop_using && <p className="rw-line rw-line-strong">Consider another card</p>}
-          <dl className="rw-stats">
-            <div>
-              <dt>Spend</dt>
-              <dd>{dollars(calc.total_spend)}</dd>
-            </div>
-            <div>
-              <dt>Eligible</dt>
-              <dd>{dollars(calc.eligible_spend)}</dd>
-            </div>
-            <div>
-              <dt>Value</dt>
-              <dd>{dollars(calc.reward_earned_dollars)}</dd>
-            </div>
-          </dl>
-          {calc.flags.length > 0 && (
-            <ul className="rw-flags">
-              {calc.flags.map((flag) => {
-                const cap = flag.maximumSpend ?? 0;
-                const counted = flag.countedSpend ?? flag.totalSpend;
-                const use = cap > 0 ? clampUnit(counted / cap) : 0;
-                return (
-                  <li key={flag.subcategoryId} className="rw-flag" data-warn={use >= 0.9 || undefined} style={{ "--use": use } as CSSProperties}>
-                    {isFlagColour(flag.flagColor)
-                      ? <FlagTag colour={flag.flagColor} name={flag.name} />
-                      : <span>{flag.name}</span>}
-                    <span>{flag.rewardRate != null ? `${flag.rewardRate}${calc.reward_type === "cashback" ? "%" : " miles/unit"}` : ""}</span>
-                    <span className="num">{formatReward(flag.rewardEarned, calc.reward_type)}</span>
-                    {cap > 0 && <span className="rw-flag-cap">{dollars(counted)} / {dollars(cap)} cap</span>}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
       </Link>
       <details className="rw-more">
-        <summary>Periods and tiers</summary>
+        <summary>Targets, periods and tiers</summary>
+        {min != null && min > 0 && (
+          <ExposureMeter
+            primary={minimumLeads || max <= 0}
+            tone={calc.minimum_spend_met ? "earning" : "needs"}
+            label={fullPeriod ? (calc.minimum_spend_met ? "Full-period minimum met" : "Full-period minimum") : (calc.minimum_spend_met ? "Minimum met" : "Minimum spend")}
+            figure={`${dollars(fullPeriod?.total_spend ?? calc.total_spend)} / ${dollars(min)}`}
+            value={(calc.minimum_spend_progress ?? 0) / 100}
+            ariaLabel="Minimum spend progress"
+          />
+        )}
+        {max > 0 && (
+          <ExposureMeter
+            primary={!minimumLeads}
+            tone={capDone ? "complete" : "earning"}
+            label={calc.maximum_spend_exceeded ? "Cap reached" : "Bonus cap"}
+            figure={`${dollars(Math.min(calc.counted_spend, max))} / ${dollars(max)}`}
+            value={calc.counted_spend / max}
+            ariaLabel="Bonus cap used"
+          />
+        )}
+        {calc.has_next_spending_tier && calc.next_spending_tier_threshold != null && <p className="rw-line">Next tier at {dollars(calc.next_spending_tier_threshold)}</p>}
+        {calc.should_stop_using && <p className="rw-line rw-line-strong">Consider another card</p>}
+        <dl className="rw-stats">
+          <div>
+            <dt>Spend</dt>
+            <dd>{dollars(calc.total_spend)}</dd>
+          </div>
+          <div>
+            <dt>Eligible</dt>
+            <dd>{dollars(calc.eligible_spend)}</dd>
+          </div>
+          <div>
+            <dt>Value</dt>
+            <dd>{dollars(calc.reward_earned_dollars)}</dd>
+          </div>
+        </dl>
+        {phone && <FlagList calc={calc} />}
         <p>Period: {calc.periods?.map((period) => `${formatDate(period.start)} – ${formatDate(period.end)}`).join("; ") || calc.period}</p>
         {calc.qualification_status && <p>Monthly qualification: {calc.qualification_status.replaceAll("_", " ")}</p>}
         {calc.monthly_qualifications?.length ? (

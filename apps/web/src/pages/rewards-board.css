@@ -1,13 +1,17 @@
 /*
  * Rewards board ("Exposure"). Imported by pages/Rewards.tsx.
  *
- * Each card is a frame of film, and spending exposes it: the sun rises over
- * the ridge as --rw-p (progress toward the current target) goes from 0 to 1.
- * Below the minimum the glow is weak; at a terminal cap the sun sets behind the
- * ridge and the sky dims (done, not failed); a failed qualification desaturates.
+ * Each card is a small photograph, the Sun Arc (docs/frontend/rewards-exposure-card.md).
+ * The way to the minimum is across: the light spreads left to right to a faint
+ * hairline marker and the sun rides the horizon beside it (--rw-h). Past it the sun
+ * climbs, from just above the ground to off the top edge at the cap (--rw-v). A
+ * tier holds it at halfway. Capped is the brightest state (done, not failed); a
+ * failed qualification is overcast and monochrome.
  *
  * No colour literals here: the page inherits the app's tokens and the card
- * faces use the --face-*, --ridge-* and --sun-* tokens in styles/tokens.css.
+ * faces use the --face-*, --ridge-* and --sun-* tokens in styles/tokens.css, which
+ * follow the mode (daytime faces in light, night and dusk in dark). There is no
+ * data-mode selector in this sheet.
  * This sheet loads after app.css and motion.css, so it wins specificity ties.
  */
 
@@ -63,10 +67,15 @@
 }
 
 .rw-hero-scope,
-.rw-hero-status {
+.rw-hero-status,
+.rw-hero-summary {
   margin: 6px 0 0;
   font-size: 13px;
   color: var(--ink-soft);
+}
+
+.rw-hero-summary {
+  font-weight: 500;
 }
 
 .rw-hero-figures {
@@ -454,28 +463,33 @@
 
 /* ---------- card ---------- */
 
-/* Tile, then the slip's "Periods and tiers" footer. Cards in a row stretch to one
-   height and the slip takes the slack, so the row's bottoms line up. */
+/* Tile, then the slip's "Targets, periods and tiers" footer. Cards in a row stretch to one
+   height and the slip takes the slack, so the row's bottoms line up. The face is the Sun Arc:
+   data-stage (gate, climb, rest, capped, calm, failed, range) and data-type pick the look, and
+   the tokens carry the mode, so there is no data-mode selector in this sheet. */
 .rw-card {
   position: relative;
   display: grid;
   grid-template-rows: 1fr auto;
   min-width: 0;
-  transition: --rw-p var(--dur-fill) var(--ease-out);
-  animation: rw-arrive var(--dur-arrive) var(--ease-out) backwards, rw-expose var(--dur-fill) var(--ease-out) backwards;
+  /* The veil's multiply colour and the title ink follow the reward type. */
+  --rw-veil-multiply: var(--face-veil-cashback);
+  --rw-ink: var(--face-cashback-ink);
+  --rw-marker: var(--face-marker-cashback);
+  animation: rw-arrive var(--dur-arrive) var(--ease-out) backwards;
   animation-delay: calc(var(--i, 0) * var(--stagger));
+}
+
+.rw-card[data-type="miles"] {
+  --rw-veil-multiply: var(--face-veil-miles);
+  --rw-ink: var(--face-miles-ink);
+  --rw-marker: var(--face-marker-miles);
 }
 
 @keyframes rw-arrive {
   from {
     opacity: 0;
     translate: 0 8px;
-  }
-}
-
-@keyframes rw-expose {
-  from {
-    --rw-p: 0;
   }
 }
 
@@ -499,78 +513,65 @@
   overflow: hidden;
   /* clip, where supported, keeps the 3:2 frame but lets very long names grow it rather than be cut. */
   overflow: clip;
-  container-type: inline-size;
   aspect-ratio: var(--face-aspect);
   display: grid;
   grid-template-rows: auto 1fr auto;
   padding: 14px 16px 12px;
   border-radius: 12px;
-  background: var(--face-day);
-  color: var(--face-day-ink);
+  --rw-sky: var(--face-cashback-sky);
+  background: var(--rw-sky);
+  color: var(--rw-ink);
   box-shadow: var(--face-shadow);
   transition: translate var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 
 .rw-card[data-type="miles"] .rw-face {
-  background: var(--face-night);
-  color: var(--face-night-ink);
+  --rw-sky: var(--face-miles-sky);
 }
 
-/* Pre-dawn warmth along the ridge line, so even an unexposed frame has a lit horizon. */
-.rw-face::before {
+/* A failed card is overcast: the flat grey sky over the type's, which dark mode leaves out (none). */
+.rw-card[data-stage="failed"] .rw-face {
+  --rw-sky: var(--face-overcast), var(--face-cashback-sky);
+}
+
+.rw-card[data-stage="failed"][data-type="miles"] .rw-face {
+  --rw-sky: var(--face-overcast), var(--face-miles-sky);
+}
+
+/* Monochrome: the sky and the ridges. The filter sits on the sky (a pseudo-element carrying it) and the
+   scene, not on the face, so the headline keeps FailedInk's red where it is a child of the face (the phone
+   strip). The sun and halo are not drawn. */
+.rw-card[data-mono] .rw-face {
+  background: none;
+}
+
+.rw-card[data-mono] .rw-face::before {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: -4;
-  pointer-events: none;
-  background: linear-gradient(to top, var(--face-horizon) 45%, transparent 80%);
+  background: var(--rw-sky);
+  filter: saturate(0.15);
 }
 
-/* Stepped rings whose radius and strength grow with --rw-p, centred on the sun.
-   Each step is posterised but its edge is soft (a gap the browser blends), the
-   bright steps hug the sun and the outer ones fade fast, and the radius is capped
-   so the light never floods the frame. */
-.rw-face-halo {
-  --r: calc((18 + var(--rw-p) * 20) * 1cqi);
-  --y: calc(49% - var(--rw-p) * 27%);
+.rw-card[data-mono] .rw-scene {
+  filter: saturate(0.15);
+}
+
+/* The scene is one SVG behind the text. It is positioned but has no z-index, so it is not a stacking
+   context of its own: its blend modes (the veil, the pour, the rings) see the face's sky. Text is
+   positioned too and comes later, so it paints above. */
+.rw-scene {
   position: absolute;
   inset: 0;
-  z-index: -3;
-  pointer-events: none;
-  background: radial-gradient(circle at 76% var(--y), var(--sun-core) 0 calc(var(--r) * 0.15),
-    var(--face-ring-1) calc(var(--r) * 0.19) calc(var(--r) * 0.27), var(--face-ring-2) calc(var(--r) * 0.33) calc(var(--r) * 0.46),
-    var(--face-ring-3) calc(var(--r) * 0.52) calc(var(--r) * 0.68), var(--face-ring-4) calc(var(--r) * 0.74) calc(var(--r) * 0.92),
-    transparent var(--r));
-  opacity: calc(0.45 + var(--rw-p) * 0.55);
-}
-
-/* Light adds on the night sky instead of averaging to olive with it. */
-.rw-card[data-type="miles"] .rw-face-halo {
-  mix-blend-mode: screen;
-}
-
-/* The sun rises from behind the back ridge (its crest is about 47% down at this x).
-   At zero progress a sliver of it still breaks the crest. */
-.rw-face-sun {
-  position: absolute;
-  z-index: -2;
-  left: 76%;
-  top: calc(49% - var(--rw-p) * 27%);
-  translate: -50% -50%;
-  width: 9cqi;
-  aspect-ratio: 1;
-  border-radius: 50%;
-  background: var(--sun-disc);
-  box-shadow: 0 0 0 0.3cqi color-mix(in srgb, var(--sun-rim) 60%, transparent);
-}
-
-.rw-face-ridge {
-  position: absolute;
-  inset: auto 0 0;
-  z-index: -1;
   width: 100%;
-  height: 58%;
+  height: 100%;
+  display: block;
+  overflow: hidden;
   pointer-events: none;
+}
+
+.rw-face > :not(.rw-scene) {
+  position: relative;
 }
 
 .rw-ridge-back {
@@ -581,12 +582,97 @@
   fill: var(--ridge-front);
 }
 
-.rw-ridge-crest {
+.rw-crest-target,
+.rw-crest {
   fill: none;
   stroke: var(--ridge-crest);
+}
+
+.rw-crest-target {
+  stroke-width: 1px;
+  stroke-opacity: var(--face-crest-target);
+}
+
+.rw-crest {
+  stroke-width: 1.5px;
+  stroke-opacity: var(--face-crest-spend);
+}
+
+/* Merged: one crest, brightening to full with the climb (--crest-k, written by the painter). */
+.rw-scene[data-merged] .rw-crest-target {
+  display: none;
+}
+
+.rw-scene[data-merged] .rw-crest {
+  stroke-opacity: calc(var(--face-crest-merged) + (1 - var(--face-crest-merged)) * var(--crest-k, 0));
+}
+
+.rw-ring-1 { fill: var(--face-ring-1); }
+.rw-ring-2 { fill: var(--face-ring-2); }
+.rw-ring-3 { fill: var(--face-ring-3); }
+.rw-ring-4 { fill: var(--face-ring-4); }
+
+.rw-core {
+  fill: var(--sun-core);
+}
+
+/* Light adds: screen on every daytime face and on the night print; the dusk print keeps the normal blend. */
+.rw-halo,
+.rw-pour,
+.rw-bloom {
+  mix-blend-mode: var(--face-cashback-blend);
+}
+
+.rw-card[data-type="miles"] :is(.rw-halo, .rw-pour, .rw-bloom) {
+  mix-blend-mode: screen;
+}
+
+.rw-pour {
+  opacity: calc(var(--pour-k, 0) * var(--face-pour-cashback));
+}
+
+.rw-card[data-type="miles"] .rw-pour {
+  opacity: calc(var(--pour-k, 0) * var(--face-pour-miles));
+}
+
+.rw-bloom {
+  fill: var(--face-bloom);
+}
+
+.rw-sun {
+  stroke: var(--sun-rim);
   stroke-opacity: 0.6;
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
+}
+
+.rw-veil-grey {
+  mix-blend-mode: saturation;
+}
+
+.rw-veil-multiply {
+  mix-blend-mode: multiply;
+}
+
+.rw-mk,
+.rw-mk-edge {
+  stroke: var(--rw-marker);
+  shape-rendering: crispEdges;
+}
+
+.rw-mk[data-ridge] {
+  stroke: var(--face-marker-ridge);
+}
+
+.rw-mk-edge {
+  stroke: var(--face-marker-edge);
+}
+
+.rw-mk-edge[data-ridge] {
+  stroke: var(--face-marker-edge);
+}
+
+/* The amber disc and its core while a minimum is still to be met. */
+.rw-card[data-stage="gate"] {
+  --sun-core: var(--glow-edge);
 }
 
 .rw-face-top {
@@ -640,31 +726,84 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Tones. needs: underexposed, a weaker sun core. */
-.rw-card[data-tone="needs"] {
-  --sun-core: var(--glow-edge);
+/* The phone strip (about 104px): the name on the sky, the headline and basis line on the spend ridge.
+   The scene places the ridges from the measured bottom of the name and top of the foot. */
+.rw-face[data-variant="strip"] {
+  aspect-ratio: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 9px 16px;
 }
 
-/* complete: the sun has set behind the ridge and the sky dims. Done, not failed. */
-.rw-card[data-tone="complete"] .rw-face::after {
+.rw-face[data-variant="strip"] .rw-face-name {
+  align-self: flex-start;
+  margin: 0 0 24px;
+  max-width: 50%;
+}
+
+.rw-face[data-variant="strip"] .rw-badge {
+  margin-left: 6px;
+  font: 600 10px var(--font-ui);
+  vertical-align: 3px;
+}
+
+/* The "Back {date}" badge on a strip, top right, clear of the card's actions. */
+.rw-face[data-variant="strip"] > .rw-badge-pin {
+  position: absolute;
+  top: 12px;
+  right: 46px;
+  background: color-mix(in srgb, var(--face-cashback-ink) 14%, transparent);
+  font: 600 10px var(--font-ui);
+}
+
+.rw-strip-foot {
+  z-index: 1;
+  color: var(--face-foot-ink);
+}
+
+/* Dark mode only (light's token is transparent): a scrim under the foot, so no layout can set light ink on a light sky. */
+.rw-strip-foot::before {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: -6px -16px -9px;
   z-index: -1;
-  background: var(--face-dim);
-  pointer-events: none;
+  background: var(--face-scrim);
 }
 
-.rw-card[data-tone="complete"] .rw-face-sun {
-  top: 82%;
+.rw-headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+  margin: 0;
+  font: 400 13px / 1.4 var(--font-ui);
 }
 
-.rw-card[data-tone="complete"] .rw-face-halo {
-  --y: 82%;
+.rw-amount {
+  font: 600 15px / 1.3 var(--font-figures);
+  font-variant-numeric: tabular-nums;
 }
 
-.rw-card[data-tone="failed"] .rw-face {
-  filter: saturate(0.35);
+.rw-deadline {
+  margin-left: auto;
+  font: 400 12px / 1.4 var(--font-ui);
+  color: var(--face-foot-soft);
+}
+
+.rw-deadline[data-urgent] {
+  font-weight: 600;
+  color: var(--face-urgent-ink);
+}
+
+.rw-basis {
+  margin: 2px 0 0;
+  font: 12px / 1.4 var(--font-figures);
+  font-variant-numeric: tabular-nums;
+  color: var(--face-foot-soft);
+}
+
+.rw-card[data-tone="failed"] .rw-face .rw-action {
+  color: var(--face-failed-ink);
 }
 
 .rw-card[data-hidden] .rw-face {
@@ -692,7 +831,7 @@
 
 .rw-slip {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   align-content: start;
   margin: -10px 8px 0;
   padding: 20px 14px 14px;
@@ -700,6 +839,58 @@
   border: 1px solid var(--rule);
   border-top: 0;
   border-radius: 0 0 10px 10px;
+}
+
+/* On paper the headline takes the app's inks. */
+.rw-slip .rw-headline {
+  color: var(--ink);
+}
+
+.rw-slip .rw-deadline {
+  color: var(--ink-soft);
+}
+
+.rw-slip .rw-deadline[data-urgent] {
+  color: var(--tone-needs);
+}
+
+.rw-slip .rw-basis {
+  color: var(--ink-soft);
+}
+
+.rw-card[data-tone="failed"] .rw-slip .rw-action {
+  color: var(--tone-failed);
+}
+
+/* Exceptions: at most two lines, then "+N more". */
+.rw-exceptions {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rw-exceptions li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font: 500 12px / 1.35 var(--font-ui);
+  color: var(--ink-soft);
+}
+
+.rw-exceptions li::before {
+  content: "";
+  flex: none;
+  width: 0;
+  height: 0;
+  border: 4px solid transparent;
+  border-top: 0;
+  border-bottom: 7px solid var(--tone-needs);
+}
+
+.rw-exceptions li:last-child:not(:only-child):is(:nth-child(3))::before {
+  display: none;
 }
 
 .rw-line {
@@ -870,6 +1061,11 @@
   padding: 4px 0;
 }
 
+/* The meters, tier line and stats now live in the disclosure, not the slip. */
+.rw-more > :is(.rw-meter, .rw-stats, .rw-flags, .rw-line) {
+  margin-top: 10px;
+}
+
 .rw-more p {
   margin: 4px 0;
   overflow-wrap: anywhere;
@@ -888,8 +1084,8 @@
 
 .rw-card-actions {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 6px;
+  right: 6px;
   z-index: 2;
   display: flex;
   gap: 4px;
@@ -1085,10 +1281,6 @@
 /* ---------- phones ---------- */
 
 @media (max-width: 720px) {
-  .rw-page {
-    --face-aspect: 21 / 9;
-  }
-
   .rw-hero {
     grid-template-columns: 1fr;
     padding: 20px 16px 16px;
@@ -1159,7 +1351,8 @@
     gap: 18px;
   }
 
-  .rw-face-name {
+  .rw-face-name,
+  .rw-face[data-variant="strip"] .rw-face-name {
     font-size: 19px;
   }
 
