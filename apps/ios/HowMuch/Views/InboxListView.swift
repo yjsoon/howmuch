@@ -49,9 +49,6 @@ struct InboxListView: View {
         .accessibilityLabel("Inbox options")
       }
     }
-    .navigationDestination(for: IntakeRoute.self) { route in
-      IntakeReviewView(jobID: route.jobID)
-    }
     .binaryConfirm(
       "Discard this batch?",
       presenting: $pendingDiscard,
@@ -72,7 +69,11 @@ struct InboxListView: View {
     if !jobs.isEmpty {
       Section(title) {
         ForEach(jobs) { job in
-          NavigationLink(value: IntakeRoute(jobID: job.id)) {
+          // A view destination, not a value: this list is itself pushed by the
+          // Accounts pane, where a value destination isn't visible to the link.
+          NavigationLink {
+            IntakeReviewView(jobID: job.id)
+          } label: {
             IntakeJobRow(job: job, accountName: accountName(for: job))
           }
           .listRowBackground(Theme.card)
