@@ -71,8 +71,12 @@ struct IntakeHashIndex: Sendable {
     guard let data = try? Self.encoder().encode(next) else {
       return
     }
-    try? FileManager.default.createDirectory(
-      at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true
+    let directory = fileURL.deletingLastPathComponent()
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    // Readable after the first unlock, so a background launch can still sync it.
+    try? FileManager.default.setAttributes(
+      [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+      ofItemAtPath: directory.path
     )
     try? data.write(to: fileURL, options: .atomic)
   }

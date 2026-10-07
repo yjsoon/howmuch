@@ -29,6 +29,7 @@ final class IntakeJobStore {
   private let fileManager: FileManager
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
+  private var jobsDirectoryPrepared = false
 
   init(container: URL, fileManager: FileManager = .default) {
     self.fileManager = fileManager
@@ -74,8 +75,9 @@ final class IntakeJobStore {
     jobsDirectory.appendingPathComponent("_quarantine", isDirectory: true)
   }
 
-  /// Newest first. A job folder whose `job.json` is missing or unreadable is
-  /// quarantined, not skipped forever and not deleted.
+  /// Newest first. A job folder whose `job.json` is missing or does not decode
+  /// is quarantined, not skipped forever and not deleted. One that cannot be
+  /// read right now is skipped this time.
   func list() -> [IntakeJob] {
     let urls = (try? fileManager.contentsOfDirectory(
       at: jobsDirectory,
@@ -87,7 +89,17 @@ final class IntakeJobStore {
       guard let id = UUID(uuidString: url.lastPathComponent) else {
         continue
       }
-      if let job = load(id) {
+      let manifest = manifestURL(for: id)
+      guard fileManager.fileExists(atPath: manifest.path) else {
+        quarantine(url)
+        continue
+      }
+      // A read that fails (a locked device, a transient permission error) is not
+      // corruption: leave the folder for the next listing.
+      guard let data = try? Data(contentsOf: manifest) else {
+        continue
+      }
+      if let job = try? decoder.decode(IntakeJob.self, from: data) {
         jobs.append(job)
       } else {
         quarantine(url)
@@ -122,8 +134,23 @@ final class IntakeJobStore {
     }
   }
 
+  /// Background reads run after the first unlock, so the jobs stay readable if
+  /// Data Protection is ever enabled for the app group.
+  private func prepareJobsDirectory() {
+    guard !jobsDirectoryPrepared else {
+      return
+    }
+    try? fileManager.createDirectory(at: jobsDirectory, withIntermediateDirectories: true)
+    try? fileManager.setAttributes(
+      [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+      ofItemAtPath: jobsDirectory.path
+    )
+    jobsDirectoryPrepared = true
+  }
+
   /// Atomic: a reader sees the old file or the new one, never half of it.
   func save(_ job: IntakeJob) throws {
+    prepareJobsDirectory()
     try fileManager.createDirectory(at: directory(for: job.id), withIntermediateDirectories: true)
     let data = try encoder.encode(job)
     try data.write(to: manifestURL(for: job.id), options: .atomic)
@@ -155,6 +182,7 @@ final class IntakeJobStore {
     guard !item.sources.contains(where: isMissing) else {
       throw IntakeJobStoreError.missingSource
     }
+    prepareJobsDirectory()
     try fileManager.createDirectory(at: sources, withIntermediateDirectories: true)
     let job: IntakeJob
     if let existing = load(item.id) {

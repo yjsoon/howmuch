@@ -79,9 +79,15 @@ final class IntakeCoordinator {
     jobs.first { $0.id == id }
   }
 
-  /// Jobs waiting on the owner: Ready to review plus Needs you.
+  /// Jobs waiting on the owner: Ready to review plus Needs you. A batch of only
+  /// Already in rows has nothing to review and is not counted.
   var attentionCount: Int {
-    jobs.count { $0.state == .proposed || $0.state == .needsYou }
+    jobs.count { $0.needsReview }
+  }
+
+  /// The app icon badge: `attentionCount`, or 0 while signed out.
+  var badgeCount: Int {
+    IntakeBackgroundRefresh.shared.model?.settings.isAuthenticated == true ? attentionCount : 0
   }
 
   /// Jobs that are not finished: the Accounts band shows only these.
@@ -114,12 +120,13 @@ final class IntakeCoordinator {
 
   /// A read is under way or waiting: the app should ask iOS for time to finish it.
   var isBusy: Bool {
-    drainTask != nil || jobs.contains { $0.state == .reading || $0.state == .queued }
+    drainTask != nil
+      || jobs.contains { ($0.state == .reading || $0.state == .queued) && !$0.deferredToForeground }
   }
 
   /// Keeps the app icon badge at Ready plus Needs you.
   private func publishAttention() {
-    IntakeNotifier.shared.updateBadge(attentionCount)
+    IntakeNotifier.shared.updateBadge(badgeCount)
   }
 
   // MARK: Draining the inbox
@@ -197,6 +204,7 @@ final class IntakeCoordinator {
     store.pruneQuarantine(olderThan: cutoff)
 
     let planID = model.settings.planID
+    var markedFromAnotherBudget = false
     for index in all.indices {
       var job = all[index]
       var changed = false
@@ -210,6 +218,8 @@ final class IntakeCoordinator {
         job.state = .failed
         job.failureMessage = Self.differentBudgetMessage
         changed = true
+        markedFromAnotherBudget = true
+        IntakeNotifier.shared.clear(job.id)
       }
       if job.applyStartedAt != nil, job.state == .proposed, !approving.contains(job.id) {
         // Interrupted mid-approve. Approving again is safe: creates carry their
@@ -226,15 +236,24 @@ final class IntakeCoordinator {
     }
     jobs = all.filter { $0.state != .discarded }
     publishAttention()
+    if markedFromAnotherBudget {
+      IntakeNotifier.shared.refreshSummary()
+    }
     syncHashIndex()
   }
 
-  /// Rewrites the duplicate-share index for the extension: every job from the
-  /// last 30 days that is still worth warning about. A discarded or failed job
-  /// is not (sharing it again is the point), and neither is one with no hash.
+  /// Rewrites the duplicate-share index for the extension: every share from the
+  /// last 30 days that is still worth warning about. Entries already in the
+  /// index stay until the window ends, so removing a finished job does not end
+  /// the warning early; those of a discarded or failed job go (sharing it again
+  /// is the point), and so does a job with no hash.
   private func syncHashIndex() {
-    var contents = IntakeHashIndex.Contents()
-    for job in store.list() where job.state != .discarded && job.state != .failed {
+    let all = store.list()
+    let withdrawn = Set(all.filter { $0.state == .discarded || $0.state == .failed }.map(\.id))
+    var contents = hashIndex.read()
+    contents.content = contents.content.filter { !withdrawn.contains($0.value.jobID) }
+    contents.sources = contents.sources.filter { !withdrawn.contains($0.value.jobID) }
+    for job in all where job.state != .discarded && job.state != .failed {
       let entry = IntakeHashEntry(jobID: job.id, sharedAt: job.createdAt)
       if let hash = job.contentHash, !hash.isEmpty,
          contents.content[hash].map({ $0.sharedAt < job.createdAt }) ?? true {
@@ -328,7 +347,10 @@ final class IntakeCoordinator {
       }
     }
     let pending = jobs
-      .filter { ($0.state == .reading || $0.state == .queued) && !unadoptable.contains($0.id) }
+      .filter {
+        ($0.state == .reading || $0.state == .queued) && !unadoptable.contains($0.id)
+          && !($0.deferredToForeground && Self.isReadingInBackground)
+      }
       .sorted { $0.createdAt < $1.createdAt }
     for job in pending {
       if Task.isCancelled || drainEpoch != epoch {
@@ -437,6 +459,9 @@ final class IntakeCoordinator {
     reading.state = .reading
     reading.waitingForAccounts = false
     reading.failureMessage = nil
+    if !Self.isReadingInBackground {
+      reading.deferredToForeground = false
+    }
     save(reading)
 
     let accounts = model.openAccounts
@@ -510,6 +535,12 @@ final class IntakeCoordinator {
     }
 
     guard !extracted.isEmpty else {
+      if !readAnyText, Self.isReadingInBackground {
+        // No text may only mean OCR failed quietly (a scanned PDF page). Let a
+        // foreground read decide before the batch is called failed.
+        leaveForForeground(id)
+        return
+      }
       guard var current = readable(id) else {
         return
       }
@@ -668,6 +699,7 @@ final class IntakeCoordinator {
       return
     }
     job.state = .queued
+    job.deferredToForeground = true
     save(job)
   }
 
@@ -772,6 +804,11 @@ final class IntakeCoordinator {
 
     // The job may have been discarded or changed while the live rows were read.
     guard var job = self.job(id), job.state == .proposed else {
+      return false
+    }
+    // The owner may have signed out or switched budgets while the live rows were read.
+    guard model.settings.isAuthenticated, !Self.isFromAnotherBudget(job, model: model) else {
+      model.showSaveMessage("The batch changed. Review it and approve again.", kind: .failure)
       return false
     }
     // Something else changed the rows (a new match, a changed account) while
@@ -1394,6 +1431,7 @@ final class IntakeCoordinator {
       store.delete(job.id)
     }
     reload()
+    syncHashIndex()
   }
 
   // MARK: Pure helpers

@@ -48,6 +48,9 @@ final class IntakeNotifier {
   @ObservationIgnored private let center: UNUserNotificationCenter
   @ObservationIgnored private let delegate = IntakeNotificationDelegate()
   @ObservationIgnored private var lastBadge: Int?
+  /// Posting and badge work in flight, so background time is not given back
+  /// before it lands. The permission prompt is never tracked.
+  @ObservationIgnored private var inFlight: [UUID: Task<Void, Never>] = [:]
 
   private static let logger = Logger(subsystem: "sg.soon.howmuch", category: "IntakeNotifier")
 
@@ -104,6 +107,12 @@ final class IntakeNotifier {
     status == .authorized || status == .provisional || status == .ephemeral
   }
 
+  /// Asks if the owner has not been asked yet and there are jobs: for someone
+  /// whose first share was read in the background, where no prompt could show.
+  func askIfNeeded() {
+    Task { _ = await authorisationStatus(requestIfNeeded: true) }
+  }
+
   /// The drain took a share job. For someone whose first jobs were read in the
   /// background, this is where they are first asked.
   func shareAdopted() {
@@ -122,7 +131,7 @@ final class IntakeNotifier {
       center.removeDeliveredNotifications(withIdentifiers: [Self.summaryIdentifier])
     }
     let center = center
-    Task { [weak self] in
+    track { [weak self] in
       do {
         try await center.setBadgeCount(count)
       } catch {
@@ -137,7 +146,7 @@ final class IntakeNotifier {
   /// Sets the badge again from the current jobs.
   func refreshBadge() {
     lastBadge = nil
-    updateBadge(IntakeCoordinator.shared.attentionCount)
+    updateBadge(IntakeCoordinator.shared.badgeCount)
   }
 
   /// Signed out: nothing left to say, and no badge.
@@ -150,19 +159,46 @@ final class IntakeNotifier {
 
   // MARK: Posting
 
+  /// Runs `operation` as a task `settle()` waits for.
+  private func track(_ operation: @escaping @MainActor () async -> Void) {
+    let token = UUID()
+    inFlight[token] = Task { @MainActor [weak self] in
+      await operation()
+      self?.inFlight[token] = nil
+    }
+  }
+
+  /// Waits for posting and badge work already started, for a few seconds at
+  /// most. Called before background time is handed back to iOS.
+  func settle(timeout: Duration = .seconds(4)) async {
+    let deadline = ContinuousClock.now + timeout
+    while !inFlight.isEmpty, ContinuousClock.now < deadline {
+      try? await Task.sleep(for: .milliseconds(50))
+    }
+  }
+
   /// A job moved to `job.state`. Only a move into Ready, Needs you or Failed
-  /// posts; a move out of them takes the notification back.
+  /// posts; a move out of them takes the notification back. A batch with
+  /// nothing to review (only Already in rows) does not post.
   func jobDidChange(_ job: IntakeJob, previous: IntakeJobState?, accountName: String?) {
     guard job.state != previous else {
       return
     }
     switch job.state {
+    case .proposed where !job.needsReview:
+      clear(job.id)
+      refreshSummary()
     case .proposed, .needsYou, .failed:
-      Task { await deliver(job) }
+      track { [weak self] in await self?.deliver(job) }
     case .queued, .reading, .applied, .discarded:
       clear(job.id)
-      Task { await reconcileSummary() }
+      refreshSummary()
     }
+  }
+
+  /// Brings a showing summary up to date after a batch left Ready or Needs you.
+  func refreshSummary() {
+    track { [weak self] in await self?.reconcileSummary() }
   }
 
   func clear(_ jobID: UUID) {
@@ -197,7 +233,7 @@ final class IntakeNotifier {
   /// Ready plus Needs you, as the coordinator has them now.
   private static func waitingJobs() -> [IntakeJob] {
     IntakeCoordinator.shared.jobs
-      .filter { $0.state == .proposed || $0.state == .needsYou }
+      .filter(\.needsReview)
       .sorted { $0.createdAt < $1.createdAt }
   }
 
@@ -283,7 +319,10 @@ final class IntakeNotifier {
     switch action {
     case ActionID.discard:
       if let jobID {
-        IntakeCoordinator.shared.discard(jobID)
+        // Only a batch that is still failed: the owner may have retried it since.
+        if IntakeCoordinator.shared.job(jobID)?.state == .failed {
+          IntakeCoordinator.shared.discard(jobID)
+        }
         clear(jobID)
       }
     case ActionID.later:
@@ -338,8 +377,17 @@ final class IntakeNotifier {
     job.failureMessage ?? "Choose an account to continue."
   }
 
+  /// The failure message without the title's words repeated: "No text was found."
   static func failedBody(_ job: IntakeJob) -> String {
-    job.failureMessage ?? "Open the Inbox to try again."
+    let fallback = "Open the Inbox to try again."
+    guard var message = job.failureMessage else {
+      return fallback
+    }
+    let prefix = "\(failedTitle)."
+    if message.hasPrefix(prefix) {
+      message = String(message.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+    }
+    return message.isEmpty ? fallback : message
   }
 }
 
@@ -359,9 +407,18 @@ final class IntakeNotificationDelegate: NSObject, UNUserNotificationCenterDelega
     let action = response.actionIdentifier
     DispatchQueue.main.async {
       MainActor.assumeIsolated {
-        IntakeNotifier.shared.handle(action: action, jobID: jobID, kind: kind)
+        let notifier = IntakeNotifier.shared
+        notifier.handle(action: action, jobID: jobID, kind: kind)
+        if action == IntakeNotifier.ActionID.discard {
+          // The badge and summary follow a discard; let them land before iOS suspends us.
+          Task { @MainActor in
+            await notifier.settle()
+            completionHandler()
+          }
+        } else {
+          completionHandler()
+        }
       }
-      completionHandler()
     }
   }
 }
@@ -457,6 +514,10 @@ final class IntakeBackgroundRefresh {
   }
 
   private func handle(_ completion: IntakeRefreshCompletion) {
+    // First, so a run that expires still queues the next one.
+    if model?.settings.isAuthenticated == true {
+      schedule()
+    }
     guard !completion.isFinished else {
       return
     }
@@ -464,11 +525,11 @@ final class IntakeBackgroundRefresh {
       completion.complete(success: true)
       return
     }
-    schedule()
     let coordinator = IntakeCoordinator.shared
     coordinator.drain(model: model)
     Task { @MainActor in
       await coordinator.waitForDrain()
+      await IntakeNotifier.shared.settle()
       completion.complete(success: true)
     }
   }
@@ -492,22 +553,26 @@ final class IntakeBackgroundRefresh {
         self?.end(box)
       }
     }
-    activeBackgroundTask = box
+    // iOS may refuse time. Remember the box only when there is something to end.
+    if box.id != .invalid {
+      activeBackgroundTask = box
+    }
     coordinator.drain(model: model)
     Task { @MainActor [weak self] in
       await coordinator.waitForDrain()
+      await IntakeNotifier.shared.settle()
       self?.end(box)
     }
   }
 
   private func end(_ box: IntakeBackgroundTaskBox) {
+    if activeBackgroundTask === box {
+      activeBackgroundTask = nil
+    }
     guard box.id != .invalid else {
       return
     }
     UIApplication.shared.endBackgroundTask(box.id)
     box.id = .invalid
-    if activeBackgroundTask === box {
-      activeBackgroundTask = nil
-    }
   }
 }

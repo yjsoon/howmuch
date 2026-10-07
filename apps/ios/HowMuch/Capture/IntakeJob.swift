@@ -316,6 +316,10 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
   var applyStartedAt: Date?
   /// "1 added, 1 fixed" once applied.
   var appliedSummary: String?
+  /// A background read could not finish this job (a Vision or model failure, or
+  /// no text). Only a foreground drain reads it again, so background refreshes
+  /// do not repeat the same failure.
+  var deferredToForeground: Bool
   var updatedAt: Date
 
   init(
@@ -340,6 +344,7 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
     duplicateCheckLimited: Bool = false,
     applyStartedAt: Date? = nil,
     appliedSummary: String? = nil,
+    deferredToForeground: Bool = false,
     updatedAt: Date? = nil
   ) {
     self.id = id
@@ -363,6 +368,7 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
     self.duplicateCheckLimited = duplicateCheckLimited
     self.applyStartedAt = applyStartedAt
     self.appliedSummary = appliedSummary
+    self.deferredToForeground = deferredToForeground
     self.updatedAt = updatedAt ?? createdAt
   }
 
@@ -370,7 +376,7 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
     case id, createdAt, origin, sourceFiles, accountID, decideAccount, hint, note, contentHash
     case state, failureMessage, proposals, extractions, extractionSourceIndexes, fallbackExtractionIndexes
     case waitingForAccounts
-    case planID, connectionFingerprint, duplicateCheckLimited, applyStartedAt, appliedSummary, updatedAt
+    case planID, connectionFingerprint, duplicateCheckLimited, applyStartedAt, appliedSummary, deferredToForeground, updatedAt
   }
 
   init(from decoder: Decoder) throws {
@@ -400,6 +406,7 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
     duplicateCheckLimited = try container.decodeIfPresent(Bool.self, forKey: .duplicateCheckLimited) ?? false
     applyStartedAt = try container.decodeIfPresent(Date.self, forKey: .applyStartedAt)
     appliedSummary = try container.decodeIfPresent(String.self, forKey: .appliedSummary)
+    deferredToForeground = try container.decodeIfPresent(Bool.self, forKey: .deferredToForeground) ?? false
     updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
   }
 
@@ -518,6 +525,20 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
     case .failed: 3
     case .applied: 4
     case .discarded: 5
+    }
+  }
+
+  /// True when the owner has something to do: a batch that needs them, or one
+  /// with a row to add, fix or check. A batch of only Already in rows does not.
+  var needsReview: Bool {
+    switch state {
+    case .needsYou:
+      return true
+    case .proposed:
+      let counts = counts
+      return counts.added > 0 || counts.fixed > 0 || counts.possibleDuplicates > 0
+    default:
+      return false
     }
   }
 

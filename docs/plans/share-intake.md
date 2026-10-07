@@ -85,7 +85,7 @@ After Send: a 1.2 s "Sent to Halation" pill, `.success` haptic, dismiss. No succ
 
 Accessibility: thumbnails "Screenshot 1 of 2", "PDF, 4 pages"; Send reads "Send 2 items to DBS Altitude"; 44pt targets; strip wraps at large Dynamic Type.
 
-Duplicate share: hash the payload (the clipboard offer already SHA-256s images). Same hash within 30 days shows "You shared this on 3 Oct" with **Open** or **Share anyway**.
+Duplicate share: hash the payload (the clipboard offer already SHA-256s images). Same hash within 30 days shows "You shared this on 3 Oct" with **Open** or **Share anyway**. *As built:* no **Open** button, because a share extension cannot open its host app; it offers **Close** and says to open Halation.
 
 ### 7.2 Notifications and Accounts band ([02](share-intake/02-notification-accounts.png))
 
@@ -96,7 +96,7 @@ Local notifications only (no remote push, no server device registry), category `
 - Statement: "Statement read" · "Sep 2026 · 41 matched · 2 missing · 1 extra".
 - Auto-saved: "Saved 2 as new" · "Approve them in the register when you're ready."
 - Failed: "Couldn't read this" · "The PDF was password protected." Actions **Open Inbox**, **Discard**.
-- Batches within ten minutes group under "4 batches ready to review". Nothing is applied from a notification; Review always opens the app. Badge = Ready + Needs you.
+- Batches group under "4 batches waiting" when two or more are waiting, not within a ten-minute window (*as built*). Nothing is applied from a notification; Review always opens the app. Badge = Ready + Needs you.
 
 Server-processed jobs finish while the app is closed, so iOS needs a way to learn about them: background app refresh polling a jobs endpoint is enough for the first version. Remote push is a later option.
 
