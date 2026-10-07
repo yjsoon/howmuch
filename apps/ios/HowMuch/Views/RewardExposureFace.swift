@@ -201,8 +201,12 @@ private struct ExposurePainter {
     // The wash falls to the same colour at zero alpha, never to clear, so the falloff does not pass through grey.
     let lo = min(1, max(0, pose.h - 0.04))
     let hi = min(1, max(0, pose.h + 0.04))
+    // Smoothstep between lo and hi: quarter points sit at 15.6% and 84.4% of the way.
+    let quarter = lo + 0.25 * (hi - lo), threeQuarter = lo + 0.75 * (hi - lo)
     let gradient = Gradient(stops: [
       .init(color: solid, location: 0), .init(color: solid, location: lo),
+      .init(color: colour.opacity(alpha * 0.844), location: quarter),
+      .init(color: colour.opacity(alpha * 0.156), location: threeQuarter),
       .init(color: colour.opacity(0), location: hi), .init(color: colour.opacity(0), location: 1),
     ])
     return .linearGradient(gradient, startPoint: CGPoint(x: 0, y: 0), endPoint: CGPoint(x: width, y: 0))
@@ -334,20 +338,20 @@ private struct ExposurePainter {
       veil.fill(
         Path(frame),
         with: .linearGradient(
-          Gradient(colors: [Theme.Face.veilGrey.opacity(0), Theme.Face.veilGrey.opacity(0.5)]),
+          Gradient.smoothRamp(Theme.Face.veilGrey, peak: 0.5),
           startPoint: from, endPoint: to))
       veil.blendMode = .multiply
       let cast = exposure.miles ? Theme.Face.veilMiles : Theme.Face.veilCashback
       veil.fill(
         Path(frame),
-        with: .linearGradient(Gradient(colors: [.white, cast]), startPoint: from, endPoint: to))
+        with: .linearGradient(Gradient.smoothRamp(cast, peak: 1), startPoint: from, endPoint: to))
     case .daytime:
       // A cool dim that never darkens enough to break a floor.
       let alpha = failed ? 0.14 : 0.15
       veil.fill(
         Path(frame),
         with: .linearGradient(
-          Gradient(colors: [Theme.Face.veilDim.opacity(0), Theme.Face.veilDim.opacity(alpha)]),
+          Gradient.smoothRamp(Theme.Face.veilDim, peak: alpha),
           startPoint: from, endPoint: to))
     }
   }
@@ -501,5 +505,19 @@ struct RewardExposureAnimator: View {
     } else {
       withAnimation(Theme.Motion.chart.delay(delay)) { shown = target }
     }
+  }
+}
+
+extension Gradient {
+  /// A ramp from clear to `colour` at `peak` opacity, shaped like smoothstep so the veil's
+  /// edge is soft at both ends rather than a straight line.
+  fileprivate static func smoothRamp(_ colour: Color, peak: Double) -> Gradient {
+    Gradient(stops: [
+      .init(color: colour.opacity(0), location: 0),
+      .init(color: colour.opacity(peak * 0.156), location: 0.25),
+      .init(color: colour.opacity(peak * 0.5), location: 0.5),
+      .init(color: colour.opacity(peak * 0.844), location: 0.75),
+      .init(color: colour.opacity(peak), location: 1),
+    ])
   }
 }

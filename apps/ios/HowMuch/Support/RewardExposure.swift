@@ -290,7 +290,8 @@ struct ExposureScene {
     if let sun, abs(x * width - sun.x) < sunRadius + 0.004 * width {
       let clear = 0.003 * width
       let lo = sun.y - sunRadius - clear
-      let hi = sun.y + sunRadius + clear
+      // Only the half of the disc above the target horizon shows, so the gap ends there.
+      let hi = min(sun.y + sunRadius, horizonY(at: x)) + clear
       pieces = [(top, min(height, lo)), (max(top, hi), height)].filter { $0.1 > $0.0 }
     }
     let split = horizonY(at: x)

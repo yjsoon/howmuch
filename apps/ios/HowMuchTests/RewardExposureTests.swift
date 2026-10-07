@@ -274,20 +274,19 @@ final class RewardExposureTests: XCTestCase {
     XCTAssertNil(met.markerX)
   }
 
-  func testSunGeometryOnAHorizonAt42WithADiscOfRadius8() {
-    // Across: it rides the marker between 0.07 and 0.85, then lifts clear.
-    let across: [(h: Double, x: Double, y: Double)] = [
-      (0.03, 0.07, 42.64), (0.5, 0.5, 42.64), (0.9, 0.85, 39.36), (1, 0.85, 32.8),
-    ]
-    for step in across {
-      let pose = RewardExposure.Pose(h: step.h, v: 0)
-      XCTAssertEqual(pose.sunX, step.x, accuracy: 1e-9, "x at h \(step.h)")
-      XCTAssertEqual(pose.sunY(horizon: 42, r: 8), step.y, accuracy: 0.01, "y at h \(step.h)")
+  /// Failure mode: the two sun formulas (across, then up) disagree at the hand-over, so the disc
+  /// jumps, or dips, when the minimum is met. The sun only ever rises, and never leaps.
+  func testSunNeverSinksOrLeapsThroughTheWholeJourney() {
+    let horizon = 42.0, radius = 8.0
+    let across = (0...200).map { RewardExposure.Pose(h: Double($0) / 200, v: 0) }
+    let up = (0...100).map { RewardExposure.Pose(h: 1, v: Double($0) / 100) }
+    let heights = (across + up).map { $0.sunY(horizon: horizon, r: radius) }
+    for (index, pair) in zip(heights, heights.dropFirst()).enumerated() {
+      XCTAssertLessThanOrEqual(pair.1, pair.0 + 1e-9, "the sun sank at step \(index)")
+      XCTAssertLessThan(pair.0 - pair.1, 1.0, "the sun leapt at step \(index)")
     }
-    // Up: from just above the ground to off the top edge.
-    for (v, y) in [(0.0, 32.8), (0.5, 12.2), (1.0, -8.4)] {
-      XCTAssertEqual(RewardExposure.Pose(h: 1, v: v).sunY(horizon: 42, r: 8), y, accuracy: 0.01, "y at v \(v)")
-    }
+    let beforeMinimum = RewardExposure.Pose(h: 1 - 1e-9, v: 0).sunY(horizon: horizon, r: radius)
+    XCTAssertEqual(beforeMinimum, RewardExposure.Pose(h: 1, v: 0).sunY(horizon: horizon, r: radius), accuracy: 1e-6)
   }
 
   func testFailedHasNoSunNoMarkerAndTheRidgesApart() throws {

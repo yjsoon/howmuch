@@ -833,6 +833,9 @@ struct RewardFilledRow: View {
 
   @Environment(\.colorSchemeContrast) private var contrast
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  /// Optional so a row drawn outside the app (a snapshot) still works; it only scopes the animation memory.
+  @Environment(AppModel.self) private var model: AppModel?
   @ScaledMetric(relativeTo: .body) private var stripPadding = 9.0
   @ScaledMetric(relativeTo: .body) private var paperPadding = 14.0
   @ScaledMetric(relativeTo: .body) private var horizontalPadding = 16.0
@@ -841,6 +844,9 @@ struct RewardFilledRow: View {
   @State private var nameBottom: CGFloat?
   @State private var footTop: CGFloat?
   @State private var width: CGFloat = 0
+
+  /// Plan, list and card, so a plan switch never starts from another plan's remembered pose.
+  private var memoryKey: String { "\(model?.settings.planID ?? "")|\(memoryScope)|\(projection.cardID)" }
 
   private static let space = "rewardExposure"
   /// The scene band above the words at accessibility sizes, in points: art, so it does not scale.
@@ -891,7 +897,7 @@ struct RewardFilledRow: View {
         RewardExposureAnimator(
           exposure: exposure,
           layout: .strip(nameBottom: nameBottom.map { Double($0) }, footTop: footTop.map { Double($0) }),
-          key: "\(memoryScope)|\(projection.cardID)", index: index)
+          key: memoryKey, index: index)
       }
       .coordinateSpace(.named(Self.space))
       .clipShape(.rect(cornerRadius: Theme.Radius.card, style: .continuous))
@@ -903,7 +909,7 @@ struct RewardFilledRow: View {
   private func bandRow(_ text: RewardRowText, exposure: RewardExposure) -> some View {
     VStack(alignment: .leading, spacing: 0) {
       RewardExposureAnimator(
-        exposure: exposure, layout: .band, key: "\(memoryScope)|\(projection.cardID)", index: index
+        exposure: exposure, layout: .band, key: memoryKey, index: index
       )
       .frame(height: Self.bandHeight)
       paperContent(text)
@@ -1000,6 +1006,9 @@ struct RewardFilledRow: View {
           .fixedSize(horizontal: false, vertical: true)
       }
     }
+    // Figures change in place with a short crossfade, not a roll or a jump.
+    .contentTransition(.opacity)
+    .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: text.accessibilityValue)
   }
 
   @ViewBuilder
