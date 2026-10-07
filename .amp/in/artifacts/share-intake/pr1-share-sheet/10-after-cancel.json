@@ -1,0 +1,146 @@
+{
+  "capturedAt": "2026-10-07T03:41:16.163223+00:00",
+  "database": "/Users/devin/Library/Developer/CoreSimulator/Devices/EDD9B083-63F1-44E6-9A7B-0A6964CC2561/data/Containers/Data/Application/6C7D7E3F-4C5B-4CCA-A724-0828EB2088E2/Library/Application Support/HowMuch/Local/howmuch.sqlite",
+  "group": "/Users/devin/Library/Developer/CoreSimulator/Devices/EDD9B083-63F1-44E6-9A7B-0A6964CC2561/data/Containers/Shared/AppGroup/2A15EA43-6271-4E8B-A901-E8CD06CF6D16",
+  "accounts": [
+    {
+      "id": "e2e-dbs",
+      "name": "DBS Altitude",
+      "closed": 0,
+      "balance_milli": -8900
+    },
+    {
+      "id": "e2e-everyday",
+      "name": "Everyday Account",
+      "closed": 0,
+      "balance_milli": 0
+    },
+    {
+      "id": "e2e-closed",
+      "name": "Closed Synthetic Account",
+      "closed": 1,
+      "balance_milli": 0
+    }
+  ],
+  "shareContext": {
+    "accounts": [
+      {
+        "name": "DBS Altitude",
+        "id": "e2e-dbs",
+        "isClosed": false
+      },
+      {
+        "name": "Everyday Account",
+        "id": "e2e-everyday",
+        "isClosed": false
+      }
+    ],
+    "isSignedIn": true,
+    "writtenAt": "2026-10-07T03:37:27Z",
+    "lastUsedOpenAccountID": "e2e-dbs"
+  },
+  "inbox": {
+    "Inbox/3B36B4FE-8759-400D-82B0-C4C8E4DE3CD6/manifest.json": {
+      "note": "E6baed7 Photos E2E",
+      "source": "shareSheet",
+      "sources": [
+        {
+          "kind": "image",
+          "bytes": 28810,
+          "filename": "image-1.PNG",
+          "sha256": "8a363fd697812e191ea387dc7e4c5d16b34b6f20e83b4bef6e6e485203ea01fe"
+        },
+        {
+          "kind": "image",
+          "bytes": 29571,
+          "filename": "image-2.PNG",
+          "sha256": "d87aeb1deb3297258452ee46687bb79f7ecaace732d67882da9e80c679fa876e"
+        }
+      ],
+      "decideAccount": false,
+      "id": "3B36B4FE-8759-400D-82B0-C4C8E4DE3CD6",
+      "filename": "image-1.PNG",
+      "version": 2,
+      "kind": "image",
+      "accountID": "e2e-dbs",
+      "hint": "auto",
+      "contentHash": "b5b7a6dff8721b1fb28b15eab5b5ddb75c5a984dab6cf6c737a4b44254450c73",
+      "createdAt": "2026-10-07T03:39:34Z"
+    },
+    "Inbox/96D94F82-AE3F-41FF-BB85-785DEA4C9000/manifest.json": {
+      "kind": "pdf",
+      "accountID": "e2e-dbs",
+      "createdAt": "2026-10-07T03:40:42Z",
+      "source": "shareSheet",
+      "note": "E6baed7 PDF E2E",
+      "sources": [
+        {
+          "bytes": 7805,
+          "sha256": "7b8653b563739e22e5f10a6782d0c3a46e2b1a20a3c526c964b4a72b842567d4",
+          "filename": "document-1.pdf",
+          "kind": "pdf"
+        }
+      ],
+      "decideAccount": false,
+      "filename": "document-1.pdf",
+      "id": "96D94F82-AE3F-41FF-BB85-785DEA4C9000",
+      "contentHash": "342aae85673a07c594446b4b87daf8b1d41d9dadb1758d6c689e09c23a5c876b",
+      "hint": "auto",
+      "version": 2
+    }
+  },
+  "jobs": {},
+  "transactions": [
+    {
+      "id": "e2e-existing-kopitiam",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -8900,
+      "payee_name_snapshot": "Kopitiam",
+      "approved": 1
+    }
+  ],
+  "tables": [
+    "_local_migrations",
+    "plans",
+    "accounts",
+    "category_groups",
+    "categories",
+    "transactions",
+    "subtransactions",
+    "source_events",
+    "import_sessions",
+    "import_rows",
+    "ynab_sync_state",
+    "sync_runs",
+    "sync_attempts",
+    "sync_transition_receipts",
+    "sync_renewal_receipts",
+    "audit_events",
+    "write_commands",
+    "write_state",
+    "write_assertions",
+    "users",
+    "auth_identities",
+    "sessions",
+    "plan_memberships",
+    "password_credentials",
+    "auth_setup",
+    "login_rate_limits",
+    "payees",
+    "ynab_raw_objects",
+    "plan_month_assignments",
+    "plan_month_category_targets",
+    "scheduled_transaction_edits",
+    "scheduled_subtransaction_edits",
+    "scheduled_transaction_snapshot_assertions",
+    "account_reconciliation_assertions",
+    "personal_api_tokens",
+    "account_preferences",
+    "rewards_tracker_snapshots",
+    "rewards_tracker_cards",
+    "ynab_source_month_activity",
+    "account_month_balances",
+    "report_cache"
+  ]
+}
