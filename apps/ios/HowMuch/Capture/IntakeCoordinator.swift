@@ -42,7 +42,12 @@ final class IntakeCoordinator {
   /// "Likely" is 0.75 up to 0.9; lines read by the fallback never reach "Sure".
   static let fallbackConfidenceCap = 0.85
 
-  init(inbox: InboxStore = .shared, store: IntakeJobStore = .shared) {
+  init(
+    inbox: InboxStore = IntakeJobStore.isUnitTestHost
+      ? InboxStore(container: IntakeJobStore.sharedContainer)
+      : .shared,
+    store: IntakeJobStore = .shared
+  ) {
     self.inbox = inbox
     self.store = store
     reload()
