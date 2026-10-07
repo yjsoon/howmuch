@@ -213,6 +213,7 @@ private struct RootView: View {
     }
     .onChange(of: scenePhase) { _, phase in
       if phase == .active {
+        drainIntakeInbox()
         enqueueInboxIfNeeded(force: false)
         consumePendingCapture()
         ScreenshotOfferController.shared.startIfNeeded()
@@ -226,6 +227,7 @@ private struct RootView: View {
       if !isAuthenticated {
         capture.dropForSignOut()
       } else {
+        drainIntakeInbox()
         enqueueInboxIfNeeded(force: false)
         consumePendingCapture()
       }
@@ -234,6 +236,7 @@ private struct RootView: View {
       guard HowMuchDeepLink.parse(url) == .inbox else {
         return
       }
+      drainIntakeInbox()
       enqueueInboxIfNeeded(force: true)
     }
     .environment(chrome)
@@ -253,12 +256,25 @@ private struct RootView: View {
     )
   }
 
+  /// Share-sheet entries become Inbox jobs, read in the background.
+  private func drainIntakeInbox() {
+    Task { await IntakeCoordinator.shared.drain(model: model) }
+  }
+
+  /// Opens the conversation flow for App Intent and clipboard entries only.
+  /// Share-sheet entries are `IntakeCoordinator`'s and never open this sheet.
   private func enqueueInboxIfNeeded(force: Bool) {
     guard model.settings.isAuthenticated else {
       return
     }
     let store = InboxStore.shared
+    let conversationEntry: (InboxItem) -> Bool = { !$0.isIntakeJobSource }
     if force {
+      // The deep link also opens for a share, which needs no sheet.
+      guard store.hasReadyInboxItems(matching: conversationEntry)
+        || store.hasReadingItems(matching: conversationEntry) else {
+        return
+      }
       model.presentCapture(
         CaptureRequest(
           kind: .inbox,
@@ -268,7 +284,7 @@ private struct RootView: View {
       )
       return
     }
-    if store.hasReadyInboxItems() {
+    if store.hasReadyInboxItems(matching: conversationEntry) {
       model.presentCapture(
         CaptureRequest(
           kind: .inbox,
@@ -278,7 +294,7 @@ private struct RootView: View {
       )
       return
     }
-    if CaptureRouter.shared.presented == nil, store.hasReadingItems() {
+    if CaptureRouter.shared.presented == nil, store.hasReadingItems(matching: conversationEntry) {
       model.presentCapture(
         CaptureRequest(
           kind: .inbox,

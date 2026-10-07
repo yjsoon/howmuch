@@ -309,6 +309,9 @@ final class AppModel {
   /// `serverTransactions` is not the same thing — a quiet refresh merges, and
   /// local creates insert — so the snapshot is written from this instead.
   @ObservationIgnored private var lastLedgerFirstPage: ReferenceSnapshot.LedgerPage?
+  /// Rows an intake match fetched beyond what the register had loaded, kept so
+  /// an approved Fix can still be built on the row it matched.
+  @ObservationIgnored private var intakeFetchedRows: [String: Transaction] = [:]
   /// The ids the snapshot's first page put on screen, in the order they were
   /// sorted into. They are the rows a network page must displace; anything
   /// else in `serverTransactions` was fetched this session (an older page the
@@ -4494,7 +4497,7 @@ final class AppModel {
     return repaired
   }
 
-  private func showSaveMessage(_ text: String, kind: SaveMessage.Kind = .success) {
+  func showSaveMessage(_ text: String, kind: SaveMessage.Kind = .success) {
     saveMessageToken += 1
     lastSaveMessage = SaveMessage(id: saveMessageToken, text: text, kind: kind)
     let token = saveMessageToken
@@ -4504,5 +4507,74 @@ final class AppModel {
         lastSaveMessage = nil
       }
     }
+  }
+}
+
+// MARK: - Intake candidates (docs/plans/share-intake.md section 6)
+
+extension AppModel {
+  /// How many pages an intake match will fetch beyond the loaded register.
+  private static let intakeCandidatePageLimit = 5
+
+  /// Existing rows an intake match may compare against, dated within
+  /// `from...to`. Uses what the register already holds; only when that does
+  /// not reach back to `from` and the server is reachable does it fetch more.
+  /// A failed fetch (offline) just leaves the loaded rows.
+  func intakeCandidates(accountIDs: Set<String>?, from: Date, to: Date) async -> [IntakeCandidateRow] {
+    let fromISO = from.isoDateString
+    let toISO = to.isoDateString
+    var rows: [String: Transaction] = [:]
+    for row in transactions + unapprovedTransactions where rows[row.id] == nil {
+      rows[row.id] = row
+    }
+    var fetched: [String: Transaction] = [:]
+    let covered = rows.values.contains { $0.date <= fromISO }
+    if !covered, settings.isAuthenticated {
+      let planID = settings.planID
+      var offset = 0
+      for _ in 0..<Self.intakeCandidatePageLimit {
+        guard let page = try? await fetchLedgerPage(planID: planID, offset: offset, sinceDate: fromISO) else {
+          break
+        }
+        for row in overlaying(page.transactions) where rows[row.id] == nil {
+          rows[row.id] = row
+          fetched[row.id] = row
+        }
+        guard page.hasMore, let next = page.nextOffset else {
+          break
+        }
+        offset = next
+      }
+    }
+    intakeFetchedRows = fetched
+    return rows.values.compactMap { row -> IntakeCandidateRow? in
+      guard !row.deleted,
+            row.parentTransactionID == nil,
+            row.date >= fromISO,
+            row.date <= toISO,
+            accountIDs?.contains(row.accountID) ?? true else {
+        return nil
+      }
+      return IntakeCandidateRow(
+        id: row.id,
+        accountID: row.accountID,
+        date: row.date,
+        amountMilli: row.amount,
+        payeeName: row.payeeName ?? "",
+        categoryID: row.categoryID,
+        approved: row.approved,
+        isReconciled: row.cleared == .reconciled,
+        isTransfer: row.transferAccountID != nil,
+        isSplit: row.isSplit
+      )
+    }
+  }
+
+  /// The row an approved Fix is built on: as the register shows it now, else
+  /// as the matcher fetched it.
+  func intakeTransaction(id: String) -> Transaction? {
+    transactions.first { $0.id == id }
+      ?? unapprovedTransactions.first { $0.id == id }
+      ?? intakeFetchedRows[id]
   }
 }
