@@ -380,6 +380,14 @@ final class InboxStore: @unchecked Sendable {
     }
   }
 
+  /// Entries still in `Inbox/` or `Reading/`, which the app has not yet
+  /// turned into jobs. The share extension checks these for duplicates.
+  func pendingEntries() -> [InboxItem] {
+    lock.lock()
+    defer { lock.unlock() }
+    return (readyInboxURLsLocked() + readingURLsLocked()).compactMap { loadItemLocked(at: $0) }
+  }
+
   func hasPendingWork() -> Bool {
     hasReadyInboxItems() || hasReadingItems()
   }

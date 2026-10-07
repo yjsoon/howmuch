@@ -6,7 +6,7 @@ import UserNotifications
 import os
 
 /// Where a tap on an Inbox notification, or a `howmuch://inbox` link, lands.
-enum IntakeRoute: Equatable {
+enum IntakeDestination: Equatable {
   /// The Inbox list.
   case list
   /// One batch's review screen.
@@ -27,8 +27,6 @@ final class IntakeNotifier {
   /// Failed: Open Inbox, Discard.
   static let failedCategory = "halation.inbox.failed"
   static let summaryIdentifier = "halation.inbox.summary"
-  /// Batches ready within this long of each other become one summary.
-  static let coalesceWindow: TimeInterval = 10 * 60
 
   enum ActionID {
     static let review = "halation.inbox.review"
@@ -45,7 +43,7 @@ final class IntakeNotifier {
   }
 
   /// Set by a notification tap or an Inbox link. `RootView` consumes it.
-  var pendingRoute: IntakeRoute?
+  var pendingRoute: IntakeDestination?
 
   @ObservationIgnored private let center: UNUserNotificationCenter
   @ObservationIgnored private let delegate = IntakeNotificationDelegate()
@@ -85,6 +83,33 @@ final class IntakeNotifier {
     ])
   }
 
+  // MARK: Authorisation
+
+  /// Asks the first time a job reaches Ready, or a share is first taken, and
+  /// only while the owner can see the prompt. Denied means nothing more.
+  private func authorisationStatus(requestIfNeeded: Bool) async -> UNAuthorizationStatus {
+    var status = await center.notificationSettings().authorizationStatus
+    if status == .notDetermined, requestIfNeeded, UIApplication.shared.applicationState == .active {
+      let granted = (try? await center.requestAuthorization(options: [.alert, .badge, .sound])) ?? false
+      status = granted ? .authorized : .denied
+      if granted {
+        // The badge could not be set before; set it now.
+        refreshBadge()
+      }
+    }
+    return status
+  }
+
+  private static func canPost(_ status: UNAuthorizationStatus) -> Bool {
+    status == .authorized || status == .provisional || status == .ephemeral
+  }
+
+  /// The drain took a share job. For someone whose first jobs were read in the
+  /// background, this is where they are first asked.
+  func shareAdopted() {
+    Task { _ = await authorisationStatus(requestIfNeeded: true) }
+  }
+
   // MARK: Badge
 
   /// The app badge is Ready plus Needs you. Called on every job change.
@@ -97,10 +122,30 @@ final class IntakeNotifier {
       center.removeDeliveredNotifications(withIdentifiers: [Self.summaryIdentifier])
     }
     let center = center
-    Task {
-      // Fails quietly when the owner has not allowed badges.
-      try? await center.setBadgeCount(count)
+    Task { [weak self] in
+      do {
+        try await center.setBadgeCount(count)
+      } catch {
+        // Not allowed (yet): forget it, so the next change or foreground tries again.
+        if self?.lastBadge == count {
+          self?.lastBadge = nil
+        }
+      }
     }
+  }
+
+  /// Sets the badge again from the current jobs.
+  func refreshBadge() {
+    lastBadge = nil
+    updateBadge(IntakeCoordinator.shared.attentionCount)
+  }
+
+  /// Signed out: nothing left to say, and no badge.
+  func clearAll() {
+    center.removeAllDeliveredNotifications()
+    center.removeAllPendingNotificationRequests()
+    lastBadge = nil
+    updateBadge(0)
   }
 
   // MARK: Posting
@@ -113,9 +158,10 @@ final class IntakeNotifier {
     }
     switch job.state {
     case .proposed, .needsYou, .failed:
-      Task { await deliver(job, accountName: accountName) }
+      Task { await deliver(job) }
     case .queued, .reading, .applied, .discarded:
       clear(job.id)
+      Task { await reconcileSummary() }
     }
   }
 
@@ -125,16 +171,9 @@ final class IntakeNotifier {
     center.removePendingNotificationRequests(withIdentifiers: [identifier])
   }
 
-  private func deliver(_ job: IntakeJob, accountName: String?) async {
-    var status = await center.notificationSettings().authorizationStatus
-    // Ask the first time a job reaches Ready, and only while the owner can see
-    // the prompt. Denied means nothing more, ever.
-    if status == .notDetermined, job.state == .proposed,
-       UIApplication.shared.applicationState == .active {
-      let granted = (try? await center.requestAuthorization(options: [.alert, .badge, .sound])) ?? false
-      status = granted ? .authorized : .denied
-    }
-    guard status == .authorized || status == .provisional || status == .ephemeral else {
+  private func deliver(_ job: IntakeJob) async {
+    let status = await authorisationStatus(requestIfNeeded: job.state == .proposed)
+    guard Self.canPost(status) else {
       return
     }
     // No banner while the owner is looking at the app.
@@ -145,59 +184,94 @@ final class IntakeNotifier {
     guard IntakeCoordinator.shared.job(job.id)?.state == job.state else {
       return
     }
+    if job.state != .failed {
+      let waiting = Self.waitingJobs()
+      if waiting.count >= 2 {
+        await postSummary(waiting, alert: true)
+        return
+      }
+    }
+    await postSingle(job, alert: true)
+  }
 
+  /// Ready plus Needs you, as the coordinator has them now.
+  private static func waitingJobs() -> [IntakeJob] {
+    IntakeCoordinator.shared.jobs
+      .filter { $0.state == .proposed || $0.state == .needsYou }
+      .sorted { $0.createdAt < $1.createdAt }
+  }
+
+  private func postSingle(_ job: IntakeJob, alert: Bool) async {
     let content = UNMutableNotificationContent()
-    content.sound = .default
+    content.sound = alert ? .default : nil
     content.threadIdentifier = job.id.uuidString
-    var identifier = job.id.uuidString
     var userInfo: [String: Any] = ["jobID": job.id.uuidString]
-
     switch job.state {
     case .failed:
       content.title = Self.failedTitle
       content.body = Self.failedBody(job)
       content.categoryIdentifier = Self.failedCategory
       userInfo["kind"] = Kind.failed
-    default:
+    case .needsYou:
+      content.title = Self.needsYouTitle
+      content.body = Self.needsYouBody(job)
       content.categoryIdentifier = Self.reviewCategory
-      let siblings = await recentReviewNotifications(excluding: job.id)
-      if siblings.isEmpty {
-        if job.state == .needsYou {
-          content.title = Self.needsYouTitle
-          content.body = Self.needsYouBody(job)
-          userInfo["kind"] = Kind.needsYou
-        } else {
-          content.title = Self.readyTitle
-          content.body = Self.readyBody(job, accountName: accountName)
-          userInfo["kind"] = Kind.ready
-        }
-      } else {
-        // Replace the earlier ones with one summary.
-        let total = siblings.reduce(1) { $0 + ((($1.request.content.userInfo["batchCount"]) as? Int) ?? 1) }
-        center.removeDeliveredNotifications(withIdentifiers: siblings.map(\.request.identifier))
-        identifier = Self.summaryIdentifier
-        content.threadIdentifier = Self.summaryIdentifier
-        content.title = Self.summaryTitle(count: total)
-        content.body = Self.summaryBody
-        userInfo = ["kind": Kind.summary, "batchCount": total]
-      }
+      userInfo["kind"] = Kind.needsYou
+    default:
+      content.title = Self.readyTitle
+      content.body = Self.readyBody(job, accountName: IntakeCoordinator.shared.accountName(for: job))
+      content.categoryIdentifier = Self.reviewCategory
+      userInfo["kind"] = Kind.ready
     }
     content.userInfo = userInfo
+    await add(content, identifier: job.id.uuidString)
+  }
+
+  /// One notification for every batch waiting, replacing their own. Rebuilt
+  /// from the current jobs each time, so its count is never stale.
+  private func postSummary(_ waiting: [IntakeJob], alert: Bool) async {
+    let content = UNMutableNotificationContent()
+    content.sound = alert ? .default : nil
+    content.title = Self.summaryTitle(count: waiting.count)
+    content.body = Self.summaryBody
+    content.categoryIdentifier = Self.reviewCategory
+    content.threadIdentifier = Self.summaryIdentifier
+    content.userInfo = [
+      "kind": Kind.summary,
+      "batchCount": waiting.count,
+      "jobIDs": waiting.map { $0.id.uuidString },
+    ]
+    center.removeDeliveredNotifications(withIdentifiers: waiting.map { $0.id.uuidString })
+    await add(content, identifier: Self.summaryIdentifier)
+  }
+
+  /// A batch left Ready or Needs you. If a summary is showing, bring it up to
+  /// date: its new count, or (down to one) that batch's own notification, or
+  /// nothing.
+  private func reconcileSummary() async {
+    let delivered = await center.deliveredNotifications()
+    guard let summary = delivered.first(where: { $0.request.identifier == Self.summaryIdentifier }) else {
+      return
+    }
+    let waiting = Self.waitingJobs()
+    switch waiting.count {
+    case 0:
+      center.removeDeliveredNotifications(withIdentifiers: [Self.summaryIdentifier])
+    case 1:
+      center.removeDeliveredNotifications(withIdentifiers: [Self.summaryIdentifier])
+      await postSingle(waiting[0], alert: false)
+    default:
+      if summary.request.content.userInfo["batchCount"] as? Int != waiting.count {
+        await postSummary(waiting, alert: false)
+      }
+    }
+  }
+
+  private func add(_ content: UNMutableNotificationContent, identifier: String) async {
     do {
       try await center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
     } catch {
       Self.logger.error("Couldn't post notification: \(error.localizedDescription, privacy: .public)")
-    }
-  }
-
-  /// Delivered review notifications (including an earlier summary) posted
-  /// within the coalescing window.
-  private func recentReviewNotifications(excluding jobID: UUID) async -> [UNNotification] {
-    let cutoff = Date().addingTimeInterval(-Self.coalesceWindow)
-    return await center.deliveredNotifications().filter {
-      $0.request.content.categoryIdentifier == Self.reviewCategory
-        && $0.date >= cutoff
-        && $0.request.identifier != jobID.uuidString
     }
   }
 
@@ -213,7 +287,9 @@ final class IntakeNotifier {
         clear(jobID)
       }
     case ActionID.later:
-      if let jobID {
+      if kind == Kind.summary {
+        center.removeDeliveredNotifications(withIdentifiers: [Self.summaryIdentifier])
+      } else if let jobID {
         clear(jobID)
       }
     case ActionID.openInbox:
@@ -239,7 +315,7 @@ final class IntakeNotifier {
   static let summaryBody = "Open Halation to review them."
 
   static func summaryTitle(count: Int) -> String {
-    "\(count) batches ready to review"
+    "\(count) batches waiting"
   }
 
   /// "1 correction found · 1 new, from 2 DBS screenshots". Zero parts are left out.
@@ -284,6 +360,40 @@ final class IntakeNotificationDelegate: NSObject, UNUserNotificationCenterDelega
   }
 }
 
+/// Finishes a BGAppRefreshTask exactly once, from whichever of the expiry
+/// handler (any queue) or the drain (main actor) gets there first.
+final class IntakeRefreshCompletion: @unchecked Sendable {
+  private let lock = NSLock()
+  private var finished = false
+  private let task: BGAppRefreshTask
+
+  init(_ task: BGAppRefreshTask) {
+    self.task = task
+  }
+
+  var isFinished: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return finished
+  }
+
+  func complete(success: Bool) {
+    lock.lock()
+    let first = !finished
+    finished = true
+    lock.unlock()
+    if first {
+      task.setTaskCompleted(success: success)
+    }
+  }
+}
+
+/// One `beginBackgroundTask` identifier, so the handler and the waiter end
+/// the one they belong to and no other.
+final class IntakeBackgroundTaskBox: @unchecked Sendable {
+  var id = UIBackgroundTaskIdentifier.invalid
+}
+
 /// Reads the Inbox queue when the app is not in front: a refresh iOS grants
 /// every so often, and a short extension when the app backgrounds mid-read.
 /// Reading is on-device, so nothing here touches a server beyond what the app
@@ -298,17 +408,26 @@ final class IntakeBackgroundRefresh {
 
   /// Set once when the app is created, so a launch for a refresh has a model.
   var model: AppModel?
-  private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+  private var activeBackgroundTask: IntakeBackgroundTaskBox?
 
   /// Must run before the app finishes launching.
   func register() {
-    BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.identifier, using: nil) { task in
+    BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.identifier, using: nil) { @Sendable task in
       guard let refresh = task as? BGAppRefreshTask else {
         task.setTaskCompleted(success: false)
         return
       }
+      let completion = IntakeRefreshCompletion(refresh)
+      // Installed before any hop to the main actor, so iOS can always end us.
+      refresh.expirationHandler = { @Sendable in
+        // Jobs being read stay reading and resume on the next drain.
+        Task { @MainActor in
+          IntakeCoordinator.shared.cancelDrain()
+        }
+        completion.complete(success: false)
+      }
       Task { @MainActor in
-        IntakeBackgroundRefresh.shared.handle(refresh)
+        IntakeBackgroundRefresh.shared.handle(completion)
       }
     }
   }
@@ -331,58 +450,58 @@ final class IntakeBackgroundRefresh {
     }
   }
 
-  private func handle(_ task: BGAppRefreshTask) {
+  private func handle(_ completion: IntakeRefreshCompletion) {
+    guard !completion.isFinished else {
+      return
+    }
     guard let model, model.settings.isAuthenticated else {
-      task.setTaskCompleted(success: true)
+      completion.complete(success: true)
       return
     }
     schedule()
     let coordinator = IntakeCoordinator.shared
-    let work = Task { @MainActor in
-      coordinator.drain(model: model)
+    coordinator.drain(model: model)
+    Task { @MainActor in
       await coordinator.waitForDrain()
-      task.setTaskCompleted(success: !Task.isCancelled)
-    }
-    task.expirationHandler = {
-      // Jobs being read stay reading and resume on the next drain.
-      Task { @MainActor in
-        coordinator.cancelDrain()
-        work.cancel()
-      }
+      completion.complete(success: true)
     }
   }
 
-  /// The app moved to the background. Queue a refresh if the Inbox has work,
-  /// and ask for time to finish a read that is under way.
+  /// The app moved to the background while signed in. Always queue a refresh
+  /// (a share made while the app is suspended is only seen by one), and ask
+  /// for time to finish whatever the Inbox has under way.
   func appDidEnterBackground() {
     guard let model, model.settings.isAuthenticated else {
       return
     }
-    if hasPendingWork {
-      schedule()
-    }
+    schedule()
     let coordinator = IntakeCoordinator.shared
-    guard coordinator.isBusy, backgroundTaskID == .invalid else {
+    guard hasPendingWork, activeBackgroundTask == nil else {
       return
     }
-    backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "intake-drain") { [weak self] in
+    let box = IntakeBackgroundTaskBox()
+    box.id = UIApplication.shared.beginBackgroundTask(withName: "intake-drain") { @Sendable [weak self] in
       MainActor.assumeIsolated {
         coordinator.cancelDrain()
-        self?.endBackgroundTask()
+        self?.end(box)
       }
     }
+    activeBackgroundTask = box
     coordinator.drain(model: model)
     Task { @MainActor [weak self] in
       await coordinator.waitForDrain()
-      self?.endBackgroundTask()
+      self?.end(box)
     }
   }
 
-  private func endBackgroundTask() {
-    guard backgroundTaskID != .invalid else {
+  private func end(_ box: IntakeBackgroundTaskBox) {
+    guard box.id != .invalid else {
       return
     }
-    UIApplication.shared.endBackgroundTask(backgroundTaskID)
-    backgroundTaskID = .invalid
+    UIApplication.shared.endBackgroundTask(box.id)
+    box.id = .invalid
+    if activeBackgroundTask === box {
+      activeBackgroundTask = nil
+    }
   }
 }

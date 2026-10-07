@@ -203,10 +203,27 @@ final class ShareSheetModel {
     let result = await loader.load(from: inputItems, displayScale: displayScale)
     items = result.items
     skippedCount = result.unsupportedCount
-    duplicate = result.items.isEmpty ? nil : hashIndex.lookup(
-      contentHash: ShareItemLoader.contentHash(of: result.items),
-      sourceHashes: result.items.map(\.sha256)
-    )
+    if result.items.isEmpty {
+      duplicate = nil
+    } else {
+      var pending = IntakeHashIndex.Contents()
+      for entry in store.pendingEntries() {
+        let value = IntakeHashEntry(jobID: entry.id, sharedAt: entry.createdAt)
+        if let hash = entry.contentHash, !hash.isEmpty {
+          pending.content[hash] = value
+        }
+        for file in entry.sources {
+          if let hash = file.sha256, !hash.isEmpty {
+            pending.sources[hash] = value
+          }
+        }
+      }
+      duplicate = hashIndex.lookup(
+        contentHash: ShareItemLoader.contentHash(of: result.items),
+        sourceHashes: result.items.map(\.sha256),
+        additional: pending
+      )
+    }
     phase = result.items.isEmpty ? .unsupported : .ready
   }
 
@@ -403,7 +420,7 @@ struct ShareSheetView: View {
           Text(model.duplicateMessage)
             .font(.headline)
             .foregroundStyle(ShareTheme.textPrimary)
-          Text("It's in your Halation Inbox. Open Halation to see it.")
+          Text("Halation already has this. Open Halation to check.")
             .font(.subheadline)
             .foregroundStyle(ShareTheme.textSecondary)
         }
@@ -579,7 +596,7 @@ struct ShareSheetView: View {
   }
 
   private var failureLine: some View {
-    Text("Couldn't hand this to Halation. Try again.")
+    Text("Couldn’t hand this to Halation. Try again.")
       .font(.subheadline.weight(.medium))
       .foregroundStyle(ShareTheme.outflow)
   }

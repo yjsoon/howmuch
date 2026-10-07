@@ -666,11 +666,11 @@ final class RootChromeState {
   var pendingAccountID: String?
   var pendingRewardsCardID: String?
   /// An Inbox notification tap or link; Accounts consumes it.
-  var pendingIntakeRoute: IntakeRoute?
+  var pendingIntakeDestination: IntakeDestination?
 
-  func showIntake(_ route: IntakeRoute) {
+  func showIntake(_ route: IntakeDestination) {
     overflowByTab[.accounts] = nil
-    pendingIntakeRoute = route
+    pendingIntakeDestination = route
     tab = .accounts
   }
 

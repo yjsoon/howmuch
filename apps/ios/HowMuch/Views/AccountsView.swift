@@ -141,10 +141,10 @@ struct AccountsView: View {
     .onChange(of: model.referencePhase) { _, _ in
       reconcilePane()
     }
-    .onChange(of: chrome?.pendingIntakeRoute, initial: true) { _, route in
+    .onChange(of: chrome?.pendingIntakeDestination, initial: true) { _, route in
       // An Inbox notification or link: the list, or that batch.
       guard let route else { return }
-      chrome?.pendingIntakeRoute = nil
+      chrome?.pendingIntakeDestination = nil
       switch route {
       case .list:
         pane = .intake

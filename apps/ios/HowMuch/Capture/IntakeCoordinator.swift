@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 import os
 
 extension InboxItem {
@@ -31,8 +32,13 @@ final class IntakeCoordinator {
   @ObservationIgnored private let inbox: InboxStore
   @ObservationIgnored private let store: IntakeJobStore
   @ObservationIgnored private var drainTask: Task<Void, Never>?
+  /// Identifies the drain that owns `drainTask`, so a finished (or cancelled)
+  /// drain's tail never clears a newer one.
+  @ObservationIgnored private var drainToken = UUID()
+  /// Bumped by `cancelDrain`. A drain loop stops when its epoch is stale.
+  @ObservationIgnored private var drainEpoch = 0
   @ObservationIgnored private var redrainRequested = false
-  @ObservationIgnored private var jobTasks: [UUID: Task<Void, Never>] = [:]
+  @ObservationIgnored private var jobTasks: [UUID: (token: UUID, task: Task<Void, Never>)] = [:]
   @ObservationIgnored private var approving: Set<UUID> = []
   /// Account names by ID, refreshed on each drain, for notification copy.
   @ObservationIgnored private var accountNames: [String: String] = [:]
@@ -121,19 +127,28 @@ final class IntakeCoordinator {
     }
     accountNames = Dictionary(model.accounts.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
     prepareJobs(model: model)
-    guard drainTask == nil else {
+    if let running = drainTask, !running.isCancelled {
       redrainRequested = true
       return
     }
+    // A cancelled drain may still be winding down: the new one waits for it,
+    // so two never read the same job at once.
+    let previous = drainTask
+    let epoch = drainEpoch
+    let token = UUID()
+    drainToken = token
     drainTask = Task { [weak self] in
+      await previous?.value
       guard let self else {
         return
       }
       repeat {
         self.redrainRequested = false
-        await self.processPending(model: model)
-      } while self.redrainRequested && !Task.isCancelled
-      self.drainTask = nil
+        await self.processPending(model: model, epoch: epoch)
+      } while self.redrainRequested && self.drainEpoch == epoch && !Task.isCancelled
+      if self.drainToken == token {
+        self.drainTask = nil
+      }
     }
   }
 
@@ -146,10 +161,17 @@ final class IntakeCoordinator {
   /// nothing) and is picked up by the next drain. Used when iOS ends the
   /// time it gave the app in the background.
   func cancelDrain() {
+    drainEpoch += 1
+    redrainRequested = false
     drainTask?.cancel()
-    for task in jobTasks.values {
-      task.cancel()
+    for entry in jobTasks.values {
+      entry.task.cancel()
     }
+  }
+
+  /// Notification copy: the name of the account a job was shared to, if known.
+  func accountName(for job: IntakeJob) -> String? {
+    job.accountID.flatMap { accountNames[$0] }
   }
 
   /// One `list()` per drain: adopt new entries, prune, stamp the budget, mark
@@ -226,6 +248,13 @@ final class IntakeCoordinator {
   private func adoptInbox(model: AppModel) {
     _ = try? inbox.claimInbox(where: { $0.isIntakeJobSource })
     let planID = model.settings.planID
+    var adoptedAny = false
+    defer {
+      if adoptedAny {
+        // Background-first users are asked the first time a share is taken.
+        IntakeNotifier.shared.shareAdopted()
+      }
+    }
     for item in inbox.loadReading(where: { $0.isIntakeJobSource }) {
       do {
         _ = try store.adopt(
@@ -234,18 +263,19 @@ final class IntakeCoordinator {
           connectionFingerprint: planID.isEmpty ? nil : model.settings.connectionFingerprint
         )
         inbox.discardReading(item.id)
+        adoptedAny = true
       } catch {
         Self.logger.error("Couldn't adopt share \(item.id.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)")
       }
     }
   }
 
-  private func processPending(model: AppModel) async {
+  private func processPending(model: AppModel, epoch: Int) async {
     let pending = jobs
       .filter { $0.state == .reading || $0.state == .queued }
       .sorted { $0.createdAt < $1.createdAt }
     for job in pending {
-      if Task.isCancelled {
+      if Task.isCancelled || drainEpoch != epoch {
         return
       }
       await run(job.id, model: model).value
@@ -258,14 +288,20 @@ final class IntakeCoordinator {
   /// The one task reading a job, created on demand.
   @discardableResult
   private func run(_ id: UUID, model: AppModel) -> Task<Void, Never> {
-    if let existing = jobTasks[id] {
-      return existing
+    // A cancelled read may still be winding down: ignore it, and start after it.
+    if let existing = jobTasks[id], !existing.task.isCancelled {
+      return existing.task
     }
+    let previous = jobTasks[id]?.task
+    let token = UUID()
     let task = Task { [weak self] in
+      await previous?.value
       await self?.process(id, model: model)
-      self?.jobTasks[id] = nil
+      if self?.jobTasks[id]?.token == token {
+        self?.jobTasks[id] = nil
+      }
     }
-    jobTasks[id] = task
+    jobTasks[id] = (token, task)
     return task
   }
 
@@ -337,19 +373,41 @@ final class IntakeCoordinator {
       guard FileManager.default.fileExists(atPath: url.path) else {
         continue
       }
-      let text = await recognise(file, at: url)
+      let background = Self.isReadingInBackground
+      let text: String
+      do {
+        text = try await recognise(file, at: url, strict: background)
+      } catch {
+        // Vision failed (not "found no text"). A foreground read can try again.
+        leaveForForeground(id)
+        return
+      }
       guard readable(id) != nil else {
         return
       }
       if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         readAnyText = true
       }
-      var drafts = await SlipReader.shared.interpret(
-        text: text,
-        accounts: accounts,
-        categoryGroups: model.categoryGroups,
-        payees: model.payees
-      )
+      var drafts: [SlipMappedDraft]
+      do {
+        drafts = try await SlipReader.shared.interpretOrThrow(
+          text: text,
+          accounts: accounts,
+          categoryGroups: model.categoryGroups,
+          payees: model.payees
+        )
+      } catch {
+        if background, readable(id) != nil {
+          // The model failed (not "returned no spends"). Don't settle for the
+          // line parser in the background: wait for a foreground read.
+          leaveForForeground(id)
+          return
+        }
+        drafts = []
+      }
+      guard readable(id) != nil else {
+        return
+      }
       if drafts.isEmpty {
         // No Apple Intelligence (or the model declined): read the lines directly.
         drafts = IntakeLineParser.interpret(
@@ -506,12 +564,32 @@ final class IntakeCoordinator {
     }
   }
 
-  private func recognise(_ file: InboxSourceFile, at url: URL) async -> String {
+  /// True when the app is not in front: a background refresh or the time
+  /// iOS gives after backgrounding.
+  private static var isReadingInBackground: Bool {
+    UIApplication.shared.applicationState != .active
+  }
+
+  /// Puts a job whose read failed in the background back in the queue, so the
+  /// next foreground drain reads it with the full pipeline.
+  private func leaveForForeground(_ id: UUID) {
+    guard var job = readable(id) else {
+      return
+    }
+    job.state = .queued
+    save(job)
+  }
+
+  /// With `strict`, an OCR failure throws instead of reading as no text.
+  private func recognise(_ file: InboxSourceFile, at url: URL, strict: Bool) async throws -> String {
     switch file.kind {
     case .image:
       let data = await Task.detached(priority: .userInitiated) { try? Data(contentsOf: url) }.value
       guard let data else {
         return ""
+      }
+      if strict {
+        return try await SlipImageText.recognizeOrThrow(data)
       }
       return await SlipImageText.recognize(data)
     case .text:
@@ -682,7 +760,7 @@ final class IntakeCoordinator {
   /// Rejects the batch: nothing is saved, any read in progress is cancelled,
   /// and the shared files are deleted.
   func discard(_ id: UUID) {
-    jobTasks[id]?.cancel()
+    jobTasks[id]?.task.cancel()
     guard var job = self.job(id) else {
       return
     }
@@ -1095,11 +1173,11 @@ final class IntakeCoordinator {
       jobs.sort { $0.createdAt > $1.createdAt }
     }
     publishAttention()
-    IntakeNotifier.shared.jobDidChange(
-      next,
-      previous: previous,
-      accountName: next.accountID.flatMap { accountNames[$0] }
-    )
+    if (previous == .failed) != (next.state == .failed) {
+      // A failed share can be sent again without a warning.
+      syncHashIndex()
+    }
+    IntakeNotifier.shared.jobDidChange(next, previous: previous, accountName: accountName(for: next))
     return true
   }
 }

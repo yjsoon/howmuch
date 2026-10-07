@@ -79,9 +79,18 @@ struct IntakeHashIndex: Sendable {
 
   /// The most recent earlier share of this payload, if any within the window.
   /// A whole-share match wins over a match on one item.
-  func lookup(contentHash: String?, sourceHashes: [String], now: Date = Date()) -> IntakeHashMatch? {
+  /// `additional` holds shares the app has not yet turned into jobs (still in
+  /// the inbox), so a second share before the app opens also warns.
+  func lookup(
+    contentHash: String?,
+    sourceHashes: [String],
+    additional: Contents = Contents(),
+    now: Date = Date()
+  ) -> IntakeHashMatch? {
     let cutoff = now.addingTimeInterval(-Self.window)
-    let contents = read()
+    var contents = read()
+    contents.content.merge(additional.content) { $0.sharedAt >= $1.sharedAt ? $0 : $1 }
+    contents.sources.merge(additional.sources) { $0.sharedAt >= $1.sharedAt ? $0 : $1 }
     if let contentHash, !contentHash.isEmpty,
        let entry = contents.content[contentHash], entry.sharedAt >= cutoff {
       return IntakeHashMatch(jobID: entry.jobID, sharedAt: entry.sharedAt, isWholeShare: true)

@@ -243,6 +243,9 @@ private struct RootView: View {
     }
     .onChange(of: scenePhase) { _, phase in
       if phase == .active {
+        if model.settings.isAuthenticated {
+          IntakeNotifier.shared.refreshBadge()
+        }
         drainIntakeInbox()
         enqueueInboxIfNeeded(force: false)
         consumePendingCapture()
@@ -256,6 +259,8 @@ private struct RootView: View {
     }
     .onChange(of: model.settings.isAuthenticated) { _, isAuthenticated in
       if !isAuthenticated {
+        IntakeCoordinator.shared.cancelDrain()
+        IntakeNotifier.shared.clearAll()
         capture.dropForSignOut()
       } else {
         drainIntakeInbox()
@@ -267,7 +272,8 @@ private struct RootView: View {
       switch HowMuchDeepLink.parse(url) {
       case .inboxBatch(let id):
         drainIntakeInbox()
-        IntakeNotifier.shared.pendingRoute = .batch(id)
+        // A job that is gone (discarded, pruned) opens the list instead.
+        IntakeNotifier.shared.pendingRoute = IntakeCoordinator.shared.job(id) != nil ? .batch(id) : .list
       case .inbox:
         drainIntakeInbox()
         if QuickAction.hasConversationInboxEntries {
