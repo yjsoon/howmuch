@@ -67,10 +67,22 @@ enum IntakeLineParser {
     var rows: [SlipReaderMapping.Extraction] = []
     var currentDate: String?
     var pending: Pending?
+    // A statement that prints "Posting Date:" under each row: lines between a
+    // row's amount and that line are the rest of its descriptor.
+    var continuing = false
 
-    for rawLine in text.components(separatedBy: .newlines) {
+    let lines = text.components(separatedBy: .newlines)
+    let usesPostingDates = lines.contains { matches(postingDate, clean($0)) }
+
+    for rawLine in lines {
       var line = clean(rawLine)
       guard !line.isEmpty else {
+        continue
+      }
+      // A posting date ends a row's descriptor. It is never a date or a payee,
+      // and a payee still waiting for its amount keeps waiting.
+      if matches(postingDate, line) {
+        continuing = false
         continue
       }
       // Status words, reference lines, postcodes and exchange-rate lines sit
@@ -86,7 +98,14 @@ enum IntakeLineParser {
       let leading = leadingDate(line, calendar: calendar, now: now)
       if let leading, leading.rest.isEmpty {
         currentDate = leading.date
-        pending?.date = leading.date
+        if matches(time, rawLine), pending != nil {
+          // "Kopitiam / 5 Oct, 12:30 PM / -$4.50": the date belongs to this row.
+          pending?.date = leading.date
+        } else {
+          // A plain date header starts a new block.
+          pending = nil
+        }
+        continuing = false
         continue
       }
       var rowDate: String?
@@ -101,8 +120,13 @@ enum IntakeLineParser {
       let amount: ParsedAmount
       switch parseAmount(line) {
       case .none:
+        if continuing {
+          continue
+        }
+        // The first text line of a block is the payee; later lines (the
+        // descriptor) do not replace it.
         let payee = cleanPayee(line)
-        if hasWords(payee) {
+        if pending == nil, hasWords(payee) {
           pending = Pending(payee: payee, date: rowDate)
         }
         continue
@@ -132,6 +156,7 @@ enum IntakeLineParser {
         continue
       }
       pending = nil
+      continuing = usesPostingDates
       rows.append(SlipReaderMapping.Extraction(
         amount: amount.magnitude,
         payee: name,
@@ -154,7 +179,10 @@ enum IntakeLineParser {
   }
 
   private static let noise = regex(
-    #"^(?:completed|successful|success|paid|pending|approved|declined|posted)$|^(?:ref|reference|txn|trans(?:action)? id|card (?:no|number|ending)|account (?:no|number))\b|^(?:singapore|sg|spore)\s*\d{6}$|\bexchange rate\b|\bfx rate\b|^rate\b|\bconversion fee\b|\bcurrency conversion\b|\bforex\b"#
+    #"^(?:completed|successful|success|paid|pending|approved|declined|posted)$|^(?:ref|reference|txn|trans(?:action)? id|card (?:no|number|ending)|account (?:no|number))\b|^(?:singapore|sg|spore)\s*\d{6}$|\bexchange rate\b|\bfx rate\b|^rate\b|\bconversion fee\b|\bcurrency conversion\b|\bforex\b|^(?:credit|debit)\s+[\d\s]+$|^(?:transportation|transport|groceries|food (?:&|and) drink|dining|shopping|bills|entertainment|travel|health|credit card payments|transfers?)$"#
+  )
+  private static let postingDate = regex(
+    #"^(?:posting date|posted on|posted|transaction date|trans(?:action)? date|value date)\b"#
   )
   private static let ignored = regex(
     #"\b(?:balance|bal|avail|available|opening|closing|statement|subtotal|total|credit limit|minimum payment|amount due|due date|brought forward|carried forward)\b|\b[bc]/f\b|\bpage \d+(?: of \d+)?\b"#
@@ -261,6 +289,10 @@ enum IntakeLineParser {
   private static func cleanPayee(_ text: String) -> String {
     var payee = foreignAmount.stringByReplacingMatches(
       in: text, options: [], range: range(text), withTemplate: ""
+    )
+    // Card and account numbers: twelve or more digits, spaced or not.
+    payee = payee.replacingOccurrences(
+      of: #"\b\d(?:[\s-]?\d){11,}\b"#, with: "", options: .regularExpression
     )
     payee = payee.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
     return payee.trimmingCharacters(in: CharacterSet(charactersIn: " -:\u{2022}|\u{00B7}*,;"))
