@@ -669,6 +669,18 @@ final class IntakeCoordinator {
           model.openAccounts.contains(where: { $0.id == accountID }) else {
       return
     }
+    if job.failureMessage == Self.addAccountMessage {
+      // Never read: there was no account to file against. Read it now.
+      var waiting = job
+      waiting.accountID = accountID
+      waiting.decideAccount = false
+      waiting.state = .reading
+      waiting.failureMessage = nil
+      if save(waiting) {
+        drain(model: model)
+      }
+      return
+    }
     var extracted = job.extractions
     for index in extracted.indices {
       SlipAccountPick.apply(accountID, to: &extracted[index].draft)
