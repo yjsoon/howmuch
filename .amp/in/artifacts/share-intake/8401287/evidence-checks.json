@@ -1,0 +1,115 @@
+{
+  "revision": "84012877e314d552e1d6517992004a41d90050e5",
+  "ledgerChecks": {
+    "01-baseline.json": {
+      "accounts": true,
+      "transactions": true,
+      "deletionFlags": true,
+      "activeTransactions": true
+    },
+    "02-review-queued.json": {
+      "accounts": true,
+      "transactions": true,
+      "deletionFlags": true,
+      "activeTransactions": true
+    },
+    "03-review-ready.json": {
+      "accounts": true,
+      "transactions": true,
+      "deletionFlags": true,
+      "activeTransactions": true
+    },
+    "05-after-review.json": {
+      "accounts": true,
+      "transactions": true,
+      "deletionFlags": true,
+      "activeTransactions": true
+    },
+    "07-review-discarded.json": {
+      "accounts": true,
+      "transactions": true,
+      "deletionFlags": true,
+      "activeTransactions": true
+    },
+    "08-body-queued.json": {
+      "accounts": true,
+      "transactions": true,
+      "deletionFlags": true,
+      "activeTransactions": true
+    },
+    "09-body-ready.json": {
+      "accounts": true,
+      "transactions": true,
+      "deletionFlags": true,
+      "activeTransactions": true
+    },
+    "10-after-body.json": {
+      "accounts": true,
+      "transactions": true,
+      "deletionFlags": true,
+      "activeTransactions": true
+    },
+    "12-body-discarded.json": {
+      "accounts": true,
+      "transactions": true,
+      "deletionFlags": true,
+      "activeTransactions": true
+    },
+    "13-later-queued.json": {
+      "accounts": true,
+      "transactions": true,
+      "deletionFlags": true,
+      "activeTransactions": true
+    },
+    "14-before-later.json": {
+      "accounts": true,
+      "transactions": true,
+      "deletionFlags": true,
+      "activeTransactions": true
+    },
+    "16-after-later.json": {
+      "accounts": true,
+      "transactions": true,
+      "deletionFlags": true,
+      "activeTransactions": true
+    },
+    "18-final.json": {
+      "accounts": true,
+      "transactions": true,
+      "deletionFlags": true,
+      "activeTransactions": true
+    }
+  },
+  "laterJobsIdenticalBeforeAfterFinal": true,
+  "finalJobs": [
+    {
+      "id": "15BB2D3F-600A-4EEA-9B10-2C94EEACE0B9",
+      "note": "D8401287 Review",
+      "state": "discarded"
+    },
+    {
+      "id": "8852B1DD-F29C-4ECA-9874-AAA48F728F57",
+      "note": "D8401287 Later",
+      "state": "proposed"
+    },
+    {
+      "id": "DB6D8CF5-5B12-478C-8C09-34868F2289BA",
+      "note": "D8401287 body",
+      "state": "discarded"
+    }
+  ],
+  "crashSignatureCounts": {
+    "Call must be made on main thread": 0,
+    "Terminating app": 0,
+    "Assertion failure": 0
+  },
+  "runtimePIDs": [
+    "28016"
+  ],
+  "processAfterAllActions": "28016 /Users/devin/Library/Developer/CoreSimulator/Devices/EDD9B083-63F1-44E6-9A7B-0A6964CC2561/data/Containers/Bundle/Application/572A268E-CD9D-46AF-B2B0-546A4405B735/HowMuch.app/HowMuch",
+  "actions": {
+    "halation.inbox.review": 13,
+    "com.apple.UNNotificationDefaultActionIdentifier": 11,
+    "halation.inbox.later": 17
+  }
+}
