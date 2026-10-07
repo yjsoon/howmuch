@@ -158,7 +158,8 @@ struct InboxReadingView: View {
             let result = await SlipPDFText.recognize(url)
             try Task.checkCancellation()
             if result.skippedPages > 0 {
-              onNotice("Read the first \(SlipPDFText.maxOCRPages) pages.")
+              let skipped = result.skippedPages
+              onNotice("Skipped \(skipped) scanned \(skipped == 1 ? "page" : "pages"). Halation reads up to \(SlipPDFText.maxOCRPages) scanned pages per PDF.")
             }
             itemDrafts.append(contentsOf: await interpretDrafts(from: result.text))
           }
@@ -286,18 +287,19 @@ enum SlipPDFText {
   /// Each page's text layer when it has one; OCR only for pages with an empty
   /// text layer, up to `maxOCRPages` of them.
   static func recognize(_ url: URL) async -> Result {
-    let pageCount = (try? await inboxBackgroundWork { () throws -> Int in
-      PDFDocument(url: url)?.pageCount ?? 0
-    }) ?? 0
+    // One open for every text layer. OCR pages reopen the file one at a time
+    // (at most `maxOCRPages`) so their renders never sit in memory together.
+    let layers = (try? await inboxBackgroundWork { () throws -> [String] in
+      guard let document = PDFDocument(url: url) else { return [] }
+      return (0..<document.pageCount).map {
+        document.page(at: $0)?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      }
+    }) ?? []
     var pages: [String] = []
     var ocrPages = 0
     var skipped = 0
-    for index in 0..<pageCount {
+    for (index, layer) in layers.enumerated() {
       if Task.isCancelled { break }
-      let layer = (try? await inboxBackgroundWork { () throws -> String in
-        PDFDocument(url: url)?.page(at: index)?.string?
-          .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-      }) ?? ""
       if !layer.isEmpty {
         pages.append(layer)
         continue
