@@ -1,0 +1,42 @@
+{
+  "revision": "2d14080bcaaf3f631d6d63a11ef09fd4848c258c",
+  "baselineToFinal": {
+    "accounts": true,
+    "transactions": true,
+    "deletionFlags": true,
+    "activeTransactions": true,
+    "transactionsWithCategories": true,
+    "categories": true
+  },
+  "baselineLiveTransactions": 4,
+  "finalLiveTransactions": 4,
+  "ready": {
+    "jobID": "AAE74FBA-3712-4B80-9493-204526E5849C",
+    "proposalID": "7EB54DEA-D4B2-4F6F-B1AC-A8841C65D006",
+    "expectedBody": "1 new, from 1 DBS Altitude screenshot",
+    "observedBadge": 1,
+    "reviewAction": "halation.inbox.review"
+  },
+  "alreadyIn": {
+    "jobID": "455AAEB9-5B9E-4651-9E49-4125819B8738",
+    "proposalID": "DB2BE370-8F09-48FE-A51D-E7A48A9F416F",
+    "observedNotification": false,
+    "observationSeconds": 60,
+    "observedBadge": 0,
+    "targetTransactionID": "e2e-existing-kopitiam"
+  },
+  "failed": {
+    "smallJobID": "1C7CED86-2402-4D71-8285-A1B816909B2A",
+    "largeJobID": "A051B61D-1BE7-4F47-BBD0-C2A49D35BF90",
+    "largeState": "failed",
+    "failureMessage": "Couldn\u2019t read this. No text was found.",
+    "observedNotification": false,
+    "notificationDiscardTested": false
+  },
+  "runtime": {
+    "mainThreadException": false,
+    "termination": false,
+    "assertionFailure": false,
+    "backgroundScheduleResult": "BGTaskSchedulerErrorDomain error 1"
+  }
+}
