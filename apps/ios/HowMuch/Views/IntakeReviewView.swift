@@ -111,10 +111,8 @@ struct IntakeReviewView: View {
           takenIDs: Set(job.proposals.compactMap { $0.id == proposal.id ? nil : $0.targetTransactionID })
         ) { candidateID in
           Task {
-            let flipped = await coordinator.flipToFix(reference.id, candidate: candidateID, in: jobID, model: model)
-            if !flipped {
-              model.showSaveMessage("Couldn’t read that transaction. Try again.", kind: .failure)
-            }
+            // The coordinator tells the owner when the row is gone or cannot be checked.
+            await coordinator.flipToFix(reference.id, candidate: candidateID, in: jobID, model: model)
           }
         }
       }
@@ -598,7 +596,7 @@ struct IntakeReviewView: View {
 
   private func loadExisting() async {
     for id in neededExistingIDs where existing[id] == nil {
-      if let row = await model.intakeLiveTransaction(id: id) {
+      if case .found(let row) = await model.intakeLiveTransaction(id: id) {
         existing[id] = row
       }
     }
@@ -821,7 +819,7 @@ private struct IntakeMatchSheet: View {
     for id in proposal.candidateIDs where !takenIDs.contains(id) {
       if let row = known[id] {
         found.append(row)
-      } else if let row = await model.intakeLiveTransaction(id: id) {
+      } else if case .found(let row) = await model.intakeLiveTransaction(id: id) {
         found.append(row)
       }
     }
