@@ -46,6 +46,19 @@ export class D1MetadataRepository {
     return Number(row.server_knowledge);
   }
 
+  /** Narrow counterpart of `upsertPlan`: only the given formats change, and `server_knowledge` moves. */
+  async updatePlanFormats(planId: string, formats: { currency_format?: unknown; date_format?: unknown }, context?: D1WriteContext): Promise<void> {
+    const commandId = this.id(context);
+    await this.run("metadata.plan.formats", planId, planId, { formats }, context, [
+      assertion(commandId, "metadata_plan_exists", planId, planId),
+      statement(
+        `UPDATE plans SET currency_format_json=COALESCE(?,currency_format_json),date_format_json=COALESCE(?,date_format_json),
+           server_knowledge=server_knowledge+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+        [formats.currency_format ? JSON.stringify(formats.currency_format) : null, formats.date_format ? JSON.stringify(formats.date_format) : null, planId],
+      ),
+    ]);
+  }
+
   async upsertPlan(planId: string, plan: any, settings?: any, context?: D1WriteContext): Promise<void> {
     const payload = { plan, settings };
     const date = JSON.stringify(settings?.date_format ?? { format: "DD/MM/YYYY" });

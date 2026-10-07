@@ -321,6 +321,8 @@ export interface AuthStatus {
   user: AuthUser | null;
   /** Unix seconds; null when nothing here holds a browser session. */
   session_expires_at?: number | null;
+  /** Plan id to this user's role there. Present only for a signed-in session. */
+  roles?: Record<string, "owner" | "editor" | "viewer">;
 }
 
 /** What the setup and login endpoints return for a cookie session. */
@@ -382,6 +384,11 @@ export const api = {
       body: JSON.stringify({ username, password }),
     }),
   logout: () => request<{ ok: true }>("/api/auth/logout", { method: "POST", body: "{}" }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ ok: true }>("/api/auth/password", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    }),
   personalApiTokens: () =>
     request<{ tokens: PersonalApiToken[] }>("/api/auth/personal-tokens").then((data) => data.tokens),
   createPersonalApiToken: (name: string) =>
@@ -397,6 +404,11 @@ export const api = {
     request<{ plans: Plan[] }>("/v1/plans", undefined, options).then((d) => d.plans),
   settings: (planId: string, options?: ApiRequestOptions) =>
     request<{ settings: PlanSettings }>(planUrl(planId, "settings"), undefined, options).then((d) => d.settings),
+  updatePlanFormats: (planId: string, formats: Pick<LocalePlanSeed, "currency_format" | "date_format">) =>
+    request<{ settings: PlanSettings }>(`/api/plans/${encodeURIComponent(planId)}/settings`, {
+      method: "PATCH",
+      body: JSON.stringify(formats),
+    }).then((d) => d.settings),
   accounts: (planId: string, options?: ApiRequestOptions) =>
     request<{ accounts: Account[]; server_knowledge: number }>(planUrl(planId, "accounts"), undefined, options),
   updateAccountIcon: (planId: string, accountId: string, icon: string) =>

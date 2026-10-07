@@ -19,6 +19,8 @@ export type NativeHarness = {
   backend: Backend;
   db: Database;
   repo: LedgerStore;
+  /** The raw handler, for auth flows that need cookies, origins or session tokens of their own. */
+  handle: (request: Request) => Promise<Response>;
   request: (path: string, init?: { method?: string; body?: unknown; key?: string; token?: string }) => Promise<Response>;
   /** D1 only: statement count of every binding.batch call (reads and writes). */
   batches: number[];
@@ -62,6 +64,7 @@ export async function nativeHarness(backend: Backend): Promise<NativeHarness> {
     backend,
     db,
     repo,
+    handle: handler,
     request: (path, init = {}) => handler(new Request(`https://howmuch.test${path}`, {
       method: init.method ?? "GET",
       headers: {

@@ -21,9 +21,22 @@ Authorization: Bearer <token>
 
 The first owner is created once with `POST /api/auth/setup`, authorized by `HOWMUCH_API_TOKEN`. That static token remains valid for integrations, but only against `HOWMUCH_DEFAULT_PLAN_ID`. Session users can access only plans where they hold an owner, editor, or viewer membership; viewers cannot mutate data.
 
-`POST /api/auth/setup` also accepts two optional fields that seed the new plan's formats: `currency_format` and `date_format`. `currency_format` must contain exactly `iso_code` (three capital letters), `example_format` (1 to 40 characters), `decimal_digits` (integer 0 to 4), `decimal_separator` (must be `"."`), `symbol_first` (boolean), `group_separator` (must be `","`), `currency_symbol` (1 to 8 characters) and `display_symbol` (boolean). The clients only parse `.` and `,`, so other separators are rejected. `date_format` must be `{"format": "DD/MM/YYYY" | "MM/DD/YYYY" | "YYYY-MM-DD"}`. An invalid value returns `400 bad_request` and creates nothing. Omitted fields keep the schema default (SGD, `DD/MM/YYYY`). The seed applies only when the plan row does not exist yet, and is ignored otherwise. There is no endpoint to change either format afterwards.
+`POST /api/auth/setup` also accepts two optional fields that seed the new plan's formats: `currency_format` and `date_format`. `currency_format` must contain exactly `iso_code` (three capital letters), `example_format` (1 to 40 characters), `decimal_digits` (integer 0 to 4), `decimal_separator` (must be `"."`), `symbol_first` (boolean), `group_separator` (must be `","`), `currency_symbol` (1 to 8 characters) and `display_symbol` (boolean). The clients only parse `.` and `,`, so other separators are rejected. `date_format` must be `{"format": "DD/MM/YYYY" | "MM/DD/YYYY" | "YYYY-MM-DD"}`. An invalid value returns `400 bad_request` and creates nothing. Omitted fields keep the schema default (SGD, `DD/MM/YYYY`). The seed applies only when the plan row does not exist yet, and is ignored otherwise. Change either format afterwards with `PATCH /api/plans/{plan_id}/settings` (see [Changing plan formats](#changing-plan-formats)).
 
 Signed-in browser users manage long-lived personal credentials at `GET`/`POST /api/auth/personal-tokens` and `DELETE /api/auth/personal-tokens/{id}`. Creation returns the `hm_pat_…` bearer value once; Halation stores only its SHA-256 fingerprint. Personal tokens inherit the user's current plan memberships, remain valid until revoked, and cannot create or manage other tokens. Management requires the secure browser session and same-origin checks; the global integration token and native bearer sessions are not accepted.
+
+`GET /api/auth/status` also returns `roles` (plan id to `owner`, `editor` or `viewer`) when the caller holds a user session. Clients use it to show owner-only controls; the server enforces the role on every write regardless.
+
+### Changing your password
+
+`POST /api/auth/password` with `{ "current_password": "...", "new_password": "..." }`.
+
+- Requires a signed-in user session, either the browser cookie (which must pass the same-origin check) or a native bearer session token. The static `HOWMUCH_API_TOKEN` and personal API tokens are refused with `401`.
+- `new_password` must meet the setup rule (at least 15 characters, at most 256 bytes) and differ from `current_password`, otherwise `400 bad_request`.
+- A wrong `current_password` returns `401 invalid_credentials` with a generic message. Attempts share the per-username budget of the login routes: more than 10 in a 15 minute window returns `429 rate_limited` with `retry-after: 900`, even for the correct password.
+- On success the credential is replaced and every other session of that user is revoked in one step. The session that made the request stays signed in. Personal API tokens are separate credentials and are not revoked; manage them with `/api/auth/personal-tokens`. Returns `{ "data": { "ok": true } }`.
+
+Expired sessions and rate-limit windows that ended more than a day ago are deleted opportunistically (a bounded batch at each successful sign-in or setup), so no scheduled job is needed.
 
 Error responses follow the YNAB wrapper shape:
 
@@ -68,6 +81,15 @@ Returns `plans` for `/plans` and `budgets` for `/budgets`, with the same records
 `GET /v1/plans/{plan_id}/settings`
 
 Returns date format, currency format, and custom flag names.
+
+#### Changing plan formats
+
+`PATCH /api/plans/{plan_id}/settings` with `currency_format`, `date_format`, or both. Each is validated exactly as at setup (see `POST /api/auth/setup` above), so only `.` and `,` separators and the three date formats are accepted. An invalid value, or a body with neither field, returns `400 bad_request` and writes nothing; a valid field is not applied if the other is invalid.
+
+- Plan owners only: editors and viewers receive `403 forbidden`. The static `HOWMUCH_API_TOKEN` works only for `HOWMUCH_DEFAULT_PLAN_ID`; a personal API token acts with its user's role.
+- Returns `{ "data": { "settings": ... } }` in the same shape as `GET /v1/plans/{plan_id}/settings`.
+- The plan's `server_knowledge` increases and `last_modified_on` updates, so clients that validate cached plan data against them refetch.
+- Amounts are stored as integer milliunits with no currency attached. Changing the currency changes how clients display amounts and does not convert any stored value.
 
 ### Accounts
 

@@ -41,7 +41,45 @@ export interface AuthStore {
   revokePersonalApiToken(userId: string, tokenId: string, now: number): Promise<PersonalApiToken | null>;
   authenticatePersonalApiToken(tokenHash: string): Promise<AuthUser | null>;
   rateAttempt(scope: "username" | "ip", keyHash: string, windowStart: number): Promise<number>;
+  /**
+   * Replaces the user's password credential and revokes every session of that
+   * user except the one whose token hash is `keepTokenHash`, in one atomic
+   * step. Personal API tokens are separate credentials and are left alone.
+   */
+  replaceCredential(
+    userId: string,
+    credential: Omit<StoredCredential, "user_id" | "username">,
+    keepTokenHash: string,
+    now: number,
+  ): Promise<void>;
+  /** Deletes a bounded batch of expired sessions and long-finished rate-limit windows. Never touches live rows. */
+  pruneExpired(now: number): Promise<void>;
 }
+
+/** Rows removed per table by one prune, so a backlog is worked off a little at a time. */
+const PRUNE_BATCH = 500;
+/** A rate-limit window is kept for a day after it ends, long past the 15 minutes it matters for. */
+const RATE_LIMIT_WINDOW_SECONDS = 900;
+const RATE_LIMIT_RETENTION_SECONDS = 24 * 60 * 60;
+
+// Sessions use `idx_sessions_expiry`. Rate-limit rows have no window index (the
+// primary key leads with scope and key), but the table only grows with failed
+// or repeated logins and is trimmed here on every successful sign-in, so the
+// scan stays small and no migration is needed.
+const pruneSessionsSql = (placeholder: string) =>
+  `DELETE FROM sessions WHERE id IN (SELECT id FROM sessions WHERE expires_at<${placeholder} LIMIT ${PRUNE_BATCH})`;
+const pruneRateLimitsSql = (placeholder: string) =>
+  `DELETE FROM login_rate_limits WHERE rowid IN (SELECT rowid FROM login_rate_limits WHERE window_start<${placeholder} LIMIT ${PRUNE_BATCH})`;
+const rateLimitCutoff = (now: number) => now - RATE_LIMIT_RETENTION_SECONDS - RATE_LIMIT_WINDOW_SECONDS;
+
+const replaceCredentialSql = (p: (n: number) => string) =>
+  `UPDATE password_credentials
+   SET kdf=${p(1)},kdf_version=${p(2)},cost_n=${p(3)},block_size=${p(4)},parallelization=${p(5)},salt_hex=${p(6)},hash_hex=${p(7)},updated_at=unixepoch()
+   WHERE user_id=${p(8)}`;
+const revokeOtherSessionsSql = (p: (n: number) => string) =>
+  `UPDATE sessions SET revoked_at=${p(1)} WHERE user_id=${p(2)} AND revoked_at IS NULL AND token_hash<>${p(3)}`;
+const credentialValues = (userId: string, c: Omit<StoredCredential, "user_id" | "username">) =>
+  [c.kdf, c.kdf_version, c.cost_n, c.block_size, c.parallelization, c.salt_hex, c.hash_hex, userId];
 
 /** Plan row for first-owner setup; seeded formats go in the same statement, omitted ones keep the schema default. */
 function planInsert(input: SetupInput, placeholder: (n: number) => string): { sql: string; values: string[] } {
@@ -171,6 +209,29 @@ export class SQLiteAuthStore implements AuthStore {
     ).get(scope, keyHash, windowStart) as { attempts: number };
     return row.attempts;
   }
+
+  async replaceCredential(
+    userId: string,
+    credential: Omit<StoredCredential, "user_id" | "username">,
+    keepTokenHash: string,
+    now: number,
+  ): Promise<void> {
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+      const updated = this.db.query(replaceCredentialSql(() => "?")).run(...credentialValues(userId, credential));
+      if (updated.changes !== 1) throw new Error("Password credential not found");
+      this.db.query(revokeOtherSessionsSql(() => "?")).run(now, userId, keepTokenHash);
+      this.db.run("COMMIT");
+    } catch (error) {
+      if (this.db.inTransaction) this.db.run("ROLLBACK");
+      throw error;
+    }
+  }
+
+  async pruneExpired(now: number): Promise<void> {
+    this.db.query(pruneSessionsSql("?")).run(now);
+    this.db.query(pruneRateLimitsSql("?")).run(rateLimitCutoff(now));
+  }
 }
 
 function insertCredential(db: Database, input: SetupInput): void {
@@ -298,5 +359,22 @@ export class D1AuthStore implements AuthStore {
     );
     if (!row) throw new Error("Login rate counter did not return a value");
     return Number(row.attempts);
+  }
+
+  async replaceCredential(
+    userId: string,
+    credential: Omit<StoredCredential, "user_id" | "username">,
+    keepTokenHash: string,
+    now: number,
+  ): Promise<void> {
+    await this.db.atomicBatch([
+      { sql: replaceCredentialSql((n) => `$${n}`), values: credentialValues(userId, credential) },
+      { sql: revokeOtherSessionsSql((n) => `$${n}`), values: [now, userId, keepTokenHash] },
+    ]);
+  }
+
+  async pruneExpired(now: number): Promise<void> {
+    await this.db.run(pruneSessionsSql("$1"), [now]);
+    await this.db.run(pruneRateLimitsSql("$1"), [rateLimitCutoff(now)]);
   }
 }

@@ -75,19 +75,19 @@ Paste the random string when prompted. Keep a copy in a password manager: it is 
 
 Open your Worker's address in a browser. The app shows the setup form. Enter a username, a password of at least 15 characters, and the setup token from step 4.
 
-The form also asks for a currency and a date format, prefilled from your browser's language. That guess is only a guess: browsers often report US English whatever the person's country, so check both before you continue. They cannot be changed in the app yet.
+The form also asks for a currency and a date format, prefilled from your browser's language. That guess is only a guess: browsers often report US English whatever the person's country, so check both before you continue. You can change them later in Settings.
 
 Setup works once. A second attempt returns "Setup has already completed".
 
 ### Changing the currency or date format afterwards
 
-Until the app can do this itself, update the plan row directly. This example switches to Singapore dollars with day/month/year dates. Replace `<HOWMUCH_DEFAULT_PLAN_ID>` with the value in your config, and adapt the currency JSON for another currency. The separators must stay `.` and `,`.
+Sign in as the plan owner, open **Settings**, and use **Currency and date format**. Choose the new values and save; amounts and dates update straight away. Only owners see this section.
 
-```sh
-bunx wrangler d1 execute <db-name> --remote --config wrangler.self-host.jsonc --command "UPDATE plans SET currency_format_json='{\"iso_code\":\"SGD\",\"example_format\":\"\$123,456.78\",\"decimal_digits\":2,\"decimal_separator\":\".\",\"symbol_first\":true,\"group_separator\":\",\",\"currency_symbol\":\"\$\",\"display_symbol\":true}', date_format_json='{\"format\":\"DD/MM/YYYY\"}', updated_at=CURRENT_TIMESTAMP WHERE id='<HOWMUCH_DEFAULT_PLAN_ID>'"
-```
+Amounts are stored as exact milliunits with no currency attached, so changing the currency changes how they are shown and does not convert them. If your ledger was in one currency and you now want another, the numbers stay the same.
 
-Then reload the app. The date format is one of `DD/MM/YYYY`, `MM/DD/YYYY` or `YYYY-MM-DD`.
+### Changing your password
+
+Open **Settings** and use **Change password**. Enter the current password and the new one (at least 15 characters). Every other browser and device signed in as you is signed out; the one you used stays signed in. Personal API tokens keep working, so revoke any you no longer trust on the **API tokens** page.
 
 ## 6. Connect the iOS app
 

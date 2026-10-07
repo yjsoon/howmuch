@@ -114,7 +114,22 @@ export function formatPeriod(period: string): string {
   return period;
 }
 
+let planDateFormat: string | undefined;
+
+/** Applies the plan's date format to full dates. Periods (months, weeks, years) are unaffected. */
+export function configureDateFormat(format?: { format?: string }): void {
+  planDateFormat = format?.format;
+}
+
+/** A full ISO date in the plan's date format; any other value, or no configured format, keeps the "10 Jun 2026" style. */
 export function formatDate(date: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (match) {
+    const [, year, month, day] = match;
+    if (planDateFormat === "DD/MM/YYYY") return `${day}/${month}/${year}`;
+    if (planDateFormat === "MM/DD/YYYY") return `${month}/${day}/${year}`;
+    if (planDateFormat === "YYYY-MM-DD") return date;
+  }
   return formatPeriod(date);
 }
 

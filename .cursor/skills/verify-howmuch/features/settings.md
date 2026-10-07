@@ -1,6 +1,6 @@
 # Settings
 
-Settings is the home for account plumbing: API tokens and Rewards import. Those tools are not top-level money-flow links.
+Settings is the home for account plumbing: change password, currency and date format (owners only), API tokens and Rewards import. Those tools are not top-level money-flow links.
 
 ## Sub-features
 
@@ -8,6 +8,8 @@ Settings is the home for account plumbing: API tokens and Rewards import. Those 
 - `settings-tokens` follows **API tokens** to the token page.
 - `settings-rewards` follows **Rewards import** to the importer.
 - `settings-not-primary` keeps **API tokens** and **Rewards import** out of Primary navigation.
+- `settings-password` changes the password: the current session stays signed in, other sessions are signed out, personal API tokens keep working.
+- `settings-formats` changes the plan currency and date format (owner only); amounts and dates repaint without a reload.
 - `settings-crumb` returns to the hub from the `← Settings / …` breadcrumb on a tool page.
 
 ## How to get to it (user POV)
@@ -27,6 +29,8 @@ Preconditions:
 - **Primary nav.** `Primary navigation` has `Scheduled` and the Reflect reports. It has no `API tokens` link and no `Rewards import` link.
 - **API tokens.** Choose `API tokens`. Title is `API tokens · HowMuch`. Breadcrumb is `← Settings / API tokens`. Choose `Settings` in the breadcrumb to return to the hub.
 - **Rewards import.** From the hub, choose `Rewards import`. Title is `Rewards import · HowMuch`. Heading is `Rewards import`.
+- **Change password.** In **Change password** enter the current password, a new one of 15 or more characters, and the same again. Short, mismatched or unchanged values show an inline alert; a wrong current password shows `Current password is incorrect`. Success shows `Password changed. Other sessions have been signed out.` A second browser context signed in earlier lands on the sign-in form at its next request.
+- **Currency and date format.** Choose a new currency and/or date format, then `Save formats` (disabled until something changes). Success shows `Formats saved.` Register amounts and dates change straight away; `GET /v1/plans/{plan_id}/settings` shows the new values.
 - **Proof.** Screenshot the hub (`artifacts/settings/hub.png`) and the All Accounts sidebar showing Settings in the footer, not above Reflect (`artifacts/settings/sidebar.png`).
 
 ## Gotchas

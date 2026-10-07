@@ -25,6 +25,7 @@ import {
   guessDateFormat,
   type DateFormatChoice,
 } from "../lib/locale-plan-seed";
+import { configureDateFormat } from "../lib/dates";
 import { configureMoney } from "../lib/money";
 import { parseTransactionDeepLink } from "../lib/transaction-deep-link";
 import { HalationMark } from "../components/Brand";
@@ -277,6 +278,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         const paintedCache = cached?.planId === hint && !requestedPlanId ? cached : null;
         if (paintedCache && hint && !cancelled) {
           configureMoney(paintedCache.data.settings.currency_format);
+          configureDateFormat(paintedCache.data.settings.date_format);
           setValue(provisionalPlanValue(hint, paintedCache, { reload, logout: signOut }));
         }
         const requests = planBootstrapRequests({
@@ -393,6 +395,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
           return;
         }
         configureMoney(settings.currency_format);
+        configureDateFormat(settings.date_format);
         savePrefs({ planId });
         // Tagged with the knowledge the accounts were actually read at, not
         // the plans list's, so a write landing between the two reads leaves
@@ -646,7 +649,7 @@ function AuthForm({
               {DATE_FORMAT_CHOICES.map((format) => <option key={format} value={format}>{format}</option>)}
             </select>
           </label>
-          <p className="boot-hint">Currency and date format cannot be changed later yet.</p>
+          <p className="boot-hint">You can change the currency and date format later in Settings.</p>
         </>
       )}
       <button
