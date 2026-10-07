@@ -285,6 +285,97 @@ final class IntakeLineParserTests: XCTestCase {
     XCTAssertEqual(extract("EURO 12.00"), [])
   }
 
+  // MARK: Multi-line rows (synthetic layouts)
+
+  func testCardListWithTheAmountInTheMiddleOfAWrappedDescriptor() {
+    let rows = extract("""
+    04 Oct 2026
+    MAPLE BAKERY-NORTHPT JOHOR
+    - SGD 3.20
+    BAHRU MYS
+    Posting Date: 06 Oct 2026
+    RIVER MART-EASTSIDE JOHOR BAHRU
+    - SGD 7.45
+    MYS
+    Posting Date: 06 Oct 2026
+    LANTERN PHARMACY DESA JOHOR MYS
+    - SGD 5.10
+    Posting Date: 06 Oct 2026
+    03 Oct 2026
+    88 MINIMART - 1234 JOHOR MYS
+    - SGD 2.30
+    Posting Date: 05 Oct 2026
+    """)
+    XCTAssertEqual(rows, [
+      Row("MAPLE BAKERY-NORTHPT JOHOR", "3.20", .outflow, "2026-10-04"),
+      Row("RIVER MART-EASTSIDE JOHOR BAHRU", "7.45", .outflow, "2026-10-04"),
+      Row("LANTERN PHARMACY DESA JOHOR MYS", "5.10", .outflow, "2026-10-04"),
+      Row("88 MINIMART - 1234 JOHOR MYS", "2.30", .outflow, "2026-10-03"),
+    ])
+  }
+
+  func testCardListWithTheAmountAfterTheWrappedLinesAndAPostingDateBeforeIt() {
+    let rows = extract("""
+    04 Oct 2026
+    MAPLE BAKERY-NORTHPT JOHOR
+    BAHRU MYS
+    - SGD 3.20
+    Posting Date: 06 Oct 2026
+    LANTERN PHARMACY DESA JOHOR MYS
+    Posting Date: 06 Oct 2026
+    - SGD 5.10
+    """)
+    XCTAssertEqual(rows, [
+      Row("MAPLE BAKERY-NORTHPT JOHOR", "3.20", .outflow, "2026-10-04"),
+      Row("LANTERN PHARMACY DESA JOHOR MYS", "5.10", .outflow, "2026-10-04"),
+    ])
+  }
+
+  func testCardAppWithMerchantDescriptorCategoryAndWeekdayHeaders() {
+    let rows = extract("""
+    18:28
+    5G 66
+    Yuu
+    Credit 4111 1111 1111 1111
+    Jun
+    Jul
+    Aug
+    Current
+    Unbilled
+    Thu, 10 Sep 2026
+    QuickRide
+    QUICKRIDE-PAY SINGAPORE SG
+    Transportation
+    SGD -18.40
+    Corner Mart
+    CORNER MART-123A SENGKANG SINGAPORE SG
+    Groceries
+    SGD -6.80
+    Wed, 09 Sep 2026
+    Fresh Grocer
+    FRESH GROCER-NEX SINGAPORE SG
+    Groceries
+    SGD -9.15
+    Tue, 08 Sep 2026
+    PAYMENT FROM 4111111111111111
+    Credit Card Payments
+    SGD +0.16
+    """)
+    XCTAssertEqual(rows, [
+      Row("QuickRide", "18.40", .outflow, "2026-09-10"),
+      Row("Corner Mart", "6.80", .outflow, "2026-09-10"),
+      Row("Fresh Grocer", "9.15", .outflow, "2026-09-09"),
+      Row("PAYMENT FROM", "0.16", .inflow, "2026-09-08"),
+    ])
+  }
+
+  func testLongDigitRunsAreStrippedFromPayees() {
+    XCTAssertEqual(
+      extract("Grab 4111 1111 1111 1111 -8.90"),
+      [Row("Grab", "8.90", .outflow, nil)]
+    )
+  }
+
   // MARK: Dates
 
   func testYearlessDateMoreThanAWeekAheadUsesThePreviousYear() {
