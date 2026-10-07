@@ -4600,6 +4600,10 @@ extension AppModel {
         return row.deleted ? nil : overlaying([row]).first
       } catch APIClientError.httpStatus(404) {
         return nil
+      } catch APIClientError.server {
+        // A JSON error body (404 `resource_not_found` and friends): the server
+        // answered and has no row to give, so treat it as gone, never stale.
+        return nil
       } catch {
         // Unreachable: fall back to what the register shows.
       }
