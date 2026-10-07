@@ -2734,7 +2734,15 @@ final class AppModel {
 
   func wipeIntentCatalog(using store: IntentCatalogStore = .shared) {
     store.wipeAll()
-    publishSignedOutShareContext(using: .shared)
+    guard settings.isAuthenticated else {
+      publishSignedOutShareContext(using: .shared)
+      return
+    }
+    // A plan or connection switch while signed in: the old accounts must go, but
+    // the owner is not signed out. A missing file reads as "unknown" until the
+    // new accounts publish.
+    ShareContextStore.shared.remove()
+    lastPublishedShareContext = nil
   }
 
   /// A signed-out context, not a missing file: a missing file means a fresh
