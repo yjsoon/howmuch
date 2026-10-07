@@ -111,9 +111,10 @@ struct InboxReadingView: View {
     do {
       let store = store
       let items = try await inboxBackgroundWork {
-        try store.claimInbox()
+        // Share-sheet entries belong to the intake coordinator.
+        try store.claimInbox(where: { !$0.isIntakeJobSource })
         try Task.checkCancellation()
-        return store.loadReading()
+        return store.loadReading(where: { !$0.isIntakeJobSource })
       }
       try Task.checkCancellation()
       onClaimed(items.map(\.id))

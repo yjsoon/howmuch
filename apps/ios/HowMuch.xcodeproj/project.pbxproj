@@ -132,6 +132,17 @@
 		B10000000000000000000021 /* ServerConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000020 /* ServerConnection.swift */; };
 		B10000000000000000000023 /* ServerConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000022 /* ServerConnectView.swift */; };
 		B10000000000000000000025 /* ServerConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000024 /* ServerConnectionTests.swift */; };
+		D20000000000000000000002 /* IntakeJob.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000001 /* IntakeJob.swift */; };
+		D20000000000000000000004 /* IntakeJobStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000003 /* IntakeJobStore.swift */; };
+		D20000000000000000000008 /* IntakeMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000007 /* IntakeMatcher.swift */; };
+		D2000000000000000000000A /* IntakeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000009 /* IntakeCoordinator.swift */; };
+		D20000000000000000000006 /* PayeeNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000005 /* PayeeNames.swift */; };
+		D2000000000000000000000C /* IntakeInboxBand.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000000000000000000000B /* IntakeInboxBand.swift */; };
+		D2000000000000000000000E /* InboxListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000000000000000000000D /* InboxListView.swift */; };
+		D20000000000000000000010 /* IntakeMatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000000000000000000000F /* IntakeMatcherTests.swift */; };
+		D20000000000000000000012 /* PayeeNamesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000011 /* PayeeNamesTests.swift */; };
+		D20000000000000000000014 /* IntakeLineParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000013 /* IntakeLineParser.swift */; };
+		D20000000000000000000016 /* IntakeLineParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000015 /* IntakeLineParserTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -262,6 +273,17 @@
 		B10000000000000000000020 /* ServerConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConnection.swift; sourceTree = "<group>"; };
 		B10000000000000000000022 /* ServerConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConnectView.swift; sourceTree = "<group>"; };
 		B10000000000000000000024 /* ServerConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConnectionTests.swift; sourceTree = "<group>"; };
+		D20000000000000000000001 /* IntakeJob.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeJob.swift; sourceTree = "<group>"; };
+		D20000000000000000000003 /* IntakeJobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeJobStore.swift; sourceTree = "<group>"; };
+		D20000000000000000000007 /* IntakeMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeMatcher.swift; sourceTree = "<group>"; };
+		D20000000000000000000009 /* IntakeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeCoordinator.swift; sourceTree = "<group>"; };
+		D20000000000000000000005 /* PayeeNames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayeeNames.swift; sourceTree = "<group>"; };
+		D2000000000000000000000B /* IntakeInboxBand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeInboxBand.swift; sourceTree = "<group>"; };
+		D2000000000000000000000D /* InboxListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxListView.swift; sourceTree = "<group>"; };
+		D2000000000000000000000F /* IntakeMatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeMatcherTests.swift; sourceTree = "<group>"; };
+		D20000000000000000000011 /* PayeeNamesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayeeNamesTests.swift; sourceTree = "<group>"; };
+		D20000000000000000000013 /* IntakeLineParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeLineParser.swift; sourceTree = "<group>"; };
+		D20000000000000000000015 /* IntakeLineParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeLineParserTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXContainerItemProxy section */
@@ -397,6 +419,7 @@
 				A50000000000000000000030 /* RewardRowProjection.swift */,
 				A50000000000000000000032 /* RewardDraftPeriod.swift */,
 				A10000000000000000000019 /* Theme.swift */,
+				D20000000000000000000005 /* PayeeNames.swift */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -413,6 +436,8 @@
 				A1000000000000000000007D /* AccountIdentityFields.swift */,
 				A1000000000000000000007E /* EditAccountSheet.swift */,
 				A10000000000000000000071 /* AccountsView.swift */,
+				D2000000000000000000000B /* IntakeInboxBand.swift */,
+				D2000000000000000000000D /* InboxListView.swift */,
 				A10000000000000000000072 /* RegisterView.swift */,
 				A50000000000000000000010 /* RewardsView.swift */,
 				A50000000000000000000012 /* RewardsImportView.swift */,
@@ -449,6 +474,11 @@
 				A20000000000000000000012 /* CaptureRouter.swift */,
 				A20000000000000000000090 /* InboxStore.swift */,
 				A200000000000000000000F6 /* ShareContextStore.swift */,
+				D20000000000000000000001 /* IntakeJob.swift */,
+				D20000000000000000000003 /* IntakeJobStore.swift */,
+				D20000000000000000000007 /* IntakeMatcher.swift */,
+				D20000000000000000000009 /* IntakeCoordinator.swift */,
+				D20000000000000000000013 /* IntakeLineParser.swift */,
 				A20000000000000000000094 /* InboxReadingView.swift */,
 				A20000000000000000000096 /* IntelligenceAura.swift */,
 				A200000000000000000000A0 /* ScreenshotOffer.swift */,
@@ -490,6 +520,9 @@
 				A2000000000000000000005A /* AddTransactionIntentTests.swift */,
 				A20000000000000000000082 /* CommitManyTests.swift */,
 				A20000000000000000000092 /* InboxStoreTests.swift */,
+				D2000000000000000000000F /* IntakeMatcherTests.swift */,
+				D20000000000000000000011 /* PayeeNamesTests.swift */,
+				D20000000000000000000015 /* IntakeLineParserTests.swift */,
 				A2000000000000000000009C /* AddFromInboxIntentTests.swift */,
 				A200000000000000000000A2 /* ScreenshotOfferTests.swift */,
 				A200000000000000000000B0 /* RegisterSnapshotTests.swift */,
@@ -744,6 +777,14 @@
 				A20000000000000000000059 /* AppShortcuts.swift in Sources */,
 				A20000000000000000000091 /* InboxStore.swift in Sources */,
 				A200000000000000000000F7 /* ShareContextStore.swift in Sources */,
+				D20000000000000000000002 /* IntakeJob.swift in Sources */,
+				D20000000000000000000004 /* IntakeJobStore.swift in Sources */,
+				D20000000000000000000008 /* IntakeMatcher.swift in Sources */,
+				D2000000000000000000000A /* IntakeCoordinator.swift in Sources */,
+				D20000000000000000000014 /* IntakeLineParser.swift in Sources */,
+				D20000000000000000000006 /* PayeeNames.swift in Sources */,
+				D2000000000000000000000C /* IntakeInboxBand.swift in Sources */,
+				D2000000000000000000000E /* InboxListView.swift in Sources */,
 				A20000000000000000000095 /* InboxReadingView.swift in Sources */,
 				A20000000000000000000097 /* IntelligenceAura.swift in Sources */,
 				A200000000000000000000A1 /* ScreenshotOffer.swift in Sources */,
@@ -769,6 +810,9 @@
 				A2000000000000000000005B /* AddTransactionIntentTests.swift in Sources */,
 				A20000000000000000000083 /* CommitManyTests.swift in Sources */,
 				A20000000000000000000093 /* InboxStoreTests.swift in Sources */,
+				D20000000000000000000010 /* IntakeMatcherTests.swift in Sources */,
+				D20000000000000000000012 /* PayeeNamesTests.swift in Sources */,
+				D20000000000000000000016 /* IntakeLineParserTests.swift in Sources */,
 				A2000000000000000000009D /* AddFromInboxIntentTests.swift in Sources */,
 				A200000000000000000000A3 /* ScreenshotOfferTests.swift in Sources */,
 				A200000000000000000000B1 /* RegisterSnapshotTests.swift in Sources */,

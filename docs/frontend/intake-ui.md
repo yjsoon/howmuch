@@ -22,7 +22,9 @@ Resolve account context at session admission. Composer **Account** is the next m
 | + from overview, Rewards, Assistant, Plan, or Reflect | last-used **open** account |
 | Home Screen **Add Expense** | last-used **open** account, even if a register was left open |
 | Duplicate / structured App Intent | the draft’s explicit account |
-| Share | The sheet's chosen account, default last-used open. "Let Halation decide" means the account is chosen at review. |
+| Share | The sheet's chosen account, default last-used open. The chosen account applies to every line. "Let Halation decide" lets the reader's own account pick apply, and a batch with a line that has no account waits in the Inbox as **Needs you**. |
+
+Share-sheet entries go to the **Inbox** (the band at the top of Accounts, and its list), not the conversation. The main app reads them on this phone, matches each line against the register, and offers **Approve all**. App Intents and the screenshot offer still open the conversation. See `docs/plans/share-intake.md`.
 
 Prefer last-used to most-used. Fallback: first open account, or **Choose Account** if none. Never a closed or deleted account. Browsing or cancelling does not change last-used. A successful local save or outbox enqueue does.
 

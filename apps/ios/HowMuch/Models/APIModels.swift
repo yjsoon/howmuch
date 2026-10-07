@@ -3161,6 +3161,9 @@ struct TransactionDraft: Equatable, Codable {
   var linkedTransferIDs: [String] = []
   var flag: FlagColour = .none
   var memo = ""
+  /// Nil keeps the editor's behaviour: saving approves the row. A caller that
+  /// must not change approval (a share-intake Fix) sets the row's own value.
+  var approved: Bool?
 
   init() {
     importID = UUID().uuidString.lowercased()
@@ -3331,7 +3334,7 @@ struct TransactionDraft: Equatable, Codable {
       categoryID: isSplit ? nil : categoryID,
       memo: memo.trimmedNil,
       cleared: includeCleared ? clearedState : nil,
-      approved: true,
+      approved: approved ?? true,
       flagColor: flag.rawValue.isEmpty ? nil : flag.rawValue,
       subtransactions: subtransactions.compactMap { $0.writeRequest() },
       importID: importID

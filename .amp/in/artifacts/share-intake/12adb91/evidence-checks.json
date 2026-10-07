@@ -1,0 +1,52 @@
+{
+  "revision": "12adb917270d872474069d5e44eebaa6db4b772e",
+  "checks": {
+    "setup_only_C_row_soft_deleted": true,
+    "baseline_three_live_no_23450": true,
+    "no_write_before_approval": true,
+    "two_original_images_auto_DBS_note": true,
+    "correct_kinds_dates": true,
+    "correct_already_in_target": true,
+    "one_new_approved_NTUC_only": true,
+    "baseline_rows_and_tombstones_preserved": true,
+    "one_live_23450_one_kopitiam": true,
+    "relaunch_unchanged": true,
+    "four_live_six_historical": true,
+    "previous_jobs_unchanged": true,
+    "new_job_applied_one_added": true
+  },
+  "allPassed": true,
+  "setupDeletedID": "txn_c95b236c-7263-48ac-b9e2-1c620f718dfd",
+  "newTransaction": {
+    "id": "txn_51258cd7-90b6-49e0-9d20-d2558c5f91ee",
+    "account_id": "e2e-dbs",
+    "date": "2026-10-05",
+    "amount_milli": -23450,
+    "payee_name_snapshot": "NTUC FAIRPRICE",
+    "category_id": null,
+    "category_name_snapshot": null,
+    "approved": 1,
+    "deleted": 0
+  },
+  "jobID": "40AF3AF0-42A2-4705-8E00-C2E9D319C681",
+  "finalAccounts": [
+    {
+      "id": "e2e-dbs",
+      "name": "DBS Altitude",
+      "closed": 0,
+      "balance_milli": -63450
+    },
+    {
+      "id": "e2e-everyday",
+      "name": "Everyday Account",
+      "closed": 0,
+      "balance_milli": 0
+    },
+    {
+      "id": "e2e-closed",
+      "name": "Closed Synthetic Account",
+      "closed": 1,
+      "balance_milli": 0
+    }
+  ]
+}

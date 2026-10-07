@@ -2,6 +2,9 @@ import SwiftUI
 
 enum AccountsPane: Hashable, Identifiable {
   case inbox
+  /// The share-intake Inbox list (batches shared to Halation), not the "New" queue.
+  case intake
+  case intakeBatch(UUID)
   case scheduled
   case all
   case account(String)
@@ -10,6 +13,10 @@ enum AccountsPane: Hashable, Identifiable {
     switch self {
     case .inbox:
       return "inbox"
+    case .intake:
+      return "intake"
+    case .intakeBatch(let id):
+      return "intake-\(id.uuidString)"
     case .scheduled:
       return "scheduled"
     case .all:
@@ -214,6 +221,10 @@ struct AccountsView: View {
     switch pane {
     case .inbox:
       RegisterView(scope: .unapproved)
+    case .intake:
+      InboxListView()
+    case .intakeBatch(let id):
+      IntakeBatchDetailView(jobID: id)
     case .scheduled:
       ScheduledTransactionsView()
     case .all:
@@ -235,6 +246,11 @@ struct AccountsView: View {
           OutboxCard()
             .transition(.move(edge: .top).combined(with: .opacity))
         }
+
+        IntakeInboxBand(
+          onSeeAll: { pane = .intake },
+          onOpen: { job in pane = .intakeBatch(job.id) }
+        )
 
         if model.accounts.isEmpty, model.referencePhase != .loaded {
           PhasePlaceholder(phase: model.referencePhase) {

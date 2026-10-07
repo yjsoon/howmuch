@@ -362,6 +362,24 @@ final class InboxStore: @unchecked Sendable {
     return !readingURLsLocked().isEmpty
   }
 
+  /// Ready entries the predicate accepts. A manifest that cannot be decoded
+  /// counts as a match, so whichever flow looks first claims and quarantines it.
+  func hasReadyInboxItems(matching include: (InboxItem) -> Bool) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return readyInboxURLsLocked().contains { url in
+      loadItemLocked(at: url).map(include) ?? true
+    }
+  }
+
+  func hasReadingItems(matching include: (InboxItem) -> Bool) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return readingURLsLocked().contains { url in
+      loadItemLocked(at: url).map(include) ?? false
+    }
+  }
+
   func hasPendingWork() -> Bool {
     hasReadyInboxItems() || hasReadingItems()
   }
@@ -465,6 +483,14 @@ final class InboxStore: @unchecked Sendable {
   /// id already in Reading is a no-op and is not returned again.
   @discardableResult
   func claimInbox() throws -> [InboxItem] {
+    try claimInbox(where: { _ in true })
+  }
+
+  /// Claims only entries the predicate accepts and leaves the rest in
+  /// `Inbox/` for another flow. A manifest that cannot be decoded is
+  /// quarantined whatever the predicate says.
+  @discardableResult
+  func claimInbox(where include: (InboxItem) -> Bool) throws -> [InboxItem] {
     lock.lock()
     defer { lock.unlock() }
     try fileManager.createDirectory(at: readingDirectory, withIntermediateDirectories: true)
@@ -475,13 +501,16 @@ final class InboxStore: @unchecked Sendable {
       if fileManager.fileExists(atPath: destination.path) {
         continue
       }
-      guard loadItemLocked(at: url) != nil else {
+      guard let item = loadItemLocked(at: url) else {
         quarantineLocked(url)
         continue
       }
+      guard include(item) else {
+        continue
+      }
       try fileManager.moveItem(at: url, to: destination)
-      if let item = loadItemLocked(at: destination) {
-        claimed.append(item)
+      if let moved = loadItemLocked(at: destination) {
+        claimed.append(moved)
       }
     }
     return claimed.sorted { $0.createdAt < $1.createdAt }
@@ -508,9 +537,14 @@ final class InboxStore: @unchecked Sendable {
   }
 
   func loadReading() -> [InboxItem] {
+    loadReading(where: { _ in true })
+  }
+
+  func loadReading(where include: (InboxItem) -> Bool) -> [InboxItem] {
     lock.lock()
     defer { lock.unlock() }
     return readingURLsLocked().compactMap { loadItemLocked(at: $0) }
+      .filter(include)
       .sorted { $0.createdAt < $1.createdAt }
   }
 
@@ -518,6 +552,14 @@ final class InboxStore: @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
     discardReadingLocked(id)
+  }
+
+  /// Moves a Reading folder out of the way (kept for inspection) when its
+  /// files can never be read.
+  func quarantineReading(_ id: UUID) {
+    lock.lock()
+    defer { lock.unlock() }
+    quarantineLocked(readingDirectory.appendingPathComponent(id.uuidString, isDirectory: true))
   }
 
   func discardReading(ids: [UUID]) {

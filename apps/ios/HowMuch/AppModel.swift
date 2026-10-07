@@ -4387,7 +4387,8 @@ final class AppModel {
     planID: String,
     accountID: String? = nil,
     offset: Int = 0,
-    sinceDate: String? = nil
+    sinceDate: String? = nil,
+    untilDate: String? = nil
   ) async throws -> TransactionPage {
     let generation = beginLedgerRead()
     defer { endLedgerRead(generation) }
@@ -4395,14 +4396,17 @@ final class AppModel {
       planID: planID,
       accountID: accountID,
       offset: offset,
-      sinceDate: sinceDate
+      sinceDate: sinceDate,
+      untilDate: untilDate
     )
     return TransactionPage(
       transactions: repairingStaleRead(
         page.transactions,
         startedAt: generation,
         addingCreates: offset == 0 ? { row in
-          (accountID == nil || row.accountID == accountID) && (sinceDate.map { row.date >= $0 } ?? true)
+          (accountID == nil || row.accountID == accountID)
+            && (sinceDate.map { row.date >= $0 } ?? true)
+            && (untilDate.map { row.date <= $0 } ?? true)
         } : nil
       ),
       hasMore: page.hasMore,
@@ -4515,7 +4519,7 @@ final class AppModel {
     return repaired
   }
 
-  private func showSaveMessage(_ text: String, kind: SaveMessage.Kind = .success) {
+  func showSaveMessage(_ text: String, kind: SaveMessage.Kind = .success) {
     saveMessageToken += 1
     lastSaveMessage = SaveMessage(id: saveMessageToken, text: text, kind: kind)
     let token = saveMessageToken
@@ -4526,4 +4530,120 @@ final class AppModel {
       }
     }
   }
+}
+
+// MARK: - Intake candidates (docs/plans/share-intake.md section 6)
+
+/// The rows an intake match compares against, and whether the search was whole.
+struct IntakeCandidateSet {
+  var rows: [IntakeCandidateRow]
+  /// The full rows behind `rows` that came from the register or server, by ID.
+  var transactions: [String: Transaction]
+  /// False when the server could not be read (offline), so rows beyond what
+  /// the register had loaded may be missing and a duplicate could go unseen.
+  var isComplete: Bool
+}
+
+extension AppModel {
+  /// Safety stop for the paging loop below; a window never has this many pages.
+  private static let intakeCandidatePageCeiling = 400
+
+  /// Existing rows an intake match may compare against, dated within
+  /// `from...to`: what the register already holds, every page the server has
+  /// for the window (plan-wide, `since_date` to `until_date`), and creates
+  /// still waiting in the outbox. A failed fetch leaves the loaded rows and
+  /// reports the set incomplete.
+  func intakeCandidates(accountIDs: Set<String>?, from: Date, to: Date) async -> IntakeCandidateSet {
+    let fromISO = from.isoDateString
+    let toISO = to.isoDateString
+    var rows: [String: IntakeCandidateRow] = [:]
+    var full: [String: Transaction] = [:]
+    func add(_ row: Transaction) {
+      guard !row.deleted, row.parentTransactionID == nil, row.date >= fromISO, row.date <= toISO,
+            accountIDs?.contains(row.accountID) ?? true, rows[row.id] == nil else {
+        return
+      }
+      rows[row.id] = IntakeCandidateRow(transaction: row)
+      full[row.id] = row
+    }
+
+    var isComplete = false
+    if settings.isAuthenticated {
+      isComplete = true
+      let planID = settings.planID
+      var offset = 0
+      for _ in 0..<Self.intakeCandidatePageCeiling {
+        do {
+          let page = try await fetchLedgerPage(
+            planID: planID, offset: offset, sinceDate: fromISO, untilDate: toISO
+          )
+          overlaying(page.transactions).forEach(add)
+          guard page.hasMore, let next = page.nextOffset, next > offset else {
+            break
+          }
+          offset = next
+        } catch {
+          isComplete = false
+          break
+        }
+      }
+    }
+    transactions.forEach(add)
+    unapprovedTransactions.forEach(add)
+
+    // Creates the server has not seen yet are still money in the register.
+    for command in currentOutbox {
+      guard case .create(let request) = command.kind, rows[command.transactionID] == nil,
+            request.date >= fromISO, request.date <= toISO,
+            accountIDs?.contains(request.accountID) ?? true else {
+        continue
+      }
+      rows[command.transactionID] = IntakeCandidateRow(
+        id: command.transactionID,
+        accountID: request.accountID,
+        date: request.date,
+        amountMilli: request.amount,
+        payeeName: request.payeeName ?? "",
+        categoryID: request.categoryID,
+        approved: request.approved
+      )
+    }
+    return IntakeCandidateSet(rows: Array(rows.values), transactions: full, isComplete: isComplete)
+  }
+
+  /// The row as it is now, for approving a Fix: the server's copy with queued
+  /// changes applied. Never the cached copy when a server is in play, because
+  /// an edit is sent as a whole row and stale data would overwrite newer changes.
+  func intakeLiveTransaction(id: String) async -> IntakeLiveRow {
+    // On-device mode answers from the engine, which is the authoritative read;
+    // signed out there is nothing to ask, and the cached page is not a source.
+    guard settings.isAuthenticated else {
+      return .unavailable
+    }
+    do {
+      let row = try await apiClient.fetchTransaction(planID: settings.planID, transactionID: id)
+      if row.deleted {
+        return .gone
+      }
+      return overlaying([row]).first.map(IntakeLiveRow.found) ?? .gone
+    } catch APIClientError.httpStatus(404) {
+      return .gone
+    } catch APIClientError.server {
+      // A JSON error body (404 `resource_not_found` and friends): the server
+      // answered and has no row to give.
+      return .gone
+    } catch {
+      // Unreachable or failing: the row cannot be checked right now.
+      return .unavailable
+    }
+  }
+}
+
+/// The result of looking a Fix target up on the server.
+enum IntakeLiveRow {
+  case found(Transaction)
+  /// The server answered and the row is not there.
+  case gone
+  /// The server could not be asked (offline, a failing request).
+  case unavailable
 }
