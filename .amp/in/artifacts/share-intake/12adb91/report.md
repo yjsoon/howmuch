@@ -67,7 +67,7 @@ Final: **4 live / 6 historical**, including **2 deleted prior NTUC tombstones**.
 
 ## Reproduction and evidence
 
-Use preserved synthetic local setup, never production. The locally retained `snapshot.py` helper opens dynamically discovered SQLite with `mode=ro`; no SQL schema mismatch occurred. The read-only SQL statements below are copied verbatim from that helper:
+Use preserved synthetic local setup, never production. The checkpoints were captured with a local helper that opened the app's SQLite file with `mode=ro`; no SQL schema mismatch occurred. The read-only SQL statements below are the ones it ran:
 
 ```sql
 SELECT id, name, closed, balance_milli FROM accounts
@@ -79,13 +79,21 @@ SELECT id, name, category_group_id, hidden, internal, deleted FROM categories
 SELECT name FROM sqlite_master WHERE type='table'
 ```
 
-The helper scripts are retained locally and excluded from the published file set.
+That helper is not committed. The same reads, and the key comparisons, need only `xcrun`, `sqlite3` and `jq`:
 
 ```sh
-# In repo root, after corresponding UI checkpoint:
-python3 .amp/in/artifacts/share-intake/12adb91/snapshot.py LABEL
-# Compare saved evidence only, no app/database access:
-python3 .amp/in/artifacts/share-intake/12adb91/evidence-checks.py
+# After each UI checkpoint, on the booted simulator (read-only):
+DATA=$(xcrun simctl get_app_container booted sg.soon.howmuch data)
+DB="$DATA/Library/Application Support/HowMuch/Local/howmuch.sqlite"
+sqlite3 -readonly "$DB" "SELECT id, account_id, date, amount_milli, payee_name_snapshot, approved FROM transactions WHERE deleted = 0"
+
+# From a clean checkout, against the committed checkpoints only:
+E=.amp/in/artifacts/share-intake/12adb91
+jq '[.activeTransactions[] | select(.amount_milli == -23450)] | length' $E/06-before-approve.json   # 0: nothing saved before approval
+jq '[.activeTransactions[] | select(.amount_milli == -23450)] | length' $E/08-after-approve.json    # 1: one NTUC row
+jq '[.activeTransactions[] | select(.amount_milli == -8900)] | length' $E/08-after-approve.json     # 1: no second Kopitiam
+jq -S .activeTransactions $E/08-after-approve.json > /tmp/a.json; jq -S .activeTransactions $E/09-after-relaunch.json | diff - /tmp/a.json && echo "relaunch unchanged"
+jq '.allPassed' $E/evidence-checks.json                                                              # true: all 13 recorded comparisons
 ```
 
 Checkpoints: `01-preserved-before-setup`, `03-baseline`, `06-before-approve`, `08-after-approve`, `09-after-relaunch` (each JSON plus TXT). `evidence-checks.json` contains 13 passing read-only comparisons.
