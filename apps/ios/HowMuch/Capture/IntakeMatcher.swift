@@ -91,7 +91,9 @@ struct IntakeMatcher: Sendable {
     var claimed = Set<String>()
     var proposals: [IntakeProposal] = []
     for read in extracted {
-      var result = proposal(for: read, openAccountIDs: openAccountIDs, candidates: candidates, claimed: claimed)
+      var result = proposal(
+        for: read, openAccountIDs: openAccountIDs, candidates: candidates, claimed: claimed, hint: hint
+      )
       // An existing row answers one line of the document, not two.
       if let target = result.targetTransactionID {
         claimed.insert(target)
@@ -120,7 +122,8 @@ struct IntakeMatcher: Sendable {
     for read: SlipMappedDraft,
     openAccountIDs: Set<String>,
     candidates: [IntakeCandidateRow],
-    claimed: Set<String>
+    claimed: Set<String>,
+    hint: IntakeHint
   ) -> IntakeProposal {
     let magnitude = read.draft.amountMagnitudeMilli
     guard magnitude > 0 else {
@@ -237,7 +240,8 @@ struct IntakeMatcher: Sendable {
       reasons.append("Reconciled · stays reconciled")
     }
     let changed = Self.differences(
-      draft: read.draft, parsedCategory: read.parsedCategory, row: best.row
+      draft: read.draft, parsedCategory: read.parsedCategory, row: best.row,
+      allowContainment: hint != .fix
     )
     if changed.isEmpty {
       return IntakeProposal(
@@ -279,7 +283,8 @@ struct IntakeMatcher: Sendable {
   static func differences(
     draft: TransactionDraft,
     parsedCategory: Bool,
-    row: IntakeCandidateRow
+    row: IntakeCandidateRow,
+    allowContainment: Bool = true
   ) -> [IntakeField] {
     var fields: [IntakeField] = []
     let readTokens = PayeeNames.tokens(draft.payeeName)
@@ -287,8 +292,9 @@ struct IntakeMatcher: Sendable {
     // A raw bank descriptor that contains every word of the saved payee is the
     // same payee ("KOPITIAM AMK" for "Kopitiam"). The test is on whole words,
     // so "GrabFood" does not contain "Grab" and stays a different payee.
+    // Under a Fix hint the owner asked for corrections, so a longer name is a rename.
     let samePayee = readTokens == existingTokens
-      || (!existingTokens.isEmpty && Set(existingTokens).isSubset(of: Set(readTokens)))
+      || (allowContainment && !existingTokens.isEmpty && Set(existingTokens).isSubset(of: Set(readTokens)))
     if !row.isTransfer, draft.transferAccountID == nil, !readTokens.isEmpty, !samePayee {
       fields.append(.payee)
     }
@@ -327,10 +333,14 @@ struct IntakeMatcher: Sendable {
   static func pendingFixFields(
     wanted: [IntakeField],
     draft: TransactionDraft,
-    live: Transaction
+    live: Transaction,
+    allowContainment: Bool = true
   ) -> [IntakeField] {
     let base = differences(
-      draft: draft, parsedCategory: wanted.contains(.category), row: IntakeCandidateRow(transaction: live)
+      draft: draft,
+      parsedCategory: wanted.contains(.category),
+      row: IntakeCandidateRow(transaction: live),
+      allowContainment: allowContainment
     )
     return wanted.filter { field in
       switch field {

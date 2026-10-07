@@ -1,9 +1,5 @@
 import SwiftUI
 
-struct IntakeRoute: Hashable {
-  let jobID: UUID
-}
-
 /// The Inbox: every batch shared to Halation, grouped by what it needs.
 struct InboxListView: View {
   @Environment(AppModel.self) private var model
