@@ -1,0 +1,61 @@
+{
+  "revision": "15935b7571e3293e75958a899bf7837eb01d1694",
+  "baselineLiveCount": 1,
+  "baselineDeletionFlags": [
+    {
+      "id": "e2e-existing-kopitiam",
+      "deleted": 0
+    },
+    {
+      "id": "txn_5a0cabc1-c688-4c42-8891-a45116d7e610",
+      "deleted": 1
+    }
+  ],
+  "untickLedgerUnchanged": true,
+  "doneLedgerUnchanged": true,
+  "doneActiveUnchanged": true,
+  "doneAccountsUnchanged": true,
+  "relaunchUnchanged": true,
+  "rejectionHistoricalUnchanged": true,
+  "rejectionActiveUnchanged": true,
+  "rejectionAccountsUnchanged": true,
+  "finalActiveTransactions": [
+    {
+      "id": "txn_c95b236c-7263-48ac-b9e2-1c620f718dfd",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FairPrice",
+      "approved": 1
+    },
+    {
+      "id": "e2e-existing-kopitiam",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -8900,
+      "payee_name_snapshot": "Kopitiam",
+      "approved": 1
+    }
+  ],
+  "finalHistoricalCount": 3,
+  "finalLiveCount": 2,
+  "originalKopitiamUnchanged": true,
+  "finalJobStates": [
+    [
+      "C15935b7 PDF E2E",
+      "1A94A452-535D-4F7A-BE03-CB9978B6754D",
+      "discarded"
+    ],
+    [
+      null,
+      "C7E0A426-EED8-488A-AF74-6D2B5E34B334",
+      "discarded"
+    ],
+    [
+      "C15935b7 Photos E2E",
+      "ED0A4BBB-1A80-4CB7-AED9-A111C9311F00",
+      "applied"
+    ]
+  ],
+  "navigationLogMatches": []
+}
