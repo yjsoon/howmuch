@@ -46,9 +46,13 @@ final class IntakeCoordinator {
   static let fallbackConfidenceCap = 0.85
 
   init(
-    inbox: InboxStore = .shared,
+    inbox: InboxStore = IntakeJobStore.isUnitTestHost
+      ? InboxStore(container: IntakeJobStore.sharedContainer)
+      : .shared,
     store: IntakeJobStore = .shared,
-    hashIndex: IntakeHashIndex = .shared
+    hashIndex: IntakeHashIndex = IntakeJobStore.isUnitTestHost
+      ? IntakeHashIndex(container: IntakeJobStore.sharedContainer)
+      : .shared
   ) {
     self.inbox = inbox
     self.store = store

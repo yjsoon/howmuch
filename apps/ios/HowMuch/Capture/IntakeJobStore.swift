@@ -4,7 +4,20 @@ import Foundation
 /// shared files under `Jobs/{id}/sources/`. Main app only: the share extension
 /// writes the inbox, never jobs. Use from the main actor.
 final class IntakeJobStore {
-  static let shared = IntakeJobStore(container: InboxStore.defaultContainer())
+  static let shared = IntakeJobStore(container: IntakeJobStore.sharedContainer)
+
+  /// The app group, except under the unit-test host: tests must not read jobs a
+  /// simulator run left in the real container (they would render in snapshots).
+  static let isUnitTestHost =
+    ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
+  static let sharedContainer: URL = {
+    guard isUnitTestHost else {
+      return InboxStore.defaultContainer()
+    }
+    return FileManager.default.temporaryDirectory
+      .appendingPathComponent("HowMuchTests-intake-\(UUID().uuidString)", isDirectory: true)
+  }()
 
   let jobsDirectory: URL
 
