@@ -50,6 +50,7 @@
 		A50000000000000000000013 /* RewardsImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000012 /* RewardsImportView.swift */; };
 		A50000000000000000000015 /* RewardCardEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000014 /* RewardCardEditorView.swift */; };
 		A50000000000000000000021 /* RewardsReportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000020 /* RewardsReportTests.swift */; };
+		D10000000000000000000002 /* RewardExposureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000001 /* RewardExposureTests.swift */; };
 		A50000000000000000000023 /* RewardCardEditorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000022 /* RewardCardEditorTests.swift */; };
 		A50000000000000000000025 /* RewardDraftPeriodTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000024 /* RewardDraftPeriodTests.swift */; };
 		A60000000000000000000011 /* IPadLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000000000000000000010 /* IPadLayoutTests.swift */; };
@@ -190,6 +191,7 @@
 		A200000000000000000000F2 /* SplitMirrorDeleteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitMirrorDeleteTests.swift; sourceTree = "<group>"; };
 		A200000000000000000000F4 /* AccountGroupOrderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountGroupOrderTests.swift; sourceTree = "<group>"; };
 		A50000000000000000000020 /* RewardsReportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardsReportTests.swift; sourceTree = "<group>"; };
+		D10000000000000000000001 /* RewardExposureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardExposureTests.swift; sourceTree = "<group>"; };
 		A50000000000000000000022 /* RewardCardEditorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardCardEditorTests.swift; sourceTree = "<group>"; };
 		A50000000000000000000024 /* RewardDraftPeriodTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardDraftPeriodTests.swift; sourceTree = "<group>"; };
 		A60000000000000000000010 /* IPadLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPadLayoutTests.swift; sourceTree = "<group>"; };
@@ -490,6 +492,7 @@
 				A200000000000000000000C2 /* RegisterApprovalTests.swift */,
 				A200000000000000000000C4 /* APISettingsTests.swift */,
 				A50000000000000000000020 /* RewardsReportTests.swift */,
+				D10000000000000000000001 /* RewardExposureTests.swift */,
 				A50000000000000000000022 /* RewardCardEditorTests.swift */,
 				A50000000000000000000024 /* RewardDraftPeriodTests.swift */,
 				A60000000000000000000010 /* IPadLayoutTests.swift */,
@@ -766,6 +769,7 @@
 				A200000000000000000000C3 /* RegisterApprovalTests.swift in Sources */,
 				A200000000000000000000C5 /* APISettingsTests.swift in Sources */,
 				A50000000000000000000021 /* RewardsReportTests.swift in Sources */,
+				D10000000000000000000002 /* RewardExposureTests.swift in Sources */,
 				A50000000000000000000023 /* RewardCardEditorTests.swift in Sources */,
 				A50000000000000000000025 /* RewardDraftPeriodTests.swift in Sources */,
 				A60000000000000000000011 /* IPadLayoutTests.swift in Sources */,
