@@ -35,6 +35,9 @@ enum IntakeLineParser {
   private struct Pending {
     var payee: String
     var date: String?
+    /// The next text line may replace this payee: it was a heading or category
+    /// label, or a date line came after it, and no amount has arrived yet.
+    var replaceable = false
   }
 
   private struct Token {
@@ -90,6 +93,13 @@ enum IntakeLineParser {
       if matches(noise, line) {
         continue
       }
+      // A category label never replaces or blocks a payee; alone above an amount it is the payee.
+      if matches(categoryLabel, line) {
+        if pending == nil, !continuing {
+          pending = Pending(payee: cleanPayee(line), date: nil, replaceable: true)
+        }
+        continue
+      }
       // Balances, totals and page furniture end any row in progress.
       if matches(ignored, line) {
         pending = nil
@@ -98,12 +108,14 @@ enum IntakeLineParser {
       let leading = leadingDate(line, calendar: calendar, now: now)
       if let leading, leading.rest.isEmpty {
         currentDate = leading.date
-        if matches(time, rawLine), pending != nil {
-          // "Kopitiam / 5 Oct, 12:30 PM / -$4.50": the date belongs to this row.
+        if pending != nil {
+          // "Grab / Today / -$8.90": the date belongs to the waiting payee. Without
+          // a clock time it may instead be a header, so a text line that comes
+          // next may still replace the payee (it may have been chrome).
           pending?.date = leading.date
-        } else {
-          // A plain date header starts a new block.
-          pending = nil
+          if !matches(time, rawLine) {
+            pending?.replaceable = true
+          }
         }
         continuing = false
         continue
@@ -126,7 +138,11 @@ enum IntakeLineParser {
         // The first text line of a block is the payee; later lines (the
         // descriptor) do not replace it.
         let payee = cleanPayee(line)
-        if pending == nil, hasWords(payee) {
+        if let existing = pending {
+          if existing.replaceable, hasWords(payee) {
+            pending = Pending(payee: payee, date: existing.date ?? rowDate)
+          }
+        } else if hasWords(payee) {
           pending = Pending(payee: payee, date: rowDate)
         }
         continue
@@ -179,7 +195,11 @@ enum IntakeLineParser {
   }
 
   private static let noise = regex(
-    #"^(?:completed|successful|success|paid|pending|approved|declined|posted)$|^(?:ref|reference|txn|trans(?:action)? id|card (?:no|number|ending)|account (?:no|number))\b|^(?:singapore|sg|spore)\s*\d{6}$|\bexchange rate\b|\bfx rate\b|^rate\b|\bconversion fee\b|\bcurrency conversion\b|\bforex\b|^(?:credit|debit)\s+[\d\s]+$|^(?:transportation|transport|groceries|food (?:&|and) drink|dining|shopping|bills|entertainment|travel|health|credit card payments|transfers?)$"#
+    #"^(?:completed|successful|success|paid|pending|approved|declined|posted)$|^(?:ref|reference|txn|trans(?:action)? id|card (?:no|number|ending)|account (?:no|number))\b|^(?:singapore|sg|spore)\s*\d{6}$|\bexchange rate\b|\bfx rate\b|^rate\b|\bconversion fee\b|\bcurrency conversion\b|\bforex\b|^(?:credit|debit)\s+[\d\s]+$|^(?:all transactions|recent transactions|transactions|transaction history|activity|history|statement|unbilled|current|pending)$"#
+  )
+  /// A category label under a payee. It is the payee only when it is alone above an amount.
+  private static let categoryLabel = regex(
+    #"^(?:transportation|transport|groceries|food (?:&|and) drink|dining|shopping|bills|entertainment|travel|health|credit card payments|transfers?)$"#
   )
   private static let postingDate = regex(
     #"^(?:posting date|posted on|posted|transaction date|trans(?:action)? date|value date)\b"#

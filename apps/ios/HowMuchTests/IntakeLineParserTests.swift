@@ -376,6 +376,39 @@ final class IntakeLineParserTests: XCTestCase {
     )
   }
 
+  func testPlainDateLineBetweenAPayeeAndItsAmountDatesTheRow() {
+    XCTAssertEqual(extract("Grab\nToday\n-$8.90"), [Row("Grab", "8.90", .outflow, "today")])
+    XCTAssertEqual(
+      extract("Kopitiam\n5 Oct 2026\n-$4.50"),
+      [Row("Kopitiam", "4.50", .outflow, "2026-10-05")]
+    )
+  }
+
+  func testListHeadingsAboveTheFirstRowAreNotPayees() {
+    for heading in ["Transactions", "All Transactions", "Recent transactions", "Transaction history",
+                    "Activity", "History", "Statement", "Unbilled", "Current", "Pending"] {
+      XCTAssertEqual(
+        extract("\(heading)\nGrab\n-$8.90"),
+        [Row("Grab", "8.90", .outflow, nil)],
+        heading
+      )
+    }
+  }
+
+  func testCategoryLabelAloneAboveAnAmountIsThePayee() {
+    XCTAssertEqual(extract("Transfer\n-$50.00"), [Row("Transfer", "50.00", .outflow, nil)])
+    // A label never replaces or blocks a real payee, before or after it.
+    XCTAssertEqual(extract("Transportation\nQuickRide\n-$18.40"), [Row("QuickRide", "18.40", .outflow, nil)])
+    XCTAssertEqual(extract("QuickRide\nTransportation\n-$18.40"), [Row("QuickRide", "18.40", .outflow, nil)])
+  }
+
+  func testAFollowUpRowKeepsItsOwnFirstLineAsThePayee() {
+    XCTAssertEqual(
+      extract("Grab\n-$8.90\nGrabFood order\nKopitiam\n-$4.50"),
+      [Row("Grab", "8.90", .outflow, nil), Row("GrabFood order", "4.50", .outflow, nil)]
+    )
+  }
+
   // MARK: Dates
 
   func testYearlessDateMoreThanAWeekAheadUsesThePreviousYear() {
