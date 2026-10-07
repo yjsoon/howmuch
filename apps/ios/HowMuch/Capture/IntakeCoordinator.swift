@@ -1159,7 +1159,15 @@ final class IntakeCoordinator {
   /// kept; the kind, candidates and reasons follow the register. Rows the
   /// rest of the batch already targets are not offered. Unless it is still a
   /// confident New, the row is unticked so it is not approved on a stale tick.
-  private func rematchRow(_ proposalID: UUID, in id: UUID, model: AppModel) async {
+  /// With `rulesOnly` (a rule changed, not the row), an incomplete register search
+  /// (offline) keeps the row's existing match and only refreshes the rules' effects:
+  /// rules never change the amount, date or account the match rests on.
+  private func rematchRow(
+    _ proposalID: UUID,
+    in id: UUID,
+    model: AppModel,
+    rulesOnly: Bool = false
+  ) async {
     guard let job = self.job(id), job.state == .proposed, !approving.contains(id),
           let index = job.proposals.firstIndex(where: { $0.id == proposalID }) else {
       return
@@ -1252,18 +1260,33 @@ final class IntakeCoordinator {
     guard let match = result.first else {
       return
     }
+    let keepMatch = rulesOnly && !set.isComplete
     mutateProposal(proposalID, in: id, model: model) { proposal in
       // A row first read without Apple Intelligence keeps that note and its cap.
       let readByFallback = proposal.reasons.contains(Self.fallbackReason)
-      proposal.kind = match.kind
-      proposal.confidence = match.confidence
-      proposal.targetTransactionID = match.targetTransactionID
-      proposal.targetSnapshot = match.targetTransactionID.flatMap { set.transactions[$0] }
-      proposal.changedFields = match.changedFields
-      proposal.candidateIDs = match.candidateIDs
+      if keepMatch {
+        // The search was incomplete, so the match stays as it was (and so does its
+        // confidence, bar a flag rule's cap).
+        if match.ruleApplications.contains(where: { $0.effects.contains(.review) }) {
+          proposal.confidence = min(proposal.confidence, IntakeRuleEngine.flaggedConfidenceCap)
+        }
+      } else {
+        proposal.kind = match.kind
+        proposal.confidence = match.confidence
+        proposal.targetTransactionID = match.targetTransactionID
+        proposal.targetSnapshot = match.targetTransactionID.flatMap { set.transactions[$0] }
+        proposal.changedFields = match.changedFields
+        proposal.candidateIDs = match.candidateIDs
+      }
       if rulesApply {
-        // The reasons, including any learned rule's, are the fresh match's.
-        proposal.reasons = match.reasons
+        // The reasons, including any learned rule's, are the fresh match's; a kept
+        // match keeps its own reasons and takes only the fresh rule lines.
+        if keepMatch {
+          let ruleLines = match.reasons.filter { $0.hasPrefix(IntakeRuleEngine.reasonPrefix) }
+          proposal.reasons = ruleLines + proposal.reasons.filter { !$0.hasPrefix(IntakeRuleEngine.reasonPrefix) }
+        } else {
+          proposal.reasons = match.reasons
+        }
         proposal.ruleApplications = match.ruleApplications
         proposal.readPayee = match.readPayee
         proposal.draft = match.draft
@@ -1275,7 +1298,7 @@ final class IntakeCoordinator {
         }
         if !editedTransfer { proposed.transferAccountID = match.draft.transferAccountID }
         proposal.proposedDraft = proposed
-      } else {
+      } else if !keepMatch {
         proposal.reasons = proposal.reasons.filter { $0.hasPrefix(IntakeRuleEngine.reasonPrefix) } + match.reasons
       }
       if readByFallback {
@@ -1285,7 +1308,7 @@ final class IntakeCoordinator {
       proposal.flippedFrom = nil
       proposal.preFlipDecision = nil
       proposal.issue = nil
-      switch match.kind {
+      switch proposal.kind {
       case .add, .possibleDuplicate, .alreadyIn:
         proposal.decision = .pending
       case .edit:
@@ -1303,7 +1326,7 @@ final class IntakeCoordinator {
         for proposal in job.proposals where proposal.isUntouched {
           switch proposal.kind {
           case .add, .possibleDuplicate:
-            await rematchRow(proposal.id, in: job.id, model: model)
+            await rematchRow(proposal.id, in: job.id, model: model, rulesOnly: true)
           case .edit, .alreadyIn:
             refreshNotAppliedNote(proposal.id, in: job.id, model: model)
           }
