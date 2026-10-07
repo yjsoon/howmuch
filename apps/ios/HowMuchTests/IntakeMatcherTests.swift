@@ -90,16 +90,33 @@ final class IntakeMatcherTests: XCTestCase {
     XCTAssertFalse(proposals[0].appliesOnApproval)
   }
 
-  func testStrongMatchDifferingOnlyInPayeeIsAnEdit() {
+  func testStrongMatchWithAGenuinelyDifferentPayeeIsAnEdit() {
+    // "GrabFood" is a different budget line from "Grab": token-level, so a Fix.
     let proposals = matcher.match(
-      [line(8_900, payee: "Sheng Siong Supermarke")],
+      [line(8_900, payee: "GrabFood")],
       openAccountIDs: openIDs,
-      candidates: [row("a", payee: "Sheng Siong")]
+      candidates: [row("a", payee: "Grab")]
     )
     XCTAssertEqual(proposals[0].kind, .edit)
     XCTAssertEqual(proposals[0].targetTransactionID, "a")
     XCTAssertEqual(proposals[0].changedFields, [.payee])
     XCTAssertTrue(proposals[0].appliesOnApproval)
+  }
+
+  func testBankDescriptorContainingTheExistingPayeeIsTheSamePayee() {
+    // The raw descriptor adds a branch or suffix; the saved name is shorter.
+    let cases = [
+      ("KOPITIAM AMK", "Kopitiam"),
+      ("NTUC FAIRPRICE XPRESS", "NTUC FairPrice"),
+    ]
+    for (read, existing) in cases {
+      let proposals = matcher.match(
+        [line(8_900, payee: read)], openAccountIDs: openIDs, candidates: [row("a", payee: existing)]
+      )
+      XCTAssertEqual(proposals[0].kind, .alreadyIn, "\(read) vs \(existing)")
+      XCTAssertEqual(proposals[0].targetTransactionID, "a")
+      XCTAssertEqual(proposals[0].changedFields, [])
+    }
   }
 
   func testStrongMatchDifferingOnlyInCategoryIsAnEdit() {
