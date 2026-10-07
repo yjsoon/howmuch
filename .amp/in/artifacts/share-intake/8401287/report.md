@@ -121,3 +121,22 @@ Committed PNG copies are downscaled to at most 1200px long edge without cropping
 Simulator remains running in Accounts, one pending Later job, unchanged ledger, archived earlier jobs intact. No teardown. No user input needed. Artifact publication is completed afterwards on the current branch head; no new retest of that branch-head code was run.
 
 No PR was specified, so suggested PR comment: none. No SKILL file created. Blueprint checked: none exists; suggested setup knowledge is pinned Xcode/Simulator, dynamic container discovery, real native Home timing and explicit distinction between background completion and OS scheduling. No dependencies, credentials or services installed.
+
+## Rechecking from a clean checkout
+
+`snapshot.py` above were local helpers and are not committed. These equivalents need only `xcrun`, `sqlite3` and `jq`:
+
+```sh
+# Read-only ledger and job state on the booted simulator, at any checkpoint:
+DATA=$(xcrun simctl get_app_container booted sg.soon.howmuch data)
+sqlite3 -readonly "$DATA/Library/Application Support/HowMuch/Local/howmuch.sqlite" \
+  "SELECT id, account_id, date, amount_milli, payee_name_snapshot, approved FROM transactions WHERE deleted = 0"
+GROUP=$(xcrun simctl get_app_container booted sg.soon.howmuch group.sg.soon.howmuch)
+find "$GROUP/Jobs" -name job.json -exec jq -c '{state, proposals: (.proposals | length)}' {} \;
+
+# Recorded comparisons, against the committed JSON only; lists any check that failed:
+jq '[paths(type == "boolean") as $p | select(getpath($p) == false) | $p | map(tostring) | join(".")]' \
+  .amp/in/artifacts/share-intake/8401287/evidence-checks.json
+```
+
+Expected from the last command: `[]` (no recorded check failed).
