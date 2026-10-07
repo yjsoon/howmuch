@@ -178,3 +178,22 @@ This commit includes only the report, selected downscaled PNGs, original synthet
 Final Simulator left running in DBS register, ledger and all jobs/tombstones preserved. No teardown.
 
 PR-comment suggestion: none (no PR supplied). SKILL.md suggestion: none. Blueprint checked: none exists; setup knowledge worth recording is pinned Xcode/Simulator, dynamic app containers after installs, and soft-deletion-aware read-only evidence. No dependency installs/services needed. User action needed: none.
+
+## Rechecking from a clean checkout
+
+`snapshot.py` above were local helpers and are not committed. These equivalents need only `xcrun`, `sqlite3` and `jq`:
+
+```sh
+# Read-only ledger and job state on the booted simulator, at any checkpoint:
+DATA=$(xcrun simctl get_app_container booted sg.soon.howmuch data)
+sqlite3 -readonly "$DATA/Library/Application Support/HowMuch/Local/howmuch.sqlite" \
+  "SELECT id, account_id, date, amount_milli, payee_name_snapshot, approved FROM transactions WHERE deleted = 0"
+GROUP=$(xcrun simctl get_app_container booted sg.soon.howmuch group.sg.soon.howmuch)
+find "$GROUP/Jobs" -name job.json -exec jq -c '{state, proposals: (.proposals | length)}' {} \;
+
+# Recorded comparisons, against the committed JSON only; lists any check that failed:
+jq '[paths(type == "boolean") as $p | select(getpath($p) == false) | $p | map(tostring) | join(".")]' \
+  .amp/in/artifacts/share-intake/15935b7/evidence-checks.json
+```
+
+Expected from the last command: `[]` (no recorded check failed).
