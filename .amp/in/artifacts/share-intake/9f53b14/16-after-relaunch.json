@@ -1,0 +1,435 @@
+{
+  "capturedAt": "2026-10-07T04:26:47.231990+00:00",
+  "database": "/Users/devin/Library/Developer/CoreSimulator/Devices/EDD9B083-63F1-44E6-9A7B-0A6964CC2561/data/Containers/Data/Application/2372E0C7-E99F-4CC0-9254-921181DFF422/Library/Application Support/HowMuch/Local/howmuch.sqlite",
+  "group": "/Users/devin/Library/Developer/CoreSimulator/Devices/EDD9B083-63F1-44E6-9A7B-0A6964CC2561/data/Containers/Shared/AppGroup/2A15EA43-6271-4E8B-A901-E8CD06CF6D16",
+  "accounts": [
+    {
+      "id": "e2e-dbs",
+      "name": "DBS Altitude",
+      "closed": 0,
+      "balance_milli": -32350
+    },
+    {
+      "id": "e2e-everyday",
+      "name": "Everyday Account",
+      "closed": 0,
+      "balance_milli": 0
+    },
+    {
+      "id": "e2e-closed",
+      "name": "Closed Synthetic Account",
+      "closed": 1,
+      "balance_milli": 0
+    }
+  ],
+  "shareContext": {
+    "accounts": [
+      {
+        "isClosed": false,
+        "id": "e2e-dbs",
+        "name": "DBS Altitude"
+      },
+      {
+        "isClosed": false,
+        "id": "e2e-everyday",
+        "name": "Everyday Account"
+      }
+    ],
+    "writtenAt": "2026-10-07T04:26:24Z",
+    "isSignedIn": true,
+    "lastUsedOpenAccountID": "e2e-dbs"
+  },
+  "inbox": {},
+  "jobs": {
+    "Jobs/4EE67DE8-1EC6-4389-BB87-8EC28925E57D/job.json": {
+      "accountID": "e2e-dbs",
+      "origin": "shareSheet",
+      "fallbackExtractionIndexes": [
+        0,
+        1
+      ],
+      "sourceFiles": [
+        {
+          "sha256": "7b8653b563739e22e5f10a6782d0c3a46e2b1a20a3c526c964b4a72b842567d4",
+          "kind": "pdf",
+          "filename": "document-1.pdf",
+          "bytes": 7805
+        }
+      ],
+      "extractionSourceIndexes": [
+        0,
+        0
+      ],
+      "proposals": [
+        {
+          "reasons": [
+            "Same amount within 3 days",
+            "Read without Apple Intelligence"
+          ],
+          "draft": {
+            "direction": "outflow",
+            "date": "2026-10-05T07:00:00Z",
+            "accountID": "e2e-dbs",
+            "payeeName": "KOPITIAM AMK",
+            "flag": "",
+            "wasReconciled": false,
+            "isCleared": false,
+            "importID": "82f787de-73e7-4048-86d3-bc21b2618253",
+            "memo": "",
+            "loadedTransferLineSignatures": [],
+            "subtransactions": [],
+            "amountMagnitudeMilli": 8900,
+            "linkedTransferIDs": []
+          },
+          "kind": "alreadyIn",
+          "sourceFileIndex": 0,
+          "proposedDraft": {
+            "direction": "outflow",
+            "date": "2026-10-05T07:00:00Z",
+            "accountID": "e2e-dbs",
+            "payeeName": "KOPITIAM AMK",
+            "flag": "",
+            "wasReconciled": false,
+            "isCleared": false,
+            "importID": "82f787de-73e7-4048-86d3-bc21b2618253",
+            "memo": "",
+            "loadedTransferLineSignatures": [],
+            "subtransactions": [],
+            "amountMagnitudeMilli": 8900,
+            "linkedTransferIDs": []
+          },
+          "decision": "pending",
+          "candidateIDs": [
+            "e2e-existing-kopitiam"
+          ],
+          "targetTransactionID": "e2e-existing-kopitiam",
+          "id": "0C31F2B1-DDEE-46D5-8762-297B3E587927",
+          "isApplied": false,
+          "changedFields": [],
+          "confidence": 0.85,
+          "targetSnapshot": {
+            "payeeId": "e2e-kopitiam",
+            "subtransactions": [],
+            "accountName": "DBS Altitude",
+            "cleared": "uncleared",
+            "approved": true,
+            "id": "e2e-existing-kopitiam",
+            "date": "2026-10-05",
+            "accountId": "e2e-dbs",
+            "deleted": false,
+            "amount": -8900,
+            "payeeName": "Kopitiam"
+          }
+        },
+        {
+          "candidateIDs": [],
+          "isApplied": false,
+          "confidence": 0.8,
+          "changedFields": [],
+          "reasons": [
+            "No row within 3 days for this amount",
+            "Read without Apple Intelligence"
+          ],
+          "id": "7DCEFCBE-F020-41F3-93C0-B4357B628892",
+          "proposedDraft": {
+            "direction": "outflow",
+            "date": "2026-10-05T07:00:00Z",
+            "accountID": "e2e-dbs",
+            "payeeName": "NTUC FAIRPRICE",
+            "flag": "",
+            "wasReconciled": false,
+            "isCleared": false,
+            "importID": "f38665ac-f789-4b2c-85c3-63cfbb1b141a",
+            "memo": "",
+            "loadedTransferLineSignatures": [],
+            "subtransactions": [],
+            "amountMagnitudeMilli": 23450,
+            "linkedTransferIDs": []
+          },
+          "draft": {
+            "direction": "outflow",
+            "date": "2026-10-05T07:00:00Z",
+            "accountID": "e2e-dbs",
+            "payeeName": "NTUC FAIRPRICE",
+            "flag": "",
+            "wasReconciled": false,
+            "isCleared": false,
+            "importID": "f38665ac-f789-4b2c-85c3-63cfbb1b141a",
+            "memo": "",
+            "loadedTransferLineSignatures": [],
+            "subtransactions": [],
+            "amountMagnitudeMilli": 23450,
+            "linkedTransferIDs": []
+          },
+          "kind": "add",
+          "decision": "pending",
+          "sourceFileIndex": 0
+        }
+      ],
+      "note": "B9f53b14 PDF E2E",
+      "planID": "plan_613b3d02-e28b-4c3b-b514-afaf3deb047e",
+      "createdAt": "2026-10-07T04:23:53Z",
+      "duplicateCheckLimited": false,
+      "extractions": [
+        {
+          "categoryCandidates": [],
+          "accountCandidates": [],
+          "parsedDirection": true,
+          "parsedAccount": false,
+          "parsedCategory": false,
+          "parsedDate": true,
+          "parsedAmount": true,
+          "draft": {
+            "direction": "outflow",
+            "date": "2026-10-05T07:00:00Z",
+            "accountID": "e2e-dbs",
+            "payeeName": "KOPITIAM AMK",
+            "flag": "",
+            "isCleared": false,
+            "wasReconciled": false,
+            "importID": "82f787de-73e7-4048-86d3-bc21b2618253",
+            "memo": "",
+            "loadedTransferLineSignatures": [],
+            "subtransactions": [],
+            "amountMagnitudeMilli": 8900,
+            "linkedTransferIDs": []
+          }
+        },
+        {
+          "categoryCandidates": [],
+          "accountCandidates": [],
+          "parsedDirection": true,
+          "parsedAccount": false,
+          "parsedCategory": false,
+          "parsedDate": true,
+          "parsedAmount": true,
+          "draft": {
+            "direction": "outflow",
+            "date": "2026-10-05T07:00:00Z",
+            "accountID": "e2e-dbs",
+            "payeeName": "NTUC FAIRPRICE",
+            "flag": "",
+            "isCleared": false,
+            "wasReconciled": false,
+            "importID": "f38665ac-f789-4b2c-85c3-63cfbb1b141a",
+            "memo": "",
+            "loadedTransferLineSignatures": [],
+            "subtransactions": [],
+            "amountMagnitudeMilli": 23450,
+            "linkedTransferIDs": []
+          }
+        }
+      ],
+      "contentHash": "342aae85673a07c594446b4b87daf8b1d41d9dadb1758d6c689e09c23a5c876b",
+      "decideAccount": false,
+      "state": "proposed",
+      "id": "4EE67DE8-1EC6-4389-BB87-8EC28925E57D",
+      "connectionFingerprint": "https://local.howmuch|plan_613b3d02-e28b-4c3b-b514-afaf3deb047e|local-user",
+      "updatedAt": "2026-10-07T04:24:05Z",
+      "hint": "auto"
+    },
+    "Jobs/D4B0E7A8-F960-4668-85D6-705182CF0A87/job.json": {
+      "id": "D4B0E7A8-F960-4668-85D6-705182CF0A87",
+      "state": "applied",
+      "sourceFiles": [
+        {
+          "kind": "image",
+          "bytes": 28810,
+          "sha256": "8a363fd697812e191ea387dc7e4c5d16b34b6f20e83b4bef6e6e485203ea01fe",
+          "filename": "image-1.PNG"
+        },
+        {
+          "kind": "image",
+          "bytes": 29571,
+          "sha256": "d87aeb1deb3297258452ee46687bb79f7ecaace732d67882da9e80c679fa876e",
+          "filename": "image-2.PNG"
+        }
+      ],
+      "contentHash": "b5b7a6dff8721b1fb28b15eab5b5ddb75c5a984dab6cf6c737a4b44254450c73",
+      "origin": "shareSheet",
+      "accountID": "e2e-dbs",
+      "planID": "plan_613b3d02-e28b-4c3b-b514-afaf3deb047e",
+      "duplicateCheckLimited": false,
+      "hint": "auto",
+      "note": "B9f53b14 Photos E2E",
+      "updatedAt": "2026-10-07T04:25:35Z",
+      "extractions": [],
+      "appliedSummary": "1 added",
+      "proposals": [
+        {
+          "targetSnapshot": {
+            "accountName": "DBS Altitude",
+            "subtransactions": [],
+            "id": "e2e-existing-kopitiam",
+            "payeeName": "Kopitiam",
+            "approved": true,
+            "deleted": false,
+            "payeeId": "e2e-kopitiam",
+            "cleared": "uncleared",
+            "amount": -8900,
+            "date": "2026-10-05",
+            "accountId": "e2e-dbs"
+          },
+          "id": "8A816DC3-A6DD-4927-BC23-DF1AD3D1CBFD",
+          "changedFields": [],
+          "targetTransactionID": "e2e-existing-kopitiam",
+          "kind": "alreadyIn",
+          "reasons": [
+            "Same amount within 3 days",
+            "Read without Apple Intelligence"
+          ],
+          "proposedDraft": {
+            "payeeName": "KOPITIAM AMK",
+            "subtransactions": [],
+            "direction": "outflow",
+            "linkedTransferIDs": [],
+            "amountMagnitudeMilli": 8900,
+            "importID": "0ab230b4-6c11-4543-99a5-83ccd86ee017",
+            "accountID": "e2e-dbs",
+            "isCleared": false,
+            "loadedTransferLineSignatures": [],
+            "date": "2026-10-05T07:00:00Z",
+            "flag": "",
+            "memo": "",
+            "wasReconciled": false
+          },
+          "isApplied": false,
+          "candidateIDs": [
+            "e2e-existing-kopitiam"
+          ],
+          "confidence": 0.85,
+          "decision": "pending",
+          "draft": {
+            "payeeName": "KOPITIAM AMK",
+            "subtransactions": [],
+            "direction": "outflow",
+            "linkedTransferIDs": [],
+            "amountMagnitudeMilli": 8900,
+            "importID": "0ab230b4-6c11-4543-99a5-83ccd86ee017",
+            "accountID": "e2e-dbs",
+            "isCleared": false,
+            "loadedTransferLineSignatures": [],
+            "date": "2026-10-05T07:00:00Z",
+            "flag": "",
+            "memo": "",
+            "wasReconciled": false
+          },
+          "sourceFileIndex": 0
+        },
+        {
+          "id": "28E8F73C-AB42-420C-9196-3E3A7D6E3978",
+          "confidence": 0.8,
+          "kind": "add",
+          "candidateIDs": [],
+          "sourceFileIndex": 1,
+          "draft": {
+            "payeeName": "NTUC FAIRPRICE",
+            "subtransactions": [],
+            "direction": "outflow",
+            "linkedTransferIDs": [],
+            "amountMagnitudeMilli": 23450,
+            "importID": "9c02c825-3fdf-4311-becd-be20eada24ba",
+            "accountID": "e2e-dbs",
+            "isCleared": false,
+            "loadedTransferLineSignatures": [],
+            "date": "2026-10-05T07:00:00Z",
+            "flag": "",
+            "memo": "",
+            "wasReconciled": false
+          },
+          "changedFields": [],
+          "reasons": [
+            "No row within 3 days for this amount",
+            "Read without Apple Intelligence"
+          ],
+          "decision": "accepted",
+          "proposedDraft": {
+            "subtransactions": [],
+            "linkedTransferIDs": [],
+            "date": "2026-10-05T07:00:00Z",
+            "accountID": "e2e-dbs",
+            "wasReconciled": false,
+            "amountMagnitudeMilli": 23450,
+            "loadedTransferLineSignatures": [],
+            "isCleared": false,
+            "flag": "",
+            "payeeName": "NTUC FAIRPRICE",
+            "memo": "",
+            "importID": "9c02c825-3fdf-4311-becd-be20eada24ba",
+            "direction": "outflow"
+          },
+          "isApplied": true
+        }
+      ],
+      "createdAt": "2026-10-07T04:23:06Z",
+      "decideAccount": false,
+      "extractionSourceIndexes": [],
+      "fallbackExtractionIndexes": [
+        0,
+        1
+      ],
+      "connectionFingerprint": "https://local.howmuch|plan_613b3d02-e28b-4c3b-b514-afaf3deb047e|local-user"
+    }
+  },
+  "transactions": [
+    {
+      "id": "e2e-existing-kopitiam",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -8900,
+      "payee_name_snapshot": "Kopitiam",
+      "approved": 1
+    },
+    {
+      "id": "txn_5a0cabc1-c688-4c42-8891-a45116d7e610",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "approved": 1
+    }
+  ],
+  "tables": [
+    "_local_migrations",
+    "plans",
+    "accounts",
+    "category_groups",
+    "categories",
+    "transactions",
+    "subtransactions",
+    "source_events",
+    "import_sessions",
+    "import_rows",
+    "ynab_sync_state",
+    "sync_runs",
+    "sync_attempts",
+    "sync_transition_receipts",
+    "sync_renewal_receipts",
+    "audit_events",
+    "write_commands",
+    "write_state",
+    "write_assertions",
+    "users",
+    "auth_identities",
+    "sessions",
+    "plan_memberships",
+    "password_credentials",
+    "auth_setup",
+    "login_rate_limits",
+    "payees",
+    "ynab_raw_objects",
+    "plan_month_assignments",
+    "plan_month_category_targets",
+    "scheduled_transaction_edits",
+    "scheduled_subtransaction_edits",
+    "scheduled_transaction_snapshot_assertions",
+    "account_reconciliation_assertions",
+    "personal_api_tokens",
+    "account_preferences",
+    "rewards_tracker_snapshots",
+    "rewards_tracker_cards",
+    "ynab_source_month_activity",
+    "account_month_balances",
+    "report_cache"
+  ]
+}
