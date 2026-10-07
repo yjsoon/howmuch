@@ -1072,12 +1072,15 @@ enum IntakeRuleSuggester {
   /// cleaner name for the same merchant. The one corrected most often wins;
   /// ties go to a category, then to the earlier row. Nothing is offered for a
   /// batch already offered one, for a rule that already exists for this account
-  /// (on or off), or one the owner dismissed within 30 days.
+  /// (on or off), or one the owner dismissed within 30 days. No category rule is
+  /// offered for a row in `readerCategoryRows` (the document itself named the
+  /// category): the engine never replaces that, so the rule would never apply.
   static func suggest(
     applied: [IntakeProposal],
     jobID: UUID,
     skill: IntakeSkill,
-    now: Date = Date()
+    now: Date = Date(),
+    readerCategoryRows: Set<UUID> = []
   ) -> IntakeRuleSuggestion? {
     guard !skill.offeredJobIDs.contains(jobID) else {
       return nil
@@ -1094,7 +1097,8 @@ enum IntakeRuleSuggester {
       guard let token = IntakeRuleCondition.suggestedToken(from: rawName) else {
         continue
       }
-      if let category = row.draft.categoryID, category != row.proposedDraft.categoryID {
+      if let category = row.draft.categoryID, category != row.proposedDraft.categoryID,
+         !readerCategoryRows.contains(row.id) {
         add(
           Candidate(
             key: "category|\(token)|\(category)", token: token, action: .setCategory(category),

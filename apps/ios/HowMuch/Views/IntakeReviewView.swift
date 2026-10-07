@@ -683,10 +683,18 @@ struct IntakeReviewView: View {
       }
       // After an approval only, never a reject: offer at most one rule from what
       // the owner changed in the rows this approval saved.
+      var readerCategoryRows = Set<UUID>()
+      if after.extractions.count == after.proposals.count {
+        for (proposal, read) in zip(after.proposals, after.extractions)
+        where read.parsedCategory && read.draft.categoryID != nil {
+          readerCategoryRows.insert(proposal.id)
+        }
+      }
       suggestion = IntakeRuleSuggester.suggest(
         applied: after.proposals.filter { $0.isApplied && !alreadyApplied.contains($0.id) },
         jobID: after.id,
-        skill: IntakeSkillStore.shared.skill
+        skill: IntakeSkillStore.shared.skill,
+        readerCategoryRows: readerCategoryRows
       )
       if suggestion != nil {
         // One offer per batch, ever, whatever the answer.
