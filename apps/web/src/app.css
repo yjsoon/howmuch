@@ -104,7 +104,7 @@ textarea {
 }
 
 .brand-lockup strong {
-  font: 600 22px/1.1 var(--font-display);
+  font: 400 22px/1.1 var(--font-display);
   color: var(--brand-ink);
   text-shadow: var(--brand-glow);
 }
@@ -714,12 +714,12 @@ textarea {
 }
 
 .auth-form h1 {
-  font: 500 28px/1.1 var(--font-display);
+  font: 400 28px/1.1 var(--font-display);
   color: var(--ink);
 }
 
 /* Instrument Serif has weight 400 only: never fake a bold. */
-:root[data-theme="overexposed"] .auth-form h1 {
+.auth-form h1 {
   font-size: 32px;
   font-style: italic;
   font-weight: 400;
@@ -1144,27 +1144,27 @@ textarea {
   color: var(--ink-soft);
 }
 
-/* Overexposed sets display type in Instrument Serif, which has weight 400 only:
+/* Display type is Instrument Serif in every look, which has weight 400 only:
    reset heavier display weights so the browser never fakes a bold.
    (Rewards board display selectors are added beside these with the board.) */
-:root[data-theme="overexposed"] :is(.report-header h1, .brand-lockup strong, .masthead-title, .quick-entry-title, .settings-crumb a,
+:is(.report-header h1, .brand-lockup strong, .masthead-title, .quick-entry-title, .settings-crumb a,
   .settings-crumb li:first-child::after, .api-docs-content h3, .api-token-reveal h2, .account-organizer-header h2,
   .account-organizer-unsupported h3) {
   font-weight: 400;
 }
 
-:root[data-theme="overexposed"] .report-header h1 {
+.report-header h1 {
   font-size: 30px;
   font-style: italic;
   letter-spacing: -0.005em;
 }
 
-:root[data-theme="overexposed"] .brand-lockup strong {
+.brand-lockup strong {
   font-size: 26px;
   font-style: italic;
 }
 
-:root[data-theme="overexposed"] .masthead-title {
+.masthead-title {
   font-size: 30px;
 }
 
@@ -1174,7 +1174,7 @@ textarea {
 }
 
 @media (max-width: 720px) {
-  :root[data-theme="overexposed"] .report-header h1 {
+  .report-header h1 {
     font-size: 26px;
   }
 }
@@ -3318,7 +3318,7 @@ tr:hover .share-bar {
 
 .api-token-reveal h2 {
   margin: 0;
-  font: 500 23px/1.1 var(--font-display);
+  font: 400 23px/1.1 var(--font-display);
 }
 
 .api-token-reveal p {
@@ -3580,11 +3580,7 @@ tr:hover .share-bar {
 }
 
 .theme-option-name {
-  font: 500 16px/1.2 "Newsreader Variable", Georgia, serif;
-}
-
-.theme-option[data-look="overexposed"] .theme-option-name {
-  font: italic 400 19px/1.1 "Instrument Serif", Georgia, serif;
+  font: italic 400 19px/1.1 var(--font-display);
 }
 
 .theme-option-name small {
@@ -3730,7 +3726,7 @@ tr:hover .share-bar {
 
 .account-organizer-header h2 {
   margin: 0;
-  font: 500 30px/1.1 var(--font-display);
+  font: 400 30px/1.1 var(--font-display);
 }
 
 .account-organizer-header p {
@@ -3793,7 +3789,7 @@ tr:hover .share-bar {
 .account-organizer-section h3,
 .account-organizer-unsupported h3 {
   margin: 0;
-  font: 500 21px/1.2 var(--font-display);
+  font: 400 21px/1.2 var(--font-display);
 }
 
 .account-organizer-section-heading p,

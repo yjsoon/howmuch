@@ -48,17 +48,17 @@
 
 .rw-hero h1 {
   margin: 0;
-  font: 500 clamp(28px, 3vw, 40px) / 1.05 var(--font-display);
+  font: 400 clamp(28px, 3vw, 40px) / 1.05 var(--font-display);
   letter-spacing: -0.01em;
 }
 
-:root[data-theme="overexposed"] .rw-hero h1 {
+.rw-hero h1 {
   font-style: italic;
   font-size: clamp(34px, 3.6vw, 48px);
 }
 
 /* Instrument Serif has weight 400 only (styles beside the app.css overrides, §3.4). */
-:root[data-theme="overexposed"] :is(.rw-hero h1, .rw-face-name, .rw-group-name, .rw-stepper[data-past] .rw-date-face) {
+:is(.rw-hero h1, .rw-face-name, .rw-group-name, .rw-stepper[data-past] .rw-date-face) {
   font-weight: 400;
 }
 
@@ -237,7 +237,7 @@
 
 /* A past as-of date reads as "not now": italic display face in the needs tone. */
 .rw-stepper[data-past] .rw-date-face {
-  font: italic 600 15px var(--font-display);
+  font: italic 400 15px var(--font-display);
   color: var(--tone-needs);
 }
 
@@ -410,7 +410,7 @@
 }
 
 .rw-group-name {
-  font: 500 20px / 1.2 var(--font-display);
+  font: 400 20px / 1.2 var(--font-display);
 }
 
 .rw-group-count {
@@ -612,7 +612,7 @@
   align-self: start;
   margin: 6px 0 0;
   max-width: 64%;
-  font: 500 21px / 1.15 var(--font-display);
+  font: 400 21px / 1.15 var(--font-display);
   text-wrap: balance;
 }
 

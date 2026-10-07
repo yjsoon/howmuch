@@ -1,6 +1,4 @@
-import "@fontsource-variable/newsreader/opsz.css"; // "Newsreader Variable", wght 200-800 with optical sizing
-import "@fontsource-variable/newsreader/opsz-italic.css";
-import "@fontsource/instrument-serif/400.css"; // "Instrument Serif"; files load only when a rendered element uses it
+import "@fontsource/instrument-serif/400.css"; // "Instrument Serif": display type in every look (weight 400 only)
 import "@fontsource/instrument-serif/400-italic.css";
 import "@fontsource/ibm-plex-sans/400.css";
 import "@fontsource/ibm-plex-sans/500.css";
