@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { createId } from "./ids";
+import type { SeedCurrencyFormat, SeedDateFormat } from "./plan-settings-seed";
 import { SqliteRepositoryDatabase, type RepositoryDatabase } from "./repository-db";
 import {
   DEFAULT_TRANSACTION_PAGE_SIZE,
@@ -74,6 +75,7 @@ import {
 
 type Row = Record<string, any>;
 
+export type PlanFormatsPatch = { currency_format?: SeedCurrencyFormat; date_format?: SeedDateFormat };
 export type SnapshotImportResult = { imported: SnapshotCounts; replayed: boolean; server_knowledge: number };
 
 export type CategoryWriteOptions = { operationId?: string };
@@ -233,6 +235,30 @@ export class LedgerRepository {
         bool(plan.deleted),
         planId,
       );
+  }
+
+  /**
+   * Changes only the currency and/or date format. `server_knowledge` moves so
+   * clients that validate cached plan data against it refetch. Stored amounts
+   * are milliunits and are not rewritten: this changes how they are shown.
+   */
+  async updatePlanFormats(planId: string, formats: PlanFormatsPatch): Promise<void> {
+    const updated = await this.db
+      .query(
+        `UPDATE plans
+         SET currency_format_json = COALESCE(?, currency_format_json),
+             date_format_json = COALESCE(?, date_format_json),
+             server_knowledge = server_knowledge + 1,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND deleted = 0
+         RETURNING id`,
+      )
+      .get(
+        formats.currency_format ? JSON.stringify(formats.currency_format) : null,
+        formats.date_format ? JSON.stringify(formats.date_format) : null,
+        planId,
+      );
+    if (!updated) throw new PlanNotFoundError();
   }
 
   async getSettings(planId: string): Promise<any> {

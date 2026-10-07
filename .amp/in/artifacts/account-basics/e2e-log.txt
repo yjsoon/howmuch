@@ -1,0 +1,18 @@
+setup date options: ["Day first (24 May 2026)","Month first (May 24, 2026)","Year first (2026-05-24)"]
+both signed in: true
+register default (expect 24 May 2026): 24 May 2026
+net worth default: AS AT 7 OCT 2026
+settings date options: ["Day first (24 May 2026)","Month first (May 24, 2026)","Year first (2026-05-24)"]
+settings currency copy: Changing the currency only changes the symbol and decimal places shown. Nothing is converted: $100 becomes £100. For a currency such as JPY the cents are hidden, not lost.
+success message MM/DD/YYYY: Formats saved. Amounts and dates here now use the new settings. The iOS app shows the new currency after its next refresh and always shows dates as 24 May 2026.
+register MM/DD/YYYY: May 24, 2026
+net worth MM/DD/YYYY: AS AT OCT 7, 2026
+success message YYYY-MM-DD: Formats saved. Amounts and dates here now use the new settings. The iOS app shows the new currency after its next refresh and always shows dates as 24 May 2026.
+register YYYY-MM-DD: 2026-05-24
+net worth YYYY-MM-DD: AS AT 2026-10-07
+success message: Password changed. This device stays signed in; every other session has been signed out.
+A cookie rotated: {"changed":true,"before":true,"after":true}
+A still signed in after reload: true
+old cookie value /v1/user status (expect 401): 401
+B signed out on next request: true
+rate-limit message after wrong attempts: {"attempts":10,"message":"Too many attempts. Try again in 15 minutes."}

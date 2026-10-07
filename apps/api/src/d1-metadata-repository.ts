@@ -46,15 +46,31 @@ export class D1MetadataRepository {
     return Number(row.server_knowledge);
   }
 
+  /** Narrow counterpart of `upsertPlan`: only the given formats change, and `server_knowledge` moves. */
+  async updatePlanFormats(planId: string, formats: { currency_format?: unknown; date_format?: unknown }, context?: D1WriteContext): Promise<void> {
+    const commandId = this.id(context);
+    await this.run("metadata.plan.formats", planId, planId, { formats }, context, [
+      assertion(commandId, "metadata_plan_exists", planId, planId),
+      statement(
+        `UPDATE plans SET currency_format_json=COALESCE(?,currency_format_json),date_format_json=COALESCE(?,date_format_json),
+           server_knowledge=server_knowledge+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+        [formats.currency_format ? JSON.stringify(formats.currency_format) : null, formats.date_format ? JSON.stringify(formats.date_format) : null, planId],
+      ),
+    ]);
+  }
+
   async upsertPlan(planId: string, plan: any, settings?: any, context?: D1WriteContext): Promise<void> {
     const payload = { plan, settings };
     const date = JSON.stringify(settings?.date_format ?? { format: "DD/MM/YYYY" });
     const currency = JSON.stringify(settings?.currency_format ?? { iso_code: "SGD", example_format: "$123,456.78", decimal_digits: 2, decimal_separator: ".", symbol_first: true, group_separator: ",", currency_symbol: "$", display_symbol: true });
     const flags = JSON.stringify(settings?.display?.flag_names ?? {});
+    // On conflict, an absent block keeps what the plan has (as the SQLite store does);
+    // the defaults above apply only when the row is first created.
+    const keep = (value: unknown) => (value === undefined || value === null ? null : JSON.stringify(value));
     await this.run("metadata.plan.upsert", planId, planId, payload, context, [
       statement("INSERT INTO write_assertions(command_id,kind,target_id,plan_id) VALUES (?, 'metadata_plan', ?, ?)", [this.id(context), planId, planId]),
       statement(`INSERT INTO plans(id,name,first_month,last_month,date_format_json,currency_format_json,flag_names_json,external_ynab_id,deleted,updated_at) VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-        ON CONFLICT(id) DO UPDATE SET name=excluded.name,first_month=COALESCE(excluded.first_month,plans.first_month),last_month=COALESCE(excluded.last_month,plans.last_month),date_format_json=excluded.date_format_json,currency_format_json=excluded.currency_format_json,flag_names_json=excluded.flag_names_json,external_ynab_id=excluded.external_ynab_id,deleted=excluded.deleted,updated_at=CURRENT_TIMESTAMP`, [planId, plan.name ?? "HowMuch", plan.first_month ?? null, plan.last_month ?? null, date, currency, flags, plan.id ?? plan.external_ynab_id ?? planId, bool(plan.deleted)]),
+        ON CONFLICT(id) DO UPDATE SET name=excluded.name,first_month=COALESCE(excluded.first_month,plans.first_month),last_month=COALESCE(excluded.last_month,plans.last_month),date_format_json=COALESCE(?,plans.date_format_json),currency_format_json=COALESCE(?,plans.currency_format_json),flag_names_json=COALESCE(?,plans.flag_names_json),external_ynab_id=excluded.external_ynab_id,deleted=excluded.deleted,updated_at=CURRENT_TIMESTAMP`, [planId, plan.name ?? "HowMuch", plan.first_month ?? null, plan.last_month ?? null, date, currency, flags, plan.id ?? plan.external_ynab_id ?? planId, bool(plan.deleted), keep(settings?.date_format), keep(settings?.currency_format), keep(settings?.display?.flag_names)]),
     ]);
   }
 
