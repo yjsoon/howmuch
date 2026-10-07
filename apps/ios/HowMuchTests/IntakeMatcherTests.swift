@@ -119,6 +119,18 @@ final class IntakeMatcherTests: XCTestCase {
     }
   }
 
+  func testFixHintDisablesTheContainmentRule() {
+    // The owner asked for corrections, so a longer descriptor is a rename.
+    let proposals = matcher.match(
+      [line(8_900, payee: "KOPITIAM AMK")],
+      openAccountIDs: openIDs,
+      candidates: [row("a", payee: "Kopitiam")],
+      hint: .fix
+    )
+    XCTAssertEqual(proposals[0].kind, .edit)
+    XCTAssertEqual(proposals[0].changedFields, [.payee])
+  }
+
   func testStrongMatchDifferingOnlyInCategoryIsAnEdit() {
     var read = line(8_900, payee: "Grab")
     read.draft.categoryID = "cat-transport"
