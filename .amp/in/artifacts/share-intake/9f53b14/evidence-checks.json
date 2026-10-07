@@ -1,0 +1,56 @@
+{
+  "revision": "9f53b14ab7f49388fec6389d88f33c2dd70a4e1e",
+  "baselineTransactions": 1,
+  "beforeApprovalLedgerUnchanged": true,
+  "beforeApprovalJobs": [
+    [
+      "B9f53b14 PDF E2E",
+      "proposed",
+      [
+        "alreadyIn",
+        "add"
+      ]
+    ],
+    [
+      "B9f53b14 Photos E2E",
+      "proposed",
+      [
+        "alreadyIn",
+        "add"
+      ]
+    ]
+  ],
+  "afterApprovalTransactions": [
+    {
+      "id": "e2e-existing-kopitiam",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -8900,
+      "payee_name_snapshot": "Kopitiam",
+      "approved": 1
+    },
+    {
+      "id": "txn_5a0cabc1-c688-4c42-8891-a45116d7e610",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "approved": 1
+    }
+  ],
+  "afterRelaunchIdentical": true,
+  "rejectionLedgerIdentical": true,
+  "finalCount": 2,
+  "originalKopitiamUnchanged": true,
+  "finalJobStates": [
+    [
+      "4EE67DE8-1EC6-4389-BB87-8EC28925E57D",
+      "discarded"
+    ],
+    [
+      "D4B0E7A8-F960-4668-85D6-705182CF0A87",
+      "applied"
+    ]
+  ],
+  "navigationLogMatches": []
+}
