@@ -352,12 +352,17 @@ final class IntakeCoordinator {
     // data (offline at launch, a headless run) is not a failure. The job keeps
     // its state and is read on the next drain.
     guard await awaitReferenceData(model), !model.openAccounts.isEmpty else {
+      if var waiting = readable(id), waiting.state == .queued, !waiting.waitingForAccounts {
+        waiting.waitingForAccounts = true
+        save(waiting)
+      }
       return
     }
     guard var reading = readable(id) else {
       return
     }
     reading.state = .reading
+    reading.waitingForAccounts = false
     reading.failureMessage = nil
     save(reading)
 

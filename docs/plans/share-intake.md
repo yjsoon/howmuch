@@ -1,6 +1,6 @@
 # Share to Halation: document intake
 
-Status: design agreed with the owner, not built. Screens are in [`share-intake/`](share-intake/). Interactive original (owner only): https://claude.ai/artifact/KneQW91pq5pGNh4eqaAprJ
+Status: first version built in yjsoon/howmuch#273–#277 (on device; phase 2 and 3 not built). Screens are in [`share-intake/`](share-intake/). Interactive original (owner only): https://claude.ai/artifact/KneQW91pq5pGNh4eqaAprJ
 
 This plan changes two statements in [`docs/frontend/intake-ui.md`](../frontend/intake-ui.md): "No push notifications" (intake uses local notifications) and the blanket "Stays on this device" promise (statement PDFs and some images go to the owner's server and may reach a vision model). Update that doc when the feature lands.
 
@@ -69,7 +69,7 @@ All copy is British English and follows the existing house style: warm canvas, w
 SwiftUI inside the extension, medium detent. Top to bottom:
 
 - **Cancel** · title **Add to Halation**.
-- Items strip: 72pt thumbnails; a PDF is one item with a "PDF · 4 pages" badge; more than four collapse to "+3". Caption "2 screenshots" or "Statement PDF · 4 pages · 1.2 MB". Over the size limit the caption turns red: "Too large to send (limit 8 MB)". Tap to Quick Look.
+- Items strip: 72pt thumbnails; a PDF is one item with a "PDF · 4 pages" badge; more than four collapse to "+3". Caption "2 screenshots" or "Statement PDF · 4 pages · 1.2 MB". Over the size limit the caption turns red: "Too large to send (limit 12 MB per file, 24 MB per share)". Tap to Quick Look.
 - **Account** row: defaults to the last-used open account (per `intake-ui.md`). Menu lists open accounts plus **Let Halation decide**, which shows "Picks from the document. You confirm at review." Never closed or deleted accounts.
 - **What is this?** segmented: Auto · New · Fix · Statement, with a hint line:
   - Auto: "Halation works out whether each item is new or a correction."
@@ -249,6 +249,7 @@ The likely split: a reading model (on-device or vision) extracts text and struct
 - Rule hit and override counts come from approvals in review only, not from later edits made in the register.
 - Rules never change a row that is already in the register (Fix and Already in rows); they shape New rows only.
 - Skill notes reach only the Apple Intelligence reader, capped at 1,500 characters including account notes.
+- Added in the first version: an on-device fallback line reader (`IntakeLineParser`) for when Apple Intelligence is unavailable or finds nothing. Its rows are capped at Likely and always reviewed.
 
 **Phase 2:** server-side reading on the Worker with file lifecycle and vision models; skill and rules synced to the server with API; reconcile jobs; auto-save as unapproved with the teal indicator; eval harness; Jev decisions that pass the evals.
 

@@ -1,20 +1,22 @@
 # iOS share and screenshots
 
-Share and a later screenshot offer are more writers of the same inbox. The extension copies files and quits. For a share, the main app turns the entry into an Inbox job, reads it on the phone, matches it against the register and waits for **Approve all**. The screenshot offer also becomes an Inbox job; only App Intents still go through the conversation and the density rule. Default-off screenshot offer lives on Accounts. Issues [#104](https://github.com/yjsoon/howmuch/issues/104), [#106](https://github.com/yjsoon/howmuch/issues/106). Spec: `docs/frontend/intake-ui.md` §9–10.
+Share and a later screenshot offer are more writers of the same inbox. The extension copies files and quits. For a share, the main app turns the entry into an Inbox job, reads it on the phone, matches it against the register and waits for **Approve all**. The screenshot offer also becomes an Inbox job; only App Intents still go through the conversation and the density rule. Default-off screenshot offer lives on Accounts. Issues [#104](https://github.com/yjsoon/howmuch/issues/104), [#106](https://github.com/yjsoon/howmuch/issues/106). Spec: `docs/frontend/intake-ui.md` (Apple Intelligence and Skill & Memory sections).
 
 ## Sub-features
 
 - `share-appears` HowMuch appears in the iOS share sheet for up to 10 images, one PDF, or text.
 - `share-copies` choosing HowMuch shows a sheet with account, kind and note. Send hands the job off without opening the app, and nothing is saved.
 - `share-inbox-band` opening Halation shows an **Inbox** band at the top of Accounts, with a count chip (Ready plus Needs you), **See all**, and the batch row: thumbnail, title such as `2 screenshots`, a status pill and a summary.
-- `share-reading` while the batch is read the row's pill is **Reading** with `Reading on this phone…`. Reading continues if you leave the Inbox list.
-- `share-ready` when reading ends the pill is **Ready** and the summary reads like `1 new · 1 fix · 1 already in`.
+- `share-reading` while the batch is read the row's pill is **Reading** with `Reading on this phone…`. Reading continues if you leave the Inbox list. A job waiting for account data shows `Waiting for your accounts` instead, then `Reading on this phone…` once accounts load.
+- `share-ready` when reading ends the pill is **Ready** and the summary reads like `1 new · 1 fix · 1 already in`. With Apple Intelligence unavailable (Simulator) the line reader fills in: its rows carry the reason `Read without Apple Intelligence` and are never above Likely.
 - `share-batch` tapping the row opens the batch with FIX, NEW, POSSIBLE DUPLICATES and ALREADY IN groups, each row with its reasons, and **Approve all N** and **Reject batch**.
 - `share-approve` **Approve all** adds the ticked new rows and fixes the ticked fix rows, shows `{n} added, {m} fixed · Saved on device`, and the batch moves to **Applied**. A fix keeps the row's approved state.
 - `share-reject` **Reject batch** asks `Discard this batch?` / `Nothing was saved.`, then the batch leaves the Inbox and the register is unchanged.
 - `share-needs-you` **Let Halation decide** with a line that names no account puts the batch under **Needs you**. Choosing an account moves it to **Ready**.
-- `share-failed` an image with no text shows **Failed** with `Couldn't read this. No text was found.` and a **Retry** swipe.
+- `share-failed` an image with no text shows **Failed** with `Couldn't read this. No text was found.` and a **Retry** swipe. Text with no spends fails with `Couldn't read this. No transactions were found.`
 - `share-no-upload` sharing does not POST the file or a transcript to the HowMuch API.
+- `skill-remember` correct a New row's category, **Approve**, and **Remember this?** appears; tap Remember. Share the same payee again: the New row is pre-categorised and Why cites a `Learned rule`. An **Already in** row is unchanged.
+- `skill-delete` delete the rule in Settings → Intelligence → Skill & Memory. Pending rows lose the rule's effect but keep `Read without Apple Intelligence`. Save the Skill & Memory screen and the Why sheet before and after under `.amp/in/artifacts/ios-share-and-screenshots/`.
 - `intents-conversation-unchanged` App Intents (Add from Image or Text) still open the conversation, not the Inbox.
 - `shot-offer` Accounts bottom toast `Add these transactions?` / `Looks like a screenshot · {n} lines`. Tap the toast to create an Inbox batch (no conversation opens). Swipe away or tap dismiss. Default off.
 - `shot-review` Review uses inbox + reader, not a third confirmation UI.

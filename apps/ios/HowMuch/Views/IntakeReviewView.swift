@@ -236,9 +236,11 @@ struct IntakeReviewView: View {
         Theme.canvas
         IntelligenceAura()
         VStack(spacing: 8) {
-          Text("Reading on this phone…")
+          Text(job.waitingMessage ?? "Reading on this phone…")
             .font(.headline)
-          Text("Rows appear here when the reader finishes.")
+          Text(job.waitingMessage == nil
+            ? "Rows appear here when the reader finishes."
+            : "Reading starts when they load.")
             .font(.subheadline)
             .foregroundStyle(.secondary)
         }
