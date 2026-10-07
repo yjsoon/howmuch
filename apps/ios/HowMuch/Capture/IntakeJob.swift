@@ -299,6 +299,10 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
   var applyStartedAt: Date?
   /// "1 added, 1 fixed" once applied.
   var appliedSummary: String?
+  /// A background read could not finish this job (a Vision or model failure, or
+  /// no text). Only a foreground drain reads it again, so background refreshes
+  /// do not repeat the same failure.
+  var deferredToForeground: Bool
   var updatedAt: Date
 
   init(
@@ -322,6 +326,7 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
     duplicateCheckLimited: Bool = false,
     applyStartedAt: Date? = nil,
     appliedSummary: String? = nil,
+    deferredToForeground: Bool = false,
     updatedAt: Date? = nil
   ) {
     self.id = id
@@ -344,13 +349,14 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
     self.duplicateCheckLimited = duplicateCheckLimited
     self.applyStartedAt = applyStartedAt
     self.appliedSummary = appliedSummary
+    self.deferredToForeground = deferredToForeground
     self.updatedAt = updatedAt ?? createdAt
   }
 
   private enum CodingKeys: String, CodingKey {
     case id, createdAt, origin, sourceFiles, accountID, decideAccount, hint, note, contentHash
     case state, failureMessage, proposals, extractions, extractionSourceIndexes, fallbackExtractionIndexes
-    case planID, connectionFingerprint, duplicateCheckLimited, applyStartedAt, appliedSummary, updatedAt
+    case planID, connectionFingerprint, duplicateCheckLimited, applyStartedAt, appliedSummary, deferredToForeground, updatedAt
   }
 
   init(from decoder: Decoder) throws {
@@ -379,6 +385,7 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
     duplicateCheckLimited = try container.decodeIfPresent(Bool.self, forKey: .duplicateCheckLimited) ?? false
     applyStartedAt = try container.decodeIfPresent(Date.self, forKey: .applyStartedAt)
     appliedSummary = try container.decodeIfPresent(String.self, forKey: .appliedSummary)
+    deferredToForeground = try container.decodeIfPresent(Bool.self, forKey: .deferredToForeground) ?? false
     updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
   }
 
@@ -448,28 +455,36 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
     state == .proposed ? (spokenProposalSummary ?? "Nothing to add") : statusSummary
   }
 
-  /// "DBS Altitude screenshots", "2 screenshots", "PDF".
-  func title(accountName: String?) -> String {
+  private var payloadNoun: (noun: String, count: Int) {
     let images = sourceFiles.filter { $0.kind == .image }.count
     let pdfs = sourceFiles.filter { $0.kind == .pdf }.count
     let texts = sourceFiles.filter { $0.kind == .text }.count
-    let noun: String
-    let count: Int
     if images > 0 {
-      noun = images == 1 ? "screenshot" : "screenshots"
-      count = images
-    } else if pdfs > 0 {
-      noun = pdfs == 1 ? "PDF" : "PDFs"
-      count = pdfs
-    } else {
-      noun = texts == 1 ? "text" : "texts"
-      count = max(texts, 1)
+      return (images == 1 ? "screenshot" : "screenshots", images)
     }
+    if pdfs > 0 {
+      return (pdfs == 1 ? "PDF" : "PDFs", pdfs)
+    }
+    return (texts == 1 ? "text" : "texts", max(texts, 1))
+  }
+
+  /// "DBS Altitude screenshots", "2 screenshots", "PDF".
+  func title(accountName: String?) -> String {
+    let (noun, count) = payloadNoun
     if let accountName, !accountName.isEmpty {
       return "\(accountName) \(noun)"
     }
     if count == 1 {
       return noun == "text" ? "Pasted text" : noun.prefix(1).uppercased() + String(noun.dropFirst())
+    }
+    return "\(count) \(noun)"
+  }
+
+  /// For a sentence: "2 DBS Altitude screenshots", "1 screenshot", "1 PDF".
+  func sourceDescription(accountName: String?) -> String {
+    let (noun, count) = payloadNoun
+    if let accountName, !accountName.isEmpty {
+      return "\(count) \(accountName) \(noun)"
     }
     return "\(count) \(noun)"
   }
@@ -483,6 +498,20 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
     case .failed: 3
     case .applied: 4
     case .discarded: 5
+    }
+  }
+
+  /// True when the owner has something to do: a batch that needs them, or one
+  /// with a row to add, fix or check. A batch of only Already in rows does not.
+  var needsReview: Bool {
+    switch state {
+    case .needsYou:
+      return true
+    case .proposed:
+      let counts = counts
+      return counts.added > 0 || counts.fixed > 0 || counts.possibleDuplicates > 0
+    default:
+      return false
     }
   }
 

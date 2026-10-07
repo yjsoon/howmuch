@@ -1,12 +1,13 @@
 import Foundation
 import Observation
+import UIKit
 import os
 
 extension InboxItem {
-  /// Share-sheet entries become intake jobs. Every other source (App Intents,
-  /// the clipboard offer) keeps the conversation flow.
+  /// Share-sheet entries and the clipboard offer's "Add these transactions?"
+  /// become intake jobs. App Intents keep the conversation flow.
   var isIntakeJobSource: Bool {
-    source == .shareSheet
+    source == .shareSheet || source == .detectedScreenshot
   }
 }
 
@@ -31,9 +32,17 @@ final class IntakeCoordinator {
   @ObservationIgnored private let inbox: InboxStore
   @ObservationIgnored private let store: IntakeJobStore
   @ObservationIgnored private var drainTask: Task<Void, Never>?
+  /// Identifies the drain that owns `drainTask`, so a finished (or cancelled)
+  /// drain's tail never clears a newer one.
+  @ObservationIgnored private var drainToken = UUID()
+  /// Bumped by `cancelDrain`. A drain loop stops when its epoch is stale.
+  @ObservationIgnored private var drainEpoch = 0
   @ObservationIgnored private var redrainRequested = false
-  @ObservationIgnored private var jobTasks: [UUID: Task<Void, Never>] = [:]
+  @ObservationIgnored private var jobTasks: [UUID: (token: UUID, task: Task<Void, Never>)] = [:]
   @ObservationIgnored private var approving: Set<UUID> = []
+  /// Account names by ID, refreshed on each drain, for notification copy.
+  @ObservationIgnored private var accountNames: [String: String] = [:]
+  @ObservationIgnored private let hashIndex: IntakeHashIndex
   /// Shares whose files could not all be found; left alone until the next drain re-adopts them.
   @ObservationIgnored private var unadoptable: Set<UUID> = []
 
@@ -53,10 +62,14 @@ final class IntakeCoordinator {
     inbox: InboxStore = IntakeJobStore.isUnitTestHost
       ? InboxStore(container: IntakeJobStore.sharedContainer)
       : .shared,
-    store: IntakeJobStore = .shared
+    store: IntakeJobStore = .shared,
+    hashIndex: IntakeHashIndex = IntakeJobStore.isUnitTestHost
+      ? IntakeHashIndex(container: IntakeJobStore.sharedContainer)
+      : .shared
   ) {
     self.inbox = inbox
     self.store = store
+    self.hashIndex = hashIndex
     reload()
   }
 
@@ -66,9 +79,15 @@ final class IntakeCoordinator {
     jobs.first { $0.id == id }
   }
 
-  /// Jobs waiting on the owner: Ready to review plus Needs you.
+  /// Jobs waiting on the owner: Ready to review plus Needs you. A batch of only
+  /// Already in rows has nothing to review and is not counted.
   var attentionCount: Int {
-    jobs.count { $0.state == .proposed || $0.state == .needsYou }
+    jobs.count { $0.needsReview }
+  }
+
+  /// The app icon badge: `attentionCount`, or 0 while signed out.
+  var badgeCount: Int {
+    IntakeBackgroundRefresh.shared.model?.settings.isAuthenticated == true ? attentionCount : 0
   }
 
   /// Jobs that are not finished: the Accounts band shows only these.
@@ -96,6 +115,18 @@ final class IntakeCoordinator {
 
   func reload() {
     jobs = store.list().filter { $0.state != .discarded }
+    publishAttention()
+  }
+
+  /// A read is under way or waiting: the app should ask iOS for time to finish it.
+  var isBusy: Bool {
+    drainTask != nil
+      || jobs.contains { ($0.state == .reading || $0.state == .queued) && !$0.deferredToForeground }
+  }
+
+  /// Keeps the app icon badge at Ready plus Needs you.
+  private func publishAttention() {
+    IntakeNotifier.shared.updateBadge(badgeCount)
   }
 
   // MARK: Draining the inbox
@@ -108,21 +139,53 @@ final class IntakeCoordinator {
     guard model.settings.isAuthenticated else {
       return
     }
+    accountNames = Dictionary(model.accounts.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
     prepareJobs(model: model)
-    guard drainTask == nil else {
+    if let running = drainTask, !running.isCancelled {
       redrainRequested = true
       return
     }
+    // A cancelled drain may still be winding down: the new one waits for it,
+    // so two never read the same job at once.
+    let previous = drainTask
+    let epoch = drainEpoch
+    let token = UUID()
+    drainToken = token
     drainTask = Task { [weak self] in
+      await previous?.value
       guard let self else {
         return
       }
       repeat {
         self.redrainRequested = false
-        await self.processPending(model: model)
-      } while self.redrainRequested
-      self.drainTask = nil
+        await self.processPending(model: model, epoch: epoch)
+      } while self.redrainRequested && self.drainEpoch == epoch && !Task.isCancelled
+      if self.drainToken == token {
+        self.drainTask = nil
+      }
     }
+  }
+
+  /// Resolves once the drain in flight (if any) has finished or been cancelled.
+  func waitForDrain() async {
+    await drainTask?.value
+  }
+
+  /// Stops reading. A job being read stays `reading` (a cancelled read saves
+  /// nothing) and is picked up by the next drain. Used when iOS ends the
+  /// time it gave the app in the background.
+  func cancelDrain() {
+    drainEpoch += 1
+    redrainRequested = false
+    drainTask?.cancel()
+    for entry in jobTasks.values {
+      entry.task.cancel()
+    }
+  }
+
+  /// Notification copy: the name of the account a job was shared to, if known.
+  func accountName(for job: IntakeJob) -> String? {
+    job.accountID.flatMap { accountNames[$0] }
   }
 
   /// One `list()` per drain: adopt new entries, prune, stamp the budget, mark
@@ -141,6 +204,7 @@ final class IntakeCoordinator {
     store.pruneQuarantine(olderThan: cutoff)
 
     let planID = model.settings.planID
+    var markedFromAnotherBudget = false
     for index in all.indices {
       var job = all[index]
       var changed = false
@@ -154,6 +218,8 @@ final class IntakeCoordinator {
         job.state = .failed
         job.failureMessage = Self.differentBudgetMessage
         changed = true
+        markedFromAnotherBudget = true
+        IntakeNotifier.shared.clear(job.id)
       }
       if job.applyStartedAt != nil, job.state == .proposed, !approving.contains(job.id) {
         // Interrupted mid-approve. Approving again is safe: creates carry their
@@ -169,6 +235,38 @@ final class IntakeCoordinator {
       }
     }
     jobs = all.filter { $0.state != .discarded }
+    publishAttention()
+    if markedFromAnotherBudget {
+      IntakeNotifier.shared.refreshSummary()
+    }
+    syncHashIndex()
+  }
+
+  /// Rewrites the duplicate-share index for the extension: every share from the
+  /// last 30 days that is still worth warning about. Entries already in the
+  /// index stay until the window ends, so removing a finished job does not end
+  /// the warning early; those of a discarded or failed job go (sharing it again
+  /// is the point), and so does a job with no hash.
+  private func syncHashIndex() {
+    let all = store.list()
+    let withdrawn = Set(all.filter { $0.state == .discarded || $0.state == .failed }.map(\.id))
+    var contents = hashIndex.read()
+    contents.content = contents.content.filter { !withdrawn.contains($0.value.jobID) }
+    contents.sources = contents.sources.filter { !withdrawn.contains($0.value.jobID) }
+    for job in all where job.state != .discarded && job.state != .failed {
+      let entry = IntakeHashEntry(jobID: job.id, sharedAt: job.createdAt)
+      if let hash = job.contentHash, !hash.isEmpty,
+         contents.content[hash].map({ $0.sharedAt < job.createdAt }) ?? true {
+        contents.content[hash] = entry
+      }
+      for file in job.sourceFiles {
+        if let hash = file.sha256, !hash.isEmpty,
+           contents.sources[hash].map({ $0.sharedAt < job.createdAt }) ?? true {
+          contents.sources[hash] = entry
+        }
+      }
+    }
+    hashIndex.replace(contents)
   }
 
   /// Moves claimed `Reading/` entries into `Jobs/`. Also picks up entries an
@@ -177,6 +275,13 @@ final class IntakeCoordinator {
     unadoptable = []
     _ = try? inbox.claimInbox(where: { $0.isIntakeJobSource })
     let planID = model.settings.planID
+    var adoptedAny = false
+    defer {
+      if adoptedAny {
+        // Background-first users are asked the first time a share is taken.
+        IntakeNotifier.shared.shareAdopted()
+      }
+    }
     for item in inbox.loadReading(where: { $0.isIntakeJobSource }) {
       do {
         _ = try store.adopt(
@@ -185,6 +290,7 @@ final class IntakeCoordinator {
           connectionFingerprint: planID.isEmpty ? nil : model.settings.connectionFingerprint
         )
         inbox.discardReading(item.id)
+        adoptedAny = true
       } catch IntakeJobStoreError.missingSource {
         unadoptable.insert(item.id)
         giveUpOnMissingFiles(
@@ -230,7 +336,7 @@ final class IntakeCoordinator {
     save(job)
   }
 
-  private func processPending(model: AppModel) async {
+  private func processPending(model: AppModel, epoch: Int) async {
     // A batch that was waiting for an account is read once there is one.
     if !model.openAccounts.isEmpty {
       for job in jobs where job.state == .needsYou && job.failureMessage == Self.addAccountMessage {
@@ -241,9 +347,15 @@ final class IntakeCoordinator {
       }
     }
     let pending = jobs
-      .filter { ($0.state == .reading || $0.state == .queued) && !unadoptable.contains($0.id) }
+      .filter {
+        ($0.state == .reading || $0.state == .queued) && !unadoptable.contains($0.id)
+          && !($0.deferredToForeground && Self.isReadingInBackground)
+      }
       .sorted { $0.createdAt < $1.createdAt }
     for job in pending {
+      if Task.isCancelled || drainEpoch != epoch {
+        return
+      }
       await run(job.id, model: model).value
     }
     for job in jobs where job.state == .proposed && job.duplicateCheckLimited {
@@ -254,14 +366,20 @@ final class IntakeCoordinator {
   /// The one task reading a job, created on demand.
   @discardableResult
   private func run(_ id: UUID, model: AppModel) -> Task<Void, Never> {
-    if let existing = jobTasks[id] {
-      return existing
+    // A cancelled read may still be winding down: ignore it, and start after it.
+    if let existing = jobTasks[id], !existing.task.isCancelled {
+      return existing.task
     }
+    let previous = jobTasks[id]?.task
+    let token = UUID()
     let task = Task { [weak self] in
+      await previous?.value
       await self?.process(id, model: model)
-      self?.jobTasks[id] = nil
+      if self?.jobTasks[id]?.token == token {
+        self?.jobTasks[id] = nil
+      }
     }
-    jobTasks[id] = task
+    jobTasks[id] = (token, task)
     return task
   }
 
@@ -329,6 +447,9 @@ final class IntakeCoordinator {
     }
     reading.state = .reading
     reading.failureMessage = nil
+    if !Self.isReadingInBackground {
+      reading.deferredToForeground = false
+    }
     save(reading)
 
     let accounts = model.openAccounts
@@ -344,19 +465,41 @@ final class IntakeCoordinator {
       guard FileManager.default.fileExists(atPath: url.path) else {
         continue
       }
-      let text = await recognise(file, at: url)
+      let background = Self.isReadingInBackground
+      let text: String
+      do {
+        text = try await recognise(file, at: url, strict: background)
+      } catch {
+        // Vision failed (not "found no text"). A foreground read can try again.
+        leaveForForeground(id)
+        return
+      }
       guard readable(id) != nil else {
         return
       }
       if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         readAnyText = true
       }
-      var drafts = await SlipReader.shared.interpret(
-        text: text,
-        accounts: accounts,
-        categoryGroups: model.categoryGroups,
-        payees: model.payees
-      )
+      var drafts: [SlipMappedDraft]
+      do {
+        drafts = try await SlipReader.shared.interpretOrThrow(
+          text: text,
+          accounts: accounts,
+          categoryGroups: model.categoryGroups,
+          payees: model.payees
+        )
+      } catch {
+        if background, readable(id) != nil {
+          // The model failed (not "returned no spends"). Don't settle for the
+          // line parser in the background: wait for a foreground read.
+          leaveForForeground(id)
+          return
+        }
+        drafts = []
+      }
+      guard readable(id) != nil else {
+        return
+      }
       if drafts.isEmpty {
         // No Apple Intelligence (or the model declined): read the lines directly.
         drafts = IntakeLineParser.interpret(
@@ -375,6 +518,12 @@ final class IntakeCoordinator {
     }
 
     guard !extracted.isEmpty else {
+      if !readAnyText, Self.isReadingInBackground {
+        // No text may only mean OCR failed quietly (a scanned PDF page). Let a
+        // foreground read decide before the batch is called failed.
+        leaveForForeground(id)
+        return
+      }
       guard var current = readable(id) else {
         return
       }
@@ -513,12 +662,33 @@ final class IntakeCoordinator {
     }
   }
 
-  private func recognise(_ file: InboxSourceFile, at url: URL) async -> String {
+  /// True when the app is not in front: a background refresh or the time
+  /// iOS gives after backgrounding.
+  private static var isReadingInBackground: Bool {
+    UIApplication.shared.applicationState != .active
+  }
+
+  /// Puts a job whose read failed in the background back in the queue, so the
+  /// next foreground drain reads it with the full pipeline.
+  private func leaveForForeground(_ id: UUID) {
+    guard var job = readable(id) else {
+      return
+    }
+    job.state = .queued
+    job.deferredToForeground = true
+    save(job)
+  }
+
+  /// With `strict`, an OCR failure throws instead of reading as no text.
+  private func recognise(_ file: InboxSourceFile, at url: URL, strict: Bool) async throws -> String {
     switch file.kind {
     case .image:
       let data = await Task.detached(priority: .userInitiated) { try? Data(contentsOf: url) }.value
       guard let data else {
         return ""
+      }
+      if strict {
+        return try await SlipImageText.recognizeOrThrow(data)
       }
       return await SlipImageText.recognize(data)
     case .text:
@@ -610,6 +780,11 @@ final class IntakeCoordinator {
 
     // The job may have been discarded or changed while the live rows were read.
     guard var job = self.job(id), job.state == .proposed else {
+      return false
+    }
+    // The owner may have signed out or switched budgets while the live rows were read.
+    guard model.settings.isAuthenticated, !Self.isFromAnotherBudget(job, model: model) else {
+      model.showSaveMessage("The batch changed. Review it and approve again.", kind: .failure)
       return false
     }
     // Something else changed the rows (a new match, a changed account) while
@@ -707,7 +882,7 @@ final class IntakeCoordinator {
   /// Rejects the batch: nothing is saved, any read in progress is cancelled,
   /// and the shared files are deleted.
   func discard(_ id: UUID) {
-    jobTasks[id]?.cancel()
+    jobTasks[id]?.task.cancel()
     guard var job = self.job(id) else {
       return
     }
@@ -719,6 +894,7 @@ final class IntakeCoordinator {
     job.extractionSourceIndexes = []
     if save(job) {
       store.deleteSources(id)
+      syncHashIndex()
     }
   }
 
@@ -1082,6 +1258,7 @@ final class IntakeCoordinator {
   func remove(_ id: UUID) {
     store.delete(id)
     reload()
+    syncHashIndex()
   }
 
   func clearApplied() {
@@ -1089,6 +1266,7 @@ final class IntakeCoordinator {
       store.delete(job.id)
     }
     reload()
+    syncHashIndex()
   }
 
   // MARK: Pure helpers
@@ -1150,6 +1328,7 @@ final class IntakeCoordinator {
   private func save(_ job: IntakeJob) -> Bool {
     var next = job
     next.updatedAt = Date()
+    let previous = jobs.first { $0.id == job.id }?.state
     do {
       try store.save(next)
     } catch {
@@ -1164,6 +1343,12 @@ final class IntakeCoordinator {
       jobs.insert(next, at: 0)
       jobs.sort { $0.createdAt > $1.createdAt }
     }
+    publishAttention()
+    if (previous == .failed) != (next.state == .failed) {
+      // A failed share can be sent again without a warning.
+      syncHashIndex()
+    }
+    IntakeNotifier.shared.jobDidChange(next, previous: previous, accountName: accountName(for: next))
     return true
   }
 }

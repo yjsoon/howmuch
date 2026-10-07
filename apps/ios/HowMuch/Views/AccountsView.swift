@@ -107,7 +107,9 @@ struct AccountsView: View {
         ScreenshotOfferToast(
           offer: offer,
           onAdd: {
+            // The offer becomes an Inbox batch, read here like a share.
             try? screenshots.review()
+            IntakeCoordinator.shared.drain(model: model)
           },
           onDismiss: {
             screenshots.dismiss()
@@ -138,6 +140,17 @@ struct AccountsView: View {
     }
     .onChange(of: model.referencePhase) { _, _ in
       reconcilePane()
+    }
+    .onChange(of: chrome?.pendingIntakeDestination, initial: true) { _, route in
+      // An Inbox notification or link: the list, or that batch.
+      guard let route else { return }
+      chrome?.pendingIntakeDestination = nil
+      switch route {
+      case .list:
+        pane = .intake
+      case .batch(let id):
+        pane = .intakeBatch(id)
+      }
     }
     .onChange(of: chrome?.pendingAccountID, initial: true) { _, accountID in
       // Opened from a Rewards card: show that account's register.

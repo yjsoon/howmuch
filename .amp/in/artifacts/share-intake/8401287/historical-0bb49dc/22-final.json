@@ -1,0 +1,619 @@
+{
+  "capturedAt": "2026-10-07T05:51:39.455221+00:00",
+  "database": "/Users/devin/Library/Developer/CoreSimulator/Devices/EDD9B083-63F1-44E6-9A7B-0A6964CC2561/data/Containers/Data/Application/5AACF4D3-D05E-4F2A-8ED3-616806224A6C/Library/Application Support/HowMuch/Local/howmuch.sqlite",
+  "group": "/Users/devin/Library/Developer/CoreSimulator/Devices/EDD9B083-63F1-44E6-9A7B-0A6964CC2561/data/Containers/Shared/AppGroup/2A15EA43-6271-4E8B-A901-E8CD06CF6D16",
+  "accounts": [
+    {
+      "id": "e2e-dbs",
+      "name": "DBS Altitude",
+      "closed": 0,
+      "balance_milli": -32350
+    },
+    {
+      "id": "e2e-everyday",
+      "name": "Everyday Account",
+      "closed": 0,
+      "balance_milli": 0
+    },
+    {
+      "id": "e2e-closed",
+      "name": "Closed Synthetic Account",
+      "closed": 1,
+      "balance_milli": 0
+    }
+  ],
+  "shareContext": {
+    "accounts": [
+      {
+        "id": "e2e-dbs",
+        "name": "DBS Altitude",
+        "isClosed": false
+      },
+      {
+        "id": "e2e-everyday",
+        "name": "Everyday Account",
+        "isClosed": false
+      }
+    ],
+    "writtenAt": "2026-10-07T05:51:11Z",
+    "lastUsedOpenAccountID": "e2e-dbs",
+    "isSignedIn": true
+  },
+  "inbox": {},
+  "jobs": {
+    "Jobs/17636F04-9AB3-476C-BB15-B649219FF03A/job.json": {
+      "state": "discarded",
+      "fallbackExtractionIndexes": [
+        0
+      ],
+      "sourceFiles": [
+        {
+          "filename": "payload.png",
+          "kind": "image",
+          "bytes": 27687
+        }
+      ],
+      "hint": "auto",
+      "planID": "plan_613b3d02-e28b-4c3b-b514-afaf3deb047e",
+      "extractions": [],
+      "extractionSourceIndexes": [],
+      "duplicateCheckLimited": false,
+      "origin": "detectedScreenshot",
+      "updatedAt": "2026-10-07T05:48:27Z",
+      "proposals": [
+        {
+          "changedFields": [],
+          "candidateIDs": [
+            "e2e-existing-kopitiam"
+          ],
+          "decision": "rejected",
+          "id": "5161C145-925A-4303-9B25-08A45DB9EA40",
+          "sourceFileIndex": 0,
+          "isApplied": false,
+          "reasons": [
+            "Same amount within 3 days",
+            "Read without Apple Intelligence"
+          ],
+          "targetTransactionID": "e2e-existing-kopitiam",
+          "kind": "alreadyIn",
+          "targetSnapshot": {
+            "approved": true,
+            "payeeName": "Kopitiam",
+            "deleted": false,
+            "id": "e2e-existing-kopitiam",
+            "subtransactions": [],
+            "accountName": "DBS Altitude",
+            "date": "2026-10-05",
+            "accountId": "e2e-dbs",
+            "cleared": "uncleared",
+            "amount": -8900,
+            "payeeId": "e2e-kopitiam"
+          },
+          "confidence": 0.85,
+          "draft": {
+            "payeeName": "KOPITIAM AMK",
+            "wasReconciled": false,
+            "date": "2026-10-05T07:00:00Z",
+            "amountMagnitudeMilli": 8900,
+            "isCleared": false,
+            "direction": "outflow",
+            "importID": "0e345f67-6de6-460a-a496-5bae45ea9f4a",
+            "linkedTransferIDs": [],
+            "subtransactions": [],
+            "accountID": "e2e-dbs",
+            "loadedTransferLineSignatures": [],
+            "memo": "",
+            "flag": ""
+          },
+          "proposedDraft": {
+            "payeeName": "KOPITIAM AMK",
+            "wasReconciled": false,
+            "date": "2026-10-05T07:00:00Z",
+            "amountMagnitudeMilli": 8900,
+            "isCleared": false,
+            "direction": "outflow",
+            "importID": "0e345f67-6de6-460a-a496-5bae45ea9f4a",
+            "linkedTransferIDs": [],
+            "subtransactions": [],
+            "accountID": "e2e-dbs",
+            "loadedTransferLineSignatures": [],
+            "memo": "",
+            "flag": ""
+          }
+        }
+      ],
+      "createdAt": "2026-10-07T05:46:56Z",
+      "decideAccount": false,
+      "id": "17636F04-9AB3-476C-BB15-B649219FF03A",
+      "connectionFingerprint": "https://local.howmuch|plan_613b3d02-e28b-4c3b-b514-afaf3deb047e|local-user"
+    },
+    "Jobs/64A340DA-56F8-4FC1-95DC-1B94C81EC85B/job.json": {
+      "decideAccount": false,
+      "proposals": [
+        {
+          "proposedDraft": {
+            "wasReconciled": false,
+            "subtransactions": [],
+            "accountID": "e2e-dbs",
+            "flag": "",
+            "date": "2026-10-05T07:00:00Z",
+            "linkedTransferIDs": [],
+            "importID": "75eb7ffd-0228-4d2c-be28-f8657f6da797",
+            "direction": "outflow",
+            "payeeName": "KOPITIAM AMK",
+            "memo": "",
+            "amountMagnitudeMilli": 8900,
+            "isCleared": false,
+            "loadedTransferLineSignatures": []
+          },
+          "confidence": 0.85,
+          "isApplied": false,
+          "id": "A32C6E83-3EAB-44D5-BF78-134D26DAECE4",
+          "targetTransactionID": "e2e-existing-kopitiam",
+          "changedFields": [],
+          "sourceFileIndex": 0,
+          "decision": "rejected",
+          "reasons": [
+            "Same amount within 3 days",
+            "Read without Apple Intelligence"
+          ],
+          "draft": {
+            "wasReconciled": false,
+            "subtransactions": [],
+            "accountID": "e2e-dbs",
+            "flag": "",
+            "date": "2026-10-05T07:00:00Z",
+            "linkedTransferIDs": [],
+            "importID": "75eb7ffd-0228-4d2c-be28-f8657f6da797",
+            "direction": "outflow",
+            "payeeName": "KOPITIAM AMK",
+            "memo": "",
+            "amountMagnitudeMilli": 8900,
+            "isCleared": false,
+            "loadedTransferLineSignatures": []
+          },
+          "targetSnapshot": {
+            "accountId": "e2e-dbs",
+            "date": "2026-10-05",
+            "cleared": "uncleared",
+            "accountName": "DBS Altitude",
+            "payeeId": "e2e-kopitiam",
+            "approved": true,
+            "id": "e2e-existing-kopitiam",
+            "amount": -8900,
+            "payeeName": "Kopitiam",
+            "deleted": false,
+            "subtransactions": []
+          },
+          "candidateIDs": [
+            "e2e-existing-kopitiam"
+          ],
+          "kind": "alreadyIn"
+        }
+      ],
+      "sourceFiles": [
+        {
+          "filename": "image-1.PNG",
+          "bytes": 28810,
+          "kind": "image",
+          "sha256": "8a363fd697812e191ea387dc7e4c5d16b34b6f20e83b4bef6e6e485203ea01fe"
+        }
+      ],
+      "accountID": "e2e-dbs",
+      "fallbackExtractionIndexes": [
+        0
+      ],
+      "id": "64A340DA-56F8-4FC1-95DC-1B94C81EC85B",
+      "contentHash": "4ea3258cf150c378c223c7808722e1391e3592a0eb908a721d231439cdb15f10",
+      "extractions": [],
+      "planID": "plan_613b3d02-e28b-4c3b-b514-afaf3deb047e",
+      "duplicateCheckLimited": false,
+      "state": "discarded",
+      "connectionFingerprint": "https://local.howmuch|plan_613b3d02-e28b-4c3b-b514-afaf3deb047e|local-user",
+      "createdAt": "2026-10-07T05:41:37Z",
+      "note": "D0bb49dc BG simulation",
+      "hint": "auto",
+      "extractionSourceIndexes": [],
+      "origin": "shareSheet",
+      "updatedAt": "2026-10-07T05:48:36Z"
+    },
+    "Jobs/8967C20F-7E12-4025-882C-AE37A9DF763E/job.json": {
+      "createdAt": "2026-10-07T05:48:50Z",
+      "contentHash": "4ea3258cf150c378c223c7808722e1391e3592a0eb908a721d231439cdb15f10",
+      "sourceFiles": [
+        {
+          "sha256": "8a363fd697812e191ea387dc7e4c5d16b34b6f20e83b4bef6e6e485203ea01fe",
+          "bytes": 28810,
+          "filename": "image-1.PNG",
+          "kind": "image"
+        }
+      ],
+      "extractionSourceIndexes": [
+        0
+      ],
+      "state": "proposed",
+      "fallbackExtractionIndexes": [
+        0
+      ],
+      "connectionFingerprint": "https://local.howmuch|plan_613b3d02-e28b-4c3b-b514-afaf3deb047e|local-user",
+      "planID": "plan_613b3d02-e28b-4c3b-b514-afaf3deb047e",
+      "duplicateCheckLimited": false,
+      "updatedAt": "2026-10-07T05:49:03Z",
+      "extractions": [
+        {
+          "parsedCategory": false,
+          "draft": {
+            "loadedTransferLineSignatures": [],
+            "subtransactions": [],
+            "amountMagnitudeMilli": 8900,
+            "memo": "",
+            "isCleared": false,
+            "linkedTransferIDs": [],
+            "importID": "a1e11d90-96ca-4a56-8289-eb5929a6d3e9",
+            "wasReconciled": false,
+            "flag": "",
+            "accountID": "e2e-dbs",
+            "date": "2026-10-05T07:00:00Z",
+            "direction": "outflow",
+            "payeeName": "KOPITIAM AMK"
+          },
+          "parsedAmount": true,
+          "accountCandidates": [],
+          "parsedAccount": false,
+          "categoryCandidates": [],
+          "parsedDirection": true,
+          "parsedDate": true
+        }
+      ],
+      "accountID": "e2e-dbs",
+      "hint": "auto",
+      "decideAccount": false,
+      "id": "8967C20F-7E12-4025-882C-AE37A9DF763E",
+      "origin": "shareSheet",
+      "proposals": [
+        {
+          "sourceFileIndex": 0,
+          "proposedDraft": {
+            "loadedTransferLineSignatures": [],
+            "subtransactions": [],
+            "amountMagnitudeMilli": 8900,
+            "memo": "",
+            "isCleared": false,
+            "linkedTransferIDs": [],
+            "importID": "a1e11d90-96ca-4a56-8289-eb5929a6d3e9",
+            "wasReconciled": false,
+            "flag": "",
+            "accountID": "e2e-dbs",
+            "date": "2026-10-05T07:00:00Z",
+            "direction": "outflow",
+            "payeeName": "KOPITIAM AMK"
+          },
+          "reasons": [
+            "Same amount within 3 days",
+            "Read without Apple Intelligence"
+          ],
+          "draft": {
+            "loadedTransferLineSignatures": [],
+            "subtransactions": [],
+            "amountMagnitudeMilli": 8900,
+            "memo": "",
+            "isCleared": false,
+            "linkedTransferIDs": [],
+            "importID": "a1e11d90-96ca-4a56-8289-eb5929a6d3e9",
+            "wasReconciled": false,
+            "flag": "",
+            "accountID": "e2e-dbs",
+            "date": "2026-10-05T07:00:00Z",
+            "direction": "outflow",
+            "payeeName": "KOPITIAM AMK"
+          },
+          "targetSnapshot": {
+            "id": "e2e-existing-kopitiam",
+            "accountId": "e2e-dbs",
+            "accountName": "DBS Altitude",
+            "date": "2026-10-05",
+            "amount": -8900,
+            "cleared": "uncleared",
+            "approved": true,
+            "payeeId": "e2e-kopitiam",
+            "deleted": false,
+            "payeeName": "Kopitiam",
+            "subtransactions": []
+          },
+          "isApplied": false,
+          "candidateIDs": [
+            "e2e-existing-kopitiam"
+          ],
+          "targetTransactionID": "e2e-existing-kopitiam",
+          "confidence": 0.85,
+          "decision": "pending",
+          "kind": "alreadyIn",
+          "id": "3A4E8EB7-19F2-42C1-9B0B-C17B950AAFEA",
+          "changedFields": []
+        }
+      ],
+      "note": "D0bb49dc timed Home"
+    },
+    "Jobs/C2573EFB-3672-4C2E-AACF-F6DE2C907BF1/job.json": {
+      "hint": "auto",
+      "createdAt": "2026-10-07T05:38:30Z",
+      "note": "D0bb49dc background retry",
+      "origin": "shareSheet",
+      "id": "C2573EFB-3672-4C2E-AACF-F6DE2C907BF1",
+      "proposals": [
+        {
+          "decision": "rejected",
+          "draft": {
+            "payeeName": "KOPITIAM AMK",
+            "isCleared": false,
+            "wasReconciled": false,
+            "subtransactions": [],
+            "date": "2026-10-05T07:00:00Z",
+            "importID": "93abcffa-c431-41e9-8ddb-e84f044b044c",
+            "accountID": "e2e-dbs",
+            "memo": "",
+            "direction": "outflow",
+            "amountMagnitudeMilli": 8900,
+            "flag": "",
+            "loadedTransferLineSignatures": [],
+            "linkedTransferIDs": []
+          },
+          "changedFields": [],
+          "id": "FF748A77-9778-4A98-A019-6B7F9A27B984",
+          "reasons": [
+            "Same amount within 3 days",
+            "Read without Apple Intelligence"
+          ],
+          "candidateIDs": [
+            "e2e-existing-kopitiam"
+          ],
+          "kind": "alreadyIn",
+          "proposedDraft": {
+            "subtransactions": [],
+            "amountMagnitudeMilli": 8900,
+            "memo": "",
+            "importID": "93abcffa-c431-41e9-8ddb-e84f044b044c",
+            "wasReconciled": false,
+            "payeeName": "KOPITIAM AMK",
+            "linkedTransferIDs": [],
+            "loadedTransferLineSignatures": [],
+            "date": "2026-10-05T07:00:00Z",
+            "accountID": "e2e-dbs",
+            "direction": "outflow",
+            "isCleared": false,
+            "flag": ""
+          },
+          "targetTransactionID": "e2e-existing-kopitiam",
+          "sourceFileIndex": 0,
+          "targetSnapshot": {
+            "date": "2026-10-05",
+            "accountId": "e2e-dbs",
+            "approved": true,
+            "payeeId": "e2e-kopitiam",
+            "payeeName": "Kopitiam",
+            "amount": -8900,
+            "id": "e2e-existing-kopitiam",
+            "cleared": "uncleared",
+            "accountName": "DBS Altitude",
+            "subtransactions": [],
+            "deleted": false
+          },
+          "isApplied": false,
+          "confidence": 0.85
+        }
+      ],
+      "planID": "plan_613b3d02-e28b-4c3b-b514-afaf3deb047e",
+      "duplicateCheckLimited": false,
+      "extractions": [],
+      "decideAccount": false,
+      "fallbackExtractionIndexes": [
+        0
+      ],
+      "extractionSourceIndexes": [],
+      "connectionFingerprint": "https://local.howmuch|plan_613b3d02-e28b-4c3b-b514-afaf3deb047e|local-user",
+      "accountID": "e2e-dbs",
+      "contentHash": "4ea3258cf150c378c223c7808722e1391e3592a0eb908a721d231439cdb15f10",
+      "updatedAt": "2026-10-07T05:41:18Z",
+      "sourceFiles": [
+        {
+          "filename": "image-1.PNG",
+          "sha256": "8a363fd697812e191ea387dc7e4c5d16b34b6f20e83b4bef6e6e485203ea01fe",
+          "bytes": 28810,
+          "kind": "image"
+        }
+      ],
+      "state": "discarded"
+    },
+    "Jobs/E1BDDBAE-FA0F-4486-A944-F7ED7ED38978/job.json": {
+      "proposals": [
+        {
+          "changedFields": [],
+          "decision": "rejected",
+          "candidateIDs": [
+            "e2e-existing-kopitiam"
+          ],
+          "confidence": 0.85,
+          "targetTransactionID": "e2e-existing-kopitiam",
+          "draft": {
+            "direction": "outflow",
+            "memo": "",
+            "isCleared": false,
+            "flag": "",
+            "accountID": "e2e-dbs",
+            "linkedTransferIDs": [],
+            "importID": "5a1182c9-c8a8-4a06-ae16-cf3be02bccf2",
+            "subtransactions": [],
+            "payeeName": "KOPITIAM AMK",
+            "date": "2026-10-05T07:00:00Z",
+            "amountMagnitudeMilli": 8900,
+            "wasReconciled": false,
+            "loadedTransferLineSignatures": []
+          },
+          "sourceFileIndex": 0,
+          "kind": "alreadyIn",
+          "isApplied": false,
+          "id": "642C7C3D-0EB9-4850-BF51-5F579F4ABFBF",
+          "reasons": [
+            "Same amount within 3 days",
+            "Read without Apple Intelligence"
+          ],
+          "targetSnapshot": {
+            "payeeId": "e2e-kopitiam",
+            "deleted": false,
+            "id": "e2e-existing-kopitiam",
+            "payeeName": "Kopitiam",
+            "approved": true,
+            "accountId": "e2e-dbs",
+            "subtransactions": [],
+            "accountName": "DBS Altitude",
+            "amount": -8900,
+            "cleared": "uncleared",
+            "date": "2026-10-05"
+          },
+          "proposedDraft": {
+            "memo": "",
+            "flag": "",
+            "accountID": "e2e-dbs",
+            "loadedTransferLineSignatures": [],
+            "subtransactions": [],
+            "linkedTransferIDs": [],
+            "importID": "5a1182c9-c8a8-4a06-ae16-cf3be02bccf2",
+            "date": "2026-10-05T07:00:00Z",
+            "amountMagnitudeMilli": 8900,
+            "wasReconciled": false,
+            "isCleared": false,
+            "direction": "outflow",
+            "payeeName": "KOPITIAM AMK"
+          }
+        }
+      ],
+      "connectionFingerprint": "https://local.howmuch|plan_613b3d02-e28b-4c3b-b514-afaf3deb047e|local-user",
+      "contentHash": "4ea3258cf150c378c223c7808722e1391e3592a0eb908a721d231439cdb15f10",
+      "origin": "shareSheet",
+      "accountID": "e2e-dbs",
+      "note": "D0bb49dc notification",
+      "duplicateCheckLimited": false,
+      "id": "E1BDDBAE-FA0F-4486-A944-F7ED7ED38978",
+      "updatedAt": "2026-10-07T05:37:57Z",
+      "hint": "auto",
+      "decideAccount": false,
+      "extractions": [],
+      "createdAt": "2026-10-07T05:36:34Z",
+      "extractionSourceIndexes": [],
+      "sourceFiles": [
+        {
+          "kind": "image",
+          "sha256": "8a363fd697812e191ea387dc7e4c5d16b34b6f20e83b4bef6e6e485203ea01fe",
+          "filename": "image-1.PNG",
+          "bytes": 28810
+        }
+      ],
+      "planID": "plan_613b3d02-e28b-4c3b-b514-afaf3deb047e",
+      "state": "discarded",
+      "fallbackExtractionIndexes": [
+        0
+      ]
+    }
+  },
+  "transactions": [
+    {
+      "id": "e2e-existing-kopitiam",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -8900,
+      "payee_name_snapshot": "Kopitiam",
+      "approved": 1
+    },
+    {
+      "id": "txn_5a0cabc1-c688-4c42-8891-a45116d7e610",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "approved": 1
+    },
+    {
+      "id": "txn_c95b236c-7263-48ac-b9e2-1c620f718dfd",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FairPrice",
+      "approved": 1
+    }
+  ],
+  "deletionFlags": [
+    {
+      "id": "e2e-existing-kopitiam",
+      "deleted": 0
+    },
+    {
+      "id": "txn_5a0cabc1-c688-4c42-8891-a45116d7e610",
+      "deleted": 1
+    },
+    {
+      "id": "txn_c95b236c-7263-48ac-b9e2-1c620f718dfd",
+      "deleted": 0
+    }
+  ],
+  "activeTransactions": [
+    {
+      "id": "txn_c95b236c-7263-48ac-b9e2-1c620f718dfd",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FairPrice",
+      "approved": 1
+    },
+    {
+      "id": "e2e-existing-kopitiam",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -8900,
+      "payee_name_snapshot": "Kopitiam",
+      "approved": 1
+    }
+  ],
+  "tables": [
+    "_local_migrations",
+    "plans",
+    "accounts",
+    "category_groups",
+    "categories",
+    "transactions",
+    "subtransactions",
+    "source_events",
+    "import_sessions",
+    "import_rows",
+    "ynab_sync_state",
+    "sync_runs",
+    "sync_attempts",
+    "sync_transition_receipts",
+    "sync_renewal_receipts",
+    "audit_events",
+    "write_commands",
+    "write_state",
+    "write_assertions",
+    "users",
+    "auth_identities",
+    "sessions",
+    "plan_memberships",
+    "password_credentials",
+    "auth_setup",
+    "login_rate_limits",
+    "payees",
+    "ynab_raw_objects",
+    "plan_month_assignments",
+    "plan_month_category_targets",
+    "scheduled_transaction_edits",
+    "scheduled_subtransaction_edits",
+    "scheduled_transaction_snapshot_assertions",
+    "account_reconciliation_assertions",
+    "personal_api_tokens",
+    "account_preferences",
+    "rewards_tracker_snapshots",
+    "rewards_tracker_cards",
+    "ynab_source_month_activity",
+    "account_month_balances",
+    "report_cache"
+  ]
+}

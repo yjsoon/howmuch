@@ -58,6 +58,9 @@ final class ShareSheetModel {
   private(set) var context: ShareContext?
   private(set) var skippedCount = 0
   private(set) var sendState: SendState = .idle
+  /// An earlier share of the same payload (or of one item in it), if any in the last 30 days.
+  private(set) var duplicate: IntakeHashMatch?
+  private var hasAcknowledgedDuplicate = false
   /// `nil` means "Let Halation decide".
   var accountSelection: String?
   var hint: IntakeHint = .auto
@@ -69,13 +72,36 @@ final class ShareSheetModel {
   private let loader = ShareItemLoader()
   private let store: InboxStore
   private let contextStore: ShareContextStore
+  private let hashIndex: IntakeHashIndex
 
   init(
     store: InboxStore = .shared,
-    contextStore: ShareContextStore = .shared
+    contextStore: ShareContextStore = .shared,
+    hashIndex: IntakeHashIndex = .shared
   ) {
     self.store = store
     self.contextStore = contextStore
+    self.hashIndex = hashIndex
+  }
+
+  /// The owner has not yet chosen between closing and sharing again.
+  var needsDuplicateDecision: Bool {
+    duplicate != nil && !hasAcknowledgedDuplicate
+  }
+
+  /// "You shared this on 3 Oct", or "You shared one of these on 3 Oct" when only
+  /// some of the items were shared before.
+  var duplicateMessage: String {
+    guard let duplicate else { return "" }
+    let date = duplicate.sharedAt.formatted(.dateTime.day().month(.abbreviated))
+    if duplicate.isWholeShare || items.count == 1 {
+      return "You shared this on \(date)"
+    }
+    return "You shared one of these on \(date)"
+  }
+
+  func shareAnyway() {
+    hasAcknowledgedDuplicate = true
   }
 
   /// A missing context file means "unknown", not signed out: the job is kept
@@ -152,12 +178,12 @@ final class ShareSheetModel {
   }
 
   var canSend: Bool {
-    phase == .ready && !needsSignIn && !items.isEmpty && !isTooLarge
+    phase == .ready && !needsSignIn && !items.isEmpty && !isTooLarge && !needsDuplicateDecision
       && (sendState == .idle || sendState == .failed)
   }
 
   var canSaveForLater: Bool {
-    phase == .ready && needsSignIn && !items.isEmpty && !isTooLarge
+    phase == .ready && needsSignIn && !items.isEmpty && !isTooLarge && !needsDuplicateDecision
       && (sendState == .idle || sendState == .failed)
   }
 
@@ -177,6 +203,27 @@ final class ShareSheetModel {
     let result = await loader.load(from: inputItems, displayScale: displayScale)
     items = result.items
     skippedCount = result.unsupportedCount
+    if result.items.isEmpty {
+      duplicate = nil
+    } else {
+      var pending = IntakeHashIndex.Contents()
+      for entry in store.pendingEntries() {
+        let value = IntakeHashEntry(jobID: entry.id, sharedAt: entry.createdAt)
+        if let hash = entry.contentHash, !hash.isEmpty {
+          pending.content[hash] = value
+        }
+        for file in entry.sources {
+          if let hash = file.sha256, !hash.isEmpty {
+            pending.sources[hash] = value
+          }
+        }
+      }
+      duplicate = hashIndex.lookup(
+        contentHash: ShareItemLoader.contentHash(of: result.items),
+        sourceHashes: result.items.map(\.sha256),
+        additional: pending
+      )
+    }
     phase = result.items.isEmpty ? .unsupported : .ready
   }
 
@@ -328,7 +375,9 @@ struct ShareSheetView: View {
   private var readyContent: some View {
     itemsStrip
     caption
-    if !model.needsSignIn {
+    if model.needsDuplicateDecision {
+      duplicatePrompt
+    } else if !model.needsSignIn {
       accountRow
       kindPicker
       noteField
@@ -359,6 +408,33 @@ struct ShareSheetView: View {
         action: { Task { await model.saveForLater() } }
       )
       footnote("Reads on this phone", "Nothing is saved without your review")
+    }
+  }
+
+  /// A share extension cannot open the app, so there is no Open button: the
+  /// owner closes this and opens Halation themselves.
+  private var duplicatePrompt: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      panel {
+        VStack(alignment: .leading, spacing: 6) {
+          Text(model.duplicateMessage)
+            .font(.headline)
+            .foregroundStyle(ShareTheme.textPrimary)
+          Text("Halation already has this. Open Halation to check.")
+            .font(.subheadline)
+            .foregroundStyle(ShareTheme.textSecondary)
+        }
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
+      }
+      sendButton(title: "Share anyway", enabled: true, action: { model.shareAnyway() })
+      Button(action: { model.cancel() }) {
+        Text("Close")
+          .font(.headline)
+          .frame(maxWidth: .infinity, minHeight: 44)
+          .foregroundStyle(ShareTheme.accent)
+          .background(ShareTheme.muted, in: Capsule())
+      }
     }
   }
 
@@ -520,7 +596,7 @@ struct ShareSheetView: View {
   }
 
   private var failureLine: some View {
-    Text("Couldn't hand this to Halation. Try again.")
+    Text("Couldn’t hand this to Halation. Try again.")
       .font(.subheadline.weight(.medium))
       .foregroundStyle(ShareTheme.outflow)
   }

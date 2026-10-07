@@ -202,7 +202,8 @@ final class ScreenshotOfferController {
       filename: offer.filename,
       source: .detectedScreenshot
     )
-    try InboxIntentHandoff.enqueue(write)
+    // An Inbox batch, not a conversation: the intake coordinator takes it.
+    try InboxIntentHandoff.store.write(write)
     dismiss()
   }
 

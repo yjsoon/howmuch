@@ -494,6 +494,26 @@ actor SlipReader {
     calendar: Calendar = .current,
     now: Date = .now
   ) async -> [SlipMappedDraft] {
+    (try? await interpretOrThrow(
+      text: text,
+      accounts: accounts,
+      categoryGroups: categoryGroups,
+      payees: payees,
+      calendar: calendar,
+      now: now
+    )) ?? []
+  }
+
+  /// Like `interpret`, but a model failure is thrown rather than read as "no
+  /// spends". An unavailable model, or one that returns nothing, still gives [].
+  func interpretOrThrow(
+    text: String,
+    accounts: [Account],
+    categoryGroups: [CategoryGroup],
+    payees: [Payee],
+    calendar: Calendar = .current,
+    now: Date = .now
+  ) async throws -> [SlipMappedDraft] {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {
       return []
@@ -501,7 +521,7 @@ actor SlipReader {
     let extractions: [SlipReaderMapping.Extraction]
     switch extractor {
     case .foundationModels:
-      extractions = await extractWithModel(
+      extractions = try await extractWithModel(
         text: trimmed,
         accounts: accounts,
         categoryGroups: categoryGroups,
@@ -526,7 +546,7 @@ actor SlipReader {
     accounts: [Account],
     categoryGroups: [CategoryGroup],
     payees: [Payee]
-  ) async -> [SlipReaderMapping.Extraction] {
+  ) async throws -> [SlipReaderMapping.Extraction] {
     #if canImport(FoundationModels)
     guard Self.modelAllowsExtract else {
       return []
@@ -568,7 +588,7 @@ actor SlipReader {
         )
       }
     } catch {
-      return []
+      throw error
     }
     #else
     return []

@@ -1,0 +1,137 @@
+{
+  "finalLedger": {
+    "accounts": true,
+    "transactions": true,
+    "activeTransactions": true,
+    "deletionFlags": true
+  },
+  "duplicateClose": {
+    "accounts": true,
+    "transactions": true,
+    "activeTransactions": true,
+    "deletionFlags": true,
+    "jobs": true,
+    "inbox": true
+  },
+  "clipboardOffer": {
+    "accounts": true,
+    "transactions": true,
+    "activeTransactions": true,
+    "deletionFlags": true,
+    "newJobs": [
+      {
+        "origin": "detectedScreenshot",
+        "fallbackExtractionIndexes": [
+          0
+        ],
+        "connectionFingerprint": "https://local.howmuch|plan_613b3d02-e28b-4c3b-b514-afaf3deb047e|local-user",
+        "duplicateCheckLimited": false,
+        "id": "17636F04-9AB3-476C-BB15-B649219FF03A",
+        "hint": "auto",
+        "updatedAt": "2026-10-07T05:46:58Z",
+        "state": "proposed",
+        "extractions": [
+          {
+            "parsedDate": true,
+            "draft": {
+              "direction": "outflow",
+              "isCleared": false,
+              "date": "2026-10-05T07:00:00Z",
+              "flag": "",
+              "amountMagnitudeMilli": 8900,
+              "accountID": "e2e-dbs",
+              "linkedTransferIDs": [],
+              "wasReconciled": false,
+              "loadedTransferLineSignatures": [],
+              "importID": "0e345f67-6de6-460a-a496-5bae45ea9f4a",
+              "subtransactions": [],
+              "payeeName": "KOPITIAM AMK",
+              "memo": ""
+            },
+            "parsedAmount": true,
+            "parsedAccount": false,
+            "parsedDirection": true,
+            "categoryCandidates": [],
+            "accountCandidates": [],
+            "parsedCategory": false
+          }
+        ],
+        "decideAccount": false,
+        "proposals": [
+          {
+            "id": "5161C145-925A-4303-9B25-08A45DB9EA40",
+            "proposedDraft": {
+              "memo": "",
+              "date": "2026-10-05T07:00:00Z",
+              "wasReconciled": false,
+              "linkedTransferIDs": [],
+              "flag": "",
+              "payeeName": "KOPITIAM AMK",
+              "direction": "outflow",
+              "amountMagnitudeMilli": 8900,
+              "subtransactions": [],
+              "loadedTransferLineSignatures": [],
+              "importID": "0e345f67-6de6-460a-a496-5bae45ea9f4a",
+              "isCleared": false,
+              "accountID": "e2e-dbs"
+            },
+            "confidence": 0.85,
+            "kind": "alreadyIn",
+            "isApplied": false,
+            "draft": {
+              "memo": "",
+              "date": "2026-10-05T07:00:00Z",
+              "wasReconciled": false,
+              "linkedTransferIDs": [],
+              "flag": "",
+              "payeeName": "KOPITIAM AMK",
+              "direction": "outflow",
+              "amountMagnitudeMilli": 8900,
+              "subtransactions": [],
+              "loadedTransferLineSignatures": [],
+              "importID": "0e345f67-6de6-460a-a496-5bae45ea9f4a",
+              "isCleared": false,
+              "accountID": "e2e-dbs"
+            },
+            "sourceFileIndex": 0,
+            "candidateIDs": [
+              "e2e-existing-kopitiam"
+            ],
+            "reasons": [
+              "Same amount within 3 days",
+              "Read without Apple Intelligence"
+            ],
+            "targetTransactionID": "e2e-existing-kopitiam",
+            "changedFields": [],
+            "targetSnapshot": {
+              "deleted": false,
+              "payeeId": "e2e-kopitiam",
+              "approved": true,
+              "payeeName": "Kopitiam",
+              "subtransactions": [],
+              "accountId": "e2e-dbs",
+              "date": "2026-10-05",
+              "amount": -8900,
+              "cleared": "uncleared",
+              "accountName": "DBS Altitude",
+              "id": "e2e-existing-kopitiam"
+            },
+            "decision": "pending"
+          }
+        ],
+        "planID": "plan_613b3d02-e28b-4c3b-b514-afaf3deb047e",
+        "extractionSourceIndexes": [
+          0
+        ],
+        "sourceFiles": [
+          {
+            "filename": "payload.png",
+            "kind": "image",
+            "bytes": 27687
+          }
+        ],
+        "createdAt": "2026-10-07T05:46:56Z"
+      }
+    ]
+  }
+}

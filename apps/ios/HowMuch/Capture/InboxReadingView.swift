@@ -257,8 +257,14 @@ private func inboxBackgroundWork<Value: Sendable>(
 
 enum SlipImageText {
   static func recognize(_ data: Data) async -> String {
+    (try? await recognizeOrThrow(data)) ?? ""
+  }
+
+  /// Like `recognize`, but a Vision (or cancellation) error is thrown rather
+  /// than read as an image with no text.
+  static func recognizeOrThrow(_ data: Data) async throws -> String {
     #if canImport(Vision)
-    return (try? await inboxBackgroundWork {
+    return try await inboxBackgroundWork {
       let request = VNRecognizeTextRequest()
       request.recognitionLevel = .accurate
       let handler = VNImageRequestHandler(data: data, options: [:])
@@ -267,7 +273,7 @@ enum SlipImageText {
       try Task.checkCancellation()
       let observations = request.results ?? []
       return observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
-    }) ?? ""
+    }
     #else
     return ""
     #endif
