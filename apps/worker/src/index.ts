@@ -8,8 +8,7 @@ import { createHandler } from "../../api/src/http";
 import { D1AuthStore } from "../../api/src/auth-store";
 import { withDocumentSecurityHeaders } from "./security-headers";
 
-const YNAB_TRANSITION_CRON = "10 16 * * *";
-const SCHEDULED_MATERIALIZATION_CRON = "5 16 * * *";
+const DEFAULT_YNAB_SYNC_CRON = "10 16 * * *";
 
 interface Env {
   ASSETS: Fetcher;
@@ -21,16 +20,19 @@ interface Env {
   HOWMUCH_YNAB_PLAN_ID?: string;
   HOWMUCH_YNAB_BASE_URL?: string;
   HOWMUCH_TRANSITION_READ_ONLY?: string;
+  /** Cron expression that runs the YNAB sync; any other cron runs scheduled-transaction materialisation. */
+  HOWMUCH_YNAB_SYNC_CRON?: string;
+  /** Comma-separated Apple app IDs (TeamID.bundleId) for the app-site-association file; unset serves 404. */
+  HOWMUCH_APPLE_APP_IDS?: string;
   HOWMUCH_REDIRECT_TARGET?: string;
   TYPESAFE_API_KEY?: string;
   TYPESAFE_MODEL?: string;
 }
 
-const APP_SITE_ASSOCIATION = JSON.stringify({
-  webcredentials: {
-    apps: ["PQ6U5ESLN2.sg.soon.howmuch"],
-  },
-});
+function appSiteAssociation(env: Env): string | undefined {
+  const apps = (env.HOWMUCH_APPLE_APP_IDS ?? "").split(",").map((id) => id.trim()).filter(Boolean);
+  return apps.length ? JSON.stringify({ webcredentials: { apps } }) : undefined;
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -38,8 +40,12 @@ export default {
     // Serve the association file directly on every host, including the
     // redirecting legacy host: Apple fetches it from the associated domain
     // (howmuch.soon.sg), and following a redirect is not guaranteed there.
+    // The app IDs come from HOWMUCH_APPLE_APP_IDS so a self-hosted domain never
+    // claims another owner's app; without it these paths are a plain 404.
     if (pathname === "/.well-known/apple-app-site-association" || pathname === "/apple-app-site-association") {
-      return new Response(APP_SITE_ASSOCIATION, {
+      const association = appSiteAssociation(env);
+      if (!association) return new Response("Not found", { status: 404 });
+      return new Response(association, {
         headers: {
           "content-type": "application/json",
           "cache-control": "public, max-age=3600",
@@ -66,9 +72,15 @@ export default {
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     const config = workerConfig(env);
     const database = new HowMuchD1Database(requiredBinding(env.DB, "DB"));
-    assertCronMatchesMode(controller.cron, config.transitionReadOnly);
+    const explicitYnabCron = optional(env.HOWMUCH_YNAB_SYNC_CRON);
+    const ynabSyncCron = explicitYnabCron ?? DEFAULT_YNAB_SYNC_CRON;
+    assertCronMatchesMode(controller.cron, ynabSyncCron, config.transitionReadOnly);
 
-    if (controller.cron === YNAB_TRANSITION_CRON) {
+    // The default YNAB cron time is also a plausible materialisation time for a
+    // self-hoster, so it only means "YNAB sync" when YNAB is actually in play.
+    const ynabInPlay = explicitYnabCron !== undefined || config.transitionReadOnly
+      || config.ynabToken !== undefined || config.ynabPlanId !== undefined;
+    if (controller.cron === ynabSyncCron && ynabInPlay) {
       const result = await runD1ScheduledYnabSync({
         db: database,
         config,
@@ -117,11 +129,11 @@ function workerConfig(env: Env): ApiConfig & { timeZone: string } {
   };
 }
 
-function assertCronMatchesMode(cron: string | undefined, transitionReadOnly: boolean): void {
-  if (cron !== YNAB_TRANSITION_CRON && cron !== SCHEDULED_MATERIALIZATION_CRON) {
-    throw new Error(`Unknown scheduled cron: ${cron ?? "missing"}`);
+function assertCronMatchesMode(cron: string | undefined, ynabSyncCron: string, transitionReadOnly: boolean): void {
+  if (!cron) {
+    throw new Error("Unknown scheduled cron: missing");
   }
-  if (transitionReadOnly && cron !== YNAB_TRANSITION_CRON) {
+  if (transitionReadOnly && cron !== ynabSyncCron) {
     throw new Error(`Scheduled cron ${cron} does not match transition read-only mode`);
   }
 }

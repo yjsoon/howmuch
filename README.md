@@ -4,9 +4,11 @@ Halation (formerly HowMuch) is a personal ledger and reporting app with YNAB-com
 
 The product name is Halation; `howmuch` remains its compatibility identity. Keep the existing URLs, iOS bundle ID `sg.soon.howmuch`, signing team, app group, `howmuch://` links, storage keys/paths, API formats and infrastructure names unchanged. These preserve installed apps, saved data, credentials and integrations. The repository, packages and Xcode project/scheme also retain their existing names; do not globally replace them when updating branding.
 
+To run your own instance on Cloudflare, see [self-hosting](docs/self-hosting.md).
+
 Public API documentation is available at [howmuch.tk.sg/docs](https://howmuch.tk.sg/docs). Its source is [the API contract](docs/api-contract.md).
 
-Local development uses Bun and SQLite:
+Local development uses Bun and SQLite. The Bun server is for local development only and is not a supported way to self-host:
 
 ```sh
 bun run demo:seed

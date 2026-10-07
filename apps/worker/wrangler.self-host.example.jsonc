@@ -1,0 +1,64 @@
+// Self-hosting template for Halation on your own Cloudflare account.
+// Copy to wrangler.self-host.jsonc (gitignored) in this folder and fill in the
+// placeholders. See docs/self-hosting.md. Paths below are relative to this file.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+
+  // Worker name. It becomes <name>.<your-subdomain>.workers.dev.
+  "name": "halation",
+  "main": "src/index.ts",
+  "workers_dev": true,
+  "compatibility_date": "2026-07-18",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+
+  "vars": {
+    // Generate your own UUID (for example `uuidgen` or `bun -e "console.log(crypto.randomUUID())"`)
+    // and never change it afterwards: it is the id of your plan.
+    "HOWMUCH_DEFAULT_PLAN_ID": "REPLACE-WITH-A-NEW-UUID",
+    // IANA time zone that decides what "today" means for scheduled transactions.
+    "HOWMUCH_TIME_ZONE": "Europe/London",
+    // Must be "false" so the instance accepts writes.
+    "HOWMUCH_TRANSITION_READ_ONLY": "false"
+    // HOWMUCH_YNAB_SYNC_CRON is only relevant if you configure YNAB sync, which
+    // a fresh instance does not have. Leave it out.
+    // Deliberately absent:
+    //  - No YNAB variables: a fresh instance has no YNAB sync.
+    //  - No HOWMUCH_REDIRECT_TARGET: it would redirect every request elsewhere.
+    //  - No HOWMUCH_APPLE_APP_IDS: that claims the iOS app's associated domain
+    //    for the owner's signing team, which your domain must not do. Without
+    //    it the association file returns 404, which is correct for you.
+    // HOWMUCH_API_TOKEN is a secret, not a var: `wrangler secret put HOWMUCH_API_TOKEN`.
+  },
+
+  // Optional custom domain on a zone in your Cloudflare account. Delete this
+  // block to use only the workers.dev address.
+  // "routes": [{ "pattern": "halation.example.com", "custom_domain": true }],
+
+  // Daily materialisation of due scheduled transactions. Cron runs in UTC, so
+  // convert your local 00:05: Singapore (UTC+8) is "5 16 * * *"; London in
+  // winter (UTC+0) is "5 0 * * *" and in summer (UTC+1) "5 23 * * *". Pick the
+  // one that suits you; an hour either side is harmless.
+  "triggers": { "crons": ["5 0 * * *"] },
+
+  "d1_databases": [{
+    "binding": "DB",
+    // Name you passed to `wrangler d1 create`.
+    "database_name": "halation",
+    // The UUID printed by `wrangler d1 create`.
+    "database_id": "REPLACE-WITH-D1-DATABASE-ID",
+    "migrations_dir": "../api/d1-migrations"
+  }],
+
+  // Sampling less keeps you inside the free logging allowance.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1
+  }
+}

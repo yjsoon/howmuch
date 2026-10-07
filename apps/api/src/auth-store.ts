@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { D1Database } from "./d1";
 import type { NewSession, StoredCredential } from "./password-auth";
+import type { SeedCurrencyFormat, SeedDateFormat } from "./plan-settings-seed";
 
 export type PlanRole = "owner" | "editor" | "viewer";
 export type AuthUser = {
@@ -23,6 +24,9 @@ export type SetupInput = {
   credential: Omit<StoredCredential, "user_id" | "username">;
   session: Pick<NewSession, "id" | "tokenHash" | "expiresAt">;
   planId: string;
+  /** Applied only when the plan row is created here; absent keeps the schema default (SGD). */
+  currencyFormat?: SeedCurrencyFormat;
+  dateFormat?: SeedDateFormat;
 };
 
 export interface AuthStore {
@@ -37,6 +41,18 @@ export interface AuthStore {
   revokePersonalApiToken(userId: string, tokenId: string, now: number): Promise<PersonalApiToken | null>;
   authenticatePersonalApiToken(tokenHash: string): Promise<AuthUser | null>;
   rateAttempt(scope: "username" | "ip", keyHash: string, windowStart: number): Promise<number>;
+}
+
+/** Plan row for first-owner setup; seeded formats go in the same statement, omitted ones keep the schema default. */
+function planInsert(input: SetupInput, placeholder: (n: number) => string): { sql: string; values: string[] } {
+  const columns = ["id", "name"];
+  const values = [input.planId, "My Plan"];
+  if (input.currencyFormat) { columns.push("currency_format_json"); values.push(JSON.stringify(input.currencyFormat)); }
+  if (input.dateFormat) { columns.push("date_format_json"); values.push(JSON.stringify(input.dateFormat)); }
+  return {
+    sql: `INSERT OR IGNORE INTO plans(${columns.join(",")}) VALUES(${values.map((_, i) => placeholder(i + 1)).join(",")})`,
+    values,
+  };
 }
 
 const credentialSql = `SELECT user_id,username,kdf,kdf_version,cost_n,block_size,parallelization,salt_hex,hash_hex FROM password_credentials WHERE username=?`;
@@ -90,7 +106,8 @@ export class SQLiteAuthStore implements AuthStore {
         return false;
       }
       this.db.run("INSERT INTO auth_setup(singleton) VALUES(1)");
-      this.db.query("INSERT OR IGNORE INTO plans(id,name) VALUES(?,?)").run(i.planId, "My Plan");
+      const plan = planInsert(i, () => "?");
+      this.db.query(plan.sql).run(...plan.values);
       this.db.query("INSERT INTO users(id,display_name) VALUES(?,?)").run(i.userId, i.username);
       insertCredential(this.db, i);
       this.db.query("INSERT INTO plan_memberships(plan_id,user_id,role) VALUES(?,?,'owner')").run(i.planId, i.userId);
@@ -193,7 +210,7 @@ export class D1AuthStore implements AuthStore {
     try {
       await this.db.atomicBatch([
         { sql: "INSERT INTO auth_setup(singleton) VALUES(1)" },
-        { sql: "INSERT OR IGNORE INTO plans(id,name) VALUES($1,$2)", values: [input.planId, "My Plan"] },
+        planInsert(input, (n) => `$${n}`),
         { sql: "INSERT INTO users(id,display_name) VALUES($1,$2)", values: [input.userId, input.username] },
         {
           sql: `INSERT INTO password_credentials(user_id,username,kdf,kdf_version,cost_n,block_size,parallelization,salt_hex,hash_hex)

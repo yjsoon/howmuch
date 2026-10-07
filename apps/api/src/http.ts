@@ -48,6 +48,7 @@ import {
   parseCategoryPatch,
 } from "./category-management";
 import { MAX_SNAPSHOT_BYTES, PlanNotEmptyError, SnapshotValidationError } from "./plan-snapshot";
+import { parseSeedCurrencyFormat, parseSeedDateFormat } from "./plan-settings-seed";
 
 type HandlerOptions = {
   db?: Database;
@@ -1123,6 +1124,12 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
       return authError(400, "bad_request", "Username or password does not meet the requirements");
     }
 
+    const currencyFormat = body.currency_format === undefined ? undefined : parseSeedCurrencyFormat(body.currency_format);
+    const dateFormat = body.date_format === undefined ? undefined : parseSeedDateFormat(body.date_format);
+    if (currencyFormat === null || dateFormat === null) {
+      return authError(400, "bad_request", "currency_format or date_format is not valid");
+    }
+
     const userId = randomBytes(16).toString("hex");
     const session = newSession();
     const credential = await passwordCredential(body.password);
@@ -1132,6 +1139,8 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
       credential,
       session,
       planId: config.defaultPlanId,
+      currencyFormat,
+      dateFormat,
     });
     if (!created) {
       return authError(409, "setup_complete", "Setup has already completed");
