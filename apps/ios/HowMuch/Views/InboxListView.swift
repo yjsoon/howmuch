@@ -1,9 +1,5 @@
 import SwiftUI
 
-struct IntakeRoute: Hashable {
-  let jobID: UUID
-}
-
 /// The Inbox: every batch shared to Halation, grouped by what it needs.
 struct InboxListView: View {
   @Environment(AppModel.self) private var model
@@ -217,7 +213,7 @@ struct IntakeBatchDetailView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
-            if job.hint != .statement {
+            if job.hint != .statement, !model.openAccounts.isEmpty {
               Menu {
                 ForEach(model.openAccounts) { account in
                   Button(account.name) {

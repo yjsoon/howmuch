@@ -17,8 +17,8 @@ final class IntakeLineParserTests: XCTestCase {
     04 OCT KOPITIAM 12345 4.50
     """)
     XCTAssertEqual(rows, [
-      Row("GRAB*A-5X7K9QWE SINGAPORE SG", "8.90", .outflow, "5 Oct"),
-      Row("KOPITIAM 12345", "4.50", .outflow, "4 Oct"),
+      Row("GRAB*A-5X7K9QWE SINGAPORE SG", "8.90", .outflow, "2026-10-05"),
+      Row("KOPITIAM 12345", "4.50", .outflow, "2026-10-04"),
     ])
   }
 
@@ -28,8 +28,8 @@ final class IntakeLineParserTests: XCTestCase {
     07/10 SHENG SIONG SUPERMARKE 31.45
     """)
     XCTAssertEqual(rows, [
-      Row("PAYMENT - THANK YOU", "250.00", .inflow, "6 Oct"),
-      Row("SHENG SIONG SUPERMARKE", "31.45", .outflow, "7 Oct"),
+      Row("PAYMENT - THANK YOU", "250.00", .inflow, "2026-10-06"),
+      Row("SHENG SIONG SUPERMARKE", "31.45", .outflow, "2026-10-07"),
     ])
   }
 
@@ -53,7 +53,7 @@ final class IntakeLineParserTests: XCTestCase {
 
   func testMonthFirstDateAndUnicodeMinus() {
     let rows = extract("Oct 5 COLD STORAGE \u{2212}$9.30")
-    XCTAssertEqual(rows, [Row("COLD STORAGE", "9.30", .outflow, "5 Oct")])
+    XCTAssertEqual(rows, [Row("COLD STORAGE", "9.30", .outflow, "2026-10-05")])
   }
 
   // MARK: OCR look-alikes
@@ -61,12 +61,12 @@ final class IntakeLineParserTests: XCTestCase {
   func testCyrillicLookalikesInAMostlyLatinLineAreFolded() {
     // Vision on the simulator read the month as Cyrillic O, S-like C and T.
     let rows = extract("05 \u{041E}\u{0421}\u{0422} KOPITIAM AMK -8.90")
-    XCTAssertEqual(rows, [Row("KOPITIAM AMK", "8.90", .outflow, "5 Oct")])
+    XCTAssertEqual(rows, [Row("KOPITIAM AMK", "8.90", .outflow, "2026-10-05")])
   }
 
   func testGreekLookalikesInAMostlyLatinLineAreFolded() {
     let rows = extract("05 OC\u{03A4} KOPITIAM AMK 4.50")
-    XCTAssertEqual(rows, [Row("KOPITIAM AMK", "4.50", .outflow, "5 Oct")])
+    XCTAssertEqual(rows, [Row("KOPITIAM AMK", "4.50", .outflow, "2026-10-05")])
   }
 
   func testGenuinelyCyrillicMerchantsKeepTheirLetters() {
@@ -74,7 +74,7 @@ final class IntakeLineParserTests: XCTestCase {
     let magnit = "\u{041C}\u{0410}\u{0413}\u{041D}\u{0418}\u{0422}"
     XCTAssertEqual(
       extract("07 OCT \(magnit) 120.00"),
-      [Row(magnit, "120.00", .outflow, "7 Oct")]
+      [Row(magnit, "120.00", .outflow, "2026-10-07")]
     )
     let pyaterochka = "\u{041F}\u{042F}\u{0422}\u{0415}\u{0420}\u{041E}\u{0427}\u{041A}\u{0410}"
     XCTAssertEqual(
@@ -131,7 +131,7 @@ final class IntakeLineParserTests: XCTestCase {
 
   func testForeignAmountIsCompletedByTheSGDFigureThatFollows() {
     let sameLine = extract("04 OCT ADOBE USD 12.00 S$16.20")
-    XCTAssertEqual(sameLine, [Row("ADOBE", "16.20", .outflow, "4 Oct")])
+    XCTAssertEqual(sameLine, [Row("ADOBE", "16.20", .outflow, "2026-10-04")])
     let nextLine = extract("""
     AMAZON USD 12.00
     SGD 16.20
@@ -182,6 +182,96 @@ final class IntakeLineParserTests: XCTestCase {
     XCTAssertEqual(rows, [])
   }
 
+  // MARK: Running balances
+
+  func testRunningBalanceColumnIsNotTheAmount() {
+    XCTAssertEqual(
+      extract("05/10/2026 FAST PAYMENT TO JOHN 50.00 1,234.56"),
+      [Row("FAST PAYMENT TO JOHN", "50.00", .outflow, "2026-10-05")]
+    )
+    XCTAssertEqual(
+      extract("05/10/2026 FAST PAYMENT TO JOHN 50.00 1,234.56 CR"),
+      [Row("FAST PAYMENT TO JOHN", "50.00", .outflow, "2026-10-05")]
+    )
+  }
+
+  func testThreeAmountsOnOneLineAreAmbiguousAndDropped() {
+    XCTAssertEqual(extract("05 OCT SOMETHING 10.00 20.00 1,234.56"), [])
+  }
+
+  func testBalanceLinesInTheirCommonSpellingsAreIgnored() {
+    for line in ["Avail Bal SGD 1,234.56", "Available balance", "Bal", "Balance B/F", "Closing bal 880.00"] {
+      XCTAssertEqual(extract("Grab\n\(line)\n-$8.90"), [], line)
+    }
+  }
+
+  // MARK: Foreign amounts
+
+  func testForeignSymbolsAndCodesAreNeverReadAsSGD() {
+    let foreign = [
+      "RM 45.00", "RM45.00", "\u{20AC}12.00", "\u{00A3}12.50", "\u{00A5}1200.00", "\u{20A9}12000.00",
+      "\u{0E3F}350.00", "\u{20B9}450.00", "Rp 15000.00", "\u{20B1}450.00", "MYR 45.00", "THB 350.00",
+      "IDR 150000.00", "JPY 1200.00", "EUR 12.00", "GBP 12.50", "USD 12.00", "AUD 12.00",
+      "12.00 EUR", "45.00 MYR",
+    ]
+    for amount in foreign {
+      XCTAssertEqual(extract("05 OCT KEDAI MAKAN JB \(amount)"), [], amount)
+    }
+    XCTAssertEqual(extract("ADOBE\n\u{20AC}12.00"), [])
+  }
+
+  func testForeignRowIsCompletedByAnSGDFigureOnTheNextLine() {
+    XCTAssertEqual(
+      extract("HARRODS \u{00A3}12.50\nS$21.70"),
+      [Row("HARRODS", "21.70", .outflow, nil)]
+    )
+  }
+
+  func testForeignExchangeLinesAreIgnoredWithoutLosingThePendingPayee() {
+    for line in ["Exchange rate 1.36", "FX rate 1.36", "Rate 1.3567", "Conversion fee 0.50"] {
+      XCTAssertEqual(
+        extract("NETFLIX.COM USD 15.99\n\(line)\nS$21.70"),
+        [Row("NETFLIX.COM", "21.70", .outflow, nil)],
+        line
+      )
+    }
+  }
+
+  func testPostcodesAndLoneForeignAmountsDoNotReplaceThePendingPayee() {
+    XCTAssertEqual(extract("Grab\nSingapore 238801\n-$8.90"), [Row("Grab", "8.90", .outflow, nil)])
+    XCTAssertEqual(extract("Grab\n12.00 USD\n-$8.90"), [Row("Grab", "8.90", .outflow, nil)])
+  }
+
+  // MARK: Dates
+
+  func testYearlessDateMoreThanAWeekAheadUsesThePreviousYear() {
+    XCTAssertEqual(
+      extract("28 Dec GRAB 8.90", now: Self.january),
+      [Row("GRAB", "8.90", .outflow, "2026-12-28")]
+    )
+    XCTAssertEqual(extract("10 OCT GRAB 8.90"), [Row("GRAB", "8.90", .outflow, "2026-10-10")])
+    XCTAssertEqual(extract("20 OCT GRAB 8.90"), [Row("GRAB", "8.90", .outflow, "2025-10-20")])
+  }
+
+  func testAnImplausibleYearIsTextNotPartOfTheDate() {
+    XCTAssertEqual(
+      extract("05 OCT 4512 GRAB*TRIP 8.90"),
+      [Row("4512 GRAB*TRIP", "8.90", .outflow, "2026-10-05")]
+    )
+  }
+
+  func testDateHeaderAfterAnUnrelatedTextLineStillDatesTheRow() {
+    XCTAssertEqual(
+      extract("Transaction history\n5 Oct\nKOPITIAM -8.90"),
+      [Row("KOPITIAM", "8.90", .outflow, "2026-10-05")]
+    )
+  }
+
+  func testDottedShortDateIsADateNotAnAmount() {
+    XCTAssertEqual(extract("05.10.26 GRAB 8.90"), [Row("GRAB", "8.90", .outflow, "2026-10-05")])
+    XCTAssertEqual(extract("05.10.26\nGRAB -8.90"), [Row("GRAB", "8.90", .outflow, "2026-10-05")])
+  }
+
   // MARK: Mapping
 
   func testInterpretMapsDatesAndDirectionThroughTheSharedReaderMapping() {
@@ -219,8 +309,18 @@ final class IntakeLineParserTests: XCTestCase {
     }
   }
 
-  private func extract(_ text: String) -> [Row] {
-    IntakeLineParser.extract(text).map { extraction in
+  /// 2026-10-07 and 2027-01-05, UTC.
+  private static let october = Date(timeIntervalSince1970: 1_791_331_200)
+  private static let january = Date(timeIntervalSince1970: 1_799_107_200)
+
+  private static var calendar: Calendar {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    return calendar
+  }
+
+  private func extract(_ text: String, now: Date = IntakeLineParserTests.october) -> [Row] {
+    IntakeLineParser.extract(text, calendar: Self.calendar, now: now).map { extraction in
       Row(
         extraction.payee,
         extraction.amount,
