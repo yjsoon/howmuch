@@ -67,7 +67,17 @@ Final: **4 live / 6 historical**, including **2 deleted prior NTUC tombstones**.
 
 ## Reproduction and evidence
 
-Use preserved synthetic local setup, never production. `snapshot.py` is unchanged from the authorized prior helper and opens dynamically discovered SQLite with `mode=ro`; existing exact account/transaction/deletion/live/category queries are unchanged. No SQL schema mismatch occurred.
+Use preserved synthetic local setup, never production. The locally retained `snapshot.py` helper opens dynamically discovered SQLite with `mode=ro`; no SQL schema mismatch occurred. The read-only SQL statements below are copied verbatim from that helper:
+
+```sql
+SELECT id, name, closed, balance_milli FROM accounts
+SELECT id, account_id, date, amount_milli, payee_name_snapshot, approved FROM transactions
+SELECT id, deleted FROM transactions
+SELECT id, account_id, date, amount_milli, payee_name_snapshot, approved FROM transactions WHERE deleted = 0
+SELECT id, account_id, date, amount_milli, payee_name_snapshot, category_id, category_name_snapshot, approved, deleted FROM transactions
+SELECT id, name, category_group_id, hidden, internal, deleted FROM categories
+SELECT name FROM sqlite_master WHERE type='table'
+```
 
 The helper scripts are retained locally and excluded from the published file set.
 
@@ -92,14 +102,6 @@ Also occurred for `com.apple.MobileAsset.UAF.FM.Overrides`. These environment er
 
 ## Publication / handoff
 
-All files beneath `.amp/in/artifacts/share-intake/12adb91/`. **Only curate listed files in `CURATED-MANIFEST.txt`; never blanket-add this directory.** Exclude video, raw runtime logs, database, old job copies and any secrets. No database was copied.
+The committed artifact set contains only `report.md`, ten selected PNGs, six synthetic JSON files (the five read-only checkpoints and `evidence-checks.json`), and `runtime-excerpts.txt`.
 
-- `share-intake-B12adb91.mp4`: local annotated recording, never commit.
-- `report.md`, `test-plan.md`, `evidence-checks.json`: report, plan and comparison results. `snapshot.py` and `evidence-checks.py` remain local-only and are excluded from the published file set.
-- Numbered PNGs: setup confirmation/baseline, Photos selection, share configuration, pre-approval batch, toast, register/relaunch.
-- Numbered JSON/TXT: synthetic read-only snapshots, not a database dump.
-- `runtime-excerpts.txt`: short reviewable runtime evidence; raw logs remain local.
-- `SHA256SUMS.txt`: curated integrity hashes.
-- `share-intake-B12adb91-curated.zip`: curated files only; packaging convenience, not itself a recommended commit.
-
-Suggested PR comment: **none**, per lead. SKILL.md suggestions: **none**. Blueprint checked: none exists. Suggested future knowledge: pin existing Xcode/UDID, install supplied product without resetting, launch host before sharing, distinguish soft-deleted historical rows from live rows, dynamically discover read-only containers. No dependency installs/services/signing required. User needs: **none**. Simulator remains on final DBS register; product, data, old/new jobs and logs preserved.
+The five numbered TXT snapshot companions, `test-plan.md`, `CURATED-MANIFEST.txt`, `SHA256SUMS.txt`, `snapshot.py`, `evidence-checks.py`, annotated MP4, curated ZIP, raw runtime logs, preserved Jobs/Inbox copies, and shell outputs remain local and are not committed. No database was copied. The Simulator remains on the final DBS register; product, data, old and new jobs, and logs remain preserved.
