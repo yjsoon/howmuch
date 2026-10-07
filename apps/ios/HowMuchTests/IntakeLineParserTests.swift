@@ -56,6 +56,33 @@ final class IntakeLineParserTests: XCTestCase {
     XCTAssertEqual(rows, [Row("COLD STORAGE", "9.30", .outflow, "5 Oct")])
   }
 
+  // MARK: OCR look-alikes
+
+  func testCyrillicLookalikesInAMostlyLatinLineAreFolded() {
+    // Vision on the simulator read the month as Cyrillic O, S-like C and T.
+    let rows = extract("05 \u{041E}\u{0421}\u{0422} KOPITIAM AMK -8.90")
+    XCTAssertEqual(rows, [Row("KOPITIAM AMK", "8.90", .outflow, "5 Oct")])
+  }
+
+  func testGreekLookalikesInAMostlyLatinLineAreFolded() {
+    let rows = extract("05 OC\u{03A4} KOPITIAM AMK 4.50")
+    XCTAssertEqual(rows, [Row("KOPITIAM AMK", "4.50", .outflow, "5 Oct")])
+  }
+
+  func testGenuinelyCyrillicMerchantsKeepTheirLetters() {
+    // More Cyrillic than Latin letters: not OCR confusion, so nothing is folded.
+    let magnit = "\u{041C}\u{0410}\u{0413}\u{041D}\u{0418}\u{0422}"
+    XCTAssertEqual(
+      extract("07 OCT \(magnit) 120.00"),
+      [Row(magnit, "120.00", .outflow, "7 Oct")]
+    )
+    let pyaterochka = "\u{041F}\u{042F}\u{0422}\u{0415}\u{0420}\u{041E}\u{0427}\u{041A}\u{0410}"
+    XCTAssertEqual(
+      extract("\(pyaterochka) 120.00"),
+      [Row(pyaterochka, "120.00", .outflow, nil)]
+    )
+  }
+
   // MARK: Wallet two-line rows
 
   func testWalletRowsWithPayeeAndAmountOnAdjacentLinesUnderADateHeader() {
