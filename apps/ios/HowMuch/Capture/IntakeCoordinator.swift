@@ -50,6 +50,7 @@ final class IntakeCoordinator {
   static let statementMessage = "Statements come in a later version."
   /// "Likely" is 0.75 up to 0.9; lines read by the fallback never reach "Sure".
   static let fallbackConfidenceCap = 0.85
+  static let fallbackReason = "Read without Apple Intelligence"
 
   init(
     inbox: InboxStore = IntakeJobStore.isUnitTestHost
@@ -524,7 +525,7 @@ final class IntakeCoordinator {
       if fallbackIndexes.contains(index) {
         // Read by line rules, not the model: at most Likely.
         proposals[index].confidence = min(proposals[index].confidence, Self.fallbackConfidenceCap)
-        proposals[index].reasons.append("Read without Apple Intelligence")
+        proposals[index].reasons.append(Self.fallbackReason)
       }
     }
     return (proposals, !set.isComplete)
@@ -1114,6 +1115,8 @@ final class IntakeCoordinator {
       return
     }
     mutateProposal(proposalID, in: id, model: model) { proposal in
+      // A row first read without Apple Intelligence keeps that note and its cap.
+      let readByFallback = proposal.reasons.contains(Self.fallbackReason)
       proposal.kind = match.kind
       proposal.confidence = match.confidence
       proposal.targetTransactionID = match.targetTransactionID
@@ -1136,6 +1139,10 @@ final class IntakeCoordinator {
         proposal.proposedDraft = proposed
       } else {
         proposal.reasons = proposal.reasons.filter { $0.hasPrefix(IntakeRuleEngine.reasonPrefix) } + match.reasons
+      }
+      if readByFallback {
+        proposal.confidence = min(proposal.confidence, Self.fallbackConfidenceCap)
+        proposal.reasons.append(Self.fallbackReason)
       }
       proposal.flippedFrom = nil
       proposal.preFlipDecision = nil
