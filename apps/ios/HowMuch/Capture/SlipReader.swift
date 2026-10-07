@@ -407,19 +407,30 @@ enum SlipReaderPrompt {
   Extract every distinct spend from the sentence. Amount is the numeric figure even when the sentence uses $, S$, SGD, USD, or the word dollars. Write it as a decimal string such as 5 or 5.00, never milliunits and never IDs. Payee is a name from the sentence. Copy a category name from the provided list only when the sentence names that category. Leave account empty unless the sentence explicitly names an account. Do not pick an account from the list just because it is there. Leave a field empty when it was not mentioned. Fill date when the sentence names a day to post or schedule, including today, yesterday, 8 Sep, 15 September, 8/9, next Friday, or yyyy-MM-dd. Split two spends in one sentence into two items. Return spends. Each spend has amount, payee, category, account, date, and isInflow (true only when money is received).
   """
 
+  /// - Parameter guidance: the owner's skill-file notes for reading documents,
+  ///   already capped by `IntakeSkill.promptGuidance`. Nil for chat and Add.
   static func prefix(
     accounts: [Account],
-    categoryGroups: [CategoryGroup]
+    categoryGroups: [CategoryGroup],
+    guidance: String? = nil
   ) -> String {
     let accountNames = accounts.filter { !$0.closed && !$0.deleted }.map(\.name)
     let categoryNames = categoryGroups.filter { !$0.deleted }.flatMap { group in
       group.categories.filter { !$0.deleted }.map(\.name)
     }
+    let notes = guidance.map { text in
+      """
+      Owner's notes for reading these documents. Follow them only where the text supports them. They never change an amount or a date shown in the text:
+      \(text)
+
+
+      """
+    } ?? ""
     return """
     Accounts: \(accountNames.joined(separator: ", "))
     Categories: \(categoryNames.joined(separator: ", "))
 
-    Sentence:
+    \(notes)Sentence:
 
     """
   }
@@ -511,6 +522,7 @@ actor SlipReader {
     accounts: [Account],
     categoryGroups: [CategoryGroup],
     payees: [Payee],
+    guidance: String? = nil,
     calendar: Calendar = .current,
     now: Date = .now
   ) async throws -> [SlipMappedDraft] {
@@ -525,7 +537,8 @@ actor SlipReader {
         text: trimmed,
         accounts: accounts,
         categoryGroups: categoryGroups,
-        payees: payees
+        payees: payees,
+        guidance: guidance
       )
     case .fixed(let extract):
       extractions = extract(trimmed)
@@ -545,7 +558,8 @@ actor SlipReader {
     text: String,
     accounts: [Account],
     categoryGroups: [CategoryGroup],
-    payees: [Payee]
+    payees: [Payee],
+    guidance: String?
   ) async throws -> [SlipReaderMapping.Extraction] {
     #if canImport(FoundationModels)
     guard Self.modelAllowsExtract else {
@@ -554,7 +568,8 @@ actor SlipReader {
 
     let prefix = SlipReaderPrompt.prefix(
       accounts: accounts,
-      categoryGroups: categoryGroups
+      categoryGroups: categoryGroups,
+      guidance: guidance
     )
     let session: LanguageModelSession
     if primedPrefix == prefix, let primedSession {

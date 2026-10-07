@@ -51,6 +51,9 @@ extension IntakeCandidateRow {
 /// date, or when two rows score the same.
 struct IntakeMatcher: Sendable {
   var dayWindow = 3
+  /// Windows for accounts that override the global one (the skill file's
+  /// per-account `dedupeDayWindow`), by account ID.
+  var accountDayWindows: [String: Int] = [:]
 
   static let strongThreshold = 0.74
   /// A weak match in another account scoring below this is plain New.
@@ -63,6 +66,16 @@ struct IntakeMatcher: Sendable {
   private static let limitedConfidence = 0.5
   /// Confidence of a New line under a Fix hint: shown, but not ticked.
   private static let unmatchedFixConfidence = 0.4
+
+  /// The window for a line on `accountID`: the account's own, else the global one.
+  func window(for accountID: String) -> Int {
+    accountDayWindows[accountID] ?? dayWindow
+  }
+
+  /// The widest window in use, for reading the register once for the whole batch.
+  var widestWindow: Int {
+    max(dayWindow, accountDayWindows.values.max() ?? dayWindow)
+  }
 
   /// - Parameters:
   ///   - hint: `.fix` keeps lines with no strong match, unticked, with a reason.
@@ -118,6 +131,7 @@ struct IntakeMatcher: Sendable {
     }
     let signed = read.draft.direction == .outflow ? -magnitude : magnitude
     let readDay = Self.dayNumber(read.draft.date.isoDateString)
+    let days = window(for: read.draft.accountID)
 
     let pool: [(row: IntakeCandidateRow, distance: Int)] = candidates.compactMap { row in
       guard openAccountIDs.contains(row.accountID),
@@ -128,7 +142,7 @@ struct IntakeMatcher: Sendable {
         return nil
       }
       let distance = abs(rowDay - readDay)
-      if distance <= dayWindow {
+      if distance <= days {
         return (row: row, distance: distance)
       }
       return nil
@@ -144,14 +158,14 @@ struct IntakeMatcher: Sendable {
         kind: .add,
         confidence: 0.8,
         draft: read.draft,
-        reasons: ["No row within \(dayWindow) days for this amount"]
+        reasons: ["No row within \(days) days for this amount"]
       )
     }
 
     let unsorted = searched.map { entry in
       Scored(
         row: entry.row,
-        score: score(read, entry.row, distance: entry.distance),
+        score: score(read, entry.row, distance: entry.distance, window: days),
         distance: entry.distance,
         sameDirection: entry.row.amountMilli == signed
       )
@@ -216,7 +230,7 @@ struct IntakeMatcher: Sendable {
       )
     }
 
-    var reasons = ["Same amount within \(dayWindow) days"]
+    var reasons = ["Same amount within \(days) days"]
     if !chosen.isEmpty, best.row.accountID != chosen {
       reasons.append("Found in another account")
     }
@@ -256,8 +270,8 @@ struct IntakeMatcher: Sendable {
     )
   }
 
-  private func score(_ read: SlipMappedDraft, _ row: IntakeCandidateRow, distance: Int) -> Double {
-    let dateScore = 1 - Double(distance) / Double(dayWindow + 1)
+  private func score(_ read: SlipMappedDraft, _ row: IntakeCandidateRow, distance: Int, window: Int) -> Double {
+    let dateScore = 1 - Double(distance) / Double(window + 1)
     let payeeScore = PayeeNames.similarity(read.draft.payeeName, row.payeeName)
     return Self.amountWeight + Self.dateWeight * max(0, dateScore) + Self.payeeWeight * payeeScore
   }

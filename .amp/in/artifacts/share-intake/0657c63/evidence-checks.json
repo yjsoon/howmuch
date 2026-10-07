@@ -1,0 +1,39 @@
+{
+  "checks": {
+    "before_done_ledger_unchanged": true,
+    "after_done_ledger_unchanged": true,
+    "baseline_rows_unchanged_after_approval": true,
+    "exactly_one_new_groceries_transaction": true,
+    "no_rule_before_remember": true,
+    "remember_rule_DBS_scope": true,
+    "new_has_rule_category_and_why": true,
+    "saved_row_guard": true,
+    "all_post_approval_ledger_unchanged": true,
+    "rule_deleted_and_absent_after_relaunch": true,
+    "followup_remains_pending_unapplied": true,
+    "fallback_provenance_retained_after_deletion": false
+  },
+  "newTransaction": [
+    {
+      "id": "txn_5f0796c3-bdb2-4cda-872f-79c2b022df97",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -12340,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "category_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:groceries",
+      "category_name_snapshot": "Groceries",
+      "approved": 1,
+      "deleted": 0
+    }
+  ],
+  "ruleID": "E2454D3D-5A2F-4987-BB91-DB14120C66D0",
+  "followupJobID": "1C7BB734-12AD-41E3-96D6-1FCD80D8FA02",
+  "beforeDeleteReasons": [
+    "Learned rule: NTUC FAIRPRICE \u2192 Groceries (from 1 correction)",
+    "No row within 3 days for this amount",
+    "Read without Apple Intelligence"
+  ],
+  "afterDeleteReasons": [
+    "No row within 3 days for this amount"
+  ]
+}

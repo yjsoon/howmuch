@@ -144,6 +144,12 @@ struct IntakeProposal: Codable, Equatable, Identifiable, Sendable {
   var flippedFrom: IntakeProposalKind?
   /// The decision the row had before it was flipped, restored on undo.
   var preFlipDecision: IntakeDecision?
+  /// The learned rule that set fields on this row before matching, if any. Approve
+  /// compares what it set with what the owner saved to count an override.
+  var ruleApplications: [IntakeRuleApplication]
+  /// What the reader saw as the payee, when a learned rule changed it. Remember
+  /// this? learns from this, so a rule can match future raw descriptors.
+  var readPayee: String?
 
   init(
     id: UUID = UUID(),
@@ -161,7 +167,9 @@ struct IntakeProposal: Codable, Equatable, Identifiable, Sendable {
     isApplied: Bool = false,
     issue: String? = nil,
     flippedFrom: IntakeProposalKind? = nil,
-    preFlipDecision: IntakeDecision? = nil
+    preFlipDecision: IntakeDecision? = nil,
+    ruleApplications: [IntakeRuleApplication] = [],
+    readPayee: String? = nil
   ) {
     self.id = id
     self.kind = kind
@@ -179,11 +187,14 @@ struct IntakeProposal: Codable, Equatable, Identifiable, Sendable {
     self.issue = issue
     self.flippedFrom = flippedFrom
     self.preFlipDecision = preFlipDecision
+    self.ruleApplications = ruleApplications
+    self.readPayee = readPayee
   }
 
   private enum CodingKeys: String, CodingKey {
     case id, kind, confidence, draft, proposedDraft, targetTransactionID, targetSnapshot
     case changedFields, candidateIDs, reasons, decision, sourceFileIndex, isApplied, issue, flippedFrom, preFlipDecision
+    case ruleApplications, readPayee
   }
 
   /// Tolerant: a draft this build cannot decode (the draft type grew a field,
@@ -207,6 +218,9 @@ struct IntakeProposal: Codable, Equatable, Identifiable, Sendable {
     issue = try container.decodeIfPresent(String.self, forKey: .issue)
     flippedFrom = try? container.decodeIfPresent(IntakeProposalKind.self, forKey: .flippedFrom)
     preFlipDecision = try? container.decodeIfPresent(IntakeDecision.self, forKey: .preFlipDecision)
+    ruleApplications = (try? container.decodeIfPresent([Lossy<IntakeRuleApplication>].self, forKey: .ruleApplications))?
+      .compactMap(\.value) ?? []
+    readPayee = try? container.decodeIfPresent(String.self, forKey: .readPayee)
     if decodedDraft == nil {
       kind = .possibleDuplicate
       decision = .rejected
@@ -287,6 +301,9 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
   /// Extractions read by the deterministic line parser because the model
   /// returned nothing. Their proposals are capped at Likely and say so.
   var fallbackExtractionIndexes: [Int]
+  /// True while a queued job has been tried but its accounts were not
+  /// available yet; cleared when reading starts.
+  var waitingForAccounts: Bool
   /// The plan and connection the job was shared into. A job from another
   /// budget is shown as failed and cannot be approved.
   var planID: String?
@@ -321,6 +338,7 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
     extractions: [SlipMappedDraft] = [],
     extractionSourceIndexes: [Int] = [],
     fallbackExtractionIndexes: [Int] = [],
+    waitingForAccounts: Bool = false,
     planID: String? = nil,
     connectionFingerprint: String? = nil,
     duplicateCheckLimited: Bool = false,
@@ -344,6 +362,7 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
     self.extractions = extractions
     self.extractionSourceIndexes = extractionSourceIndexes
     self.fallbackExtractionIndexes = fallbackExtractionIndexes
+    self.waitingForAccounts = waitingForAccounts
     self.planID = planID
     self.connectionFingerprint = connectionFingerprint
     self.duplicateCheckLimited = duplicateCheckLimited
@@ -356,6 +375,7 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case id, createdAt, origin, sourceFiles, accountID, decideAccount, hint, note, contentHash
     case state, failureMessage, proposals, extractions, extractionSourceIndexes, fallbackExtractionIndexes
+    case waitingForAccounts
     case planID, connectionFingerprint, duplicateCheckLimited, applyStartedAt, appliedSummary, deferredToForeground, updatedAt
   }
 
@@ -380,6 +400,7 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
     extractionSourceIndexes = (try? container.decodeIfPresent([Int].self, forKey: .extractionSourceIndexes)) ?? []
     fallbackExtractionIndexes =
       (try? container.decodeIfPresent([Int].self, forKey: .fallbackExtractionIndexes)) ?? []
+    waitingForAccounts = (try? container.decodeIfPresent(Bool.self, forKey: .waitingForAccounts)) ?? false
     planID = try container.decodeIfPresent(String.self, forKey: .planID)
     connectionFingerprint = try container.decodeIfPresent(String.self, forKey: .connectionFingerprint)
     duplicateCheckLimited = try container.decodeIfPresent(Bool.self, forKey: .duplicateCheckLimited) ?? false
@@ -436,7 +457,7 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
   var statusSummary: String {
     switch state {
     case .queued, .reading:
-      return "Reading on this phone…"
+      return waitingMessage ?? "Reading on this phone…"
     case .proposed:
       return proposalSummary ?? "Nothing to add"
     case .needsYou:
@@ -448,6 +469,12 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
     case .failed:
       return failureMessage ?? "Couldn’t read this"
     }
+  }
+
+  /// Set only for a job not yet being read that is waiting for account data
+  /// (the flag is cleared when the read starts).
+  var waitingMessage: String? {
+    (state == .queued || state == .reading) && waitingForAccounts ? "Waiting for your accounts" : nil
   }
 
   /// The summary read aloud.

@@ -427,17 +427,28 @@ final class IntakeCoordinator {
 
     // Reading is on this device and the document is fine, so missing reference
     // data (offline at launch, a headless run) is not a failure. The job keeps
-    // its state and is read on the next drain.
+    // its state and is read on the next drain. A fresh share is adopted as
+    // `.reading` before this point, and the flag is cleared again when the read
+    // really starts below, so either state may wait.
+    func markWaiting() {
+      if var waiting = readable(id), !waiting.waitingForAccounts {
+        waiting.waitingForAccounts = true
+        save(waiting)
+      }
+    }
     guard await awaitReferenceData(model) else {
+      markWaiting()
       return
     }
     if model.openAccounts.isEmpty {
       // Accounts loaded and there are none to file against (a new budget):
       // ask for one. Nothing is known yet if they did not load, so wait.
       guard model.referencePhase == .loaded, var current = readable(id) else {
+        markWaiting()
         return
       }
       current.state = .needsYou
+      current.waitingForAccounts = false
       current.failureMessage = Self.addAccountMessage
       save(current)
       return
@@ -446,6 +457,7 @@ final class IntakeCoordinator {
       return
     }
     reading.state = .reading
+    reading.waitingForAccounts = false
     reading.failureMessage = nil
     if !Self.isReadingInBackground {
       reading.deferredToForeground = false
@@ -453,6 +465,10 @@ final class IntakeCoordinator {
     save(reading)
 
     let accounts = model.openAccounts
+    // The owner's notes go to the model reader only; the line parser reads none.
+    let guidance = IntakeSkillStore.shared.skill.promptGuidance(
+      accountID: reading.decideAccount ? nil : reading.accountID
+    )
     var extracted: [SlipMappedDraft] = []
     var sourceIndexes: [Int] = []
     var fallbackIndexes: [Int] = []
@@ -486,7 +502,8 @@ final class IntakeCoordinator {
           text: text,
           accounts: accounts,
           categoryGroups: model.categoryGroups,
-          payees: model.payees
+          payees: model.payees,
+          guidance: guidance
         )
       } catch {
         if background, readable(id) != nil {
@@ -584,21 +601,28 @@ final class IntakeCoordinator {
     hint: IntakeHint,
     model: AppModel
   ) async -> (proposals: [IntakeProposal], limited: Bool) {
-    let matcher = IntakeMatcher()
+    let skill = IntakeSkillStore.shared.skill
+    let matcher = IntakeMatcher(skill: skill)
     var set = IntakeCandidateSet(rows: [], transactions: [:], isComplete: true)
     // "New" in the share sheet means add everything as new.
     if hint != .new, let first = extracted.map(\.draft.date).min(), let last = extracted.map(\.draft.date).max() {
       let calendar = Calendar.current
-      let from = calendar.date(byAdding: .day, value: -matcher.dayWindow, to: first) ?? first
-      let to = calendar.date(byAdding: .day, value: matcher.dayWindow, to: last) ?? last
+      let from = calendar.date(byAdding: .day, value: -matcher.widestWindow, to: first) ?? first
+      let to = calendar.date(byAdding: .day, value: matcher.widestWindow, to: last) ?? last
       set = await model.intakeCandidates(accountIDs: nil, from: from, to: to)
     }
+    // Match the lines as read, so a learned rule can never turn a row that is
+    // already in the register into a Fix. Rules then apply to New rows only.
     var proposals = matcher.match(
       extracted,
       openAccountIDs: Set(model.openAccounts.map(\.id)),
       candidates: set.rows,
       hint: hint,
       duplicateCheckLimited: !set.isComplete
+    )
+    // Counting a use waits for Approve, so reading a job again never counts twice.
+    IntakeRuleEngine.applyLearned(
+      skill.rules, to: &proposals, reads: extracted, context: IntakeRuleContext.make(model: model)
     )
     for index in proposals.indices {
       if index < sourceIndexes.count {
@@ -819,11 +843,20 @@ final class IntakeCoordinator {
     var addedNow = 0
     var fixedNow = 0
     var skipped = 0
+    var ruleOutcomes: [(ruleID: UUID, overridden: Bool)] = []
     for index in job.proposals.indices {
       switch plans[job.proposals[index].id] {
       case .apply:
         job.proposals[index].isApplied = true
         let applied = job.proposals[index]
+        for application in applied.ruleApplications where Self.ruleWroteField(application, in: applied) {
+          ruleOutcomes.append((
+            ruleID: application.ruleID,
+            overridden: IntakeRuleEngine.wasOverridden(
+              application, proposed: applied.proposedDraft, final: applied.draft
+            )
+          ))
+        }
         if applied.draft != applied.proposedDraft || applied.flippedFrom != nil {
           job.proposals[index].decision = .editedThenAccepted
         } else if !applied.decision.isAccepted {
@@ -867,6 +900,9 @@ final class IntakeCoordinator {
       model.showSaveMessage("Saved, but couldn’t update the Inbox. Open it again.", kind: .failure)
       return false
     }
+    // A rule counts a use once its row is saved (approving again after a failed
+    // save would count twice), and an override when the owner changed what it set.
+    IntakeSkillStore.shared.record(ruleOutcomes)
 
     var toast = Self.appliedSummary(added: addedNow, fixed: fixedNow)
     if skipped > 0 {
@@ -877,6 +913,21 @@ final class IntakeCoordinator {
     }
     model.showSaveMessage(toast)
     return true
+  }
+
+  /// A rule counts a hit when what it set was saved. On a Fix only the payee and
+  /// category it changed on the saved row count.
+  private static func ruleWroteField(_ application: IntakeRuleApplication, in proposal: IntakeProposal) -> Bool {
+    guard proposal.kind == .edit else {
+      return true
+    }
+    return application.effects.contains { effect in
+      switch effect {
+      case .category: proposal.changedFields.contains(.category)
+      case .payee: proposal.changedFields.contains(.payee)
+      case .transfer, .review: false
+      }
+    }
   }
 
   /// Rejects the batch: nothing is saved, any read in progress is cancelled,
@@ -1145,7 +1196,15 @@ final class IntakeCoordinator {
   /// kept; the kind, candidates and reasons follow the register. Rows the
   /// rest of the batch already targets are not offered. Unless it is still a
   /// confident New, the row is unticked so it is not approved on a stale tick.
-  private func rematchRow(_ proposalID: UUID, in id: UUID, model: AppModel) async {
+  /// With `rulesOnly` (a rule changed, not the row), an incomplete register search
+  /// (offline) keeps the row's existing match and only refreshes the rules' effects:
+  /// rules never change the amount, date or account the match rests on.
+  private func rematchRow(
+    _ proposalID: UUID,
+    in id: UUID,
+    model: AppModel,
+    rulesOnly: Bool = false
+  ) async {
     guard let job = self.job(id), job.state == .proposed, !approving.contains(id),
           let index = job.proposals.firstIndex(where: { $0.id == proposalID }) else {
       return
@@ -1155,12 +1214,12 @@ final class IntakeCoordinator {
           start.draft.amountMagnitudeMilli > 0 else {
       return
     }
-    let matcher = IntakeMatcher()
+    let matcher = IntakeMatcher(skill: IntakeSkillStore.shared.skill)
     var set = IntakeCandidateSet(rows: [], transactions: [:], isComplete: true)
     if job.hint != .new {
       let calendar = Calendar.current
-      let from = calendar.date(byAdding: .day, value: -matcher.dayWindow, to: start.draft.date) ?? start.draft.date
-      let to = calendar.date(byAdding: .day, value: matcher.dayWindow, to: start.draft.date) ?? start.draft.date
+      let from = calendar.date(byAdding: .day, value: -matcher.widestWindow, to: start.draft.date) ?? start.draft.date
+      let to = calendar.date(byAdding: .day, value: matcher.widestWindow, to: start.draft.date) ?? start.draft.date
       set = await model.intakeCandidates(accountIDs: nil, from: from, to: to)
     }
     guard let latest = self.job(id), latest.state == .proposed, !approving.contains(id),
@@ -1170,11 +1229,41 @@ final class IntakeCoordinator {
       return
     }
     let claimed = Set(latest.proposals.filter { $0.id != proposalID }.compactMap(\.targetTransactionID))
+    // What the owner edited stays theirs; rules only touch the rest.
+    let editedCategory = current.draft.categoryID != current.proposedDraft.categoryID
+    let editedPayee = current.draft.payeeName != current.proposedDraft.payeeName
+    let editedTransfer = current.draft.transferAccountID != current.proposedDraft.transferAccountID
+    var skipping = Set<IntakeRuleEffect>()
+    if editedCategory { skipping.insert(.category) }
+    if editedPayee { skipping.insert(.payee) }
+    if editedTransfer { skipping.insert(.transfer) }
+
     var read: SlipMappedDraft
+    // With the reader's extraction to hand, the rules' own effects are undone and
+    // applied afresh (the account may have changed, so a different rule may fit).
+    let rulesApply: Bool
     if latest.extractions.count == latest.proposals.count,
        let position = latest.proposals.firstIndex(where: { $0.id == proposalID }) {
       read = latest.extractions[position]
       read.draft = current.draft
+      let asRead = latest.extractions[position].draft
+      if !current.ruleApplications.isEmpty {
+        if !editedTransfer, !editedPayee {
+          read.draft.payeeName = asRead.payeeName
+          read.draft.payeeID = asRead.payeeID
+        }
+        if !editedTransfer {
+          read.draft.transferAccountID = asRead.transferAccountID
+          if read.draft.transferAccountID == read.draft.accountID {
+            read.draft.transferAccountID = nil
+            read.draft.payeeID = nil
+          }
+        }
+        if !editedCategory, !editedTransfer {
+          read.draft.categoryID = asRead.categoryID
+        }
+      }
+      rulesApply = true
     } else {
       read = SlipMappedDraft(
         draft: current.draft,
@@ -1186,27 +1275,69 @@ final class IntakeCoordinator {
         accountCandidates: [],
         categoryCandidates: []
       )
+      rulesApply = false
     }
-    let result = matcher.match(
+    var result = matcher.match(
       [read],
       openAccountIDs: Set(model.openAccounts.map(\.id)),
       candidates: set.rows.filter { !claimed.contains($0.id) },
       hint: latest.hint,
       duplicateCheckLimited: !set.isComplete
     )
+    if rulesApply {
+      // Also re-applies the flag cap, so a flagged row stays unticked.
+      IntakeRuleEngine.applyLearned(
+        IntakeSkillStore.shared.skill.rules,
+        to: &result,
+        reads: [read],
+        context: IntakeRuleContext.make(model: model),
+        skipping: skipping
+      )
+    }
     guard let match = result.first else {
       return
     }
+    let keepMatch = rulesOnly && !set.isComplete
     mutateProposal(proposalID, in: id, model: model) { proposal in
       // A row first read without Apple Intelligence keeps that note and its cap.
       let readByFallback = proposal.reasons.contains(Self.fallbackReason)
-      proposal.kind = match.kind
-      proposal.confidence = match.confidence
-      proposal.targetTransactionID = match.targetTransactionID
-      proposal.targetSnapshot = match.targetTransactionID.flatMap { set.transactions[$0] }
-      proposal.changedFields = match.changedFields
-      proposal.candidateIDs = match.candidateIDs
-      proposal.reasons = match.reasons
+      if keepMatch {
+        // The search was incomplete, so the match stays as it was (and so does its
+        // confidence, bar a flag rule's cap).
+        if match.ruleApplications.contains(where: { $0.effects.contains(.review) }) {
+          proposal.confidence = min(proposal.confidence, IntakeRuleEngine.flaggedConfidenceCap)
+        }
+      } else {
+        proposal.kind = match.kind
+        proposal.confidence = match.confidence
+        proposal.targetTransactionID = match.targetTransactionID
+        proposal.targetSnapshot = match.targetTransactionID.flatMap { set.transactions[$0] }
+        proposal.changedFields = match.changedFields
+        proposal.candidateIDs = match.candidateIDs
+      }
+      if rulesApply {
+        // The reasons, including any learned rule's, are the fresh match's; a kept
+        // match keeps its own reasons and takes only the fresh rule lines.
+        if keepMatch {
+          let ruleLines = match.reasons.filter { $0.hasPrefix(IntakeRuleEngine.reasonPrefix) }
+          proposal.reasons = ruleLines + proposal.reasons.filter { !$0.hasPrefix(IntakeRuleEngine.reasonPrefix) }
+        } else {
+          proposal.reasons = match.reasons
+        }
+        proposal.ruleApplications = match.ruleApplications
+        proposal.readPayee = match.readPayee
+        proposal.draft = match.draft
+        var proposed = proposal.proposedDraft
+        if !editedCategory, !editedTransfer { proposed.categoryID = match.draft.categoryID }
+        if !editedPayee, !editedTransfer {
+          proposed.payeeName = match.draft.payeeName
+          proposed.payeeID = match.draft.payeeID
+        }
+        if !editedTransfer { proposed.transferAccountID = match.draft.transferAccountID }
+        proposal.proposedDraft = proposed
+      } else if !keepMatch {
+        proposal.reasons = proposal.reasons.filter { $0.hasPrefix(IntakeRuleEngine.reasonPrefix) } + match.reasons
+      }
       if readByFallback {
         proposal.confidence = min(proposal.confidence, Self.fallbackConfidenceCap)
         proposal.reasons.append(Self.fallbackReason)
@@ -1214,12 +1345,46 @@ final class IntakeCoordinator {
       proposal.flippedFrom = nil
       proposal.preFlipDecision = nil
       proposal.issue = nil
-      switch match.kind {
+      switch proposal.kind {
       case .add, .possibleDuplicate, .alreadyIn:
         proposal.decision = .pending
       case .edit:
         proposal.decision = .rejected
       }
+    }
+  }
+
+  /// A rule was deleted, switched off, edited or cleared: reads the untouched rows
+  /// of batches waiting for review again, so effects of rules that no longer exist
+  /// (and their lines in Why) go. Rows the owner has touched keep their choices.
+  func reapplyRules(model: AppModel) {
+    Task {
+      for job in jobs where job.state == .proposed {
+        for proposal in job.proposals where proposal.isUntouched {
+          switch proposal.kind {
+          case .add, .possibleDuplicate:
+            await rematchRow(proposal.id, in: job.id, model: model, rulesOnly: true)
+          case .edit, .alreadyIn:
+            refreshNotAppliedNote(proposal.id, in: job.id, model: model)
+          }
+        }
+      }
+    }
+  }
+
+  private func refreshNotAppliedNote(_ proposalID: UUID, in id: UUID, model: AppModel) {
+    guard let job = self.job(id), job.extractions.count == job.proposals.count,
+          let position = job.proposals.firstIndex(where: { $0.id == proposalID }) else {
+      return
+    }
+    let read = job.extractions[position]
+    let context = IntakeRuleContext.make(model: model)
+    let rules = IntakeSkillStore.shared.skill.rules
+    mutateProposal(proposalID, in: id, model: model) { proposal in
+      proposal.reasons.removeAll { $0 == IntakeRuleEngine.notAppliedReason }
+      var list = [proposal]
+      IntakeRuleEngine.applyLearned(rules, to: &list, reads: [read], context: context)
+      proposal = list[0]
     }
   }
 
@@ -1350,5 +1515,34 @@ final class IntakeCoordinator {
     }
     IntakeNotifier.shared.jobDidChange(next, previous: previous, accountName: accountName(for: next))
     return true
+  }
+}
+
+extension IntakeRuleContext {
+  /// What the register looks like now, for applying learned rules to a line.
+  @MainActor
+  static func make(model: AppModel) -> IntakeRuleContext {
+    var context = IntakeRuleContext()
+    for account in model.openAccounts {
+      context.openAccountIDs.insert(account.id)
+      if account.onBudget {
+        context.onBudgetAccountIDs.insert(account.id)
+      }
+    }
+    for account in model.accounts {
+      context.accountNames[account.id] = account.name
+    }
+    for group in model.categoryGroups where !group.deleted {
+      for category in group.categories where !category.deleted {
+        context.categoryIDs.insert(category.id)
+        context.categoryNames[category.id] = category.name
+      }
+    }
+    for payee in model.payees where payee.deleted != true {
+      if let target = payee.transferAccountId {
+        context.transferPayees[target] = IntakeTransferPayee(id: payee.id, name: payee.name)
+      }
+    }
+    return context
   }
 }

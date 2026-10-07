@@ -1,0 +1,816 @@
+{
+  "capturedAt": "2026-10-07T16:25:23.881665+00:00",
+  "database": "/Users/devin/Library/Developer/CoreSimulator/Devices/EDD9B083-63F1-44E6-9A7B-0A6964CC2561/data/Containers/Data/Application/07C2E08F-2B6B-4966-8906-D78EC06F90C8/Library/Application Support/HowMuch/Local/howmuch.sqlite",
+  "group": "/Users/devin/Library/Developer/CoreSimulator/Devices/EDD9B083-63F1-44E6-9A7B-0A6964CC2561/data/Containers/Shared/AppGroup/2A15EA43-6271-4E8B-A901-E8CD06CF6D16",
+  "accounts": [
+    {
+      "id": "e2e-dbs",
+      "name": "DBS Altitude",
+      "closed": 0,
+      "balance_milli": -84790
+    },
+    {
+      "id": "e2e-everyday",
+      "name": "Everyday Account",
+      "closed": 0,
+      "balance_milli": 0
+    },
+    {
+      "id": "e2e-closed",
+      "name": "Closed Synthetic Account",
+      "closed": 1,
+      "balance_milli": 0
+    }
+  ],
+  "shareContext": {
+    "lastUsedOpenAccountID": "e2e-dbs",
+    "isSignedIn": true,
+    "writtenAt": "2026-10-07T16:20:40Z",
+    "accounts": [
+      {
+        "id": "e2e-dbs",
+        "name": "DBS Altitude",
+        "isClosed": false
+      },
+      {
+        "id": "e2e-everyday",
+        "name": "Everyday Account",
+        "isClosed": false
+      }
+    ]
+  },
+  "inbox": {},
+  "jobs": {
+    "Jobs/2CD737C5-7ACA-47E9-A39A-F85D3ABB53D8/job.json": {
+      "updatedAt": "2026-10-07T16:24:53Z",
+      "fallbackExtractionIndexes": [
+        0,
+        1,
+        2
+      ],
+      "extractionSourceIndexes": [
+        0,
+        0,
+        0
+      ],
+      "createdAt": "2026-10-07T16:24:39Z",
+      "decideAccount": false,
+      "contentHash": "2a45095a2f20bcb56a058245c0a7c958ab26d1ebbdff2eb8497cb8ea99e89f64",
+      "extractions": [
+        {
+          "parsedCategory": false,
+          "parsedDate": true,
+          "parsedDirection": true,
+          "parsedAccount": false,
+          "categoryCandidates": [],
+          "parsedAmount": true,
+          "accountCandidates": [],
+          "draft": {
+            "isCleared": false,
+            "wasReconciled": false,
+            "linkedTransferIDs": [],
+            "date": "2026-10-05T07:00:00Z",
+            "subtransactions": [],
+            "flag": "",
+            "importID": "8096567c-c7d4-4db0-a78c-884604d3a5ae",
+            "amountMagnitudeMilli": 22560,
+            "accountID": "e2e-dbs",
+            "memo": "",
+            "direction": "outflow",
+            "loadedTransferLineSignatures": [],
+            "payeeName": "NTUC FAIRPRICE"
+          }
+        },
+        {
+          "parsedDirection": true,
+          "parsedAccount": false,
+          "categoryCandidates": [],
+          "accountCandidates": [],
+          "parsedAmount": true,
+          "draft": {
+            "payeeName": "NTUC FAIRPRICE",
+            "linkedTransferIDs": [],
+            "isCleared": false,
+            "direction": "outflow",
+            "loadedTransferLineSignatures": [],
+            "flag": "",
+            "accountID": "e2e-dbs",
+            "memo": "",
+            "wasReconciled": false,
+            "date": "2026-10-05T07:00:00Z",
+            "subtransactions": [],
+            "importID": "e49745c9-cb35-4448-b68b-065cd120aadd",
+            "amountMagnitudeMilli": 24670
+          },
+          "parsedDate": true,
+          "parsedCategory": false
+        },
+        {
+          "parsedDirection": true,
+          "parsedAccount": false,
+          "categoryCandidates": [],
+          "accountCandidates": [],
+          "parsedAmount": true,
+          "draft": {
+            "payeeName": "NTUC FAIRPRICE",
+            "linkedTransferIDs": [],
+            "isCleared": false,
+            "direction": "outflow",
+            "loadedTransferLineSignatures": [],
+            "flag": "",
+            "accountID": "e2e-dbs",
+            "memo": "",
+            "wasReconciled": false,
+            "date": "2026-10-05T07:00:00Z",
+            "subtransactions": [],
+            "importID": "3b3b6fd2-56b3-4a03-b0bc-b32128774ab6",
+            "amountMagnitudeMilli": 23450
+          },
+          "parsedDate": true,
+          "parsedCategory": false
+        }
+      ],
+      "state": "proposed",
+      "deferredToForeground": false,
+      "origin": "shareSheet",
+      "connectionFingerprint": "https://local.howmuch|plan_613b3d02-e28b-4c3b-b514-afaf3deb047e|local-user",
+      "waitingForAccounts": false,
+      "hint": "auto",
+      "sourceFiles": [
+        {
+          "filename": "image-1.PNG",
+          "kind": "image",
+          "bytes": 48863,
+          "sha256": "c9285e4bf3815108267b4bb43149e0a81ec8f3f98d289e34c8d7e45393f8eba5"
+        }
+      ],
+      "id": "2CD737C5-7ACA-47E9-A39A-F85D3ABB53D8",
+      "duplicateCheckLimited": false,
+      "proposals": [
+        {
+          "isApplied": false,
+          "id": "F4F82A16-EA6E-4014-AB59-44D17BDEDBE6",
+          "confidence": 0.8,
+          "proposedDraft": {
+            "isCleared": false,
+            "categoryID": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:groceries",
+            "wasReconciled": false,
+            "linkedTransferIDs": [],
+            "subtransactions": [],
+            "date": "2026-10-05T07:00:00Z",
+            "flag": "",
+            "importID": "8096567c-c7d4-4db0-a78c-884604d3a5ae",
+            "amountMagnitudeMilli": 22560,
+            "accountID": "e2e-dbs",
+            "memo": "",
+            "direction": "outflow",
+            "loadedTransferLineSignatures": [],
+            "payeeName": "NTUC FAIRPRICE"
+          },
+          "candidateIDs": [],
+          "reasons": [
+            "Learned rule: NTUC FAIRPRICE \u2192 Groceries (from 1 correction)",
+            "No row within 3 days for this amount",
+            "Read without Apple Intelligence"
+          ],
+          "decision": "pending",
+          "sourceFileIndex": 0,
+          "ruleApplications": [
+            {
+              "effects": [
+                "category"
+              ],
+              "ruleID": "37D8305A-A52D-47EB-91BD-F8C19030D02D"
+            }
+          ],
+          "kind": "add",
+          "draft": {
+            "isCleared": false,
+            "categoryID": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:groceries",
+            "wasReconciled": false,
+            "linkedTransferIDs": [],
+            "subtransactions": [],
+            "date": "2026-10-05T07:00:00Z",
+            "flag": "",
+            "importID": "8096567c-c7d4-4db0-a78c-884604d3a5ae",
+            "amountMagnitudeMilli": 22560,
+            "accountID": "e2e-dbs",
+            "memo": "",
+            "direction": "outflow",
+            "loadedTransferLineSignatures": [],
+            "payeeName": "NTUC FAIRPRICE"
+          },
+          "changedFields": []
+        },
+        {
+          "isApplied": false,
+          "id": "73CFB5C1-7000-4765-B99E-B40AEF5641EB",
+          "confidence": 0.8,
+          "proposedDraft": {
+            "isCleared": false,
+            "categoryID": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:groceries",
+            "wasReconciled": false,
+            "linkedTransferIDs": [],
+            "subtransactions": [],
+            "date": "2026-10-05T07:00:00Z",
+            "flag": "",
+            "importID": "e49745c9-cb35-4448-b68b-065cd120aadd",
+            "amountMagnitudeMilli": 24670,
+            "accountID": "e2e-dbs",
+            "memo": "",
+            "direction": "outflow",
+            "loadedTransferLineSignatures": [],
+            "payeeName": "NTUC FAIRPRICE"
+          },
+          "candidateIDs": [],
+          "reasons": [
+            "Learned rule: NTUC FAIRPRICE \u2192 Groceries (from 1 correction)",
+            "No row within 3 days for this amount",
+            "Read without Apple Intelligence"
+          ],
+          "decision": "pending",
+          "sourceFileIndex": 0,
+          "ruleApplications": [
+            {
+              "effects": [
+                "category"
+              ],
+              "ruleID": "37D8305A-A52D-47EB-91BD-F8C19030D02D"
+            }
+          ],
+          "kind": "add",
+          "draft": {
+            "isCleared": false,
+            "categoryID": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:groceries",
+            "wasReconciled": false,
+            "linkedTransferIDs": [],
+            "subtransactions": [],
+            "date": "2026-10-05T07:00:00Z",
+            "flag": "",
+            "importID": "e49745c9-cb35-4448-b68b-065cd120aadd",
+            "amountMagnitudeMilli": 24670,
+            "accountID": "e2e-dbs",
+            "memo": "",
+            "direction": "outflow",
+            "loadedTransferLineSignatures": [],
+            "payeeName": "NTUC FAIRPRICE"
+          },
+          "changedFields": []
+        },
+        {
+          "targetTransactionID": "txn_51258cd7-90b6-49e0-9d20-d2558c5f91ee",
+          "candidateIDs": [
+            "txn_51258cd7-90b6-49e0-9d20-d2558c5f91ee"
+          ],
+          "decision": "pending",
+          "sourceFileIndex": 0,
+          "id": "21C8E532-F729-4FEE-A453-36CBA4F4F34A",
+          "kind": "alreadyIn",
+          "targetSnapshot": {
+            "amount": -23450,
+            "id": "txn_51258cd7-90b6-49e0-9d20-d2558c5f91ee",
+            "accountId": "e2e-dbs",
+            "importId": "6c1dff99-f2f2-4262-9faf-372549b45f96",
+            "payeeName": "NTUC FAIRPRICE",
+            "accountName": "DBS Altitude",
+            "deleted": false,
+            "cleared": "uncleared",
+            "approved": true,
+            "subtransactions": [],
+            "date": "2026-10-05"
+          },
+          "draft": {
+            "isCleared": false,
+            "wasReconciled": false,
+            "linkedTransferIDs": [],
+            "date": "2026-10-05T07:00:00Z",
+            "subtransactions": [],
+            "flag": "",
+            "importID": "3b3b6fd2-56b3-4a03-b0bc-b32128774ab6",
+            "amountMagnitudeMilli": 23450,
+            "accountID": "e2e-dbs",
+            "memo": "",
+            "direction": "outflow",
+            "loadedTransferLineSignatures": [],
+            "payeeName": "NTUC FAIRPRICE"
+          },
+          "confidence": 0.85,
+          "proposedDraft": {
+            "isCleared": false,
+            "wasReconciled": false,
+            "linkedTransferIDs": [],
+            "date": "2026-10-05T07:00:00Z",
+            "subtransactions": [],
+            "flag": "",
+            "importID": "3b3b6fd2-56b3-4a03-b0bc-b32128774ab6",
+            "amountMagnitudeMilli": 23450,
+            "accountID": "e2e-dbs",
+            "memo": "",
+            "direction": "outflow",
+            "loadedTransferLineSignatures": [],
+            "payeeName": "NTUC FAIRPRICE"
+          },
+          "ruleApplications": [],
+          "changedFields": [],
+          "reasons": [
+            "Learned rule not applied to a saved transaction",
+            "Same amount within 3 days",
+            "Read without Apple Intelligence"
+          ],
+          "isApplied": false
+        }
+      ],
+      "accountID": "e2e-dbs",
+      "planID": "plan_613b3d02-e28b-4c3b-b514-afaf3deb047e"
+    },
+    "Jobs/7653A7BF-754F-4A91-B7B7-67617570DEDE/job.json": {
+      "createdAt": "2026-10-07T16:22:28Z",
+      "hint": "auto",
+      "state": "applied",
+      "decideAccount": false,
+      "id": "7653A7BF-754F-4A91-B7B7-67617570DEDE",
+      "waitingForAccounts": false,
+      "connectionFingerprint": "https://local.howmuch|plan_613b3d02-e28b-4c3b-b514-afaf3deb047e|local-user",
+      "deferredToForeground": false,
+      "extractionSourceIndexes": [],
+      "proposals": [
+        {
+          "candidateIDs": [],
+          "decision": "editedThenAccepted",
+          "proposedDraft": {
+            "memo": "",
+            "linkedTransferIDs": [],
+            "importID": "39e95af5-f46d-43fe-a817-89259672dc35",
+            "isCleared": false,
+            "amountMagnitudeMilli": 21340,
+            "subtransactions": [],
+            "date": "2026-10-05T07:00:00Z",
+            "direction": "outflow",
+            "flag": "",
+            "accountID": "e2e-dbs",
+            "loadedTransferLineSignatures": [],
+            "payeeName": "NTUC FAIRPRICE",
+            "wasReconciled": false
+          },
+          "sourceFileIndex": 0,
+          "changedFields": [],
+          "confidence": 0.8,
+          "kind": "add",
+          "ruleApplications": [],
+          "reasons": [
+            "No row within 3 days for this amount",
+            "Read without Apple Intelligence"
+          ],
+          "isApplied": true,
+          "draft": {
+            "memo": "",
+            "linkedTransferIDs": [],
+            "importID": "39e95af5-f46d-43fe-a817-89259672dc35",
+            "isCleared": false,
+            "amountMagnitudeMilli": 21340,
+            "subtransactions": [],
+            "date": "2026-10-05T07:00:00Z",
+            "direction": "outflow",
+            "accountID": "e2e-dbs",
+            "wasReconciled": false,
+            "loadedTransferLineSignatures": [],
+            "payeeName": "NTUC FAIRPRICE",
+            "flag": "",
+            "categoryID": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:groceries"
+          },
+          "id": "9740931A-5D9B-48A8-98B5-E2B4B2704E44"
+        }
+      ],
+      "planID": "plan_613b3d02-e28b-4c3b-b514-afaf3deb047e",
+      "duplicateCheckLimited": false,
+      "accountID": "e2e-dbs",
+      "extractions": [],
+      "origin": "shareSheet",
+      "fallbackExtractionIndexes": [
+        0
+      ],
+      "appliedSummary": "1 added",
+      "updatedAt": "2026-10-07T16:23:39Z",
+      "contentHash": "85233efc9e4ec696926b0ceeec70fdb15c290d08b1e794abe485f28223e10fe8",
+      "sourceFiles": [
+        {
+          "filename": "image-1.PNG",
+          "kind": "image",
+          "bytes": 29785,
+          "sha256": "013cf16d5c04dd0d6f7919bf8f0691cf4eae1f3364fff55091b58537f3412d94"
+        }
+      ]
+    }
+  },
+  "transactions": [
+    {
+      "id": "e2e-existing-kopitiam",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -8900,
+      "payee_name_snapshot": "Kopitiam",
+      "approved": 1
+    },
+    {
+      "id": "txn_5a0cabc1-c688-4c42-8891-a45116d7e610",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "approved": 1
+    },
+    {
+      "id": "txn_c95b236c-7263-48ac-b9e2-1c620f718dfd",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FairPrice",
+      "approved": 1
+    },
+    {
+      "id": "txn_5f0796c3-bdb2-4cda-872f-79c2b022df97",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -12340,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "approved": 1
+    },
+    {
+      "id": "txn_bdad6012-10e4-49e1-9410-f8bc52e0acc4",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -18760,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "approved": 1
+    },
+    {
+      "id": "txn_51258cd7-90b6-49e0-9d20-d2558c5f91ee",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "approved": 1
+    },
+    {
+      "id": "txn_d1093158-783a-47c2-bbe4-6573da079e27",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -21340,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "approved": 1
+    }
+  ],
+  "deletionFlags": [
+    {
+      "id": "e2e-existing-kopitiam",
+      "deleted": 0
+    },
+    {
+      "id": "txn_5a0cabc1-c688-4c42-8891-a45116d7e610",
+      "deleted": 1
+    },
+    {
+      "id": "txn_c95b236c-7263-48ac-b9e2-1c620f718dfd",
+      "deleted": 1
+    },
+    {
+      "id": "txn_5f0796c3-bdb2-4cda-872f-79c2b022df97",
+      "deleted": 0
+    },
+    {
+      "id": "txn_bdad6012-10e4-49e1-9410-f8bc52e0acc4",
+      "deleted": 0
+    },
+    {
+      "id": "txn_51258cd7-90b6-49e0-9d20-d2558c5f91ee",
+      "deleted": 0
+    },
+    {
+      "id": "txn_d1093158-783a-47c2-bbe4-6573da079e27",
+      "deleted": 0
+    }
+  ],
+  "activeTransactions": [
+    {
+      "id": "txn_d1093158-783a-47c2-bbe4-6573da079e27",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -21340,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "approved": 1
+    },
+    {
+      "id": "txn_51258cd7-90b6-49e0-9d20-d2558c5f91ee",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "approved": 1
+    },
+    {
+      "id": "txn_bdad6012-10e4-49e1-9410-f8bc52e0acc4",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -18760,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "approved": 1
+    },
+    {
+      "id": "txn_5f0796c3-bdb2-4cda-872f-79c2b022df97",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -12340,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "approved": 1
+    },
+    {
+      "id": "e2e-existing-kopitiam",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -8900,
+      "payee_name_snapshot": "Kopitiam",
+      "approved": 1
+    }
+  ],
+  "transactionsWithCategories": [
+    {
+      "id": "e2e-existing-kopitiam",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -8900,
+      "payee_name_snapshot": "Kopitiam",
+      "category_id": null,
+      "category_name_snapshot": null,
+      "approved": 1,
+      "deleted": 0
+    },
+    {
+      "id": "txn_5a0cabc1-c688-4c42-8891-a45116d7e610",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "category_id": null,
+      "category_name_snapshot": null,
+      "approved": 1,
+      "deleted": 1
+    },
+    {
+      "id": "txn_c95b236c-7263-48ac-b9e2-1c620f718dfd",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FairPrice",
+      "category_id": null,
+      "category_name_snapshot": null,
+      "approved": 1,
+      "deleted": 1
+    },
+    {
+      "id": "txn_5f0796c3-bdb2-4cda-872f-79c2b022df97",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -12340,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "category_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:groceries",
+      "category_name_snapshot": "Groceries",
+      "approved": 1,
+      "deleted": 0
+    },
+    {
+      "id": "txn_bdad6012-10e4-49e1-9410-f8bc52e0acc4",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -18760,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "category_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:groceries",
+      "category_name_snapshot": "Groceries",
+      "approved": 1,
+      "deleted": 0
+    },
+    {
+      "id": "txn_51258cd7-90b6-49e0-9d20-d2558c5f91ee",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "category_id": null,
+      "category_name_snapshot": null,
+      "approved": 1,
+      "deleted": 0
+    },
+    {
+      "id": "txn_d1093158-783a-47c2-bbe4-6573da079e27",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -21340,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "category_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:groceries",
+      "category_name_snapshot": "Groceries",
+      "approved": 1,
+      "deleted": 0
+    }
+  ],
+  "categories": [
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:groceries",
+      "name": "Groceries",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:everyday",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:eating-out",
+      "name": "Eating out",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:everyday",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:transport",
+      "name": "Transport",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:everyday",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:shopping",
+      "name": "Shopping",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:everyday",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:housing",
+      "name": "Housing",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:bills",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:utilities",
+      "name": "Utilities",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:bills",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:phone-and-internet",
+      "name": "Phone and internet",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:bills",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:insurance",
+      "name": "Insurance",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:bills",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:health",
+      "name": "Health",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:life",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:entertainment",
+      "name": "Entertainment",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:life",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:travel",
+      "name": "Travel",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:life",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:gifts",
+      "name": "Gifts",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:life",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:salary",
+      "name": "Salary",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:income",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:other-income",
+      "name": "Other income",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:income",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    }
+  ],
+  "skill": {
+    "accounts": [],
+    "dedupe": {
+      "dayWindow": 3
+    },
+    "locale": {
+      "currency": "SGD",
+      "dateOrder": "dmy",
+      "timezone": "Asia/Singapore"
+    },
+    "notes": "",
+    "offeredJobs": [
+      "364BAAC7-CEE7-45B1-B794-3AAA310F9BE7",
+      "D11D697C-B857-4C31-94AC-2417FA036435",
+      "7653A7BF-754F-4A91-B7B7-67617570DEDE"
+    ],
+    "rules": [
+      {
+        "createdAt": "2026-10-07T16:23:39Z",
+        "enabled": true,
+        "hits": 0,
+        "id": "37D8305A-A52D-47EB-91BD-F8C19030D02D",
+        "origin": {
+          "corrections": 1,
+          "decidedAt": "2026-10-07T16:23:39Z",
+          "jobID": "7653A7BF-754F-4A91-B7B7-67617570DEDE"
+        },
+        "overrides": 0,
+        "scope": {
+          "kind": "account",
+          "value": "e2e-dbs"
+        },
+        "then": {
+          "kind": "setCategory",
+          "value": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:groceries"
+        },
+        "when": {
+          "accountID": "e2e-dbs",
+          "payeeToken": "ntuc fairprice"
+        }
+      }
+    ],
+    "suppressed": [],
+    "version": 1
+  },
+  "tables": [
+    "_local_migrations",
+    "plans",
+    "accounts",
+    "category_groups",
+    "categories",
+    "transactions",
+    "subtransactions",
+    "source_events",
+    "import_sessions",
+    "import_rows",
+    "ynab_sync_state",
+    "sync_runs",
+    "sync_attempts",
+    "sync_transition_receipts",
+    "sync_renewal_receipts",
+    "audit_events",
+    "write_commands",
+    "write_state",
+    "write_assertions",
+    "users",
+    "auth_identities",
+    "sessions",
+    "plan_memberships",
+    "password_credentials",
+    "auth_setup",
+    "login_rate_limits",
+    "payees",
+    "ynab_raw_objects",
+    "plan_month_assignments",
+    "plan_month_category_targets",
+    "scheduled_transaction_edits",
+    "scheduled_subtransaction_edits",
+    "scheduled_transaction_snapshot_assertions",
+    "account_reconciliation_assertions",
+    "personal_api_tokens",
+    "account_preferences",
+    "rewards_tracker_snapshots",
+    "rewards_tracker_cards",
+    "ynab_source_month_activity",
+    "account_month_balances",
+    "report_cache"
+  ]
+}

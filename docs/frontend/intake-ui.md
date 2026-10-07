@@ -59,3 +59,9 @@ Today is the local calendar day, using recorded-spending reports and excluding u
 ## Apple Intelligence
 
 Show unavailable, downloading, and error states explicitly. Stop and Retry reuse the same frozen turn and reply slot. Later typed text is not swallowed. True unavailable status offers Add manually, not a fake fallback. There is no cloud or regex fallback for reading amounts. A Name / call it / rename line can still update payee when the model returns no spends. Simulator model unavailability is a validation limit. Tests may inject deterministic doubles. In-flight replies use typed waiting copy rather than a single frozen status line.
+
+Share to Halation Inbox is the one exception. It tries Apple Intelligence first. If that is unavailable or finds nothing, a deterministic on-device line reader (`IntakeLineParser`) reads bank, card and wallet lines. Those rows say "Read without Apple Intelligence", are capped at Likely and are never saved without review.
+
+## Skill & Memory
+
+Settings → Intelligence → Skill & Memory. The skill file and per-account notes are stored on this device. Learned rules are created only through **Remember this?**, offered after an owner correction on an approved batch: at most one per batch, and never after Reject. Rules apply only to New and Possible duplicate rows and never change saved transactions. Every applied rule is cited in Why. A category rule is not offered for a row whose category the document itself named, because rules never replace that. Changing, switching off or deleting a rule also updates untouched rows in pending batches; offline, those rows keep their existing duplicate match. **Cancel** on the skill-file and account editors asks **Discard changes?** once edited. **Clear all memory** removes learned rules and dismissed suggestions, never the instructions.
