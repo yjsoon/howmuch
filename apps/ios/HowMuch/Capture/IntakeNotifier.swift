@@ -346,16 +346,22 @@ final class IntakeNotifier {
 /// Receives taps. Not main-actor isolated: UserNotifications calls it on its
 /// own queue, and each response hops to the main actor to act.
 final class IntakeNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+  // The completion-handler form, not `async`: with the async form UIKit can finish
+  // the response off the main thread and assert "Call must be made on main thread".
   func userNotificationCenter(
     _ center: UNUserNotificationCenter,
-    didReceive response: UNNotificationResponse
-  ) async {
+    didReceive response: UNNotificationResponse,
+    withCompletionHandler completionHandler: @escaping () -> Void
+  ) {
     let info = response.notification.request.content.userInfo
     let jobID = (info["jobID"] as? String).flatMap { UUID(uuidString: $0) }
     let kind = info["kind"] as? String
     let action = response.actionIdentifier
-    await MainActor.run {
-      IntakeNotifier.shared.handle(action: action, jobID: jobID, kind: kind)
+    DispatchQueue.main.async {
+      MainActor.assumeIsolated {
+        IntakeNotifier.shared.handle(action: action, jobID: jobID, kind: kind)
+      }
+      completionHandler()
     }
   }
 }
