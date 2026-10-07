@@ -14,8 +14,8 @@ A quiet, dense ledger and Reflect dashboard for a single self-hosted user. It is
 
 The aesthetic is a broadsheet ledger: ink on paper, hairline rules, controlled density.
 
-- **Palette**: warm paper background (`#f7f5ef`), near-black ink (`#1c1b18`), ledger red (`#a8322a`) for outflows/negatives, racing green (`#2a6648`) for inflows/positives, muted graphite for chrome. One surface, no cards-on-cards.
-- **Typography**: Newsreader (serif) for the masthead and report titles; IBM Plex Sans for UI copy; IBM Plex Mono with tabular numerals for every figure. Fonts are bundled via `@fontsource` so the app works offline/self-hosted with no external requests.
+- **Palette**: three Halation looks (Dusk Ridge by default, Ridge Charcoal, Overexposed), each with light and dark modes, chosen in Settings → Appearance. They differ only in colour; every colour is a token in `apps/web/src/styles/tokens.css`. Red for outflows/negatives and green for inflows/positives in every look. One surface, no cards-on-cards.
+- **Typography**: Instrument Serif (italic for titles) for the masthead and report titles, the same in every look; IBM Plex Sans for UI copy; IBM Plex Mono with tabular numerals for every figure. Fonts are bundled via `@fontsource` so the app works offline/self-hosted with no external requests.
 - **Density**: compact tables, 13–14px body, generous column alignment rather than whitespace. Right-aligned numerals everywhere.
 - **Charts**: hand-rolled SVG (no chart library). Horizontal share bars for breakdowns, paired columns for income vs spending, stepped area for net worth, dotted line for age of money. Quiet by default; detail on hover.
 - **Copy**: British spelling throughout (Uncategorised, colour, summarise).
