@@ -405,9 +405,11 @@ final class IntakeCoordinator {
 
     // Reading is on this device and the document is fine, so missing reference
     // data (offline at launch, a headless run) is not a failure. The job keeps
-    // its state and is read on the next drain.
+    // its state and is read on the next drain. A fresh share is adopted as
+    // `.reading` before this point, and the flag is cleared again when the read
+    // really starts below, so either state may wait.
     func markWaiting() {
-      if var waiting = readable(id), waiting.state == .queued, !waiting.waitingForAccounts {
+      if var waiting = readable(id), !waiting.waitingForAccounts {
         waiting.waitingForAccounts = true
         save(waiting)
       }

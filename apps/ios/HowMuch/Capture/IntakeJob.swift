@@ -464,9 +464,10 @@ struct IntakeJob: Codable, Equatable, Identifiable, Sendable {
     }
   }
 
-  /// Set only for a queued job that is waiting for account data.
+  /// Set only for a job not yet being read that is waiting for account data
+  /// (the flag is cleared when the read starts).
   var waitingMessage: String? {
-    state == .queued && waitingForAccounts ? "Waiting for your accounts" : nil
+    (state == .queued || state == .reading) && waitingForAccounts ? "Waiting for your accounts" : nil
   }
 
   /// The summary read aloud.
