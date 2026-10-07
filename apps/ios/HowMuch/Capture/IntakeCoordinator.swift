@@ -39,6 +39,8 @@ final class IntakeCoordinator {
   private static let retention: TimeInterval = 30 * 24 * 3600
   static let differentBudgetMessage = "From a different budget"
   static let statementMessage = "Statements come in a later version."
+  /// "Likely" is 0.75 up to 0.9; lines read by the fallback never reach "Sure".
+  static let fallbackConfidenceCap = 0.85
 
   init(inbox: InboxStore = .shared, store: IntakeJobStore = .shared) {
     self.inbox = inbox
@@ -264,6 +266,7 @@ final class IntakeCoordinator {
     let accounts = model.openAccounts
     var extracted: [SlipMappedDraft] = []
     var sourceIndexes: [Int] = []
+    var fallbackIndexes: [Int] = []
     var readAnyText = false
     for (index, file) in reading.sourceFiles.enumerated() {
       guard readable(id) != nil else {
@@ -280,12 +283,22 @@ final class IntakeCoordinator {
       if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         readAnyText = true
       }
-      let drafts = await SlipReader.shared.interpret(
+      var drafts = await SlipReader.shared.interpret(
         text: text,
         accounts: accounts,
         categoryGroups: model.categoryGroups,
         payees: model.payees
       )
+      if drafts.isEmpty {
+        // No Apple Intelligence (or the model declined): read the lines directly.
+        drafts = IntakeLineParser.interpret(
+          text: text,
+          accounts: accounts,
+          categoryGroups: model.categoryGroups,
+          payees: model.payees
+        )
+        fallbackIndexes.append(contentsOf: (extracted.count..<(extracted.count + drafts.count)))
+      }
       extracted.append(contentsOf: drafts)
       sourceIndexes.append(contentsOf: Array(repeating: index, count: drafts.count))
     }
@@ -327,12 +340,19 @@ final class IntakeCoordinator {
       }
     }
 
-    let result = await propose(extracted, sourceIndexes: sourceIndexes, hint: reading.hint, model: model)
+    let result = await propose(
+      extracted,
+      sourceIndexes: sourceIndexes,
+      fallbackIndexes: fallbackIndexes,
+      hint: reading.hint,
+      model: model
+    )
     guard var final = readable(id) else {
       return
     }
     final.extractions = extracted
     final.extractionSourceIndexes = sourceIndexes
+    final.fallbackExtractionIndexes = fallbackIndexes
     final.proposals = result.proposals
     final.duplicateCheckLimited = result.limited
     final.state = needsYouMessage == nil ? .proposed : .needsYou
@@ -343,6 +363,7 @@ final class IntakeCoordinator {
   private func propose(
     _ extracted: [SlipMappedDraft],
     sourceIndexes: [Int],
+    fallbackIndexes: [Int] = [],
     hint: IntakeHint,
     model: AppModel
   ) async -> (proposals: [IntakeProposal], limited: Bool) {
@@ -369,6 +390,11 @@ final class IntakeCoordinator {
       if let target = proposals[index].targetTransactionID {
         proposals[index].targetSnapshot = set.transactions[target]
       }
+      if fallbackIndexes.contains(index) {
+        // Read by line rules, not the model: at most Likely.
+        proposals[index].confidence = min(proposals[index].confidence, Self.fallbackConfidenceCap)
+        proposals[index].reasons.append("Read without Apple Intelligence")
+      }
     }
     return (proposals, !set.isComplete)
   }
@@ -382,7 +408,11 @@ final class IntakeCoordinator {
       return
     }
     let result = await propose(
-      job.extractions, sourceIndexes: job.extractionSourceIndexes, hint: job.hint, model: model
+      job.extractions,
+      sourceIndexes: job.extractionSourceIndexes,
+      fallbackIndexes: job.fallbackExtractionIndexes,
+      hint: job.hint,
+      model: model
     )
     guard !result.limited, var current = self.job(id), current.state == .proposed,
           current.duplicateCheckLimited, current.proposals.allSatisfy(\.isUntouched) else {
@@ -623,7 +653,13 @@ final class IntakeCoordinator {
     for index in extracted.indices {
       SlipAccountPick.apply(accountID, to: &extracted[index].draft)
     }
-    let result = await propose(extracted, sourceIndexes: job.extractionSourceIndexes, hint: job.hint, model: model)
+    let result = await propose(
+      extracted,
+      sourceIndexes: job.extractionSourceIndexes,
+      fallbackIndexes: job.fallbackExtractionIndexes,
+      hint: job.hint,
+      model: model
+    )
     // Discarded, or otherwise changed, while matching.
     guard var current = self.job(id), current.state == .needsYou else {
       return

@@ -144,6 +144,8 @@
 		D20000000000000000000019 /* IntakeDocumentViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000018 /* IntakeDocumentViewer.swift */; };
 		D20000000000000000000010 /* IntakeMatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000000000000000000000F /* IntakeMatcherTests.swift */; };
 		D20000000000000000000012 /* PayeeNamesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000011 /* PayeeNamesTests.swift */; };
+		D20000000000000000000014 /* IntakeLineParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000013 /* IntakeLineParser.swift */; };
+		D20000000000000000000016 /* IntakeLineParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000015 /* IntakeLineParserTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -286,6 +288,8 @@
 		D20000000000000000000018 /* IntakeDocumentViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeDocumentViewer.swift; sourceTree = "<group>"; };
 		D2000000000000000000000F /* IntakeMatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeMatcherTests.swift; sourceTree = "<group>"; };
 		D20000000000000000000011 /* PayeeNamesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayeeNamesTests.swift; sourceTree = "<group>"; };
+		D20000000000000000000013 /* IntakeLineParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeLineParser.swift; sourceTree = "<group>"; };
+		D20000000000000000000015 /* IntakeLineParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeLineParserTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXContainerItemProxy section */
@@ -483,6 +487,7 @@
 				D20000000000000000000003 /* IntakeJobStore.swift */,
 				D20000000000000000000007 /* IntakeMatcher.swift */,
 				D20000000000000000000009 /* IntakeCoordinator.swift */,
+				D20000000000000000000013 /* IntakeLineParser.swift */,
 				A20000000000000000000094 /* InboxReadingView.swift */,
 				A20000000000000000000096 /* IntelligenceAura.swift */,
 				A200000000000000000000A0 /* ScreenshotOffer.swift */,
@@ -526,6 +531,7 @@
 				A20000000000000000000092 /* InboxStoreTests.swift */,
 				D2000000000000000000000F /* IntakeMatcherTests.swift */,
 				D20000000000000000000011 /* PayeeNamesTests.swift */,
+				D20000000000000000000015 /* IntakeLineParserTests.swift */,
 				A2000000000000000000009C /* AddFromInboxIntentTests.swift */,
 				A200000000000000000000A2 /* ScreenshotOfferTests.swift */,
 				A200000000000000000000B0 /* RegisterSnapshotTests.swift */,
@@ -784,6 +790,7 @@
 				D20000000000000000000004 /* IntakeJobStore.swift in Sources */,
 				D20000000000000000000008 /* IntakeMatcher.swift in Sources */,
 				D2000000000000000000000A /* IntakeCoordinator.swift in Sources */,
+				D20000000000000000000014 /* IntakeLineParser.swift in Sources */,
 				D20000000000000000000006 /* PayeeNames.swift in Sources */,
 				D2000000000000000000000C /* IntakeInboxBand.swift in Sources */,
 				D2000000000000000000000E /* InboxListView.swift in Sources */,
@@ -817,6 +824,7 @@
 				A20000000000000000000093 /* InboxStoreTests.swift in Sources */,
 				D20000000000000000000010 /* IntakeMatcherTests.swift in Sources */,
 				D20000000000000000000012 /* PayeeNamesTests.swift in Sources */,
+				D20000000000000000000016 /* IntakeLineParserTests.swift in Sources */,
 				A2000000000000000000009D /* AddFromInboxIntentTests.swift in Sources */,
 				A200000000000000000000A3 /* ScreenshotOfferTests.swift in Sources */,
 				A200000000000000000000B1 /* RegisterSnapshotTests.swift in Sources */,
