@@ -1193,7 +1193,10 @@ final class IntakeSkillStore {
 
   private(set) var skill: IntakeSkill
   /// The file exists but could not be read. Saving would overwrite it, so it is refused.
+  /// A file that failed to decode stays this way for the process; one that failed to
+  /// be read at all (a launch before first unlock) is tried again on the next save.
   private(set) var isReadOnly = false
+  @ObservationIgnored private var needsReload = false
 
   @ObservationIgnored private let fileURL: URL
 
@@ -1204,7 +1207,20 @@ final class IntakeSkillStore {
     fileURL = url
     let loaded = Self.load(url)
     skill = loaded.skill
-    isReadOnly = loaded.failed
+    isReadOnly = loaded.failed || loaded.unreadable
+    needsReload = loaded.unreadable
+  }
+
+  /// Tries a file that could not be read again, for as long as the failure was an
+  /// I/O error rather than a bad file.
+  private func reloadIfNeeded() {
+    guard needsReload else {
+      return
+    }
+    let loaded = Self.load(fileURL)
+    skill = loaded.skill
+    isReadOnly = loaded.failed || loaded.unreadable
+    needsReload = loaded.unreadable
   }
 
   /// What to tell the owner when a save fails.
@@ -1226,22 +1242,30 @@ final class IntakeSkillStore {
   }
 
   /// A missing file is a fresh start. A file that exists but cannot be read or
-  /// decoded gives the default skill and `failed`, so it is never overwritten.
-  private nonisolated static func load(_ url: URL) -> (skill: IntakeSkill, failed: Bool) {
+  /// decoded gives the default skill and `failed`, so it is never overwritten. A
+  /// read error (permission, before first unlock) is `unreadable`: also never
+  /// overwritten, but worth trying again.
+  private nonisolated static func load(
+    _ url: URL
+  ) -> (skill: IntakeSkill, failed: Bool, unreadable: Bool) {
     guard FileManager.default.fileExists(atPath: url.path) else {
-      return (IntakeSkill(), false)
+      return (IntakeSkill(), false, false)
     }
-    guard let data = try? Data(contentsOf: url),
-          let skill = try? decoder().decode(IntakeSkill.self, from: data) else {
-      logger.error("Couldn't read the skill file; leaving it as it is")
-      return (IntakeSkill(), true)
+    guard let data = try? Data(contentsOf: url) else {
+      logger.error("Couldn't read the skill file; will try again")
+      return (IntakeSkill(), false, true)
     }
-    return (skill, false)
+    guard let skill = try? decoder().decode(IntakeSkill.self, from: data) else {
+      logger.error("Couldn't decode the skill file; leaving it as it is")
+      return (IntakeSkill(), true, false)
+    }
+    return (skill, false, false)
   }
 
   /// Applies `change` and saves. A failed save leaves the skill as it was and returns false.
   @discardableResult
   func update(_ change: (inout IntakeSkill) -> Void) -> Bool {
+    reloadIfNeeded()
     guard !isReadOnly else {
       Self.logger.error("Refusing to save over a skill file that could not be read")
       return false
