@@ -2734,8 +2734,22 @@ final class AppModel {
 
   func wipeIntentCatalog(using store: IntentCatalogStore = .shared) {
     store.wipeAll()
-    ShareContextStore.shared.remove()
-    lastPublishedShareContext = nil
+    publishSignedOutShareContext(using: .shared)
+  }
+
+  /// A signed-out context, not a missing file: a missing file means a fresh
+  /// install ("unknown"), so the extension could never show Save for later.
+  private func publishSignedOutShareContext(using store: ShareContextStore) {
+    let signedOut = ShareContext(
+      isSignedIn: false,
+      lastUsedOpenAccountID: nil,
+      accounts: [],
+      writtenAt: Date()
+    )
+    if lastPublishedShareContext?.isSignedIn != false {
+      store.write(signedOut)
+    }
+    lastPublishedShareContext = signedOut
   }
 
   /// Gives the share extension the open accounts and the last-used one.
@@ -2744,8 +2758,7 @@ final class AppModel {
   /// is not rewritten.
   func publishShareContext(using store: ShareContextStore = .shared) {
     guard settings.isAuthenticated else {
-      store.remove()
-      lastPublishedShareContext = nil
+      publishSignedOutShareContext(using: store)
       return
     }
     guard !accounts.isEmpty else {
