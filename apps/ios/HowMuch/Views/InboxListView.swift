@@ -63,7 +63,7 @@ struct InboxListView: View {
       coordinator.discard(job.id)
     }
     .task {
-      await coordinator.drain(model: model)
+      coordinator.drain(model: model)
     }
   }
 
@@ -122,6 +122,7 @@ struct IntakeBatchDetailView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
   @State private var confirmingReject = false
+  @State private var isApproving = false
 
   private var coordinator: IntakeCoordinator { .shared }
 
@@ -172,10 +173,12 @@ struct IntakeBatchDetailView: View {
       } description: {
         Text(job.failureMessage ?? "Couldn’t read this.")
       } actions: {
-        Button("Try Again") {
-          coordinator.retry(job.id, model: model)
+        if job.failureMessage != IntakeCoordinator.differentBudgetMessage {
+          Button("Try Again") {
+            coordinator.retry(job.id, model: model)
+          }
+          .buttonStyle(.borderedProminent)
         }
-        .buttonStyle(.borderedProminent)
         Button("Discard", role: .destructive) {
           confirmingReject = true
         }
@@ -199,24 +202,32 @@ struct IntakeBatchDetailView: View {
       if job.state == .needsYou {
         Section {
           VStack(alignment: .leading, spacing: 8) {
-            Label("Choose an account to continue", systemImage: "exclamationmark.circle")
-              .font(.subheadline.weight(.semibold))
-              .foregroundStyle(Theme.uncategorised)
+            if job.hint == .statement {
+              Label("Needs a later version", systemImage: "exclamationmark.circle")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.uncategorised)
+            } else {
+              Label("Choose an account to continue", systemImage: "exclamationmark.circle")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.uncategorised)
+            }
             if let message = job.failureMessage {
               Text(message)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
-            Menu {
-              ForEach(model.openAccounts) { account in
-                Button(account.name) {
-                  Task { await coordinator.assignAccount(account.id, to: job.id, model: model) }
+            if job.hint != .statement {
+              Menu {
+                ForEach(model.openAccounts) { account in
+                  Button(account.name) {
+                    Task { await coordinator.assignAccount(account.id, to: job.id, model: model) }
+                  }
                 }
+              } label: {
+                Label("Choose account", systemImage: "building.columns")
               }
-            } label: {
-              Label("Choose account", systemImage: "building.columns")
+              .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
           }
           .listRowBackground(Theme.card)
         }
@@ -230,9 +241,15 @@ struct IntakeBatchDetailView: View {
       }
       if let note = job.note, !note.isEmpty {
         Section("Your note") {
-          Text(note)
-            .font(.subheadline)
-            .listRowBackground(Theme.card)
+          VStack(alignment: .leading, spacing: 4) {
+            Text(note)
+              .font(.subheadline)
+            // This version reads documents only; it does not act on notes yet.
+            Label("Couldn’t apply this note", systemImage: "exclamationmark.circle")
+              .font(.caption)
+              .foregroundStyle(Theme.uncategorised)
+          }
+          .listRowBackground(Theme.card)
         }
       }
       ForEach(groups, id: \.title) { group in
@@ -277,10 +294,19 @@ struct IntakeBatchDetailView: View {
           .font(.caption)
           .foregroundStyle(.secondary)
       }
-      if proposal.appliesOnApproval, proposal.isIncomplete {
+      if let issue = proposal.issue {
+        Text(issue)
+          .font(.caption)
+          .foregroundStyle(Theme.uncategorised)
+      } else if proposal.isIncomplete, !proposal.isResolved {
         Text("Can’t be added as read. Approve all skips it.")
           .font(.caption)
           .foregroundStyle(Theme.uncategorised)
+      }
+      if proposal.isApplied {
+        Label("Applied", systemImage: "checkmark")
+          .font(.caption)
+          .foregroundStyle(Theme.inflow)
       }
     }
     .accessibilityElement(children: .combine)
@@ -304,14 +330,20 @@ struct IntakeBatchDetailView: View {
     let count = job.proposals.filter(\.appliesOnApproval).count
     return VStack(spacing: 8) {
       Button {
-        if coordinator.approve(job.id, model: model) {
-          dismiss()
+        isApproving = true
+        Task {
+          let done = await coordinator.approve(job.id, model: model)
+          isApproving = false
+          if done, coordinator.job(job.id)?.state == .applied {
+            dismiss()
+          }
         }
       } label: {
         Text(count > 0 ? "Approve all \(count)" : "Done")
           .font(.headline)
           .frame(maxWidth: .infinity)
       }
+      .disabled(isApproving)
       .buttonStyle(.borderedProminent)
       .controlSize(.large)
       .tint(Theme.accent)

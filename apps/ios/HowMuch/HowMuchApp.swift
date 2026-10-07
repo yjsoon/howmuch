@@ -258,7 +258,7 @@ private struct RootView: View {
 
   /// Share-sheet entries become Inbox jobs, read in the background.
   private func drainIntakeInbox() {
-    Task { await IntakeCoordinator.shared.drain(model: model) }
+    IntakeCoordinator.shared.drain(model: model)
   }
 
   /// Opens the conversation flow for App Intent and clipboard entries only.

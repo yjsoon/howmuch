@@ -6,7 +6,9 @@ import XCTest
 /// E2E flows cannot reach them cheaply):
 /// - a day window that is off by one, or breaks across a month end;
 /// - a refund (same amount, opposite sign) treated as the original spend;
-/// - two equally good rows silently picking one, so Fix edits the wrong row;
+/// - a line with no date, or two equally good rows, silently becoming a Fix of
+///   the wrong row;
+/// - an approved row scoring higher than an unapproved one;
 /// - widening to other accounts when the chosen account already has a match;
 /// - a proposal naming a transaction ID the matcher was never given;
 /// - one existing row absorbing two lines of the same document.
@@ -44,14 +46,25 @@ final class IntakeMatcherTests: XCTestCase {
 
   // MARK: Direction and amount
 
-  func testSameAmountOppositeDirectionIsNoMatch() {
+  func testSameAmountOppositeDirectionIsAPossibleDuplicateNeverAFix() {
+    // A refund of the same amount: shown beside the original, never edited.
     let refund = row("refund", amount: 8_900, payee: "Grab")
     let proposals = matcher.match(
       [line(8_900, payee: "Grab", direction: .outflow)], openAccountIDs: openIDs, candidates: [refund]
     )
-    XCTAssertEqual(proposals.first?.kind, .add)
+    XCTAssertEqual(proposals.first?.kind, .possibleDuplicate)
     XCTAssertNil(proposals.first?.targetTransactionID)
-    XCTAssertEqual(proposals.first?.candidateIDs, [])
+    XCTAssertEqual(proposals.first?.candidateIDs, ["refund"])
+  }
+
+  func testSameDirectionRowOutranksAnOppositeOne() {
+    let proposals = matcher.match(
+      [line(8_900, payee: "Grab")],
+      openAccountIDs: openIDs,
+      candidates: [row("refund", amount: 8_900, payee: "Grab"), row("spend", payee: "Grab")]
+    )
+    XCTAssertEqual(proposals[0].kind, .alreadyIn)
+    XCTAssertEqual(proposals[0].targetTransactionID, "spend")
   }
 
   func testDifferentAmountIsNoMatch() {
@@ -111,6 +124,59 @@ final class IntakeMatcherTests: XCTestCase {
     XCTAssertFalse(proposals[0].appliesOnApproval)
   }
 
+  func testLineWithoutADateIsNeverStrong() {
+    var read = line(8_900, payee: "Grab")
+    read.parsedDate = false
+    let proposals = matcher.match(
+      [read], openAccountIDs: openIDs, candidates: [row("a", payee: "Grab")]
+    )
+    XCTAssertEqual(proposals[0].kind, .possibleDuplicate)
+    XCTAssertNil(proposals[0].targetTransactionID)
+  }
+
+  func testWeakMatchInAnotherAccountUnderADifferentPayeeIsPlainNewKeepingCandidates() {
+    // Chosen account has nothing, so the search widens; the only hit is a
+    // coincidence of amount under another merchant.
+    let proposals = matcher.match(
+      [line(8_900, payee: "Kopitiam", account: everyday)],
+      openAccountIDs: openIDs,
+      candidates: [row("t", account: travel, payee: "Sheng Siong")]
+    )
+    XCTAssertEqual(proposals[0].kind, .add)
+    XCTAssertNil(proposals[0].targetTransactionID)
+    XCTAssertEqual(proposals[0].candidateIDs, ["t"])
+    XCTAssertTrue(proposals[0].appliesOnApproval)
+  }
+
+  func testApprovedFlagDoesNotChangeTheScore() {
+    // Identical but for approval: if approval scored, one would win.
+    let proposals = matcher.match(
+      [line(8_900, payee: "Grab")],
+      openAccountIDs: openIDs,
+      candidates: [row("a", payee: "Grab", approved: true), row("b", payee: "Grab", approved: false)]
+    )
+    XCTAssertEqual(proposals[0].kind, .possibleDuplicate)
+    XCTAssertNil(proposals[0].targetTransactionID)
+  }
+
+  func testFixHintLeavesUnmatchedLinesUntickedWithAReason() {
+    let proposals = matcher.match(
+      [line(8_900, payee: "Grab")], openAccountIDs: openIDs, candidates: [], hint: .fix
+    )
+    XCTAssertEqual(proposals[0].kind, .add)
+    XCTAssertTrue(proposals[0].reasons.contains("No matching transaction found"))
+    XCTAssertFalse(proposals[0].appliesOnApproval)
+  }
+
+  func testLimitedDuplicateCheckLeavesNewLinesUnticked() {
+    let proposals = matcher.match(
+      [line(8_900, payee: "Grab")], openAccountIDs: openIDs, candidates: [], duplicateCheckLimited: true
+    )
+    XCTAssertEqual(proposals[0].kind, .add)
+    XCTAssertTrue(proposals[0].reasons.contains("Duplicate check limited · offline"))
+    XCTAssertFalse(proposals[0].appliesOnApproval)
+  }
+
   func testNoCandidateIsAPlainAdd() {
     let proposals = matcher.match([line(8_900, payee: "Grab")], openAccountIDs: openIDs, candidates: [])
     XCTAssertEqual(proposals[0].kind, .add)
@@ -120,7 +186,7 @@ final class IntakeMatcherTests: XCTestCase {
 
   // MARK: Ambiguity
 
-  func testEqualScoreTieAddsAndNeverEdits() {
+  func testEqualScoreTieIsAPossibleDuplicateAndNeverEdits() {
     // Two identical rows. The matcher cannot know which one the document means,
     // so it must not edit either, even though the payee differs.
     let proposals = matcher.match(
@@ -128,9 +194,10 @@ final class IntakeMatcherTests: XCTestCase {
       openAccountIDs: openIDs,
       candidates: [row("a", payee: "Sheng Siong"), row("b", payee: "Sheng Siong")]
     )
-    XCTAssertEqual(proposals[0].kind, .add)
+    XCTAssertEqual(proposals[0].kind, .possibleDuplicate)
     XCTAssertNil(proposals[0].targetTransactionID)
     XCTAssertEqual(Set(proposals[0].candidateIDs), ["a", "b"])
+    XCTAssertFalse(proposals[0].appliesOnApproval)
   }
 
   func testTieOfIdenticalContentIsNotAnAlreadyInEither() {
@@ -139,7 +206,7 @@ final class IntakeMatcherTests: XCTestCase {
       openAccountIDs: openIDs,
       candidates: [row("a", payee: "Grab"), row("b", payee: "Grab")]
     )
-    XCTAssertEqual(proposals[0].kind, .add)
+    XCTAssertEqual(proposals[0].kind, .possibleDuplicate)
     XCTAssertNil(proposals[0].targetTransactionID)
   }
 

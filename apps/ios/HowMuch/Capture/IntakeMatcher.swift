@@ -17,38 +17,79 @@ struct IntakeCandidateRow: Equatable, Identifiable, Sendable {
   var isSplit = false
 }
 
+extension IntakeCandidateRow {
+  init(transaction row: Transaction) {
+    self.init(
+      id: row.id,
+      accountID: row.accountID,
+      date: row.date,
+      amountMilli: row.amount,
+      payeeName: row.payeeName ?? "",
+      categoryID: row.categoryID,
+      approved: row.approved,
+      isReconciled: row.cleared == .reconciled,
+      isTransfer: row.transferAccountID != nil,
+      isSplit: row.isSplit
+    )
+  }
+}
+
 /// Decides add versus fix for what was read from a document, deterministically
 /// and after extraction (docs/plans/share-intake.md section 6). Pure: the same
 /// input gives the same proposals, and a proposal only ever names rows that
 /// were passed in.
 ///
-/// Scoring, highest first: the amount must already be equal (0.40), a closer
-/// date adds up to 0.20, payee similarity adds up to 0.35 and an approved row
-/// 0.05. 0.75 or more is a strong match, so a strong match needs a payee that
-/// agrees at least in part; the same amount on the same day under another
-/// merchant is only a possible duplicate.
+/// Candidates share the line's absolute amount and fall within the day window.
+/// Scoring, highest first: amount 0.30 (always earned), a closer date adds up
+/// to 0.20, payee similarity up to 0.50. 0.74 or more is a strong match, so a
+/// strong match needs a payee that agrees at least in part; the same amount on
+/// the same day under another merchant is only a possible duplicate. Whether a
+/// row is approved does not change the score.
+///
+/// A match is never strong, and so never a Fix or Already in, when the
+/// direction differs (a refund of the same amount), when the document gave no
+/// date, or when two rows score the same.
 struct IntakeMatcher: Sendable {
   var dayWindow = 3
 
-  static let strongThreshold = 0.75
-  private static let amountWeight = 0.40
+  static let strongThreshold = 0.74
+  /// A weak match in another account scoring below this is plain New.
+  static let possibleDuplicateFloor = 0.55
+  private static let amountWeight = 0.30
   private static let dateWeight = 0.20
-  private static let payeeWeight = 0.35
-  private static let approvedWeight = 0.05
+  private static let payeeWeight = 0.50
   private static let maxCandidateIDs = 5
+  /// Confidence of a New line whose duplicate check could not be completed.
+  private static let limitedConfidence = 0.5
+  /// Confidence of a New line under a Fix hint: shown, but not ticked.
+  private static let unmatchedFixConfidence = 0.4
 
+  /// - Parameters:
+  ///   - hint: `.fix` keeps lines with no strong match, unticked, with a reason.
+  ///   - duplicateCheckLimited: the register could not be fully searched
+  ///     (offline), so New lines are not ticked by default.
   func match(
     _ extracted: [SlipMappedDraft],
     openAccountIDs: Set<String>,
-    candidates: [IntakeCandidateRow]
+    candidates: [IntakeCandidateRow],
+    hint: IntakeHint = .auto,
+    duplicateCheckLimited: Bool = false
   ) -> [IntakeProposal] {
     var claimed = Set<String>()
     var proposals: [IntakeProposal] = []
     for read in extracted {
-      let result = proposal(for: read, openAccountIDs: openAccountIDs, candidates: candidates, claimed: claimed)
+      var result = proposal(for: read, openAccountIDs: openAccountIDs, candidates: candidates, claimed: claimed)
       // An existing row answers one line of the document, not two.
       if let target = result.targetTransactionID {
         claimed.insert(target)
+      }
+      if result.kind == .add, duplicateCheckLimited {
+        result.confidence = min(result.confidence, Self.limitedConfidence)
+        result.reasons.append("Duplicate check limited · offline")
+      }
+      if hint == .fix, result.kind == .add || result.kind == .possibleDuplicate {
+        result.confidence = min(result.confidence, Self.unmatchedFixConfidence)
+        result.reasons.append("No matching transaction found")
       }
       proposals.append(result)
     }
@@ -59,6 +100,7 @@ struct IntakeMatcher: Sendable {
     var row: IntakeCandidateRow
     var score: Double
     var distance: Int
+    var sameDirection: Bool
   }
 
   private func proposal(
@@ -77,7 +119,7 @@ struct IntakeMatcher: Sendable {
     let pool: [(row: IntakeCandidateRow, distance: Int)] = candidates.compactMap { row in
       guard openAccountIDs.contains(row.accountID),
             !claimed.contains(row.id),
-            row.amountMilli == signed,
+            abs(row.amountMilli) == magnitude,
             let readDay,
             let rowDay = Self.dayNumber(row.date) else {
         return nil
@@ -104,9 +146,16 @@ struct IntakeMatcher: Sendable {
     }
 
     let unsorted = searched.map { entry in
-      Scored(row: entry.row, score: score(read, entry.row, distance: entry.distance), distance: entry.distance)
+      Scored(
+        row: entry.row,
+        score: score(read, entry.row, distance: entry.distance),
+        distance: entry.distance,
+        sameDirection: entry.row.amountMilli == signed
+      )
     }
+    // Same-direction rows outrank an opposite-direction one of any score.
     let scored = unsorted.sorted { lhs, rhs in
+      if lhs.sameDirection != rhs.sameDirection { return lhs.sameDirection }
       if lhs.score != rhs.score { return lhs.score > rhs.score }
       if lhs.distance != rhs.distance { return lhs.distance < rhs.distance }
       return lhs.row.id < rhs.row.id
@@ -114,27 +163,53 @@ struct IntakeMatcher: Sendable {
     let best = scored[0]
     let candidateIDs = Array(scored.prefix(Self.maxCandidateIDs).map(\.row.id))
 
-    guard best.score >= Self.strongThreshold else {
+    guard best.sameDirection else {
       return IntakeProposal(
         kind: .possibleDuplicate,
         confidence: best.score,
         draft: read.draft,
         candidateIDs: candidateIDs,
-        reasons: ["Looks like \(describe(best.row)) already in the register"]
+        reasons: ["Same amount as \(describe(best.row)), but the other way round"]
       )
     }
 
     // Two equally good rows: do not guess which one the document means.
     if scored.count > 1,
-       scored[1].score >= Self.strongThreshold,
+       best.score >= Self.strongThreshold,
+       scored[1].sameDirection,
        abs(scored[1].score - best.score) < 1e-9 {
-      let tied = scored.filter { abs($0.score - best.score) < 1e-9 }
+      let tied = scored.filter { $0.sameDirection && abs($0.score - best.score) < 1e-9 }
       return IntakeProposal(
-        kind: .add,
-        confidence: 0.5,
+        kind: .possibleDuplicate,
+        confidence: best.score,
         draft: read.draft,
         candidateIDs: candidateIDs,
-        reasons: ["Matches \(tied.count) existing rows equally well, so it is added as new"]
+        reasons: ["Matches \(tied.count) existing rows equally well"]
+      )
+    }
+
+    guard best.score >= Self.strongThreshold, read.parsedDate else {
+      var reasons = ["Looks like \(describe(best.row)) already in the register"]
+      if !read.parsedDate {
+        reasons.append("No date was read, so it cannot be a certain match")
+      }
+      // A near miss in another account under a different merchant is a
+      // coincidence of amount: plain New, keeping the candidates for a flip.
+      if !chosen.isEmpty, best.row.accountID != chosen, best.score < Self.possibleDuplicateFloor {
+        return IntakeProposal(
+          kind: .add,
+          confidence: 0.8,
+          draft: read.draft,
+          candidateIDs: candidateIDs,
+          reasons: ["Same amount in another account, but a different payee"]
+        )
+      }
+      return IntakeProposal(
+        kind: .possibleDuplicate,
+        confidence: best.score,
+        draft: read.draft,
+        candidateIDs: candidateIDs,
+        reasons: reasons
       )
     }
 
@@ -143,9 +218,13 @@ struct IntakeMatcher: Sendable {
       reasons.append("Found in another account")
     }
     if best.row.isReconciled {
-      reasons.append("Reconciled · approving reopens it")
+      // Editing payee or category leaves the cleared state alone
+      // (`TransactionDraft.shouldWriteCleared`), so a Fix never reopens it.
+      reasons.append("Reconciled · stays reconciled")
     }
-    let changed = differences(read, best.row)
+    let changed = Self.differences(
+      draft: read.draft, parsedCategory: read.parsedCategory, row: best.row
+    )
     if changed.isEmpty {
       return IntakeProposal(
         kind: .alreadyIn,
@@ -176,24 +255,25 @@ struct IntakeMatcher: Sendable {
   private func score(_ read: SlipMappedDraft, _ row: IntakeCandidateRow, distance: Int) -> Double {
     let dateScore = 1 - Double(distance) / Double(dayWindow + 1)
     let payeeScore = PayeeNames.similarity(read.draft.payeeName, row.payeeName)
-    return Self.amountWeight
-      + Self.dateWeight * max(0, dateScore)
-      + Self.payeeWeight * payeeScore
-      + (row.approved ? Self.approvedWeight : 0)
+    return Self.amountWeight + Self.dateWeight * max(0, dateScore) + Self.payeeWeight * payeeScore
   }
 
-  /// What a Fix would change. Amount and direction already agree, and a date
+  /// What a Fix would change on `row`. Amount already agrees, and a date
   /// within the window is tolerated (banks post a day late), so only the payee
   /// and category can differ. Transfers and splits keep their own payee and
-  /// categories.
-  private func differences(_ read: SlipMappedDraft, _ row: IntakeCandidateRow) -> [IntakeField] {
+  /// categories. Approve runs this again on the live row.
+  static func differences(
+    draft: TransactionDraft,
+    parsedCategory: Bool,
+    row: IntakeCandidateRow
+  ) -> [IntakeField] {
     var fields: [IntakeField] = []
-    let readTokens = PayeeNames.tokens(read.draft.payeeName)
-    if !row.isTransfer, read.draft.transferAccountID == nil,
+    let readTokens = PayeeNames.tokens(draft.payeeName)
+    if !row.isTransfer, draft.transferAccountID == nil,
        !readTokens.isEmpty, readTokens != PayeeNames.tokens(row.payeeName) {
       fields.append(.payee)
     }
-    if read.parsedCategory, let category = read.draft.categoryID,
+    if parsedCategory, let category = draft.categoryID,
        !row.isTransfer, !row.isSplit, category != row.categoryID {
       fields.append(.category)
     }

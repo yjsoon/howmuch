@@ -309,9 +309,6 @@ final class AppModel {
   /// `serverTransactions` is not the same thing — a quiet refresh merges, and
   /// local creates insert — so the snapshot is written from this instead.
   @ObservationIgnored private var lastLedgerFirstPage: ReferenceSnapshot.LedgerPage?
-  /// Rows an intake match fetched beyond what the register had loaded, kept so
-  /// an approved Fix can still be built on the row it matched.
-  @ObservationIgnored private var intakeFetchedRows: [String: Transaction] = [:]
   /// The ids the snapshot's first page put on screen, in the order they were
   /// sorted into. They are the rows a network page must displace; anything
   /// else in `serverTransactions` was fetched this session (an older page the
@@ -4369,7 +4366,8 @@ final class AppModel {
     planID: String,
     accountID: String? = nil,
     offset: Int = 0,
-    sinceDate: String? = nil
+    sinceDate: String? = nil,
+    untilDate: String? = nil
   ) async throws -> TransactionPage {
     let generation = beginLedgerRead()
     defer { endLedgerRead(generation) }
@@ -4377,14 +4375,17 @@ final class AppModel {
       planID: planID,
       accountID: accountID,
       offset: offset,
-      sinceDate: sinceDate
+      sinceDate: sinceDate,
+      untilDate: untilDate
     )
     return TransactionPage(
       transactions: repairingStaleRead(
         page.transactions,
         startedAt: generation,
         addingCreates: offset == 0 ? { row in
-          (accountID == nil || row.accountID == accountID) && (sinceDate.map { row.date >= $0 } ?? true)
+          (accountID == nil || row.accountID == accountID)
+            && (sinceDate.map { row.date >= $0 } ?? true)
+            && (untilDate.map { row.date <= $0 } ?? true)
         } : nil
       ),
       hasMore: page.hasMore,
@@ -4512,69 +4513,97 @@ final class AppModel {
 
 // MARK: - Intake candidates (docs/plans/share-intake.md section 6)
 
+/// The rows an intake match compares against, and whether the search was whole.
+struct IntakeCandidateSet {
+  var rows: [IntakeCandidateRow]
+  /// The full rows behind `rows` that came from the register or server, by ID.
+  var transactions: [String: Transaction]
+  /// False when the server could not be read (offline), so rows beyond what
+  /// the register had loaded may be missing and a duplicate could go unseen.
+  var isComplete: Bool
+}
+
 extension AppModel {
-  /// How many pages an intake match will fetch beyond the loaded register.
-  private static let intakeCandidatePageLimit = 5
+  /// Safety stop for the paging loop below; a window never has this many pages.
+  private static let intakeCandidatePageCeiling = 400
 
   /// Existing rows an intake match may compare against, dated within
-  /// `from...to`. Uses what the register already holds; only when that does
-  /// not reach back to `from` and the server is reachable does it fetch more.
-  /// A failed fetch (offline) just leaves the loaded rows.
-  func intakeCandidates(accountIDs: Set<String>?, from: Date, to: Date) async -> [IntakeCandidateRow] {
+  /// `from...to`: what the register already holds, every page the server has
+  /// for the window (plan-wide, `since_date` to `until_date`), and creates
+  /// still waiting in the outbox. A failed fetch leaves the loaded rows and
+  /// reports the set incomplete.
+  func intakeCandidates(accountIDs: Set<String>?, from: Date, to: Date) async -> IntakeCandidateSet {
     let fromISO = from.isoDateString
     let toISO = to.isoDateString
-    var rows: [String: Transaction] = [:]
-    for row in transactions + unapprovedTransactions where rows[row.id] == nil {
-      rows[row.id] = row
+    var rows: [String: IntakeCandidateRow] = [:]
+    var full: [String: Transaction] = [:]
+    func add(_ row: Transaction) {
+      guard !row.deleted, row.parentTransactionID == nil, row.date >= fromISO, row.date <= toISO,
+            accountIDs?.contains(row.accountID) ?? true, rows[row.id] == nil else {
+        return
+      }
+      rows[row.id] = IntakeCandidateRow(transaction: row)
+      full[row.id] = row
     }
-    var fetched: [String: Transaction] = [:]
-    let covered = rows.values.contains { $0.date <= fromISO }
-    if !covered, settings.isAuthenticated {
+
+    var isComplete = false
+    if settings.isAuthenticated {
+      isComplete = true
       let planID = settings.planID
       var offset = 0
-      for _ in 0..<Self.intakeCandidatePageLimit {
-        guard let page = try? await fetchLedgerPage(planID: planID, offset: offset, sinceDate: fromISO) else {
+      for _ in 0..<Self.intakeCandidatePageCeiling {
+        do {
+          let page = try await fetchLedgerPage(
+            planID: planID, offset: offset, sinceDate: fromISO, untilDate: toISO
+          )
+          overlaying(page.transactions).forEach(add)
+          guard page.hasMore, let next = page.nextOffset, next > offset else {
+            break
+          }
+          offset = next
+        } catch {
+          isComplete = false
           break
         }
-        for row in overlaying(page.transactions) where rows[row.id] == nil {
-          rows[row.id] = row
-          fetched[row.id] = row
-        }
-        guard page.hasMore, let next = page.nextOffset else {
-          break
-        }
-        offset = next
       }
     }
-    intakeFetchedRows = fetched
-    return rows.values.compactMap { row -> IntakeCandidateRow? in
-      guard !row.deleted,
-            row.parentTransactionID == nil,
-            row.date >= fromISO,
-            row.date <= toISO,
-            accountIDs?.contains(row.accountID) ?? true else {
-        return nil
+    transactions.forEach(add)
+    unapprovedTransactions.forEach(add)
+
+    // Creates the server has not seen yet are still money in the register.
+    for command in currentOutbox {
+      guard case .create(let request) = command.kind, rows[command.transactionID] == nil,
+            request.date >= fromISO, request.date <= toISO,
+            accountIDs?.contains(request.accountID) ?? true else {
+        continue
       }
-      return IntakeCandidateRow(
-        id: row.id,
-        accountID: row.accountID,
-        date: row.date,
-        amountMilli: row.amount,
-        payeeName: row.payeeName ?? "",
-        categoryID: row.categoryID,
-        approved: row.approved,
-        isReconciled: row.cleared == .reconciled,
-        isTransfer: row.transferAccountID != nil,
-        isSplit: row.isSplit
+      rows[command.transactionID] = IntakeCandidateRow(
+        id: command.transactionID,
+        accountID: request.accountID,
+        date: request.date,
+        amountMilli: request.amount,
+        payeeName: request.payeeName ?? "",
+        categoryID: request.categoryID,
+        approved: request.approved
       )
     }
+    return IntakeCandidateSet(rows: Array(rows.values), transactions: full, isComplete: isComplete)
   }
 
-  /// The row an approved Fix is built on: as the register shows it now, else
-  /// as the matcher fetched it.
-  func intakeTransaction(id: String) -> Transaction? {
-    transactions.first { $0.id == id }
-      ?? unapprovedTransactions.first { $0.id == id }
-      ?? intakeFetchedRows[id]
+  /// The row as it is now, for approving a Fix: the server's copy with queued
+  /// changes applied. `nil` when the server says it is gone, or when it cannot
+  /// be reached and the register does not hold it either.
+  func intakeLiveTransaction(id: String) async -> Transaction? {
+    if settings.isAuthenticated {
+      do {
+        let row = try await apiClient.fetchTransaction(planID: settings.planID, transactionID: id)
+        return row.deleted ? nil : overlaying([row]).first
+      } catch APIClientError.httpStatus(404) {
+        return nil
+      } catch {
+        // Unreachable: fall back to what the register shows.
+      }
+    }
+    return transactions.first { $0.id == id } ?? unapprovedTransactions.first { $0.id == id }
   }
 }

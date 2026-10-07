@@ -11,10 +11,9 @@ struct IntakeInboxBand: View {
   private var coordinator: IntakeCoordinator { .shared }
 
   var body: some View {
-    let jobs = coordinator.jobs
-    if !jobs.isEmpty {
-      let open = jobs.filter { $0.state != .applied }.count
-      let urgent = Array(coordinator.mostUrgent.prefix(2))
+    let urgent = Array(coordinator.mostUrgent.prefix(2))
+    if !urgent.isEmpty {
+      let open = coordinator.attentionCount
       VStack(alignment: .leading, spacing: 10) {
         HStack(spacing: 8) {
           Image(systemName: "tray.and.arrow.down")
@@ -97,10 +96,17 @@ struct IntakeJobRow: View {
         .monospacedDigit()
         .foregroundStyle(.secondary)
     }
+    .background {
+      if job.state == .reading || job.state == .queued {
+        // The aura is the only "working" signal; it holds still under Reduce Motion.
+        IntelligenceAura(intensity: 0.3)
+          .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+      }
+    }
     .accessibilityElement(children: .combine)
     .accessibilityLabel(
       "\(job.title(accountName: accountName)), \(IntakeStatusPill.spokenLabel(for: job.state)), "
-        + "\(job.statusSummary), \(IntakeTime.label(for: job.createdAt))"
+        + "\(job.spokenStatusSummary), \(IntakeTime.label(for: job.createdAt))"
     )
   }
 }

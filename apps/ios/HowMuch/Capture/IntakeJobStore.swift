@@ -50,17 +50,58 @@ final class IntakeJobStore {
     return try? decoder.decode(IntakeJob.self, from: data)
   }
 
-  /// Newest first. A folder whose `job.json` cannot be read is skipped, not deleted.
+  /// Where a job folder whose `job.json` cannot be read is moved, out of the
+  /// way of `list()` but still on disk for inspection until `pruneQuarantine`.
+  var quarantineDirectory: URL {
+    jobsDirectory.appendingPathComponent("_quarantine", isDirectory: true)
+  }
+
+  /// Newest first. A job folder whose `job.json` is missing or unreadable is
+  /// quarantined, not skipped forever and not deleted.
   func list() -> [IntakeJob] {
     let urls = (try? fileManager.contentsOfDirectory(
       at: jobsDirectory,
       includingPropertiesForKeys: [.isDirectoryKey],
       options: [.skipsHiddenFiles]
     )) ?? []
-    return urls
-      .compactMap { UUID(uuidString: $0.lastPathComponent) }
-      .compactMap { load($0) }
-      .sorted { $0.createdAt > $1.createdAt }
+    var jobs: [IntakeJob] = []
+    for url in urls {
+      guard let id = UUID(uuidString: url.lastPathComponent) else {
+        continue
+      }
+      if let job = load(id) {
+        jobs.append(job)
+      } else {
+        quarantine(url)
+      }
+    }
+    return jobs.sorted { $0.createdAt > $1.createdAt }
+  }
+
+  private func quarantine(_ url: URL) {
+    try? fileManager.createDirectory(at: quarantineDirectory, withIntermediateDirectories: true)
+    var destination = quarantineDirectory.appendingPathComponent(url.lastPathComponent)
+    if fileManager.fileExists(atPath: destination.path) {
+      destination = quarantineDirectory.appendingPathComponent(
+        "\(url.lastPathComponent)-\(Int(Date().timeIntervalSince1970))"
+      )
+    }
+    try? fileManager.moveItem(at: url, to: destination)
+  }
+
+  /// Deletes quarantined folders last touched before `cutoff`.
+  func pruneQuarantine(olderThan cutoff: Date) {
+    let urls = (try? fileManager.contentsOfDirectory(
+      at: quarantineDirectory,
+      includingPropertiesForKeys: [.contentModificationDateKey],
+      options: [.skipsHiddenFiles]
+    )) ?? []
+    for url in urls {
+      let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+      if let modified, modified < cutoff {
+        try? fileManager.removeItem(at: url)
+      }
+    }
   }
 
   /// Atomic: a reader sees the old file or the new one, never half of it.
@@ -84,7 +125,7 @@ final class IntakeJobStore {
   /// moving its payload files into `sources/`. Safe to repeat after a crash:
   /// an existing job is kept and only files still in the Reading folder move.
   /// The caller discards the (now empty) Reading folder afterwards.
-  func adopt(_ item: InboxItem) throws -> IntakeJob {
+  func adopt(_ item: InboxItem, planID: String? = nil, connectionFingerprint: String? = nil) throws -> IntakeJob {
     let sources = sourcesDirectory(for: item.id)
     try fileManager.createDirectory(at: sources, withIntermediateDirectories: true)
     let job: IntakeJob
@@ -101,7 +142,9 @@ final class IntakeJobStore {
         hint: item.hint,
         note: item.note,
         contentHash: item.contentHash,
-        state: .reading
+        state: .reading,
+        planID: planID,
+        connectionFingerprint: connectionFingerprint
       )
       try save(job)
     }
