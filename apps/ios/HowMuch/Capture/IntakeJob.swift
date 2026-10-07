@@ -139,6 +139,9 @@ struct IntakeProposal: Codable, Equatable, Identifiable, Sendable {
   var isApplied: Bool
   /// Why this row could not be applied ("Couldn't find the original transaction").
   var issue: String?
+  /// Set when the owner turned a New row into a Fix of one of its candidates:
+  /// the kind to go back to if they undo it.
+  var flippedFrom: IntakeProposalKind?
 
   init(
     id: UUID = UUID(),
@@ -154,7 +157,8 @@ struct IntakeProposal: Codable, Equatable, Identifiable, Sendable {
     decision: IntakeDecision = .pending,
     sourceFileIndex: Int? = nil,
     isApplied: Bool = false,
-    issue: String? = nil
+    issue: String? = nil,
+    flippedFrom: IntakeProposalKind? = nil
   ) {
     self.id = id
     self.kind = kind
@@ -170,11 +174,12 @@ struct IntakeProposal: Codable, Equatable, Identifiable, Sendable {
     self.sourceFileIndex = sourceFileIndex
     self.isApplied = isApplied
     self.issue = issue
+    self.flippedFrom = flippedFrom
   }
 
   private enum CodingKeys: String, CodingKey {
     case id, kind, confidence, draft, proposedDraft, targetTransactionID, targetSnapshot
-    case changedFields, candidateIDs, reasons, decision, sourceFileIndex, isApplied, issue
+    case changedFields, candidateIDs, reasons, decision, sourceFileIndex, isApplied, issue, flippedFrom
   }
 
   /// Tolerant: a draft this build cannot decode (the draft type grew a field,
@@ -196,6 +201,7 @@ struct IntakeProposal: Codable, Equatable, Identifiable, Sendable {
     sourceFileIndex = try container.decodeIfPresent(Int.self, forKey: .sourceFileIndex)
     isApplied = try container.decodeIfPresent(Bool.self, forKey: .isApplied) ?? false
     issue = try container.decodeIfPresent(String.self, forKey: .issue)
+    flippedFrom = try? container.decodeIfPresent(IntakeProposalKind.self, forKey: .flippedFrom)
     if decodedDraft == nil {
       kind = .possibleDuplicate
       decision = .rejected
@@ -231,6 +237,12 @@ struct IntakeProposal: Codable, Equatable, Identifiable, Sendable {
     default:
       return draft.accountID.isEmpty || draft.amountMagnitudeMilli <= 0
     }
+  }
+
+  /// The reviewer has not ticked, unticked, edited or flipped this row, so a
+  /// fresh match may replace it.
+  var isUntouched: Bool {
+    decision == .pending && !isApplied && draft == proposedDraft && flippedFrom == nil
   }
 
   /// Nothing more to decide: applied, turned down, or nothing to do.

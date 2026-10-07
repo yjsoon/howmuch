@@ -378,14 +378,14 @@ final class IntakeCoordinator {
   private func rematchAfterOffline(_ id: UUID, model: AppModel) async {
     guard let job = self.job(id), job.state == .proposed, job.duplicateCheckLimited,
           !job.extractions.isEmpty,
-          job.proposals.allSatisfy({ $0.decision == .pending && !$0.isApplied }) else {
+          job.proposals.allSatisfy(\.isUntouched) else {
       return
     }
     let result = await propose(
       job.extractions, sourceIndexes: job.extractionSourceIndexes, hint: job.hint, model: model
     )
     guard !result.limited, var current = self.job(id), current.state == .proposed,
-          current.duplicateCheckLimited, current.proposals.allSatisfy({ $0.decision == .pending && !$0.isApplied }) else {
+          current.duplicateCheckLimited, current.proposals.allSatisfy(\.isUntouched) else {
       return
     }
     current.proposals = result.proposals
@@ -525,7 +525,10 @@ final class IntakeCoordinator {
       switch plans[job.proposals[index].id] {
       case .apply:
         job.proposals[index].isApplied = true
-        if !job.proposals[index].decision.isAccepted {
+        let applied = job.proposals[index]
+        if applied.draft != applied.proposedDraft {
+          job.proposals[index].decision = .editedThenAccepted
+        } else if !applied.decision.isAccepted {
           job.proposals[index].decision = .accepted
         }
         job.proposals[index].issue = nil
@@ -633,6 +636,132 @@ final class IntakeCoordinator {
     current.state = .proposed
     current.failureMessage = nil
     save(current)
+  }
+
+  // MARK: Review edits
+
+  /// Ticks or unticks one row. Only a job waiting for review changes, and a
+  /// row already applied never does.
+  func setDecision(_ decision: IntakeDecision, proposal proposalID: UUID, in id: UUID) {
+    mutateProposal(proposalID, in: id) { proposal in
+      proposal.decision = decision
+    }
+  }
+
+  /// Replaces what a row will save with the reviewer's edit. A Fix recomputes
+  /// which fields differ from the row it targets, so it never overwrites a
+  /// field the edit left alone.
+  func updateDraft(_ draft: TransactionDraft, proposal proposalID: UUID, in id: UUID) {
+    mutateProposal(proposalID, in: id) { proposal in
+      proposal.draft = draft
+      proposal.issue = nil
+      if proposal.kind == .edit, let snapshot = proposal.targetSnapshot {
+        proposal.changedFields = IntakeMatcher.differences(
+          draft: draft,
+          parsedCategory: draft.categoryID != nil,
+          row: IntakeCandidateRow(transaction: snapshot)
+        )
+      }
+    }
+  }
+
+  /// Sets the account on one row, clearing a self-transfer as the share sheet does.
+  func setAccount(_ accountID: String, proposal proposalID: UUID, in id: UUID) {
+    mutateProposal(proposalID, in: id) { proposal in
+      SlipAccountPick.apply(accountID, to: &proposal.draft)
+    }
+  }
+
+  /// Sets the account on every row of a job waiting for review that would
+  /// create a transaction. Fixes and Already in rows keep the account of the
+  /// row they target.
+  func setAccountForAll(_ accountID: String, in id: UUID, model: AppModel) {
+    guard model.openAccounts.contains(where: { $0.id == accountID }),
+          var job = self.job(id), job.state == .proposed else {
+      return
+    }
+    var changed = false
+    for index in job.proposals.indices {
+      let proposal = job.proposals[index]
+      guard !proposal.isApplied, proposal.kind == .add || proposal.kind == .possibleDuplicate else {
+        continue
+      }
+      SlipAccountPick.apply(accountID, to: &job.proposals[index].draft)
+      changed = true
+    }
+    if changed {
+      job.accountID = accountID
+      save(job)
+    }
+  }
+
+  /// Turns a New (or Possible duplicate) row into a Fix of one of its
+  /// candidates, ticked because the reviewer chose it. Needs the live row, so
+  /// it does nothing when that cannot be read.
+  @discardableResult
+  func flipToFix(_ proposalID: UUID, candidate candidateID: String, in id: UUID, model: AppModel) async -> Bool {
+    guard let live = await model.intakeLiveTransaction(id: candidateID) else {
+      return false
+    }
+    var flipped = false
+    mutateProposal(proposalID, in: id) { proposal in
+      guard proposal.kind == .add || proposal.kind == .possibleDuplicate, proposal.candidateIDs.contains(candidateID) else {
+        return
+      }
+      proposal.flippedFrom = proposal.kind
+      proposal.kind = .edit
+      proposal.targetTransactionID = candidateID
+      proposal.targetSnapshot = live
+      proposal.changedFields = IntakeMatcher.differences(
+        draft: proposal.draft,
+        parsedCategory: proposal.draft.categoryID != nil,
+        row: IntakeCandidateRow(transaction: live)
+      )
+      proposal.reasons.removeAll { $0.hasPrefix("Reconciled") }
+      if live.cleared == .reconciled {
+        proposal.reasons.append("Reconciled · stays reconciled")
+      }
+      proposal.issue = nil
+      proposal.decision = .accepted
+      flipped = true
+    }
+    return flipped
+  }
+
+  /// Undoes `flipToFix`: back to the kind the row had, unticked unless it was
+  /// a confident New.
+  func flipToNew(_ proposalID: UUID, in id: UUID) {
+    mutateProposal(proposalID, in: id) { proposal in
+      guard proposal.kind == .edit, let original = proposal.flippedFrom else {
+        return
+      }
+      proposal.kind = original
+      proposal.flippedFrom = nil
+      proposal.targetTransactionID = nil
+      proposal.targetSnapshot = nil
+      proposal.changedFields = []
+      proposal.reasons.removeAll { $0.hasPrefix("Reconciled") }
+      proposal.issue = nil
+      proposal.decision = .pending
+    }
+  }
+
+  private func mutateProposal(_ proposalID: UUID, in id: UUID, _ change: (inout IntakeProposal) -> Void) {
+    guard var job = self.job(id), job.state == .proposed,
+          !approving.contains(id),
+          let index = job.proposals.firstIndex(where: { $0.id == proposalID }),
+          !job.proposals[index].isApplied else {
+      return
+    }
+    let before = job.proposals[index]
+    change(&job.proposals[index])
+    if job.proposals[index] != before {
+      save(job)
+    }
+  }
+
+  func sourceURL(_ file: InboxSourceFile, jobID: UUID) -> URL {
+    store.sourceURL(file, jobID: jobID)
   }
 
   /// Removes one finished job from the Inbox.
