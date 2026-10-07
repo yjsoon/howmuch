@@ -242,6 +242,14 @@ The likely split: a reading model (on-device or vision) extracts text and struct
 
 **First version:** share sheet UI with account, hint, note and destination line; multi-image and PDF activation in `HowMuchShare/Info.plist`; Job and Proposal persisted in the app group; on-device reading only; deterministic matcher; batch review with approve, edit, reject; local notifications; Inbox band; skill file on device; rules only through explicit confirm.
 
+**Deferred from the first version** (the skill file and rules shipped on device only):
+
+- Rule detail does not yet link its source examples to the register; it names the original batch while it is still in the Inbox.
+- Currency and date order are stored in the skill file but nothing reads them, so the editor hides them. The duplicate window is live.
+- Rule hit and override counts come from approvals in review only, not from later edits made in the register.
+- Rules never change a row that is already in the register (Fix and Already in rows); they shape New rows only.
+- Skill notes reach only the Apple Intelligence reader, capped at 1,500 characters including account notes.
+
 **Phase 2:** server-side reading on the Worker with file lifecycle and vision models; skill and rules synced to the server with API; reconcile jobs; auto-save as unapproved with the teal indicator; eval harness; Jev decisions that pass the evals.
 
 **Phase 3:** chat follow-up on batches; job submission through the API for external agents (OpenClaw and others), shown with their origin in the Inbox; iPad and web review; rules export through Export everything.

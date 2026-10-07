@@ -139,8 +139,10 @@ struct SkillAndMemoryView: View {
         Text("Deletes every learned rule. Your instructions stay. Saved transactions are not changed.")
       }
     ) {
-      if !store.clearMemory() {
-        model.showSaveMessage("Couldn’t clear memory. Try again.", kind: .failure)
+      if store.clearMemory() {
+        IntakeCoordinator.shared.reapplyRules(model: model)
+      } else {
+        model.showSaveMessage(store.saveFailureMessage("Couldn’t clear memory. Try again."), kind: .failure)
       }
     }
   }
@@ -162,6 +164,7 @@ struct SkillAndMemoryView: View {
 
   private func ruleRow(_ rule: IntakeRule, context: IntakeRuleContext) -> some View {
     let summary = context.summary(of: rule)
+    let spoken = rule.spokenSummary(accountNames: context.accountNames, categoryNames: context.categoryNames)
     return HStack(spacing: 12) {
       Button {
         selectedRule = rule.id
@@ -185,15 +188,22 @@ struct SkillAndMemoryView: View {
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
+      .accessibilityLabel(
+        "\(spoken). \(rule.isOverriddenTwice ? "Overridden twice, consider removing" : rule.provenance)"
+      )
       .accessibilityHint("Opens the rule")
 
       Toggle(
-        "Use \(summary)",
+        "Use rule: \(spoken)",
         isOn: Binding(
           get: { rule.enabled },
           set: { enabled in
-            if !store.setEnabled(enabled, rule: rule.id) {
-              model.showSaveMessage("Couldn’t save this change. Try again.", kind: .failure)
+            if store.setEnabled(enabled, rule: rule.id) {
+              if !enabled {
+                IntakeCoordinator.shared.reapplyRules(model: model)
+              }
+            } else {
+              model.showSaveMessage(store.saveFailureMessage("Couldn’t save this change. Try again."), kind: .failure)
             }
           }
         )
@@ -212,19 +222,24 @@ struct SkillAndMemoryView: View {
         mode: .existing,
         rule: rule,
         onSave: { saved in
-          if !store.replace(saved) {
-            model.showSaveMessage("Couldn’t save this rule. Try again.", kind: .failure)
+          guard store.replace(saved) else {
+            model.showSaveMessage(store.saveFailureMessage("Couldn’t save this rule. Try again."), kind: .failure)
+            return false
           }
+          IntakeCoordinator.shared.reapplyRules(model: model)
+          return true
         },
         onDelete: {
-          selectedRule = nil
-          if !store.delete(rule: id) {
-            model.showSaveMessage("Couldn’t delete this rule. Try again.", kind: .failure)
+          if store.delete(rule: id) {
+            IntakeCoordinator.shared.reapplyRules(model: model)
+          } else {
+            model.showSaveMessage(store.saveFailureMessage("Couldn’t delete this rule. Try again."), kind: .failure)
           }
         }
       )
     } else {
-      ContentUnavailableView("Rule not found", systemImage: "questionmark.circle")
+      // Gone (deleted while the screen pops): nothing to show.
+      Color.clear
     }
   }
 
@@ -253,7 +268,8 @@ struct IntakeRuleEditorView: View {
 
   let mode: Mode
   let original: IntakeRule
-  let onSave: (IntakeRule) -> Void
+  /// Returns whether the rule was saved; the editor closes only when it was.
+  let onSave: (IntakeRule) -> Bool
   let onDelete: (() -> Void)?
 
   @State private var payeeText: String
@@ -288,7 +304,7 @@ struct IntakeRuleEditorView: View {
   init(
     mode: Mode,
     rule: IntakeRule,
-    onSave: @escaping (IntakeRule) -> Void,
+    onSave: @escaping (IntakeRule) -> Bool,
     onDelete: (() -> Void)? = nil
   ) {
     self.mode = mode
@@ -299,7 +315,8 @@ struct IntakeRuleEditorView: View {
     _sign = State(initialValue: rule.when.amountSign)
     switch rule.scope {
     case .global:
-      _scopeChoice = State(initialValue: .global)
+      // A global rule with a payee is a payee rule.
+      _scopeChoice = State(initialValue: (rule.when.payeeToken ?? "").isEmpty ? .global : .payee)
       _accountID = State(initialValue: rule.when.accountID ?? "")
     case .account(let id):
       _scopeChoice = State(initialValue: .account)
@@ -361,7 +378,7 @@ struct IntakeRuleEditorView: View {
         case .category:
           Picker("Category", selection: $categoryID) {
             Text("Choose a category").tag(String?.none)
-            ForEach(model.categoryGroups.filter { !$0.deleted }) { group in
+            ForEach(categoryGroups) { group in
               Section(group.name) {
                 ForEach(group.categories.filter { !$0.deleted }) { category in
                   Text(category.name).tag(String?.some(category.id))
@@ -388,9 +405,13 @@ struct IntakeRuleEditorView: View {
 
       Section {
         Picker("Applies to", selection: $scopeChoice) {
-          Text("This payee, all accounts").tag(IntakeRuleScopeChoice.payee)
+          if hasPayee {
+            Text("All accounts").tag(IntakeRuleScopeChoice.payee)
+          } else {
+            // A rule with no payee (direction or account only) is the global kind.
+            Text("Global").tag(IntakeRuleScopeChoice.global)
+          }
           Text("One account").tag(IntakeRuleScopeChoice.account)
-          Text("Global").tag(IntakeRuleScopeChoice.global)
         }
         if scopeChoice == .account {
           Picker("Account", selection: $accountID) {
@@ -406,6 +427,14 @@ struct IntakeRuleEditorView: View {
         Text("A rule for a payee and one account beats a rule for the payee alone, which beats one for the account alone.")
       }
       .listRowBackground(Theme.card)
+      .onChange(of: payeeText) { _, _ in
+        // A payee makes it a payee rule; with none it can only be global or for one account.
+        if hasPayee, scopeChoice == .global {
+          scopeChoice = .payee
+        } else if !hasPayee, scopeChoice == .payee {
+          scopeChoice = .global
+        }
+      }
 
       if mode == .existing {
         Section {
@@ -461,8 +490,20 @@ struct IntakeRuleEditorView: View {
         Text("Future documents won’t use it.")
       }
     ) {
-      onDelete?()
+      // Close first; the rule goes once the screen has gone, so it never shows a rule that is not there.
+      let delete = onDelete
+      dismiss()
+      Task {
+        try? await Task.sleep(for: .milliseconds(450))
+        delete?()
+      }
     }
+  }
+
+  /// Everyday groups first, bookkeeping groups last, as the category picker does.
+  private var categoryGroups: [CategoryGroup] {
+    let live = model.categoryGroups.filter { !$0.deleted }
+    return live.filter { !$0.isQuiet } + live.filter(\.isQuiet)
   }
 
   // MARK: Source
@@ -474,6 +515,10 @@ struct IntakeRuleEditorView: View {
     }
     let account = job.accountID.flatMap { id in model.accounts.first { $0.id == id }?.name }
     return "Decided \(when) in \(job.title(accountName: account))."
+  }
+
+  private var hasPayee: Bool {
+    !payeeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
   // MARK: Building the rule
@@ -539,8 +584,7 @@ struct IntakeRuleEditorView: View {
     guard let rule = built else {
       return
     }
-    onSave(rule)
-    if mode == .existing {
+    if onSave(rule), mode == .existing {
       dismiss()
     }
   }

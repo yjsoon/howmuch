@@ -680,6 +680,10 @@ struct IntakeReviewView: View {
         jobID: after.id,
         skill: IntakeSkillStore.shared.skill
       )
+      if suggestion != nil {
+        // One offer per batch, ever, whatever the answer.
+        IntakeSkillStore.shared.markOffered(after.id)
+      }
       // Stay on the screen unless the batch is finished: skipped rows need the owner.
       // With a rule on offer, closing waits for the sheet.
       if suggestion == nil, after.state == .applied {
@@ -736,6 +740,7 @@ private struct IntakeWhySheet: View {
           } else {
             ForEach(Array(proposal.reasons.enumerated()), id: \.offset) { _, reason in
               Text(reason)
+                .accessibilityLabel(reason.replacingOccurrences(of: " → ", with: ", "))
             }
           }
         }

@@ -14,7 +14,11 @@ import XCTest
 ///   counting as one, so a rule is never flagged (or flagged wrongly);
 /// - a skill.json written by a newer build losing the rest of the file;
 /// - Remember this? offering more than one rule, a rule the owner dismissed, or
-///   one that already exists.
+///   one that already exists for the account in question;
+/// - a rule turning a row that is already in the register into a Fix of a saved
+///   transaction, or a flag rule being shadowed by a category rule;
+/// - a skill file's unreadable rules being erased on the next save, or a file
+///   that could not be read being overwritten.
 @MainActor
 final class IntakeSkillTests: XCTestCase {
   private let everyday = "acct-everyday"
@@ -62,16 +66,122 @@ final class IntakeSkillTests: XCTestCase {
     XCTAssertEqual(category(after: all, payee: "KOPITIAM AMK", account: everyday), eatingOut)
   }
 
-  func testOnlyTheWinningRuleApplies() {
+  func testRenameAndCategoryRulesBothFireButEachFamilyTakesItsBestRule() {
     var read = line(payee: "KOPITIAM AMK", account: altitude)
     let rename = rule(scope: .payee("kopitiam"), when: .init(payeeToken: "kopitiam"), then: .renamePayee("Kopitiam"))
-    let recategorise = rule(
+    let broaderCategory = rule(when: .init(payeeToken: "kopitiam"), then: .setCategory(groceries))
+    let bestCategory = rule(
       scope: .account(altitude), when: .init(payeeToken: "kopitiam", accountID: altitude), then: .setCategory(eatingOut)
     )
-    let outcome = IntakeRuleEngine.apply([rename, recategorise], to: &read, context: context)
-    XCTAssertEqual(outcome?.application.ruleID, recategorise.id)
-    XCTAssertEqual(read.draft.categoryID, eatingOut)
-    XCTAssertEqual(read.draft.payeeName, "KOPITIAM AMK", "the lower rule must not also rename")
+    let outcomes = IntakeRuleEngine.apply([rename, broaderCategory, bestCategory], to: &read, context: context)
+    XCTAssertEqual(Set(outcomes.map(\.application.ruleID)), [rename.id, bestCategory.id])
+    XCTAssertEqual(read.draft.categoryID, eatingOut, "the more specific category rule wins within its family")
+    XCTAssertEqual(read.draft.payeeName, "Kopitiam", "the rename is a different family, so it fires too")
+  }
+
+  func testFlagRuleFiresAlongsideACategoryRule() {
+    var read = line(payee: "PAYNOW TAN AH KOW", account: altitude)
+    let flag = rule(when: .init(payeeToken: "tan ah kow"), then: .flag)
+    let categorise = rule(
+      scope: .account(altitude), when: .init(payeeToken: "tan ah kow", accountID: altitude), then: .setCategory(household)
+    )
+    let outcomes = IntakeRuleEngine.apply([categorise, flag], to: &read, context: context)
+    XCTAssertEqual(read.draft.categoryID, household)
+    XCTAssertEqual(outcomes.filter(\.needsReview).count, 1, "a matching flag rule is always honoured")
+    XCTAssertEqual(outcomes.count, 2)
+  }
+
+  func testTransferRuleSuppressesCategoryAndRenameRules() {
+    var read = line(payee: "GRABPAY TOP-UP", account: altitude)
+    let transfer = rule(when: .init(payeeToken: "grabpay"), then: .treatAsTransfer(everyday))
+    let categorise = rule(
+      scope: .account(altitude), when: .init(payeeToken: "grabpay", accountID: altitude), then: .setCategory(transport)
+    )
+    let rename = rule(when: .init(payeeToken: "grabpay"), then: .renamePayee("GrabPay"))
+    let outcomes = IntakeRuleEngine.apply([categorise, rename, transfer], to: &read, context: context)
+    XCTAssertEqual(outcomes.map(\.application.ruleID), [transfer.id])
+    XCTAssertEqual(read.draft.transferAccountID, everyday)
+    XCTAssertNil(read.draft.categoryID)
+    XCTAssertEqual(read.draft.payeeName, "Transfer : Everyday")
+  }
+
+  func testAnUnperformableTransferDoesNotSuppressTheOthers() {
+    var read = line(payee: "GRABPAY TOP-UP", account: everyday)
+    let selfTransfer = rule(when: .init(payeeToken: "grabpay"), then: .treatAsTransfer(everyday))
+    let categorise = rule(when: .init(payeeToken: "grabpay"), then: .setCategory(transport))
+    let outcomes = IntakeRuleEngine.apply([selfTransfer, categorise], to: &read, context: context)
+    XCTAssertEqual(outcomes.map(\.application.ruleID), [categorise.id])
+  }
+
+  func testCategoryRuleLeavesACategoryTheReaderSetAlone() {
+    var read = line(payee: "KOPITIAM AMK", account: altitude)
+    read.draft.categoryID = groceries
+    read.parsedCategory = true
+    let categorise = rule(when: .init(payeeToken: "kopitiam"), then: .setCategory(eatingOut))
+    XCTAssertTrue(IntakeRuleEngine.apply([categorise], to: &read, context: context).isEmpty)
+    XCTAssertEqual(read.draft.categoryID, groceries)
+  }
+
+  func testSkippingAFamilyLeavesThatFieldToTheOwner() {
+    var read = line(payee: "KOPITIAM AMK", account: altitude)
+    let rename = rule(when: .init(payeeToken: "kopitiam"), then: .renamePayee("Kopitiam"))
+    let categorise = rule(when: .init(payeeToken: "kopitiam"), then: .setCategory(eatingOut))
+    let outcomes = IntakeRuleEngine.apply([rename, categorise], to: &read, context: context, skipping: [.category])
+    XCTAssertEqual(outcomes.map(\.application.ruleID), [rename.id])
+    XCTAssertNil(read.draft.categoryID)
+  }
+
+  // MARK: Saved transactions
+
+  func testCategoryRuleNeverTurnsAnAlreadyInRowIntoAFix() {
+    // The row is already in the register under another category. The line as
+    // read matches it exactly, so it is Already in; a rule must not make it a Fix.
+    let read = line(payee: "Kopitiam", account: altitude, date: "2026-06-30")
+    let existing = IntakeCandidateRow(
+      id: "row-1", accountID: altitude, date: "2026-06-30", amountMilli: -8_900, payeeName: "Kopitiam",
+      categoryID: groceries, approved: true
+    )
+    var proposals = IntakeMatcher().match([read], openAccountIDs: [everyday, altitude], candidates: [existing])
+    XCTAssertEqual(proposals.first?.kind, .alreadyIn, "setup: the line as read is already in")
+    let categorise = rule(when: .init(payeeToken: "kopitiam"), then: .setCategory(eatingOut))
+    IntakeRuleEngine.applyLearned([categorise], to: &proposals, reads: [read], context: context)
+    XCTAssertEqual(proposals[0].kind, .alreadyIn)
+    XCTAssertEqual(proposals[0].changedFields, [])
+    XCTAssertNil(proposals[0].draft.categoryID)
+    XCTAssertEqual(proposals[0].draft, proposals[0].proposedDraft)
+    XCTAssertTrue(proposals[0].ruleApplications.isEmpty)
+    XCTAssertTrue(proposals[0].reasons.contains(IntakeRuleEngine.notAppliedReason))
+  }
+
+  func testRenameRuleDoesNotTurnAnAlreadyInRowIntoAFixOrAPossibleDuplicate() {
+    let read = line(payee: "KOPITIAM AMK", account: altitude, date: "2026-06-30")
+    let existing = IntakeCandidateRow(
+      id: "row-1", accountID: altitude, date: "2026-06-30", amountMilli: -8_900, payeeName: "Kopitiam",
+      categoryID: nil, approved: true
+    )
+    var proposals = IntakeMatcher().match([read], openAccountIDs: [everyday, altitude], candidates: [existing])
+    XCTAssertEqual(proposals.first?.kind, .alreadyIn, "setup")
+    let rename = rule(when: .init(payeeToken: "kopitiam"), then: .renamePayee("Kopitiam Eating House"))
+    IntakeRuleEngine.applyLearned([rename], to: &proposals, reads: [read], context: context)
+    XCTAssertEqual(proposals[0].kind, .alreadyIn)
+    XCTAssertEqual(proposals[0].draft.payeeName, "KOPITIAM AMK")
+    XCTAssertTrue(proposals[0].ruleApplications.isEmpty)
+  }
+
+  func testRulesApplyToNewRowsAndFlagsCapTheirConfidence() {
+    let read = line(payee: "KOPITIAM AMK", account: altitude)
+    var proposals = IntakeMatcher().match([read], openAccountIDs: [everyday, altitude], candidates: [])
+    XCTAssertEqual(proposals.first?.kind, .add)
+    let rename = rule(when: .init(payeeToken: "kopitiam"), then: .renamePayee("Kopitiam"))
+    let flag = rule(when: .init(payeeToken: "kopitiam"), then: .flag)
+    IntakeRuleEngine.applyLearned([rename, flag], to: &proposals, reads: [read], context: context)
+    XCTAssertEqual(proposals[0].draft.payeeName, "Kopitiam")
+    XCTAssertEqual(proposals[0].proposedDraft, proposals[0].draft)
+    XCTAssertEqual(proposals[0].readPayee, "KOPITIAM AMK", "the reader's own payee is kept for learning")
+    XCTAssertEqual(proposals[0].ruleApplications.count, 2)
+    XCTAssertLessThanOrEqual(proposals[0].confidence, IntakeRuleEngine.flaggedConfidenceCap)
+    XCTAssertFalse(proposals[0].appliesOnApproval, "a flagged row is not ticked")
+    XCTAssertTrue(proposals[0].reasons.first?.hasPrefix(IntakeRuleEngine.reasonPrefix) == true)
   }
 
   func testEqualSpecificityGoesToTheNewestRule() {
@@ -174,22 +284,22 @@ final class IntakeSkillTests: XCTestCase {
     var read = line(payee: "KOPITIAM AMK SINGAPORE SG", account: altitude)
     read.draft.payeeID = "payee-stale"
     let rename = rule(when: .init(payeeToken: "kopitiam"), then: .renamePayee("Kopitiam"))
-    let outcome = IntakeRuleEngine.apply([rename], to: &read, context: context)
+    let outcomes = IntakeRuleEngine.apply([rename], to: &read, context: context)
     XCTAssertEqual(read.draft.payeeName, "Kopitiam")
     XCTAssertNil(read.draft.payeeID)
-    XCTAssertEqual(outcome?.application.effects, [.payee])
+    XCTAssertEqual(outcomes.first?.application.effects, [.payee])
   }
 
   func testTransferRuleSetsTheTransferAndClearsTheCategoryBetweenOnBudgetAccounts() {
     var read = line(payee: "GRABPAY TOP-UP", account: altitude)
     read.draft.categoryID = groceries
     let transfer = rule(when: .init(payeeToken: "grabpay"), then: .treatAsTransfer(everyday))
-    let outcome = IntakeRuleEngine.apply([transfer], to: &read, context: context)
+    let outcomes = IntakeRuleEngine.apply([transfer], to: &read, context: context)
     XCTAssertEqual(read.draft.transferAccountID, everyday)
     XCTAssertEqual(read.draft.payeeID, "payee-to-everyday")
     XCTAssertEqual(read.draft.payeeName, "Transfer : Everyday")
     XCTAssertNil(read.draft.categoryID)
-    XCTAssertEqual(outcome?.application.effects, [.transfer])
+    XCTAssertEqual(outcomes.first?.application.effects, [.transfer])
   }
 
   func testTransferRuleKeepsTheCategoryWhenTheOtherAccountIsOffBudget() {
@@ -206,16 +316,16 @@ final class IntakeSkillTests: XCTestCase {
   func testTransferRuleNeverTargetsTheLinesOwnAccountAClosedAccountOrAMissingTransferPayee() {
     let toSelf = rule(when: .init(payeeToken: "grabpay"), then: .treatAsTransfer(everyday))
     var read = line(payee: "GRABPAY TOP-UP", account: everyday)
-    XCTAssertNil(IntakeRuleEngine.apply([toSelf], to: &read, context: context))
+    XCTAssertTrue(IntakeRuleEngine.apply([toSelf], to: &read, context: context).isEmpty)
     XCTAssertNil(read.draft.transferAccountID)
 
     let toClosed = rule(when: .init(payeeToken: "grabpay"), then: .treatAsTransfer(closedAccount))
     read = line(payee: "GRABPAY TOP-UP", account: altitude)
-    XCTAssertNil(IntakeRuleEngine.apply([toClosed], to: &read, context: context))
+    XCTAssertTrue(IntakeRuleEngine.apply([toClosed], to: &read, context: context).isEmpty)
 
     // Open, but no transfer payee exists for it (the register has not loaded it).
     let toUOB = rule(when: .init(payeeToken: "grabpay"), then: .treatAsTransfer(uob))
-    XCTAssertNil(IntakeRuleEngine.apply([toUOB], to: &read, context: context))
+    XCTAssertTrue(IntakeRuleEngine.apply([toUOB], to: &read, context: context).isEmpty)
     XCTAssertNil(read.draft.transferAccountID)
   }
 
@@ -223,23 +333,23 @@ final class IntakeSkillTests: XCTestCase {
     var read = line(payee: "PAYNOW TAN AH KOW", account: altitude)
     let before = read.draft
     let flag = rule(when: .init(payeeToken: "tan ah kow"), then: .flag)
-    let outcome = IntakeRuleEngine.apply([flag], to: &read, context: context)
+    let outcomes = IntakeRuleEngine.apply([flag], to: &read, context: context)
     XCTAssertEqual(read.draft, before)
-    XCTAssertEqual(outcome?.needsReview, true)
-    XCTAssertEqual(outcome?.application.effects, [.review])
+    XCTAssertEqual(outcomes.first?.needsReview, true)
+    XCTAssertEqual(outcomes.first?.application.effects, [.review])
   }
 
   func testReasonNamesTheRuleAndHowManyCorrectionsItCameFrom() {
     var read = line(payee: "KOPITIAM AMK", account: altitude)
     var learned = rule(when: .init(payeeToken: "kopitiam"), then: .setCategory(eatingOut))
     learned.origin.corrections = 4
-    var outcome = IntakeRuleEngine.apply([learned], to: &read, context: context)
-    XCTAssertEqual(outcome?.reason, "Learned rule: KOPITIAM → Eating Out (from 4 corrections)")
+    var outcomes = IntakeRuleEngine.apply([learned], to: &read, context: context)
+    XCTAssertEqual(outcomes.first?.reason, "Learned rule: KOPITIAM → Eating Out (from 4 corrections)")
 
     read = line(payee: "KOPITIAM AMK", account: altitude)
     learned.origin.corrections = 1
-    outcome = IntakeRuleEngine.apply([learned], to: &read, context: context)
-    XCTAssertEqual(outcome?.reason, "Learned rule: KOPITIAM → Eating Out (from 1 correction)")
+    outcomes = IntakeRuleEngine.apply([learned], to: &read, context: context)
+    XCTAssertEqual(outcomes.first?.reason, "Learned rule: KOPITIAM → Eating Out (from 1 correction)")
   }
 
   // MARK: Overrides
@@ -431,13 +541,14 @@ final class IntakeSkillTests: XCTestCase {
 
   // MARK: Store
 
-  func testStoreRoundTripsAtomicallyAndIgnoresAGarbageFile() throws {
+  func testStoreRoundTripsAtomicallyAndRefusesToOverwriteAFileItCannotRead() throws {
     let container = FileManager.default.temporaryDirectory
       .appendingPathComponent("HowMuchTests-skill-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: container) }
 
     let store = IntakeSkillStore(container: container)
     XCTAssertEqual(store.skill, IntakeSkill())
+    XCTAssertFalse(store.isReadOnly, "a missing file is a fresh start, not a failure")
     let added = rule(when: .init(payeeToken: "kopitiam"), then: .setCategory(eatingOut))
     XCTAssertTrue(store.update { $0.notes = "Hello"; $0.add(added) })
 
@@ -448,7 +559,66 @@ final class IntakeSkillTests: XCTestCase {
     XCTAssertEqual(reloaded.skill.rules.map(\.id), [added.id])
 
     try Data("not json".utf8).write(to: url)
-    XCTAssertEqual(IntakeSkillStore(container: container).skill, IntakeSkill())
+    let broken = IntakeSkillStore(container: container)
+    XCTAssertEqual(broken.skill, IntakeSkill())
+    XCTAssertTrue(broken.isReadOnly)
+    XCTAssertFalse(broken.update { $0.notes = "Overwrite" }, "must not replace a file it could not read")
+    XCTAssertEqual(try Data(contentsOf: url), Data("not json".utf8))
+    XCTAssertEqual(broken.skill, IntakeSkill())
+  }
+
+  func testRulesThisBuildCannotReadSurviveASave() throws {
+    let kept = UUID()
+    let json = """
+    { "rules": [
+      { "id": "\(UUID().uuidString)", "scope": { "kind": "global" }, "when": { "payeeToken": "grab" },
+        "then": { "kind": "preferReceiptTotal" }, "createdAt": "2026-10-02T09:41:00Z" },
+      { "id": "\(kept.uuidString)", "scope": { "kind": "global" }, "when": { "payeeToken": "kopitiam" },
+        "then": { "kind": "flag" }, "createdAt": "2026-10-02T09:41:00Z" } ],
+      "accounts": [ { "notes": "no id" } ] }
+    """
+    var skill = try IntakeSkillStore.decoder().decode(IntakeSkill.self, from: Data(json.utf8))
+    XCTAssertEqual(skill.rules.map(\.id), [kept])
+    XCTAssertEqual(skill.unreadRules.count, 1)
+    XCTAssertEqual(skill.unreadAccounts.count, 1)
+    skill.notes = "Changed"
+
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let data = try encoder.encode(skill)
+    let again = try IntakeSkillStore.decoder().decode(IntakeSkill.self, from: data)
+    XCTAssertEqual(again.unreadRules, skill.unreadRules)
+    XCTAssertEqual(again.unreadAccounts, skill.unreadAccounts)
+    let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let rules = try XCTUnwrap(object["rules"] as? [[String: Any]])
+    XCTAssertEqual(rules.count, 2)
+    XCTAssertTrue(rules.contains { ($0["then"] as? [String: Any])?["kind"] as? String == "preferReceiptTotal" })
+  }
+
+  func testAnUnreadableEnabledAccountOrPayeeValueNeverBroadensOrReEnablesARule() throws {
+    func decode(_ body: String) throws -> IntakeSkill {
+      let json = """
+      { "rules": [ { "id": "\(UUID().uuidString)", "scope": { "kind": "global" },
+        \(body), "then": { "kind": "flag" }, "createdAt": "2026-10-02T09:41:00Z" } ] }
+      """
+      return try IntakeSkillStore.decoder().decode(IntakeSkill.self, from: Data(json.utf8))
+    }
+    for body in [
+      #""when": { "payeeToken": "grab", "accountID": 7 }"#,
+      #""when": { "payeeToken": 7 }"#,
+      #""when": { "payeeToken": "grab" }, "enabled": "no""#,
+    ] {
+      let skill = try decode(body)
+      XCTAssertTrue(skill.rules.isEmpty, body)
+      XCTAssertEqual(skill.unreadRules.count, 1, body)
+    }
+  }
+
+  func testAccountWindowIsClampedWhenTheFileIsRead() throws {
+    let json = #"{ "accounts": [ { "id": "a", "dedupeDayWindow": 40 }, { "id": "b", "dedupeDayWindow": -3 } ] }"#
+    let skill = try IntakeSkillStore.decoder().decode(IntakeSkill.self, from: Data(json.utf8))
+    XCTAssertEqual(skill.account("a")?.dedupeDayWindow, 7)
+    XCTAssertEqual(skill.account("b")?.dedupeDayWindow, 1)
   }
 
   func testClearAllMemoryRemovesRulesAndSuppressionsButKeepsTheOwnersInstructions() {
@@ -457,7 +627,9 @@ final class IntakeSkillTests: XCTestCase {
     skill.accounts = [IntakeAccountSkill(id: altitude, notes: "Keep me too", dedupeDayWindow: nil)]
     skill.rules = [rule(when: .init(payeeToken: "kopitiam"), then: .setCategory(eatingOut))]
     skill.suppress("category|kopitiam|cat-eating-out", at: now)
+    skill.markOffered(UUID())
     skill.clearMemory()
+    XCTAssertTrue(skill.offeredJobIDs.isEmpty)
     XCTAssertTrue(skill.rules.isEmpty)
     XCTAssertTrue(skill.suppressed.isEmpty)
     XCTAssertEqual(skill.notes, "Keep me")
@@ -468,13 +640,37 @@ final class IntakeSkillTests: XCTestCase {
     let first = rule(scope: .payee("shopee"), when: .init(payeeToken: "shopee"), then: .setCategory(household))
     let rename = rule(scope: .payee("shopee"), when: .init(payeeToken: "shopee"), then: .renamePayee("Shopee"))
     let second = rule(scope: .payee("shopee"), when: .init(payeeToken: "shopee"), then: .setCategory(groceries))
-    let elsewhere = rule(scope: .account(uob), when: .init(payeeToken: "shopee", accountID: uob), then: .setCategory(household))
     var skill = IntakeSkill()
     skill.add(first)
     skill.add(rename)
-    skill.add(elsewhere)
     skill.add(second)
-    XCTAssertEqual(Set(skill.rules.map(\.id)), [rename.id, elsewhere.id, second.id])
+    XCTAssertEqual(Set(skill.rules.map(\.id)), [rename.id, second.id])
+  }
+
+  func testGlobalWithAPayeeIsTheSameRuleAsAPayeeScope() {
+    let payee = rule(scope: .payee("shopee"), when: .init(payeeToken: "shopee"), then: .setCategory(household))
+    let global = rule(scope: .global, when: .init(payeeToken: "shopee"), then: .setCategory(groceries))
+    var skill = IntakeSkill()
+    skill.add(payee)
+    skill.add(global)
+    XCTAssertEqual(skill.rules.map(\.id), [global.id])
+  }
+
+  func testAnAllAccountsRuleReplacesOlderAccountRulesForTheSameTokenAndFamilyButNotTheOtherWayRound() {
+    let uobRule = rule(scope: .account(uob), when: .init(payeeToken: "shopee", accountID: uob), then: .setCategory(household))
+    let allAccounts = rule(scope: .payee("shopee"), when: .init(payeeToken: "shopee"), then: .setCategory(groceries))
+    let otherFamily = rule(scope: .account(uob), when: .init(payeeToken: "shopee", accountID: uob), then: .renamePayee("Shopee"))
+    var skill = IntakeSkill()
+    skill.add(uobRule)
+    skill.add(otherFamily)
+    skill.add(allAccounts)
+    XCTAssertEqual(Set(skill.rules.map(\.id)), [allAccounts.id, otherFamily.id], "the newer owner choice wins")
+
+    let altitudeRule = rule(
+      scope: .account(altitude), when: .init(payeeToken: "shopee", accountID: altitude), then: .setCategory(transport)
+    )
+    skill.add(altitudeRule)
+    XCTAssertEqual(Set(skill.rules.map(\.id)), [allAccounts.id, otherFamily.id, altitudeRule.id])
   }
 
   func testSuppressionLastsThirtyDaysAndIsForgottenAfterwards() {
@@ -483,6 +679,17 @@ final class IntakeSkillTests: XCTestCase {
     XCTAssertTrue(skill.isSuppressed("category|kopitiam|cat-eating-out", at: now.addingTimeInterval(29 * 86_400)))
     XCTAssertFalse(skill.isSuppressed("category|kopitiam|cat-eating-out", at: now.addingTimeInterval(31 * 86_400)))
     XCTAssertFalse(skill.isSuppressed("category|kopitiam|cat-groceries", at: now), "only that exact suggestion")
+  }
+
+  // MARK: Summary
+
+  func testSummaryIsTheCharacterCountOnly() {
+    var skill = IntakeSkill()
+    XCTAssertEqual(skill.summary, "No instructions yet")
+    skill.notes = String(repeating: "a", count: 1_912)
+    XCTAssertEqual(skill.summary, "1.9k characters")
+    skill.notes = "Short"
+    XCTAssertEqual(skill.summary, "5 characters")
   }
 
   // MARK: Reading guidance
@@ -573,6 +780,52 @@ final class IntakeSkillTests: XCTestCase {
     XCTAssertNil(IntakeRuleSuggester.suggest(applied: [kopi], jobID: UUID(), skill: known, now: now))
   }
 
+  func testNothingIsOfferedTwiceForOneBatch() throws {
+    let kopi = applied(payee: "KOPITIAM AMK", proposedCategory: nil, category: eatingOut)
+    let jobID = UUID()
+    var skill = IntakeSkill()
+    XCTAssertNotNil(IntakeRuleSuggester.suggest(applied: [kopi], jobID: jobID, skill: skill, now: now))
+    skill.markOffered(jobID)
+    XCTAssertNil(IntakeRuleSuggester.suggest(applied: [kopi], jobID: jobID, skill: skill, now: now))
+    XCTAssertNotNil(IntakeRuleSuggester.suggest(applied: [kopi], jobID: UUID(), skill: skill, now: now))
+  }
+
+  func testAnExistingRuleOnlyBlocksTheSuggestionItCovers() throws {
+    let kopiAtDBS = applied(payee: "KOPITIAM AMK", proposedCategory: nil, category: eatingOut, account: altitude)
+    var skill = IntakeSkill()
+    skill.add(
+      rule(scope: .account(uob), when: .init(payeeToken: "kopitiam", accountID: uob), then: .setCategory(eatingOut))
+    )
+    XCTAssertNotNil(
+      IntakeRuleSuggester.suggest(applied: [kopiAtDBS], jobID: UUID(), skill: skill, now: now),
+      "a UOB rule does not block offering one for DBS"
+    )
+    var allAccounts = IntakeSkill()
+    allAccounts.add(rule(scope: .payee("kopitiam"), when: .init(payeeToken: "kopitiam"), then: .setCategory(eatingOut)))
+    XCTAssertNil(IntakeRuleSuggester.suggest(applied: [kopiAtDBS], jobID: UUID(), skill: allAccounts, now: now))
+    var dbsOnly = IntakeSkill()
+    dbsOnly.add(
+      rule(scope: .account(altitude), when: .init(payeeToken: "kopitiam", accountID: altitude), then: .setCategory(eatingOut))
+    )
+    XCTAssertNil(IntakeRuleSuggester.suggest(applied: [kopiAtDBS], jobID: UUID(), skill: dbsOnly, now: now))
+  }
+
+  func testTheTokenComesFromTheReadersOwnPayeeNotTheRenamedOne() throws {
+    var row = applied(payee: "Kopitiam", proposedCategory: nil, category: eatingOut)
+    row.readPayee = "KOPITIAM AMK SINGAPORE SG"
+    let suggestion = try XCTUnwrap(
+      IntakeRuleSuggester.suggest(applied: [row], jobID: UUID(), skill: IntakeSkill(), now: now)
+    )
+    XCTAssertEqual(suggestion.rule(scope: .payee).when.payeeToken, "kopitiam")
+
+    var renamedAway = applied(payee: "Coffee", proposedCategory: nil, category: nil, finalPayee: "Coffee corner")
+    renamedAway.readPayee = "STARBUCKS COFFEE SG"
+    let rename = try XCTUnwrap(
+      IntakeRuleSuggester.suggest(applied: [renamedAway], jobID: UUID(), skill: IntakeSkill(), now: now)
+    )
+    XCTAssertEqual(rename.rule(scope: .payee).when.payeeToken, "starbucks")
+  }
+
   func testDefaultScopeIsTheAccountForASingleAccountBatchAndThePayeeOtherwise() throws {
     let one = applied(payee: "KOPITIAM AMK", proposedCategory: nil, category: eatingOut, account: altitude)
     let single = try XCTUnwrap(IntakeRuleSuggester.suggest(applied: [one], jobID: UUID(), skill: IntakeSkill(), now: now))
@@ -582,7 +835,6 @@ final class IntakeSkillTests: XCTestCase {
     XCTAssertEqual(single.rule(scope: .account).when.accountID, altitude)
     XCTAssertEqual(single.rule(scope: .payee).scope, .payee("kopitiam"))
     XCTAssertNil(single.rule(scope: .payee).when.accountID)
-    XCTAssertEqual(single.rule(scope: .global).scope, .global)
 
     let other = applied(payee: "SHOPEE SG", proposedCategory: nil, category: household, account: uob)
     let mixed = try XCTUnwrap(

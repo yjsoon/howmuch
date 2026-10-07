@@ -6,14 +6,10 @@ struct SkillFileEditorView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.dismiss) private var dismiss
 
-  @State private var currency: String
-  @State private var dateOrder: IntakeDateOrder
+  // Currency and date order are kept in the file for later but nothing reads
+  // them yet, so they are not shown.
   @State private var window: Int
   @State private var notes: String
-
-  private static let commonCurrencies = [
-    "SGD", "MYR", "USD", "EUR", "GBP", "AUD", "NZD", "JPY", "HKD", "CNY", "IDR", "THB", "INR", "KRW",
-  ]
 
   /// The example from docs/plans/share-intake.md section 8.
   static let exampleNotes = """
@@ -33,8 +29,6 @@ struct SkillFileEditorView: View {
 
   init() {
     let skill = IntakeSkillStore.shared.skill
-    _currency = State(initialValue: skill.locale.currency)
-    _dateOrder = State(initialValue: skill.locale.dateOrder)
     _window = State(initialValue: skill.dedupe.dayWindow)
     _notes = State(initialValue: skill.notes)
   }
@@ -43,8 +37,9 @@ struct SkillFileEditorView: View {
     notes.count > IntakeSkill.notesLimit
   }
 
-  private var currencies: [String] {
-    Self.commonCurrencies.contains(currency) ? Self.commonCurrencies : [currency] + Self.commonCurrencies
+  private var isDirty: Bool {
+    let skill = IntakeSkillStore.shared.skill
+    return notes != skill.notes || window != skill.dedupe.dayWindow
   }
 
   var body: some View {
@@ -54,7 +49,7 @@ struct SkillFileEditorView: View {
         SkillNotesField(text: $notes, limit: IntakeSkill.notesLimit) {
           notes += Self.example(fittingAfter: notes, limit: IntakeSkill.notesLimit)
         }
-        Text("Plain instructions. Halation reads this before every document, alongside per-account notes and learned rules. Without Apple Intelligence, only the settings above and learned rules apply.")
+        Text("Plain instructions. Halation reads this before every document, alongside per-account notes and learned rules. Apple Intelligence reads only the first \(IntakeSkill.promptGuidanceLimit.formatted()) characters, after any notes for the account; without it, only the duplicate window and learned rules apply.")
           .font(.footnote)
           .foregroundStyle(.secondary)
           .padding(.horizontal, 4)
@@ -65,6 +60,8 @@ struct SkillFileEditorView: View {
     .background(Theme.canvas)
     .navigationTitle("How to read my documents")
     .navigationBarTitleDisplayMode(.inline)
+    // Swiping the sheet away would lose edits; Cancel is the way out.
+    .interactiveDismissDisabled(isDirty)
     .toolbar {
       ToolbarItem(placement: .cancellationAction) {
         Button("Cancel") {
@@ -84,44 +81,6 @@ struct SkillFileEditorView: View {
 
   private var settingsCard: some View {
     VStack(spacing: 0) {
-      HStack {
-        Text("Currency")
-          .foregroundStyle(Theme.textPrimary)
-        Spacer(minLength: 8)
-        Menu {
-          Picker("Currency", selection: $currency) {
-            ForEach(currencies, id: \.self) { code in
-              Text(code).tag(code)
-            }
-          }
-        } label: {
-          Text(currency)
-            .font(.body.weight(.semibold))
-            .frame(minHeight: 44)
-        }
-        .accessibilityLabel("Currency")
-        .accessibilityValue(currency)
-      }
-      Divider()
-      HStack {
-        Text("Dates")
-          .foregroundStyle(Theme.textPrimary)
-        Spacer(minLength: 8)
-        Menu {
-          Picker("Dates", selection: $dateOrder) {
-            ForEach(IntakeDateOrder.allCases, id: \.self) { order in
-              Text(order.label).tag(order)
-            }
-          }
-        } label: {
-          Text(dateOrder.label)
-            .font(.body.weight(.semibold))
-            .frame(minHeight: 44)
-        }
-        .accessibilityLabel("Date order")
-        .accessibilityValue(dateOrder.label)
-      }
-      Divider()
       Stepper(value: $window, in: IntakeSkill.dayWindowRange) {
         HStack {
           Text("Duplicate window")
@@ -141,15 +100,15 @@ struct SkillFileEditorView: View {
 
   private func save() {
     let saved = IntakeSkillStore.shared.update { skill in
-      skill.locale.currency = currency
-      skill.locale.dateOrder = dateOrder
       skill.dedupe.dayWindow = IntakeSkill.clampedWindow(window)
       skill.notes = String(notes.prefix(IntakeSkill.notesLimit))
     }
     if saved {
       dismiss()
     } else {
-      model.showSaveMessage("Couldn’t save the skill file. Try again.", kind: .failure)
+      model.showSaveMessage(
+        IntakeSkillStore.shared.saveFailureMessage("Couldn’t save the skill file. Try again."), kind: .failure
+      )
     }
   }
 
@@ -205,6 +164,13 @@ struct AccountSkillEditorView: View {
     notes.count > IntakeSkill.accountNotesLimit
   }
 
+  private var isDirty: Bool {
+    let own = IntakeSkillStore.shared.skill.account(accountID)
+    let savedWindow = own?.dedupeDayWindow
+    return notes != (own?.notes ?? "")
+      || (overridesWindow ? window : nil) != savedWindow
+  }
+
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
@@ -244,6 +210,7 @@ struct AccountSkillEditorView: View {
     .background(Theme.canvas)
     .navigationTitle(accountName)
     .navigationBarTitleDisplayMode(.inline)
+    .interactiveDismissDisabled(isDirty)
     .toolbar {
       ToolbarItem(placement: .cancellationAction) {
         Button("Cancel") {
@@ -272,7 +239,9 @@ struct AccountSkillEditorView: View {
     if saved {
       dismiss()
     } else {
-      model.showSaveMessage("Couldn’t save these instructions. Try again.", kind: .failure)
+      model.showSaveMessage(
+        IntakeSkillStore.shared.saveFailureMessage("Couldn’t save these instructions. Try again."), kind: .failure
+      )
     }
   }
 }

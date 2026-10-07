@@ -18,7 +18,12 @@ struct RememberThisSheet: View {
 
   private var store: IntakeSkillStore { .shared }
 
+  private var device: String {
+    UIDevice.current.model
+  }
+
   var body: some View {
+    let context = IntakeRuleContext.make(model: model)
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
         Label {
@@ -31,8 +36,8 @@ struct RememberThisSheet: View {
         }
         .accessibilityAddTraits(.isHeader)
 
-        ruleCard
-        if let noticed = alsoNoticedText {
+        ruleCard(context)
+        if let noticed = alsoNoticed(context) {
           alsoNoticedCard(noticed)
         }
 
@@ -47,28 +52,19 @@ struct RememberThisSheet: View {
         .controlSize(.large)
         .tint(Theme.accent)
 
-        HStack(spacing: 12) {
-          Button {
-            editing = suggestion.rule(scope: scope)
-          } label: {
-            Text("Edit…")
-              .frame(maxWidth: .infinity, minHeight: 44)
+        // Side by side when they fit, stacked at large text sizes.
+        ViewThatFits(in: .horizontal) {
+          HStack(spacing: 12) {
+            editButton
+            justThisOnceButton
           }
-          .buttonStyle(.bordered)
-          .tint(Theme.accent)
-
-          Button {
-            store.suppress(suggestion.key)
-            dismiss()
-          } label: {
-            Text("Just this once")
-              .frame(maxWidth: .infinity, minHeight: 44)
+          VStack(spacing: 12) {
+            editButton
+            justThisOnceButton
           }
-          .buttonStyle(.bordered)
-          .tint(Theme.textPrimary)
         }
 
-        Text("Saved on this iPhone · used for future documents only")
+        Text("Saved on this \(device) · used for future documents only")
           .font(.footnote)
           .foregroundStyle(.secondary)
           .multilineTextAlignment(.center)
@@ -80,12 +76,7 @@ struct RememberThisSheet: View {
     .sheet(item: $editing) { rule in
       NavigationStack {
         IntakeRuleEditorView(mode: .create, rule: rule) { saved in
-          if store.add(saved) {
-            model.showSaveMessage("Rule saved on this iPhone")
-            dismiss()
-          } else {
-            model.showSaveMessage("Couldn’t save this rule. Try again.", kind: .failure)
-          }
+          save(saved)
         }
       }
       .presentationDetents([.large])
@@ -93,24 +84,43 @@ struct RememberThisSheet: View {
     }
   }
 
-  // MARK: Rule
-
-  private var context: IntakeRuleContext {
-    IntakeRuleContext.make(model: model)
+  private var editButton: some View {
+    Button {
+      editing = suggestion.rule(scope: scope)
+    } label: {
+      Text("Edit…")
+        .frame(maxWidth: .infinity, minHeight: 44)
+    }
+    .buttonStyle(.bordered)
+    .tint(Theme.accent)
   }
 
-  private var accountName: String {
+  private var justThisOnceButton: some View {
+    Button {
+      store.suppress(suggestion.key)
+      dismiss()
+    } label: {
+      Text("Just this once")
+        .frame(maxWidth: .infinity, minHeight: 44)
+    }
+    .buttonStyle(.bordered)
+    .tint(Theme.textPrimary)
+  }
+
+  // MARK: Rule
+
+  private func accountName(_ context: IntakeRuleContext) -> String {
     suggestion.accountID.flatMap { context.accountNames[$0] } ?? "This account"
   }
 
-  private var ruleCard: some View {
+  private func ruleCard(_ context: IntakeRuleContext) -> some View {
     VStack(alignment: .leading, spacing: 12) {
-      sentence
+      sentence(context)
         .font(.title3)
         .foregroundStyle(Theme.textPrimary)
         .fixedSize(horizontal: false, vertical: true)
       Divider()
-      scopeMenu
+      scopeMenu(context)
       Text(basis)
         .font(.subheadline)
         .foregroundStyle(.secondary)
@@ -121,57 +131,65 @@ struct RememberThisSheet: View {
     .accessibilityElement(children: .contain)
   }
 
-  /// "When the payee is KOPITIAM, use Eating Out."
-  private var sentence: Text {
+  /// "When the payee includes KOPITIAM, use Eating Out."
+  private func sentence(_ context: IntakeRuleContext) -> Text {
     let token = Text(suggestion.token.uppercased()).bold()
-    let place = scope == .account ? " on \(accountName)" : ""
+    let place = scope == .account ? " on \(accountName(context))" : ""
     switch suggestion.action {
     case .setCategory(let id):
       let category = Text(context.categoryNames[id] ?? "that category").bold()
-      return Text("When the payee is \(token)\(place), use \(category).")
+      return Text("When the payee includes \(token)\(place), use \(category).")
     case .renamePayee(let name):
-      return Text("When the payee is \(token)\(place), rename it to \(Text(name).bold()).")
+      return Text("When the payee includes \(token)\(place), rename it to \(Text(name).bold()).")
     case .treatAsTransfer(let id):
       let target = Text(context.accountNames[id] ?? "another account").bold()
-      return Text("When the payee is \(token)\(place), treat it as a transfer to \(target).")
+      return Text("When the payee includes \(token)\(place), treat it as a transfer to \(target).")
     case .flag:
-      return Text("When the payee is \(token)\(place), ask me to check it.")
+      return Text("When the payee includes \(token)\(place), ask me to check it.")
     }
   }
 
-  private func label(for choice: IntakeRuleScopeChoice) -> String {
+  private func label(for choice: IntakeRuleScopeChoice, _ context: IntakeRuleContext) -> String {
     switch choice {
-    case .global: "Global"
-    case .account: "\(accountName) only"
-    case .payee: "All accounts"
+    case .global, .payee: "All accounts"
+    case .account: "\(accountName(context)) only"
     }
   }
 
+  /// This account, or every account. A global rule is for a rule with no payee,
+  /// which the rule editor offers.
   private var choices: [IntakeRuleScopeChoice] {
-    suggestion.accountID == nil ? [.payee, .global] : [.account, .payee, .global]
+    suggestion.accountID == nil ? [.payee] : [.account, .payee]
   }
 
-  private var scopeMenu: some View {
-    Menu {
-      Picker("Scope", selection: $scope) {
-        ForEach(choices) { choice in
-          Text(label(for: choice)).tag(choice)
+  @ViewBuilder
+  private func scopeMenu(_ context: IntakeRuleContext) -> some View {
+    if choices.count > 1 {
+      Menu {
+        Picker("Scope", selection: $scope) {
+          ForEach(choices) { choice in
+            Text(label(for: choice, context)).tag(choice)
+          }
         }
+      } label: {
+        HStack(spacing: 6) {
+          Text("Scope · \(label(for: scope, context))")
+            .foregroundStyle(Theme.textPrimary)
+          Image(systemName: "chevron.up.chevron.down")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+          Spacer(minLength: 0)
+        }
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
       }
-    } label: {
-      HStack(spacing: 6) {
-        Text("Scope · \(label(for: scope))")
-          .foregroundStyle(Theme.textPrimary)
-        Image(systemName: "chevron.up.chevron.down")
-          .font(.caption2.weight(.semibold))
-          .foregroundStyle(.secondary)
-        Spacer(minLength: 0)
-      }
-      .frame(minHeight: 44)
-      .contentShape(Rectangle())
+      .accessibilityLabel("Scope")
+      .accessibilityValue(label(for: scope, context))
+    } else {
+      Text("Scope · \(label(for: scope, context))")
+        .foregroundStyle(Theme.textPrimary)
+        .frame(minHeight: 44, alignment: .leading)
     }
-    .accessibilityLabel("Scope")
-    .accessibilityValue(label(for: scope))
   }
 
   private var basis: String {
@@ -181,22 +199,26 @@ struct RememberThisSheet: View {
 
   // MARK: Also noticed
 
-  private var alsoNoticedText: String? {
+  /// The words, and the same for VoiceOver (no arrow).
+  private func alsoNoticed(_ context: IntakeRuleContext) -> (text: String, spoken: String)? {
     guard let record = suggestion.alsoNoticed,
           let rule = store.skill.rules.first(where: { $0.id == record.ruleID }) else {
       return nil
     }
     let times = record.count == 1 ? "once" : "\(record.count) times"
-    return "\(context.summary(of: rule)) was right \(times)"
+    return (
+      "\(context.summary(of: rule)) was right \(times)",
+      "\(rule.spokenSummary(accountNames: context.accountNames, categoryNames: context.categoryNames)), was right \(times)"
+    )
   }
 
-  private func alsoNoticedCard(_ text: String) -> some View {
+  private func alsoNoticedCard(_ noticed: (text: String, spoken: String)) -> some View {
     VStack(alignment: .leading, spacing: 4) {
       Text("ALSO NOTICED")
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
       HStack(alignment: .firstTextBaseline) {
-        Text(text)
+        Text(noticed.text)
           .foregroundStyle(Theme.textPrimary)
         Spacer(minLength: 8)
         Text("Kept")
@@ -207,17 +229,25 @@ struct RememberThisSheet: View {
     .padding(16)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-    .accessibilityElement(children: .combine)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("Also noticed: \(noticed.spoken). Kept")
   }
 
   // MARK: Actions
 
   private func remember() {
-    if store.add(suggestion.rule(scope: scope)) {
-      model.showSaveMessage("Rule saved on this iPhone")
-      dismiss()
-    } else {
-      model.showSaveMessage("Couldn’t save this rule. Try again.", kind: .failure)
+    _ = save(suggestion.rule(scope: scope))
+  }
+
+  /// Saves the rule and closes the sheet; on failure says why and stays open.
+  @discardableResult
+  private func save(_ rule: IntakeRule) -> Bool {
+    guard store.add(rule) else {
+      model.showSaveMessage(store.saveFailureMessage("Couldn’t save this rule. Try again."), kind: .failure)
+      return false
     }
+    model.showSaveMessage("Rule saved on this \(device)")
+    dismiss()
+    return true
   }
 }

@@ -16,7 +16,69 @@ private struct LossyElement<Value: Decodable>: Decodable {
   }
 }
 
+/// A JSON value kept as read, so a rule or account this build cannot understand
+/// is written back unchanged instead of being erased by the next save.
+enum RawJSON: Codable, Equatable, Sendable {
+  case null
+  case bool(Bool)
+  case int(Int)
+  case double(Double)
+  case string(String)
+  case array([RawJSON])
+  case object([String: RawJSON])
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    if container.decodeNil() {
+      self = .null
+    } else if let value = try? container.decode(Bool.self) {
+      self = .bool(value)
+    } else if let value = try? container.decode(Int.self) {
+      self = .int(value)
+    } else if let value = try? container.decode(Double.self) {
+      self = .double(value)
+    } else if let value = try? container.decode(String.self) {
+      self = .string(value)
+    } else if let value = try? container.decode([RawJSON].self) {
+      self = .array(value)
+    } else {
+      self = .object(try container.decode([String: RawJSON].self))
+    }
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    switch self {
+    case .null: try container.encodeNil()
+    case .bool(let value): try container.encode(value)
+    case .int(let value): try container.encode(value)
+    case .double(let value): try container.encode(value)
+    case .string(let value): try container.encode(value)
+    case .array(let value): try container.encode(value)
+    case .object(let value): try container.encode(value)
+    }
+  }
+}
+
+/// One element read twice: as the value it should be, and as raw JSON to keep if it cannot be.
+private struct PreservedElement<Value: Decodable>: Decodable {
+  var value: Value?
+  var raw: RawJSON
+
+  init(from decoder: Decoder) throws {
+    raw = try RawJSON(from: decoder)
+    value = try? Value(from: decoder)
+  }
+}
+
 private extension KeyedDecodingContainer {
+  /// The readable elements, and the raw JSON of those this build cannot read. A
+  /// key that is present but is not an array throws, so the file counts as unreadable.
+  func preservedArray<T: Decodable>(_ type: T.Type, forKey key: Key) throws -> (items: [T], unread: [RawJSON]) {
+    let elements = try decodeIfPresent([PreservedElement<T>].self, forKey: key) ?? []
+    return (elements.compactMap(\.value), elements.filter { $0.value == nil }.map(\.raw))
+  }
+
   /// The value, or nil when the key is missing or holds something this build cannot read.
   func lenient<T: Decodable>(_ type: T.Type, forKey key: Key) -> T? {
     (try? decodeIfPresent(type, forKey: key)) ?? nil
@@ -108,7 +170,7 @@ struct IntakeAccountSkill: Codable, Equatable, Identifiable, Sendable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     id = try container.decode(String.self, forKey: .id)
     notes = String((container.lenient(String.self, forKey: .notes) ?? "").prefix(IntakeSkill.accountNotesLimit))
-    dedupeDayWindow = container.lenient(Int.self, forKey: .dedupeDayWindow)
+    dedupeDayWindow = container.lenient(Int.self, forKey: .dedupeDayWindow).map(IntakeSkill.clampedWindow)
   }
 }
 
@@ -184,9 +246,10 @@ struct IntakeRuleCondition: Codable, Equatable, Sendable {
 
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
-    payeeToken = container.lenient(String.self, forKey: .payeeToken).map(Self.normalisedToken)
-    accountID = container.lenient(String.self, forKey: .accountID)
-    // Strict: a direction this build cannot read would broaden the rule, so the rule is skipped.
+    // Strict: a payee, account or direction this build cannot read would broaden
+    // the rule, so the rule is kept aside unread instead.
+    payeeToken = try container.decodeIfPresent(String.self, forKey: .payeeToken).map(Self.normalisedToken)
+    accountID = try container.decodeIfPresent(String.self, forKey: .accountID)
     amountSign = try container.decodeIfPresent(IntakeAmountSign.self, forKey: .amountSign)
   }
 
@@ -335,8 +398,8 @@ struct IntakeRule: Codable, Equatable, Identifiable, Sendable {
     case id, scope, when, then, origin, hits, overrides, lastUsed, enabled, createdAt
   }
 
-  /// A rule whose ID, scope or action this build cannot read throws, and
-  /// `IntakeSkill` skips it.
+  /// A rule whose ID, conditions, scope, action or enabled flag this build cannot
+  /// read throws, and `IntakeSkill` keeps its raw JSON aside, unchanged.
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     id = try container.decode(UUID.self, forKey: .id)
@@ -347,7 +410,8 @@ struct IntakeRule: Codable, Equatable, Identifiable, Sendable {
     hits = max(container.lenient(Int.self, forKey: .hits) ?? 0, 0)
     overrides = max(container.lenient(Int.self, forKey: .overrides) ?? 0, 0)
     lastUsed = container.lenient(Date.self, forKey: .lastUsed)
-    enabled = container.lenient(Bool.self, forKey: .enabled) ?? true
+    // Strict: an unreadable value must not switch a disabled rule back on.
+    enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
     createdAt = container.lenient(Date.self, forKey: .createdAt) ?? Date(timeIntervalSince1970: 0)
   }
 
@@ -357,7 +421,7 @@ struct IntakeRule: Codable, Equatable, Identifiable, Sendable {
 
   // MARK: Matching
 
-  private var payeeWords: String? {
+  var payeeWords: String? {
     if let token = when.payeeToken {
       return token
     }
@@ -367,7 +431,8 @@ struct IntakeRule: Codable, Equatable, Identifiable, Sendable {
     return nil
   }
 
-  private var accountLimit: String? {
+  /// The one account the rule is limited to, if any.
+  var accountLimit: String? {
     if let id = when.accountID {
       return id
     }
@@ -425,6 +490,19 @@ struct IntakeRule: Codable, Equatable, Identifiable, Sendable {
     return false
   }
 
+  /// A global rule with a payee is the same rule as a payee-scoped one.
+  var normalisedScope: IntakeRuleScope {
+    if case .global = scope, let token = when.payeeToken, !token.isEmpty {
+      return .payee(token)
+    }
+    return scope
+  }
+
+  /// Whether the rule reaches lines on `accountID` (nil: every account).
+  func covers(account accountID: String?) -> Bool {
+    accountLimit == nil || accountLimit == accountID
+  }
+
   // MARK: Words
 
   /// "KOPITIAM", or "Any outflow" for a direction-only rule.
@@ -445,6 +523,18 @@ struct IntakeRule: Codable, Equatable, Identifiable, Sendable {
     case .treatAsTransfer(let id): "transfer to \(accountNames[id] ?? "another account")"
     case .flag: "flagged for review"
     }
+  }
+
+  /// The same, for VoiceOver: no arrow. "KOPITIAM, set category Eating Out".
+  func spokenSummary(accountNames: [String: String], categoryNames: [String: String]) -> String {
+    let action: String
+    switch then {
+    case .setCategory(let id): action = "set category \(categoryNames[id] ?? "a category that is gone")"
+    case .renamePayee(let name): action = "rename to \(name)"
+    case .treatAsTransfer(let id): action = "treat as a transfer to \(accountNames[id] ?? "another account")"
+    case .flag: action = "flag for review"
+    }
+    return "\(matchText), \(action)"
   }
 
   /// "KOPITIAM → Eating Out".
@@ -490,11 +580,16 @@ struct IntakeSkill: Codable, Equatable, Sendable {
   var accounts: [IntakeAccountSkill] = []
   var rules: [IntakeRule] = []
   var suppressed: [IntakeSuppressedSuggestion] = []
+  /// Batches Remember this? has already been offered for: one offer per batch, ever.
+  var offeredJobIDs: [UUID] = []
+  /// Accounts and rules this build could not read, kept as raw JSON and written back unchanged.
+  var unreadAccounts: [RawJSON] = []
+  var unreadRules: [RawJSON] = []
 
   init() {}
 
   private enum CodingKeys: String, CodingKey {
-    case version, locale, dedupe, notes, accounts, rules, suppressed
+    case version, locale, dedupe, notes, accounts, rules, suppressed, offeredJobs
   }
 
   /// Tolerant: anything this build cannot read falls back to its default, and a
@@ -505,9 +600,38 @@ struct IntakeSkill: Codable, Equatable, Sendable {
     locale = container.lenient(IntakeSkillLocale.self, forKey: .locale) ?? IntakeSkillLocale()
     dedupe = container.lenient(IntakeSkillDedupe.self, forKey: .dedupe) ?? IntakeSkillDedupe()
     notes = String((container.lenient(String.self, forKey: .notes) ?? "").prefix(Self.notesLimit))
-    accounts = container.lossyArray(IntakeAccountSkill.self, forKey: .accounts)
-    rules = container.lossyArray(IntakeRule.self, forKey: .rules)
+    let readAccounts = try container.preservedArray(IntakeAccountSkill.self, forKey: .accounts)
+    accounts = readAccounts.items
+    unreadAccounts = readAccounts.unread
+    let readRules = try container.preservedArray(IntakeRule.self, forKey: .rules)
+    rules = readRules.items
+    unreadRules = readRules.unread
     suppressed = container.lossyArray(IntakeSuppressedSuggestion.self, forKey: .suppressed)
+    offeredJobIDs = container.lossyArray(UUID.self, forKey: .offeredJobs)
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(version, forKey: .version)
+    try container.encode(locale, forKey: .locale)
+    try container.encode(dedupe, forKey: .dedupe)
+    try container.encode(notes, forKey: .notes)
+    var accountsContainer = container.nestedUnkeyedContainer(forKey: .accounts)
+    for account in accounts {
+      try accountsContainer.encode(account)
+    }
+    for raw in unreadAccounts {
+      try accountsContainer.encode(raw)
+    }
+    var rulesContainer = container.nestedUnkeyedContainer(forKey: .rules)
+    for rule in rules {
+      try rulesContainer.encode(rule)
+    }
+    for raw in unreadRules {
+      try rulesContainer.encode(raw)
+    }
+    try container.encode(suppressed, forKey: .suppressed)
+    try container.encode(offeredJobIDs, forKey: .offeredJobs)
   }
 
   static func clampedWindow(_ days: Int) -> Int {
@@ -536,9 +660,12 @@ struct IntakeSkill: Codable, Equatable, Sendable {
     }
   }
 
-  /// "SGD, Singapore · 1.9k characters".
+  /// "1.9k characters", or "No instructions yet". Currency and date order are
+  /// stored but nothing reads them yet, so they are not shown.
   var summary: String {
-    "\(locale.currency), \(locale.place) · \(Self.characterCount(notes.count))"
+    notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      ? "No instructions yet"
+      : Self.characterCount(notes.count)
   }
 
   static func characterCount(_ count: Int) -> String {
@@ -570,11 +697,37 @@ struct IntakeSkill: Codable, Equatable, Sendable {
 
   // MARK: Rules
 
-  /// Adds a rule, replacing any rule with the same match, scope and kind of
-  /// action: the newer correction supersedes the older.
+  /// Adds a rule. The newer owner choice supersedes the older: a rule with the
+  /// same match, reach and kind of action is replaced (a global rule with a payee
+  /// counts as a payee rule), and an all-accounts rule also replaces older
+  /// account-limited rules for the same payee and kind of action.
   mutating func add(_ rule: IntakeRule) {
-    rules.removeAll { $0.when == rule.when && $0.scope == rule.scope && $0.then.family == rule.then.family }
+    let reach = rule.normalisedScope
+    rules.removeAll { existing in
+      guard existing.then.family == rule.then.family else {
+        return false
+      }
+      if existing.when == rule.when, existing.normalisedScope == reach {
+        return true
+      }
+      if rule.accountLimit == nil, let words = rule.payeeWords, !words.isEmpty,
+         existing.accountLimit != nil, existing.payeeWords == words {
+        return true
+      }
+      return false
+    }
     rules.append(rule)
+  }
+
+  /// Notes that Remember this? has been offered for a batch. Only the latest are kept.
+  mutating func markOffered(_ jobID: UUID) {
+    guard !offeredJobIDs.contains(jobID) else {
+      return
+    }
+    offeredJobIDs.append(jobID)
+    if offeredJobIDs.count > 200 {
+      offeredJobIDs.removeFirst(offeredJobIDs.count - 200)
+    }
   }
 
   /// Counts one use of a rule that was approved. An override is the owner changing what the rule set.
@@ -594,6 +747,8 @@ struct IntakeSkill: Codable, Equatable, Sendable {
   mutating func clearMemory() {
     rules = []
     suppressed = []
+    offeredJobIDs = []
+    unreadRules = []
   }
 
   func isSuppressed(_ key: String, at date: Date) -> Bool {
@@ -670,6 +825,12 @@ struct IntakeRuleOutcome: Equatable, Sendable {
 }
 
 enum IntakeRuleEngine {
+  /// Every reason a rule adds starts with this.
+  static let reasonPrefix = "Learned rule"
+  static let notAppliedReason = "Learned rule not applied to a saved transaction"
+  /// A row a "flag" rule asks the owner to check is Unsure, so it is not ticked.
+  static let flaggedConfidenceCap = 0.5
+
   /// Most specific first; equally specific rules, newest first.
   static func ordered(_ rules: [IntakeRule]) -> [IntakeRule] {
     rules.sorted { lhs, rhs in
@@ -679,39 +840,69 @@ enum IntakeRuleEngine {
     }
   }
 
-  /// Applies the first enabled rule that matches the line and can be carried out
-  /// (most specific first), and only that one. A rule whose target is gone (a
-  /// deleted category, a closed account) is passed over for the next. Returns nil,
-  /// leaving the line alone, when none applies. Counting a use is the caller's job.
+  /// Applies the best enabled matching rule of each family to one line, most
+  /// specific first, passing over a rule whose target is gone (a deleted category,
+  /// a closed account). A transfer rule excludes category and rename rules;
+  /// otherwise one category rule and one rename rule can both apply. A matching
+  /// flag rule is always honoured. Matching looks at the line as read, so one
+  /// rule's change never decides whether another matches. A category the reader
+  /// already set is left alone, and so is any field in `skipping` (what the owner
+  /// has edited). Counting a use is the caller's job.
   static func apply(
     _ rules: [IntakeRule],
     to read: inout SlipMappedDraft,
-    context: IntakeRuleContext
-  ) -> IntakeRuleOutcome? {
-    for rule in ordered(rules) where rule.enabled && rule.matches(read.draft) {
-      var attempt = read
-      guard let effect = perform(rule.then, on: &attempt, context: context) else {
-        continue
-      }
-      read = attempt
-      let corrections = max(rule.origin.corrections, 1)
-      return IntakeRuleOutcome(
-        application: IntakeRuleApplication(ruleID: rule.id, effects: [effect]),
-        reason: "Learned rule: \(context.summary(of: rule)) (from \(corrections) \(corrections == 1 ? "correction" : "corrections"))",
-        needsReview: effect == .review
-      )
+    context: IntakeRuleContext,
+    skipping: Set<IntakeRuleEffect> = []
+  ) -> [IntakeRuleOutcome] {
+    let matching = ordered(rules).filter { $0.enabled && $0.matches(read.draft) }
+    guard !matching.isEmpty else {
+      return []
     }
-    return nil
+    let original = read
+    var working = read
+    var outcomes: [IntakeRuleOutcome] = []
+
+    func take(_ family: String, skipped: IntakeRuleEffect) -> Bool {
+      guard !skipping.contains(skipped) else {
+        return false
+      }
+      for rule in matching where rule.then.family == family {
+        var attempt = working
+        if let effect = perform(rule.then, on: &attempt, original: original, context: context) {
+          working = attempt
+          let corrections = max(rule.origin.corrections, 1)
+          outcomes.append(
+            IntakeRuleOutcome(
+              application: IntakeRuleApplication(ruleID: rule.id, effects: [effect]),
+              reason: "\(reasonPrefix): \(context.summary(of: rule)) (from \(corrections) \(corrections == 1 ? "correction" : "corrections"))",
+              needsReview: effect == .review
+            )
+          )
+          return true
+        }
+      }
+      return false
+    }
+
+    if !take("transfer", skipped: .transfer) {
+      _ = take("category", skipped: .category)
+      _ = take("rename", skipped: .payee)
+    }
+    _ = take("flag", skipped: .review)
+    read = working
+    return outcomes
   }
 
   private static func perform(
     _ action: IntakeRuleAction,
     on read: inout SlipMappedDraft,
+    original: SlipMappedDraft,
     context: IntakeRuleContext
   ) -> IntakeRuleEffect? {
     switch action {
     case .setCategory(let id):
-      guard context.categoryIDs.contains(id), read.draft.transferAccountID == nil else {
+      let readerSetCategory = original.parsedCategory && original.draft.categoryID != nil
+      guard context.categoryIDs.contains(id), read.draft.transferAccountID == nil, !readerSetCategory else {
         return nil
       }
       read.draft.categoryID = id
@@ -742,6 +933,43 @@ enum IntakeRuleEngine {
       return .transfer
     case .flag:
       return .review
+    }
+  }
+
+  /// Applies learned rules to proposals that were matched on the lines as read
+  /// (`reads[i]` is the line behind `proposals[i]`). Only New and Possible
+  /// duplicate rows take a rule's effects: a Fix or Already in row is about a
+  /// saved transaction, which a rule never changes, so it only gets a note in Why.
+  static func applyLearned(
+    _ rules: [IntakeRule],
+    to proposals: inout [IntakeProposal],
+    reads: [SlipMappedDraft],
+    context: IntakeRuleContext,
+    skipping: Set<IntakeRuleEffect> = []
+  ) {
+    for index in proposals.indices where index < reads.count {
+      var read = reads[index]
+      read.draft = proposals[index].draft
+      switch proposals[index].kind {
+      case .add, .possibleDuplicate:
+        let readPayee = read.draft.payeeName
+        let outcomes = apply(rules, to: &read, context: context, skipping: skipping)
+        guard !outcomes.isEmpty else {
+          continue
+        }
+        proposals[index].draft = read.draft
+        proposals[index].proposedDraft = read.draft
+        proposals[index].readPayee = read.draft.payeeName == readPayee ? nil : readPayee
+        proposals[index].ruleApplications = outcomes.map(\.application)
+        proposals[index].reasons.insert(contentsOf: outcomes.map(\.reason), at: 0)
+        if outcomes.contains(where: \.needsReview) {
+          proposals[index].confidence = min(proposals[index].confidence, flaggedConfidenceCap)
+        }
+      case .edit, .alreadyIn:
+        if !apply(rules, to: &read, context: context, skipping: skipping).isEmpty {
+          proposals[index].reasons.insert(notAppliedReason, at: 0)
+        }
+      }
     }
   }
 
@@ -843,18 +1071,27 @@ enum IntakeRuleSuggester {
   /// for a payee the reader or a rule left otherwise, or a payee renamed to a
   /// cleaner name for the same merchant. The one corrected most often wins;
   /// ties go to a category, then to the earlier row. Nothing is offered for a
-  /// rule that already exists (on or off) or that the owner dismissed within
-  /// 30 days.
+  /// batch already offered one, for a rule that already exists for this account
+  /// (on or off), or one the owner dismissed within 30 days.
   static func suggest(
     applied: [IntakeProposal],
     jobID: UUID,
     skill: IntakeSkill,
     now: Date = Date()
   ) -> IntakeRuleSuggestion? {
+    guard !skill.offeredJobIDs.contains(jobID) else {
+      return nil
+    }
     let rows = applied.filter { $0.isApplied && $0.decision != .rejected && $0.kind != .alreadyIn }
+    let accounts = Set(rows.map(\.draft.accountID).filter { !$0.isEmpty })
+    let accountID = accounts.count == 1 ? accounts.first : nil
     var candidates: [String: Candidate] = [:]
     for (index, row) in rows.enumerated() where row.draft.transferAccountID == nil {
-      guard let token = IntakeRuleCondition.suggestedToken(from: row.proposedDraft.payeeName) else {
+      // The token comes from what the reader saw, before any rename rule, so the
+      // learned rule can match the raw descriptors of future documents.
+      let proposedName = row.proposedDraft.payeeName.trimmingCharacters(in: .whitespacesAndNewlines)
+      let rawName = row.readPayee ?? proposedName
+      guard let token = IntakeRuleCondition.suggestedToken(from: rawName) else {
         continue
       }
       if let category = row.draft.categoryID, category != row.proposedDraft.categoryID {
@@ -867,11 +1104,10 @@ enum IntakeRuleSuggester {
         )
       }
       let renamed = row.draft.payeeName.trimmingCharacters(in: .whitespacesAndNewlines)
-      let read = row.proposedDraft.payeeName.trimmingCharacters(in: .whitespacesAndNewlines)
       // A rename to another name for the same merchant generalises; a rename to
       // something unrelated ("Dinner with Ann") does not.
-      if !renamed.isEmpty, renamed != read,
-         !Set(PayeeNames.tokens(renamed)).isDisjoint(with: PayeeNames.tokens(read)) {
+      if !renamed.isEmpty, renamed != proposedName,
+         !Set(PayeeNames.tokens(renamed)).isDisjoint(with: PayeeNames.tokens(rawName)) {
         add(
           Candidate(
             key: "rename|\(token)|\(renamed)", token: token, action: .renamePayee(renamed),
@@ -884,7 +1120,9 @@ enum IntakeRuleSuggester {
 
     let usable = candidates.values.filter { candidate in
       !skill.isSuppressed(candidate.key, at: now)
-        && !skill.rules.contains { $0.when.payeeToken == candidate.token && $0.then == candidate.action }
+        && !skill.rules.contains {
+          $0.payeeWords == candidate.token && $0.then == candidate.action && $0.covers(account: accountID)
+        }
     }
     let best = usable.min { lhs, rhs in
       if lhs.count != rhs.count { return lhs.count > rhs.count }
@@ -895,12 +1133,11 @@ enum IntakeRuleSuggester {
       return nil
     }
 
-    let accounts = Set(rows.map(\.draft.accountID).filter { !$0.isEmpty })
     return IntakeRuleSuggestion(
       key: best.key,
       token: best.token,
       action: best.action,
-      accountID: accounts.count == 1 ? accounts.first : nil,
+      accountID: accountID,
       jobID: jobID,
       corrections: best.count,
       decidedAt: now,
@@ -948,9 +1185,11 @@ enum IntakeRuleSuggester {
 final class IntakeSkillStore {
   static let shared = IntakeSkillStore(container: IntakeJobStore.sharedContainer)
 
-  private static let logger = Logger(subsystem: "sg.soon.howmuch", category: "IntakeSkillStore")
+  private nonisolated static let logger = Logger(subsystem: "sg.soon.howmuch", category: "IntakeSkillStore")
 
   private(set) var skill: IntakeSkill
+  /// The file exists but could not be read. Saving would overwrite it, so it is refused.
+  private(set) var isReadOnly = false
 
   @ObservationIgnored private let fileURL: URL
 
@@ -959,7 +1198,14 @@ final class IntakeSkillStore {
       .appendingPathComponent("Intake", isDirectory: true)
       .appendingPathComponent("skill.json")
     fileURL = url
-    skill = Self.load(url)
+    let loaded = Self.load(url)
+    skill = loaded.skill
+    isReadOnly = loaded.failed
+  }
+
+  /// What to tell the owner when a save fails.
+  func saveFailureMessage(_ fallback: String) -> String {
+    isReadOnly ? "Couldn’t read your skill file. Changes weren’t saved." : fallback
   }
 
   nonisolated static func decoder() -> JSONDecoder {
@@ -975,17 +1221,27 @@ final class IntakeSkillStore {
     return encoder
   }
 
-  private nonisolated static func load(_ url: URL) -> IntakeSkill {
+  /// A missing file is a fresh start. A file that exists but cannot be read or
+  /// decoded gives the default skill and `failed`, so it is never overwritten.
+  private nonisolated static func load(_ url: URL) -> (skill: IntakeSkill, failed: Bool) {
+    guard FileManager.default.fileExists(atPath: url.path) else {
+      return (IntakeSkill(), false)
+    }
     guard let data = try? Data(contentsOf: url),
           let skill = try? decoder().decode(IntakeSkill.self, from: data) else {
-      return IntakeSkill()
+      logger.error("Couldn't read the skill file; leaving it as it is")
+      return (IntakeSkill(), true)
     }
-    return skill
+    return (skill, false)
   }
 
   /// Applies `change` and saves. A failed save leaves the skill as it was and returns false.
   @discardableResult
   func update(_ change: (inout IntakeSkill) -> Void) -> Bool {
+    guard !isReadOnly else {
+      Self.logger.error("Refusing to save over a skill file that could not be read")
+      return false
+    }
     var next = skill
     change(&next)
     guard next != skill else {
@@ -1031,6 +1287,10 @@ final class IntakeSkillStore {
   @discardableResult
   func delete(rule id: UUID) -> Bool {
     update { $0.rules.removeAll { $0.id == id } }
+  }
+
+  func markOffered(_ jobID: UUID) {
+    update { $0.markOffered(jobID) }
   }
 
   @discardableResult
