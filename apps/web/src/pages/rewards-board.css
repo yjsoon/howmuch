@@ -518,27 +518,42 @@
   grid-template-rows: auto 1fr auto;
   padding: 14px 16px 12px;
   border-radius: 12px;
-  background: var(--face-cashback-sky);
+  --rw-sky: var(--face-cashback-sky);
+  background: var(--rw-sky);
   color: var(--rw-ink);
   box-shadow: var(--face-shadow);
   transition: translate var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 
 .rw-card[data-type="miles"] .rw-face {
-  background: var(--face-miles-sky);
+  --rw-sky: var(--face-miles-sky);
 }
 
 /* A failed card is overcast: the flat grey sky over the type's, which dark mode leaves out (none). */
 .rw-card[data-stage="failed"] .rw-face {
-  background: var(--face-overcast), var(--face-cashback-sky);
+  --rw-sky: var(--face-overcast), var(--face-cashback-sky);
 }
 
 .rw-card[data-stage="failed"][data-type="miles"] .rw-face {
-  background: var(--face-overcast), var(--face-miles-sky);
+  --rw-sky: var(--face-overcast), var(--face-miles-sky);
 }
 
-/* Monochrome: the whole face, ink and all. The sun and halo are not drawn. */
+/* Monochrome: the sky and the ridges. The filter sits on the sky (a pseudo-element carrying it) and the
+   scene, not on the face, so the headline keeps FailedInk's red where it is a child of the face (the phone
+   strip). The sun and halo are not drawn. */
 .rw-card[data-mono] .rw-face {
+  background: none;
+}
+
+.rw-card[data-mono] .rw-face::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--rw-sky);
+  filter: saturate(0.15);
+}
+
+.rw-card[data-mono] .rw-scene {
   filter: saturate(0.15);
 }
 
@@ -1069,8 +1084,8 @@
 
 .rw-card-actions {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 6px;
+  right: 6px;
   z-index: 2;
   display: flex;
   gap: 4px;

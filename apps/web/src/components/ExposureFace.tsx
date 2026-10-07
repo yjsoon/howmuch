@@ -109,8 +109,9 @@ export function ExposureFace({ exposure, variant, index, memoryKey, children }: 
     const first = !seen.current;
     const remembered = memoryKey ? SHOWN.get(memoryKey) : undefined;
     // Never glide backwards or sink the sun: a new target that falls, or relights, swaps the face.
-    const crossfade = !first && exposure.target !== lastTarget.current
-      && (falls(target, poseRef.current) || exposure.light !== lastLight.current);
+    // A changed light always swaps (failed, calm and journey can share a target string); a changed target only where it would fall.
+    const crossfade = !first
+      && (exposure.light !== lastLight.current || (exposure.target !== lastTarget.current && falls(target, poseRef.current)));
     let start: Pose;
     if (first) start = remembered ? (remembered.target === exposure.target ? remembered.pose : target) : exposure.journeyStart;
     else start = crossfade ? target : poseRef.current;
