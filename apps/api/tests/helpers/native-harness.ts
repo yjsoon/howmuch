@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { AsyncReportService } from "../../src/async-reports";
-import { D1AuthStore } from "../../src/auth-store";
+import { D1AuthStore, SQLiteAuthStore, type AuthStore } from "../../src/auth-store";
 import { D1Database } from "../../src/d1";
 import { D1LedgerRepository } from "../../src/d1-ledger-repository";
 import { applyMigrations } from "../../src/db";
@@ -33,7 +33,11 @@ export type NativeHarness = {
  * migrations to an in-memory database behind a fake binding, as production
  * would see them.
  */
-export async function nativeHarness(backend: Backend): Promise<NativeHarness> {
+export async function nativeHarness(
+  backend: Backend,
+  /** Wraps the auth store, so a test can run code between two of its calls. */
+  wrapAuth: (store: AuthStore) => AuthStore = (store) => store,
+): Promise<NativeHarness> {
   const db = new Database(":memory:", { strict: true });
   const writeBatches: number[] = [];
   let repo: LedgerStore;
@@ -42,7 +46,7 @@ export async function nativeHarness(backend: Backend): Promise<NativeHarness> {
   if (backend === "SQLite") {
     applyMigrations(db);
     repo = new LedgerRepository(db, "p");
-    handler = createHandler({ db, repo, config });
+    handler = createHandler({ db, repo, auth: wrapAuth(new SQLiteAuthStore(db)), config });
   } else {
     const directory = new URL("../../d1-migrations/", import.meta.url).pathname;
     for (const file of [...new Bun.Glob("*.sql").scanSync(directory)].sort()) {
@@ -56,7 +60,7 @@ export async function nativeHarness(backend: Backend): Promise<NativeHarness> {
     }) as typeof binding.batch;
     const d1 = new D1Database(binding);
     repo = new D1LedgerRepository(d1, "p");
-    handler = createHandler({ repo, reports: new AsyncReportService(d1), auth: new D1AuthStore(d1), config });
+    handler = createHandler({ repo, reports: new AsyncReportService(d1), auth: wrapAuth(new D1AuthStore(d1)), config });
   }
   await repo.ensurePlan("p");
   await repo.ensurePlan("q");

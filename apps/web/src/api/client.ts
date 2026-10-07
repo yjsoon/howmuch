@@ -385,7 +385,7 @@ export const api = {
     }),
   logout: () => request<{ ok: true }>("/api/auth/logout", { method: "POST", body: "{}" }),
   changePassword: (currentPassword: string, newPassword: string) =>
-    request<{ ok: true }>("/api/auth/password", {
+    request<{ ok: true; session_expires_at?: number | null }>("/api/auth/password", {
       method: "POST",
       body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
     }),

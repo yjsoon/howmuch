@@ -81,13 +81,13 @@ Setup works once. A second attempt returns "Setup has already completed".
 
 ### Changing the currency or date format afterwards
 
-Sign in as the plan owner, open **Settings**, and use **Currency and date format**. Choose the new values and save; amounts and dates update straight away. Only owners see this section.
+Sign in as the plan owner, open **Settings**, and use **Currency and date format**. Choose the new values and save; amounts and dates in the web app update straight away. Only owners see this section.
 
-Amounts are stored as exact milliunits with no currency attached, so changing the currency changes how they are shown and does not convert them. If your ledger was in one currency and you now want another, the numbers stay the same.
+Changing the currency only changes the symbol and decimal places shown. Nothing is converted: $100 becomes £100. For a currency such as JPY the cents are hidden, not lost. The date options are orderings: day first (24 May 2026), month first (May 24, 2026) and year first (2026-05-24). The iOS app shows the new currency after its next refresh and always shows dates as 24 May 2026.
 
 ### Changing your password
 
-Open **Settings** and use **Change password**. Enter the current password and the new one (at least 15 characters). Every other browser and device signed in as you is signed out; the one you used stays signed in. Personal API tokens keep working, so revoke any you no longer trust on the **API tokens** page.
+Open **Settings** and use **Change password**. Enter the current password and the new one (at least 15 characters). Every other browser and device signed in as you is signed out; the one you used stays signed in (it is given a fresh session behind the scenes). Personal API tokens keep working, so revoke any you no longer trust on the **API tokens** page.
 
 ## 6. Connect the iOS app
 

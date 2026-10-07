@@ -1,18 +1,18 @@
-setup hint: You can change the currency and date format later in Settings.
+setup date options: ["Day first (24 May 2026)","Month first (May 24, 2026)","Year first (2026-05-24)"]
 both signed in: true
-initial currency select: SGD
-initial date select: DD/MM/YYYY
-register sample before: Filters ▾ | All time · All accounts · All categories | All Accounts | $541,000.00 | CLEARED | + | $13,677.70 | UNCLEARED | = | $554,677.70 | WORKING BALANCE | + Add transaction | Reconcile | 	DATE	ACCOUNT	PAYEE	CATEGORY	MEMO	OUTFLOW	INFLOW	 | CLEARED STATUS |  | 	24/05/2026	Rainy Day Saver	Broker transfer	Investing	ETF top-up		$850.00	 | C |  | 	19/05/2026	Everyday Account	SimplyGo	Transport	Commuting	$17.60		 | C |  | 	13/05/2026	Travel Card	CandlenutDining	Dining Out	Birthday supper	$86.60		 | C |  | 	08/05/2026	Everyday Account	Cold Storage	Groceries	Top-up shop	$118.70		 | C |  | 	04/05/2026	Travel Card	MUJIOnline	Shopping	Home bits	$228.90		 | C
-short pw message (native or custom): Please lengthen this text to 15 characters or more (you are currently using 5 characters).
-mismatch message: The new password and its confirmation do not match.
-wrong current message: Current password is incorrect
-A still signed in after wrong current: 200
-success message: Password changed. Other sessions have been signed out.
-A after reload still on Settings: true
+register default (expect 24 May 2026): 24 May 2026
+net worth default: AS AT 7 OCT 2026
+settings date options: ["Day first (24 May 2026)","Month first (May 24, 2026)","Year first (2026-05-24)"]
+settings currency copy: Changing the currency only changes the symbol and decimal places shown. Nothing is converted: $100 becomes £100. For a currency such as JPY the cents are hidden, not lost.
+success message MM/DD/YYYY: Formats saved. Amounts and dates here now use the new settings. The iOS app shows the new currency after its next refresh and always shows dates as 24 May 2026.
+register MM/DD/YYYY: May 24, 2026
+net worth MM/DD/YYYY: AS AT OCT 7, 2026
+success message YYYY-MM-DD: Formats saved. Amounts and dates here now use the new settings. The iOS app shows the new currency after its next refresh and always shows dates as 24 May 2026.
+register YYYY-MM-DD: 2026-05-24
+net worth YYYY-MM-DD: AS AT 2026-10-07
+success message: Password changed. This device stays signed in; every other session has been signed out.
+A cookie rotated: {"changed":true,"before":true,"after":true}
+A still signed in after reload: true
+old cookie value /v1/user status (expect 401): 401
 B signed out on next request: true
-old password sign-in: Invalid username or password
-new password sign-in works: true
-save disabled before edit: true
-register sample after: Filters ▾ | All time · All accounts · All categories | All Accounts | £541,000.00 | CLEARED | + | £13,677.70 | UNCLEARED | = | £554,677.70 | WORKING BALANCE | + Add transaction | Reconcile | 	DATE	ACCOUNT	PAYEE	CATEGORY	MEMO	OUTFLOW	INFLOW	 | CLEARED STATUS |  | 	2026-05-24	Rainy Day Saver	Broker transfer	Investing	ETF top-up		£850.00	 | C |  | 	2026-05-19	Everyday Account	SimplyGo	Transport	Commuting	£17.60		 | C |  | 	2026-05-13	Travel Card	CandlenutDining	Dining Out	Birthday supper	£86.60		 | C |  | 	2026-05-08	Everyday Account	Cold Storage	Groceries	Top-up shop	£118.70		 | C |  | 	2026-05-04	Travel Card	MUJIOnline	Shopping	Home bits	£228.90		 | C
-in-app nav after EUR save: money sample: ["€541,000.00","€13,677.70","€554,677.70","\t\t€850.00","g\t€17.60"]
-GET settings via API (B session): {"data":{"settings":{"date_format":{"format":"YYYY-MM-DD"},"currency_format":{"iso_code":"EUR","example_format":"€123,456.78","decimal_digits":2,"decimal_separator":".","symbol_first":true,"group_separator":",","currency_symbol":"€","display_symbol":true},"display":{"flag_names":{}}}}}
+rate-limit message after wrong attempts: {"attempts":10,"message":"Too many attempts. Try again in 15 minutes."}

@@ -33,8 +33,9 @@ Signed-in browser users manage long-lived personal credentials at `GET`/`POST /a
 
 - Requires a signed-in user session, either the browser cookie (which must pass the same-origin check) or a native bearer session token. The static `HOWMUCH_API_TOKEN` and personal API tokens are refused with `401`.
 - `new_password` must meet the setup rule (at least 15 characters, at most 256 bytes) and differ from `current_password`, otherwise `400 bad_request`.
-- A wrong `current_password` returns `401 invalid_credentials` with a generic message. Attempts share the per-username budget of the login routes: more than 10 in a 15 minute window returns `429 rate_limited` with `retry-after: 900`, even for the correct password.
-- On success the credential is replaced and every other session of that user is revoked in one step. The session that made the request stays signed in. Personal API tokens are separate credentials and are not revoked; manage them with `/api/auth/personal-tokens`. Returns `{ "data": { "ok": true } }`.
+- A wrong `current_password` returns `401 invalid_credentials` with a generic message. Attempts have their own budget, keyed on the account and separate from the login counters, so failed sign-ins by others cannot block the owner. More than 10 in a 15 minute window returns `429 rate_limited` with `retry-after: 900`, even for the correct password. A `current_password` over 256 bytes, or a body that is not a JSON object, returns `400 bad_request`.
+- On success the credential is replaced, every session of that user (the caller's included) is revoked, and a fresh session is issued to the caller, all in one step. The old token stops working. A cookie request receives a new `__Host-howmuch_session` cookie (same attributes as login) and `{ "data": { "ok": true, "session_expires_at": <unix seconds> } }`. A bearer request receives `{ "data": { "ok": true, "token": "...", "expires_at": <unix seconds> } }` and must use the new `token` from then on. Personal API tokens are separate credentials and are not revoked; manage them with `/api/auth/personal-tokens`.
+- A login that verified the old password but commits after a password change creates no session and returns `401 invalid_credentials`.
 
 Expired sessions and rate-limit windows that ended more than a day ago are deleted opportunistically (a bounded batch at each successful sign-in or setup), so no scheduled job is needed.
 
@@ -82,14 +83,7 @@ Returns `plans` for `/plans` and `budgets` for `/budgets`, with the same records
 
 Returns date format, currency format, and custom flag names.
 
-#### Changing plan formats
-
-`PATCH /api/plans/{plan_id}/settings` with `currency_format`, `date_format`, or both. Each is validated exactly as at setup (see `POST /api/auth/setup` above), so only `.` and `,` separators and the three date formats are accepted. An invalid value, or a body with neither field, returns `400 bad_request` and writes nothing; a valid field is not applied if the other is invalid.
-
-- Plan owners only: editors and viewers receive `403 forbidden`. The static `HOWMUCH_API_TOKEN` works only for `HOWMUCH_DEFAULT_PLAN_ID`; a personal API token acts with its user's role.
-- Returns `{ "data": { "settings": ... } }` in the same shape as `GET /v1/plans/{plan_id}/settings`.
-- The plan's `server_knowledge` increases and `last_modified_on` updates, so clients that validate cached plan data against them refetch.
-- Amounts are stored as integer milliunits with no currency attached. Changing the currency changes how clients display amounts and does not convert any stored value.
+Plan owners change the formats with `PATCH /api/plans/{plan_id}/settings`; see [Changing plan formats](#changing-plan-formats) under Native Endpoints.
 
 ### Accounts
 
@@ -625,6 +619,16 @@ Import rules:
 The import is one atomic write. Each table's rows are bound as JSON chunks of at most 512 KiB and expanded in SQL with `json_each`, so the statement count grows with the snapshot's size in bytes, not its row count. On SQLite the whole import runs in one immediate transaction; on D1 it is one guarded batch that re-checks emptiness and the native-plan rule inside the batch. A failure leaves the plan exactly as it was, never partly imported.
 
 ## Native Endpoints
+
+### Changing plan formats
+
+`PATCH /api/plans/{plan_id}/settings` with `currency_format`, `date_format`, or both. Each is validated exactly as at setup (see `POST /api/auth/setup` above), so only `.` and `,` separators and the three date formats are accepted. An invalid value, or a body with neither field, returns `400 bad_request` and writes nothing; a valid field is not applied if the other is invalid.
+
+- Plan owners only: editors and viewers receive `403 forbidden`. The static `HOWMUCH_API_TOKEN` works only for `HOWMUCH_DEFAULT_PLAN_ID`; a personal API token acts with its user's role.
+- Returns `{ "data": { "settings": ... } }` in the same shape as `GET /v1/plans/{plan_id}/settings`.
+- The plan's `server_knowledge` increases and `last_modified_on` updates, so clients that validate cached plan data against them refetch.
+- Changing the currency changes only how clients display amounts (symbol and decimal places). No stored value is converted.
+- The three `date_format` values name an ordering: `DD/MM/YYYY` is day first (24 May 2026), `MM/DD/YYYY` is month first (May 24, 2026) and `YYYY-MM-DD` is year first (2026-05-24). The web app renders them that way. The iOS app always shows dates as 24 May 2026 and picks up a new currency on its next refresh.
 
 ### Reports
 

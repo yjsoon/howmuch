@@ -101,11 +101,30 @@ export function formatMonthName(month: string): string {
   return `${FULL_MONTHS[Number(monthNumber) - 1]} ${year}`;
 }
 
-/** Renders API period labels ("2026-06", "2026-W23", "2026-06-10", "2026") for humans. */
+let planDateFormat: string | undefined;
+
+/**
+ * Applies the plan's date format to full dates. Periods (months, weeks, years)
+ * are unaffected. The stored value names an ordering, not a literal pattern:
+ * "DD/MM/YYYY" is day first ("24 May 2026"), "MM/DD/YYYY" is month first
+ * ("May 24, 2026") and "YYYY-MM-DD" is year first ("2026-05-24").
+ */
+export function configureDateFormat(format?: { format?: string }): void {
+  planDateFormat = format?.format;
+}
+
+/** A full ISO date in the plan's ordering; an unset or unknown format renders day first. */
+function formatFullDate(date: string): string {
+  const [year, month, day] = date.split("-");
+  if (planDateFormat === "MM/DD/YYYY") return `${MONTHS[Number(month) - 1]} ${Number(day)}, ${year}`;
+  if (planDateFormat === "YYYY-MM-DD") return date;
+  return `${Number(day)} ${MONTHS[Number(month) - 1]} ${year}`;
+}
+
+/** Renders API period labels ("2026-06", "2026-W23", "2026-06-10", "2026") for humans; full dates follow the plan's date format. */
 export function formatPeriod(period: string): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(period)) {
-    const [, month, day] = period.split("-");
-    return `${Number(day)} ${MONTHS[Number(month) - 1]} ${period.slice(0, 4)}`;
+    return formatFullDate(period);
   }
   if (/^\d{4}-\d{2}$/.test(period)) {
     const [year, month] = period.split("-");
@@ -114,22 +133,7 @@ export function formatPeriod(period: string): string {
   return period;
 }
 
-let planDateFormat: string | undefined;
-
-/** Applies the plan's date format to full dates. Periods (months, weeks, years) are unaffected. */
-export function configureDateFormat(format?: { format?: string }): void {
-  planDateFormat = format?.format;
-}
-
-/** A full ISO date in the plan's date format; any other value, or no configured format, keeps the "10 Jun 2026" style. */
 export function formatDate(date: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (match) {
-    const [, year, month, day] = match;
-    if (planDateFormat === "DD/MM/YYYY") return `${day}/${month}/${year}`;
-    if (planDateFormat === "MM/DD/YYYY") return `${month}/${day}/${year}`;
-    if (planDateFormat === "YYYY-MM-DD") return date;
-  }
   return formatPeriod(date);
 }
 

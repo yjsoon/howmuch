@@ -707,6 +707,9 @@ async function handleNative(
       ?? authorizePlanAdministration(principal, targetPlanId);
     if (denied) return denied;
     const body = await readJson(request);
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new ValidationError("Request body must be a JSON object");
+    }
     const currencyFormat = body.currency_format === undefined ? undefined : parseSeedCurrencyFormat(body.currency_format);
     const dateFormat = body.date_format === undefined ? undefined : parseSeedDateFormat(body.date_format);
     if (currencyFormat === null || dateFormat === null) {
@@ -1197,7 +1200,11 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
     }
 
     const session = newSession();
-    await store.createSession(credential.user_id, session);
+    // Conditional on the hash just verified: a password change that committed
+    // while scrypt ran must not leave this login with a live session.
+    if (!await store.createSession(credential.user_id, session, credential.hash_hex)) {
+      return authError(401, "invalid_credentials", "Invalid username or password");
+    }
     await pruneAuthRows(store);
     const user = { id: credential.user_id, username: credential.username };
     return browserLogin
@@ -1216,32 +1223,42 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
       return authError(403, "forbidden", "CSRF validation failed");
     }
     const body = await readJson(request);
-    if (typeof body.current_password !== "string" || !validPassword(body.new_password)) {
+    if (!body || typeof body !== "object" || Array.isArray(body)
+      || typeof body.current_password !== "string" || !validPassword(body.new_password)) {
       return authError(400, "bad_request", "A current password and a new password of at least 15 characters are required");
+    }
+    // Same byte ceiling as sign-in, checked before any key derivation.
+    if (Buffer.byteLength(body.current_password, "utf8") > 256) {
+      return authError(400, "bad_request", "The current password is too long");
     }
     if (body.new_password === body.current_password) {
       return authError(400, "bad_request", "The new password must differ from the current one");
     }
-    // Shares the sign-in budget for this username, so this route cannot be
-    // used to guess the current password faster than the login route allows.
+    // Its own counter, keyed on the account rather than the username, so
+    // anonymous failed sign-ins cannot lock the owner out of changing their
+    // password, while guessing through this route stays at ten per window.
+    // (The table's CHECK allows only 'username' and 'ip' scopes; the prefix
+    // keeps this key apart from any sign-in key.)
     const windowStart = Math.floor(Date.now() / 1_000 / 900) * 900;
-    if (await store.rateAttempt("username", sha256(principal.username), windowStart) > 10) {
+    if (await store.rateAttempt("username", sha256(`pwchange:${principal.id}`), windowStart) > 10) {
       return authError(429, "rate_limited", "Too many password attempts", { "retry-after": "900" });
     }
     const credential = await store.credential(principal.username);
     if (!credential || credential.user_id !== principal.id || !await verifyPassword(body.current_password, credential)) {
       return authError(401, "invalid_credentials", "Current password is incorrect");
     }
-    const keepToken = principal.transport === "bearer"
-      ? bearerToken(request.headers.get("authorization"))!
-      : cookieToken(request)!;
+    // Every session of this user is revoked and the caller gets a fresh one in
+    // the same step, so a token that leaked before the change dies with it.
+    const session = newSession();
     await store.replaceCredential(
       principal.id,
       await passwordCredential(body.new_password),
-      sha256(keepToken),
+      session,
       Math.floor(Date.now() / 1_000),
     );
-    return authJson({ data: { ok: true } });
+    return principal.transport === "cookie"
+      ? sessionResponse({ data: { ok: true, session_expires_at: session.expiresAt } }, session.token, session.expiresAt)
+      : authJson({ data: { ok: true, token: session.token, expires_at: session.expiresAt } });
   }
 
   if (path === "/api/auth/logout" && method === "POST") {

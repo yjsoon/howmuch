@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import type { AuthStore } from "../src/auth-store";
 import { sha256 } from "../src/password-auth";
 import { API_TOKEN, BACKENDS, sessionFor, nativeHarness, type NativeHarness } from "./helpers/native-harness";
 
@@ -8,13 +9,26 @@ import { API_TOKEN, BACKENDS, sessionFor, nativeHarness, type NativeHarness } fr
  *
  * Password change
  *  - the other sessions survive the change (a stolen cookie keeps working);
- *  - the session making the change is revoked too (user logged out mid-save);
+ *  - the session making the change is not replaced, so a token that leaked
+ *    before the change is still valid afterwards (it must rotate);
+ *  - the session making the change is revoked without a replacement (user
+ *    logged out mid-save);
+ *  - a login that verified the old password but commits after the change
+ *    keeps a fresh 30-day session (session creation must be conditional on
+ *    the credential that was verified);
+ *  - a JSON `null` or array body reaches property access and returns 500;
+ *  - an enormous `current_password` is fed to scrypt before any length check;
  *  - a static bootstrap token or personal API token is accepted as "the user";
  *  - the endpoint becomes an unthrottled password oracle;
+ *  - anonymous failed logins for the username exhaust the shared counter and
+ *    stop the owner changing their own password (the route needs its own key);
  *  - a cookie request skips the same-origin check that logout performs.
  * Plan settings
+ *  - a `null` body returns 500 instead of 400;
  *  - an editor or viewer rewrites the plan's currency;
  *  - an invalid seed is half-applied (one field written, the other rejected);
+ *  - re-importing a plan with no `settings` block resets chosen formats to
+ *    SGD / DD/MM/YYYY (the D1 upsert used to; SQLite preserves them);
  *  - the change is written but `server_knowledge` does not move, so clients
  *    that validate caches against it keep the old format.
  * Pruning
@@ -37,8 +51,8 @@ const GBP = {
   symbol_first: true, group_separator: ",", currency_symbol: "£", display_symbol: true,
 };
 
-async function open(backend: (typeof BACKENDS)[number]): Promise<NativeHarness> {
-  const harness = await nativeHarness(backend);
+async function open(backend: (typeof BACKENDS)[number], wrapAuth?: (store: AuthStore) => AuthStore): Promise<NativeHarness> {
+  const harness = await nativeHarness(backend, wrapAuth);
   harnesses.push(harness);
   return harness;
 }
@@ -66,7 +80,7 @@ function status(harness: NativeHarness, headers: Record<string, string>): Promis
 
 for (const backend of BACKENDS) {
   describe(`account basics (${backend})`, () => {
-    test("password change revokes other sessions, keeps this one, and leaves personal tokens alone", async () => {
+    test("password change revokes every session, issues a fresh one to the caller, and leaves personal tokens alone", async () => {
       const harness = await open(backend);
       const { cookie, tokenA, tokenB } = await ownerWithSessions(harness);
       const created = await post(harness, "/api/auth/personal-tokens", { name: "Script" }, { cookie });
@@ -76,13 +90,65 @@ for (const backend of BACKENDS) {
         { current_password: PASSWORD, new_password: NEXT_PASSWORD }, { authorization: `Bearer ${tokenA}` });
       expect(changed.status).toBe(200);
 
-      expect(await status(harness, { authorization: `Bearer ${tokenA}` })).toBe(200);
+      // The calling session is rotated: its old token dies, a fresh one is returned.
+      const rotated = (await changed.json()).data as { ok: boolean; token: string; expires_at: number };
+      expect(rotated.ok).toBe(true);
+      expect(rotated.token).not.toBe(tokenA);
+      expect(rotated.expires_at).toBeGreaterThan(Math.floor(Date.now() / 1000));
+      expect(changed.headers.get("set-cookie")).toBeNull();
+      expect(await status(harness, { authorization: `Bearer ${tokenA}` })).toBe(401);
+      expect(await status(harness, { authorization: `Bearer ${rotated.token}` })).toBe(200);
       expect(await status(harness, { authorization: `Bearer ${tokenB}` })).toBe(401);
       expect(await status(harness, { cookie })).toBe(401);
       expect(await status(harness, { authorization: `Bearer ${personal}` })).toBe(200);
 
       expect((await post(harness, "/api/auth/token", { username: "owner", password: PASSWORD })).status).toBe(401);
       expect((await post(harness, "/api/auth/token", { username: "owner", password: NEXT_PASSWORD })).status).toBe(200);
+    });
+
+    test("a cookie session is rotated through a new cookie, and the old cookie stops working", async () => {
+      const harness = await open(backend);
+      const { cookie, tokenA } = await ownerWithSessions(harness);
+      const changed = await post(harness, "/api/auth/password", { current_password: PASSWORD, new_password: NEXT_PASSWORD }, { cookie });
+      expect(changed.status).toBe(200);
+      const setCookie = changed.headers.get("set-cookie")!;
+      expect(setCookie).toMatch(/^__Host-howmuch_session=[^;]+; HttpOnly; Secure; SameSite=Lax; Path=\/; Max-Age=\d+$/);
+      const fresh = setCookie.split(";", 1)[0];
+      expect(fresh).not.toBe(cookie);
+      expect((await changed.json()).data.token).toBeUndefined();
+      expect(await status(harness, { cookie })).toBe(401);
+      expect(await status(harness, { cookie: fresh })).toBe(200);
+      expect(await status(harness, { authorization: `Bearer ${tokenA}` })).toBe(401);
+    });
+
+    test("a login that verified the old password cannot start a session after the password changed", async () => {
+      let armed = false;
+      let db!: NativeHarness["db"];
+      // Commits a password change between the login's password check and its
+      // session insert, with no timing involved: the hook runs inside createSession.
+      const harness = await open(backend, (store) => new Proxy(store, {
+        get(target, property, receiver) {
+          const value = Reflect.get(target, property, receiver);
+          if (typeof value !== "function") return value;
+          if (property !== "createSession") return value.bind(target);
+          return async (...args: unknown[]) => {
+            if (armed) {
+              armed = false;
+              db.run("UPDATE password_credentials SET hash_hex=?, salt_hex=?", ["0".repeat(64), "1".repeat(32)]);
+              db.run("UPDATE sessions SET revoked_at=unixepoch() WHERE revoked_at IS NULL");
+            }
+            return value.apply(target, args);
+          };
+        },
+      }));
+      db = harness.db;
+      const setup = await post(harness, "/api/auth/setup", { username: "owner", password: PASSWORD }, { authorization: `Bearer ${API_TOKEN}` });
+      expect(setup.status).toBe(200);
+
+      armed = true;
+      const attacker = await post(harness, "/api/auth/token", { username: "owner", password: PASSWORD });
+      expect(attacker.status).toBe(401);
+      expect(db.query("SELECT COUNT(*) AS n FROM sessions WHERE revoked_at IS NULL").get()).toEqual({ n: 0 });
     });
 
     test("only a signed-in user session may change the password", async () => {
@@ -118,24 +184,50 @@ for (const backend of BACKENDS) {
       expect(await status(harness, { authorization: `Bearer ${tokenB}` })).toBe(200);
     });
 
-    test("wrong current passwords are rate limited like login attempts", async () => {
+    test("wrong current passwords are rate limited on their own budget, apart from logins", async () => {
       const harness = await open(backend);
       const { tokenA } = await ownerWithSessions(harness);
       const auth = { authorization: `Bearer ${tokenA}` };
-      // Two logins in the helper already spent two attempts of the shared budget.
       const attempt = () => post(harness, "/api/auth/password", { current_password: WRONG_PASSWORD, new_password: NEXT_PASSWORD }, auth);
-      let throttled: Response | null = null;
-      for (let n = 0; n < 12 && !throttled; n++) {
-        const response = await attempt();
-        if (response.status === 429) throttled = response;
-        else expect(response.status).toBe(401);
-      }
-      expect(throttled).not.toBeNull();
-      expect(throttled!.headers.get("retry-after")).toBe("900");
+      // The route allows ten guesses per window: ten 401s, then 429.
+      for (let n = 0; n < 10; n++) expect((await attempt()).status).toBe(401);
+      const throttled = await attempt();
+      expect(throttled.status).toBe(429);
+      expect(throttled.headers.get("retry-after")).toBe("900");
       // Even the right password is refused while the window is exhausted.
       const right = await post(harness, "/api/auth/password", { current_password: PASSWORD, new_password: NEXT_PASSWORD }, auth);
       expect(right.status).toBe(429);
-      expect((await post(harness, "/api/auth/token", { username: "owner", password: NEXT_PASSWORD })).status).toBe(429);
+      // Signing in is a separate budget and is not starved by the route's guesses.
+      expect((await post(harness, "/api/auth/token", { username: "owner", password: PASSWORD })).status).toBe(200);
+    });
+
+    test("anonymous failed logins for the username do not block the owner changing their password", async () => {
+      const harness = await open(backend);
+      const { cookie } = await ownerWithSessions(harness);
+      const codes: number[] = [];
+      for (let n = 0; n < 12; n++) {
+        codes.push((await post(harness, "/api/auth/token", { username: "owner", password: WRONG_PASSWORD }, { "cf-connecting-ip": `10.0.0.${n}` })).status);
+      }
+      expect(codes.at(-1)).toBe(429);
+      const changed = await post(harness, "/api/auth/password", { current_password: PASSWORD, new_password: NEXT_PASSWORD }, { cookie });
+      expect(changed.status).toBe(200);
+    });
+
+    test("non-object JSON bodies and oversized current passwords are 400s, not 500s or scrypt work", async () => {
+      const harness = await open(backend);
+      const { tokenA } = await ownerWithSessions(harness);
+      const auth = { authorization: `Bearer ${tokenA}` };
+      for (const raw of ["null", "[]", "42", '"text"']) {
+        const request = (path: string, method: string, headers: Record<string, string>) =>
+          harness.handle(new Request(`${ORIGIN}${path}`, { method, headers: { "content-type": "application/json", origin: ORIGIN, ...headers }, body: raw }));
+        expect((await request("/api/auth/password", "POST", auth)).status).toBe(400);
+        expect((await request("/api/plans/p/settings", "PATCH", { authorization: `Bearer ${API_TOKEN}` })).status).toBe(400);
+      }
+      // 300 bytes is over the limit login applies; it is refused before any hashing or rate-limit spend.
+      const huge = await post(harness, "/api/auth/password", { current_password: "x".repeat(300), new_password: NEXT_PASSWORD }, auth);
+      expect(huge.status).toBe(400);
+      const user = harness.db.query("SELECT id FROM users LIMIT 1").get() as { id: string };
+      expect(harness.db.query("SELECT COUNT(*) AS n FROM login_rate_limits WHERE key_hash=?").get(sha256(`pwchange:${user.id}`))).toEqual({ n: 0 });
     });
 
     test("only owners change plan formats, invalid seeds write nothing, and knowledge moves", async () => {
@@ -176,6 +268,17 @@ for (const backend of BACKENDS) {
       // The static token is confined to the default plan, like other plan routes.
       expect((await harness.request("/api/plans/p/settings", { method: "PATCH", body: { date_format: { format: "DD/MM/YYYY" } } })).status).toBe(200);
       expect((await harness.request("/api/plans/nope/settings", { method: "PATCH", body: { date_format: { format: "DD/MM/YYYY" } } })).status).toBe(404);
+    });
+
+    test("upserting a plan without settings keeps the formats an owner chose", async () => {
+      const harness = await open(backend);
+      const owner = sessionFor(harness.db, "owner");
+      const read = async () => (await (await harness.request("/v1/plans/p/settings")).json()).data.settings;
+      expect((await harness.request("/api/plans/p/settings", { method: "PATCH", token: owner, body: { currency_format: GBP, date_format: { format: "YYYY-MM-DD" } } })).status).toBe(200);
+      await harness.repo.upsertPlan("p", { name: "Renamed" });
+      const after = await read();
+      expect(after.currency_format).toEqual(GBP);
+      expect(after.date_format).toEqual({ format: "YYYY-MM-DD" });
     });
 
     test("pruning removes expired sessions and stale rate-limit rows but never live ones", async () => {

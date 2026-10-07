@@ -1,42 +1,38 @@
 # Account basics E2E notes
 
-Revision: `aaf15e5fae1f3873ece4dc93e954dc9e92c0c764` plus the uncommitted account-basics working tree on `feat/account-basics`.
+Revision: `b41332b` plus the uncommitted review-fix working tree on `feat/account-basics`.
 
 ## Setup
 
-- Isolated stack from `control-howmuch launch` (Bun API + Vite, throwaway SQLite seeded from `fixtures/demo-ledger.json`, OS-assigned localhost ports). Synthetic credentials only: owner `verifier`, setup token from the recipe. No remote account touched.
-- Driver: Playwright, Chromium (`/opt/pw-browsers/chromium-1194`), two separate browser contexts (A and B). Script kept outside the repo; every step is listed below and the raw log is `e2e-log.txt`.
-- Pre-existing behaviour found first: the web app never read the plan's `date_format`, so dates always rendered as `24 May 2026`. This change makes `formatDate` (full dates) follow the plan format, so the register now shows `24/05/2026` for the default `DD/MM/YYYY`.
+- Isolated stack from `control-howmuch launch` (Bun API + Vite, throwaway SQLite seeded from `fixtures/demo-ledger.json`, OS-assigned localhost ports), cleaned up afterwards. Synthetic credentials only (owner `verifier`, recipe setup token). No remote account touched.
+- Driver: Playwright with Chromium (`/opt/pw-browsers/chromium-1194`), two browser contexts (A and B). Raw log: `e2e-log.txt`. Run on a fresh stack so the default plan is SGD / `DD/MM/YYYY`.
+- Stored date values name an ordering: `DD/MM/YYYY` renders `24 May 2026` (as on `origin/main`), `MM/DD/YYYY` renders `May 24, 2026`, `YYYY-MM-DD` renders `2026-05-24`.
 
 ## Steps, expected, observed
 
 | # | Step | Expected | Observed |
 |---|------|----------|----------|
-| 1 | Context A: first-owner setup (SGD, DD/MM/YYYY), then Context B signs in | Both signed in | Both signed in |
-| 2 | A: open Settings | Change password section and Currency and date format section (owner) visible, selects prefilled | Both visible; prefill SGD and DD/MM/YYYY; `settings-light-desktop.png` |
-| 3 | A: register before | `$` amounts, `24/05/2026` style dates | `register-before.png`, `$541,000.00`, `24/05/2026` |
-| 4 | A: new password `short` | Blocked client side | Browser min-length message (15 characters) |
-| 5 | A: new and confirm differ | Inline alert, no request | `The new password and its confirmation do not match.` |
-| 6 | A: wrong current password | 401, generic message, A still signed in | `Current password is incorrect`; `password-error.png`; status call 200 |
-| 7 | A: correct current, valid new | Success message | `Password changed. Other sessions have been signed out.`; `password-success.png` |
-| 8 | A: reload | Still signed in | Stayed on Settings |
-| 9 | B: reload | Signed out | Sign-in form (`context-b-signed-out.png`) |
-| 10 | B: sign in with old password | Rejected | `Invalid username or password` |
-| 11 | B: sign in with new password | Works | Signed in |
-| 12 | A: Save formats disabled before any edit | Disabled | Disabled |
-| 13 | A: GBP and YYYY-MM-DD, save | Success message | `Formats saved...` (`formats-success.png`) |
-| 14 | A: register after | `£` amounts, `2026-05-24` dates | `register-after.png`: `£541,000.00`, `2026-05-24` |
-| 15 | A: switch to EUR, save, navigate in-app without reload | `€` amounts | `€541,000.00`, `€850.00` |
-| 16 | `GET /v1/plans/local-plan/settings` from B's session | New formats | `date_format YYYY-MM-DD`, `currency_format iso_code EUR`, flag names unchanged |
-| 17 | 390px width | No horizontal scroll, sections readable | `settings-light-390.png` |
+| 1 | A: first-owner setup form, B signs in | Date options labelled with example renders | `Day first (24 May 2026)`, `Month first (May 24, 2026)`, `Year first (2026-05-24)`; both signed in |
+| 2 | A: register with the default plan | `24 May 2026` | `24 May 2026` (`register-day-first.png`) |
+| 3 | A: Net Worth (`/net-worth?range=all`) | Same ordering in `As at` | `AS AT 7 OCT 2026` (upper-cased by CSS) |
+| 4 | A: Settings | Plain currency copy, labelled date options | `settings-desktop.png`; copy reads "Nothing is converted: $100 becomes £100. For a currency such as JPY the cents are hidden, not lost." |
+| 5 | A: choose Month first, save | Success note mentions iOS; register `May 24, 2026` | Both as expected (`register-month-first.png`); Net Worth `AS AT OCT 7, 2026` (`net-worth-month-first.png`) |
+| 6 | A: choose Year first, save | Register `2026-05-24` | As expected (`register-year-first.png`); Net Worth `AS AT 2026-10-07` |
+| 7 | A: restore Day first, change password | Success says this device stays signed in | `Password changed. This device stays signed in; every other session has been signed out.` |
+| 8 | A: session cookie before and after | Value changed | Changed (rotated) |
+| 9 | A: reload; old cookie value against `/v1/user` | A still signed in; old value 401 | Stayed on Settings; old value returned 401 |
+| 10 | B: reload | Signed out | Sign-in form (`context-b-signed-out.png`) |
+| 11 | A: repeated wrong current passwords | Rate-limit copy | After 10 wrong attempts: `Too many attempts. Try again in 15 minutes.` (`password-rate-limited.png`) |
+| 12 | 390px width | Readable, no horizontal scroll | `settings-390.png` |
 
-Dark mode: the web app has no dark theme (the sidebar is dark by design in light mode, and there is no `prefers-color-scheme` handling), so there is no separate dark rendering to check. The new sections reuse the existing `--paper`, `--ink`, `--rule` tokens and `status-panel` classes.
+Screenshots from the earlier revision (numeric dates) were removed as stale.
 
 ## Not covered in the browser
 
-- Owner-only gating for editors and viewers in the UI (no second-user flow exists in the web app). The server side (403 for editor and viewer) is covered by the isolated test.
-- iOS (no UI change in this PR).
+- Owner-only gating for editors and viewers, and the Settings load-error line (no way to make the account fetch fail without altering the stack). Server roles are covered by the isolated tests.
+- Dark mode: the web app has no dark theme.
+- iOS (no UI change; the engine bundle was regenerated and checks as up to date).
 
-## Isolated tests (`apps/api/tests/account-basics.test.ts`, SQLite and D1 backends)
+## Isolated tests (`apps/api/tests/account-basics.test.ts`, SQLite and D1)
 
-Written before the implementation. Before: `0 pass, 12 fail` (routes returned 404; pruning left expired rows). After: `12 pass, 0 fail`. Full suite: `813 pass, 0 fail`.
+New tests were written before each fix and failed first for the intended reason: the login race (200 and a live session instead of 401), rotation (no new token or cookie), login spam starving the change (429 instead of 200), the route budget (shared counter), `null` body (500 instead of 400) and D1 `upsertPlan` resetting formats. Final: `bun test` 823 pass, 0 fail.

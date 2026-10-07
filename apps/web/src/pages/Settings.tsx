@@ -1,14 +1,16 @@
 import { useState, type FormEvent } from "react";
 import { NavLink } from "react-router-dom";
-import { api, useApi } from "../api/client";
+import { api, ApiError, useApi } from "../api/client";
 import type { PlanSettings } from "../api/types";
 import {
   buildPlanSeed,
   CURRENCY_CHOICES,
   DATE_FORMAT_CHOICES,
+  DATE_FORMAT_LABELS,
   type DateFormatChoice,
 } from "../lib/locale-plan-seed";
 import { usePlan } from "../state/plan";
+import { savePrefs } from "../state/prefs";
 
 const MIN_PASSWORD_LENGTH = 15;
 
@@ -62,6 +64,12 @@ export function SettingsPage() {
 
       <ChangePasswordSection />
 
+      {account.loading && !account.data && <p className="diagnostic-note" role="status">Loading account details…</p>}
+      {account.error && !account.data && (
+        <div className="status-panel status-panel-error" role="alert">
+          <p className="status-detail">Could not load your account details, so plan formats are hidden. Reload to try again. ({account.error})</p>
+        </div>
+      )}
       {account.data?.isOwner && (
         <PlanFormatsSection settings={saved ?? account.data.settings} onSaved={setSaved} />
       )}
@@ -86,6 +94,7 @@ export function SettingsPage() {
 }
 
 function messageOf(cause: unknown): string {
+  if (cause instanceof ApiError && cause.status === 429) return "Too many attempts. Try again in 15 minutes.";
   return cause instanceof Error ? cause.message : String(cause);
 }
 
@@ -115,7 +124,9 @@ function ChangePasswordSection() {
     setBusy(true);
     setError(null);
     try {
-      await api.changePassword(current, next);
+      const rotated = await api.changePassword(current, next);
+      // This session was replaced server-side; keep the stored expiry in step with the new cookie.
+      savePrefs({ sessionExpiresAt: rotated.session_expires_at ?? undefined });
       setCurrent("");
       setNext("");
       setConfirm("");
@@ -133,7 +144,7 @@ function ChangePasswordSection() {
         <div>
           <span className="section-title" id="settings-password-heading">Change password</span>
           <span className="section-meta">
-            Use at least {MIN_PASSWORD_LENGTH} characters. Every other browser and device signed in as you is signed out. Personal API tokens keep working;
+            Use at least {MIN_PASSWORD_LENGTH} characters. Every other browser and device signed in as you is signed out; this one stays signed in. Personal API tokens keep working;
             revoke them on the <NavLink to="/api-tokens">API tokens</NavLink> page if you need to.
           </span>
         </div>
@@ -149,14 +160,14 @@ function ChangePasswordSection() {
         </label>
         <label className="field">
           <span className="field-label">Confirm new password</span>
-          <input type="password" value={confirm} onChange={(event) => setConfirm(event.target.value)} autoComplete="new-password" minLength={MIN_PASSWORD_LENGTH} required />
+          <input type="password" value={confirm} onChange={(event) => setConfirm(event.target.value)} autoComplete="new-password" required />
         </label>
         <button type="submit" className="save-button settings-form-button" disabled={busy || !current || !next || !confirm}>
           {busy ? "Changing…" : "Change password"}
         </button>
       </form>
       {error && <div className="status-panel status-panel-error" role="alert"><p className="status-detail">{error}</p></div>}
-      {done && <div className="status-panel status-panel-success" role="status"><p className="status-detail">Password changed. Other sessions have been signed out.</p></div>}
+      {done && <div className="status-panel status-panel-success" role="status"><p className="status-detail">Password changed. This device stays signed in; every other session has been signed out.</p></div>}
     </section>
   );
 }
@@ -207,8 +218,8 @@ function PlanFormatsSection({ settings, onSaved }: { settings: PlanSettings; onS
         <div>
           <span className="section-title" id="settings-formats-heading">Currency and date format</span>
           <span className="section-meta">
-            Amounts are stored as exact milliunits with no currency attached, so changing the currency changes how
-            amounts are shown and does not convert them. A balance of 100.00 in one currency shows as 100.00 in the next.
+            Changing the currency only changes the symbol and decimal places shown. Nothing is converted: $100 becomes £100.
+            For a currency such as JPY the cents are hidden, not lost.
           </span>
         </div>
       </div>
@@ -222,7 +233,7 @@ function PlanFormatsSection({ settings, onSaved }: { settings: PlanSettings; onS
         <label className="field">
           <span className="field-label">Date format</span>
           <select value={dateFormat} onChange={(event) => { setDateFormat(event.target.value); setDone(false); }}>
-            {dateFormats.map((format) => <option key={format} value={format}>{format}</option>)}
+            {dateFormats.map((format) => <option key={format} value={format}>{DATE_FORMAT_LABELS[format as DateFormatChoice] ?? format}</option>)}
           </select>
         </label>
         <button type="submit" className="save-button settings-form-button" disabled={busy || !changed}>
@@ -230,7 +241,7 @@ function PlanFormatsSection({ settings, onSaved }: { settings: PlanSettings; onS
         </button>
       </form>
       {error && <div className="status-panel status-panel-error" role="alert"><p className="status-detail">{error}</p></div>}
-      {done && <div className="status-panel status-panel-success" role="status"><p className="status-detail">Formats saved. Amounts and dates now use the new settings.</p></div>}
+      {done && <div className="status-panel status-panel-success" role="status"><p className="status-detail">Formats saved. Amounts and dates here now use the new settings. The iOS app shows the new currency after its next refresh and always shows dates as 24 May 2026.</p></div>}
     </section>
   );
 }

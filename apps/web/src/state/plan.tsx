@@ -20,6 +20,7 @@ import {
   buildPlanSeed,
   CURRENCY_CHOICES,
   DATE_FORMAT_CHOICES,
+  DATE_FORMAT_LABELS,
   DEFAULT_CURRENCY,
   guessCurrency,
   guessDateFormat,
@@ -646,7 +647,7 @@ function AuthForm({
           <label>
             <span>Date format</span>
             <select value={dateFormat} onChange={(event) => setDateFormat(event.target.value as DateFormatChoice)}>
-              {DATE_FORMAT_CHOICES.map((format) => <option key={format} value={format}>{format}</option>)}
+              {DATE_FORMAT_CHOICES.map((format) => <option key={format} value={format}>{DATE_FORMAT_LABELS[format]}</option>)}
             </select>
           </label>
           <p className="boot-hint">You can change the currency and date format later in Settings.</p>
