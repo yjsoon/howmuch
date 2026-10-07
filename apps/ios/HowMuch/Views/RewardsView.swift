@@ -141,6 +141,7 @@ private struct RewardsBoard {
 struct RewardsView: View {
   @Environment(AppModel.self) private var model
   @Environment(RootChromeState.self) private var chrome: RootChromeState?
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var filter: RewardsReportFilter
   @State private var sheet: RewardsSheet?
   @State private var route: RewardsRoute?
@@ -183,7 +184,7 @@ struct RewardsView: View {
       }
     }
     // Loaded data arrives with the shared motion, as the Reflect overview does.
-    .animation(Theme.Motion.arrive, value: model.rewardsPhase)
+    .animation(reduceMotion ? nil : Theme.Motion.arrive, value: model.rewardsPhase)
     .listStyle(.plain)
     .scrollContentBackground(.hidden)
     .background(Theme.canvas)
@@ -289,8 +290,8 @@ struct RewardsView: View {
       typeSection("Cashback", kind: .cashback, rows: board.visible)
       typeSection("Miles", kind: .miles, rows: board.visible)
     } else {
-      ForEach(board.visible, id: \.cardID) { projection in
-        boardRow(projection)
+      ForEach(Array(board.visible.enumerated()), id: \.element.cardID) { index, projection in
+        boardRow(projection, index: index)
       }
     }
     if board.hiddenCount > 0, !board.visible.isEmpty {
@@ -343,19 +344,21 @@ struct RewardsView: View {
       .accessibilityLabel("\(title), \(matching.count) cards")
       .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
       if isExpanded {
-        ForEach(matching, id: \.cardID) { projection in
-          boardRow(projection)
+        ForEach(Array(matching.enumerated()), id: \.element.cardID) { index, projection in
+          boardRow(projection, index: index)
         }
       }
     }
   }
 
-  private func boardRow(_ projection: RewardRowProjection) -> some View {
+  private func boardRow(_ projection: RewardRowProjection, index: Int) -> some View {
     let text = RewardRowText(projection, currencyFormat: model.currencyFormat)
     return Button {
       sheet = .detail(projection.cardID)
     } label: {
-      RewardFilledRow(projection: projection, icon: icon(for: projection.accountID), currencyFormat: model.currencyFormat)
+      RewardFilledRow(
+        projection: projection, icon: icon(for: projection.accountID), currencyFormat: model.currencyFormat,
+        index: index)
     }
     .buttonStyle(.plain)
     .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
@@ -808,78 +811,211 @@ enum RewardCardEditorDestination: Identifiable {
 
 // MARK: - Filled row
 
-/// A rounded row whose whole background is the progress track. Text colours
-/// never change across the fill edge.
+/// The Rewards Exposure card (docs/frontend/rewards-exposure-card.md): a small
+/// photograph, a sky, a pair of ridges and a sun, behind the same words the row
+/// always said. Spend exposes it from left to right until the minimum is met, and
+/// then lifts the sun until the cap is met. The picture is art only: the figures
+/// and the spoken value are the projection's.
+///
+/// Board and register rows are a strip. At accessibility sizes, and for rows with
+/// no picture (a range report), the words sit on paper, with a scene band above
+/// them where there is a picture.
 struct RewardFilledRow: View {
   let projection: RewardRowProjection
   var icon: String?
   let currencyFormat: CurrencyFormat?
-  var showsChevron = true
   /// Off in the detail sheet, whose navigation title already names the card.
   var showsTitle = true
+  /// Which list this row is in, so the same card remembers its pose separately in each.
+  var memoryScope = "board"
+  /// The row's place in its list, for the staggered first showing.
+  var index = 0
 
   @Environment(\.colorSchemeContrast) private var contrast
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-  @Environment(\.layoutDirection) private var layoutDirection
-  @ScaledMetric(relativeTo: .body) private var verticalPadding = 14.0
+  @ScaledMetric(relativeTo: .body) private var stripPadding = 9.0
+  @ScaledMetric(relativeTo: .body) private var paperPadding = 14.0
   @ScaledMetric(relativeTo: .body) private var horizontalPadding = 16.0
+  @ScaledMetric(relativeTo: .body) private var skyBand = 24.0
+  /// The ridges follow the measured bottom of the name and top of the headline.
+  @State private var nameBottom: CGFloat?
+  @State private var footTop: CGFloat?
+  @State private var width: CGFloat = 0
 
-  private static let cornerRadius: CGFloat = 18
+  private static let space = "rewardExposure"
+  /// The scene band above the words at accessibility sizes, in points: art, so it does not scale.
+  private static let bandHeight: CGFloat = 64
+
+  /// What the words sit on, which sets their inks.
+  private enum Surface {
+    /// The faces: dark ink on every light-mode sky, and light or dark by print in dark mode.
+    case ridge
+    case paper
+  }
 
   var body: some View {
     let text = RewardRowText(projection, currencyFormat: currencyFormat)
-    let palette = RewardTonePalette.palette(for: projection.tone)
-    let increased = contrast == .increased
-    VStack(alignment: .leading, spacing: 3) {
-      if showsTitle {
-        titleLine
-      }
-      actionLine(text, palette: palette)
-      if let basis = text.basisLine {
-        Text(basis)
-          .font(.subheadline)
-          .monospacedDigit()
-          .foregroundStyle(Theme.rowSecondary)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-      ForEach(Array(text.exceptionLines.enumerated()), id: \.element) { index, line in
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-          Image(systemName: "exclamationmark.triangle.fill")
-            .accessibilityHidden(true)
-          Text(line)
-            .foregroundStyle(exceptionInk(at: index, forText: true))
-            .fixedSize(horizontal: false, vertical: true)
+    Group {
+      if let exposure = RewardExposure(projection) {
+        if dynamicTypeSize.isAccessibilitySize {
+          bandRow(text, exposure: exposure)
+        } else {
+          stripRow(text, exposure: exposure)
         }
-        .foregroundStyle(exceptionInk(at: index))
-        .font(.footnote.weight(.medium))
-        .padding(.top, 2)
+      } else {
+        paperRow(text)
       }
     }
-    .padding(.vertical, verticalPadding)
-    .padding(.horizontal, horizontalPadding)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background {
-      ZStack(alignment: .leading) {
-        palette.track
-        if let fill = projection.fill {
-          LeadingFill(fraction: fill, rightToLeft: layoutDirection == .rightToLeft)
-            .fill(palette.fill)
-        }
-      }
-      .animation(reduceMotion ? nil : Theme.Motion.chart, value: projection.fill)
-    }
-    .clipShape(.rect(cornerRadius: Self.cornerRadius, style: .continuous))
-    .overlay {
-      if increased {
-        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-          .strokeBorder(Color.primary.opacity(0.3), lineWidth: 1)
-      }
-    }
-    .contentShape(.rect(cornerRadius: Self.cornerRadius, style: .continuous))
+    .contentShape(.rect(cornerRadius: Theme.Radius.card, style: .continuous))
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(projection.title)
     .accessibilityValue(text.accessibilityValue)
+  }
+
+  // MARK: Layouts
+
+  private func stripRow(_ text: RewardRowText, exposure: RewardExposure) -> some View {
+    VStack(spacing: 0) {
+      VStack(alignment: .leading, spacing: 0) {
+        nameBox
+          .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).maxY } action: { nameBottom = $0 }
+          .padding(.bottom, skyBand)
+        foot(text, surface: .ridge)
+          .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).minY } action: { footTop = $0 }
+      }
+      .padding(.horizontal, horizontalPadding)
+      .padding(.vertical, stripPadding)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+      .background {
+        RewardExposureAnimator(
+          exposure: exposure,
+          layout: .strip(nameBottom: nameBottom.map { Double($0) }, footTop: footTop.map { Double($0) }),
+          key: "\(memoryScope)|\(projection.cardID)", index: index)
+      }
+      .coordinateSpace(.named(Self.space))
+      .clipShape(.rect(cornerRadius: Theme.Radius.card, style: .continuous))
+      .overlay { outline }
+      slip(text)
+    }
+  }
+
+  private func bandRow(_ text: RewardRowText, exposure: RewardExposure) -> some View {
+    VStack(alignment: .leading, spacing: 0) {
+      RewardExposureAnimator(
+        exposure: exposure, layout: .band, key: "\(memoryScope)|\(projection.cardID)", index: index
+      )
+      .frame(height: Self.bandHeight)
+      paperContent(text)
+    }
+    .background(Theme.card)
+    .clipShape(.rect(cornerRadius: Theme.Radius.card, style: .continuous))
+    .overlay { outline }
+  }
+
+  private func paperRow(_ text: RewardRowText) -> some View {
+    paperContent(text)
+      .background(Theme.card)
+      .clipShape(.rect(cornerRadius: Theme.Radius.card, style: .continuous))
+      .overlay { outline }
+  }
+
+  private func paperContent(_ text: RewardRowText) -> some View {
+    VStack(alignment: .leading, spacing: 3) {
+      if showsTitle {
+        titleLine(surface: .paper)
+      }
+      foot(text, surface: .paper)
+      exceptions(text)
+    }
+    .padding(.vertical, paperPadding)
+    .padding(.horizontal, horizontalPadding)
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  /// The name, kept to the left half so the sun's column and its rings stay clear of it.
+  /// Without a name (the detail sheet) it is an empty line, so the ridges still have a sky.
+  @ViewBuilder
+  private var nameBox: some View {
+    if showsTitle {
+      titleLine(surface: .ridge)
+        .frame(maxWidth: width > 0 ? width * 0.5 : .infinity, alignment: .leading)
+    } else {
+      Color.clear.frame(height: 0)
+    }
+  }
+
+  /// Exceptions go on a paper slip tucked under the frame; the frame's height never changes for them.
+  @ViewBuilder
+  private func slip(_ text: RewardRowText) -> some View {
+    if !text.exceptionLines.isEmpty {
+      VStack(alignment: .leading, spacing: 2) {
+        exceptions(text)
+      }
+      .padding(.horizontal, horizontalPadding)
+      .padding(.top, 16)
+      .padding(.bottom, 8)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(
+        Theme.card,
+        in: UnevenRoundedRectangle(bottomLeadingRadius: 12, bottomTrailingRadius: 12, style: .continuous)
+      )
+      .padding(.horizontal, 8)
+      .padding(.top, -10)
+      .zIndex(-1)
+    }
+  }
+
+  @ViewBuilder
+  private var outline: some View {
+    if contrast == .increased {
+      RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+        .strokeBorder(Color.primary.opacity(0.3), lineWidth: 1)
+    }
+  }
+
+  // MARK: Words
+
+  private func titleLine(surface: Surface) -> some View {
+    HStack(alignment: .firstTextBaseline, spacing: 6) {
+      if let icon {
+        Text(icon)
+          .font(.headline)
+          .accessibilityHidden(true)
+      }
+      Text(projection.title)
+        .font(.system(.title3, design: .serif).italic())
+        .foregroundStyle(titleInk(surface))
+        .lineLimit(2)
+    }
+  }
+
+  private func foot(_ text: RewardRowText, surface: Surface) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      actionLine(text, surface: surface)
+      if let basis = text.basisLine {
+        Text(basis)
+          .font(.system(.caption, design: .monospaced))
+          .foregroundStyle(secondaryInk(surface))
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func exceptions(_ text: RewardRowText) -> some View {
+    ForEach(Array(text.exceptionLines.enumerated()), id: \.element) { index, line in
+      HStack(alignment: .firstTextBaseline, spacing: 6) {
+        Image(systemName: "exclamationmark.triangle.fill")
+          .accessibilityHidden(true)
+        Text(line)
+          .foregroundStyle(exceptionInk(at: index, forText: true))
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      .foregroundStyle(exceptionInk(at: index))
+      .font(.footnote.weight(.medium))
+      .padding(.top, 2)
+    }
   }
 
   private func exceptionInk(at index: Int, forText: Bool = false) -> Color {
@@ -896,34 +1032,34 @@ struct RewardFilledRow: View {
     }
   }
 
-  private var titleLine: some View {
-    HStack(alignment: .firstTextBaseline, spacing: 6) {
-      if let icon {
-        Text(icon)
-          .font(.headline)
-          .accessibilityHidden(true)
-      }
-      Text(projection.title)
-        .font(.headline)
-        .foregroundStyle(Theme.textPrimary)
-        .lineLimit(2)
-      Spacer(minLength: 8)
-      if showsChevron {
-        Image(systemName: "chevron.forward")
-          .font(.footnote.weight(.semibold))
-          .foregroundStyle(Theme.rowSecondary)
-          .accessibilityHidden(true)
-      }
+  private func titleInk(_ surface: Surface) -> Color {
+    guard surface == .ridge else { return Theme.textPrimary }
+    return projection.rewardType == .miles ? Theme.Face.inkMiles : Theme.Face.inkCashback
+  }
+
+  private func headlineInk(_ surface: Surface) -> Color {
+    let failed = projection.tone == .failed
+    switch surface {
+    case .ridge: return failed ? Theme.Face.failedInk : Theme.Face.footInk
+    case .paper: return failed ? RewardTonePalette.palette(for: .failed).ink : Theme.textPrimary
     }
   }
 
+  private func secondaryInk(_ surface: Surface) -> Color {
+    surface == .ridge ? Theme.Face.footInkSoft : Theme.rowSecondary
+  }
+
+  private func urgentInk(_ surface: Surface) -> Color {
+    surface == .ridge ? Theme.Face.urgentInk : RewardTonePalette.palette(for: projection.tone).ink
+  }
+
   @ViewBuilder
-  private func actionLine(_ text: RewardRowText, palette: RewardTonePalette) -> some View {
-    let headline = headlineText(text)
+  private func actionLine(_ text: RewardRowText, surface: Surface) -> some View {
+    let headline = headlineText(text, surface: surface)
     let deadline = text.deadline.map { value in
       Text(value)
-        .font(.subheadline.weight(text.isUrgent ? .semibold : .regular))
-        .foregroundStyle(text.isUrgent ? palette.ink : Theme.rowSecondary)
+        .font(.footnote.weight(text.isUrgent ? .semibold : .regular))
+        .foregroundStyle(text.isUrgent ? urgentInk(surface) : secondaryInk(surface))
     }
     let stacked = VStack(alignment: .leading, spacing: 2) {
       headline
@@ -946,15 +1082,17 @@ struct RewardFilledRow: View {
     }
   }
 
-  private func headlineText(_ text: RewardRowText) -> Text {
+  private func headlineText(_ text: RewardRowText, surface: Surface) -> Text {
+    let ink = headlineInk(surface)
     if let amount = text.amount {
-      return Text("\(Text(amount).font(.title2.bold()).monospacedDigit()) \(text.actionLabel)")
-        .font(.body)
-        .foregroundStyle(Theme.textPrimary)
+      let figure = Text(amount).font(.system(.headline, design: .monospaced).weight(.semibold))
+      return Text("\(figure) \(text.actionLabel)")
+        .font(.subheadline)
+        .foregroundStyle(ink)
     }
     return Text(text.actionLabel)
-      .font(.title3.weight(.semibold))
-      .foregroundStyle(projection.tone == .failed ? RewardTonePalette.palette(for: .failed).ink : Theme.textPrimary)
+      .font(.headline)
+      .foregroundStyle(ink)
   }
 }
 
@@ -994,7 +1132,7 @@ struct RewardCardDetailSheet: View {
       List {
         Section {
           RewardFilledRow(
-            projection: projection, icon: icon, currencyFormat: currencyFormat, showsChevron: false, showsTitle: false
+            projection: projection, icon: icon, currencyFormat: currencyFormat, showsTitle: false, memoryScope: "sheet"
           )
           .listRowInsets(EdgeInsets())
           .listRowBackground(Color.clear)
@@ -1442,7 +1580,7 @@ struct RewardsReportScreen: View {
                 projection: .make(row: row, asOf: report.asOf, isRange: true),
                 icon: model.accounts.first { $0.id == row.accountId }?.displayIcon,
                 currencyFormat: model.currencyFormat,
-                showsChevron: false
+                memoryScope: "range"
               )
               .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
               .listRowBackground(Color.clear)
@@ -1714,7 +1852,7 @@ struct RegisterRewardRow: View {
     Button {
       sheet = .detail
     } label: {
-      RewardFilledRow(projection: projection, currencyFormat: model.currencyFormat)
+      RewardFilledRow(projection: projection, currencyFormat: model.currencyFormat, memoryScope: "register")
     }
     .buttonStyle(.plain)
     .accessibilityLabel("Rewards, \(projection.title)")
