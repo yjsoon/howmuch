@@ -195,7 +195,7 @@ private struct ExposurePainter {
   /// journey, with the soft falloff, and end to end from then on.
   private func wash(_ colour: Color, alpha: Double) -> GraphicsContext.Shading {
     let solid = colour.opacity(alpha)
-    guard exposure.stage == .gate else {
+    guard scene.inMinimumJourney else {
       return .color(solid)
     }
     // The wash falls to the same colour at zero alpha, never to clear, so the falloff does not pass through grey.

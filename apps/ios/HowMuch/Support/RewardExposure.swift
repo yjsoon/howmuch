@@ -223,11 +223,19 @@ struct ExposureScene {
 
   var haloOpacity: Double { 0.4 + 0.6 * pose.v }
 
+  /// The light is still spreading towards the marker. This follows the animated pose, not
+  /// the stage, so when the minimum is met the lit edge sweeps to the right edge and the
+  /// marker goes with it, instead of the whole band lighting at once.
+  var inMinimumJourney: Bool { exposure.light == .journey && pose.h < 0.999 }
+
+  /// The marker's share of the width: exactly the fill, in the minimum journey only.
+  var markerShare: Double? { inMinimumJourney ? pose.h : nil }
+
   /// The veil's soft edge, in points: full light to the left of `from`, full veil right of `to`.
   /// A failed card is veiled everywhere. Nil once there is no minimum journey to show.
   var veilEdge: (from: Double, to: Double)? {
     if exposure.stage == .failed { return (-0.08 * width, 0) }
-    guard exposure.hasMarker else { return nil }
+    guard inMinimumJourney else { return nil }
     return ((pose.h - 0.04) * width, (pose.h + 0.04) * width)
   }
 
@@ -269,14 +277,14 @@ struct ExposureScene {
 
   /// The marker's x in points, snapped to the device pixel grid so its two-pixel line stays crisp.
   func markerX(scale: Double) -> Double? {
-    guard let x = exposure.markerX, scale > 0 else { return nil }
+    guard let x = markerShare, scale > 0 else { return nil }
     return (x * width * scale).rounded() / scale
   }
 
   /// The marker runs from 0.06 of the height to the bottom edge and breaks across the sun's disc,
   /// as in the brand mark. Dark mode also splits it at the target horizon.
   var markerSegments: [MarkerSegment] {
-    guard let x = exposure.markerX else { return [] }
+    guard let x = markerShare else { return [] }
     let top = 0.06 * height
     var pieces: [(Double, Double)] = [(top, height)]
     if let sun, abs(x * width - sun.x) < sunRadius + 0.004 * width {
