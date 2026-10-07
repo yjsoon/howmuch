@@ -4,7 +4,7 @@ import SwiftUI
 import UIKit
 
 /// One viewable page of a batch's source files: an image, or one page of a PDF.
-struct IntakeViewerPage: Identifiable, Equatable {
+struct IntakeViewerPage: Identifiable, Equatable, Sendable {
   var id: String
   /// Index into the job's `sourceFiles`, which proposals point at.
   var fileIndex: Int
@@ -13,13 +13,50 @@ struct IntakeViewerPage: Identifiable, Equatable {
   var pdfPage: Int
 }
 
-/// Decodes source pages at a size the viewer can zoom into without holding a
-/// full-resolution screenshot in memory.
+/// Decodes source pages off the main actor, to a pixel budget rather than a
+/// long-edge cap so a tall screenshot stays readable when zoomed.
 enum IntakeSourceImage {
-  static let maxPixel: CGFloat = 2400
+  /// About ten megapixels per decoded page.
+  static let pixelBudget: Double = 10_000_000
 
-  static func downsampled(_ url: URL, maxPixel: CGFloat = maxPixel) -> UIImage? {
+  /// Decodes one page in a detached task that is cancelled with the caller.
+  static func load(_ page: IntakeViewerPage) async -> UIImage? {
+    let task = Task.detached(priority: .userInitiated) { () -> UIImage? in
+      guard !Task.isCancelled else {
+        return nil
+      }
+      switch page.kind {
+      case .image: return downsampled(page.url)
+      case .pdf: return renderPDFPage(url: page.url, index: page.pdfPage)
+      case .text: return nil
+      }
+    }
+    return await withTaskCancellationHandler {
+      await task.value
+    } onCancel: {
+      task.cancel()
+    }
+  }
+
+  static func pdfPageCount(_ url: URL) async -> Int {
+    await Task.detached(priority: .userInitiated) {
+      PDFDocument(url: url)?.pageCount ?? 0
+    }.value
+  }
+
+  static func downsampled(_ url: URL) -> UIImage? {
     guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+      return nil
+    }
+    var maxPixel = 4096.0
+    if let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+       let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+       let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue,
+       width > 0, height > 0 {
+      let longEdge = max(width, height)
+      maxPixel = width * height > pixelBudget ? longEdge * (pixelBudget / (width * height)).squareRoot() : longEdge
+    }
+    guard !Task.isCancelled else {
       return nil
     }
     let options: [CFString: Any] = [
@@ -34,19 +71,38 @@ enum IntakeSourceImage {
     return UIImage(cgImage: image)
   }
 
-  static func pdfPage(url: URL, index: Int, maxPixel: CGFloat = maxPixel) -> UIImage? {
-    guard let document = PDFDocument(url: url), let page = document.page(at: index) else {
+  /// Draws a PDF page onto white at scale 1, from its crop box and honouring
+  /// the page's rotation, within the pixel budget.
+  static func renderPDFPage(url: URL, index: Int) -> UIImage? {
+    guard let document = PDFDocument(url: url),
+          let page = document.page(at: index),
+          let pageRef = page.pageRef else {
       return nil
     }
-    let bounds = page.bounds(for: .mediaBox)
-    guard bounds.width > 0, bounds.height > 0 else {
+    let box = pageRef.getBoxRect(.cropBox)
+    guard box.width > 0, box.height > 0 else {
       return nil
     }
-    let scale = maxPixel / max(bounds.width, bounds.height)
-    return page.thumbnail(
-      of: CGSize(width: bounds.width * scale, height: bounds.height * scale),
-      for: .mediaBox
-    )
+    let turned = pageRef.rotationAngle % 180 != 0
+    let natural = turned ? CGSize(width: box.height, height: box.width) : box.size
+    let scale = (pixelBudget / Double(natural.width * natural.height)).squareRoot()
+    let target = CGSize(width: (natural.width * scale).rounded(), height: (natural.height * scale).rounded())
+    guard !Task.isCancelled else {
+      return nil
+    }
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    format.opaque = true
+    let bounds = CGRect(origin: .zero, size: target)
+    return UIGraphicsImageRenderer(size: target, format: format).image { context in
+      UIColor.white.setFill()
+      context.fill(bounds)
+      let cgContext = context.cgContext
+      cgContext.translateBy(x: 0, y: target.height)
+      cgContext.scaleBy(x: 1, y: -1)
+      cgContext.concatenate(pageRef.getDrawingTransform(.cropBox, rect: bounds, rotate: 0, preserveAspectRatio: true))
+      cgContext.drawPDFPage(pageRef)
+    }
   }
 }
 
@@ -61,6 +117,8 @@ struct IntakeDocumentViewer: View {
   let height: CGFloat
   var showsHint = true
   var onToggle: () -> Void = {}
+
+  private static let maxDots = 10
 
   var body: some View {
     VStack(spacing: 0) {
@@ -92,19 +150,34 @@ struct IntakeDocumentViewer: View {
       .buttonStyle(.plain)
       .accessibilityLabel(isExpanded ? "Hide original" : "Show original")
       .accessibilityValue(pages.count > 1 ? "Page \(page + 1) of \(pages.count)" : "")
+      .accessibilityAdjustableAction { direction in
+        switch direction {
+        case .increment:
+          page = min(page + 1, pages.count - 1)
+        case .decrement:
+          page = max(page - 1, 0)
+        @unknown default:
+          break
+        }
+      }
 
       if isExpanded {
         TabView(selection: $page) {
           ForEach(pages.indices, id: \.self) { index in
-            IntakeViewerPageView(page: pages[index], number: index + 1, total: pages.count)
-              .tag(index)
+            IntakeViewerPageView(
+              page: pages[index],
+              number: index + 1,
+              total: pages.count,
+              isNear: abs(index - page) <= 1
+            )
+            .tag(index)
           }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .frame(height: height)
 
         VStack(spacing: 4) {
-          if pages.count > 1 {
+          if pages.count > 1, pages.count <= Self.maxDots {
             HStack(spacing: 6) {
               ForEach(pages.indices, id: \.self) { index in
                 Circle()
@@ -115,7 +188,7 @@ struct IntakeDocumentViewer: View {
             .accessibilityHidden(true)
           }
           if showsHint {
-            Text("Tap a row to see where it came from")
+            Text("Swipe the pages to find each row’s source")
               .font(.footnote)
               .foregroundStyle(.secondary)
           }
@@ -129,10 +202,13 @@ struct IntakeDocumentViewer: View {
   }
 }
 
+/// A page keeps its decoded image only while it is within one page of the
+/// current one, and drops it when it leaves the screen.
 private struct IntakeViewerPageView: View {
   let page: IntakeViewerPage
   let number: Int
   let total: Int
+  let isNear: Bool
   @State private var image: UIImage?
   @State private var failed = false
 
@@ -152,29 +228,31 @@ private struct IntakeViewerPageView: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .task(id: page.id) {
-      await load()
+    .task(id: "\(page.id)-\(isNear)") {
+      guard isNear else {
+        image = nil
+        return
+      }
+      guard image == nil else {
+        return
+      }
+      let decoded = await IntakeSourceImage.load(page)
+      guard !Task.isCancelled else {
+        return
+      }
+      image = decoded
+      failed = decoded == nil
     }
-  }
-
-  private func load() async {
-    let url = page.url
-    switch page.kind {
-    case .image:
-      image = await Task.detached(priority: .userInitiated) {
-        IntakeSourceImage.downsampled(url)
-      }.value
-    case .pdf:
-      image = IntakeSourceImage.pdfPage(url: url, index: page.pdfPage)
-    case .text:
+    .onDisappear {
       image = nil
+      failed = false
     }
-    failed = image == nil
   }
 }
 
-/// Pinch to zoom, drag while zoomed, double tap to zoom in or reset. Zoom
-/// resets by double tap, so Reduce Motion needs no animation here.
+/// Pinch to zoom, drag while zoomed, double tap to zoom in or reset. Dragging
+/// is only a gesture of this view while zoomed in, so a pan never pages the
+/// viewer, and it is limited to the letterboxed image.
 private struct IntakeZoomableImage: View {
   let image: UIImage
   @State private var scale: CGFloat = 1
@@ -208,12 +286,9 @@ private struct IntakeZoomableImage: View {
               }
             }
         )
-        .simultaneousGesture(
+        .gesture(
           DragGesture()
             .onChanged { value in
-              guard scale > 1 else {
-                return
-              }
               offset = clamped(
                 CGSize(
                   width: committedOffset.width + value.translation.width,
@@ -224,7 +299,8 @@ private struct IntakeZoomableImage: View {
             }
             .onEnded { _ in
               committedOffset = offset
-            }
+            },
+          including: scale > 1 ? .all : .subviews
         )
         .onTapGesture(count: 2) {
           if scale > 1 {
@@ -245,10 +321,21 @@ private struct IntakeZoomableImage: View {
     committedOffset = .zero
   }
 
-  /// Keeps the zoomed image from being dragged off its own edges.
+  /// The image as drawn at scale 1, letterboxed inside `size`.
+  private func fitted(in size: CGSize) -> CGSize {
+    guard image.size.width > 0, image.size.height > 0 else {
+      return size
+    }
+    let ratio = min(size.width / image.size.width, size.height / image.size.height)
+    return CGSize(width: image.size.width * ratio, height: image.size.height * ratio)
+  }
+
+  /// Keeps the zoomed image from being dragged past its own edges: a side
+  /// that still fits inside the frame does not move.
   private func clamped(_ value: CGSize, in size: CGSize) -> CGSize {
-    let limitX = max(0, size.width * (scale - 1) / 2)
-    let limitY = max(0, size.height * (scale - 1) / 2)
+    let fit = fitted(in: size)
+    let limitX = max(0, (fit.width * scale - size.width) / 2)
+    let limitY = max(0, (fit.height * scale - size.height) / 2)
     return CGSize(
       width: min(max(value.width, -limitX), limitX),
       height: min(max(value.height, -limitY), limitY)

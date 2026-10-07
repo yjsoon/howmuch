@@ -1,4 +1,3 @@
-import PDFKit
 import SwiftUI
 
 /// The batch review: the source documents above, the proposals below grouped
@@ -11,14 +10,17 @@ struct IntakeReviewView: View {
   var onClose: (() -> Void)?
 
   @Environment(AppModel.self) private var model
+  @Environment(RootChromeState.self) private var chrome: RootChromeState?
   @Environment(\.dismiss) private var dismiss
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.verticalSizeClass) private var verticalSizeClass
 
   @State private var confirmingDiscard = false
   @State private var isApproving = false
   @State private var pages: [IntakeViewerPage] = []
   @State private var page = 0
   @State private var isViewerExpanded = true
+  @State private var hasSetInitialExpansion = false
   @State private var highlightedID: UUID?
   @State private var scrollRequest: UUID?
   /// Existing rows that Possible duplicates look like, read once per batch.
@@ -46,27 +48,32 @@ struct IntakeReviewView: View {
     }
     .background(Theme.canvas)
     .navigationBarTitleDisplayMode(.inline)
-    .navigationBarBackButtonHidden(true)
+    // A push keeps the system Back and swipe-back; a pane supplies Close.
+    .navigationBarBackButtonHidden(onClose != nil)
     .toolbar {
-      ToolbarItem(placement: .cancellationAction) {
-        Button("Close") {
-          close()
+      if onClose != nil {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Close") {
+            close()
+          }
+          .tint(Theme.accent)
         }
-        .tint(Theme.accent)
       }
       ToolbarItem(placement: .principal) {
         titleView
       }
-      ToolbarItem(placement: .primaryAction) {
-        optionsMenu
+      if hasOptions {
+        ToolbarItem(placement: .primaryAction) {
+          optionsMenu
+        }
       }
     }
     .binaryConfirm(
-      "Discard this batch?",
+      LocalizedStringKey(discardTitle),
       isPresented: $confirmingDiscard,
       confirm: .destructive("Discard"),
       message: {
-        Text("Nothing was saved.")
+        Text(discardMessage)
       }
     ) {
       coordinator.discard(jobID)
@@ -81,7 +88,9 @@ struct IntakeReviewView: View {
             allowsDeletion: false,
             chrome: .sessionEditor,
             onPersist: { updated in
-              coordinator.updateDraft(updated, proposal: reference.id, in: jobID)
+              if let refusal = coordinator.updateDraft(updated, proposal: reference.id, in: jobID, model: model) {
+                model.showSaveMessage(refusal, kind: .failure)
+              }
             }
           )
         }
@@ -111,7 +120,7 @@ struct IntakeReviewView: View {
       }
     }
     .task(id: pagesKey) {
-      loadPages()
+      await loadPages()
     }
     .task(id: neededExistingIDs) {
       await loadExisting()
@@ -147,9 +156,30 @@ struct IntakeReviewView: View {
     return "\(job.title(accountName: accountName(for: job))) · \(IntakeTime.label(for: job.createdAt))"
   }
 
+  /// The menu has something to offer only before the batch is finished.
+  private var hasOptions: Bool {
+    guard let job = coordinator.job(jobID) else {
+      return false
+    }
+    return job.state != .applied && job.state != .discarded
+  }
+
+  /// Saved rows stay in the register, so discarding says it only drops the rest.
+  private var hasAppliedRows: Bool {
+    coordinator.job(jobID)?.proposals.contains(where: \.isApplied) ?? false
+  }
+
+  private var discardTitle: String {
+    hasAppliedRows ? "Discard the rest?" : "Discard this batch?"
+  }
+
+  private var discardMessage: String {
+    hasAppliedRows ? "Saved rows stay in the register." : "Nothing was saved."
+  }
+
   @ViewBuilder
   private var optionsMenu: some View {
-    if let job = coordinator.job(jobID), job.state != .applied, job.state != .discarded {
+    if let job = coordinator.job(jobID), hasOptions {
       Menu {
         if job.state == .proposed || (job.state == .needsYou && job.hint != .statement) {
           Menu {
@@ -171,6 +201,7 @@ struct IntakeReviewView: View {
         Image(systemName: "ellipsis.circle")
           .frame(minWidth: 44, minHeight: 44)
       }
+      .disabled(isApproving)
       .accessibilityLabel("Batch options")
     }
   }
@@ -236,7 +267,7 @@ struct IntakeReviewView: View {
             pages: pages,
             page: $page,
             isExpanded: $isViewerExpanded,
-            height: max(160, proxy.size.height * Self.viewerShare),
+            height: proxy.size.height * Self.viewerShare,
             showsHint: !job.proposals.isEmpty,
             onToggle: {
               animate { isViewerExpanded.toggle() }
@@ -275,9 +306,11 @@ struct IntakeReviewView: View {
             animate { reader.scrollTo(id, anchor: .center) }
             scrollRequest = nil
           }
-        }
-        if job.state == .proposed {
-          actionBar(for: job)
+          .safeAreaInset(edge: .bottom, spacing: 0) {
+            if job.state == .proposed {
+              actionBar(for: job)
+            }
+          }
         }
       }
     }
@@ -315,13 +348,13 @@ struct IntakeReviewView: View {
           .padding(.vertical, 12)
           .background(Theme.accent, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         // This version reads documents only; it does not act on notes yet.
-        Label("Couldn’t apply this note", systemImage: "exclamationmark.circle")
+        Label("Notes aren’t read yet", systemImage: "exclamationmark.circle")
           .font(.footnote)
           .foregroundStyle(Theme.uncategorised)
       }
       .frame(maxWidth: .infinity, alignment: .trailing)
       .accessibilityElement(children: .combine)
-      .accessibilityLabel("Your note: \(note). Couldn’t apply this note")
+      .accessibilityLabel("Your note: \(note). Notes aren’t read yet")
     }
   }
 
@@ -368,7 +401,7 @@ struct IntakeReviewView: View {
   // MARK: Rows
 
   private func row(_ proposal: IntakeProposal, in job: IntakeJob) -> some View {
-    let reviewable = job.state == .proposed
+    let reviewable = job.state == .proposed && !isApproving
     let chips = candidateChips(for: proposal, in: job)
     return IntakeProposalRow(
       proposal: proposal,
@@ -378,8 +411,15 @@ struct IntakeReviewView: View {
       accountCandidates: chips.account,
       categoryCandidates: chips.category,
       onToggle: {
-        let ticked = proposal.appliesOnApproval && !proposal.isIncomplete
-        coordinator.setDecision(ticked ? .rejected : .accepted, proposal: proposal.id, in: job.id)
+        if proposal.isIncomplete {
+          // An incomplete row cannot be ticked; it can only be skipped or not.
+          coordinator.setDecision(
+            proposal.decision == .rejected ? .pending : .rejected, proposal: proposal.id, in: job.id, model: model
+          )
+        } else {
+          let ticked = proposal.appliesOnApproval
+          coordinator.setDecision(ticked ? .rejected : .accepted, proposal: proposal.id, in: job.id, model: model)
+        }
       },
       onOpen: {
         select(proposal)
@@ -391,17 +431,19 @@ struct IntakeReviewView: View {
       },
       onViewExisting: {
         if let row = existingRow(for: proposal) {
-          model.showAccount(row.accountID)
+          chrome?.showAccount(row.accountID)
         }
       },
       onMatchExisting: {
         matchTarget = ProposalRef(id: proposal.id)
       },
       onMakeNew: {
-        coordinator.flipToNew(proposal.id, in: job.id)
+        coordinator.flipToNew(proposal.id, in: job.id, model: model)
       },
       onPickAccount: { accountID in
-        coordinator.setAccount(accountID, proposal: proposal.id, in: job.id)
+        if let refusal = coordinator.setAccount(accountID, proposal: proposal.id, in: job.id, model: model) {
+          model.showSaveMessage(refusal, kind: .failure)
+        }
       },
       onPickAccountForAll: { accountID in
         coordinator.setAccountForAll(accountID, in: job.id, model: model)
@@ -409,7 +451,9 @@ struct IntakeReviewView: View {
       onPickCategory: { categoryID in
         var draft = proposal.draft
         draft.categoryID = categoryID
-        coordinator.updateDraft(draft, proposal: proposal.id, in: job.id)
+        if let refusal = coordinator.updateDraft(draft, proposal: proposal.id, in: job.id, model: model) {
+          model.showSaveMessage(refusal, kind: .failure)
+        }
       }
     )
   }
@@ -493,7 +537,7 @@ struct IntakeReviewView: View {
     return "\(job.state.rawValue)-" + job.sourceFiles.map(\.filename).joined(separator: ",")
   }
 
-  private func loadPages() {
+  private func loadPages() async {
     guard let job = coordinator.job(jobID) else {
       pages = []
       return
@@ -508,7 +552,7 @@ struct IntakeReviewView: View {
       case .image:
         result.append(IntakeViewerPage(id: "\(index)", fileIndex: index, url: url, kind: .image, pdfPage: 0))
       case .pdf:
-        let count = PDFDocument(url: url)?.pageCount ?? 0
+        let count = await IntakeSourceImage.pdfPageCount(url)
         for pdfPage in 0..<count {
           result.append(
             IntakeViewerPage(id: "\(index)-\(pdfPage)", fileIndex: index, url: url, kind: .pdf, pdfPage: pdfPage)
@@ -518,8 +562,18 @@ struct IntakeReviewView: View {
         break
       }
     }
+    guard !Task.isCancelled else {
+      return
+    }
     pages = result
     page = min(page, max(result.count - 1, 0))
+    // In landscape the rows need the room: start with the original collapsed.
+    if !hasSetInitialExpansion {
+      hasSetInitialExpansion = true
+      if verticalSizeClass == .compact {
+        isViewerExpanded = false
+      }
+    }
   }
 
   // MARK: Existing rows
@@ -589,6 +643,7 @@ struct IntakeReviewView: View {
         confirmingDiscard = true
       }
       .frame(minHeight: 44)
+      .disabled(isApproving)
       .tint(Theme.cancellation)
     }
     .padding(.horizontal, 16)
@@ -655,7 +710,7 @@ private struct IntakeWhySheet: View {
             Text("No further detail.")
               .foregroundStyle(.secondary)
           } else {
-            ForEach(proposal.reasons, id: \.self) { reason in
+            ForEach(Array(proposal.reasons.enumerated()), id: \.offset) { _, reason in
               Text(reason)
             }
           }

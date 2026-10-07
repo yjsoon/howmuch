@@ -246,6 +246,10 @@ struct IntakeProposalRow: View {
           Text(money(old))
             .strikethrough()
             .foregroundStyle(.secondary)
+          Image(systemName: "arrow.right")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .accessibilityHidden(true)
         }
         Text(money(signed))
           .foregroundStyle(isAlreadyIn ? Color.secondary : Theme.amountColour(signed))
@@ -288,6 +292,17 @@ struct IntakeProposalRow: View {
       }
     } else if isActionable {
       VStack(alignment: .leading, spacing: 4) {
+        if (proposal.kind == .add || proposal.kind == .possibleDuplicate), proposal.isIncomplete {
+          Button(action: onToggle) {
+            FilterChip(
+              label: proposal.decision == .rejected ? "Include this row again" : "Skip this row",
+              showsChevron: false
+            )
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+        }
         if proposal.kind == .add || proposal.kind == .possibleDuplicate {
           accountControl
           if draft.categoryID == nil {
@@ -320,7 +335,7 @@ struct IntakeProposalRow: View {
 
   private var viewExistingButton: some View {
     Button(action: onViewExisting) {
-      Text(isAlreadyIn ? "View in register" : "View existing")
+      Text("Open account")
         .font(.subheadline.weight(.medium))
         .foregroundStyle(Theme.accent)
         .frame(minHeight: 44, alignment: .leading)
@@ -407,14 +422,11 @@ struct IntakeProposalRow: View {
           .buttonStyle(.plain)
         }
         Menu {
-          ForEach(model.categoryGroups.filter { !$0.deleted && !$0.hidden }) { group in
-            let categories = group.categories.filter { !$0.deleted }
-            if !categories.isEmpty {
-              Menu(group.name) {
-                ForEach(categories) { category in
-                  Button(category.name) {
-                    onPickCategory(category.id)
-                  }
+          ForEach(orderedCategoryGroups) { group in
+            Menu(group.name) {
+              ForEach(group.categories.filter { !$0.deleted }) { category in
+                Button(category.name) {
+                  onPickCategory(category.id)
                 }
               }
             }
@@ -427,6 +439,15 @@ struct IntakeProposalRow: View {
         .accessibilityLabel("Choose category")
       }
     }
+  }
+
+  /// The category picker's ordering: everyday groups first, bookkeeping and
+  /// hidden groups demoted to the bottom.
+  private var orderedCategoryGroups: [CategoryGroup] {
+    let live = model.categoryGroups.filter { group in
+      !group.deleted && group.categories.contains { !$0.deleted }
+    }
+    return live.filter { !$0.isQuiet && !$0.hidden } + live.filter { $0.isQuiet || $0.hidden }
   }
 
   // MARK: Text
@@ -492,6 +513,9 @@ struct IntakeProposalRow: View {
     if proposal.kind == .edit || proposal.kind == .alreadyIn {
       return proposal.targetTransactionID == nil ? "The original transaction is gone" : nil
     }
+    if proposal.isIncomplete, proposal.decision == .rejected {
+      return "Skipped. Nothing will be saved for this row."
+    }
     if draft.amountMagnitudeMilli <= 0 {
       return "Couldn’t read an amount. Tap to add one. Approve skips it until then."
     }
@@ -513,7 +537,7 @@ struct IntakeProposalRow: View {
     var label = AttributedString("\(change.label) ")
     label.foregroundColor = Color.secondary
     var old = AttributedString(change.old)
-    old.strikethroughStyle = .single
+    old.strikethroughStyle = Text.LineStyle.single
     old.foregroundColor = Color.secondary
     var arrow = AttributedString(" → ")
     arrow.foregroundColor = Color.secondary
@@ -561,23 +585,38 @@ struct IntakeProposalRow: View {
     } else {
       parts.append("no amount")
     }
-    if proposal.kind == .edit {
+    switch proposal.kind {
+    case .edit:
       for field in proposal.changedFields {
         switch field {
         case .amount:
           if let old = (existing ?? proposal.targetSnapshot)?.amount {
-            parts.append("was \(spokenMoney(old))")
+            parts.append("amount was \(spokenMoney(old)), now \(spokenMoney(draft.signedMilliunits))")
           }
         case .unknown:
           break
         default:
           if let change = changes.first(where: { $0.label == field.label }) {
-            parts.append("\(change.label.lowercased()) was \(change.old)")
+            parts.append("\(change.label.lowercased()) was \(change.old), now \(change.new)")
           }
         }
       }
-    } else if proposal.kind == .possibleDuplicate, let existing {
-      parts.append("looks like \(existingLine(existing, includeAmount: true)) already in \(existing.accountName)")
+      if let row = existing ?? proposal.targetSnapshot {
+        let category = model.categoryName(forID: row.categoryID) ?? row.categoryName ?? "Uncategorised"
+        parts.append("Existing: \(shortDate(iso: row.date)), \(category), \(row.accountName)")
+      }
+    case .add:
+      parts.append("\(shortDate(draft.date)), \(accountName)")
+    case .possibleDuplicate:
+      parts.append("\(shortDate(draft.date)), \(accountName)")
+      if let existing {
+        parts.append("looks like \(existingLine(existing, includeAmount: true)) already in \(existing.accountName)")
+      }
+    case .alreadyIn:
+      parts.append(alreadyInText)
+    }
+    if let reconciled = proposal.reasons.first(where: { $0.hasPrefix("Reconciled") }) {
+      parts.append(reconciled)
     }
     if let message = problem {
       parts.append(message)

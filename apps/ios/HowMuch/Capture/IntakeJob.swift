@@ -142,6 +142,8 @@ struct IntakeProposal: Codable, Equatable, Identifiable, Sendable {
   /// Set when the owner turned a New row into a Fix of one of its candidates:
   /// the kind to go back to if they undo it.
   var flippedFrom: IntakeProposalKind?
+  /// The decision the row had before it was flipped, restored on undo.
+  var preFlipDecision: IntakeDecision?
 
   init(
     id: UUID = UUID(),
@@ -158,7 +160,8 @@ struct IntakeProposal: Codable, Equatable, Identifiable, Sendable {
     sourceFileIndex: Int? = nil,
     isApplied: Bool = false,
     issue: String? = nil,
-    flippedFrom: IntakeProposalKind? = nil
+    flippedFrom: IntakeProposalKind? = nil,
+    preFlipDecision: IntakeDecision? = nil
   ) {
     self.id = id
     self.kind = kind
@@ -175,11 +178,12 @@ struct IntakeProposal: Codable, Equatable, Identifiable, Sendable {
     self.isApplied = isApplied
     self.issue = issue
     self.flippedFrom = flippedFrom
+    self.preFlipDecision = preFlipDecision
   }
 
   private enum CodingKeys: String, CodingKey {
     case id, kind, confidence, draft, proposedDraft, targetTransactionID, targetSnapshot
-    case changedFields, candidateIDs, reasons, decision, sourceFileIndex, isApplied, issue, flippedFrom
+    case changedFields, candidateIDs, reasons, decision, sourceFileIndex, isApplied, issue, flippedFrom, preFlipDecision
   }
 
   /// Tolerant: a draft this build cannot decode (the draft type grew a field,
@@ -202,6 +206,7 @@ struct IntakeProposal: Codable, Equatable, Identifiable, Sendable {
     isApplied = try container.decodeIfPresent(Bool.self, forKey: .isApplied) ?? false
     issue = try container.decodeIfPresent(String.self, forKey: .issue)
     flippedFrom = try? container.decodeIfPresent(IntakeProposalKind.self, forKey: .flippedFrom)
+    preFlipDecision = try? container.decodeIfPresent(IntakeDecision.self, forKey: .preFlipDecision)
     if decodedDraft == nil {
       kind = .possibleDuplicate
       decision = .rejected

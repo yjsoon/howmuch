@@ -225,7 +225,7 @@ struct AccountsView: View {
       InboxListView()
     case .intakeBatch(let id):
       // Close pops the push on a phone and returns to the Inbox list in the split layout.
-      IntakeReviewView(jobID: id, onClose: { pane = usesSplit ? .intake : nil })
+      IntakeReviewView(jobID: id, onClose: { self.pane = usesSplit ? .intake : nil })
     case .scheduled:
       ScheduledTransactionsView()
     case .all:

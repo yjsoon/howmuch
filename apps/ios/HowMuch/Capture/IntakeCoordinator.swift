@@ -402,7 +402,7 @@ final class IntakeCoordinator {
   /// A job matched while offline is matched again once the register can be
   /// searched in full, so long as the owner has not touched any row.
   private func rematchAfterOffline(_ id: UUID, model: AppModel) async {
-    guard let job = self.job(id), job.state == .proposed, job.duplicateCheckLimited,
+    guard let job = self.job(id), job.state == .proposed, job.duplicateCheckLimited, !approving.contains(id),
           !job.extractions.isEmpty,
           job.proposals.allSatisfy(\.isUntouched) else {
       return
@@ -415,7 +415,7 @@ final class IntakeCoordinator {
       model: model
     )
     guard !result.limited, var current = self.job(id), current.state == .proposed,
-          current.duplicateCheckLimited, current.proposals.allSatisfy(\.isUntouched) else {
+          current.duplicateCheckLimited, !approving.contains(id), current.proposals.allSatisfy(\.isUntouched) else {
       return
     }
     current.proposals = result.proposals
@@ -502,12 +502,13 @@ final class IntakeCoordinator {
           plans[proposal.id] = .skip("Couldn’t find the original transaction")
           continue
         }
-        let wanted = proposal.changedFields
-        let fields = IntakeMatcher.differences(
-          draft: proposal.draft,
-          parsedCategory: wanted.contains(.category),
-          row: IntakeCandidateRow(transaction: live)
-        ).filter { wanted.contains($0) }
+        let fields = IntakeMatcher.pendingFixFields(
+          wanted: proposal.changedFields, draft: proposal.draft, live: live
+        )
+        if let refusal = Self.fixRefusal(fields: fields, live: live) {
+          plans[proposal.id] = .skip(refusal)
+          continue
+        }
         let plan: Plan = fields.isEmpty
           ? .unchanged
           : .apply(Self.editDraft(fields: fields, from: proposal, base: live))
@@ -523,6 +524,12 @@ final class IntakeCoordinator {
 
     // The job may have been discarded while the live rows were read.
     guard var job = self.job(id), job.state == .proposed else {
+      return false
+    }
+    // Something else changed the rows (a new match, a changed account) while
+    // the live rows were read: the plans no longer describe the batch.
+    guard job.proposals == start.proposals else {
+      model.showSaveMessage("The batch changed. Review it and approve again.", kind: .failure)
       return false
     }
     var drafts: [TransactionDraft] = []
@@ -556,7 +563,7 @@ final class IntakeCoordinator {
       case .apply:
         job.proposals[index].isApplied = true
         let applied = job.proposals[index]
-        if applied.draft != applied.proposedDraft {
+        if applied.draft != applied.proposedDraft || applied.flippedFrom != nil {
           job.proposals[index].decision = .editedThenAccepted
         } else if !applied.decision.isAccepted {
           job.proposals[index].decision = .accepted
@@ -676,58 +683,103 @@ final class IntakeCoordinator {
 
   // MARK: Review edits
 
+  /// What decides whether a New row must be matched again after an edit.
+  private static func matchKey(_ draft: TransactionDraft) -> String {
+    "\(draft.signedMilliunits)|\(draft.date.isoDateString)|\(draft.accountID)"
+  }
+
   /// Ticks or unticks one row. Only a job waiting for review changes, and a
   /// row already applied never does.
-  func setDecision(_ decision: IntakeDecision, proposal proposalID: UUID, in id: UUID) {
-    mutateProposal(proposalID, in: id) { proposal in
+  func setDecision(_ decision: IntakeDecision, proposal proposalID: UUID, in id: UUID, model: AppModel) {
+    mutateProposal(proposalID, in: id, model: model) { proposal in
       proposal.decision = decision
     }
   }
 
-  /// Replaces what a row will save with the reviewer's edit. A Fix recomputes
-  /// which fields differ from the row it targets, so it never overwrites a
-  /// field the edit left alone.
-  func updateDraft(_ draft: TransactionDraft, proposal proposalID: UUID, in id: UUID) {
-    mutateProposal(proposalID, in: id) { proposal in
-      proposal.draft = draft
-      proposal.issue = nil
-      if proposal.kind == .edit, let snapshot = proposal.targetSnapshot {
-        proposal.changedFields = IntakeMatcher.differences(
-          draft: draft,
-          parsedCategory: draft.categoryID != nil,
-          row: IntakeCandidateRow(transaction: snapshot)
+  /// Replaces what a row will save with the reviewer's edit. Returns why the
+  /// edit was refused, or nil. A Fix recomputes which fields differ from the
+  /// row it targets and refuses account, direction or split changes, and
+  /// amount or date changes on a reconciled row. A New row whose amount,
+  /// direction, date or account changed is matched again.
+  @discardableResult
+  func updateDraft(_ draft: TransactionDraft, proposal proposalID: UUID, in id: UUID, model: AppModel) -> String? {
+    guard let job = self.job(id), job.state == .proposed, !approving.contains(id),
+          let current = job.proposals.first(where: { $0.id == proposalID }), !current.isApplied else {
+      return nil
+    }
+    var fields: [IntakeField]?
+    if current.kind == .edit {
+      if draft.accountID != current.draft.accountID || draft.direction != current.draft.direction
+        || draft.isSplit || draft.transferAccountID != current.draft.transferAccountID {
+        return Self.fixScopeMessage
+      }
+      if let snapshot = current.targetSnapshot {
+        let changed = IntakeMatcher.editedDifferences(
+          draft: draft, proposed: current.proposedDraft, parsedCategory: draft.categoryID != nil, live: snapshot
         )
+        if let refusal = Self.fixRefusal(fields: changed, live: snapshot) {
+          mutateProposal(proposalID, in: id, model: model) { $0.issue = refusal }
+          return refusal
+        }
+        fields = changed
       }
     }
+    let rematch = (current.kind == .add || current.kind == .possibleDuplicate)
+      && Self.matchKey(draft) != Self.matchKey(current.draft)
+    mutateProposal(proposalID, in: id, model: model) { proposal in
+      proposal.draft = draft
+      proposal.issue = nil
+      if let fields {
+        proposal.changedFields = fields
+      }
+    }
+    if rematch {
+      Task { await rematchRow(proposalID, in: id, model: model) }
+    }
+    return nil
   }
 
   /// Sets the account on one row, clearing a self-transfer as the share sheet does.
-  func setAccount(_ accountID: String, proposal proposalID: UUID, in id: UUID) {
-    mutateProposal(proposalID, in: id) { proposal in
-      SlipAccountPick.apply(accountID, to: &proposal.draft)
+  @discardableResult
+  func setAccount(_ accountID: String, proposal proposalID: UUID, in id: UUID, model: AppModel) -> String? {
+    guard var draft = job(id)?.proposals.first(where: { $0.id == proposalID })?.draft else {
+      return nil
     }
+    SlipAccountPick.apply(accountID, to: &draft)
+    return updateDraft(draft, proposal: proposalID, in: id, model: model)
   }
 
   /// Sets the account on every row of a job waiting for review that would
   /// create a transaction. Fixes and Already in rows keep the account of the
-  /// row they target.
+  /// row they target. Rows whose account changed are matched again.
   func setAccountForAll(_ accountID: String, in id: UUID, model: AppModel) {
     guard model.openAccounts.contains(where: { $0.id == accountID }),
-          var job = self.job(id), job.state == .proposed else {
+          var job = self.job(id), job.state == .proposed, !approving.contains(id) else {
       return
     }
-    var changed = false
+    var changedIDs: [UUID] = []
     for index in job.proposals.indices {
       let proposal = job.proposals[index]
       guard !proposal.isApplied, proposal.kind == .add || proposal.kind == .possibleDuplicate else {
         continue
       }
       SlipAccountPick.apply(accountID, to: &job.proposals[index].draft)
-      changed = true
+      if job.proposals[index].draft != proposal.draft {
+        changedIDs.append(proposal.id)
+      }
     }
-    if changed {
-      job.accountID = accountID
-      save(job)
+    guard !changedIDs.isEmpty else {
+      return
+    }
+    job.accountID = accountID
+    guard save(job) else {
+      model.showSaveMessage("Couldn’t save this change. Try again.", kind: .failure)
+      return
+    }
+    Task {
+      for proposalID in changedIDs {
+        await rematchRow(proposalID, in: id, model: model)
+      }
     }
   }
 
@@ -740,18 +792,20 @@ final class IntakeCoordinator {
       return false
     }
     var flipped = false
-    mutateProposal(proposalID, in: id) { proposal in
+    mutateProposal(proposalID, in: id, model: model) { proposal in
       guard proposal.kind == .add || proposal.kind == .possibleDuplicate, proposal.candidateIDs.contains(candidateID) else {
         return
       }
       proposal.flippedFrom = proposal.kind
+      proposal.preFlipDecision = proposal.decision
       proposal.kind = .edit
       proposal.targetTransactionID = candidateID
       proposal.targetSnapshot = live
-      proposal.changedFields = IntakeMatcher.differences(
+      proposal.changedFields = IntakeMatcher.editedDifferences(
         draft: proposal.draft,
+        proposed: proposal.proposedDraft,
         parsedCategory: proposal.draft.categoryID != nil,
-        row: IntakeCandidateRow(transaction: live)
+        live: live
       )
       proposal.reasons.removeAll { $0.hasPrefix("Reconciled") }
       if live.cleared == .reconciled {
@@ -764,10 +818,9 @@ final class IntakeCoordinator {
     return flipped
   }
 
-  /// Undoes `flipToFix`: back to the kind the row had, unticked unless it was
-  /// a confident New.
-  func flipToNew(_ proposalID: UUID, in id: UUID) {
-    mutateProposal(proposalID, in: id) { proposal in
+  /// Undoes `flipToFix`: back to the kind and the tick the row had before.
+  func flipToNew(_ proposalID: UUID, in id: UUID, model: AppModel) {
+    mutateProposal(proposalID, in: id, model: model) { proposal in
       guard proposal.kind == .edit, let original = proposal.flippedFrom else {
         return
       }
@@ -778,22 +831,113 @@ final class IntakeCoordinator {
       proposal.changedFields = []
       proposal.reasons.removeAll { $0.hasPrefix("Reconciled") }
       proposal.issue = nil
-      proposal.decision = .pending
+      proposal.decision = proposal.preFlipDecision ?? .pending
+      proposal.preFlipDecision = nil
     }
   }
 
-  private func mutateProposal(_ proposalID: UUID, in id: UUID, _ change: (inout IntakeProposal) -> Void) {
+  /// Matches one New or Possible duplicate row again after the reviewer
+  /// changed its amount, direction, date or account. The reviewer's draft is
+  /// kept; the kind, candidates and reasons follow the register. Rows the
+  /// rest of the batch already targets are not offered. Unless it is still a
+  /// confident New, the row is unticked so it is not approved on a stale tick.
+  private func rematchRow(_ proposalID: UUID, in id: UUID, model: AppModel) async {
+    guard let job = self.job(id), job.state == .proposed, !approving.contains(id),
+          let index = job.proposals.firstIndex(where: { $0.id == proposalID }) else {
+      return
+    }
+    let start = job.proposals[index]
+    guard start.kind == .add || start.kind == .possibleDuplicate, !start.isApplied,
+          start.draft.amountMagnitudeMilli > 0 else {
+      return
+    }
+    let matcher = IntakeMatcher()
+    var set = IntakeCandidateSet(rows: [], transactions: [:], isComplete: true)
+    if job.hint != .new {
+      let calendar = Calendar.current
+      let from = calendar.date(byAdding: .day, value: -matcher.dayWindow, to: start.draft.date) ?? start.draft.date
+      let to = calendar.date(byAdding: .day, value: matcher.dayWindow, to: start.draft.date) ?? start.draft.date
+      set = await model.intakeCandidates(accountIDs: nil, from: from, to: to)
+    }
+    guard let latest = self.job(id), latest.state == .proposed, !approving.contains(id),
+          let current = latest.proposals.first(where: { $0.id == proposalID }),
+          current.draft == start.draft, !current.isApplied else {
+      // Edited again meanwhile: that edit matches the row itself.
+      return
+    }
+    let claimed = Set(latest.proposals.filter { $0.id != proposalID }.compactMap(\.targetTransactionID))
+    var read: SlipMappedDraft
+    if latest.extractions.count == latest.proposals.count,
+       let position = latest.proposals.firstIndex(where: { $0.id == proposalID }) {
+      read = latest.extractions[position]
+      read.draft = current.draft
+    } else {
+      read = SlipMappedDraft(
+        draft: current.draft,
+        parsedAmount: true,
+        parsedDate: true,
+        parsedAccount: true,
+        parsedCategory: current.draft.categoryID != nil,
+        parsedDirection: true,
+        accountCandidates: [],
+        categoryCandidates: []
+      )
+    }
+    let result = matcher.match(
+      [read],
+      openAccountIDs: Set(model.openAccounts.map(\.id)),
+      candidates: set.rows.filter { !claimed.contains($0.id) },
+      hint: latest.hint,
+      duplicateCheckLimited: !set.isComplete
+    )
+    guard let match = result.first else {
+      return
+    }
+    mutateProposal(proposalID, in: id, model: model) { proposal in
+      proposal.kind = match.kind
+      proposal.confidence = match.confidence
+      proposal.targetTransactionID = match.targetTransactionID
+      proposal.targetSnapshot = match.targetTransactionID.flatMap { set.transactions[$0] }
+      proposal.changedFields = match.changedFields
+      proposal.candidateIDs = match.candidateIDs
+      proposal.reasons = match.reasons
+      proposal.flippedFrom = nil
+      proposal.preFlipDecision = nil
+      proposal.issue = nil
+      switch match.kind {
+      case .add, .possibleDuplicate, .alreadyIn:
+        proposal.decision = .pending
+      case .edit:
+        proposal.decision = .rejected
+      }
+    }
+  }
+
+  /// Applies `change` to one row and saves. A refused or failed change leaves
+  /// the row as it was; a failed save tells the owner.
+  @discardableResult
+  private func mutateProposal(
+    _ proposalID: UUID,
+    in id: UUID,
+    model: AppModel,
+    _ change: (inout IntakeProposal) -> Void
+  ) -> Bool {
     guard var job = self.job(id), job.state == .proposed,
           !approving.contains(id),
           let index = job.proposals.firstIndex(where: { $0.id == proposalID }),
           !job.proposals[index].isApplied else {
-      return
+      return false
     }
     let before = job.proposals[index]
     change(&job.proposals[index])
-    if job.proposals[index] != before {
-      save(job)
+    guard job.proposals[index] != before else {
+      return true
     }
+    guard save(job) else {
+      model.showSaveMessage("Couldn’t save this change. Try again.", kind: .failure)
+      return false
+    }
+    return true
   }
 
   func sourceURL(_ file: InboxSourceFile, jobID: UUID) -> URL {
@@ -826,12 +970,37 @@ final class IntakeCoordinator {
         draft.payeeName = proposal.draft.payeeName
       case .category:
         draft.categoryID = proposal.draft.categoryID
-      case .amount, .date, .memo, .unknown:
+      case .amount:
+        draft.direction = proposal.draft.direction
+        draft.amountMagnitudeMilli = proposal.draft.amountMagnitudeMilli
+      case .date:
+        draft.date = proposal.draft.date
+      case .memo:
+        draft.memo = proposal.draft.memo
+      case .unknown:
         break
       }
     }
     draft.approved = base.approved
     return draft
+  }
+
+  static let fixScopeMessage = "Only payee, category, amount, date and memo can be fixed here"
+  static let reconciledFixMessage = "Reconciled · amount and date can’t be changed here"
+
+  /// Why a Fix with these fields cannot be written to this row, if it cannot:
+  /// amount and date on a reconciled row, or on a split or transfer.
+  static func fixRefusal(fields: [IntakeField], live: Transaction) -> String? {
+    guard fields.contains(.amount) || fields.contains(.date) else {
+      return nil
+    }
+    if live.cleared == .reconciled {
+      return reconciledFixMessage
+    }
+    if live.isSplit || live.transferAccountID != nil {
+      return "Splits and transfers can’t be changed here"
+    }
+    return nil
   }
 
   static func appliedSummary(added: Int, fixed: Int) -> String {
