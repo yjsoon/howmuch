@@ -269,8 +269,13 @@ struct IntakeMatcher: Sendable {
   ) -> [IntakeField] {
     var fields: [IntakeField] = []
     let readTokens = PayeeNames.tokens(draft.payeeName)
-    if !row.isTransfer, draft.transferAccountID == nil,
-       !readTokens.isEmpty, readTokens != PayeeNames.tokens(row.payeeName) {
+    let existingTokens = PayeeNames.tokens(row.payeeName)
+    // A raw bank descriptor that contains every word of the saved payee is the
+    // same payee ("KOPITIAM AMK" for "Kopitiam"). The test is on whole words,
+    // so "GrabFood" does not contain "Grab" and stays a different payee.
+    let samePayee = readTokens == existingTokens
+      || (!existingTokens.isEmpty && Set(existingTokens).isSubset(of: Set(readTokens)))
+    if !row.isTransfer, draft.transferAccountID == nil, !readTokens.isEmpty, !samePayee {
       fields.append(.payee)
     }
     if parsedCategory, let category = draft.categoryID,

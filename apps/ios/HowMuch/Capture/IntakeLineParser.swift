@@ -170,10 +170,40 @@ enum IntakeLineParser {
 
   /// Trims, drops clock times, and collapses runs of spaces.
   private static func clean(_ raw: String) -> String {
-    var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    var text = foldLookalikes(raw.trimmingCharacters(in: .whitespacesAndNewlines))
     text = time.stringByReplacingMatches(in: text, options: [], range: range(text), withTemplate: "")
     text = text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
     return text.trimmingCharacters(in: CharacterSet(charactersIn: " ,|"))
+  }
+
+  /// Latin letters that OCR returns as Cyrillic or Greek look-alikes.
+  private static let lookalikes: [Character: Character] = [
+    "\u{0410}": "A", "\u{0412}": "B", "\u{0421}": "C", "\u{0415}": "E", "\u{041D}": "H", "\u{041A}": "K",
+    "\u{041C}": "M", "\u{041E}": "O", "\u{0420}": "P", "\u{0422}": "T", "\u{0425}": "X", "\u{0423}": "Y",
+    "\u{0430}": "a", "\u{0441}": "c", "\u{0435}": "e", "\u{043E}": "o", "\u{0440}": "p", "\u{0445}": "x",
+    "\u{0443}": "y", "\u{0456}": "i", "\u{0455}": "s", "\u{0458}": "j",
+    "\u{0391}": "A", "\u{0392}": "B", "\u{0395}": "E", "\u{0396}": "Z", "\u{0397}": "H", "\u{0399}": "I",
+    "\u{039A}": "K", "\u{039C}": "M", "\u{039D}": "N", "\u{039F}": "O", "\u{03A1}": "P", "\u{03A4}": "T",
+    "\u{03A5}": "Y", "\u{03A7}": "X", "\u{03BF}": "o", "\u{03BD}": "v",
+  ]
+
+  /// Folds look-alike Cyrillic and Greek letters to ASCII, but only in a line
+  /// that is mostly Latin. A line with as many Cyrillic or Greek letters as
+  /// Latin ones is real text in that script and is left as read.
+  private static func foldLookalikes(_ text: String) -> String {
+    var latin = 0
+    var other = 0
+    for scalar in text.unicodeScalars where scalar.properties.isAlphabetic {
+      if scalar.isASCII {
+        latin += 1
+      } else if (0x0370...0x03FF).contains(scalar.value) || (0x0400...0x04FF).contains(scalar.value) {
+        other += 1
+      }
+    }
+    guard other > 0, latin > other else {
+      return text
+    }
+    return String(text.map { lookalikes[$0] ?? $0 })
   }
 
   private static func hasWords(_ text: String) -> Bool {
