@@ -303,12 +303,25 @@ final class IntakeNotifier {
     }
   }
 
+  /// Every post goes through here. A delivery that was still waiting when the
+  /// owner signed out never posts, and one that lands as they sign out is taken back.
   private func add(_ content: UNMutableNotificationContent, identifier: String) async {
+    guard Self.isSignedIn else {
+      return
+    }
     do {
       try await center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
     } catch {
       Self.logger.error("Couldn't post notification: \(error.localizedDescription, privacy: .public)")
     }
+    if !Self.isSignedIn {
+      center.removeDeliveredNotifications(withIdentifiers: [identifier])
+      center.removePendingNotificationRequests(withIdentifiers: [identifier])
+    }
+  }
+
+  private static var isSignedIn: Bool {
+    IntakeBackgroundRefresh.shared.model?.settings.isAuthenticated == true
   }
 
   // MARK: Responses
