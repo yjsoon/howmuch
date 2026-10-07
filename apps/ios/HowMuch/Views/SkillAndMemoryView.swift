@@ -136,7 +136,7 @@ struct SkillAndMemoryView: View {
       isPresented: $confirmingClear,
       confirm: .destructive("Clear"),
       message: {
-        Text("Deletes every learned rule. Your instructions stay. Saved transactions are not changed.")
+        Text("Deletes every learned rule and dismissed suggestion. Your instructions stay. Saved transactions are not changed.")
       }
     ) {
       if store.clearMemory() {
@@ -487,7 +487,7 @@ struct IntakeRuleEditorView: View {
       isPresented: $confirmingDelete,
       confirm: .destructive("Delete"),
       message: {
-        Text("Future documents won’t use it.")
+        Text("Pending and future documents won’t use it.")
       }
     ) {
       // Close first; the rule goes once the screen has gone, so it never shows a rule that is not there.

@@ -10,6 +10,7 @@ struct SkillFileEditorView: View {
   // them yet, so they are not shown.
   @State private var window: Int
   @State private var notes: String
+  @State private var confirmingDiscard = false
 
   /// The example from docs/plans/share-intake.md section 8.
   static let exampleNotes = """
@@ -65,7 +66,11 @@ struct SkillFileEditorView: View {
     .toolbar {
       ToolbarItem(placement: .cancellationAction) {
         Button("Cancel") {
-          dismiss()
+          if isDirty {
+            confirmingDiscard = true
+          } else {
+            dismiss()
+          }
         }
         .tint(Theme.accent)
       }
@@ -76,6 +81,9 @@ struct SkillFileEditorView: View {
         .disabled(isOverLimit)
         .tint(Theme.accent)
       }
+    }
+    .binaryConfirm("Discard changes?", isPresented: $confirmingDiscard, confirm: .destructive("Discard")) {
+      dismiss()
     }
   }
 
@@ -145,6 +153,7 @@ struct AccountSkillEditorView: View {
 
   @State private var notes: String
   @State private var overridesWindow: Bool
+  @State private var confirmingDiscard = false
   @State private var window: Int
 
   init(accountID: String) {
@@ -214,7 +223,11 @@ struct AccountSkillEditorView: View {
     .toolbar {
       ToolbarItem(placement: .cancellationAction) {
         Button("Cancel") {
-          dismiss()
+          if isDirty {
+            confirmingDiscard = true
+          } else {
+            dismiss()
+          }
         }
         .tint(Theme.accent)
       }
@@ -225,6 +238,9 @@ struct AccountSkillEditorView: View {
         .disabled(isOverLimit)
         .tint(Theme.accent)
       }
+    }
+    .binaryConfirm("Discard changes?", isPresented: $confirmingDiscard, confirm: .destructive("Discard")) {
+      dismiss()
     }
   }
 
