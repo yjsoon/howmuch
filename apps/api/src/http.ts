@@ -701,6 +701,30 @@ async function handleNative(
   const method = request.method.toUpperCase();
   const planId = url.searchParams.get("plan_id") ?? defaultPlanId;
 
+  if (segments[1] === "plans" && segments[3] === "settings" && segments.length === 4 && method === "PATCH") {
+    const targetPlanId = segments[2];
+    const denied = authorizePlan(principal, targetPlanId, defaultPlanId, method)
+      ?? authorizePlanAdministration(principal, targetPlanId);
+    if (denied) return denied;
+    const body = await readJson(request);
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new ValidationError("Request body must be a JSON object");
+    }
+    const currencyFormat = body.currency_format === undefined ? undefined : parseSeedCurrencyFormat(body.currency_format);
+    const dateFormat = body.date_format === undefined ? undefined : parseSeedDateFormat(body.date_format);
+    if (currencyFormat === null || dateFormat === null) {
+      throw new ValidationError("currency_format or date_format is not valid");
+    }
+    if (currencyFormat === undefined && dateFormat === undefined) {
+      throw new ValidationError("Provide currency_format, date_format or both");
+    }
+    await repo.updatePlanFormats(targetPlanId, {
+      ...(currencyFormat ? { currency_format: currencyFormat } : {}),
+      ...(dateFormat ? { date_format: dateFormat } : {}),
+    });
+    return json({ data: { settings: await repo.getSettings(targetPlanId) } });
+  }
+
   // Suggestions only: nothing is written. Cookie sessions still pass the
   // global same-origin check for POSTs, and bearer clients (iOS) may call it.
   if (segments[1] === "tools" && segments[2] === "categorise" && segments.length === 3 && method === "POST") {
@@ -1039,6 +1063,9 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
         // ledger data once it has passed, so an expired cookie cannot show the
         // previous user's plan to whoever opens the browser next (#175, #177).
         session_expires_at: principal?.kind === "session" ? principal.sessionExpiresAt ?? null : null,
+        // Plan id to role, for session principals only. Lets the web client show
+        // owner-only controls; the server still enforces the role on every write.
+        ...(principal?.kind === "session" ? { roles: principal.roles } : {}),
       },
     });
   }
@@ -1145,6 +1172,7 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
     if (!created) {
       return authError(409, "setup_complete", "Setup has already completed");
     }
+    await pruneAuthRows(store);
     return sessionResponse({ data: { user: { id: userId, username }, session_expires_at: session.expiresAt } }, session.token, session.expiresAt);
   }
 
@@ -1172,11 +1200,70 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
     }
 
     const session = newSession();
-    await store.createSession(credential.user_id, session);
+    // Conditional on the hash just verified: a password change that committed
+    // while scrypt ran must not leave this login with a live session.
+    if (!await store.createSession(credential.user_id, session, credential.hash_hex)) {
+      return authError(401, "invalid_credentials", "Invalid username or password");
+    }
+    await pruneAuthRows(store);
     const user = { id: credential.user_id, username: credential.username };
     return browserLogin
       ? sessionResponse({ data: { user, session_expires_at: session.expiresAt } }, session.token, session.expiresAt)
       : authJson({ data: { token: session.token, expires_at: session.expiresAt, user } });
+  }
+
+  if (path === "/api/auth/password" && method === "POST") {
+    const principal = await authenticate(request, store, config.apiToken);
+    // Only a signed-in person may change a password. The static bootstrap token
+    // and personal API tokens are machine credentials and never qualify.
+    if (!principal || principal.kind !== "session") {
+      return authError(401, "not_authorized", "A signed-in account is required");
+    }
+    if (principal.transport === "cookie" && !sameOrigin(request, url)) {
+      return authError(403, "forbidden", "CSRF validation failed");
+    }
+    const body = await readJson(request);
+    if (!body || typeof body !== "object" || Array.isArray(body)
+      || typeof body.current_password !== "string" || !validPassword(body.new_password)) {
+      return authError(400, "bad_request", "A current password and a new password of at least 15 characters are required");
+    }
+    // Same byte ceiling as sign-in, checked before any key derivation.
+    if (Buffer.byteLength(body.current_password, "utf8") > 256) {
+      return authError(400, "bad_request", "The current password is too long");
+    }
+    if (body.new_password === body.current_password) {
+      return authError(400, "bad_request", "The new password must differ from the current one");
+    }
+    // Its own counter, keyed on the account rather than the username, so
+    // anonymous failed sign-ins cannot lock the owner out of changing their
+    // password, while guessing through this route stays at ten per window.
+    // (The table's CHECK allows only 'username' and 'ip' scopes; the prefix
+    // keeps this key apart from any sign-in key.)
+    const windowStart = Math.floor(Date.now() / 1_000 / 900) * 900;
+    if (await store.rateAttempt("username", sha256(`pwchange:${principal.id}`), windowStart) > 10) {
+      return authError(429, "rate_limited", "Too many password attempts", { "retry-after": "900" });
+    }
+    const credential = await store.credential(principal.username);
+    if (!credential || credential.user_id !== principal.id || !await verifyPassword(body.current_password, credential)) {
+      return authError(401, "invalid_credentials", "Current password is incorrect");
+    }
+    // Every session of this user is revoked and the caller gets a fresh one in
+    // the same step, so a token that leaked before the change dies with it.
+    const session = newSession();
+    // Conditional on the hash just verified: a concurrent change that committed
+    // first wins, and this request changes nothing and issues no session.
+    if (!await store.replaceCredential(
+      principal.id,
+      await passwordCredential(body.new_password),
+      session,
+      Math.floor(Date.now() / 1_000),
+      credential.hash_hex,
+    )) {
+      return authError(401, "invalid_credentials", "Current password is incorrect");
+    }
+    return principal.transport === "cookie"
+      ? sessionResponse({ data: { ok: true, session_expires_at: session.expiresAt } }, session.token, session.expiresAt)
+      : authJson({ data: { ok: true, token: session.token, expires_at: session.expiresAt } });
   }
 
   if (path === "/api/auth/logout" && method === "POST") {
@@ -1195,6 +1282,19 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
   }
 
   return authError(404, "not_found", "Route not found");
+}
+
+/**
+ * Housekeeping on sign-in: expired sessions and finished rate-limit windows
+ * are otherwise never deleted. Best effort and bounded, so a failure here must
+ * never fail the sign-in that triggered it.
+ */
+async function pruneAuthRows(store: AuthStore): Promise<void> {
+  try {
+    await store.pruneExpired(Math.floor(Date.now() / 1_000));
+  } catch (error) {
+    console.error("Could not prune expired auth rows", error);
+  }
 }
 
 async function authenticate(request: Request, store: AuthStore, apiToken?: string): Promise<Principal | null> {
