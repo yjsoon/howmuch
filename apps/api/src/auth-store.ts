@@ -55,13 +55,17 @@ export interface AuthStore {
    * Replaces the user's password credential, revokes every session of that
    * user (the caller's included) and starts `session` in its place, in one
    * atomic step. Personal API tokens are separate credentials and are left alone.
+   * It applies only while the stored password hash is still `verifiedHashHex`,
+   * the one the caller just checked; when another change committed first it
+   * changes nothing (no revocation, no session) and returns false.
    */
   replaceCredential(
     userId: string,
     credential: Omit<StoredCredential, "user_id" | "username">,
     session: Pick<NewSession, "id" | "tokenHash" | "expiresAt">,
     now: number,
-  ): Promise<void>;
+    verifiedHashHex: string,
+  ): Promise<boolean>;
   /** Deletes a bounded batch of expired sessions and long-finished rate-limit windows. Never touches live rows. */
   pruneExpired(now: number): Promise<void>;
 }
@@ -85,18 +89,23 @@ const rateLimitCutoff = (now: number) => now - RATE_LIMIT_RETENTION_SECONDS - RA
 const replaceCredentialSql = (p: (n: number) => string) =>
   `UPDATE password_credentials
    SET kdf=${p(1)},kdf_version=${p(2)},cost_n=${p(3)},block_size=${p(4)},parallelization=${p(5)},salt_hex=${p(6)},hash_hex=${p(7)},updated_at=unixepoch()
-   WHERE user_id=${p(8)}`;
+   WHERE user_id=${p(8)} AND hash_hex=${p(9)}`;
+/** Revokes only once the credential holds the new hash, i.e. this request's own update applied. */
 const revokeSessionsSql = (p: (n: number) => string) =>
-  `UPDATE sessions SET revoked_at=${p(1)} WHERE user_id=${p(2)} AND revoked_at IS NULL`;
+  `UPDATE sessions SET revoked_at=${p(1)} WHERE user_id=${p(2)} AND revoked_at IS NULL
+   AND EXISTS (SELECT 1 FROM password_credentials WHERE user_id=${p(2)} AND hash_hex=${p(3)})`;
+/** Inserts only once the credential holds the new hash, i.e. this request's own update applied. */
 const insertSessionSql = (p: (n: number) => string) =>
-  `INSERT INTO sessions(id,user_id,token_hash,expires_at) VALUES(${p(1)},${p(2)},${p(3)},${p(4)})`;
+  `INSERT INTO sessions(id,user_id,token_hash,expires_at)
+   SELECT ${p(1)},${p(2)},${p(3)},${p(4)}
+   WHERE EXISTS (SELECT 1 FROM password_credentials WHERE user_id=${p(2)} AND hash_hex=${p(5)})`;
 /** Inserts only while the user's stored hash is still the verified one. */
 const insertVerifiedSessionSql = (p: (n: number) => string) =>
   `INSERT INTO sessions(id,user_id,token_hash,expires_at)
    SELECT ${p(1)},${p(2)},${p(3)},${p(4)}
    WHERE EXISTS (SELECT 1 FROM password_credentials WHERE user_id=${p(2)} AND hash_hex=${p(5)})`;
-const credentialValues = (userId: string, c: Omit<StoredCredential, "user_id" | "username">) =>
-  [c.kdf, c.kdf_version, c.cost_n, c.block_size, c.parallelization, c.salt_hex, c.hash_hex, userId];
+const credentialValues = (userId: string, c: Omit<StoredCredential, "user_id" | "username">, verifiedHashHex: string) =>
+  [c.kdf, c.kdf_version, c.cost_n, c.block_size, c.parallelization, c.salt_hex, c.hash_hex, userId, verifiedHashHex];
 
 /** Plan row for first-owner setup; seeded formats go in the same statement, omitted ones keep the schema default. */
 function planInsert(input: SetupInput, placeholder: (n: number) => string): { sql: string; values: string[] } {
@@ -239,16 +248,23 @@ export class SQLiteAuthStore implements AuthStore {
     credential: Omit<StoredCredential, "user_id" | "username">,
     session: Pick<NewSession, "id" | "tokenHash" | "expiresAt">,
     now: number,
-  ): Promise<void> {
+    verifiedHashHex: string,
+  ): Promise<boolean> {
     let began = false;
     try {
       this.db.run("BEGIN IMMEDIATE");
       began = true;
-      const updated = this.db.query(replaceCredentialSql(() => "?")).run(...credentialValues(userId, credential));
-      if (updated.changes !== 1) throw new Error("Password credential not found");
-      this.db.query(revokeSessionsSql(() => "?")).run(now, userId);
-      this.db.query(insertSessionSql(() => "?")).run(session.id, userId, session.tokenHash, session.expiresAt);
+      const updated = this.db.query(replaceCredentialSql((n) => `?${n}`))
+        .run(...credentialValues(userId, credential, verifiedHashHex));
+      if (updated.changes !== 1) {
+        this.db.run("ROLLBACK");
+        return false;
+      }
+      this.db.query(revokeSessionsSql((n) => `?${n}`)).run(now, userId, credential.hash_hex);
+      this.db.query(insertSessionSql((n) => `?${n}`))
+        .run(session.id, userId, session.tokenHash, session.expiresAt, credential.hash_hex);
       this.db.run("COMMIT");
+      return true;
     } catch (error) {
       if (began && this.db.inTransaction) this.db.run("ROLLBACK");
       throw error;
@@ -398,12 +414,20 @@ export class D1AuthStore implements AuthStore {
     credential: Omit<StoredCredential, "user_id" | "username">,
     session: Pick<NewSession, "id" | "tokenHash" | "expiresAt">,
     now: number,
-  ): Promise<void> {
-    await this.db.atomicBatch([
-      { sql: replaceCredentialSql((n) => `$${n}`), values: credentialValues(userId, credential) },
-      { sql: revokeSessionsSql((n) => `$${n}`), values: [now, userId] },
-      { sql: insertSessionSql((n) => `$${n}`), values: [session.id, userId, session.tokenHash, session.expiresAt] },
+    verifiedHashHex: string,
+  ): Promise<boolean> {
+    // The revoke and the insert are conditional on the credential holding this
+    // request's new hash, so a stale request touches no session even though the
+    // batch still runs every statement.
+    const [updated] = await this.db.atomicBatch([
+      { sql: replaceCredentialSql((n) => `$${n}`), values: credentialValues(userId, credential, verifiedHashHex) },
+      { sql: revokeSessionsSql((n) => `$${n}`), values: [now, userId, credential.hash_hex] },
+      {
+        sql: insertSessionSql((n) => `$${n}`),
+        values: [session.id, userId, session.tokenHash, session.expiresAt, credential.hash_hex],
+      },
     ]);
+    return Number(updated?.meta?.changes ?? 0) === 1;
   }
 
   async pruneExpired(now: number): Promise<void> {

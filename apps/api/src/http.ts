@@ -1250,12 +1250,17 @@ async function handleAuth(request: Request, url: URL, store: AuthStore, config: 
     // Every session of this user is revoked and the caller gets a fresh one in
     // the same step, so a token that leaked before the change dies with it.
     const session = newSession();
-    await store.replaceCredential(
+    // Conditional on the hash just verified: a concurrent change that committed
+    // first wins, and this request changes nothing and issues no session.
+    if (!await store.replaceCredential(
       principal.id,
       await passwordCredential(body.new_password),
       session,
       Math.floor(Date.now() / 1_000),
-    );
+      credential.hash_hex,
+    )) {
+      return authError(401, "invalid_credentials", "Current password is incorrect");
+    }
     return principal.transport === "cookie"
       ? sessionResponse({ data: { ok: true, session_expires_at: session.expiresAt } }, session.token, session.expiresAt)
       : authJson({ data: { ok: true, token: session.token, expires_at: session.expiresAt } });

@@ -16,6 +16,11 @@ import { API_TOKEN, BACKENDS, sessionFor, nativeHarness, type NativeHarness } fr
  *  - a login that verified the old password but commits after the change
  *    keeps a fresh 30-day session (session creation must be conditional on
  *    the credential that was verified);
+ *  - two password changes that both verified the same old password both
+ *    commit: the later overwrites the earlier's new password, revokes the
+ *    earlier's fresh session, and both return 200 (the write must be
+ *    conditional on the credential that was verified, and on D1 a stale request
+ *    must neither revoke sessions nor insert one);
  *  - a JSON `null` or array body reaches property access and returns 500;
  *  - an enormous `current_password` is fed to scrypt before any length check;
  *  - a static bootstrap token or personal API token is accepted as "the user";
@@ -44,6 +49,7 @@ afterEach(() => { for (const harness of harnesses.splice(0)) harness.close(); })
 const ORIGIN = "https://howmuch.test";
 const PASSWORD = ["ledger", "test", "passphrase", "2026"].join("-");
 const NEXT_PASSWORD = ["another", "test", "passphrase", "2027"].join("-");
+const LATER_PASSWORD = ["later", "test", "passphrase", "2028"].join("-");
 const WRONG_PASSWORD = ["incorrect", "test", "passphrase", "2026"].join("-");
 
 const GBP = {
@@ -149,6 +155,47 @@ for (const backend of BACKENDS) {
       const attacker = await post(harness, "/api/auth/token", { username: "owner", password: PASSWORD });
       expect(attacker.status).toBe(401);
       expect(db.query("SELECT COUNT(*) AS n FROM sessions WHERE revoked_at IS NULL").get()).toEqual({ n: 0 });
+    });
+
+    test("a password change that verified the old password loses to one that committed first", async () => {
+      let armed = false;
+      let first: (() => Promise<Response>) | undefined;
+      let firstResponse: Response | undefined;
+      // Request 2 has already verified the old password when it reaches
+      // replaceCredential; request 1 runs to completion right there, so request 2
+      // writes against a credential that is no longer the one it checked.
+      const harness = await open(backend, (store) => new Proxy(store, {
+        get(target, property, receiver) {
+          const value = Reflect.get(target, property, receiver);
+          if (typeof value !== "function") return value;
+          if (property !== "replaceCredential") return value.bind(target);
+          return async (...args: unknown[]) => {
+            if (armed) {
+              armed = false;
+              firstResponse = await first!();
+            }
+            return value.apply(target, args);
+          };
+        },
+      }));
+      const { tokenA, tokenB } = await ownerWithSessions(harness);
+      first = () => post(harness, "/api/auth/password",
+        { current_password: PASSWORD, new_password: NEXT_PASSWORD }, { authorization: `Bearer ${tokenA}` });
+
+      armed = true;
+      const second = await post(harness, "/api/auth/password",
+        { current_password: PASSWORD, new_password: LATER_PASSWORD }, { authorization: `Bearer ${tokenB}` });
+
+      expect(firstResponse!.status).toBe(200);
+      const winner = (await firstResponse!.json()).data.token as string;
+      expect(second.status).toBe(401);
+      expect((await second.json()).error.detail).toBe("Current password is incorrect");
+      expect(second.headers.get("set-cookie")).toBeNull();
+      // Only request 1's fresh session is live: the loser issued none and did not revoke the winner's.
+      expect(harness.db.query("SELECT COUNT(*) AS n FROM sessions WHERE revoked_at IS NULL").get()).toEqual({ n: 1 });
+      expect(await status(harness, { authorization: `Bearer ${winner}` })).toBe(200);
+      expect((await post(harness, "/api/auth/token", { username: "owner", password: LATER_PASSWORD })).status).toBe(401);
+      expect((await post(harness, "/api/auth/token", { username: "owner", password: NEXT_PASSWORD })).status).toBe(200);
     });
 
     test("only a signed-in user session may change the password", async () => {
