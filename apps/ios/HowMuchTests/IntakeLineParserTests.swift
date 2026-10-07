@@ -249,6 +249,22 @@ final class IntakeLineParserTests: XCTestCase {
     )
   }
 
+  func testCodeAfterAnSGDAmountBelongsToTheForeignAmountThatFollows() {
+    for line in ["NETFLIX S$21.70 USD 15.99", "NETFLIX SGD 21.70 USD 15.99"] {
+      XCTAssertEqual(
+        extract("05 OCT \(line)"),
+        [Row("NETFLIX", "21.70", .outflow, "2026-10-05")],
+        line
+      )
+    }
+  }
+
+  func testMerchantsThatStartWithACurrencyWordAreNormalRows() {
+    XCTAssertEqual(extract("05 OCT YUAN CHUN LOR MEE 5.00"), [Row("YUAN CHUN LOR MEE", "5.00", .outflow, "2026-10-05")])
+    XCTAssertEqual(extract("05 OCT EURO SPORTS 45.00"), [Row("EURO SPORTS", "45.00", .outflow, "2026-10-05")])
+    XCTAssertEqual(extract("05 OCT RINGGIT CAFE 8.00"), [Row("RINGGIT CAFE", "8.00", .outflow, "2026-10-05")])
+  }
+
   func testCurrencySymbolStuckToTheWordIsStillForeign() {
     for line in ["HARRODS\u{00A3}12.50", "HARRODS\u{20AC}12.50", "SHOP\u{00A5}1200.00", "SHOP\u{20A9}12000.00", "KEDAI JBRM45.00"] {
       XCTAssertEqual(extract("05 OCT \(line)"), [], line)

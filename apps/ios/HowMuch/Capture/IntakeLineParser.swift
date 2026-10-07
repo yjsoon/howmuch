@@ -161,11 +161,12 @@ enum IntakeLineParser {
   )
   /// A line that is a currency written out ("US DOLLAR 15.99", "JAPANESE YEN 1,500").
   private static let currencyName = regex(
-    #"^(?:u\.?\s*s\.?\s*dollars?|euros?|japanese yen|pounds? sterling|british pounds?|australian dollars?|malaysian ringgit|ringgit|thai baht|rupiah|renminbi|yuan|korean won)\b.*\d"#
+    #"^(?:u\.?\s*s\.?\s*dollars?|euros?|japanese yen|pounds? sterling|british pounds?|australian dollars?|malaysian ringgit|ringgit|thai baht|rupiah|renminbi|yuan|korean won)\b\s*[\d,]+(?:\.\d+)?$"#
   )
-  /// A code between two amounts ("12.00 USD 16.20"): it belongs to the first.
+  /// A code between two amounts ("12.00 USD 16.20"): it belongs to the first,
+  /// unless that one carries its own `$`, `S$` or `SGD` prefix.
   private static let codeBetweenAmounts = regex(
-    #"(\d\.\d{1,2})\s*("# + #"(?:USD|EUR|GBP|AUD|MYR|JPY|HKD|CNY|RMB|THB|IDR|NZD|CAD|CHF|KRW|INR|PHP|TWD|VND)"# + #")\s+(?=(?:[-+]\s*)?\d)"#
+    #"(?<!\$)(?<!\$ )(?<!SGD)(?<!SGD )(?<![\d,.])((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{1,2})\s*("# + #"(?:USD|EUR|GBP|AUD|MYR|JPY|HKD|CNY|RMB|THB|IDR|NZD|CAD|CHF|KRW|INR|PHP|TWD|VND)"# + #")\s+(?=(?:[-+]\s*)?\d)"#
   )
   private static let time = regex(#"\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\b"#)
   private static let foreignAmount = regex(
