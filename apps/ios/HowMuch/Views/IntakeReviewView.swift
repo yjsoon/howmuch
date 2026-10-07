@@ -358,6 +358,11 @@ struct IntakeReviewView: View {
     }
   }
 
+  /// Accounts are loaded but none is open: there is nothing to choose yet.
+  private var hasNoAccounts: Bool {
+    model.openAccounts.isEmpty
+  }
+
   private func needsYouBanner(for job: IntakeJob) -> some View {
     VStack(alignment: .leading, spacing: 8) {
       if job.hint == .statement {
@@ -365,16 +370,19 @@ struct IntakeReviewView: View {
           .font(.subheadline.weight(.semibold))
           .foregroundStyle(Theme.uncategorised)
       } else {
-        Label("Choose an account to continue", systemImage: "exclamationmark.circle")
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(Theme.uncategorised)
+        Label(
+          job.failureMessage == IntakeCoordinator.addAccountMessage ? IntakeCoordinator.addAccountMessage : "Choose an account to continue",
+          systemImage: "exclamationmark.circle"
+        )
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(Theme.uncategorised)
       }
-      if let message = job.failureMessage {
+      if let message = job.failureMessage, message != IntakeCoordinator.addAccountMessage {
         Text(message)
           .font(.footnote)
           .foregroundStyle(.secondary)
       }
-      if job.hint != .statement {
+      if job.hint != .statement, !hasNoAccounts {
         Menu {
           ForEach(model.openAccounts) { account in
             Button(account.name) {
