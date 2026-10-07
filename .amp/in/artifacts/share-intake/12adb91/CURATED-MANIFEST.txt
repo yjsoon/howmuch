@@ -1,0 +1,29 @@
+Curated files for lead-only evidence commit. All paths relative to this directory.
+Exclude MP4, raw runtime*.log, preserved-pre-test/, shell outputs, ZIP, DB/secrets, and helper scripts. Only listed files will be committed.
+
+report.md
+test-plan.md
+evidence-checks.json
+runtime-excerpts.txt
+screenshot-1.png
+screenshot-2.png
+01-preserved-before-setup.json
+01-preserved-before-setup.txt
+02-setup-delete-confirm.png
+03-baseline.json
+03-baseline.txt
+03-setup-baseline-register.png
+04-photos-selected.png
+05-share-dbs-auto-note.png
+06-before-approve.json
+06-before-approve.png
+06-before-approve.txt
+07-saved.png
+08-after-approve.json
+08-after-approve.txt
+08-register.png
+09-after-relaunch.json
+09-after-relaunch.txt
+09-register-after-relaunch.png
+SHA256SUMS.txt
+CURATED-MANIFEST.txt
