@@ -725,6 +725,16 @@ final class IntakeSkillTests: XCTestCase {
     XCTAssertEqual(suggestion.rule(scope: .payee).origin.corrections, 2)
   }
 
+  // Failure mode: offering a category rule the engine never applies to a category the reader took from the document.
+  func testNoCategoryRuleIsOfferedForARowWhoseCategoryTheReaderSet() {
+    let kopi = applied(payee: "KOPITIAM AMK", proposedCategory: groceries, category: eatingOut)
+    XCTAssertNil(
+      IntakeRuleSuggester.suggest(
+        applied: [kopi], jobID: UUID(), skill: IntakeSkill(), now: now, readerCategoryRows: [kopi.id]
+      )
+    )
+  }
+
   func testCategoryCorrectionOutranksARenameWhenCountsTie() throws {
     let rename = applied(payee: "SHOPEE SG", proposedCategory: nil, category: nil, finalPayee: "Shopee")
     let kopi = applied(payee: "KOPITIAM AMK", proposedCategory: nil, category: eatingOut)
