@@ -518,6 +518,7 @@ final class IntakeCoordinator {
     defer { approving.remove(id) }
 
     var plans: [UUID: Plan] = [:]
+    var plannedTargets = Set<String>()
     for proposal in start.proposals where !proposal.isApplied && proposal.decision != .rejected && proposal.kind != .alreadyIn {
       if proposal.kind == .edit {
         guard proposal.appliesOnApproval else {
@@ -549,9 +550,13 @@ final class IntakeCoordinator {
           plans[proposal.id] = .skip(refusal)
           continue
         }
-        let plan: Plan = fields.isEmpty
+        var plan: Plan = fields.isEmpty
           ? .unchanged
           : .apply(Self.editDraft(fields: fields, from: proposal, base: live))
+        if case .apply = plan, !plannedTargets.insert(target).inserted {
+          // Two rows must not both rewrite one transaction.
+          plan = .skip("Another row already fixes this transaction.")
+        }
         plans[proposal.id] = plan
       } else if proposal.isIncomplete {
         plans[proposal.id] = .skip("Needs an amount and an account")
@@ -856,7 +861,14 @@ final class IntakeCoordinator {
       return false
     }
     var flipped = false
-    let allowContainment = self.job(id)?.hint != .fix
+    // Checked against the job as it is now, with no await before the change:
+    // a re-match may have given another row this target since the sheet opened.
+    guard let current = self.job(id),
+          !current.proposals.contains(where: { $0.id != proposalID && $0.targetTransactionID == candidateID }) else {
+      model.showSaveMessage("Another row already fixes this transaction.", kind: .failure)
+      return false
+    }
+    let allowContainment = current.hint != .fix
     mutateProposal(proposalID, in: id, model: model) { proposal in
       guard proposal.kind == .add || proposal.kind == .possibleDuplicate, proposal.candidateIDs.contains(candidateID) else {
         return
@@ -880,6 +892,9 @@ final class IntakeCoordinator {
       proposal.issue = nil
       proposal.decision = .accepted
       flipped = true
+    }
+    if !flipped {
+      model.showSaveMessage("Couldn’t change this row. Try again.", kind: .failure)
     }
     return flipped
   }
