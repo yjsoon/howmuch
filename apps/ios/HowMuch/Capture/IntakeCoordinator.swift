@@ -51,6 +51,9 @@ final class IntakeCoordinator {
   static let differentBudgetMessage = "From a different budget"
   static let statementMessage = "Statements come in a later version."
   static let addAccountMessage = "Add an account to continue"
+  static let missingFilesMessage = "Some shared files are missing. Share it again."
+  /// How long a share with missing files is retried before it is given up on.
+  private static let missingFilesGrace: TimeInterval = 3600
   /// "Likely" is 0.75 up to 0.9; lines read by the fallback never reach "Sure".
   static let fallbackConfidenceCap = 0.85
   static let fallbackReason = "Read without Apple Intelligence"
@@ -269,11 +272,49 @@ final class IntakeCoordinator {
         )
         inbox.discardReading(item.id)
         adoptedAny = true
+      } catch IntakeJobStoreError.missingSource {
+        unadoptable.insert(item.id)
+        giveUpOnMissingFiles(
+          item,
+          planID: planID.isEmpty ? nil : planID,
+          connectionFingerprint: planID.isEmpty ? nil : model.settings.connectionFingerprint
+        )
       } catch {
         unadoptable.insert(item.id)
         Self.logger.error("Couldn't adopt share \(item.id.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)")
       }
     }
+  }
+
+  /// A share whose files are gone is not retried for ever. A leftover Reading
+  /// folder of a job that is already past reading is just removed. Otherwise,
+  /// after a grace period, the folder is quarantined and the batch is shown as failed.
+  private func giveUpOnMissingFiles(_ item: InboxItem, planID: String?, connectionFingerprint: String?) {
+    let existing = store.load(item.id)
+    if let existing, existing.state != .reading, existing.state != .queued {
+      inbox.discardReading(item.id)
+      return
+    }
+    guard Date().timeIntervalSince(item.createdAt) > Self.missingFilesGrace else {
+      return
+    }
+    inbox.quarantineReading(item.id)
+    var job = existing ?? IntakeJob(
+      id: item.id,
+      createdAt: item.createdAt,
+      origin: IntakeOrigin(source: item.source),
+      sourceFiles: item.sources,
+      accountID: item.accountID,
+      decideAccount: item.decideAccount,
+      hint: item.hint,
+      note: item.note,
+      contentHash: item.contentHash,
+      planID: planID,
+      connectionFingerprint: connectionFingerprint
+    )
+    job.state = .failed
+    job.failureMessage = Self.missingFilesMessage
+    save(job)
   }
 
   private func processPending(model: AppModel, epoch: Int) async {
@@ -656,6 +697,7 @@ final class IntakeCoordinator {
     defer { approving.remove(id) }
 
     var plans: [UUID: Plan] = [:]
+    var plannedTargets = Set<String>()
     for proposal in start.proposals where !proposal.isApplied && proposal.decision != .rejected && proposal.kind != .alreadyIn {
       if proposal.kind == .edit {
         guard proposal.appliesOnApproval else {
@@ -687,9 +729,13 @@ final class IntakeCoordinator {
           plans[proposal.id] = .skip(refusal)
           continue
         }
-        let plan: Plan = fields.isEmpty
+        var plan: Plan = fields.isEmpty
           ? .unchanged
           : .apply(Self.editDraft(fields: fields, from: proposal, base: live))
+        if case .apply = plan, !plannedTargets.insert(target).inserted {
+          // Two rows must not both rewrite one transaction.
+          plan = .skip("Another row already fixes this transaction.")
+        }
         plans[proposal.id] = plan
       } else if proposal.isIncomplete {
         plans[proposal.id] = .skip("Needs an amount and an account")
@@ -819,6 +865,12 @@ final class IntakeCoordinator {
   func retry(_ id: UUID, model: AppModel) {
     guard var job = self.job(id), job.state == .failed,
           !Self.isFromAnotherBudget(job, model: model) else {
+      return
+    }
+    // The files are gone: reading again cannot help, so it stays failed.
+    guard !job.sourceFiles.contains(where: {
+      !FileManager.default.fileExists(atPath: store.sourceURL($0, jobID: id).path)
+    }) else {
       return
     }
     job.state = .reading
@@ -995,7 +1047,14 @@ final class IntakeCoordinator {
       return false
     }
     var flipped = false
-    let allowContainment = self.job(id)?.hint != .fix
+    // Checked against the job as it is now, with no await before the change:
+    // a re-match may have given another row this target since the sheet opened.
+    guard let current = self.job(id),
+          !current.proposals.contains(where: { $0.id != proposalID && $0.targetTransactionID == candidateID }) else {
+      model.showSaveMessage("Another row already fixes this transaction.", kind: .failure)
+      return false
+    }
+    let allowContainment = current.hint != .fix
     mutateProposal(proposalID, in: id, model: model) { proposal in
       guard proposal.kind == .add || proposal.kind == .possibleDuplicate, proposal.candidateIDs.contains(candidateID) else {
         return
@@ -1019,6 +1078,9 @@ final class IntakeCoordinator {
       proposal.issue = nil
       proposal.decision = .accepted
       flipped = true
+    }
+    if !flipped {
+      model.showSaveMessage("Couldn’t change this row. Try again.", kind: .failure)
     }
     return flipped
   }
