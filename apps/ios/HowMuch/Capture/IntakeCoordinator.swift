@@ -48,6 +48,7 @@ final class IntakeCoordinator {
   private static let retention: TimeInterval = 30 * 24 * 3600
   static let differentBudgetMessage = "From a different budget"
   static let statementMessage = "Statements come in a later version."
+  static let addAccountMessage = "Add an account to continue"
   /// "Likely" is 0.75 up to 0.9; lines read by the fallback never reach "Sure".
   static let fallbackConfidenceCap = 0.85
   static let fallbackReason = "Read without Apple Intelligence"
@@ -272,6 +273,15 @@ final class IntakeCoordinator {
   }
 
   private func processPending(model: AppModel, epoch: Int) async {
+    // A batch that was waiting for an account is read once there is one.
+    if !model.openAccounts.isEmpty {
+      for job in jobs where job.state == .needsYou && job.failureMessage == Self.addAccountMessage {
+        var waiting = job
+        waiting.state = .reading
+        waiting.failureMessage = nil
+        save(waiting)
+      }
+    }
     let pending = jobs
       .filter { $0.state == .reading || $0.state == .queued }
       .sorted { $0.createdAt < $1.createdAt }
@@ -351,7 +361,18 @@ final class IntakeCoordinator {
     // Reading is on this device and the document is fine, so missing reference
     // data (offline at launch, a headless run) is not a failure. The job keeps
     // its state and is read on the next drain.
-    guard await awaitReferenceData(model), !model.openAccounts.isEmpty else {
+    guard await awaitReferenceData(model) else {
+      return
+    }
+    if model.openAccounts.isEmpty {
+      // Accounts loaded and there are none to file against (a new budget):
+      // ask for one. Nothing is known yet if they did not load, so wait.
+      guard model.referencePhase == .loaded, var current = readable(id) else {
+        return
+      }
+      current.state = .needsYou
+      current.failureMessage = Self.addAccountMessage
+      save(current)
       return
     }
     guard var reading = readable(id) else {
@@ -643,7 +664,10 @@ final class IntakeCoordinator {
           continue
         }
         let fields = IntakeMatcher.pendingFixFields(
-          wanted: proposal.changedFields, draft: proposal.draft, live: live
+          wanted: proposal.changedFields,
+          draft: proposal.draft,
+          live: live,
+          allowContainment: start.hint != .fix
         )
         if let refusal = Self.fixRefusal(fields: fields, live: live) {
           plans[proposal.id] = .skip(refusal)

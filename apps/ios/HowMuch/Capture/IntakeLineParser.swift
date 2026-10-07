@@ -22,7 +22,7 @@ enum IntakeLineParser {
     now: Date = .now
   ) -> [SlipMappedDraft] {
     SlipReaderMapping.map(
-      extract(text),
+      extract(text, calendar: calendar, now: now),
       sentence: text,
       accounts: accounts,
       categoryGroups: categoryGroups,
@@ -37,6 +37,12 @@ enum IntakeLineParser {
     var date: String?
   }
 
+  private struct Token {
+    var magnitude: String
+    var isInflow: Bool
+    var isForeign: Bool
+  }
+
   private struct ParsedAmount {
     var text: String
     var magnitude: String
@@ -44,7 +50,20 @@ enum IntakeLineParser {
     var isForeign: Bool
   }
 
-  static func extract(_ text: String) -> [SlipReaderMapping.Extraction] {
+  private enum AmountResult {
+    /// The line ends in no amount.
+    case none
+    /// The line has amounts but not one that can be trusted (a running balance
+    /// that cannot be told from the amount): the row is dropped, not guessed.
+    case dropped
+    case amount(ParsedAmount)
+  }
+
+  static func extract(
+    _ text: String,
+    calendar: Calendar = .current,
+    now: Date = .now
+  ) -> [SlipReaderMapping.Extraction] {
     var rows: [SlipReaderMapping.Extraction] = []
     var currentDate: String?
     var pending: Pending?
@@ -54,7 +73,8 @@ enum IntakeLineParser {
       guard !line.isEmpty else {
         continue
       }
-      // Status words and reference lines sit between a payee and its amount.
+      // Status words, reference lines, postcodes and exchange-rate lines sit
+      // between a payee and its amount without ending the row.
       if matches(noise, line) {
         continue
       }
@@ -63,25 +83,30 @@ enum IntakeLineParser {
         pending = nil
         continue
       }
-      if let header = leadingDate(line), header.rest.isEmpty {
-        if pending != nil {
-          pending?.date = header.date
-        } else {
-          currentDate = header.date
-        }
+      let leading = leadingDate(line, calendar: calendar, now: now)
+      if let leading, leading.rest.isEmpty {
+        currentDate = leading.date
+        pending?.date = leading.date
         continue
       }
       var rowDate: String?
-      if let leading = leadingDate(line) {
+      if let leading {
         rowDate = leading.date
         line = leading.rest
       }
-      guard let amount = parseAmount(line) else {
+      let amount: ParsedAmount
+      switch parseAmount(line) {
+      case .none:
         let payee = cleanPayee(line)
         if hasWords(payee) {
           pending = Pending(payee: payee, date: rowDate)
         }
         continue
+      case .dropped:
+        pending = nil
+        continue
+      case .amount(let parsed):
+        amount = parsed
       }
       let payee = cleanPayee(amount.text)
       if amount.isForeign {
@@ -125,14 +150,14 @@ enum IntakeLineParser {
   }
 
   private static let noise = regex(
-    #"^(?:completed|successful|success|paid|pending|approved|declined|posted)$|^(?:ref|reference|txn|trans(?:action)? id|card (?:no|number|ending)|account (?:no|number))\b"#
+    #"^(?:completed|successful|success|paid|pending|approved|declined|posted)$|^(?:ref|reference|txn|trans(?:action)? id|card (?:no|number|ending)|account (?:no|number))\b|^(?:singapore|sg|spore)\s*\d{6}$|\bexchange rate\b|\bfx rate\b|^rate\b|\bconversion fee\b|\bcurrency conversion\b|\bforex\b"#
   )
   private static let ignored = regex(
-    #"\b(?:balance|total|available|opening|closing|statement|subtotal|credit limit|minimum payment|amount due|due date|brought forward|carried forward)\b|\bpage \d+(?: of \d+)?\b"#
+    #"\b(?:balance|bal|avail|available|opening|closing|statement|subtotal|total|credit limit|minimum payment|amount due|due date|brought forward|carried forward)\b|\b[bc]/f\b|\bpage \d+(?: of \d+)?\b"#
   )
   private static let time = regex(#"\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\b"#)
   private static let foreignAmount = regex(
-    #"\b(?:USD|EUR|GBP|AUD|MYR|JPY|HKD|CNY|RMB|THB|IDR|NZD|CAD|CHF|KRW|INR)\s*[\d,]+(?:\.\d+)?"#
+    #"\b(?:USD|EUR|GBP|AUD|MYR|JPY|HKD|CNY|RMB|THB|IDR|NZD|CAD|CHF|KRW|INR|PHP|TWD|VND)\s*[\d,]+(?:\.\d+)?"#
   )
 
   private static let weekday = #"(?:(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s+)?"#
@@ -144,10 +169,20 @@ enum IntakeLineParser {
   private static let dayMonthName = regex("^" + weekday + #"(\d{1,2})[\s-]*"# + month + #"(?:[\s,-]+(\d{4}))?\b"#)
   private static let monthNameDay = regex("^" + weekday + month + #"\s+(\d{1,2})(?:,?\s+(\d{4}))?\b"#)
   private static let slashDate = regex("^" + weekday + #"(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b"#)
+  private static let dottedDate = regex("^" + weekday + #"(\d{1,2})\.(\d{1,2})\.(\d{2,4})\b"#)
   private static let namedDay = regex(#"^(today|yesterday)\b"#)
 
-  private static let amountPattern = regex(
-    #"^(.*?)\s*([-+−–])?\s*(S\$|US\$|A\$|HK\$|NT\$|\$|SGD|USD|EUR|GBP|AUD|MYR|JPY|HKD|CNY|RMB|THB|IDR|NZD|CAD|CHF|KRW|INR)?\s*([-+−–])?\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)\s*(CR|DR)?$"#
+  private static let currencyPrefix =
+    #"(?:S\$|US\$|A\$|HK\$|NT\$|NZ\$|C\$|\$|SGD|USD|EUR|GBP|AUD|MYR|JPY|HKD|CNY|RMB|THB|IDR|NZD|CAD|CHF|KRW|INR|PHP|TWD|VND|RM|Rp|\u20AC|\u00A3|\u00A5|\u20A9|\u0E3F|\u20B9|\u20B1|\u20AB)"#
+  private static let currencyCode =
+    #"(?:SGD|USD|EUR|GBP|AUD|MYR|JPY|HKD|CNY|RMB|THB|IDR|NZD|CAD|CHF|KRW|INR|PHP|TWD|VND)"#
+
+  /// The last amount on a line: `text`, an optional sign, an optional currency
+  /// marker before the number, the number, then an optional `CR`, `DR` or
+  /// currency code. The amount must not start inside a word or number.
+  private static let amountTail = regex(
+    #"^(.*?)(?<![A-Za-z0-9,.])([-+\u2212\u2013])?\s*("# + currencyPrefix + #")?\s*([-+\u2212\u2013])?\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)\s*(CR|DR|"#
+      + currencyCode + #")?$"#
   )
 
   // MARK: Parsing
@@ -218,24 +253,72 @@ enum IntakeLineParser {
     return payee.trimmingCharacters(in: CharacterSet(charactersIn: " -:\u{2022}|\u{00B7}*,"))
   }
 
-  /// A date at the start of the line, normalised for `SlipReaderMapping.date`
-  /// (`yyyy-MM-dd` with a year, `d MMM` without, or `today`/`yesterday`), and
-  /// the text after it.
-  private static func leadingDate(_ line: String) -> (date: String, rest: String)? {
-    func result(_ match: NSTextCheckingResult, day: Int?, month: Int?, year: String?) -> (date: String, rest: String)? {
-      guard let day, let month, (1...31).contains(day), (1...12).contains(month) else {
+  /// A date at the start of the line, as `yyyy-MM-dd` (or `today` /
+  /// `yesterday`), and the text after it. A date without a year takes this
+  /// year, or last year when that would be more than a week ahead. A year more
+  /// than one away from now is not a year: after a day and month name the
+  /// digits stay in the text, and anywhere else the line has no date.
+  private static func leadingDate(
+    _ line: String,
+    calendar: Calendar,
+    now: Date
+  ) -> (date: String, rest: String)? {
+    let nowYear = calendar.component(.year, from: now)
+
+    func validDate(_ year: Int, _ month: Int, _ day: Int) -> Date? {
+      guard let date = calendar.date(from: DateComponents(year: year, month: month, day: day)) else {
         return nil
       }
-      let tail = String(line[Range(match.range, in: line)!.upperBound...])
-        .trimmingCharacters(in: CharacterSet(charactersIn: " ,.-\u{2013}|"))
-      if var year {
-        if year.count == 2 { year = "20" + year }
-        guard let value = Int(year) else {
+      let parts = calendar.dateComponents([.year, .month, .day], from: date)
+      return parts.year == year && parts.month == month && parts.day == day ? date : nil
+    }
+
+    func iso(day: Int, month: Int, year: Int?) -> String? {
+      guard (1...31).contains(day), (1...12).contains(month) else {
+        return nil
+      }
+      var resolved = year ?? nowYear
+      if year == nil, let candidate = validDate(resolved, month, day),
+         let limit = calendar.date(byAdding: .day, value: 7, to: now), candidate > limit {
+        resolved -= 1
+      }
+      guard validDate(resolved, month, day) != nil else {
+        return nil
+      }
+      return String(format: "%04d-%02d-%02d", resolved, month, day)
+    }
+
+    func tail(from index: String.Index) -> String {
+      String(line[index...]).trimmingCharacters(in: CharacterSet(charactersIn: " ,.-\u{2013}|"))
+    }
+
+    func finish(
+      _ match: NSTextCheckingResult,
+      day: Int?,
+      month: Int?,
+      yearText: String?,
+      yearGroup: Int,
+      yearMayBeText: Bool
+    ) -> (date: String, rest: String)? {
+      guard let day, let month else {
+        return nil
+      }
+      var year: Int?
+      var end = Range(match.range, in: line)!.upperBound
+      if let yearText, var value = Int(yearText) {
+        if yearText.count == 2 { value += 2000 }
+        if abs(value - nowYear) <= 1 {
+          year = value
+        } else if yearMayBeText, let yearRange = Range(match.range(at: yearGroup), in: line) {
+          end = yearRange.lowerBound
+        } else {
           return nil
         }
-        return (String(format: "%04d-%02d-%02d", value, month, day), tail)
       }
-      return ("\(day) \(monthNames[month - 1].capitalized)", tail)
+      guard let date = iso(day: day, month: month, year: year) else {
+        return nil
+      }
+      return (date, tail(from: end))
     }
 
     func monthIndex(_ name: String?) -> Int? {
@@ -245,71 +328,97 @@ enum IntakeLineParser {
       return monthNames.firstIndex(of: String(prefix)).map { $0 + 1 }
     }
 
+    func number(_ match: NSTextCheckingResult, _ index: Int) -> Int? {
+      group(match, index, in: line).flatMap { Int($0) }
+    }
+
     let full = range(line)
     if let match = isoDate.firstMatch(in: line, options: [], range: full) {
-      return result(
-        match,
-        day: group(match, 3, in: line).flatMap { Int($0) },
-        month: group(match, 2, in: line).flatMap { Int($0) },
-        year: group(match, 1, in: line)
+      return finish(
+        match, day: number(match, 3), month: number(match, 2),
+        yearText: group(match, 1, in: line), yearGroup: 1, yearMayBeText: false
       )
     }
     if let match = dayMonthName.firstMatch(in: line, options: [], range: full) {
-      return result(
-        match,
-        day: group(match, 1, in: line).flatMap { Int($0) },
-        month: monthIndex(group(match, 2, in: line)),
-        year: group(match, 3, in: line)
+      return finish(
+        match, day: number(match, 1), month: monthIndex(group(match, 2, in: line)),
+        yearText: group(match, 3, in: line), yearGroup: 3, yearMayBeText: true
       )
     }
     if let match = monthNameDay.firstMatch(in: line, options: [], range: full) {
-      return result(
-        match,
-        day: group(match, 2, in: line).flatMap { Int($0) },
-        month: monthIndex(group(match, 1, in: line)),
-        year: group(match, 3, in: line)
+      return finish(
+        match, day: number(match, 2), month: monthIndex(group(match, 1, in: line)),
+        yearText: group(match, 3, in: line), yearGroup: 3, yearMayBeText: true
+      )
+    }
+    if let match = dottedDate.firstMatch(in: line, options: [], range: full) {
+      return finish(
+        match, day: number(match, 1), month: number(match, 2),
+        yearText: group(match, 3, in: line), yearGroup: 3, yearMayBeText: false
       )
     }
     if let match = slashDate.firstMatch(in: line, options: [], range: full) {
-      return result(
-        match,
-        day: group(match, 1, in: line).flatMap { Int($0) },
-        month: group(match, 2, in: line).flatMap { Int($0) },
-        year: group(match, 3, in: line)
+      return finish(
+        match, day: number(match, 1), month: number(match, 2),
+        yearText: group(match, 3, in: line), yearGroup: 3, yearMayBeText: false
       )
     }
     if let match = namedDay.firstMatch(in: line, options: [], range: full), let word = group(match, 1, in: line) {
-      let tail = String(line[Range(match.range, in: line)!.upperBound...])
-        .trimmingCharacters(in: CharacterSet(charactersIn: " ,.-\u{2013}|"))
-      return (word.lowercased(), tail)
+      return (word.lowercased(), tail(from: Range(match.range, in: line)!.upperBound))
     }
     return nil
   }
 
-  /// A trailing amount: whole numbers count only with a currency marker, so a
-  /// store number or reference is never money.
-  private static func parseAmount(_ line: String) -> ParsedAmount? {
-    guard let match = amountPattern.firstMatch(in: line, options: [], range: range(line)) else {
-      return nil
+  /// Reads the amounts at the end of a line. A whole number counts only with a
+  /// currency marker, so a store number or reference is never money.
+  ///
+  /// - One amount is the amount.
+  /// - Two SGD amounts: the first is the transaction and the last a running
+  ///   balance. Three or more cannot be told apart, so the row is dropped.
+  /// - With a foreign amount present, the single SGD amount is used; none
+  ///   leaves a foreign row that waits for one, and several drop the row.
+  private static func parseAmount(_ line: String) -> AmountResult {
+    var tokens: [Token] = []
+    var rest = line
+    while tokens.count < 4, let match = amountTail.firstMatch(in: rest, options: [], range: range(rest)) {
+      guard let number = group(match, 5, in: rest) else {
+        break
+      }
+      let prefix = group(match, 3, in: rest)?.uppercased()
+      let marker = group(match, 6, in: rest)?.uppercased()
+      if !number.contains("."), prefix == nil {
+        break
+      }
+      let magnitude = number.replacingOccurrences(of: ",", with: "")
+      let sgd: Set<String> = ["$", "S$", "SGD"]
+      let foreign = (prefix.map { !sgd.contains($0) } ?? false)
+        || (marker.map { $0 != "CR" && $0 != "DR" && $0 != "SGD" } ?? false)
+      let inflow = group(match, 2, in: rest) == "+" || group(match, 4, in: rest) == "+" || marker == "CR"
+      tokens.insert(Token(magnitude: magnitude, isInflow: inflow, isForeign: foreign), at: 0)
+      rest = (group(match, 1, in: rest) ?? "").trimmingCharacters(in: .whitespaces)
     }
-    let text = group(match, 1, in: line) ?? ""
-    let leadingSign = group(match, 2, in: line)
-    let currency = group(match, 3, in: line)?.uppercased()
-    let trailingSign = group(match, 4, in: line)
-    guard let number = group(match, 5, in: line) else {
-      return nil
+    guard !tokens.isEmpty else {
+      return .none
     }
-    let marker = group(match, 6, in: line)?.uppercased()
-    if !number.contains("."), currency == nil {
-      return nil
+
+    let local = tokens.filter { !$0.isForeign }
+    let hasForeign = local.count != tokens.count
+    let chosen: Token
+    if local.isEmpty {
+      return .amount(ParsedAmount(text: rest, magnitude: tokens[0].magnitude, isInflow: false, isForeign: true))
+    } else if hasForeign {
+      guard local.count == 1 else {
+        return .dropped
+      }
+      chosen = local[0]
+    } else if local.count <= 2 {
+      chosen = local[0]
+    } else {
+      return .dropped
     }
-    let magnitude = number.replacingOccurrences(of: ",", with: "")
-    guard let value = Decimal(string: magnitude), value > 0 else {
-      return nil
+    guard let value = Decimal(string: chosen.magnitude), value > 0 else {
+      return .dropped
     }
-    let inflow = leadingSign == "+" || trailingSign == "+" || marker == "CR"
-    let sgd: Set<String> = ["$", "S$", "SGD"]
-    let foreign = currency.map { !sgd.contains($0) } ?? false
-    return ParsedAmount(text: text, magnitude: magnitude, isInflow: inflow, isForeign: foreign)
+    return .amount(ParsedAmount(text: rest, magnitude: chosen.magnitude, isInflow: chosen.isInflow, isForeign: false))
   }
 }
