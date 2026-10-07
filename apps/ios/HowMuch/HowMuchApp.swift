@@ -245,6 +245,10 @@ private struct RootView: View {
       if phase == .active {
         if model.settings.isAuthenticated {
           IntakeNotifier.shared.refreshBadge()
+          if !IntakeCoordinator.shared.jobs.isEmpty {
+            // First shares read in the background could not ask; ask now if still unasked.
+            IntakeNotifier.shared.askIfNeeded()
+          }
         }
         drainIntakeInbox()
         enqueueInboxIfNeeded(force: false)
