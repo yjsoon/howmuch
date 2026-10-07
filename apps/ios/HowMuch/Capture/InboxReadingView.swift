@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import ImageIO
+import PDFKit
 #if canImport(Vision)
 import Vision
 #endif
@@ -15,6 +16,8 @@ struct InboxReadingView: View {
   var onResolved: ([SlipMappedDraft]) -> Void
   var onAttachments: ([CaptureAttachment]) -> Void = { _ in }
   var onClaimed: ([UUID]) -> Void = { _ in }
+  var onNote: (String) -> Void = { _ in }
+  var onNotice: (String) -> Void = { _ in }
 
   @State private var thumbnail: UIImage?
   @State private var readingTask: Task<Void, Never>?
@@ -117,35 +120,64 @@ struct InboxReadingView: View {
       thumbnail = try await InboxPreview.firstThumbnail(in: items, displayScale: displayScale)
       try Task.checkCancellation()
       var mapped: [SlipMappedDraft] = []
+      var decidedByReviewer = false
       for item in items {
         try Task.checkCancellation()
-        switch item.kind {
-        case .image:
-          guard let data = try await inboxBackgroundWork({ try? item.payloadData() }) else {
-            continue
-          }
-          let attachmentID = UUID()
-          onAttachments([
-            CaptureAttachment(id: attachmentID, filename: item.filename, data: data, isReading: true)
-          ])
-          let text = await SlipImageText.recognize(data)
-          onAttachments([
-            CaptureAttachment(
-              id: attachmentID,
-              filename: item.filename,
-              data: data,
-              recognizedText: text,
-              isReading: false,
-              errorMessage: text.isEmpty ? "I could not read text from that image. It is still attached." : nil
-            )
-          ])
-          mapped.append(contentsOf: await interpretDrafts(from: text))
-        case .text:
-          mapped.append(contentsOf: await interpretDrafts(from: item.payloadText()))
+        if let note = item.note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
+          onNote(note)
         }
+        var itemDrafts: [SlipMappedDraft] = []
+        for file in item.sources {
+          try Task.checkCancellation()
+          let url = item.payloadURL(for: file)
+          switch file.kind {
+          case .image:
+            guard let data = try await inboxBackgroundWork({ try? Data(contentsOf: url) }) else {
+              continue
+            }
+            let attachmentID = UUID()
+            onAttachments([
+              CaptureAttachment(id: attachmentID, filename: file.filename, data: data, isReading: true)
+            ])
+            let text = await SlipImageText.recognize(data)
+            onAttachments([
+              CaptureAttachment(
+                id: attachmentID,
+                filename: file.filename,
+                data: data,
+                recognizedText: text,
+                isReading: false,
+                errorMessage: text.isEmpty ? "I could not read text from that image. It is still attached." : nil
+              )
+            ])
+            itemDrafts.append(contentsOf: await interpretDrafts(from: text))
+          case .text:
+            itemDrafts.append(contentsOf: await interpretDrafts(from: item.text(of: file)))
+          case .pdf:
+            let result = await SlipPDFText.recognize(url)
+            try Task.checkCancellation()
+            if result.skippedPages > 0 {
+              let skipped = result.skippedPages
+              onNotice("Skipped \(skipped) scanned \(skipped == 1 ? "page" : "pages"). Halation reads up to \(SlipPDFText.maxOCRPages) scanned pages per PDF.")
+            }
+            itemDrafts.append(contentsOf: await interpretDrafts(from: result.text))
+          }
+        }
+        if item.decideAccount {
+          decidedByReviewer = true
+        } else if let accountID = item.accountID,
+                  model.openAccounts.contains(where: { $0.id == accountID }) {
+          for index in itemDrafts.indices where !itemDrafts[index].parsedAccount {
+            itemDrafts[index].draft.seedIfNeeded(
+              accounts: model.openAccounts,
+              preferredAccountID: accountID
+            )
+          }
+        }
+        mapped.append(contentsOf: itemDrafts)
       }
       try Task.checkCancellation()
-      if mapped.count == 1, !mapped[0].parsedAccount {
+      if !decidedByReviewer, mapped.count == 1, !mapped[0].parsedAccount {
         mapped[0].draft.seedIfNeeded(
           accounts: model.openAccounts,
           preferredAccountID: preferredAccountID
@@ -179,21 +211,22 @@ enum InboxPreview {
       let maximumPixelSize = ceil(168 * scale)
       for item in items {
         try Task.checkCancellation()
-        guard item.kind == .image else { continue }
-        let image: UIImage? = autoreleasepool {
-          guard let source = CGImageSourceCreateWithURL(
-            item.payloadURL as CFURL,
-            [kCGImageSourceShouldCache: false] as CFDictionary
-          ), let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize,
-            kCGImageSourceShouldCacheImmediately: true
-          ] as CFDictionary) else { return nil }
-          return UIImage(cgImage: thumbnail, scale: scale, orientation: .up)
+        for file in item.sources where file.kind == .image {
+          let image: UIImage? = autoreleasepool {
+            guard let source = CGImageSourceCreateWithURL(
+              item.payloadURL(for: file) as CFURL,
+              [kCGImageSourceShouldCache: false] as CFDictionary
+            ), let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+              kCGImageSourceCreateThumbnailFromImageAlways: true,
+              kCGImageSourceCreateThumbnailWithTransform: true,
+              kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize,
+              kCGImageSourceShouldCacheImmediately: true
+            ] as CFDictionary) else { return nil }
+            return UIImage(cgImage: thumbnail, scale: scale, orientation: .up)
+          }
+          try Task.checkCancellation()
+          if let image { return image }
         }
-        try Task.checkCancellation()
-        if let image { return image }
       }
       return nil
     }
@@ -237,5 +270,64 @@ enum SlipImageText {
     #else
     return ""
     #endif
+  }
+}
+
+enum SlipPDFText {
+  static let maxOCRPages = 8
+  static let maxRenderedEdge: CGFloat = 4096
+
+  struct Result: Sendable {
+    var text: String
+    /// Pages that needed OCR but were beyond `maxOCRPages`.
+    var skippedPages: Int
+  }
+
+  /// Each page's text layer when it has one; OCR only for pages with an empty
+  /// text layer, up to `maxOCRPages` of them.
+  static func recognize(_ url: URL) async -> Result {
+    // One open for every text layer. OCR pages reopen the file one at a time
+    // (at most `maxOCRPages`) so their renders never sit in memory together.
+    let layers = (try? await inboxBackgroundWork { () throws -> [String] in
+      guard let document = PDFDocument(url: url) else { return [] }
+      return (0..<document.pageCount).map {
+        document.page(at: $0)?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      }
+    }) ?? []
+    var pages: [String] = []
+    var ocrPages = 0
+    var skipped = 0
+    for (index, layer) in layers.enumerated() {
+      if Task.isCancelled { break }
+      if !layer.isEmpty {
+        pages.append(layer)
+        continue
+      }
+      guard ocrPages < maxOCRPages else {
+        skipped += 1
+        continue
+      }
+      ocrPages += 1
+      let png: Data? = try? await inboxBackgroundWork { () throws -> Data? in
+        autoreleasepool { () -> Data? in
+          guard let page = PDFDocument(url: url)?.page(at: index) else { return nil }
+          let bounds = page.bounds(for: .mediaBox)
+          guard bounds.width > 0, bounds.height > 0 else { return nil }
+          let longEdge = min(maxRenderedEdge, max(bounds.width, bounds.height) * 2)
+          let factor = longEdge / max(bounds.width, bounds.height)
+          let size = CGSize(
+            width: max(1, ceil(bounds.width * factor)),
+            height: max(1, ceil(bounds.height * factor))
+          )
+          return page.thumbnail(of: size, for: .mediaBox).pngData()
+        }
+      }
+      guard let png else { continue }
+      let text = await SlipImageText.recognize(png)
+      if !text.isEmpty {
+        pages.append(text)
+      }
+    }
+    return Result(text: pages.joined(separator: "\n"), skippedPages: skipped)
   }
 }

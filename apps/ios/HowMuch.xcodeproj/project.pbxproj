@@ -79,6 +79,7 @@
 		A2000000000000000000005B /* AddTransactionIntentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005A /* AddTransactionIntentTests.swift */; };
 		A20000000000000000000083 /* CommitManyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000082 /* CommitManyTests.swift */; };
 		A20000000000000000000091 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
+		A200000000000000000000F7 /* ShareContextStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000F6 /* ShareContextStore.swift */; };
 		A20000000000000000000093 /* InboxStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000092 /* InboxStoreTests.swift */; };
 		A20000000000000000000095 /* InboxReadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000094 /* InboxReadingView.swift */; };
 		A20000000000000000000097 /* IntelligenceAura.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000096 /* IntelligenceAura.swift */; };
@@ -114,6 +115,9 @@
 		A200000000000000000000F5 /* AccountGroupOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000F4 /* AccountGroupOrderTests.swift */; };
 		A30000000000000000000003 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000002 /* ShareViewController.swift */; };
 		A30000000000000000000006 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
+		A30000000000000000000020 /* ShareContextStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000F6 /* ShareContextStore.swift */; };
+		A30000000000000000000022 /* ShareSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000021 /* ShareSheetView.swift */; };
+		A30000000000000000000024 /* ShareItemLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000023 /* ShareItemLoader.swift */; };
 		A3000000000000000000000B /* HowMuchShare.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* HowMuchShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B10000000000000000000011 /* LocalEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000010 /* LocalEngine.swift */; };
 		B100000000000000000000F1 /* PlanSettingsSeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000F0 /* PlanSettingsSeed.swift */; };
@@ -156,6 +160,7 @@
 		A2000000000000000000005A /* AddTransactionIntentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddTransactionIntentTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000082 /* CommitManyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitManyTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000090 /* InboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxStore.swift; sourceTree = "<group>"; };
+		A200000000000000000000F6 /* ShareContextStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareContextStore.swift; sourceTree = "<group>"; };
 		A20000000000000000000092 /* InboxStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxStoreTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000094 /* InboxReadingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxReadingView.swift; sourceTree = "<group>"; };
 		A20000000000000000000096 /* IntelligenceAura.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelligenceAura.swift; sourceTree = "<group>"; };
@@ -195,6 +200,8 @@
 		A60000000000000000000010 /* IPadLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPadLayoutTests.swift; sourceTree = "<group>"; };
 		A30000000000000000000001 /* HowMuchShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HowMuchShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A30000000000000000000002 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		A30000000000000000000021 /* ShareSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSheetView.swift; sourceTree = "<group>"; };
+		A30000000000000000000023 /* ShareItemLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareItemLoader.swift; sourceTree = "<group>"; };
 		A30000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A30000000000000000000005 /* HowMuchShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HowMuchShare.entitlements; sourceTree = "<group>"; };
 		A10000000000000000000010 /* HowMuchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HowMuchApp.swift; sourceTree = "<group>"; };
@@ -441,6 +448,7 @@
 				A40000000000000000000018 /* LedgerQuery.swift */,
 				A20000000000000000000012 /* CaptureRouter.swift */,
 				A20000000000000000000090 /* InboxStore.swift */,
+				A200000000000000000000F6 /* ShareContextStore.swift */,
 				A20000000000000000000094 /* InboxReadingView.swift */,
 				A20000000000000000000096 /* IntelligenceAura.swift */,
 				A200000000000000000000A0 /* ScreenshotOffer.swift */,
@@ -514,6 +522,8 @@
 			isa = PBXGroup;
 			children = (
 				A30000000000000000000002 /* ShareViewController.swift */,
+				A30000000000000000000021 /* ShareSheetView.swift */,
+				A30000000000000000000023 /* ShareItemLoader.swift */,
 				A30000000000000000000004 /* Info.plist */,
 				A30000000000000000000005 /* HowMuchShare.entitlements */,
 			);
@@ -733,6 +743,7 @@
 				A2000000000000000000009B /* AddFromImageIntent.swift in Sources */,
 				A20000000000000000000059 /* AppShortcuts.swift in Sources */,
 				A20000000000000000000091 /* InboxStore.swift in Sources */,
+				A200000000000000000000F7 /* ShareContextStore.swift in Sources */,
 				A20000000000000000000095 /* InboxReadingView.swift in Sources */,
 				A20000000000000000000097 /* IntelligenceAura.swift in Sources */,
 				A200000000000000000000A1 /* ScreenshotOffer.swift in Sources */,
@@ -791,6 +802,9 @@
 			files = (
 				A30000000000000000000003 /* ShareViewController.swift in Sources */,
 				A30000000000000000000006 /* InboxStore.swift in Sources */,
+				A30000000000000000000020 /* ShareContextStore.swift in Sources */,
+				A30000000000000000000022 /* ShareSheetView.swift in Sources */,
+				A30000000000000000000024 /* ShareItemLoader.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

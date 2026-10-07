@@ -74,6 +74,7 @@ final class AppModel {
     set { serverAccounts = newValue }
   }
   private var displayedAccounts: [Account] = []
+  @ObservationIgnored private var lastPublishedShareContext: ShareContext?
   var categoryGroups: [CategoryGroup] = []
   var payees: [Payee] = [] {
     didSet {
@@ -519,6 +520,7 @@ final class AppModel {
     // is its own file, written from the same data and keyed on the same
     // fingerprint, so it already holds exactly what this restore would write.
     // The network refresh publishes it again as soon as it lands.
+    publishShareContext()
   }
 
   /// Writes the current reference set, tagged with the cursor the last ledger
@@ -2727,10 +2729,65 @@ final class AppModel {
       payees: payees
     )
     store.scheduleWrite(snapshot)
+    publishShareContext()
   }
 
   func wipeIntentCatalog(using store: IntentCatalogStore = .shared) {
     store.wipeAll()
+    guard settings.isAuthenticated else {
+      publishSignedOutShareContext(using: .shared)
+      return
+    }
+    // A plan or connection switch while signed in: the old accounts must go, but
+    // the owner is not signed out. A missing file reads as "unknown" until the
+    // new accounts publish.
+    ShareContextStore.shared.remove()
+    lastPublishedShareContext = nil
+  }
+
+  /// A signed-out context, not a missing file: a missing file means a fresh
+  /// install ("unknown"), so the extension could never show Save for later.
+  private func publishSignedOutShareContext(using store: ShareContextStore) {
+    let signedOut = ShareContext(
+      isSignedIn: false,
+      lastUsedOpenAccountID: nil,
+      accounts: [],
+      writtenAt: Date()
+    )
+    if lastPublishedShareContext?.isSignedIn != false {
+      store.write(signedOut)
+    }
+    lastPublishedShareContext = signedOut
+  }
+
+  /// Gives the share extension the open accounts and the last-used one.
+  /// The extension never sees a token; it only reads this file. Accounts that
+  /// have not loaded yet never overwrite a good list, and an unchanged context
+  /// is not rewritten.
+  func publishShareContext(using store: ShareContextStore = .shared) {
+    guard settings.isAuthenticated else {
+      publishSignedOutShareContext(using: store)
+      return
+    }
+    guard !accounts.isEmpty else {
+      return
+    }
+    let context = ShareContext(
+      isSignedIn: true,
+      lastUsedOpenAccountID: lastUsedOpenAccountID,
+      accounts: openAccounts.filter { !$0.deleted }.map {
+        ShareAccount(id: $0.id, name: $0.name, isClosed: false)
+      },
+      writtenAt: Date()
+    )
+    if let last = lastPublishedShareContext,
+       last.isSignedIn == context.isSignedIn,
+       last.lastUsedOpenAccountID == context.lastUsedOpenAccountID,
+       last.accounts == context.accounts {
+      return
+    }
+    store.write(context)
+    lastPublishedShareContext = context
   }
 
   func refreshScheduledTransactions(quiet: Bool = false) async {
@@ -3182,6 +3239,7 @@ final class AppModel {
     }
     viewPrefs.lastUsedAccountID = last.accountID
     saveViewPrefs()
+    publishShareContext()
   }
 
   private func savedMessage(for drafts: [TransactionDraft]) -> String {
