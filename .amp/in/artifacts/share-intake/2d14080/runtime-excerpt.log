@@ -1,0 +1,39 @@
+22319:2026-10-07 08:16:21.793 I  HowMuch[4084:bd5f] [sg.soon.howmuch:IntakeBackgroundRefresh] Couldn't schedule refresh: The operation couldn’t be completed. (BGTaskSchedulerErrorDomain error 1.)
+23863:2026-10-07 08:17:39.320 Df SpringBoard[1517:11f6e] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
+25072:2026-10-07 08:17:40.228 I  HowMuch[4084:bd5f] [sg.soon.howmuch:IntakeBackgroundRefresh] Couldn't schedule refresh: The operation couldn’t be completed. (BGTaskSchedulerErrorDomain error 1.)
+26934:2026-10-07 08:17:41.778 Df HowMuch[4084:bd5f] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Adding notification request BB45-945F to destinations: Default, contentDate: (null)
+26936:2026-10-07 08:17:41.780 Df SpringBoard[1517:1200b] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Adding notification request BB45-945F to destinations: Default, contentDate: (null)
+26937:2026-10-07 08:17:41.780 Df SpringBoard[1517:1200b] [com.apple.UserNotifications:AttachmentsService] attributedBody is empty for request BB45-945F <UNNotificationRequest: 0x10dac22b0; identifier: AAE74FBA-3712-4B80-9493-204526E5849C, content: <UNNotificationContent: 0x11e52f200; title: <redacted>, subtitle: (null), body: <redacted>, attributedBody: (null), summaryArgument: , summaryArgumentCount: 0, categoryIdentifier: halation.inbox, launchImageName: , threadIdentifier: AAE74FBA-3712-4B80-9493-204526E5849C, attachments: (
+27044:    "<CSSearchableItem:0x10bfa7840, sg.soon.howmuch:AAE74FBA-3712-4B80-9493-204526E5849C, 4, 4>"
+27103:2026-10-07 08:18:05.633 Df SpringBoard[1517:1200e] [com.apple.UserNotifications:Connections] [com.apple.Preferences] Removing delivered notifications
+27121:2026-10-07 08:20:01.882 Df SpringBoard[1517:12800] [com.apple.UserNotifications:DataProvider] [sg.soon.howmuch] Received response to BB45-945F for action halation.inbox.review (7)
+27122:2026-10-07 08:20:01.885 Df SpringBoard[1517:12800] [com.apple.UserNotifications:AppLaunching] [sg.soon.howmuch] Launch application in foreground for notification response action halation.inbox.review
+27123:2026-10-07 08:20:02.061 Df SpringBoard[1517:12940] [com.apple.UserNotifications:AppLaunching] [sg.soon.howmuch] Foreground application launch succeeed for action response halation.inbox.review: (null)
+27583:2026-10-07 08:20:02.717 Df SpringBoard[1517:2ebf] [com.apple.UserNotifications:AppLaunching] [sg.soon.howmuch] UINotificationResponseAction halation.inbox.review withHandler called
+27584:2026-10-07 08:20:02.717 Df SpringBoard[1517:2ebf] [com.apple.UserNotifications:AppLaunching] [sg.soon.howmuch] Application foreground launch action for notification response action halation.inbox.review recieved action response <BSActionResponse: 0x1187253e0; error: <NSError: 0x126205350; domain: BSActionErrorDomain; code: 4 ("empty-response")>>
+57641:2026-10-07 08:20:33.496 Df SpringBoard[1517:12941] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
+57642:2026-10-07 08:20:33.498 Df SpringBoard[1517:12941] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
+62926:2026-10-07 08:20:37.964 I  HowMuch[4084:bd5f] [sg.soon.howmuch:IntakeBackgroundRefresh] Couldn't schedule refresh: The operation couldn’t be completed. (BGTaskSchedulerErrorDomain error 1.)
+64146:2026-10-07 08:23:04.492 Df SpringBoard[1517:135ea] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
+65270:2026-10-07 08:23:05.370 I  HowMuch[4084:bd5f] [sg.soon.howmuch:IntakeBackgroundRefresh] Couldn't schedule refresh: The operation couldn’t be completed. (BGTaskSchedulerErrorDomain error 1.)
+66388:2026-10-07 08:23:06.614 Df SpringBoard[1517:1372b] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
+66648:2026-10-07 08:24:31.823 Df SpringBoard[1517:13c47] [com.apple.UserNotifications:Connections] [com.apple.Preferences] Removing delivered notifications
+67552:2026-10-07 08:24:38.854 Df SpringBoard[1517:13d23] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
+67689:2026-10-07 08:24:38.906 Df SpringBoard[1517:13d34] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
+69617:2026-10-07 08:24:40.488 Df SpringBoard[1517:13d36] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
+108270:2026-10-07 08:25:18.144 Df SpringBoard[1517:13746] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
+114738:2026-10-07 08:25:23.562 I  HowMuch[4084:bd5f] [sg.soon.howmuch:IntakeBackgroundRefresh] Couldn't schedule refresh: The operation couldn’t be completed. (BGTaskSchedulerErrorDomain error 1.)
+116999:2026-10-07 08:26:18.408 Df SpringBoard[1517:144ac] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
+117891:2026-10-07 08:26:19.052 Df SpringBoard[1517:143ee] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
+118560:2026-10-07 08:26:19.541 I  HowMuch[4084:bd5f] [sg.soon.howmuch:IntakeBackgroundRefresh] Couldn't schedule refresh: The operation couldn’t be completed. (BGTaskSchedulerErrorDomain error 1.)
+119022:2026-10-07 08:26:33.660 Df SpringBoard[1517:14637] [com.apple.UserNotifications:Connections] [com.apple.Preferences] Removing delivered notifications
+119920:2026-10-07 08:26:42.458 Df SpringBoard[1517:14728] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
+120159:2026-10-07 08:26:42.626 Df SpringBoard[1517:14728] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
+215047:2026-10-07 08:28:14.038 Df SpringBoard[1517:14cd9] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
+264759:2026-10-07 08:29:02.064 I  HowMuch[4084:bd5f] [sg.soon.howmuch:IntakeBackgroundRefresh] Couldn't schedule refresh: The operation couldn’t be completed. (BGTaskSchedulerErrorDomain error 1.)
+265879:2026-10-07 08:30:12.854 Df SpringBoard[1517:15586] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
+266993:2026-10-07 08:30:13.837 I  HowMuch[4084:bd5f] [sg.soon.howmuch:IntakeBackgroundRefresh] Couldn't schedule refresh: The operation couldn’t be completed. (BGTaskSchedulerErrorDomain error 1.)
+267237:2026-10-07 08:30:14.335 Df SpringBoard[1517:15586] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
+267815:2026-10-07 08:30:39.790 Df SpringBoard[1517:155a5] [com.apple.UserNotifications:Connections] [com.apple.Preferences] Removing delivered notifications
+268505:2026-10-07 08:30:51.570 Df SpringBoard[1517:157b6] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
+268768:2026-10-07 08:30:51.663 Df SpringBoard[1517:1589c] [com.apple.UserNotifications:Connections] [sg.soon.howmuch] Removing delivered notifications
