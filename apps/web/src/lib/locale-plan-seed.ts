@@ -25,6 +25,13 @@ export type LocalePlanSeed = {
 
 export const DATE_FORMAT_CHOICES: readonly DateFormatChoice[] = ["DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"];
 
+/** The stored values name an ordering; the labels show what each renders as. */
+export const DATE_FORMAT_LABELS: Record<DateFormatChoice, string> = {
+  "DD/MM/YYYY": "Day first (24 May 2026)",
+  "MM/DD/YYYY": "Month first (May 24, 2026)",
+  "YYYY-MM-DD": "Year first (2026-05-24)",
+};
+
 export const CURRENCY_CHOICES: readonly string[] = [
   "SGD", "USD", "EUR", "GBP", "AUD", "NZD", "CAD", "JPY", "MYR", "HKD", "CNY", "INR",
   "IDR", "THB", "PHP", "VND", "KRW", "TWD", "CHF", "SEK", "NOK", "DKK",

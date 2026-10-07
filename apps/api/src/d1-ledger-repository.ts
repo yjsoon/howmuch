@@ -2,7 +2,7 @@ import { createId } from "./ids";
 import { createHash } from "node:crypto";
 import { parseAccountIcon } from "./account-icon";
 import { applyAccountUpdate, type AccountUpdatePatch } from "./account-kind";
-import { LedgerRepository, NotFoundError, ReconciliationMismatchError, TransactionStateConflictError, ValidationError, type CategoryWriteOptions, type SnapshotImportResult, type TransactionWriteOptions } from "./repository";
+import { LedgerRepository, NotFoundError, PlanNotFoundError, type PlanFormatsPatch, ReconciliationMismatchError, TransactionStateConflictError, ValidationError, type CategoryWriteOptions, type SnapshotImportResult, type TransactionWriteOptions } from "./repository";
 import {
   EntityConflictError,
   categoryCommandStatements,
@@ -51,6 +51,10 @@ export class D1LedgerRepository extends LedgerRepository {
     await this.metadata.ensurePlan(planId, name, this.context("plan.ensure",planId,planId));
   }
   override async touchPlan(planId: string): Promise<number> { return this.metadata.touchPlan(planId, this.context("plan.touch",planId,planId)); }
+  override async updatePlanFormats(planId: string, formats: PlanFormatsPatch): Promise<void> {
+    if (!(await this.d1.get("SELECT 1 FROM plans WHERE id=? AND deleted=0", [planId]))) throw new PlanNotFoundError();
+    await this.metadata.updatePlanFormats(planId, formats, this.context("plan.formats", planId, planId));
+  }
   override async upsertPlan(planId:string,plan:any,settings?:any):Promise<void>{await this.metadata.upsertPlan(planId,plan,settings,this.context("plan.upsert",planId,planId));}
   override async ensureAccount(planId:string,accountId:string,name?:string):Promise<void>{await this.metadata.ensureAccount(planId,accountId,name,this.context("account.ensure",planId,accountId));}
   override async upsertAccount(planId:string,account:any):Promise<void>{await this.metadata.upsertAccount(planId,account,this.context("account.upsert",planId,account.id));}
