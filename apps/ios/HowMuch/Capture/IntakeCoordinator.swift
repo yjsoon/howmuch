@@ -50,6 +50,8 @@ final class IntakeCoordinator {
   static let statementMessage = "Statements come in a later version."
   /// "Likely" is 0.75 up to 0.9; lines read by the fallback never reach "Sure".
   static let fallbackConfidenceCap = 0.85
+  /// A row a learned "flag" rule asks the owner to check is Unsure, so it is not ticked.
+  static let flaggedConfidenceCap = 0.5
 
   init(
     inbox: InboxStore = IntakeJobStore.isUnitTestHost
@@ -361,6 +363,10 @@ final class IntakeCoordinator {
     save(reading)
 
     let accounts = model.openAccounts
+    // The owner's notes go to the model reader only; the line parser reads none.
+    let guidance = IntakeSkillStore.shared.skill.promptGuidance(
+      accountID: reading.decideAccount ? nil : reading.accountID
+    )
     var extracted: [SlipMappedDraft] = []
     var sourceIndexes: [Int] = []
     var fallbackIndexes: [Int] = []
@@ -394,7 +400,8 @@ final class IntakeCoordinator {
           text: text,
           accounts: accounts,
           categoryGroups: model.categoryGroups,
-          payees: model.payees
+          payees: model.payees,
+          guidance: guidance
         )
       } catch {
         if background, readable(id) != nil {
@@ -486,17 +493,28 @@ final class IntakeCoordinator {
     hint: IntakeHint,
     model: AppModel
   ) async -> (proposals: [IntakeProposal], limited: Bool) {
-    let matcher = IntakeMatcher()
+    let skill = IntakeSkillStore.shared.skill
+    let matcher = IntakeMatcher(skill: skill)
     var set = IntakeCandidateSet(rows: [], transactions: [:], isComplete: true)
     // "New" in the share sheet means add everything as new.
     if hint != .new, let first = extracted.map(\.draft.date).min(), let last = extracted.map(\.draft.date).max() {
       let calendar = Calendar.current
-      let from = calendar.date(byAdding: .day, value: -matcher.dayWindow, to: first) ?? first
-      let to = calendar.date(byAdding: .day, value: matcher.dayWindow, to: last) ?? last
+      let from = calendar.date(byAdding: .day, value: -matcher.widestWindow, to: first) ?? first
+      let to = calendar.date(byAdding: .day, value: matcher.widestWindow, to: last) ?? last
       set = await model.intakeCandidates(accountIDs: nil, from: from, to: to)
     }
+    // Learned rules run on each line before matching. Counting a use waits for
+    // Approve, so reading a job again never counts twice.
+    let context = IntakeRuleContext.make(model: model)
+    var read = extracted
+    var outcomes: [Int: IntakeRuleOutcome] = [:]
+    for index in read.indices {
+      if let outcome = IntakeRuleEngine.apply(skill.rules, to: &read[index], context: context) {
+        outcomes[index] = outcome
+      }
+    }
     var proposals = matcher.match(
-      extracted,
+      read,
       openAccountIDs: Set(model.openAccounts.map(\.id)),
       candidates: set.rows,
       hint: hint,
@@ -508,6 +526,13 @@ final class IntakeCoordinator {
       }
       if let target = proposals[index].targetTransactionID {
         proposals[index].targetSnapshot = set.transactions[target]
+      }
+      if let outcome = outcomes[index] {
+        proposals[index].ruleApplications = [outcome.application]
+        proposals[index].reasons.insert(outcome.reason, at: 0)
+        if outcome.needsReview {
+          proposals[index].confidence = min(proposals[index].confidence, Self.flaggedConfidenceCap)
+        }
       }
       if fallbackIndexes.contains(index) {
         // Read by line rules, not the model: at most Likely.
@@ -697,11 +722,20 @@ final class IntakeCoordinator {
     var addedNow = 0
     var fixedNow = 0
     var skipped = 0
+    var ruleOutcomes: [(ruleID: UUID, overridden: Bool)] = []
     for index in job.proposals.indices {
       switch plans[job.proposals[index].id] {
       case .apply:
         job.proposals[index].isApplied = true
         let applied = job.proposals[index]
+        for application in applied.ruleApplications {
+          ruleOutcomes.append((
+            ruleID: application.ruleID,
+            overridden: IntakeRuleEngine.wasOverridden(
+              application, proposed: applied.proposedDraft, final: applied.draft
+            )
+          ))
+        }
         if applied.draft != applied.proposedDraft || applied.flippedFrom != nil {
           job.proposals[index].decision = .editedThenAccepted
         } else if !applied.decision.isAccepted {
@@ -745,6 +779,9 @@ final class IntakeCoordinator {
       model.showSaveMessage("Saved, but couldn’t update the Inbox. Open it again.", kind: .failure)
       return false
     }
+    // A rule counts a use once its row is saved (approving again after a failed
+    // save would count twice), and an override when the owner changed what it set.
+    IntakeSkillStore.shared.record(ruleOutcomes)
 
     var toast = Self.appliedSummary(added: addedNow, fixed: fixedNow)
     if skipped > 0 {
@@ -991,12 +1028,12 @@ final class IntakeCoordinator {
           start.draft.amountMagnitudeMilli > 0 else {
       return
     }
-    let matcher = IntakeMatcher()
+    let matcher = IntakeMatcher(skill: IntakeSkillStore.shared.skill)
     var set = IntakeCandidateSet(rows: [], transactions: [:], isComplete: true)
     if job.hint != .new {
       let calendar = Calendar.current
-      let from = calendar.date(byAdding: .day, value: -matcher.dayWindow, to: start.draft.date) ?? start.draft.date
-      let to = calendar.date(byAdding: .day, value: matcher.dayWindow, to: start.draft.date) ?? start.draft.date
+      let from = calendar.date(byAdding: .day, value: -matcher.widestWindow, to: start.draft.date) ?? start.draft.date
+      let to = calendar.date(byAdding: .day, value: matcher.widestWindow, to: start.draft.date) ?? start.draft.date
       set = await model.intakeCandidates(accountIDs: nil, from: from, to: to)
     }
     guard let latest = self.job(id), latest.state == .proposed, !approving.contains(id),
@@ -1040,7 +1077,8 @@ final class IntakeCoordinator {
       proposal.targetSnapshot = match.targetTransactionID.flatMap { set.transactions[$0] }
       proposal.changedFields = match.changedFields
       proposal.candidateIDs = match.candidateIDs
-      proposal.reasons = match.reasons
+      // The matcher's reasons follow the register; the learned rule's stays.
+      proposal.reasons = proposal.reasons.filter { $0.hasPrefix("Learned rule") } + match.reasons
       proposal.flippedFrom = nil
       proposal.preFlipDecision = nil
       proposal.issue = nil
@@ -1179,5 +1217,34 @@ final class IntakeCoordinator {
     }
     IntakeNotifier.shared.jobDidChange(next, previous: previous, accountName: accountName(for: next))
     return true
+  }
+}
+
+extension IntakeRuleContext {
+  /// What the register looks like now, for applying learned rules to a line.
+  @MainActor
+  static func make(model: AppModel) -> IntakeRuleContext {
+    var context = IntakeRuleContext()
+    for account in model.openAccounts {
+      context.openAccountIDs.insert(account.id)
+      if account.onBudget {
+        context.onBudgetAccountIDs.insert(account.id)
+      }
+    }
+    for account in model.accounts {
+      context.accountNames[account.id] = account.name
+    }
+    for group in model.categoryGroups where !group.deleted {
+      for category in group.categories where !category.deleted {
+        context.categoryIDs.insert(category.id)
+        context.categoryNames[category.id] = category.name
+      }
+    }
+    for payee in model.payees where payee.deleted != true {
+      if let target = payee.transferAccountId {
+        context.transferPayees[target] = IntakeTransferPayee(id: payee.id, name: payee.name)
+      }
+    }
+    return context
   }
 }

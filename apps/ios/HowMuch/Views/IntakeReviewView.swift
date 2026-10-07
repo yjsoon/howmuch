@@ -28,6 +28,8 @@ struct IntakeReviewView: View {
   @State private var editing: ProposalRef?
   @State private var whyTarget: ProposalRef?
   @State private var matchTarget: ProposalRef?
+  /// The one rule offered after an approval, if a correction generalises.
+  @State private var suggestion: IntakeRuleSuggestion?
 
   private var coordinator: IntakeCoordinator { .shared }
 
@@ -118,6 +120,16 @@ struct IntakeReviewView: View {
           }
         }
       }
+    }
+    .sheet(item: $suggestion, onDismiss: {
+      // The batch stays on screen behind the sheet until it is answered.
+      if coordinator.job(jobID)?.state == .applied {
+        close()
+      }
+    }) { offered in
+      RememberThisSheet(suggestion: offered)
+        .presentationDetents([.medium, .large])
+        .blocksCapturePresentation()
     }
     .task(id: pagesKey) {
       await loadPages()
@@ -654,11 +666,23 @@ struct IntakeReviewView: View {
 
   private func approve(_ job: IntakeJob) {
     isApproving = true
+    let alreadyApplied = Set(job.proposals.filter(\.isApplied).map(\.id))
     Task {
       let done = await coordinator.approve(job.id, model: model)
       isApproving = false
+      guard done, let after = coordinator.job(job.id) else {
+        return
+      }
+      // After an approval only, never a reject: offer at most one rule from what
+      // the owner changed in the rows this approval saved.
+      suggestion = IntakeRuleSuggester.suggest(
+        applied: after.proposals.filter { $0.isApplied && !alreadyApplied.contains($0.id) },
+        jobID: after.id,
+        skill: IntakeSkillStore.shared.skill
+      )
       // Stay on the screen unless the batch is finished: skipped rows need the owner.
-      if done, coordinator.job(job.id)?.state == .applied {
+      // With a rule on offer, closing waits for the sheet.
+      if suggestion == nil, after.state == .applied {
         close()
       }
     }

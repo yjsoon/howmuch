@@ -144,6 +144,9 @@ struct IntakeProposal: Codable, Equatable, Identifiable, Sendable {
   var flippedFrom: IntakeProposalKind?
   /// The decision the row had before it was flipped, restored on undo.
   var preFlipDecision: IntakeDecision?
+  /// The learned rule that set fields on this row before matching, if any. Approve
+  /// compares what it set with what the owner saved to count an override.
+  var ruleApplications: [IntakeRuleApplication]
 
   init(
     id: UUID = UUID(),
@@ -161,7 +164,8 @@ struct IntakeProposal: Codable, Equatable, Identifiable, Sendable {
     isApplied: Bool = false,
     issue: String? = nil,
     flippedFrom: IntakeProposalKind? = nil,
-    preFlipDecision: IntakeDecision? = nil
+    preFlipDecision: IntakeDecision? = nil,
+    ruleApplications: [IntakeRuleApplication] = []
   ) {
     self.id = id
     self.kind = kind
@@ -179,11 +183,13 @@ struct IntakeProposal: Codable, Equatable, Identifiable, Sendable {
     self.issue = issue
     self.flippedFrom = flippedFrom
     self.preFlipDecision = preFlipDecision
+    self.ruleApplications = ruleApplications
   }
 
   private enum CodingKeys: String, CodingKey {
     case id, kind, confidence, draft, proposedDraft, targetTransactionID, targetSnapshot
     case changedFields, candidateIDs, reasons, decision, sourceFileIndex, isApplied, issue, flippedFrom, preFlipDecision
+    case ruleApplications
   }
 
   /// Tolerant: a draft this build cannot decode (the draft type grew a field,
@@ -207,6 +213,8 @@ struct IntakeProposal: Codable, Equatable, Identifiable, Sendable {
     issue = try container.decodeIfPresent(String.self, forKey: .issue)
     flippedFrom = try? container.decodeIfPresent(IntakeProposalKind.self, forKey: .flippedFrom)
     preFlipDecision = try? container.decodeIfPresent(IntakeDecision.self, forKey: .preFlipDecision)
+    ruleApplications = (try? container.decodeIfPresent([Lossy<IntakeRuleApplication>].self, forKey: .ruleApplications))?
+      .compactMap(\.value) ?? []
     if decodedDraft == nil {
       kind = .possibleDuplicate
       decision = .rejected

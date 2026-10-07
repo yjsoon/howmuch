@@ -219,6 +219,9 @@ struct SettingsView: View {
           NavigationLink("AI provider") {
             CaptureAISettingsView(settings: model.captureAI)
           }
+          NavigationLink("Skill & Memory") {
+            SkillAndMemoryView()
+          }
         }
         Section {
           NavigationLink {
@@ -307,6 +310,9 @@ struct SettingsView: View {
           Section("Intelligence") {
             NavigationLink("AI provider") {
               CaptureAISettingsView(settings: model.captureAI)
+            }
+            NavigationLink("Skill & Memory") {
+              SkillAndMemoryView()
             }
           }
           Section {
