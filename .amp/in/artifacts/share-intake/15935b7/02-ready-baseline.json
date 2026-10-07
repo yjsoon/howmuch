@@ -1,0 +1,125 @@
+{
+  "capturedAt": "2026-10-07T04:55:14.156167+00:00",
+  "database": "/Users/devin/Library/Developer/CoreSimulator/Devices/EDD9B083-63F1-44E6-9A7B-0A6964CC2561/data/Containers/Data/Application/30ACC3BA-9E71-4BF6-BC48-E20847930CD3/Library/Application Support/HowMuch/Local/howmuch.sqlite",
+  "group": "/Users/devin/Library/Developer/CoreSimulator/Devices/EDD9B083-63F1-44E6-9A7B-0A6964CC2561/data/Containers/Shared/AppGroup/2A15EA43-6271-4E8B-A901-E8CD06CF6D16",
+  "accounts": [
+    {
+      "id": "e2e-dbs",
+      "name": "DBS Altitude",
+      "closed": 0,
+      "balance_milli": -8900
+    },
+    {
+      "id": "e2e-everyday",
+      "name": "Everyday Account",
+      "closed": 0,
+      "balance_milli": 0
+    },
+    {
+      "id": "e2e-closed",
+      "name": "Closed Synthetic Account",
+      "closed": 1,
+      "balance_milli": 0
+    }
+  ],
+  "shareContext": {
+    "accounts": [
+      {
+        "isClosed": false,
+        "id": "e2e-dbs",
+        "name": "DBS Altitude"
+      },
+      {
+        "isClosed": false,
+        "id": "e2e-everyday",
+        "name": "Everyday Account"
+      }
+    ],
+    "writtenAt": "2026-10-07T04:53:28Z",
+    "isSignedIn": true,
+    "lastUsedOpenAccountID": "e2e-dbs"
+  },
+  "inbox": {},
+  "jobs": {},
+  "transactions": [
+    {
+      "id": "e2e-existing-kopitiam",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -8900,
+      "payee_name_snapshot": "Kopitiam",
+      "approved": 1
+    },
+    {
+      "id": "txn_5a0cabc1-c688-4c42-8891-a45116d7e610",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "approved": 1
+    }
+  ],
+  "deletionFlags": [
+    {
+      "id": "e2e-existing-kopitiam",
+      "deleted": 0
+    },
+    {
+      "id": "txn_5a0cabc1-c688-4c42-8891-a45116d7e610",
+      "deleted": 1
+    }
+  ],
+  "activeTransactions": [
+    {
+      "id": "e2e-existing-kopitiam",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -8900,
+      "payee_name_snapshot": "Kopitiam",
+      "approved": 1
+    }
+  ],
+  "tables": [
+    "_local_migrations",
+    "plans",
+    "accounts",
+    "category_groups",
+    "categories",
+    "transactions",
+    "subtransactions",
+    "source_events",
+    "import_sessions",
+    "import_rows",
+    "ynab_sync_state",
+    "sync_runs",
+    "sync_attempts",
+    "sync_transition_receipts",
+    "sync_renewal_receipts",
+    "audit_events",
+    "write_commands",
+    "write_state",
+    "write_assertions",
+    "users",
+    "auth_identities",
+    "sessions",
+    "plan_memberships",
+    "password_credentials",
+    "auth_setup",
+    "login_rate_limits",
+    "payees",
+    "ynab_raw_objects",
+    "plan_month_assignments",
+    "plan_month_category_targets",
+    "scheduled_transaction_edits",
+    "scheduled_subtransaction_edits",
+    "scheduled_transaction_snapshot_assertions",
+    "account_reconciliation_assertions",
+    "personal_api_tokens",
+    "account_preferences",
+    "rewards_tracker_snapshots",
+    "rewards_tracker_cards",
+    "ynab_source_month_activity",
+    "account_month_balances",
+    "report_cache"
+  ]
+}

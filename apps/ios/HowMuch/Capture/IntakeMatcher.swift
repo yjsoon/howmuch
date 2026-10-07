@@ -291,6 +291,64 @@ struct IntakeMatcher: Sendable {
     return fields
   }
 
+  /// The fields a Fix changes once the reviewer has edited it: what the
+  /// matcher found (`differences`, against the reader's draft) plus any
+  /// amount, date or memo the reviewer changed from the reader's draft and
+  /// that differs from the live row. Order: payee, category, amount, date, memo.
+  static func editedDifferences(
+    draft: TransactionDraft,
+    proposed: TransactionDraft,
+    parsedCategory: Bool,
+    live: Transaction,
+    allowContainment: Bool = true
+  ) -> [IntakeField] {
+    let base = differences(
+      draft: draft,
+      parsedCategory: parsedCategory,
+      row: IntakeCandidateRow(transaction: live),
+      allowContainment: allowContainment
+    )
+    var fields: [IntakeField] = base.filter { $0 == .payee || $0 == .category }
+    if draft.signedMilliunits != proposed.signedMilliunits, draft.signedMilliunits != live.amount {
+      fields.append(.amount)
+    }
+    if draft.date.isoDateString != proposed.date.isoDateString, draft.date.isoDateString != live.date {
+      fields.append(.date)
+    }
+    if trimmed(draft.memo) != trimmed(proposed.memo), trimmed(draft.memo) != trimmed(live.memo ?? "") {
+      fields.append(.memo)
+    }
+    return fields
+  }
+
+  /// Which of a Fix's wanted fields still differ on the live row at approval.
+  static func pendingFixFields(
+    wanted: [IntakeField],
+    draft: TransactionDraft,
+    live: Transaction,
+    allowContainment: Bool = true
+  ) -> [IntakeField] {
+    let base = differences(
+      draft: draft,
+      parsedCategory: wanted.contains(.category),
+      row: IntakeCandidateRow(transaction: live),
+      allowContainment: allowContainment
+    )
+    return wanted.filter { field in
+      switch field {
+      case .payee, .category: base.contains(field)
+      case .amount: live.amount != draft.signedMilliunits
+      case .date: live.date != draft.date.isoDateString
+      case .memo: trimmed(draft.memo) != trimmed(live.memo ?? "")
+      case .unknown: false
+      }
+    }
+  }
+
+  private static func trimmed(_ text: String) -> String {
+    text.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
   private func describe(_ row: IntakeCandidateRow) -> String {
     let payee = row.payeeName.isEmpty ? "a transaction" : row.payeeName
     return "\(row.date) · \(payee)"
