@@ -1,11 +1,11 @@
 # iOS share and screenshots
 
-Share and a later screenshot offer are more writers of the same inbox. The extension copies bytes and quits. The main app reads, then the density rule. Default-off screenshot offer lives on Accounts. Issues [#104](https://github.com/yjsoon/howmuch/issues/104), [#106](https://github.com/yjsoon/howmuch/issues/106). Spec: `docs/frontend/intake-ui.md` §9–10.
+Share and a later screenshot offer are more writers of the same inbox. The extension copies files and quits. The main app reads, then the density rule. Default-off screenshot offer lives on Accounts. Issues [#104](https://github.com/yjsoon/howmuch/issues/104), [#106](https://github.com/yjsoon/howmuch/issues/106). Spec: `docs/frontend/intake-ui.md` §9–10.
 
 ## Sub-features
 
-- `share-appears` HowMuch appears in the iOS share sheet for `public.image` and `public.text`.
-- `share-copies` choosing HowMuch copies the payload and completes; no review UI in the extension.
+- `share-appears` HowMuch appears in the iOS share sheet for up to 10 images, one PDF, or text.
+- `share-copies` choosing HowMuch shows a sheet with account, kind and note. Send hands the job off without opening the app. Reading happens the next time Halation is opened.
 - `share-reading` main app shows **Reading…** with `Stays on this device`, then `N == 1` capture or **{N} Transactions**.
 - `share-no-upload` sharing does not POST the file or a transcript to the HowMuch API.
 - `share-one-row` a one-line share can open Add Transaction.
@@ -31,16 +31,18 @@ Preconditions:
 - Compose/reader already prove typed `N == 1` / `N > 1` ([iOS intake compose](./ios-intake-compose.md), [iOS intake review list](./ios-intake-review-list.md)).
 - Share extension `sg.soon.howmuch.share` / App Group `group.sg.soon.howmuch` present.
 
-- **Image share.** In Simulator Photos (or any image), Share → HowMuch. Extension completes. HowMuch foreground: title `Reading…`, caption `Stays on this device`, no transcript. Then either Add Transaction or `{N} Transactions`.
+- **Image share.** In Simulator Photos (or any image), Share → HowMuch, choose the account, kind and optionally a note, then Send. The sheet shows **Sent to Halation** and closes without opening the app. Open HowMuch. Foreground: title `Reading…`, caption `Stays on this device`, no transcript. Then either Add Transaction or `{N} Transactions`.
 - **Text share.** Share a two-line spend list as text. Same Reading… then the review list.
 - **No upload.** While Reading… and after confirm **before** Save/Add: `control-howmuch http GET /parse` is 404. No new `/v1` multipart. Network tab / proxy to `{api_url}` shows no image body.
 - **Confirm.** Save or `Add {n} to {account}` as in the other recipes. HTTP then shows the rows. Cancel posts nothing.
 - **Screenshot offer.** If the Accounts toast is visible, it sits near the bottom of the screen, not in the account list. Headline `Add these transactions?` Caption `Looks like a screenshot · {n} lines`. Tap the toast to follow density. Swipe away or the dismiss control hides it and that photo does not return. Photos still has the shot. If detection is off (the default), the toast is absent — that is a pass for default-off, not a skip, once #106 has shipped the toggle.
-- **Proof.** Screenshot the share sheet with HowMuch (`artifacts/ios-share-and-screenshots/share-sheet.png`), Reading… (`artifacts/ios-share-and-screenshots/reading.png`), the resulting capture or list (`artifacts/ios-share-and-screenshots/result.png`). If the offer exists: Accounts card (`artifacts/ios-share-and-screenshots/offer.png`).
+- **Proof.** Screenshot the share sheet with HowMuch (`.amp/in/artifacts/ios-share-and-screenshots/share-sheet.png`), Reading… (`.amp/in/artifacts/ios-share-and-screenshots/reading.png`), the resulting capture or list (`.amp/in/artifacts/ios-share-and-screenshots/result.png`). If the offer exists: Accounts card (`.amp/in/artifacts/ios-share-and-screenshots/offer.png`).
 
 ## Gotchas
 
-- The extension must not run Foundation Models. If Reading… happens *inside* the share sheet, that is a fail.
+- Store review artifacts under `.amp/in/artifacts/` (AGENTS.md), not the older recipe path.
+
+- OCR or model reading inside the extension is a fail. The extension only copies, hashes and thumbnails.
 - Backgrounded HowMuch must not lose the file; inbox is the source of truth.
 - One receipt photo can still be `N == 1` and open Add Transaction. Do not require the list.
 - Photos library permission is only for the detection slice. Share from Photos does not require the detection banner.

@@ -12,6 +12,11 @@ final class ShareViewController: UIViewController {
     model.onFinish = { [weak self] in
       self?.extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
     }
+    model.onCancel = { [weak self] in
+      self?.extensionContext?.cancelRequest(
+        withError: NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError)
+      )
+    }
     let host = UIHostingController(rootView: ShareSheetView(model: model))
     host.view.backgroundColor = .clear
     host.view.translatesAutoresizingMaskIntoConstraints = false

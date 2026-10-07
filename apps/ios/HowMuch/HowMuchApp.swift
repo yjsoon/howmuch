@@ -325,7 +325,9 @@ struct CaptureIntakeHost: View {
               }
             }
           },
-          onClaimed: { claimedInboxIDs = $0 }
+          onClaimed: { claimedInboxIDs = $0 },
+          onNote: { session?.appendUserMessage($0) },
+          onNotice: { session?.appendAssistantMessage($0) }
         )
       } else if let session {
         AddTransactionsView(session: session, workspace: workspace)

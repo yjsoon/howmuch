@@ -373,6 +373,32 @@ final class InboxStoreTests: XCTestCase {
     XCTAssertEqual(try Data(contentsOf: item.payloadURL(for: item.sources[2])), Data("c.pdf".utf8))
   }
 
+  // Failure mode: a manifest from a newer build with a source kind this build does not know,
+  // or one that cannot be decoded at all, must not strand the whole job or sit in Reading forever.
+  func testUnknownSourceKindIsSkippedAndUndecodableManifestIsQuarantined() throws {
+    let good = UUID()
+    try plantManifest(id: good, json: """
+      {"version":2,"id":"\(good.uuidString)","source":"somethingNew",
+       "sources":[{"filename":"clip.mov","kind":"video","bytes":1},
+                  {"filename":"a.png","kind":"image","bytes":3}],
+       "createdAt":"2026-01-01T00:00:00Z"}
+      """, files: ["a.png": Data([1, 2, 3]), "clip.mov": Data([9])])
+    let bad = UUID()
+    try plantManifest(id: bad, json: "not json at all", files: ["a.png": Data([1])])
+    let claimed = try store.claimInbox()
+    XCTAssertEqual(claimed.map(\.id), [good])
+    XCTAssertEqual(claimed.first?.sources.map(\.filename), ["a.png"])
+    XCTAssertEqual(store.loadReading().map(\.id), [good])
+    store.discardReading(good)
+    XCTAssertFalse(store.hasReadingItems())
+    XCTAssertTrue(FileManager.default.fileExists(
+      atPath: store.quarantineDirectory.appendingPathComponent(bad.uuidString).path
+    ))
+    XCTAssertFalse(FileManager.default.fileExists(
+      atPath: store.readingDirectory.appendingPathComponent(bad.uuidString).path
+    ))
+  }
+
   @discardableResult
   private func plantManifest(id: UUID, json: String, files: [String: Data]) throws -> URL {
     let folder = store.inboxDirectory.appendingPathComponent(id.uuidString, isDirectory: true)

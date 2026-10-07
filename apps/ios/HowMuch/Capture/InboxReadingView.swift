@@ -17,6 +17,7 @@ struct InboxReadingView: View {
   var onAttachments: ([CaptureAttachment]) -> Void = { _ in }
   var onClaimed: ([UUID]) -> Void = { _ in }
   var onNote: (String) -> Void = { _ in }
+  var onNotice: (String) -> Void = { _ in }
 
   @State private var thumbnail: UIImage?
   @State private var readingTask: Task<Void, Never>?
@@ -119,6 +120,7 @@ struct InboxReadingView: View {
       thumbnail = try await InboxPreview.firstThumbnail(in: items, displayScale: displayScale)
       try Task.checkCancellation()
       var mapped: [SlipMappedDraft] = []
+      var decidedByReviewer = false
       for item in items {
         try Task.checkCancellation()
         if let note = item.note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
@@ -152,12 +154,18 @@ struct InboxReadingView: View {
           case .text:
             itemDrafts.append(contentsOf: await interpretDrafts(from: item.text(of: file)))
           case .pdf:
-            let text = await SlipPDFText.recognize(url)
+            let result = await SlipPDFText.recognize(url)
             try Task.checkCancellation()
-            itemDrafts.append(contentsOf: await interpretDrafts(from: text))
+            if result.skippedPages > 0 {
+              onNotice("Read the first \(SlipPDFText.maxOCRPages) pages.")
+            }
+            itemDrafts.append(contentsOf: await interpretDrafts(from: result.text))
           }
         }
-        if let accountID = item.accountID {
+        if item.decideAccount {
+          decidedByReviewer = true
+        } else if let accountID = item.accountID,
+                  model.openAccounts.contains(where: { $0.id == accountID }) {
           for index in itemDrafts.indices where !itemDrafts[index].parsedAccount {
             itemDrafts[index].draft.seedIfNeeded(
               accounts: model.openAccounts,
@@ -168,7 +176,7 @@ struct InboxReadingView: View {
         mapped.append(contentsOf: itemDrafts)
       }
       try Task.checkCancellation()
-      if mapped.count == 1, !mapped[0].parsedAccount {
+      if !decidedByReviewer, mapped.count == 1, !mapped[0].parsedAccount {
         mapped[0].draft.seedIfNeeded(
           accounts: model.openAccounts,
           preferredAccountID: preferredAccountID
@@ -266,26 +274,49 @@ enum SlipImageText {
 
 enum SlipPDFText {
   static let maxOCRPages = 8
+  static let maxRenderedEdge: CGFloat = 4096
 
-  /// The text layer when there is one; otherwise OCR of up to eight rendered pages.
-  static func recognize(_ url: URL) async -> String {
-    let layer = try? await inboxBackgroundWork { () throws -> String in
-      PDFDocument(url: url)?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    }
-    if let layer, !layer.isEmpty {
-      return layer
-    }
-    let pageCount = (try? await inboxBackgroundWork { () throws -> Int in PDFDocument(url: url)?.pageCount ?? 0 }) ?? 0
+  struct Result: Sendable {
+    var text: String
+    /// Pages that needed OCR but were beyond `maxOCRPages`.
+    var skippedPages: Int
+  }
+
+  /// Each page's text layer when it has one; OCR only for pages with an empty
+  /// text layer, up to `maxOCRPages` of them.
+  static func recognize(_ url: URL) async -> Result {
+    let pageCount = (try? await inboxBackgroundWork { () throws -> Int in
+      PDFDocument(url: url)?.pageCount ?? 0
+    }) ?? 0
     var pages: [String] = []
-    for index in 0..<min(pageCount, maxOCRPages) {
+    var ocrPages = 0
+    var skipped = 0
+    for index in 0..<pageCount {
       if Task.isCancelled { break }
+      let layer = (try? await inboxBackgroundWork { () throws -> String in
+        PDFDocument(url: url)?.page(at: index)?.string?
+          .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      }) ?? ""
+      if !layer.isEmpty {
+        pages.append(layer)
+        continue
+      }
+      guard ocrPages < maxOCRPages else {
+        skipped += 1
+        continue
+      }
+      ocrPages += 1
       let png: Data? = try? await inboxBackgroundWork { () throws -> Data? in
         autoreleasepool { () -> Data? in
           guard let page = PDFDocument(url: url)?.page(at: index) else { return nil }
           let bounds = page.bounds(for: .mediaBox)
           guard bounds.width > 0, bounds.height > 0 else { return nil }
-          let width: CGFloat = 1600
-          let size = CGSize(width: width, height: ceil(width * bounds.height / bounds.width))
+          let longEdge = min(maxRenderedEdge, max(bounds.width, bounds.height) * 2)
+          let factor = longEdge / max(bounds.width, bounds.height)
+          let size = CGSize(
+            width: max(1, ceil(bounds.width * factor)),
+            height: max(1, ceil(bounds.height * factor))
+          )
           return page.thumbnail(of: size, for: .mediaBox).pngData()
         }
       }
@@ -295,6 +326,6 @@ enum SlipPDFText {
         pages.append(text)
       }
     }
-    return pages.joined(separator: "\n")
+    return Result(text: pages.joined(separator: "\n"), skippedPages: skipped)
   }
 }

@@ -13,6 +13,13 @@ enum InboxSource: String, Codable, Equatable, Sendable {
   case shareSheet
   case appIntent
   case detectedScreenshot
+  /// A source written by a newer build that this build does not know.
+  case other
+
+  init(from decoder: Decoder) throws {
+    let raw = try decoder.singleValueContainer().decode(String.self)
+    self = InboxSource(rawValue: raw) ?? .other
+  }
 }
 
 enum InboxPayloadKind: String, Codable, Equatable, Sendable {
@@ -199,6 +206,16 @@ struct InboxItem: Equatable, Sendable, Identifiable {
   }
 }
 
+/// Decodes one source, yielding nil (instead of failing the array) for a kind
+/// or shape this build does not understand.
+private struct LenientSourceFile: Decodable {
+  var value: InboxSourceFile?
+
+  init(from decoder: Decoder) throws {
+    value = try? InboxSourceFile(from: decoder)
+  }
+}
+
 /// Version 2 manifest. A v1 manifest (no `version`, top-level `kind` and
 /// `filename`) decodes as a single source. Unknown keys are ignored.
 private struct InboxManifest: Codable, Equatable {
@@ -249,8 +266,9 @@ private struct InboxManifest: Codable, Equatable {
     id = try container.decode(UUID.self, forKey: .id)
     source = try container.decode(InboxSource.self, forKey: .source)
     createdAt = try container.decode(Date.self, forKey: .createdAt)
-    if let decoded = try container.decodeIfPresent([InboxSourceFile].self, forKey: .sources),
-       !decoded.isEmpty {
+    let decoded = (try? container.decodeIfPresent([LenientSourceFile].self, forKey: .sources))?
+      .compactMap(\.value) ?? []
+    if !decoded.isEmpty {
       sources = decoded
     } else {
       let kind = try container.decode(InboxPayloadKind.self, forKey: .kind)
@@ -290,6 +308,7 @@ final class InboxStore: @unchecked Sendable {
 
   let inboxDirectory: URL
   let readingDirectory: URL
+  let quarantineDirectory: URL
 
   private let fileManager: FileManager
   private let lock = NSLock()
@@ -300,6 +319,7 @@ final class InboxStore: @unchecked Sendable {
     self.fileManager = fileManager
     inboxDirectory = container.appendingPathComponent("Inbox", isDirectory: true)
     readingDirectory = container.appendingPathComponent("Reading", isDirectory: true)
+    quarantineDirectory = container.appendingPathComponent("Quarantine", isDirectory: true)
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
     self.encoder = encoder
@@ -382,9 +402,12 @@ final class InboxStore: @unchecked Sendable {
     var files: [InboxSourceFile] = []
     var names: [String] = []
     for (index, source) in job.sources.enumerated() {
-      var name = Self.sanitizedFilename(source.filename)
-      if used.contains(name) {
-        name = "\(index + 1)-\(name)"
+      let base = Self.sanitizedFilename(source.filename)
+      var name = base
+      var prefix = index + 1
+      while used.contains(name) {
+        name = "\(prefix)-\(base)"
+        prefix += 1
       }
       used.insert(name)
       names.append(name)
@@ -445,10 +468,15 @@ final class InboxStore: @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
     try fileManager.createDirectory(at: readingDirectory, withIntermediateDirectories: true)
+    sweepStalePartialsLocked()
     var claimed: [InboxItem] = []
     for url in readyInboxURLsLocked() {
       let destination = readingDirectory.appendingPathComponent(url.lastPathComponent)
       if fileManager.fileExists(atPath: destination.path) {
+        continue
+      }
+      guard loadItemLocked(at: url) != nil else {
+        quarantineLocked(url)
         continue
       }
       try fileManager.moveItem(at: url, to: destination)
@@ -468,6 +496,10 @@ final class InboxStore: @unchecked Sendable {
       return nil
     }
     guard fileManager.fileExists(atPath: inboxURL.path) else {
+      return nil
+    }
+    guard loadItemLocked(at: inboxURL) != nil else {
+      quarantineLocked(inboxURL)
       return nil
     }
     try fileManager.createDirectory(at: readingDirectory, withIntermediateDirectories: true)
@@ -493,6 +525,36 @@ final class InboxStore: @unchecked Sendable {
     defer { lock.unlock() }
     for id in ids {
       discardReadingLocked(id)
+    }
+  }
+
+  /// A folder whose manifest cannot be decoded is kept for inspection, out of
+  /// the way of both Inbox and Reading.
+  private func quarantineLocked(_ url: URL) {
+    try? fileManager.createDirectory(at: quarantineDirectory, withIntermediateDirectories: true)
+    var destination = quarantineDirectory.appendingPathComponent(url.lastPathComponent)
+    if fileManager.fileExists(atPath: destination.path) {
+      destination = quarantineDirectory.appendingPathComponent(
+        "\(url.lastPathComponent)-\(Int(Date().timeIntervalSince1970))"
+      )
+    }
+    try? fileManager.moveItem(at: url, to: destination)
+  }
+
+  /// An extension killed mid-write leaves a `.partial` folder behind.
+  private func sweepStalePartialsLocked() {
+    let cutoff = Date().addingTimeInterval(-3600)
+    let urls = (try? fileManager.contentsOfDirectory(
+      at: inboxDirectory,
+      includingPropertiesForKeys: [.contentModificationDateKey],
+      options: []
+    )) ?? []
+    for url in urls where url.lastPathComponent.hasSuffix(".partial") {
+      let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+        .contentModificationDate
+      if let modified, modified < cutoff {
+        try? fileManager.removeItem(at: url)
+      }
     }
   }
 

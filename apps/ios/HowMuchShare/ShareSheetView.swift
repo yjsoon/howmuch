@@ -56,6 +56,7 @@ final class ShareSheetModel {
   private(set) var phase: Phase = .loading
   private(set) var items: [ShareLoadedItem] = []
   private(set) var context: ShareContext?
+  private(set) var skippedCount = 0
   private(set) var sendState: SendState = .idle
   /// `nil` means "Let Halation decide".
   var accountSelection: String?
@@ -63,6 +64,7 @@ final class ShareSheetModel {
   var note = ""
 
   var onFinish: () -> Void = {}
+  var onCancel: () -> Void = {}
 
   private let loader = ShareItemLoader()
   private let store: InboxStore
@@ -76,8 +78,10 @@ final class ShareSheetModel {
     self.contextStore = contextStore
   }
 
-  var isSignedIn: Bool {
-    context?.isSignedIn == true
+  /// A missing context file means "unknown", not signed out: the job is kept
+  /// and the app picks the account at review.
+  var needsSignIn: Bool {
+    context.map { !$0.isSignedIn } ?? false
   }
 
   var openAccounts: [ShareAccount] {
@@ -106,10 +110,19 @@ final class ShareSheetModel {
 
   var caption: String {
     guard !items.isEmpty else { return "" }
+    let base = baseCaption
+    switch skippedCount {
+    case 0: return base
+    case 1: return base + " · 1 item skipped"
+    default: return base + " · \(skippedCount) items skipped"
+    }
+  }
+
+  private var baseCaption: String {
     if items.count == 1, let item = items.first {
       switch item.kind {
       case .pdf:
-        var parts = ["Statement PDF"]
+        var parts = ["PDF"]
         if let pages = item.pageCount, pages > 0 {
           parts.append(pages == 1 ? "1 page" : "\(pages) pages")
         }
@@ -139,12 +152,12 @@ final class ShareSheetModel {
   }
 
   var canSend: Bool {
-    phase == .ready && isSignedIn && !items.isEmpty && !isTooLarge
+    phase == .ready && !needsSignIn && !items.isEmpty && !isTooLarge
       && (sendState == .idle || sendState == .failed)
   }
 
   var canSaveForLater: Bool {
-    phase == .ready && !isSignedIn && !items.isEmpty && !isTooLarge
+    phase == .ready && needsSignIn && !items.isEmpty && !isTooLarge
       && (sendState == .idle || sendState == .failed)
   }
 
@@ -163,6 +176,7 @@ final class ShareSheetModel {
     accountSelection = context?.defaultAccountID
     let result = await loader.load(from: inputItems, displayScale: displayScale)
     items = result.items
+    skippedCount = result.unsupportedCount
     phase = result.items.isEmpty ? .unsupported : .ready
   }
 
@@ -178,7 +192,7 @@ final class ShareSheetModel {
 
   func cancel() {
     loader.cleanUp()
-    onFinish()
+    onCancel()
   }
 
   private func write(decide: Bool, accountID: String?, hint: IntakeHint, note: String) async {
@@ -235,6 +249,7 @@ final class ShareSheetModel {
 
 struct ShareSheetView: View {
   @Bindable var model: ShareSheetModel
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private let tile: CGFloat = 72
 
@@ -261,21 +276,32 @@ struct ShareSheetView: View {
   }
 
   private var header: some View {
-    ZStack {
+    HStack(spacing: 8) {
+      cancelButton
+      Spacer(minLength: 0)
       Text("Add to Halation")
         .font(.headline)
         .foregroundStyle(ShareTheme.textPrimary)
+        .lineLimit(2)
+        .minimumScaleFactor(0.8)
+        .multilineTextAlignment(.center)
         .accessibilityAddTraits(.isHeader)
-      HStack {
-        Button("Cancel") { model.cancel() }
-          .foregroundStyle(ShareTheme.accent)
-          .frame(minWidth: 44, minHeight: 44, alignment: .leading)
-          .disabled(model.sendState == .sending || model.sendState == .sent)
-        Spacer()
-      }
+      Spacer(minLength: 0)
+      cancelButton
+        .hidden()
+        .accessibilityHidden(true)
+        .allowsHitTesting(false)
     }
     .padding(.horizontal, 16)
     .frame(minHeight: 52)
+  }
+
+  private var cancelButton: some View {
+    Button("Cancel") { model.cancel() }
+      .foregroundStyle(ShareTheme.accent)
+      .fixedSize(horizontal: true, vertical: false)
+      .frame(minWidth: 44, minHeight: 44)
+      .disabled(model.sendState == .sending || model.sendState == .sent)
   }
 
   @ViewBuilder
@@ -283,7 +309,7 @@ struct ShareSheetView: View {
     switch model.phase {
     case .loading:
       placeholderStrip
-      Text("Reading what you shared…")
+      Text("Loading what you shared…")
         .font(.footnote)
         .foregroundStyle(ShareTheme.textSecondary)
       sendButton(title: "Send", enabled: false, action: {})
@@ -302,7 +328,7 @@ struct ShareSheetView: View {
   private var readyContent: some View {
     itemsStrip
     caption
-    if model.isSignedIn {
+    if !model.needsSignIn {
       accountRow
       kindPicker
       noteField
@@ -476,6 +502,7 @@ struct ShareSheetView: View {
         Text("Fix").tag(IntakeHint.fix)
       }
       .pickerStyle(.segmented)
+      .frame(minHeight: 44)
       Text(model.hintLine)
         .font(.footnote)
         .foregroundStyle(ShareTheme.textSecondary)
@@ -535,7 +562,10 @@ struct ShareSheetView: View {
       .padding(.vertical, 12)
       .background(ShareTheme.accent, in: Capsule())
       .shadow(radius: 8, y: 2)
-      .transition(.scale.combined(with: .opacity))
+      .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
+      .onAppear {
+        AccessibilityNotification.Announcement("Sent to Halation").post()
+      }
   }
 
   private func panel<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {

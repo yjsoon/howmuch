@@ -57,23 +57,36 @@ final class ShareItemLoader {
     try? FileManager.default.removeItem(at: directory)
   }
 
+  private enum Acquired: Sendable {
+    case file(URL)
+    case oversize(Int)
+    case failed
+  }
+
   private func loadItem(from provider: NSItemProvider, scale: CGFloat) async -> ShareLoadedItem? {
     let pixels = ceil(thumbnailPoints * scale)
-    if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
-      guard let url = await copyFile(from: provider, type: .pdf, fallbackExtension: "pdf") else {
+    let candidates: [(UTType, InboxPayloadKind, String)] = [
+      (.pdf, .pdf, "pdf"),
+      (.image, .image, "img"),
+    ]
+    for (type, kind, fallbackExtension) in candidates
+    where provider.hasItemConformingToTypeIdentifier(type.identifier) {
+      switch await acquire(from: provider, type: type, fallbackExtension: fallbackExtension) {
+      case .file(let url):
+        return await Task.detached {
+          Self.describe(url: url, kind: kind, pixels: pixels)
+        }.value
+      case .oversize(let bytes):
+        return ShareLoadedItem(
+          kind: kind,
+          filename: "oversize",
+          fileURL: directory.appendingPathComponent("oversize"),
+          bytes: bytes,
+          sha256: ""
+        )
+      case .failed:
         return nil
       }
-      return await Task.detached {
-        Self.describe(url: url, kind: .pdf, pixels: pixels)
-      }.value
-    }
-    if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
-      guard let url = await copyFile(from: provider, type: .image, fallbackExtension: "img") else {
-        return nil
-      }
-      return await Task.detached {
-        Self.describe(url: url, kind: .image, pixels: pixels)
-      }.value
     }
     for type in [UTType.plainText, .utf8PlainText, .text] {
       guard provider.hasItemConformingToTypeIdentifier(type.identifier) else {
@@ -89,25 +102,88 @@ final class ShareItemLoader {
     return nil
   }
 
+  private func acquire(
+    from provider: NSItemProvider, type: UTType, fallbackExtension: String
+  ) async -> Acquired {
+    let direct = await copyFile(from: provider, type: type, fallbackExtension: fallbackExtension)
+    if case .failed = direct {
+      return await copyViaLoadItem(from: provider, type: type, fallbackExtension: fallbackExtension)
+    }
+    return direct
+  }
+
   private func copyFile(
     from provider: NSItemProvider, type: UTType, fallbackExtension: String
-  ) async -> URL? {
+  ) async -> Acquired {
     let directory = directory
     return await withCheckedContinuation { continuation in
       provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { url, _ in
         guard let url else {
-          continuation.resume(returning: nil)
+          continuation.resume(returning: .failed)
           return
         }
-        let ext = url.pathExtension.isEmpty ? fallbackExtension : url.pathExtension
-        let destination = directory.appendingPathComponent("\(UUID().uuidString).\(ext)")
-        do {
-          try FileManager.default.copyItem(at: url, to: destination)
-          continuation.resume(returning: destination)
-        } catch {
-          continuation.resume(returning: nil)
+        continuation.resume(returning: Self.place(
+          fileAt: url, in: directory, fallbackExtension: fallbackExtension
+        ))
+      }
+    }
+  }
+
+  private func copyViaLoadItem(
+    from provider: NSItemProvider, type: UTType, fallbackExtension: String
+  ) async -> Acquired {
+    let directory = directory
+    return await withCheckedContinuation { continuation in
+      provider.loadItem(forTypeIdentifier: type.identifier, options: nil) { item, _ in
+        if let url = item as? URL, url.isFileURL {
+          continuation.resume(returning: Self.place(
+            fileAt: url, in: directory, fallbackExtension: fallbackExtension
+          ))
+        } else if let data = item as? Data {
+          continuation.resume(returning: Self.place(
+            data: data, in: directory, fileExtension: fallbackExtension
+          ))
+        } else if let image = item as? UIImage, let data = image.jpegData(compressionQuality: 0.92) {
+          continuation.resume(returning: Self.place(data: data, in: directory, fileExtension: "jpg"))
+        } else {
+          continuation.resume(returning: .failed)
         }
       }
+    }
+  }
+
+  nonisolated private static func place(
+    fileAt url: URL, in directory: URL, fallbackExtension: String
+  ) -> Acquired {
+    let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+    if size > InboxStore.maxPayloadBytes {
+      return .oversize(size)
+    }
+    let ext = url.pathExtension.isEmpty ? fallbackExtension : url.pathExtension
+    let destination = directory.appendingPathComponent("\(UUID().uuidString).\(ext)")
+    do {
+      try FileManager.default.copyItem(at: url, to: destination)
+      return .file(destination)
+    } catch {
+      return .failed
+    }
+  }
+
+  nonisolated private static func place(
+    data: Data, in directory: URL, fileExtension: String
+  ) -> Acquired {
+    guard !data.isEmpty else {
+      return .failed
+    }
+    if data.count > InboxStore.maxPayloadBytes {
+      return .oversize(data.count)
+    }
+    let destination = directory.appendingPathComponent("\(UUID().uuidString).\(fileExtension)")
+    do {
+      try data.write(to: destination, options: .atomic)
+      return .file(destination)
+    } catch {
+      return .failed
     }
   }
 

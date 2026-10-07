@@ -74,6 +74,7 @@ final class AppModel {
     set { serverAccounts = newValue }
   }
   private var displayedAccounts: [Account] = []
+  @ObservationIgnored private var lastPublishedShareContext: ShareContext?
   var categoryGroups: [CategoryGroup] = []
   var payees: [Payee] = [] {
     didSet {
@@ -519,6 +520,7 @@ final class AppModel {
     // is its own file, written from the same data and keyed on the same
     // fingerprint, so it already holds exactly what this restore would write.
     // The network refresh publishes it again as soon as it lands.
+    publishShareContext()
   }
 
   /// Writes the current reference set, tagged with the cursor the last ledger
@@ -2733,23 +2735,38 @@ final class AppModel {
   func wipeIntentCatalog(using store: IntentCatalogStore = .shared) {
     store.wipeAll()
     ShareContextStore.shared.remove()
+    lastPublishedShareContext = nil
   }
 
   /// Gives the share extension the open accounts and the last-used one.
-  /// The extension never sees a token; it only reads this file.
+  /// The extension never sees a token; it only reads this file. Accounts that
+  /// have not loaded yet never overwrite a good list, and an unchanged context
+  /// is not rewritten.
   func publishShareContext(using store: ShareContextStore = .shared) {
     guard settings.isAuthenticated else {
       store.remove()
+      lastPublishedShareContext = nil
       return
     }
-    store.write(ShareContext(
+    guard !accounts.isEmpty else {
+      return
+    }
+    let context = ShareContext(
       isSignedIn: true,
       lastUsedOpenAccountID: lastUsedOpenAccountID,
-      accounts: accounts.filter { !$0.deleted }.map {
-        ShareAccount(id: $0.id, name: $0.name, isClosed: $0.closed)
+      accounts: openAccounts.filter { !$0.deleted }.map {
+        ShareAccount(id: $0.id, name: $0.name, isClosed: false)
       },
       writtenAt: Date()
-    ))
+    )
+    if let last = lastPublishedShareContext,
+       last.isSignedIn == context.isSignedIn,
+       last.lastUsedOpenAccountID == context.lastUsedOpenAccountID,
+       last.accounts == context.accounts {
+      return
+    }
+    store.write(context)
+    lastPublishedShareContext = context
   }
 
   func refreshScheduledTransactions(quiet: Bool = false) async {
