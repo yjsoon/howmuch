@@ -135,3 +135,24 @@ Suggested PR comment: none; no PR supplied.
 SKILL.md suggestions: none.
 Blueprint checked; none exists. Suggested setup knowledge: supplied exact product and pinned Xcode/Simulator, launch host after install before extension, dynamic read-only container snapshots, distinguish approved setup write from never-approved target. No dependencies or services installed.
 Needed from user: none. No teardown. This publication contains evidence for the exact `e92a079` revision only; no newer code was tested.
+
+## Rechecking from a clean checkout
+
+`snapshot.py` and `make-fixtures.swift` above were local helpers and are not committed. These equivalents need only `xcrun`, `sqlite3` and `jq`:
+
+```sh
+# Read-only ledger and job state on the booted simulator, at any checkpoint:
+DATA=$(xcrun simctl get_app_container booted sg.soon.howmuch data)
+sqlite3 -readonly "$DATA/Library/Application Support/HowMuch/Local/howmuch.sqlite" \
+  "SELECT id, account_id, date, amount_milli, payee_name_snapshot, approved FROM transactions WHERE deleted = 0"
+GROUP=$(xcrun simctl get_app_container booted sg.soon.howmuch group.sg.soon.howmuch)
+find "$GROUP/Jobs" -name job.json -exec jq -c '{state, proposals: (.proposals | length)}' {} \;
+
+# Recorded comparisons, against the committed JSON only; lists any check that failed:
+jq '[paths(type == "boolean") as $p | select(getpath($p) == false) | $p | map(tostring) | join(".")]' \
+  .amp/in/artifacts/share-intake/e92a079/evidence-checks.json
+```
+
+Expected from the last command: `[]` (no recorded check failed).
+
+Any synthetic screenshot showing the same merchant, amount and date lines works as a fixture; never use a real statement.

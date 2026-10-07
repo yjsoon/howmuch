@@ -131,3 +131,24 @@ The same asset error appears for `com.apple.MobileAsset.UAF.FM.Overrides`. No cr
 PR-comment suggestion: none; no PR specified. SKILL.md suggestion: none.
 Blueprint checked: none exists. Suggested setup knowledge: use supplied exact product/pinned Xcode and existing Simulator; launch host once after install before opening extension; discover containers dynamically; query SQLite read-only; preserve tombstones separately from live counts. No dependencies/services installed.
 Needed from user: none for completed run. Lead owns any fix/retest decision; artifact-only publication adds no code fixes. Runtime remains on Accounts with Inbox 1; Simulator, app data, pending follow-up, approved row, archives and product preserved.
+
+## Rechecking from a clean checkout
+
+`snapshot.py` and `make-fixtures.swift` above were local helpers and are not committed. These equivalents need only `xcrun`, `sqlite3` and `jq`:
+
+```sh
+# Read-only ledger and job state on the booted simulator, at any checkpoint:
+DATA=$(xcrun simctl get_app_container booted sg.soon.howmuch data)
+sqlite3 -readonly "$DATA/Library/Application Support/HowMuch/Local/howmuch.sqlite" \
+  "SELECT id, account_id, date, amount_milli, payee_name_snapshot, approved FROM transactions WHERE deleted = 0"
+GROUP=$(xcrun simctl get_app_container booted sg.soon.howmuch group.sg.soon.howmuch)
+find "$GROUP/Jobs" -name job.json -exec jq -c '{state, proposals: (.proposals | length)}' {} \;
+
+# Recorded comparisons, against the committed JSON only; lists any check that failed:
+jq '[paths(type == "boolean") as $p | select(getpath($p) == false) | $p | map(tostring) | join(".")]' \
+  .amp/in/artifacts/share-intake/0657c63/evidence-checks.json
+```
+
+Expected from the last command: `["checks.fallback_provenance_retained_after_deletion"]`, the defect described above; it was fixed in `fdeebed` and passes in the `e92a079` run.
+
+Any synthetic screenshot showing the same merchant, amount and date lines works as a fixture; never use a real statement.
