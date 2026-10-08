@@ -11,10 +11,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@howmuch/register-query": "workspace:*",
     "@fontsource/ibm-plex-mono": "^5.2.5",
     "@fontsource/ibm-plex-sans": "^5.2.5",
-    "@fontsource/newsreader": "^5.2.5",
+    "@fontsource/instrument-serif": "^5.3.0",
+    "@howmuch/register-query": "workspace:*",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",

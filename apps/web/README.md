@@ -1,6 +1,6 @@
-# HowMuch Web
+# Halation Web
 
-Ledger and Reflect dashboard for the HowMuch web app. See `docs/frontend/brief.md` for the design brief.
+The ledger, rewards and reports for the Halation web app (formerly HowMuch). See `docs/frontend/brief.md` for the design brief.
 
 ## Development
 
@@ -22,11 +22,12 @@ Typechecks then emits a static bundle to `dist/`.
 
 ## Routes
 
-- `/` and unknown paths redirect to All Accounts (`/transactions?range=all&accounts=all`)
-- `/spending`, `/income`, `/net-worth`, `/age-of-money`, `/rewards` — Reflect reports
+- `/` and unknown paths redirect to the Ledger (`/transactions?range=all&accounts=all`)
+- `/rewards` — Rewards board (top-level in the sidebar)
+- `/spending`, `/income`, `/net-worth`, `/age-of-money` — the Reports group (Spending, Income v spending, Net worth, Money age)
 - `/transactions` — register with search and drill-down from reports
 - `/scheduled` — recurring transactions
-- `/settings` — Settings hub (API tokens, Rewards import)
+- `/settings` — Settings hub (password, plan formats, appearance, API tokens, Rewards import)
 - `/api-tokens` — personal API tokens
 - `/import/rewards` — Rewards Tracker settings import
 - `/add` — mobile quick entry (posts to `/api/mobile/quick-entry`)

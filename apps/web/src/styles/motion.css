@@ -1,0 +1,166 @@
+/*
+ * Halation motion: keyframes and animation rules. Imported after app.css.
+ * Durations and easings are tokens (styles/tokens.css); under reduced motion
+ * they collapse to 0ms, except --dur-bloom, whose keyframes are colour only.
+ *
+ * Editor rules (acceptance criteria): on .register-compose-row td,
+ * .register-compose-actions-row td and idle tr > td only background-color,
+ * color, border-color, box-shadow and opacity may animate; nothing on the
+ * editor's inputs, selects or :focus; never transform a <tr>; no entry
+ * keyframes or @starting-style on idle row selectors.
+ */
+
+/* Keyframe library */
+@keyframes hl-fade-in  { from { opacity: 0; } }
+@keyframes hl-fade-out { to { opacity: 0; } }
+@keyframes hl-rise     { from { opacity: 0; transform: translateY(6px); } }
+@keyframes hl-drop     { from { opacity: 0; transform: translateY(-6px); } }
+@keyframes hl-wash-in  { from { background-color: transparent; } }
+@keyframes hl-bloom    { 0% { background-color: var(--glow-wash-strong); } 100% { background-color: transparent; } }
+@keyframes hl-settle   { from { opacity: .35; } }
+@keyframes hl-draw     { to { stroke-dashoffset: 0; } }
+@keyframes hl-grow-y   { from { transform: scaleY(0); } }
+@keyframes hl-grow-x   { from { transform: scaleX(0); } }
+@keyframes hl-pop      { from { transform: scale(0); } }
+@keyframes hl-breathe  { 50% { transform: scale(1.18); opacity: .7; } }
+@keyframes hl-halo     { from { opacity: 0; transform: scale(.7); } }
+
+/* Filter rail busy sweep: one of the two loops allowed (the other is the "Checking session" halo). */
+@keyframes rail-sweep {
+  0% {
+    left: 0;
+    width: 0;
+  }
+  50% {
+    width: 30%;
+  }
+  100% {
+    left: 100%;
+    width: 0;
+  }
+}
+
+/*
+ * Entry reveals use fill-mode `backwards`, not `both`: the start frame still
+ * applies from the first frame, but once finished the animation lets go, so no
+ * transform lingers to trap fixed or z-indexed descendants (the MultiSelect
+ * menu inside the filter rail, for one). Exits are always instant.
+ */
+
+/* M2. Register save toast: drops in under the edge, never shifts the ledger. */
+.register-toast { animation: hl-drop var(--dur-base) var(--ease-out) backwards; }
+
+/* M3. Edit and compose wash. Background only and no fill, so focus is never gated. */
+.register-compose-row > td,
+.register-compose-actions-row > td { animation: hl-wash-in var(--dur-fast) linear; }
+
+/* M4. Save bloom (lib/halation-bloom.ts): one row, colour only, so it survives reduced motion. */
+.register-table tbody tr[data-bloom] > td { animation: hl-bloom var(--dur-bloom) linear both; }
+
+/* M5. Small state flips. Table hover stays instant: no transition on row hover. */
+.cleared-status-toggle { transition: color var(--dur-fast), background-color var(--dur-fast), border-color var(--dur-fast); }
+/* A transition, not a keyframe: it runs on an actual toggle, never when the ledger remounts after a save. */
+.cleared-glyph { transition: background-color var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast); }
+
+/* M6. Enter-only reveals. */
+@keyframes hl-bulk-in { from { opacity: 0; transform: translate(-50%, 8px); } to { transform: translate(-50%, 0); } }
+.register-bulk-bar { animation: hl-bulk-in var(--dur-base) var(--ease-out) backwards; }
+.filter-rail { animation: hl-drop var(--dur-base) var(--ease-out) backwards; }
+.multi-select-menu,
+.account-icon-popover { animation: hl-drop var(--dur-fast) var(--ease-out) backwards; }
+.account-organizer[open] { animation: hl-rise var(--dur-base) var(--ease-out) backwards; }
+.account-organizer[open]::backdrop { animation: hl-fade-in var(--dur-base) linear backwards; }
+.recent-entries li:first-child { animation: hl-rise var(--dur-base) var(--ease-out) backwards; }   /* Quick entry "Saved this session" */
+@media (max-width: 720px) {
+  .mobile-nav-open .sidebar { animation: hl-drop var(--dur-base) var(--ease-out) backwards; }
+}
+
+/* M7. Route transitions (NavLink viewTransition in Shell.tsx; never on account links).
+   The chrome holds still, the page swaps, and the active nav item slides to its new place.
+   Exactly one .sidebar-link-active renders inside .sidebar-nav at a time: the footer
+   Settings link sits outside it and the drawer copy of Settings is never displayed. */
+.sidebar { view-transition-name: hl-sidebar; }
+.mobile-masthead { view-transition-name: hl-masthead; }
+.sidebar-nav .sidebar-link-active { view-transition-name: hl-nav-active; }
+::view-transition-old(root) { animation: hl-fade-out var(--dur-vt-out) var(--ease-in-out) both; }
+::view-transition-new(root) { animation: hl-rise var(--dur-vt-in) var(--ease-out) both; }
+::view-transition-old(hl-sidebar),
+::view-transition-old(hl-masthead) { display: none; }
+::view-transition-new(hl-sidebar),
+::view-transition-new(hl-masthead) { animation: none; }
+::view-transition-group(hl-nav-active) { animation-duration: var(--dur-standard); animation-timing-function: var(--ease-out); }
+
+/* M8. Reports disclosure: links step in; the chevron turns instead of swapping glyphs. */
+@keyframes hl-reveal-nav { from { opacity: 0; transform: translateX(-4px); } }
+.sidebar-reflect[open] > .sidebar-report-link {
+  animation: hl-reveal-nav var(--dur-base) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * var(--stagger));
+}
+.sidebar-reflect-summary::after { transition: transform var(--dur-fast) var(--ease-out); }
+
+/* M9. Chart reveal (components/charts.tsx). The marks sit in a <g> keyed by the period
+   set, so this replays when the periods change and not on a refetch. Delays are capped by
+   --dur-fill, which collapses to 0ms under reduced motion, so nothing waits hidden there.
+   The hidden start lives in the keyframes, so a chart is never left undrawn if animations
+   do not run at all. */
+@keyframes hl-draw-in { from { stroke-dashoffset: 1; } }
+.area-line { stroke-dasharray: 1; animation: hl-draw-in var(--dur-fill) var(--ease-out) backwards; }
+.area-fill,
+.dotted-line { animation: hl-fade-in var(--dur-fill) var(--ease-out) backwards; animation-delay: min(120ms, var(--dur-fill)); }
+.dot {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: hl-pop var(--dur-base) var(--ease-out) backwards;
+  animation-delay: calc(min(120ms, var(--dur-fill)) + min(var(--i, 0) * 24ms, var(--dur-fill)));
+}
+.bar-income,
+.bar-spending {
+  transform-box: fill-box;
+  transform-origin: bottom;
+  animation: hl-grow-y var(--dur-fill) var(--ease-out) backwards;
+  animation-delay: min(var(--i, 0) * 18ms, var(--dur-fill));
+}
+.share-bar { transform-origin: left; animation: hl-grow-x var(--dur-fill) var(--ease-out) backwards; }
+
+/* M10. Figure settle, replacing any count-up: keyed by value, opacity only. */
+.figure-settle { animation: hl-settle var(--dur-base) var(--ease-out) backwards; }
+
+/* M12. Boot and sign-in. The "Checking session" halo is the second permitted loop. */
+.boot-message-checking::before {
+  content: "";
+  display: block;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle closest-side, var(--glow) 0 30%, var(--glow-ring-1) 30% 52%, var(--glow-ring-3) 52% 76%, transparent 76%);
+  animation: hl-breathe 2.4s var(--ease-in-out) infinite;
+}
+.auth-form { position: relative; isolation: isolate; }
+.auth-form::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -60px;
+  z-index: -1;
+  width: 420px;
+  height: 420px;
+  translate: -50% 0;
+  pointer-events: none;
+  background: radial-gradient(circle closest-side, var(--glow-ring-1) 0 24%, var(--glow-ring-2) 24% 44%, var(--glow-ring-3) 44% 66%, var(--glow-ring-4) 66% 90%, transparent 90%);
+  animation: hl-halo var(--dur-sunrise) var(--ease-bloom) both;
+}
+.halation-mark--hero { animation: hl-rise var(--dur-sunrise) var(--ease-bloom) backwards; }
+
+/* Theme switch (lib/theme.ts → withViewTransition("theme")): everything cross-fades as one. */
+:root[data-vt="theme"] :is(.sidebar, .mobile-masthead, .sidebar-link-active) { view-transition-name: none !important; }
+:root[data-vt="theme"]::view-transition-old(root) { animation: hl-fade-out var(--dur-standard) linear both; }
+:root[data-vt="theme"]::view-transition-new(root) { animation: hl-fade-in var(--dur-standard) linear both; }
+
+/* Reduced motion: the duration tokens already collapse; the loops and view transitions stop outright. */
+@media (prefers-reduced-motion: reduce) {
+  .filter-rail-busy::after { animation: none; width: 100%; opacity: .4; }
+  .boot-message-checking::before { animation: none; }
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+  .rw-tile:hover .rw-face, .rw-tile:active .rw-face { translate: none; scale: none; }
+}

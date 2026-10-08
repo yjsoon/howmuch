@@ -47,12 +47,14 @@ import {
   idleRowEdit,
   planRowCommit,
   reduceRowEdit,
+  registerRowDomId,
   rowId,
   sessionRowGone,
   type RegisterRowEditAction,
   type RegisterRowEditSession,
 } from "../lib/register-row-edit";
-import { dateInRegisterWindow, isUpcomingRegisterDate, registerFetchUntilDate } from "../lib/register-current";
+import { asOfTodayBalance, dateInRegisterWindow, isUpcomingRegisterDate, registerFetchUntilDate } from "../lib/register-current";
+import { bloomRows, postedRowDomId } from "../lib/halation-bloom";
 import { fillRegisterHorizon, REGISTER_PAGE_SIZE } from "../lib/register-horizon";
 import {
   fieldsFromSchedule,
@@ -154,7 +156,7 @@ export function TransactionsPage() {
     [filters.accountIds.length, visibleAccounts],
   );
   const registerLabel = filters.accountIds.length === 0
-    ? "All Accounts"
+    ? "Ledger"
     : selectedAccount?.name
       ?? (filters.accountIds.length === 1 ? "Account unavailable" : "Selected Accounts");
   const balances = balanceAccounts.reduce(
@@ -211,6 +213,17 @@ export function TransactionsPage() {
   const [reconciliationPreviewGeneration, setReconciliationPreviewGeneration] = useState(0);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [mutationSuccess, setMutationSuccess] = useState<string | null>(null);
+  // Rows to bloom once they are back on screen as idle rows (lib/halation-bloom.ts).
+  // A committed edit refetches the first page, which empties the table for a
+  // moment, so the bloom waits for the rows to land rather than firing at nothing.
+  const [bloomIds, setBloomIds] = useState<string[]>([]);
+  useEffect(() => {
+    if (!bloomIds.length) return;
+    const onScreen = bloomIds.some((id) => document.getElementById(id));
+    if (!onScreen && (page.loading || page.filling)) return;
+    bloomRows(bloomIds);
+    setBloomIds([]);
+  }, [bloomIds, page.filling, page.loading, page.transactions]);
   const [mutatingId, setMutatingId] = useState<string | null>(null);
   const [unapprovedOnly, setUnapprovedOnly] = useState(false);
   const [selection, setSelection] = useState(() => emptySelection(listKey));
@@ -778,6 +791,7 @@ export function TransactionsPage() {
           ? `${savedName} saved.`
           : `${savedName} saved. It is outside this date range.`,
       );
+      setBloomIds([registerRowDomId(session.row)]);
       dispatchRowEdit({ type: "committed" });
     } catch (cause) {
       dispatchRowEdit({
@@ -1224,6 +1238,7 @@ export function TransactionsPage() {
         : current);
       dispatchSelection({ kind: "none" });
       setMutationSuccess(approvedToast(result.approvedCount));
+      setBloomIds(plannedIds.map(postedRowDomId));
     } catch (cause) {
       // Only whole chunks are acknowledged. The failing chunk can still have
       // committed some rows before its response failed, so the count is an
@@ -1456,6 +1471,14 @@ export function TransactionsPage() {
     cancel: () => dispatchRowEdit({ type: "cancel" }),
   };
   const lockedComposeAccount = selectedAccount && !selectedAccount.closed ? selectedAccount : null;
+  // Posted future-dated rows are already in the working balance; take them back
+  // out for the as-of-today figure. Single-account registers only.
+  const todayBalance = useMemo(
+    () => selectedAccount
+      ? asOfTodayBalance(selectedAccount.balance, patchedPage, { accountId: selectedAccount.id, today })
+      : null,
+    [patchedPage, selectedAccount, today],
+  );
   const composeAccounts = useMemo(
     () => visibleAccounts.filter((account) => !account.closed),
     [visibleAccounts],
@@ -1489,23 +1512,20 @@ export function TransactionsPage() {
           <h1>{registerLabel}</h1>
         </div>
         <div className="headline-row register-balances">
-          <div className="headline-figure">
-            <span className="figure-value">{formatMoney(balances.cleared)}</span>
-            <span className="figure-label">Cleared</span>
-          </div>
-          <span className="balance-operator" aria-hidden="true">+</span>
-          <div className="headline-figure">
-            <span className={balances.uncleared >= 0 ? "figure-value figure-positive" : "figure-value figure-negative"}>
-              {formatMoney(balances.uncleared)}
-            </span>
-            <span className="figure-label">Uncleared</span>
-          </div>
-          <span className="balance-operator" aria-hidden="true">=</span>
-          <div className="headline-figure">
-            <span className={balances.working >= 0 ? "figure-value figure-positive" : "figure-value figure-negative"}>
+          <div className="headline-figure register-balance-hero">
+            <span className="figure-label">Working balance</span>
+            <span key={balances.working} className={`figure-value figure-settle ${balanceTone(balances.working)}`}>
               {formatMoney(balances.working)}
             </span>
-            <span className="figure-label">Working balance</span>
+            <span className="register-balance-breakdown">
+              {formatMoney(balances.cleared)} cleared · <span className={balanceTone(balances.uncleared)}>{formatMoney(balances.uncleared)}</span> uncleared
+            </span>
+            {todayBalance !== null && todayBalance !== balances.working && (
+              <span className="register-balance-note">{formatMoney(todayBalance)} as of today</span>
+            )}
+            {selectedAccount?.last_reconciled_date && (
+              <span className="register-balance-note">Last reconciled {formatDate(selectedAccount.last_reconciled_date)}</span>
+            )}
           </div>
         </div>
       </div>
@@ -1659,8 +1679,9 @@ export function TransactionsPage() {
         </div>
       )}
       {mutationSuccess && (
-        <div className="status-panel status-panel-success compact-panel" role="status">
+        <div className="status-panel status-panel-success compact-panel register-toast" role="status">
           <p className="status-title">{mutationSuccess}</p>
+          <button type="button" className="register-toast-dismiss" aria-label="Dismiss" onClick={() => setMutationSuccess(null)}>×</button>
         </div>
       )}
       {reconcileDraft && (
@@ -2045,6 +2066,7 @@ export function TransactionsPage() {
           )}
           <div className="register-footer">
             <span className="register-footer-meta">{footerMetaWithMore}</span>
+            <span className="register-hint">Double-click a cell or press Enter to edit · Esc cancels · Shift-click selects a range</span>
             {hasMoreToLoad && (
               <button
                 type="button"
@@ -2239,9 +2261,14 @@ function ClearedStatus({
       aria-label={`Mark ${payee} on ${formatDate(transaction.date)} ${cleared ? "uncleared" : "cleared"}`}
       title={cleared ? "Cleared — click to mark uncleared" : "Uncleared — click to mark cleared"}
     >
-      <span aria-hidden="true">{cleared ? "C✓" : "C"}</span>
+      <span className="cleared-glyph" aria-hidden="true" />
     </button>
   );
+}
+
+/** Zero is neutral: only a balance above or below it takes a colour. */
+function balanceTone(value: number): string {
+  return value > 0 ? "figure-positive" : value < 0 ? "figure-negative" : "";
 }
 
 function ReviewFigure({ label, value, tone }: { label: string; value: string; tone?: "negative" }) {

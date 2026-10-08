@@ -1,0 +1,1410 @@
+/*
+ * Rewards board ("Exposure"). Imported by pages/Rewards.tsx.
+ *
+ * Each card is a small photograph, the Sun Arc (docs/frontend/rewards-exposure-card.md).
+ * The way to the minimum is across: the light spreads left to right to a faint
+ * hairline marker and the sun rides the horizon beside it (--rw-h). Past it the sun
+ * climbs, from just above the ground to off the top edge at the cap (--rw-v). A
+ * tier holds it at halfway. Capped is the brightest state (done, not failed); a
+ * failed qualification is overcast and monochrome.
+ *
+ * No colour literals here: the page inherits the app's tokens and the card
+ * faces use the --face-*, --ridge-* and --sun-* tokens in styles/tokens.css, which
+ * follow the mode (daytime faces in light, night and dusk in dark). There is no
+ * data-mode selector in this sheet.
+ * This sheet loads after app.css and motion.css, so it wins specificity ties.
+ */
+
+.rw-page {
+  --face-aspect: 3 / 2;
+  --meter-track: color-mix(in srgb, var(--rule) 80%, transparent);
+}
+
+/* ---------- hero ---------- */
+
+.rw-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px 40px;
+  align-items: end;
+  margin: 4px 0 16px;
+  padding: 26px 28px 22px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--glow) 14%, var(--paper-raised)), var(--paper-raised));
+  container-type: inline-size;
+}
+
+/* Light from a sun just above the frame's corner: stepped rings only, no clipped disc.
+   Radii scale with the hero, so a phone-width hero is not flooded. */
+.rw-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(circle at 100% 0, var(--glow-ring-1) 0 min(92px, 22cqi), var(--glow-ring-2) 0 min(150px, 36cqi),
+    var(--glow-ring-3) 0 min(228px, 54cqi), var(--glow-ring-4) 0 min(330px, 78cqi), transparent 0);
+}
+
+.rw-hero h1 {
+  margin: 0;
+  font: 400 clamp(28px, 3vw, 40px) / 1.05 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.rw-hero h1 {
+  font-style: italic;
+  font-size: clamp(34px, 3.6vw, 48px);
+}
+
+/* Instrument Serif has weight 400 only (styles beside the app.css overrides, §3.4). */
+:is(.rw-hero h1, .rw-face-name, .rw-group-name, .rw-stepper[data-past] .rw-date-face) {
+  font-weight: 400;
+}
+
+.rw-hero-scope,
+.rw-hero-status,
+.rw-hero-summary {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.rw-hero-summary {
+  font-weight: 500;
+}
+
+.rw-hero-figures {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 28px;
+  align-items: end;
+  padding-top: 34px;   /* clears the Add card button pinned to the top-right corner */
+}
+
+.rw-figure {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+}
+
+.rw-figure-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+}
+
+.rw-figure-value {
+  font: 500 22px / 1.1 var(--font-figures);
+  font-variant-numeric: tabular-nums;
+}
+
+/* M10: a changed figure settles in place (the span is keyed by its value). */
+.rw-figure .figure-settle {
+  animation: hl-settle var(--dur-base) var(--ease-out) backwards;
+}
+
+.rw-figure-primary .rw-figure-value {
+  font-size: clamp(30px, 3.6vw, 44px);
+  color: var(--green);
+}
+
+/* Nothing earned yet: no success green for a zero. */
+.rw-figure-primary .rw-figure-value[data-zero] {
+  color: var(--ink-soft);
+}
+
+.rw-valuation {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.rw-valuation input {
+  width: 7ch;
+  padding: 1px 4px;
+  border: 0;
+  border-bottom: 1px dashed var(--rule-control);
+  background: transparent;
+  font: 500 16px var(--font-figures);
+  text-align: right;
+  color: var(--ink);
+}
+
+.rw-valuation input:focus-visible {
+  outline: none;
+  border-bottom: 1px solid var(--focus);
+}
+
+.rw-add {
+  position: absolute;
+  top: 18px;
+  right: 20px;
+}
+
+/* ---------- toolbar ---------- */
+
+.rw-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  margin: 0 0 6px;
+}
+
+.rw-toolbar .segment {
+  min-height: 32px;
+}
+
+.rw-toolbar .filter-trigger {
+  min-height: 34px;
+}
+
+.rw-toolbar-end {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.rw-tool-button,
+.rw-step {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--rule-control);
+  border-radius: 2px;
+  background: var(--paper-raised);
+  font-size: 13px;
+  transition: background-color var(--dur-fast), border-color var(--dur-fast);
+}
+
+.rw-tool-button:hover:not(:disabled),
+.rw-step:hover:not(:disabled) {
+  background: var(--accent-press);
+}
+
+.rw-tool-button[aria-pressed="true"] {
+  background: var(--inverse-bg);
+  color: var(--inverse-ink);
+  border-color: var(--inverse-bg);
+}
+
+.rw-stepper {
+  display: inline-flex;
+  border: 1px solid var(--rule-control);
+  border-radius: 2px;
+  background: var(--paper-raised);
+}
+
+.rw-stepper .rw-step {
+  border: 0;
+  min-width: 34px;
+  padding: 0;
+  font-size: 16px;
+}
+
+.rw-step:disabled,
+.rw-tool-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.rw-date {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 13ch;
+  padding: 0 10px;
+  border-inline: 1px solid var(--rule);
+}
+
+.rw-date-face {
+  font: 500 13.5px var(--font-figures);
+  pointer-events: none;
+}
+
+/* The native date input sits invisibly over the face: its picker, our type. */
+.rw-date input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.rw-date:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* A past as-of date reads as "not now": italic display face in the needs tone. */
+.rw-stepper[data-past] .rw-date-face {
+  font: italic 400 15px var(--font-display);
+  color: var(--tone-needs);
+}
+
+.rw-count {
+  margin-left: 4px;
+  font: 500 11px var(--font-figures);
+  color: var(--ink-faint);
+}
+
+.segment-active .rw-count {
+  color: inherit;
+  opacity: 0.7;
+}
+
+.rw-arrange {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rw-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--plan-accent);
+}
+
+.rw-mode-note {
+  margin: 0 0 4px;
+}
+
+/* ---------- popovers and the card menu ---------- */
+
+.rw-popover-wrap,
+.rw-menu {
+  position: relative;
+}
+
+.rw-popover,
+.rw-menu-list {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
+  margin: 0;
+  padding: 8px;
+  list-style: none;
+  color: var(--ink);
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-strong);
+  box-shadow: var(--shadow-2);
+  border-radius: var(--radius);
+  transform-origin: top right;
+  animation: hl-drop var(--dur-fast) var(--ease-out) both;
+}
+
+.rw-menu-list a,
+.rw-menu-list button,
+.rw-popover-link {
+  display: block;
+  width: 100%;
+  padding: 7px 8px;
+  font-size: 13px;
+  text-align: left;
+  text-decoration: none;
+  border-radius: 2px;
+}
+
+.rw-menu-list :is(a, button):hover:not(:disabled),
+.rw-popover-link:hover {
+  background: var(--row-hover);
+}
+
+.rw-menu-list button:disabled {
+  color: var(--ink-faint);
+  cursor: default;
+}
+
+.rw-menu-note {
+  display: block;
+  padding: 0 8px 4px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.rw-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.rw-fieldset legend {
+  padding: 2px 8px 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.rw-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.rw-option:hover {
+  background: var(--row-hover);
+}
+
+.rw-option input {
+  margin: 0;
+  accent-color: var(--plan-accent);
+}
+
+.rw-popover-rule {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--rule);
+}
+
+/* An open card menu rises above the neighbouring cards' action buttons. */
+.rw-card-actions:has(.rw-menu-list) {
+  z-index: 35;
+}
+
+/* ---------- board, groups, grid ---------- */
+
+.rw-board {
+  display: grid;
+  gap: 28px;
+  margin: 18px 0 28px;
+  /* The 120ms delay is deliberate: fast responses never flicker. */
+  transition: opacity var(--dur-fast) 120ms;
+}
+
+.rw-board[data-refreshing] {
+  opacity: 0.72;
+}
+
+.rw-empty {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin: 0;
+}
+
+.rw-empty .status-detail {
+  margin: 0;
+}
+
+.rw-group-head {
+  margin: 0 0 14px;
+  font: inherit;
+}
+
+.rw-group-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+}
+
+.rw-group-name {
+  font: 400 20px / 1.2 var(--font-display);
+}
+
+.rw-group-count {
+  font: 500 11px var(--font-figures);
+  color: var(--ink-faint);
+}
+
+.rw-group-sum {
+  margin-left: auto;
+  font: 13px var(--font-figures);
+  color: var(--ink-soft);
+}
+
+.rw-chevron {
+  color: var(--ink-faint);
+  transition: rotate var(--dur-standard) var(--ease-out);
+}
+
+.rw-group-toggle[aria-expanded="false"] .rw-chevron {
+  rotate: -90deg;
+}
+
+.rw-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+  gap: 22px 18px;
+}
+
+/* display: grid above would otherwise beat the hidden attribute. */
+.rw-grid[hidden] {
+  display: none;
+}
+
+.rw-hidden-footer {
+  justify-self: center;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+/* ---------- card ---------- */
+
+/* Tile, then the slip's "Targets, periods and tiers" footer. Cards in a row stretch to one
+   height and the slip takes the slack, so the row's bottoms line up. The face is the Sun Arc:
+   data-stage (gate, climb, rest, capped, calm, failed, range) and data-type pick the look, and
+   the tokens carry the mode, so there is no data-mode selector in this sheet. */
+.rw-card {
+  position: relative;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  min-width: 0;
+  /* The veil's multiply colour and the title ink follow the reward type. */
+  --rw-veil-multiply: var(--face-veil-cashback);
+  --rw-ink: var(--face-cashback-ink);
+  --rw-marker: var(--face-marker-cashback);
+  animation: rw-arrive var(--dur-arrive) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * var(--stagger));
+}
+
+.rw-card[data-type="miles"] {
+  --rw-veil-multiply: var(--face-veil-miles);
+  --rw-ink: var(--face-miles-ink);
+  --rw-marker: var(--face-marker-miles);
+}
+
+@keyframes rw-arrive {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+}
+
+.rw-tile {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  color: inherit;
+  text-decoration: none;
+  border-radius: 12px;
+}
+
+.rw-tile:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+}
+
+.rw-face {
+  position: relative;
+  z-index: 1;
+  isolation: isolate;
+  overflow: hidden;
+  /* clip, where supported, keeps the 3:2 frame but lets very long names grow it rather than be cut. */
+  overflow: clip;
+  aspect-ratio: var(--face-aspect);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  padding: 14px 16px 12px;
+  border-radius: 12px;
+  --rw-sky: var(--face-cashback-sky);
+  background: var(--rw-sky);
+  color: var(--rw-ink);
+  box-shadow: var(--face-shadow);
+  transition: translate var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.rw-card[data-type="miles"] .rw-face {
+  --rw-sky: var(--face-miles-sky);
+}
+
+/* A failed card is overcast: the flat grey sky over the type's, which dark mode leaves out (none). */
+.rw-card[data-stage="failed"] .rw-face {
+  --rw-sky: var(--face-overcast), var(--face-cashback-sky);
+}
+
+.rw-card[data-stage="failed"][data-type="miles"] .rw-face {
+  --rw-sky: var(--face-overcast), var(--face-miles-sky);
+}
+
+/* Monochrome: the sky and the ridges. The filter sits on the sky (a pseudo-element carrying it) and the
+   scene, not on the face, so the headline keeps FailedInk's red where it is a child of the face (the phone
+   strip). The sun and halo are not drawn. */
+.rw-card[data-mono] .rw-face {
+  background: none;
+}
+
+.rw-card[data-mono] .rw-face::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--rw-sky);
+  filter: saturate(0.15);
+}
+
+.rw-card[data-mono] .rw-scene {
+  filter: saturate(0.15);
+}
+
+/* The scene is one SVG behind the text. It is positioned but has no z-index, so it is not a stacking
+   context of its own: its blend modes (the veil, the pour, the rings) see the face's sky. Text is
+   positioned too and comes later, so it paints above. */
+.rw-scene {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.rw-face > :not(.rw-scene) {
+  position: relative;
+}
+
+.rw-ridge-back {
+  fill: var(--ridge-back);
+}
+
+.rw-ridge-front {
+  fill: var(--ridge-front);
+}
+
+.rw-crest-target,
+.rw-crest {
+  fill: none;
+  stroke: var(--ridge-crest);
+}
+
+.rw-crest-target {
+  stroke-width: 1px;
+  stroke-opacity: var(--face-crest-target);
+}
+
+.rw-crest {
+  stroke-width: 1.5px;
+  stroke-opacity: var(--face-crest-spend);
+}
+
+/* Merged: one crest, brightening to full with the climb (--crest-k, written by the painter). */
+.rw-scene[data-merged] .rw-crest-target {
+  display: none;
+}
+
+.rw-scene[data-merged] .rw-crest {
+  stroke-opacity: calc(var(--face-crest-merged) + (1 - var(--face-crest-merged)) * var(--crest-k, 0));
+}
+
+.rw-ring-1 { fill: var(--face-ring-1); }
+.rw-ring-2 { fill: var(--face-ring-2); }
+.rw-ring-3 { fill: var(--face-ring-3); }
+.rw-ring-4 { fill: var(--face-ring-4); }
+
+.rw-core {
+  fill: var(--sun-core);
+}
+
+/* Light adds: screen on every daytime face and on the night print; the dusk print keeps the normal blend. */
+.rw-halo,
+.rw-pour,
+.rw-bloom {
+  mix-blend-mode: var(--face-cashback-blend);
+}
+
+.rw-card[data-type="miles"] :is(.rw-halo, .rw-pour, .rw-bloom) {
+  mix-blend-mode: screen;
+}
+
+.rw-pour {
+  opacity: calc(var(--pour-k, 0) * var(--face-pour-cashback));
+}
+
+.rw-card[data-type="miles"] .rw-pour {
+  opacity: calc(var(--pour-k, 0) * var(--face-pour-miles));
+}
+
+.rw-bloom {
+  fill: var(--face-bloom);
+}
+
+.rw-sun {
+  stroke: var(--sun-rim);
+  stroke-opacity: 0.6;
+}
+
+.rw-veil-grey {
+  mix-blend-mode: saturation;
+}
+
+.rw-veil-multiply {
+  mix-blend-mode: multiply;
+}
+
+.rw-mk,
+.rw-mk-edge {
+  stroke: var(--rw-marker);
+  shape-rendering: crispEdges;
+}
+
+.rw-mk[data-ridge] {
+  stroke: var(--face-marker-ridge);
+}
+
+.rw-mk-edge {
+  stroke: var(--face-marker-edge);
+}
+
+.rw-mk-edge[data-ridge] {
+  stroke: var(--face-marker-edge);
+}
+
+/* The amber disc and its core while a minimum is still to be met. */
+.rw-card[data-stage="gate"] {
+  --sun-core: var(--glow-edge);
+}
+
+.rw-face-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  max-width: 62%;
+  font: 600 10px / 1.5 var(--font-ui);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.rw-badge {
+  padding: 0 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.rw-face-name {
+  align-self: start;
+  margin: 6px 0 0;
+  max-width: 64%;
+  font: 400 21px / 1.15 var(--font-display);
+  text-wrap: balance;
+}
+
+.rw-face-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+  color: var(--face-foot-ink);
+}
+
+.rw-face-account {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 400 11px var(--font-figures);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.rw-face-earned {
+  flex: none;
+  font: 500 17px / 1.1 var(--font-figures);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The phone strip (about 104px): the name on the sky, the headline and basis line on the spend ridge.
+   The scene places the ridges from the measured bottom of the name and top of the foot. */
+.rw-face[data-variant="strip"] {
+  aspect-ratio: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 9px 16px;
+}
+
+.rw-face[data-variant="strip"] .rw-face-name {
+  align-self: flex-start;
+  margin: 0 0 24px;
+  max-width: 50%;
+}
+
+.rw-face[data-variant="strip"] .rw-badge {
+  margin-left: 6px;
+  font: 600 10px var(--font-ui);
+  vertical-align: 3px;
+}
+
+/* The "Back {date}" badge on a strip, top right, clear of the card's actions. */
+.rw-face[data-variant="strip"] > .rw-badge-pin {
+  position: absolute;
+  top: 12px;
+  right: 46px;
+  background: color-mix(in srgb, var(--face-cashback-ink) 14%, transparent);
+  font: 600 10px var(--font-ui);
+}
+
+.rw-strip-foot {
+  z-index: 1;
+  color: var(--face-foot-ink);
+}
+
+/* Dark mode only (light's token is transparent): a scrim under the foot, so no layout can set light ink on a light sky. */
+.rw-strip-foot::before {
+  content: "";
+  position: absolute;
+  inset: -6px -16px -9px;
+  z-index: -1;
+  background: var(--face-scrim);
+}
+
+.rw-headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+  margin: 0;
+  font: 400 13px / 1.4 var(--font-ui);
+}
+
+.rw-amount {
+  font: 600 15px / 1.3 var(--font-figures);
+  font-variant-numeric: tabular-nums;
+}
+
+.rw-deadline {
+  margin-left: auto;
+  font: 400 12px / 1.4 var(--font-ui);
+  color: var(--face-foot-soft);
+}
+
+.rw-deadline[data-urgent] {
+  font-weight: 600;
+  color: var(--face-urgent-ink);
+}
+
+.rw-basis {
+  margin: 2px 0 0;
+  font: 12px / 1.4 var(--font-figures);
+  font-variant-numeric: tabular-nums;
+  color: var(--face-foot-soft);
+}
+
+.rw-card[data-tone="failed"] .rw-face .rw-action {
+  color: var(--face-failed-ink);
+}
+
+.rw-card[data-hidden] .rw-face {
+  opacity: 0.55;
+  filter: saturate(0.4);
+}
+
+/* Lift and press. Never under reduced motion (motion.css says the same; this sheet loads later). */
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .rw-tile:hover .rw-face {
+    translate: 0 -2px;
+    box-shadow: var(--face-shadow-lift);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rw-tile:active .rw-face {
+    translate: 0 0;
+    scale: 0.992;
+    transition-duration: var(--dur-press);
+  }
+}
+
+/* ---------- slip: the statement the card sits on ---------- */
+
+.rw-slip {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  margin: -10px 8px 0;
+  padding: 20px 14px 14px;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-top: 0;
+  border-radius: 0 0 10px 10px;
+}
+
+/* On paper the headline takes the app's inks. */
+.rw-slip .rw-headline {
+  color: var(--ink);
+}
+
+.rw-slip .rw-deadline {
+  color: var(--ink-soft);
+}
+
+.rw-slip .rw-deadline[data-urgent] {
+  color: var(--tone-needs);
+}
+
+.rw-slip .rw-basis {
+  color: var(--ink-soft);
+}
+
+.rw-card[data-tone="failed"] .rw-slip .rw-action {
+  color: var(--tone-failed);
+}
+
+/* Exceptions: at most two lines, then "+N more". */
+.rw-exceptions {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rw-exceptions li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font: 500 12px / 1.35 var(--font-ui);
+  color: var(--ink-soft);
+}
+
+.rw-exceptions li::before {
+  content: "";
+  flex: none;
+  width: 0;
+  height: 0;
+  border: 4px solid transparent;
+  border-top: 0;
+  border-bottom: 7px solid var(--tone-needs);
+}
+
+.rw-exceptions li:last-child:not(:only-child):is(:nth-child(3))::before {
+  display: none;
+}
+
+.rw-line {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.rw-line-strong {
+  font-weight: 600;
+  color: var(--tone-failed);
+}
+
+.rw-meter {
+  display: grid;
+  gap: 5px;
+  transition: --rw-m var(--dur-fill) var(--ease-out);
+  animation: rw-fill var(--dur-fill) var(--ease-out) backwards;
+  animation-delay: calc(var(--dur-fast) + var(--i, 0) * var(--stagger));
+}
+
+@keyframes rw-fill {
+  from {
+    --rw-m: 0;
+  }
+}
+
+.rw-meter-legend {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.rw-meter-legend > :last-child {
+  font-family: var(--font-figures);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rw-meter-track {
+  position: relative;
+  height: 2px;
+  background: var(--meter-track);
+}
+
+.rw-meter-primary .rw-meter-track {
+  height: 4px;
+}
+
+.rw-meter-fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: left;
+  transform: scaleX(var(--rw-m));
+  background: linear-gradient(90deg, var(--glow-edge), var(--glow));
+}
+
+.rw-meter[data-tone="needs"] .rw-meter-fill {
+  background: var(--tone-needs);
+}
+
+.rw-meter[data-tone="complete"] .rw-meter-fill {
+  background: var(--tone-complete);
+}
+
+.rw-meter-bead {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--rw-m) * 100%);
+  translate: -50% -50%;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--sun-disc);
+  box-shadow: 0 0 0 1.5px var(--sun-rim), 0 0 calc(4px + var(--rw-m) * 10px) calc(var(--rw-m) * 3px) var(--glow-wash-strong);
+}
+
+.rw-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0;
+}
+
+.rw-stats dt {
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.rw-stats dd {
+  margin: 2px 0 0;
+  font: 13px var(--font-figures);
+  font-variant-numeric: tabular-nums;
+}
+
+.rw-flags {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Flag rows carry a leading usage fill against their cap; red from 90%. */
+.rw-flag {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 4px 8px;
+  align-items: center;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.rw-flag::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--glow-wash) calc(var(--use, 0) * 100%), transparent 0);
+}
+
+.rw-flag[data-warn]::before {
+  background: linear-gradient(90deg, var(--red-wash) calc(var(--use) * 100%), transparent 0);
+}
+
+/* The tag keeps its own width instead of stretching into a slab. */
+.rw-flag .flag-tag {
+  justify-self: start;
+  margin-left: 0;
+}
+
+.rw-flag-cap {
+  grid-column: 1 / -1;
+  font: 11px var(--font-figures);
+  color: var(--ink-faint);
+}
+
+.rw-flag[data-warn] .rw-flag-cap {
+  color: var(--red);
+}
+
+/* "Periods and tiers" is the slip's footer, below a perforation, not a link floating under the card. */
+.rw-tile:has(+ .rw-more) .rw-slip {
+  border-bottom: 0;
+  border-radius: 0;
+}
+
+.rw-more {
+  margin: 0 8px;
+  padding: 4px 14px 8px;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-top: 1px dashed var(--rule);
+  border-radius: 0 0 10px 10px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.rw-more summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+/* The meters, tier line and stats now live in the disclosure, not the slip. */
+.rw-more > :is(.rw-meter, .rw-stats, .rw-flags, .rw-line) {
+  margin-top: 10px;
+}
+
+.rw-more p {
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+
+.rw-months {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.rw-months [data-status="failed"] {
+  color: var(--tone-failed);
+}
+
+/* ---------- actions, selection ---------- */
+
+.rw-card-actions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+}
+
+.rw-order {
+  display: flex;
+  gap: 4px;
+}
+
+.rw-icon-button {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--paper-raised) 80%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.rw-icon-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.rw-card-select {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  cursor: pointer;
+  border-radius: 12px;
+}
+
+/* Top-right, where the card actions sit outside select mode: clear of the issuer line. */
+.rw-card-select input {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--plan-accent);
+  animation: hl-pop var(--dur-standard) var(--ease-spring) both;
+  /* About 20ms apart; collapses with the stagger token under reduced motion. */
+  animation-delay: calc(var(--i, 0) * var(--stagger) * 0.7);
+}
+
+.rw-page[data-selecting] .rw-tile {
+  pointer-events: none;
+}
+
+.rw-card[data-selected] .rw-face {
+  box-shadow: var(--face-shadow), 0 0 0 2px var(--plan-accent), 0 0 0 6px var(--plan-accent-wash);
+}
+
+.rw-card[data-just-updated] .rw-face {
+  animation: rw-pulse var(--dur-pulse) var(--ease-out) 1;
+}
+
+@keyframes rw-pulse {
+  50% {
+    box-shadow: var(--face-shadow), 0 0 0 10px var(--glow-wash-strong);
+  }
+}
+
+/* ---------- bulk bar ---------- */
+
+.rw-bulk {
+  position: sticky;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 8px auto 0;
+  padding: 8px 10px 8px 16px;
+  color: var(--inverse-ink);
+  background: var(--inverse-bg);
+  border-radius: 12px;
+  box-shadow: var(--shadow-2);
+  animation: rw-rise var(--dur-standard) var(--ease-spring) both;
+}
+
+@keyframes rw-rise {
+  from {
+    translate: 0 calc(100% + 24px);
+    opacity: 0;
+  }
+}
+
+.rw-bulk-count {
+  min-width: 9ch;
+  font: 500 13px var(--font-figures);
+}
+
+.rw-bulk :is(button, select, input) {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--inverse-control);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  color-scheme: var(--inverse-scheme);
+}
+
+/* Selects and inputs keep the global 16px so iOS does not zoom on focus. */
+.rw-bulk button {
+  font-size: 13px;
+}
+
+.rw-bulk button:hover:not(:disabled) {
+  background: var(--inverse-hover);
+}
+
+.rw-bulk input {
+  width: 8ch;
+}
+
+.rw-bulk .rw-bulk-apply {
+  background: var(--plan-accent);
+  color: var(--on-accent);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.rw-bulk .rw-bulk-apply:hover:not(:disabled) {
+  background: var(--plan-accent);
+}
+
+.rw-bulk button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.rw-bulk-rule {
+  width: 1px;
+  height: 20px;
+  background: var(--inverse-rule);
+}
+
+.rw-bulk-verb {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+/* ---------- breakdown ---------- */
+
+.rw-breakdown .section-heading {
+  align-items: center;
+}
+
+.rw-breakdown .section-heading > div:not(.segmented) {
+  display: grid;
+  gap: 2px;
+}
+
+/* Keep the grouping control a row even if a global .section-heading > div rule makes divs grids. */
+.rw-breakdown .section-heading > .segmented {
+  display: inline-flex;
+}
+
+.rw-breakdown th.num {
+  text-align: right;
+}
+
+.rw-breakdown-empty {
+  color: var(--ink-soft);
+}
+
+/* ---------- board view transitions (names exist only during the 280ms window) ---------- */
+
+:root[data-vt="board"] .rw-card {
+  view-transition-name: var(--vt-name);
+  view-transition-class: rw-card;
+}
+
+:root[data-vt="board"]::view-transition-group(*) {
+  animation-duration: var(--dur-board);
+  animation-timing-function: var(--ease-out);
+}
+
+:root[data-vt="board"]::view-transition-old(root),
+:root[data-vt="board"]::view-transition-new(root) {
+  animation: none;
+}
+
+/* ---------- phones ---------- */
+
+@media (max-width: 720px) {
+  .rw-hero {
+    grid-template-columns: 1fr;
+    padding: 20px 16px 16px;
+  }
+
+  .rw-hero-figures {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    padding-top: 0;
+  }
+
+  .rw-figure {
+    justify-items: start;
+  }
+
+  .rw-figure-primary {
+    grid-column: 1 / -1;
+  }
+
+  .rw-add {
+    top: 16px;
+    right: 16px;
+  }
+
+  /* Three rows on a phone: the period mode; the as-of stepper with Today and
+     accounts; the card filter with Arrange and Select. On the narrowest screens
+     a row's trailing controls wrap rather than overflow. */
+  .rw-toolbar {
+    gap: 8px;
+  }
+
+  .rw-toolbar > .segmented:first-child {
+    flex: 1 1 100%;
+  }
+
+  .rw-toolbar .segmented {
+    display: flex;
+  }
+
+  .rw-toolbar .segment {
+    flex: 1;
+    padding-inline: 8px;
+    white-space: nowrap;
+  }
+
+  .rw-toolbar > .segmented:not(:first-child),
+  .rw-stepper {
+    flex: 1 1 auto;
+    width: auto;
+  }
+
+  .rw-stepper .rw-date {
+    flex: 1;
+    min-width: 11ch;
+  }
+
+  .rw-toolbar .rw-tool-button {
+    padding-inline: 10px;
+  }
+
+  .rw-toolbar-end {
+    flex: none;
+  }
+
+  .rw-grid {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .rw-face-name,
+  .rw-face[data-variant="strip"] .rw-face-name {
+    font-size: 19px;
+  }
+
+  .rw-page[data-selecting] {
+    padding-bottom: 132px;
+  }
+
+  .rw-bulk {
+    position: fixed;
+    inset: auto 8px max(8px, env(safe-area-inset-bottom));
+    width: auto;
+    margin: 0;
+    border-radius: 14px;
+  }
+
+  /* The rule becomes a line break: selection buttons, then "Set … to …", then Apply. */
+  .rw-bulk-rule {
+    flex-basis: 100%;
+    height: 0;
+    background: none;
+  }
+
+  .rw-bulk select,
+  .rw-bulk input {
+    flex: 1 1 110px;
+    min-width: 0;
+  }
+
+  /* Popovers become bottom sheets. */
+  .rw-popover,
+  .rw-menu-list {
+    position: fixed;
+    inset: auto 0 0;
+    top: auto;
+    min-width: 0;
+    border-radius: 16px 16px 0 0;
+    border-width: 1px 0 0;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    transform-origin: bottom center;
+    animation-name: hl-rise;
+  }
+
+  .rw-menu-list a,
+  .rw-menu-list button,
+  .rw-popover-link,
+  .rw-option {
+    min-height: 44px;
+  }
+
+  .rw-menu-list a,
+  .rw-popover-link {
+    display: flex;
+    align-items: center;
+  }
+}

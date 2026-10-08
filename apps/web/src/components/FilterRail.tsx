@@ -150,6 +150,7 @@ export function FilterRail({ filters, setFilters, intervals, showCategories = tr
               <button
                 key={preset.id}
                 type="button"
+                aria-pressed={preset.id === activePreset}
                 className={preset.id === activePreset ? "segment segment-active" : "segment"}
                 onClick={() => setFilters(preset.range())}
               >
@@ -207,6 +208,7 @@ export function FilterRail({ filters, setFilters, intervals, showCategories = tr
                 <button
                   key={interval}
                   type="button"
+                  aria-pressed={interval === filters.interval}
                   className={interval === filters.interval ? "segment segment-active" : "segment"}
                   onClick={() => setFilters({ interval })}
                 >
@@ -225,6 +227,7 @@ export function FilterRail({ filters, setFilters, intervals, showCategories = tr
                 <button
                   key={group}
                   type="button"
+                  aria-pressed={group === filters.groupBy}
                   className={group === filters.groupBy ? "segment segment-active" : "segment"}
                   onClick={() => setFilters({ groupBy: group })}
                 >

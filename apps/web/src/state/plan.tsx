@@ -539,7 +539,9 @@ export function PlanProvider({ children }: { children: ReactNode }) {
     );
   }
   if (!value) {
-    return <div className="boot-message">{authMode === "checking" ? "Checking session…" : "Loading…"}</div>;
+    return authMode === "checking"
+      ? <div className="boot-message boot-message-checking">Checking session…</div>
+      : <div className="boot-message">Loading…</div>;
   }
   // Everything below this boundary owns plan-scoped drafts, dialogs and async
   // state. Remount it when identity changes so plan A state cannot submit or
@@ -621,9 +623,11 @@ function AuthForm({
           onChange={(event) => setPassword(event.target.value)}
           autoComplete={setup ? "new-password" : "current-password"}
           minLength={15}
+          aria-describedby="auth-password-note"
           required
         />
       </label>
+      <span id="auth-password-note" className="field-note auth-field-note">At least 15 characters.</span>
       {setup && bootstrapRequired && (
         <label>
           <span>Setup token</span>

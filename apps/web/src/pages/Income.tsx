@@ -3,11 +3,13 @@ import { FilterRail } from "../components/FilterRail";
 import { PairedColumns } from "../components/charts";
 import { formatPeriod, ytdRange } from "../lib/dates";
 import { formatAmount, formatMoney, formatSavingsRate } from "../lib/money";
+import { useIsPhone } from "../lib/use-is-phone";
 import { useFilters } from "../state/filters";
 
 export function IncomePage() {
   const { filters, setFilters, reportQuery } = useFilters({ defaultRange: ytdRange });
   const report = useApi(JSON.stringify(reportQuery), () => api.incomeVsSpending(reportQuery));
+  const isPhone = useIsPhone();
 
   const periods = report.data?.periods ?? [];
   const totals = periods.reduce(
@@ -27,21 +29,22 @@ export function IncomePage() {
         setFilters={setFilters}
         intervals={["week", "month", "year"]}
         busy={report.loading}
+        collapsible={isPhone}
       />
       <div className="report-header">
         <h1>Income v spending</h1>
         <div className="headline-row">
           <div className="headline-figure">
             <span className="figure-label">Income</span>
-            <span className="figure-value figure-positive">{formatAmount(totals.income)}</span>
+            <span key={totals.income} className="figure-value figure-settle figure-positive">{formatAmount(totals.income)}</span>
           </div>
           <div className="headline-figure">
             <span className="figure-label">Spending</span>
-            <span className="figure-value figure-negative">{formatAmount(totals.spending)}</span>
+            <span key={totals.spending} className="figure-value figure-settle figure-negative">{formatAmount(totals.spending)}</span>
           </div>
           <div className="headline-figure">
             <span className="figure-label">Net</span>
-            <span className={net >= 0 ? "figure-value figure-positive" : "figure-value figure-negative"}>
+            <span key={net} className={net >= 0 ? "figure-value figure-settle figure-positive" : "figure-value figure-settle figure-negative"}>
               {formatMoney(net, { sign: true })}
             </span>
           </div>
@@ -50,12 +53,13 @@ export function IncomePage() {
             {/* An em dash means "no meaningful rate", so it stays neutral
                 rather than being coloured by a sign it does not show. */}
             <span
+              key={savingsRate}
               className={
                 savingsRate === "—"
-                  ? "figure-value"
+                  ? "figure-value figure-settle"
                   : net >= 0
-                    ? "figure-value figure-positive"
-                    : "figure-value figure-negative"
+                    ? "figure-value figure-settle figure-positive"
+                    : "figure-value figure-settle figure-negative"
               }
             >
               {savingsRate}
@@ -82,8 +86,14 @@ export function IncomePage() {
             <>
               <section className="report-section">
                 <div className="section-heading">
-                  <span className="section-title">Trend</span>
-                  <span className="section-meta">{periods.length} periods in view</span>
+                  <div>
+                    <span className="section-title">Trend</span>
+                    <span className="section-meta">{periods.length} periods in view</span>
+                  </div>
+                  <ul className="chart-legend" aria-label="Chart key">
+                    <li><span className="chart-swatch chart-swatch-income" aria-hidden="true" />Income</li>
+                    <li><span className="chart-swatch chart-swatch-spending" aria-hidden="true" />Spending</li>
+                  </ul>
                 </div>
                 <PairedColumns periods={periods} />
               </section>

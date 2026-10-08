@@ -9,7 +9,7 @@ The product is now **Halation**. In older feature recipes, read user-visible “
 
 HowMuch has two user surfaces in this repo. Drive the one the change actually touched. Both talk to the same disposable local API from `control-howmuch launch`. Never point either at production (`howmuch.tk.sg`, or the legacy `howmuch.soon.sg` that redirects to it).
 
-**Web** (`apps/web`) is the React ledger: first-owner setup, five Reflect reports (including Rewards), register, `/add` quick entry, schedules, tokens, sidebar accounts. There is no monthly Plan edit on the web.
+**Web** (`apps/web`) is the React ledger: first-owner setup, Ledger (the register), Scheduled, Rewards and four Reports (Spending, Income v spending, Net worth, Money age), `/add` quick entry, schedules, tokens, sidebar accounts. There is no monthly Plan edit on the web.
 
 **iOS** (`apps/ios`) is the SwiftUI companion: Accounts / Rewards / Reflect on iPhone, Plan in trailing **More**, a trailing **Add Transaction** button on the iPhone tab bar, a floating **Assistant** (speech bubble with a plus) above that Add button, Plan and Assistant in the iPad sidebar (with the floating plus on regular width), the **Add Transaction** capture sheet, Duplicate for Today, and (when built) typed intake, the `N > 1` review list, Shortcuts App Intents, share, and the screenshot offer. Specs: `docs/frontend/intake-ui.md`, `docs/frontend/app-intents.md`. Issues: [#87](https://github.com/yjsoon/howmuch/issues/87), [#96](https://github.com/yjsoon/howmuch/issues/96) and their children.
 
@@ -129,7 +129,7 @@ Web browser:
 - Open `{web_url}` from `control-howmuch state`.
 - Prefer visible names, `aria-label`s, and routes over CSS or coordinates.
 - Viewport ≤720px hides the sidebar. Click the button named **Open menu** before any nav link.
-- After setup, `document.title` is `{page} · Halation` (e.g. `All Accounts · Halation`).
+- After setup, `document.title` is `{page} · Halation` (e.g. `Ledger · Halation`).
 - Demo rows are dated **2026-03-01 through 2026-05-24**. Default report/register windows follow today's calendar, so they are empty until you choose **All** or set From/To to that span.
 
 iOS Simulator:
@@ -148,10 +148,10 @@ Stable web handles:
 | Auth fields | labels `Username`, `Password`, `Setup token` |
 | Auth submit | `Create account` / `Sign in` |
 | Primary nav | `nav` named `Primary navigation` |
-| Nav links | `Scheduled`, Reflect reports (`Spending breakdown`, `Income v Spending`, `Net Worth`, `Age of Money`, `Rewards`), `All Accounts`, `Organise accounts` |
-| Reflect | `Reflect` is a disclosure summary inside Primary navigation, open by default. Click Reflect only when the five report names are not visible. Do not click it when the group is already open |
-| Settings | sidebar footer link `Settings` (drawer bottom on viewport ≤720px). Hub lists `API tokens` and `Rewards import` |
-| Quick entry | sidebar `+ Add transaction` or route `/add` |
+| Nav links | `Ledger`, `Scheduled`, `Rewards`, then the Reports group (`Spending`, `Income v spending`, `Net worth`, `Money age`); account list button `Organise` |
+| Reports | `Reports` is a disclosure summary inside Primary navigation. It opens itself on a report route and is otherwise closed until clicked. Click it only when the four report names are not visible |
+| Settings | sidebar footer link `Settings` (drawer footer, under the accounts, on viewport ≤720px). Hub has `Appearance` and lists `API tokens` and `Rewards import` |
+| Quick entry | route `/add`, or masthead `+ Add` on viewport ≤720px |
 | Register compose | account register toolbar `+ Add transaction` |
 | Sign out | button `Sign out` |
 | Date range | group `Date range`, buttons `This month`, `Last month`, `2M`, `3M`, `YTD`, `1Y`, `All` |

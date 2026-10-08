@@ -11,6 +11,13 @@ import {
 } from "../lib/locale-plan-seed";
 import { usePlan } from "../state/plan";
 import { savePrefs } from "../state/prefs";
+import { LOOKS, setTheme, useTheme, type Mode } from "../lib/theme";
+
+const MODES: ReadonlyArray<{ id: Mode; label: string }> = [
+  { id: "system", label: "Match system" },
+  { id: "light", label: "Light" },
+  { id: "dark", label: "Dark" },
+];
 
 const MIN_PASSWORD_LENGTH = 15;
 
@@ -38,6 +45,7 @@ const TOOLS = [
 ];
 
 export function SettingsPage() {
+  const theme = useTheme();
   const { planId } = usePlan();
   // Formats as last saved here; they win over the first read so the form
   // reflects a save without a refetch (a refetch would unmount the section and
@@ -59,7 +67,7 @@ export function SettingsPage() {
       </header>
 
       <p className="diagnostic-note">
-        Your password, plan formats, tokens and imports live here so the daily ledger stays uncluttered.
+        Your password, plan formats, appearance, tokens and imports live here so the daily ledger stays uncluttered.
       </p>
 
       <ChangePasswordSection />
@@ -73,6 +81,48 @@ export function SettingsPage() {
       {account.data?.isOwner && (
         <PlanFormatsSection settings={saved ?? account.data.settings} onSaved={setSaved} />
       )}
+
+      <section className="report-section" aria-labelledby="settings-appearance-heading">
+        <div className="section-heading">
+          <span className="section-title" id="settings-appearance-heading">Appearance</span>
+          <span className="section-meta">Saved on this device</span>
+        </div>
+        <div className="theme-picker" role="radiogroup" aria-labelledby="settings-appearance-heading">
+          {LOOKS.map((look) => (
+            <label key={look.id} className="theme-option" data-look={look.id}>
+              <input
+                type="radio"
+                name="halation-look"
+                value={look.id}
+                checked={theme.look === look.id}
+                onChange={() => setTheme({ look: look.id })}
+              />
+              <span className="theme-swatch" aria-hidden="true">
+                <span className="theme-swatch-chrome" />
+                <span className="theme-swatch-paper" />
+              </span>
+              <span className="theme-option-name">
+                {look.name}
+                {look.id === "dusk-ridge" && <small> · default</small>}
+              </span>
+              <span className="theme-option-note">{look.note}</span>
+            </label>
+          ))}
+        </div>
+        <div className="segmented" role="group" aria-label="Colour mode">
+          {MODES.map((mode) => (
+            <button
+              key={mode.id}
+              type="button"
+              aria-pressed={theme.mode === mode.id}
+              className={theme.mode === mode.id ? "segment segment-active" : "segment"}
+              onClick={() => setTheme({ mode: mode.id })}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+      </section>
 
       <section className="report-section" aria-labelledby="settings-tools-heading">
         <div className="section-heading">

@@ -137,6 +137,12 @@ struct RewardRowProjection: Equatable {
   let earned: Double
   let exceptions: [Exception]
   let missedMinimumPeriod: ClosedRange<String>?
+  /// The calculation's minimum spend, 0 with none. Picture only: the Exposure
+  /// card measures its tier and cap climbs from here. Nothing printed or
+  /// spoken reads it.
+  let minimumAmount: Double
+  /// The spend threshold of the active spending tier, 0 with none. Picture only.
+  let reachedTierThreshold: Double
 
   var isBelowMinimum: Bool {
     switch action {
@@ -152,6 +158,10 @@ struct RewardRowProjection: Equatable {
 
   static func make(row: RewardsCardRow, asOf: String?, isRange: Bool) -> Self {
     let calc = row.calculation
+    // Range rows aggregate several periods and draw no picture.
+    let minimumAmount = isRange ? 0 : plainAmount(calc.minimumSpend)
+    let activeTier = row.card.spendingTiers?.first(where: { $0.id == calc.activeSpendingTierId })
+    let reachedTierThreshold = isRange ? 0 : plainAmount(activeTier?.spendThreshold)
     func build(
       _ action: Action,
       _ tone: Tone,
@@ -174,7 +184,9 @@ struct RewardRowProjection: Equatable {
         totalSpend: calc.totalSpend,
         earned: calc.rewardEarned,
         exceptions: exceptions,
-        missedMinimumPeriod: missedMinimumPeriod
+        missedMinimumPeriod: missedMinimumPeriod,
+        minimumAmount: minimumAmount,
+        reachedTierThreshold: reachedTierThreshold
       )
     }
 
@@ -306,6 +318,12 @@ struct RewardRowProjection: Equatable {
 
     return build(action, tone, basis: basis, fill: fill, deadline: due, exceptions: exceptions,
       missedMinimumPeriod: failedMonth.map { $0.start...$0.end })
+  }
+
+  /// A plain amount for the picture: finite and positive, else 0.
+  private static func plainAmount(_ value: Double?) -> Double {
+    guard let value, value.isFinite, value > 0 else { return 0 }
+    return value
   }
 
   private static func isMonthly(_ action: Action) -> Bool {
