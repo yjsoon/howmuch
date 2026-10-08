@@ -143,8 +143,9 @@ export function projectRow(row: RewardsRow, asOf: string | null | undefined, isR
       earned: calc.reward_earned,
       exceptions: extra.exceptions ?? [],
       missedMinimumPeriod: extra.missed ?? null,
-      minimumAmount: amount(calc.minimum_spend),
-      reachedTierThreshold: calc.active_spending_tier_id ? amount(tier?.spendThreshold) : 0,
+      // Picture-only; range rows carry 0 and 0, as on iOS.
+      minimumAmount: isRange ? 0 : amount(calc.minimum_spend),
+      reachedTierThreshold: !isRange && calc.active_spending_tier_id ? amount(tier?.spendThreshold) : 0,
     };
   };
 
