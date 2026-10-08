@@ -19,11 +19,11 @@ Conversational **Add Transactions** types a short British waiting line while a r
 
 Preconditions:
 
-- Darwin + Xcode. Linux cannot run this recipe. Target **howmuch-mac** / `yjmbpro.local`.
+- Darwin + Xcode. Linux cannot run this recipe. Target **howmuch-mac** / `<host>.local`.
 - Checkout `cursor/capture-rename-payee-a557` at `29f42e7` or this stacked branch. `CaptureAssistantPresence.swift` and `CaptureAssistantPresenceTests` must exist.
 - `control-howmuch doctor` passes against an isolated verify stack. Reuse a healthy instance; do not point the app at production (`howmuch.tk.sg` or the legacy `howmuch.soon.sg`).
 - [iOS connection](./ios-connection.md) signed in as `verifier`. Server is `{api_url}` (`http://127.0.0.1:{api_port}`). After Sign in, tap trailing **Save** on Connection (axe does not expose that toolbar button; on iPhone ~360,105).
-- Pin an explicit Simulator UDID. Never `simctl io booted`. On `yjmbpro`, use HowMuch Verification `BA2CAD1A-0977-4290-8486-760091B333AE` (iOS 26.5). Leave other xcodebuild jobs (including ICPhoto) alone. Do not set `HOWMUCH_SHUTDOWN_OTHER_SIMULATORS=1`.
+- Pin an explicit Simulator UDID. Never `simctl io booted`. On `<host>`, use HowMuch Verification `BA2CAD1A-0977-4290-8486-760091B333AE` (iOS 26.5). Leave other xcodebuild jobs (including ICPhoto) alone. Do not set `HOWMUCH_SHUTDOWN_OTHER_SIMULATORS=1`.
 - Rebuild before test/install. `scripts/ios-xcodebuild.sh test` runs `build-for-testing` first on every run and stops if it fails. Do not use `test-without-building` here; it reruns the previous bundle. Required:
 
 ```
@@ -45,7 +45,7 @@ Then `simctl install` that `app-path` onto the same UDID and `simctl launch … 
 - This is the conversational sheet titled **Add Transactions**, not the manual **Add Transaction** form and not web `/add`.
 - Animate the finished text only when the reply just reached complete. History must not replay the typewriter. Failed/stopped copy dumps in full.
 - A stale-bundle 0-test run happened when `test` skipped the rebuild whenever products existed (#166). `test` now always rebuilds; check for `runner: build-for-testing succeeded` before trusting a result.
-- Three simulators were booted on `yjmbpro`. `simctl io booted` captures the wrong device.
+- Three simulators were booted on `<host>`. `simctl io booted` captures the wrong device.
 - Last known healthy stack (reuse if doctor still says ok; otherwise `launch` a new one): session `howmuch-verify-20260908T084259-43409`, API `http://127.0.0.1:60500`, web `http://127.0.0.1:60501`, `verifier` / `howmuch-verify-15`, plan `local-plan` / HowMuch Demo.
 - Drive with axe (`describe-ui` / `tap` / `type`) and `--udid` the pinned Verification UDID. Prior helper: `/tmp/howmuch-typed-replies/axe_drive.py`.
 - Unsigned `scripts/ios-xcodebuild.sh` products cannot store AI keys. Sign a Simulator Debug build if you need a remote provider.

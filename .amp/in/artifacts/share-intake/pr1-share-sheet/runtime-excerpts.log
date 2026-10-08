@@ -1,0 +1,2 @@
+2026-10-06 20:41:58.719 F  HowMuch[12416:1e63a] [com.apple.SwiftUI:Invalid Configuration] A navigationDestination for “HowMuch.IntakeRoute” was declared earlier on the stack. Only the destination declared closest to the root view of the stack will be used.
+2026-10-06 20:42:08.896 F  HowMuch[12416:1e63a] [com.apple.SwiftUI:Invalid Configuration] A NavigationLink is presenting a value of type “IntakeRoute” but there is no matching navigationDestination declaration visible from the location of the link. The link cannot be activated.

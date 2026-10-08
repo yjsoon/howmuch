@@ -2,6 +2,9 @@ import SwiftUI
 
 enum AccountsPane: Hashable, Identifiable {
   case inbox
+  /// The share-intake Inbox list (batches shared to Halation), not the "New" queue.
+  case intake
+  case intakeBatch(UUID)
   case scheduled
   case all
   case account(String)
@@ -10,6 +13,10 @@ enum AccountsPane: Hashable, Identifiable {
     switch self {
     case .inbox:
       return "inbox"
+    case .intake:
+      return "intake"
+    case .intakeBatch(let id):
+      return "intake-\(id.uuidString)"
     case .scheduled:
       return "scheduled"
     case .all:
@@ -100,7 +107,9 @@ struct AccountsView: View {
         ScreenshotOfferToast(
           offer: offer,
           onAdd: {
+            // The offer becomes an Inbox batch, read here like a share.
             try? screenshots.review()
+            IntakeCoordinator.shared.drain(model: model)
           },
           onDismiss: {
             screenshots.dismiss()
@@ -131,6 +140,17 @@ struct AccountsView: View {
     }
     .onChange(of: model.referencePhase) { _, _ in
       reconcilePane()
+    }
+    .onChange(of: chrome?.pendingIntakeDestination, initial: true) { _, route in
+      // An Inbox notification or link: the list, or that batch.
+      guard let route else { return }
+      chrome?.pendingIntakeDestination = nil
+      switch route {
+      case .list:
+        pane = .intake
+      case .batch(let id):
+        pane = .intakeBatch(id)
+      }
     }
     .onChange(of: chrome?.pendingAccountID, initial: true) { _, accountID in
       // Opened from a Rewards card: show that account's register.
@@ -214,6 +234,11 @@ struct AccountsView: View {
     switch pane {
     case .inbox:
       RegisterView(scope: .unapproved)
+    case .intake:
+      InboxListView()
+    case .intakeBatch(let id):
+      // Close pops the push on a phone and returns to the Inbox list in the split layout.
+      IntakeReviewView(jobID: id, onClose: { self.pane = usesSplit ? .intake : nil })
     case .scheduled:
       ScheduledTransactionsView()
     case .all:
@@ -235,6 +260,11 @@ struct AccountsView: View {
           OutboxCard()
             .transition(.move(edge: .top).combined(with: .opacity))
         }
+
+        IntakeInboxBand(
+          onSeeAll: { pane = .intake },
+          onOpen: { job in pane = .intakeBatch(job.id) }
+        )
 
         if model.accounts.isEmpty, model.referencePhase != .loaded {
           PhasePlaceholder(phase: model.referencePhase) {

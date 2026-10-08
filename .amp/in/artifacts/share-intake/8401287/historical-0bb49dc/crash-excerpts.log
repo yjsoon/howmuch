@@ -1,0 +1,11 @@
+2026-10-06 22:50:29.650 E  HowMuch[24511:3d65f] [com.apple.Foundation:general] *** Assertion failure in -[_TtC7SwiftUIP33_ACC2C5639A7D76F611E170E831FCA49118SwiftUIApplication _performBlockAfterCATransactionCommitSynchronizes:], UIApplication.m:3426
+2026-10-06 22:50:29.667 Df HowMuch[24511:3d65f] (CoreFoundation) *** Terminating app due to uncaught exception 'NSInternalInconsistencyException', reason: 'Call must be made on main thread'
+*** First throw call stack:
+(
+	0   CoreFoundation                      0x00000001804c3dec __exceptionPreprocess + 172
+	1   libobjc.A.dylib                     0x0000000180063438 objc_exception_throw + 72
+	2   Foundation                          0x0000000181075818 _userInfoForFileAndLine + 0
+	3   UIKitCore                           0x00000001864a3f08 -[UIApplication _performBlockAfterCATransactionCommitSynchronizes:] + 252
+	4   UIKitCore                           0x00000001864bd554 -[UIApplication _updateStateRestorationArchiveForBackgroundEvent:saveState:exitIfCouldNotRestoreState:updateSnapshot:windowScene:] + 508
+	5   UIKitCore                           0x00000001864bd6e0 -[UIApplication _updateSnapshotAndStateRestorationWithAction:windowScene:] + 116
+	6   HowMuch                             0x000000010105d6bc $s7HowMuch26IntakeNotificationDelegateC04userD6Center_10didReceive<…>

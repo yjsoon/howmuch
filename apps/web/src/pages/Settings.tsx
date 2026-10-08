@@ -1,4 +1,16 @@
+import { useState, type FormEvent } from "react";
 import { NavLink } from "react-router-dom";
+import { api, ApiError, useApi } from "../api/client";
+import type { PlanSettings } from "../api/types";
+import {
+  buildPlanSeed,
+  CURRENCY_CHOICES,
+  DATE_FORMAT_CHOICES,
+  DATE_FORMAT_LABELS,
+  type DateFormatChoice,
+} from "../lib/locale-plan-seed";
+import { usePlan } from "../state/plan";
+import { savePrefs } from "../state/prefs";
 import { LOOKS, setTheme, useTheme, type Mode } from "../lib/theme";
 
 const MODES: ReadonlyArray<{ id: Mode; label: string }> = [
@@ -6,6 +18,8 @@ const MODES: ReadonlyArray<{ id: Mode; label: string }> = [
   { id: "light", label: "Light" },
   { id: "dark", label: "Dark" },
 ];
+
+const MIN_PASSWORD_LENGTH = 15;
 
 const TOOLS = [
   {
@@ -32,6 +46,18 @@ const TOOLS = [
 
 export function SettingsPage() {
   const theme = useTheme();
+  const { planId } = usePlan();
+  // Formats as last saved here; they win over the first read so the form
+  // reflects a save without a refetch (a refetch would unmount the section and
+  // lose its confirmation message).
+  const [saved, setSaved] = useState<PlanSettings | null>(null);
+  // The role comes from the session check and the formats from the plan, so
+  // the owner-only section reflects what the server will actually accept.
+  const account = useApi(`settings-account:${planId}`, async () => {
+    const [status, settings] = await Promise.all([api.authStatus(), api.settings(planId)]);
+    return { isOwner: status.roles?.[planId] === "owner", settings };
+  });
+
   return (
     <>
       <header className="report-header">
@@ -41,8 +67,20 @@ export function SettingsPage() {
       </header>
 
       <p className="diagnostic-note">
-        Tokens and imports live here so the daily ledger stays uncluttered.
+        Your password, plan formats, appearance, tokens and imports live here so the daily ledger stays uncluttered.
       </p>
+
+      <ChangePasswordSection />
+
+      {account.loading && !account.data && <p className="diagnostic-note" role="status">Loading account details…</p>}
+      {account.error && !account.data && (
+        <div className="status-panel status-panel-error" role="alert">
+          <p className="status-detail">Could not load your account details, so plan formats are hidden. Reload to try again. ({account.error})</p>
+        </div>
+      )}
+      {account.data?.isOwner && (
+        <PlanFormatsSection settings={saved ?? account.data.settings} onSaved={setSaved} />
+      )}
 
       <section className="report-section" aria-labelledby="settings-appearance-heading">
         <div className="section-heading">
@@ -102,5 +140,158 @@ export function SettingsPage() {
         </ul>
       </section>
     </>
+  );
+}
+
+function messageOf(cause: unknown): string {
+  if (cause instanceof ApiError && cause.status === 429) return "Too many attempts. Try again in 15 minutes.";
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+function ChangePasswordSection() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setDone(false);
+    if (Array.from(next).length < MIN_PASSWORD_LENGTH) {
+      setError(`The new password needs at least ${MIN_PASSWORD_LENGTH} characters.`);
+      return;
+    }
+    if (next !== confirm) {
+      setError("The new password and its confirmation do not match.");
+      return;
+    }
+    if (next === current) {
+      setError("The new password must differ from the current one.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const rotated = await api.changePassword(current, next);
+      // This session was replaced server-side; keep the stored expiry in step with the new cookie.
+      savePrefs({ sessionExpiresAt: rotated.session_expires_at ?? undefined });
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+      setDone(true);
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="report-section" aria-labelledby="settings-password-heading">
+      <div className="section-heading settings-heading">
+        <div>
+          <span className="section-title" id="settings-password-heading">Change password</span>
+          <span className="section-meta">
+            Use at least {MIN_PASSWORD_LENGTH} characters. Every other browser and device signed in as you is signed out; this one stays signed in. Personal API tokens keep working;
+            revoke them on the <NavLink to="/api-tokens">API tokens</NavLink> page if you need to.
+          </span>
+        </div>
+      </div>
+      <form className="settings-form" onSubmit={(event) => void submit(event)}>
+        <label className="field">
+          <span className="field-label">Current password</span>
+          <input type="password" value={current} onChange={(event) => setCurrent(event.target.value)} autoComplete="current-password" required />
+        </label>
+        <label className="field">
+          <span className="field-label">New password</span>
+          <input type="password" value={next} onChange={(event) => setNext(event.target.value)} autoComplete="new-password" minLength={MIN_PASSWORD_LENGTH} required />
+        </label>
+        <label className="field">
+          <span className="field-label">Confirm new password</span>
+          <input type="password" value={confirm} onChange={(event) => setConfirm(event.target.value)} autoComplete="new-password" required />
+        </label>
+        <button type="submit" className="save-button settings-form-button" disabled={busy || !current || !next || !confirm}>
+          {busy ? "Changing…" : "Change password"}
+        </button>
+      </form>
+      {error && <div className="status-panel status-panel-error" role="alert"><p className="status-detail">{error}</p></div>}
+      {done && <div className="status-panel status-panel-success" role="status"><p className="status-detail">Password changed. This device stays signed in; every other session has been signed out.</p></div>}
+    </section>
+  );
+}
+
+function PlanFormatsSection({ settings, onSaved }: { settings: PlanSettings; onSaved: (settings: PlanSettings) => void }) {
+  const { planId, reload } = usePlan();
+  const savedCurrency = settings.currency_format?.iso_code ?? "";
+  const savedDate = settings.date_format?.format ?? "";
+  const [currency, setCurrency] = useState(savedCurrency);
+  const [dateFormat, setDateFormat] = useState(savedDate);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  // A plan imported from elsewhere may use a value the form does not offer;
+  // keep it selectable so the select shows the truth.
+  const currencies = CURRENCY_CHOICES.includes(savedCurrency) || !savedCurrency ? CURRENCY_CHOICES : [savedCurrency, ...CURRENCY_CHOICES];
+  const dateFormats: readonly string[] = DATE_FORMAT_CHOICES.includes(savedDate as DateFormatChoice) || !savedDate
+    ? DATE_FORMAT_CHOICES
+    : [savedDate, ...DATE_FORMAT_CHOICES];
+  const changed = currency !== savedCurrency || dateFormat !== savedDate;
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    setDone(false);
+    try {
+      // Only what changed is sent, so an untouched custom format stays as it is.
+      const seed = buildPlanSeed(currency, dateFormat as DateFormatChoice);
+      const updated = await api.updatePlanFormats(planId, {
+        ...(currency !== savedCurrency ? { currency_format: seed.currency_format } : {}),
+        ...(dateFormat !== savedDate ? { date_format: seed.date_format } : {}),
+      } as Parameters<typeof api.updatePlanFormats>[1]);
+      setDone(true);
+      onSaved(updated);
+      // Re-reads the plan settings so amounts and dates repaint without a manual reload.
+      reload();
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="report-section" aria-labelledby="settings-formats-heading">
+      <div className="section-heading settings-heading">
+        <div>
+          <span className="section-title" id="settings-formats-heading">Currency and date format</span>
+          <span className="section-meta">
+            Changing the currency only changes the symbol and decimal places shown. Nothing is converted: $100 becomes £100.
+            For a currency such as JPY the cents are hidden, not lost.
+          </span>
+        </div>
+      </div>
+      <form className="settings-form" onSubmit={(event) => void submit(event)}>
+        <label className="field">
+          <span className="field-label">Currency</span>
+          <select value={currency} onChange={(event) => { setCurrency(event.target.value); setDone(false); }}>
+            {currencies.map((code) => <option key={code} value={code}>{code}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span className="field-label">Date format</span>
+          <select value={dateFormat} onChange={(event) => { setDateFormat(event.target.value); setDone(false); }}>
+            {dateFormats.map((format) => <option key={format} value={format}>{DATE_FORMAT_LABELS[format as DateFormatChoice] ?? format}</option>)}
+          </select>
+        </label>
+        <button type="submit" className="save-button settings-form-button" disabled={busy || !changed}>
+          {busy ? "Saving…" : "Save formats"}
+        </button>
+      </form>
+      {error && <div className="status-panel status-panel-error" role="alert"><p className="status-detail">{error}</p></div>}
+      {done && <div className="status-panel status-panel-success" role="status"><p className="status-detail">Formats saved. Amounts and dates here now use the new settings. The iOS app shows the new currency after its next refresh and always shows dates as 24 May 2026.</p></div>}
+    </section>
   );
 }

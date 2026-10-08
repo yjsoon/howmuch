@@ -4,7 +4,14 @@ import UIKit
 @main
 struct HowMuchApp: App {
   @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-  @State private var model = AppModel()
+  @State private var model: AppModel
+
+  init() {
+    let model = AppModel()
+    _model = State(initialValue: model)
+    // A background refresh can launch the app without ever building a view.
+    IntakeBackgroundRefresh.shared.model = model
+  }
 
   var body: some Scene {
     WindowGroup {
@@ -43,8 +50,18 @@ enum QuickAction {
     )
   }
 
+  /// App Intent and clipboard entries (not share jobs) waiting for the conversation flow.
+  static var hasConversationInboxEntries: Bool {
+    let store = InboxStore.shared
+    let conversationEntry: (InboxItem) -> Bool = { !$0.isIntakeJobSource }
+    return store.hasReadyInboxItems(matching: conversationEntry)
+      || store.hasReadingItems(matching: conversationEntry)
+  }
+
   static func handleOpenURL(_ url: URL) {
-    if HowMuchDeepLink.parse(url) == .inbox {
+    // `howmuch://inbox` opens the conversation only for App Intent entries.
+    // Otherwise the root view opens the Inbox list.
+    if HowMuchDeepLink.parse(url) == .inbox, hasConversationInboxEntries {
       enqueueInboxCapture()
     }
   }
@@ -52,19 +69,22 @@ enum QuickAction {
 
 enum HowMuchDeepLink: Equatable {
   case launch
+  /// `howmuch://inbox`
   case inbox
+  /// `howmuch://inbox/{jobID}`, from an Inbox notification.
+  case inboxBatch(UUID)
 
   static func parse(_ url: URL) -> HowMuchDeepLink? {
     guard url.scheme?.lowercased() == "howmuch" else {
       return nil
     }
     let host = (url.host ?? "").lowercased()
+    let path = url.path.split(separator: "/").map(String.init)
     if host == "inbox" {
-      return .inbox
+      return path.first.flatMap { UUID(uuidString: $0) }.map { HowMuchDeepLink.inboxBatch($0) } ?? .inbox
     }
-    let path = url.path.lowercased().split(separator: "/").map(String.init)
-    if path.first == "inbox" {
-      return .inbox
+    if path.first?.lowercased() == "inbox" {
+      return path.dropFirst().first.flatMap { UUID(uuidString: $0) }.map { HowMuchDeepLink.inboxBatch($0) } ?? .inbox
     }
     return .launch
   }
@@ -76,6 +96,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     QuickAction.register()
+    IntakeNotifier.shared.activate()
+    IntakeBackgroundRefresh.shared.register()
     return true
   }
 
@@ -211,8 +233,24 @@ private struct RootView: View {
     .onChange(of: capture.blockingSheetCount) { _, _ in
       consumePendingCapture()
     }
+    .onChange(of: IntakeNotifier.shared.pendingRoute, initial: true) { _, route in
+      // A notification tap or link: open the Inbox or that batch on Accounts.
+      guard let route else {
+        return
+      }
+      IntakeNotifier.shared.pendingRoute = nil
+      chrome.showIntake(route)
+    }
     .onChange(of: scenePhase) { _, phase in
       if phase == .active {
+        if model.settings.isAuthenticated {
+          IntakeNotifier.shared.refreshBadge()
+          if !IntakeCoordinator.shared.jobs.isEmpty {
+            // First shares read in the background could not ask; ask now if still unasked.
+            IntakeNotifier.shared.askIfNeeded()
+          }
+        }
+        drainIntakeInbox()
         enqueueInboxIfNeeded(force: false)
         consumePendingCapture()
         ScreenshotOfferController.shared.startIfNeeded()
@@ -220,21 +258,36 @@ private struct RootView: View {
         model.sceneDidBecomeActive()
       } else if phase == .background {
         CaptureWorkspace.shared.persistCurrentIfNeeded()
+        IntakeBackgroundRefresh.shared.appDidEnterBackground()
       }
     }
     .onChange(of: model.settings.isAuthenticated) { _, isAuthenticated in
       if !isAuthenticated {
+        IntakeCoordinator.shared.cancelDrain()
+        IntakeNotifier.shared.clearAll()
         capture.dropForSignOut()
       } else {
+        drainIntakeInbox()
         enqueueInboxIfNeeded(force: false)
         consumePendingCapture()
       }
     }
     .onOpenURL { url in
-      guard HowMuchDeepLink.parse(url) == .inbox else {
-        return
+      switch HowMuchDeepLink.parse(url) {
+      case .inboxBatch(let id):
+        drainIntakeInbox()
+        // A job that is gone (discarded, pruned) opens the list instead.
+        IntakeNotifier.shared.pendingRoute = IntakeCoordinator.shared.job(id) != nil ? .batch(id) : .list
+      case .inbox:
+        drainIntakeInbox()
+        if QuickAction.hasConversationInboxEntries {
+          enqueueInboxIfNeeded(force: true)
+        } else {
+          IntakeNotifier.shared.pendingRoute = .list
+        }
+      case .launch, nil:
+        break
       }
-      enqueueInboxIfNeeded(force: true)
     }
     .environment(chrome)
   }
@@ -253,12 +306,25 @@ private struct RootView: View {
     )
   }
 
+  /// Share-sheet entries become Inbox jobs, read in the background.
+  private func drainIntakeInbox() {
+    IntakeCoordinator.shared.drain(model: model)
+  }
+
+  /// Opens the conversation flow for App Intent and clipboard entries only.
+  /// Share-sheet entries are `IntakeCoordinator`'s and never open this sheet.
   private func enqueueInboxIfNeeded(force: Bool) {
     guard model.settings.isAuthenticated else {
       return
     }
     let store = InboxStore.shared
+    let conversationEntry: (InboxItem) -> Bool = { !$0.isIntakeJobSource }
     if force {
+      // The deep link also opens for a share, which needs no sheet.
+      guard store.hasReadyInboxItems(matching: conversationEntry)
+        || store.hasReadingItems(matching: conversationEntry) else {
+        return
+      }
       model.presentCapture(
         CaptureRequest(
           kind: .inbox,
@@ -268,7 +334,7 @@ private struct RootView: View {
       )
       return
     }
-    if store.hasReadyInboxItems() {
+    if store.hasReadyInboxItems(matching: conversationEntry) {
       model.presentCapture(
         CaptureRequest(
           kind: .inbox,
@@ -278,7 +344,7 @@ private struct RootView: View {
       )
       return
     }
-    if CaptureRouter.shared.presented == nil, store.hasReadingItems() {
+    if CaptureRouter.shared.presented == nil, store.hasReadingItems(matching: conversationEntry) {
       model.presentCapture(
         CaptureRequest(
           kind: .inbox,
@@ -325,7 +391,9 @@ struct CaptureIntakeHost: View {
               }
             }
           },
-          onClaimed: { claimedInboxIDs = $0 }
+          onClaimed: { claimedInboxIDs = $0 },
+          onNote: { session?.appendUserMessage($0) },
+          onNotice: { session?.appendAssistantMessage($0) }
         )
       } else if let session {
         AddTransactionsView(session: session, workspace: workspace)

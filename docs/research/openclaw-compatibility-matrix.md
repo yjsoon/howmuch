@@ -7,7 +7,7 @@ Scope: transaction ingestion and adjacent lookup/update behaviour needed for a C
 Sources:
 
 - Official YNAB API docs at `https://api.ynab.com/` and endpoint docs at `https://api.ynab.com/v1`.
-- Prior HowMuch backend thread findings from OpenClaw scripts under `mbpro:~/.openclaw/workspace/scripts`.
+- Prior HowMuch backend thread findings from OpenClaw scripts on a personal machine.
 - Local implementation under `apps/api/src`, `apps/api/tests`, `scripts/smoke.ts`, and `docs/research/ynab-usage-audit.md`.
 
 ## Matrix

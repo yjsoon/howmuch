@@ -741,7 +741,8 @@ textarea {
   text-align: left;
 }
 
-.auth-form input {
+.auth-form input,
+.auth-form select {
   width: min(320px, 80vw);
   border: 1px solid var(--ink);
   border-radius: 2px;
@@ -3392,6 +3393,32 @@ tr:hover .share-bar {
   margin: 0;
 }
 
+.settings-heading .section-title,
+.settings-heading .section-meta {
+  display: block;
+}
+
+.settings-heading .section-meta {
+  margin-top: 4px;
+  max-width: 64ch;
+  line-height: 1.5;
+}
+
+.settings-form {
+  display: grid;
+  gap: 0;
+  max-width: 520px;
+}
+
+.settings-form-button {
+  width: auto;
+  min-width: 160px;
+  justify-self: start;
+  margin: 0 3px 3px 0;
+  padding: 10px 18px;
+  font-size: 13px;
+}
+
 .api-token-create-button {
   width: auto;
   min-width: 132px;
@@ -4500,6 +4527,12 @@ tr:hover .share-bar {
 
   .api-token-create-button {
     width: 100%;
+    margin: 0;
+  }
+
+  .settings-form-button {
+    width: 100%;
+    justify-self: stretch;
     margin: 0;
   }
 

@@ -1,0 +1,421 @@
+{
+  "capturedAt": "2026-10-07T07:05:16.335514+00:00",
+  "database": "/Users/devin/Library/Developer/CoreSimulator/Devices/EDD9B083-63F1-44E6-9A7B-0A6964CC2561/data/Containers/Data/Application/C02AEB84-6ED8-40D0-AE67-A577AAD05773/Library/Application Support/HowMuch/Local/howmuch.sqlite",
+  "group": "/Users/devin/Library/Developer/CoreSimulator/Devices/EDD9B083-63F1-44E6-9A7B-0A6964CC2561/data/Containers/Shared/AppGroup/2A15EA43-6271-4E8B-A901-E8CD06CF6D16",
+  "accounts": [
+    {
+      "id": "e2e-dbs",
+      "name": "DBS Altitude",
+      "closed": 0,
+      "balance_milli": -44690
+    },
+    {
+      "id": "e2e-everyday",
+      "name": "Everyday Account",
+      "closed": 0,
+      "balance_milli": 0
+    },
+    {
+      "id": "e2e-closed",
+      "name": "Closed Synthetic Account",
+      "closed": 1,
+      "balance_milli": 0
+    }
+  ],
+  "shareContext": {
+    "accounts": [
+      {
+        "name": "DBS Altitude",
+        "id": "e2e-dbs",
+        "isClosed": false
+      },
+      {
+        "name": "Everyday Account",
+        "id": "e2e-everyday",
+        "isClosed": false
+      }
+    ],
+    "writtenAt": "2026-10-07T07:02:51Z",
+    "isSignedIn": true,
+    "lastUsedOpenAccountID": "e2e-dbs"
+  },
+  "inbox": {},
+  "jobs": {
+    "Jobs/364BAAC7-CEE7-45B1-B794-3AAA310F9BE7/job.json": {
+      "createdAt": "2026-10-07T07:04:01Z",
+      "hint": "auto",
+      "proposals": [
+        {
+          "changedFields": [],
+          "kind": "add",
+          "confidence": 0.8,
+          "reasons": [
+            "No row within 3 days for this amount",
+            "Read without Apple Intelligence"
+          ],
+          "decision": "editedThenAccepted",
+          "isApplied": true,
+          "sourceFileIndex": 0,
+          "proposedDraft": {
+            "isCleared": false,
+            "direction": "outflow",
+            "date": "2026-10-05T07:00:00Z",
+            "payeeName": "NTUC FAIRPRICE",
+            "subtransactions": [],
+            "loadedTransferLineSignatures": [],
+            "accountID": "e2e-dbs",
+            "memo": "",
+            "wasReconciled": false,
+            "linkedTransferIDs": [],
+            "flag": "",
+            "importID": "6ea08161-42b3-47bb-9f15-bb523e10ab6b",
+            "amountMagnitudeMilli": 12340
+          },
+          "id": "FF9902F5-2B73-4BA1-85B3-53F847569E84",
+          "draft": {
+            "isCleared": false,
+            "direction": "outflow",
+            "date": "2026-10-05T07:00:00Z",
+            "payeeName": "NTUC FAIRPRICE",
+            "subtransactions": [],
+            "loadedTransferLineSignatures": [],
+            "accountID": "e2e-dbs",
+            "memo": "",
+            "wasReconciled": false,
+            "categoryID": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:groceries",
+            "linkedTransferIDs": [],
+            "importID": "6ea08161-42b3-47bb-9f15-bb523e10ab6b",
+            "flag": "",
+            "amountMagnitudeMilli": 12340
+          },
+          "candidateIDs": [],
+          "ruleApplications": []
+        }
+      ],
+      "appliedSummary": "1 added",
+      "duplicateCheckLimited": false,
+      "extractionSourceIndexes": [],
+      "state": "applied",
+      "fallbackExtractionIndexes": [
+        0
+      ],
+      "decideAccount": false,
+      "accountID": "e2e-dbs",
+      "id": "364BAAC7-CEE7-45B1-B794-3AAA310F9BE7",
+      "origin": "shareSheet",
+      "connectionFingerprint": "https://local.howmuch|plan_613b3d02-e28b-4c3b-b514-afaf3deb047e|local-user",
+      "sourceFiles": [
+        {
+          "sha256": "8567d14fc06922ef146994a78d8bfb9e14627e5ecb1bcf19796f2d9fbc387d50",
+          "bytes": 29651,
+          "kind": "image",
+          "filename": "image-1.PNG"
+        }
+      ],
+      "contentHash": "26b35550fb3a63d43d4cb887a57ff500cc64e996a5566aabad2ee8e3d7f35239",
+      "note": "E0657c63 learn",
+      "updatedAt": "2026-10-07T07:05:07Z",
+      "extractions": [],
+      "planID": "plan_613b3d02-e28b-4c3b-b514-afaf3deb047e"
+    }
+  },
+  "transactions": [
+    {
+      "id": "e2e-existing-kopitiam",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -8900,
+      "payee_name_snapshot": "Kopitiam",
+      "approved": 1
+    },
+    {
+      "id": "txn_5a0cabc1-c688-4c42-8891-a45116d7e610",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "approved": 1
+    },
+    {
+      "id": "txn_c95b236c-7263-48ac-b9e2-1c620f718dfd",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FairPrice",
+      "approved": 1
+    },
+    {
+      "id": "txn_5f0796c3-bdb2-4cda-872f-79c2b022df97",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -12340,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "approved": 1
+    }
+  ],
+  "deletionFlags": [
+    {
+      "id": "e2e-existing-kopitiam",
+      "deleted": 0
+    },
+    {
+      "id": "txn_5a0cabc1-c688-4c42-8891-a45116d7e610",
+      "deleted": 1
+    },
+    {
+      "id": "txn_c95b236c-7263-48ac-b9e2-1c620f718dfd",
+      "deleted": 0
+    },
+    {
+      "id": "txn_5f0796c3-bdb2-4cda-872f-79c2b022df97",
+      "deleted": 0
+    }
+  ],
+  "activeTransactions": [
+    {
+      "id": "txn_5f0796c3-bdb2-4cda-872f-79c2b022df97",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -12340,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "approved": 1
+    },
+    {
+      "id": "txn_c95b236c-7263-48ac-b9e2-1c620f718dfd",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FairPrice",
+      "approved": 1
+    },
+    {
+      "id": "e2e-existing-kopitiam",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -8900,
+      "payee_name_snapshot": "Kopitiam",
+      "approved": 1
+    }
+  ],
+  "transactionsWithCategories": [
+    {
+      "id": "e2e-existing-kopitiam",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -8900,
+      "payee_name_snapshot": "Kopitiam",
+      "category_id": null,
+      "category_name_snapshot": null,
+      "approved": 1,
+      "deleted": 0
+    },
+    {
+      "id": "txn_5a0cabc1-c688-4c42-8891-a45116d7e610",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "category_id": null,
+      "category_name_snapshot": null,
+      "approved": 1,
+      "deleted": 1
+    },
+    {
+      "id": "txn_c95b236c-7263-48ac-b9e2-1c620f718dfd",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FairPrice",
+      "category_id": null,
+      "category_name_snapshot": null,
+      "approved": 1,
+      "deleted": 0
+    },
+    {
+      "id": "txn_5f0796c3-bdb2-4cda-872f-79c2b022df97",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -12340,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "category_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:groceries",
+      "category_name_snapshot": "Groceries",
+      "approved": 1,
+      "deleted": 0
+    }
+  ],
+  "categories": [
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:groceries",
+      "name": "Groceries",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:everyday",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:eating-out",
+      "name": "Eating out",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:everyday",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:transport",
+      "name": "Transport",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:everyday",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:shopping",
+      "name": "Shopping",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:everyday",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:housing",
+      "name": "Housing",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:bills",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:utilities",
+      "name": "Utilities",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:bills",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:phone-and-internet",
+      "name": "Phone and internet",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:bills",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:insurance",
+      "name": "Insurance",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:bills",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:health",
+      "name": "Health",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:life",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:entertainment",
+      "name": "Entertainment",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:life",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:travel",
+      "name": "Travel",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:life",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:gifts",
+      "name": "Gifts",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:life",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:salary",
+      "name": "Salary",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:income",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    },
+    {
+      "id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:other-income",
+      "name": "Other income",
+      "category_group_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:grp:income",
+      "hidden": 0,
+      "internal": 0,
+      "deleted": 0
+    }
+  ],
+  "skill": {
+    "accounts": [],
+    "dedupe": {
+      "dayWindow": 3
+    },
+    "locale": {
+      "currency": "SGD",
+      "dateOrder": "dmy",
+      "timezone": "Asia/Singapore"
+    },
+    "notes": "",
+    "offeredJobs": [
+      "364BAAC7-CEE7-45B1-B794-3AAA310F9BE7"
+    ],
+    "rules": [],
+    "suppressed": [],
+    "version": 1
+  },
+  "tables": [
+    "_local_migrations",
+    "plans",
+    "accounts",
+    "category_groups",
+    "categories",
+    "transactions",
+    "subtransactions",
+    "source_events",
+    "import_sessions",
+    "import_rows",
+    "ynab_sync_state",
+    "sync_runs",
+    "sync_attempts",
+    "sync_transition_receipts",
+    "sync_renewal_receipts",
+    "audit_events",
+    "write_commands",
+    "write_state",
+    "write_assertions",
+    "users",
+    "auth_identities",
+    "sessions",
+    "plan_memberships",
+    "password_credentials",
+    "auth_setup",
+    "login_rate_limits",
+    "payees",
+    "ynab_raw_objects",
+    "plan_month_assignments",
+    "plan_month_category_targets",
+    "scheduled_transaction_edits",
+    "scheduled_subtransaction_edits",
+    "scheduled_transaction_snapshot_assertions",
+    "account_reconciliation_assertions",
+    "personal_api_tokens",
+    "account_preferences",
+    "rewards_tracker_snapshots",
+    "rewards_tracker_cards",
+    "ynab_source_month_activity",
+    "account_month_balances",
+    "report_cache"
+  ]
+}

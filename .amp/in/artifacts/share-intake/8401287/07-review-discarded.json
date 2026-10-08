@@ -1,0 +1,236 @@
+{
+  "capturedAt": "2026-10-07T06:18:23.876544+00:00",
+  "database": "/Users/devin/Library/Developer/CoreSimulator/Devices/EDD9B083-63F1-44E6-9A7B-0A6964CC2561/data/Containers/Data/Application/9B7A0058-8E94-461D-B3EA-81E5F656C22F/Library/Application Support/HowMuch/Local/howmuch.sqlite",
+  "group": "/Users/devin/Library/Developer/CoreSimulator/Devices/EDD9B083-63F1-44E6-9A7B-0A6964CC2561/data/Containers/Shared/AppGroup/2A15EA43-6271-4E8B-A901-E8CD06CF6D16",
+  "accounts": [
+    {
+      "id": "e2e-dbs",
+      "name": "DBS Altitude",
+      "closed": 0,
+      "balance_milli": -32350
+    },
+    {
+      "id": "e2e-everyday",
+      "name": "Everyday Account",
+      "closed": 0,
+      "balance_milli": 0
+    },
+    {
+      "id": "e2e-closed",
+      "name": "Closed Synthetic Account",
+      "closed": 1,
+      "balance_milli": 0
+    }
+  ],
+  "shareContext": {
+    "writtenAt": "2026-10-07T06:14:36Z",
+    "isSignedIn": true,
+    "lastUsedOpenAccountID": "e2e-dbs",
+    "accounts": [
+      {
+        "id": "e2e-dbs",
+        "isClosed": false,
+        "name": "DBS Altitude"
+      },
+      {
+        "id": "e2e-everyday",
+        "isClosed": false,
+        "name": "Everyday Account"
+      }
+    ]
+  },
+  "inbox": {},
+  "jobs": {
+    "Jobs/15BB2D3F-600A-4EEA-9B10-2C94EEACE0B9/job.json": {
+      "contentHash": "4ea3258cf150c378c223c7808722e1391e3592a0eb908a721d231439cdb15f10",
+      "createdAt": "2026-10-07T06:16:18Z",
+      "accountID": "e2e-dbs",
+      "updatedAt": "2026-10-07T06:18:16Z",
+      "decideAccount": false,
+      "proposals": [
+        {
+          "candidateIDs": [
+            "e2e-existing-kopitiam"
+          ],
+          "kind": "alreadyIn",
+          "decision": "rejected",
+          "targetTransactionID": "e2e-existing-kopitiam",
+          "targetSnapshot": {
+            "deleted": false,
+            "date": "2026-10-05",
+            "id": "e2e-existing-kopitiam",
+            "cleared": "uncleared",
+            "payeeName": "Kopitiam",
+            "subtransactions": [],
+            "amount": -8900,
+            "accountId": "e2e-dbs",
+            "accountName": "DBS Altitude",
+            "payeeId": "e2e-kopitiam",
+            "approved": true
+          },
+          "proposedDraft": {
+            "memo": "",
+            "date": "2026-10-05T07:00:00Z",
+            "payeeName": "KOPITIAM AMK",
+            "linkedTransferIDs": [],
+            "isCleared": false,
+            "flag": "",
+            "amountMagnitudeMilli": 8900,
+            "wasReconciled": false,
+            "accountID": "e2e-dbs",
+            "subtransactions": [],
+            "loadedTransferLineSignatures": [],
+            "direction": "outflow",
+            "importID": "bf6462ab-8611-40c2-90ea-fae72978ed2f"
+          },
+          "changedFields": [],
+          "reasons": [
+            "Same amount within 3 days",
+            "Read without Apple Intelligence"
+          ],
+          "draft": {
+            "memo": "",
+            "date": "2026-10-05T07:00:00Z",
+            "payeeName": "KOPITIAM AMK",
+            "linkedTransferIDs": [],
+            "isCleared": false,
+            "flag": "",
+            "amountMagnitudeMilli": 8900,
+            "wasReconciled": false,
+            "accountID": "e2e-dbs",
+            "subtransactions": [],
+            "loadedTransferLineSignatures": [],
+            "direction": "outflow",
+            "importID": "bf6462ab-8611-40c2-90ea-fae72978ed2f"
+          },
+          "sourceFileIndex": 0,
+          "confidence": 0.85,
+          "isApplied": false,
+          "id": "2A353A65-4402-436B-A5B5-B3EE5A0D5F98"
+        }
+      ],
+      "origin": "shareSheet",
+      "connectionFingerprint": "https://local.howmuch|plan_613b3d02-e28b-4c3b-b514-afaf3deb047e|local-user",
+      "extractionSourceIndexes": [],
+      "note": "D8401287 Review",
+      "extractions": [],
+      "duplicateCheckLimited": false,
+      "fallbackExtractionIndexes": [
+        0
+      ],
+      "sourceFiles": [
+        {
+          "sha256": "8a363fd697812e191ea387dc7e4c5d16b34b6f20e83b4bef6e6e485203ea01fe",
+          "filename": "image-1.PNG",
+          "bytes": 28810,
+          "kind": "image"
+        }
+      ],
+      "id": "15BB2D3F-600A-4EEA-9B10-2C94EEACE0B9",
+      "planID": "plan_613b3d02-e28b-4c3b-b514-afaf3deb047e",
+      "hint": "auto",
+      "state": "discarded"
+    }
+  },
+  "transactions": [
+    {
+      "id": "e2e-existing-kopitiam",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -8900,
+      "payee_name_snapshot": "Kopitiam",
+      "approved": 1
+    },
+    {
+      "id": "txn_5a0cabc1-c688-4c42-8891-a45116d7e610",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "approved": 1
+    },
+    {
+      "id": "txn_c95b236c-7263-48ac-b9e2-1c620f718dfd",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FairPrice",
+      "approved": 1
+    }
+  ],
+  "deletionFlags": [
+    {
+      "id": "e2e-existing-kopitiam",
+      "deleted": 0
+    },
+    {
+      "id": "txn_5a0cabc1-c688-4c42-8891-a45116d7e610",
+      "deleted": 1
+    },
+    {
+      "id": "txn_c95b236c-7263-48ac-b9e2-1c620f718dfd",
+      "deleted": 0
+    }
+  ],
+  "activeTransactions": [
+    {
+      "id": "txn_c95b236c-7263-48ac-b9e2-1c620f718dfd",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -23450,
+      "payee_name_snapshot": "NTUC FairPrice",
+      "approved": 1
+    },
+    {
+      "id": "e2e-existing-kopitiam",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -8900,
+      "payee_name_snapshot": "Kopitiam",
+      "approved": 1
+    }
+  ],
+  "tables": [
+    "_local_migrations",
+    "plans",
+    "accounts",
+    "category_groups",
+    "categories",
+    "transactions",
+    "subtransactions",
+    "source_events",
+    "import_sessions",
+    "import_rows",
+    "ynab_sync_state",
+    "sync_runs",
+    "sync_attempts",
+    "sync_transition_receipts",
+    "sync_renewal_receipts",
+    "audit_events",
+    "write_commands",
+    "write_state",
+    "write_assertions",
+    "users",
+    "auth_identities",
+    "sessions",
+    "plan_memberships",
+    "password_credentials",
+    "auth_setup",
+    "login_rate_limits",
+    "payees",
+    "ynab_raw_objects",
+    "plan_month_assignments",
+    "plan_month_category_targets",
+    "scheduled_transaction_edits",
+    "scheduled_subtransaction_edits",
+    "scheduled_transaction_snapshot_assertions",
+    "account_reconciliation_assertions",
+    "personal_api_tokens",
+    "account_preferences",
+    "rewards_tracker_snapshots",
+    "rewards_tracker_cards",
+    "ynab_source_month_activity",
+    "account_month_balances",
+    "report_cache"
+  ]
+}

@@ -19,3 +19,10 @@ test("legacy redirect deploy is named deploy:yj-redirect and pins profile yj", (
 test("production deploy stays on env tk and profile tinkertanker", () => {
   expect(pkg.scripts["deploy:tk"]).toContain("wrangler deploy --env tk --profile tinkertanker");
 });
+
+test("self-host deploy uses only the self-host config and never the owner's env or profile", () => {
+  const script = pkg.scripts["deploy:self-host"] ?? "";
+  expect(script).toContain("wrangler deploy --config wrangler.self-host.jsonc");
+  expect(script).not.toContain("--env");
+  expect(script).not.toContain("--profile");
+});

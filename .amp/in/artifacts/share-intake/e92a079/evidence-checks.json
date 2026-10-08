@@ -1,0 +1,61 @@
+{
+  "checks": {
+    "one_authorized_setup_write": true,
+    "preexisting_ledger_rows_unchanged": true,
+    "precondition_rule_groceries_fallback": true,
+    "same_target_identity": true,
+    "deleted_rule_absent": true,
+    "deletion_removed_learned_effect_only": true,
+    "deletion_preserved_fallback_and_cap": true,
+    "account_edit_preserved_fallback_and_cap": true,
+    "no_writes_after_setup": true,
+    "target_not_saved": true,
+    "target_pending_unapplied": true,
+    "historical_pending_json_unchanged": true
+  },
+  "setupTransaction": [
+    {
+      "id": "txn_bdad6012-10e4-49e1-9410-f8bc52e0acc4",
+      "account_id": "e2e-dbs",
+      "date": "2026-10-05",
+      "amount_milli": -18760,
+      "payee_name_snapshot": "NTUC FAIRPRICE",
+      "category_id": "starter:plan_613b3d02-e28b-4c3b-b514-afaf3deb047e:cat:groceries",
+      "category_name_snapshot": "Groceries",
+      "approved": 1,
+      "deleted": 0
+    }
+  ],
+  "targetJobID": "BC80D393-096A-4700-9F9B-44F3C8E78ADC",
+  "targetProposalID": "A254D1AD-CAD2-4B27-BFD4-6488892BD8DD",
+  "checkpoints": [
+    {
+      "name": "beforeDelete",
+      "accountID": "e2e-dbs",
+      "confidence": 0.8,
+      "reasons": [
+        "Learned rule: NTUC FAIRPRICE \u2192 Groceries (from 1 correction)",
+        "No row within 3 days for this amount",
+        "Read without Apple Intelligence"
+      ]
+    },
+    {
+      "name": "afterDelete",
+      "accountID": "e2e-dbs",
+      "confidence": 0.8,
+      "reasons": [
+        "No row within 3 days for this amount",
+        "Read without Apple Intelligence"
+      ]
+    },
+    {
+      "name": "afterAccount",
+      "accountID": "e2e-everyday",
+      "confidence": 0.8,
+      "reasons": [
+        "No row within 3 days for this amount",
+        "Read without Apple Intelligence"
+      ]
+    }
+  ]
+}

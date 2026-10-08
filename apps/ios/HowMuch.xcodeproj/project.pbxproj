@@ -82,6 +82,7 @@
 		A2000000000000000000005B /* AddTransactionIntentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005A /* AddTransactionIntentTests.swift */; };
 		A20000000000000000000083 /* CommitManyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000082 /* CommitManyTests.swift */; };
 		A20000000000000000000091 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
+		A200000000000000000000F7 /* ShareContextStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000F6 /* ShareContextStore.swift */; };
 		A20000000000000000000093 /* InboxStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000092 /* InboxStoreTests.swift */; };
 		A20000000000000000000095 /* InboxReadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000094 /* InboxReadingView.swift */; };
 		A20000000000000000000097 /* IntelligenceAura.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000096 /* IntelligenceAura.swift */; };
@@ -117,6 +118,9 @@
 		A200000000000000000000F5 /* AccountGroupOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000F4 /* AccountGroupOrderTests.swift */; };
 		A30000000000000000000003 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000002 /* ShareViewController.swift */; };
 		A30000000000000000000006 /* InboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000090 /* InboxStore.swift */; };
+		A30000000000000000000020 /* ShareContextStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000F6 /* ShareContextStore.swift */; };
+		A30000000000000000000022 /* ShareSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000021 /* ShareSheetView.swift */; };
+		A30000000000000000000024 /* ShareItemLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000023 /* ShareItemLoader.swift */; };
 		A3000000000000000000000B /* HowMuchShare.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* HowMuchShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B10000000000000000000011 /* LocalEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000010 /* LocalEngine.swift */; };
 		B100000000000000000000F1 /* PlanSettingsSeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000F0 /* PlanSettingsSeed.swift */; };
@@ -131,6 +135,28 @@
 		B10000000000000000000021 /* ServerConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000020 /* ServerConnection.swift */; };
 		B10000000000000000000023 /* ServerConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000022 /* ServerConnectView.swift */; };
 		B10000000000000000000025 /* ServerConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000024 /* ServerConnectionTests.swift */; };
+		D20000000000000000000002 /* IntakeJob.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000001 /* IntakeJob.swift */; };
+		D20000000000000000000004 /* IntakeJobStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000003 /* IntakeJobStore.swift */; };
+		D40000000000000000000002 /* IntakeNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40000000000000000000001 /* IntakeNotifier.swift */; };
+		D40000000000000000000004 /* IntakeHashIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40000000000000000000003 /* IntakeHashIndex.swift */; };
+		D40000000000000000000005 /* IntakeHashIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40000000000000000000003 /* IntakeHashIndex.swift */; };
+		D20000000000000000000008 /* IntakeMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000007 /* IntakeMatcher.swift */; };
+		D2000000000000000000000A /* IntakeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000009 /* IntakeCoordinator.swift */; };
+		D20000000000000000000006 /* PayeeNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000005 /* PayeeNames.swift */; };
+		D2000000000000000000000C /* IntakeInboxBand.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000000000000000000000B /* IntakeInboxBand.swift */; };
+		D2000000000000000000000E /* InboxListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000000000000000000000D /* InboxListView.swift */; };
+		D30000000000000000000002 /* IntakeReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000001 /* IntakeReviewView.swift */; };
+		D30000000000000000000004 /* IntakeProposalRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000003 /* IntakeProposalRow.swift */; };
+		D30000000000000000000006 /* IntakeDocumentViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000005 /* IntakeDocumentViewer.swift */; };
+		D20000000000000000000010 /* IntakeMatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000000000000000000000F /* IntakeMatcherTests.swift */; };
+		D50000000000000000000002 /* IntakeSkill.swift in Sources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000001 /* IntakeSkill.swift */; };
+		D50000000000000000000004 /* RememberThisSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000003 /* RememberThisSheet.swift */; };
+		D50000000000000000000006 /* SkillAndMemoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000005 /* SkillAndMemoryView.swift */; };
+		D50000000000000000000008 /* SkillFileEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000007 /* SkillFileEditorView.swift */; };
+		D5000000000000000000000A /* IntakeSkillTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000009 /* IntakeSkillTests.swift */; };
+		D20000000000000000000012 /* PayeeNamesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000011 /* PayeeNamesTests.swift */; };
+		D20000000000000000000014 /* IntakeLineParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000013 /* IntakeLineParser.swift */; };
+		D20000000000000000000016 /* IntakeLineParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000015 /* IntakeLineParserTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -159,6 +185,7 @@
 		A2000000000000000000005A /* AddTransactionIntentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddTransactionIntentTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000082 /* CommitManyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitManyTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000090 /* InboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxStore.swift; sourceTree = "<group>"; };
+		A200000000000000000000F6 /* ShareContextStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareContextStore.swift; sourceTree = "<group>"; };
 		A20000000000000000000092 /* InboxStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxStoreTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000094 /* InboxReadingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxReadingView.swift; sourceTree = "<group>"; };
 		A20000000000000000000096 /* IntelligenceAura.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelligenceAura.swift; sourceTree = "<group>"; };
@@ -199,6 +226,8 @@
 		A60000000000000000000010 /* IPadLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPadLayoutTests.swift; sourceTree = "<group>"; };
 		A30000000000000000000001 /* HowMuchShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HowMuchShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A30000000000000000000002 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		A30000000000000000000021 /* ShareSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSheetView.swift; sourceTree = "<group>"; };
+		A30000000000000000000023 /* ShareItemLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareItemLoader.swift; sourceTree = "<group>"; };
 		A30000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A30000000000000000000005 /* HowMuchShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HowMuchShare.entitlements; sourceTree = "<group>"; };
 		A10000000000000000000010 /* HowMuchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HowMuchApp.swift; sourceTree = "<group>"; };
@@ -261,6 +290,27 @@
 		B10000000000000000000020 /* ServerConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConnection.swift; sourceTree = "<group>"; };
 		B10000000000000000000022 /* ServerConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConnectView.swift; sourceTree = "<group>"; };
 		B10000000000000000000024 /* ServerConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConnectionTests.swift; sourceTree = "<group>"; };
+		D20000000000000000000001 /* IntakeJob.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeJob.swift; sourceTree = "<group>"; };
+		D20000000000000000000003 /* IntakeJobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeJobStore.swift; sourceTree = "<group>"; };
+		D40000000000000000000001 /* IntakeNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeNotifier.swift; sourceTree = "<group>"; };
+		D40000000000000000000003 /* IntakeHashIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeHashIndex.swift; sourceTree = "<group>"; };
+		D20000000000000000000007 /* IntakeMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeMatcher.swift; sourceTree = "<group>"; };
+		D20000000000000000000009 /* IntakeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeCoordinator.swift; sourceTree = "<group>"; };
+		D20000000000000000000005 /* PayeeNames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayeeNames.swift; sourceTree = "<group>"; };
+		D2000000000000000000000B /* IntakeInboxBand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeInboxBand.swift; sourceTree = "<group>"; };
+		D2000000000000000000000D /* InboxListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxListView.swift; sourceTree = "<group>"; };
+		D30000000000000000000001 /* IntakeReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeReviewView.swift; sourceTree = "<group>"; };
+		D30000000000000000000003 /* IntakeProposalRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeProposalRow.swift; sourceTree = "<group>"; };
+		D30000000000000000000005 /* IntakeDocumentViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeDocumentViewer.swift; sourceTree = "<group>"; };
+		D2000000000000000000000F /* IntakeMatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeMatcherTests.swift; sourceTree = "<group>"; };
+		D50000000000000000000001 /* IntakeSkill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeSkill.swift; sourceTree = "<group>"; };
+		D50000000000000000000003 /* RememberThisSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RememberThisSheet.swift; sourceTree = "<group>"; };
+		D50000000000000000000005 /* SkillAndMemoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillAndMemoryView.swift; sourceTree = "<group>"; };
+		D50000000000000000000007 /* SkillFileEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillFileEditorView.swift; sourceTree = "<group>"; };
+		D50000000000000000000009 /* IntakeSkillTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeSkillTests.swift; sourceTree = "<group>"; };
+		D20000000000000000000011 /* PayeeNamesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayeeNamesTests.swift; sourceTree = "<group>"; };
+		D20000000000000000000013 /* IntakeLineParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeLineParser.swift; sourceTree = "<group>"; };
+		D20000000000000000000015 /* IntakeLineParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeLineParserTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXContainerItemProxy section */
@@ -397,6 +447,7 @@
 				D10000000000000000000003 /* RewardExposure.swift */,
 				A50000000000000000000032 /* RewardDraftPeriod.swift */,
 				A10000000000000000000019 /* Theme.swift */,
+				D20000000000000000000005 /* PayeeNames.swift */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -413,6 +464,14 @@
 				A1000000000000000000007D /* AccountIdentityFields.swift */,
 				A1000000000000000000007E /* EditAccountSheet.swift */,
 				A10000000000000000000071 /* AccountsView.swift */,
+				D2000000000000000000000B /* IntakeInboxBand.swift */,
+				D2000000000000000000000D /* InboxListView.swift */,
+				D30000000000000000000001 /* IntakeReviewView.swift */,
+				D50000000000000000000003 /* RememberThisSheet.swift */,
+				D50000000000000000000005 /* SkillAndMemoryView.swift */,
+				D50000000000000000000007 /* SkillFileEditorView.swift */,
+				D30000000000000000000003 /* IntakeProposalRow.swift */,
+				D30000000000000000000005 /* IntakeDocumentViewer.swift */,
 				A10000000000000000000072 /* RegisterView.swift */,
 				A50000000000000000000010 /* RewardsView.swift */,
 				D10000000000000000000005 /* RewardExposureFace.swift */,
@@ -449,6 +508,15 @@
 				A40000000000000000000018 /* LedgerQuery.swift */,
 				A20000000000000000000012 /* CaptureRouter.swift */,
 				A20000000000000000000090 /* InboxStore.swift */,
+				A200000000000000000000F6 /* ShareContextStore.swift */,
+				D20000000000000000000001 /* IntakeJob.swift */,
+				D20000000000000000000003 /* IntakeJobStore.swift */,
+				D40000000000000000000001 /* IntakeNotifier.swift */,
+				D40000000000000000000003 /* IntakeHashIndex.swift */,
+				D20000000000000000000007 /* IntakeMatcher.swift */,
+				D20000000000000000000009 /* IntakeCoordinator.swift */,
+				D50000000000000000000001 /* IntakeSkill.swift */,
+				D20000000000000000000013 /* IntakeLineParser.swift */,
 				A20000000000000000000094 /* InboxReadingView.swift */,
 				A20000000000000000000096 /* IntelligenceAura.swift */,
 				A200000000000000000000A0 /* ScreenshotOffer.swift */,
@@ -490,6 +558,10 @@
 				A2000000000000000000005A /* AddTransactionIntentTests.swift */,
 				A20000000000000000000082 /* CommitManyTests.swift */,
 				A20000000000000000000092 /* InboxStoreTests.swift */,
+				D2000000000000000000000F /* IntakeMatcherTests.swift */,
+				D20000000000000000000011 /* PayeeNamesTests.swift */,
+				D20000000000000000000015 /* IntakeLineParserTests.swift */,
+				D50000000000000000000009 /* IntakeSkillTests.swift */,
 				A2000000000000000000009C /* AddFromInboxIntentTests.swift */,
 				A200000000000000000000A2 /* ScreenshotOfferTests.swift */,
 				A200000000000000000000B0 /* RegisterSnapshotTests.swift */,
@@ -523,6 +595,8 @@
 			isa = PBXGroup;
 			children = (
 				A30000000000000000000002 /* ShareViewController.swift */,
+				A30000000000000000000021 /* ShareSheetView.swift */,
+				A30000000000000000000023 /* ShareItemLoader.swift */,
 				A30000000000000000000004 /* Info.plist */,
 				A30000000000000000000005 /* HowMuchShare.entitlements */,
 			);
@@ -744,6 +818,24 @@
 				A2000000000000000000009B /* AddFromImageIntent.swift in Sources */,
 				A20000000000000000000059 /* AppShortcuts.swift in Sources */,
 				A20000000000000000000091 /* InboxStore.swift in Sources */,
+				A200000000000000000000F7 /* ShareContextStore.swift in Sources */,
+				D20000000000000000000002 /* IntakeJob.swift in Sources */,
+				D20000000000000000000004 /* IntakeJobStore.swift in Sources */,
+				D40000000000000000000002 /* IntakeNotifier.swift in Sources */,
+				D40000000000000000000004 /* IntakeHashIndex.swift in Sources */,
+				D20000000000000000000008 /* IntakeMatcher.swift in Sources */,
+				D2000000000000000000000A /* IntakeCoordinator.swift in Sources */,
+				D50000000000000000000002 /* IntakeSkill.swift in Sources */,
+				D20000000000000000000014 /* IntakeLineParser.swift in Sources */,
+				D20000000000000000000006 /* PayeeNames.swift in Sources */,
+				D2000000000000000000000C /* IntakeInboxBand.swift in Sources */,
+				D2000000000000000000000E /* InboxListView.swift in Sources */,
+				D30000000000000000000002 /* IntakeReviewView.swift in Sources */,
+				D50000000000000000000004 /* RememberThisSheet.swift in Sources */,
+				D50000000000000000000006 /* SkillAndMemoryView.swift in Sources */,
+				D50000000000000000000008 /* SkillFileEditorView.swift in Sources */,
+				D30000000000000000000004 /* IntakeProposalRow.swift in Sources */,
+				D30000000000000000000006 /* IntakeDocumentViewer.swift in Sources */,
 				A20000000000000000000095 /* InboxReadingView.swift in Sources */,
 				A20000000000000000000097 /* IntelligenceAura.swift in Sources */,
 				A200000000000000000000A1 /* ScreenshotOffer.swift in Sources */,
@@ -769,6 +861,10 @@
 				A2000000000000000000005B /* AddTransactionIntentTests.swift in Sources */,
 				A20000000000000000000083 /* CommitManyTests.swift in Sources */,
 				A20000000000000000000093 /* InboxStoreTests.swift in Sources */,
+				D20000000000000000000010 /* IntakeMatcherTests.swift in Sources */,
+				D20000000000000000000012 /* PayeeNamesTests.swift in Sources */,
+				D20000000000000000000016 /* IntakeLineParserTests.swift in Sources */,
+				D5000000000000000000000A /* IntakeSkillTests.swift in Sources */,
 				A2000000000000000000009D /* AddFromInboxIntentTests.swift in Sources */,
 				A200000000000000000000A3 /* ScreenshotOfferTests.swift in Sources */,
 				A200000000000000000000B1 /* RegisterSnapshotTests.swift in Sources */,
@@ -803,6 +899,10 @@
 			files = (
 				A30000000000000000000003 /* ShareViewController.swift in Sources */,
 				A30000000000000000000006 /* InboxStore.swift in Sources */,
+				A30000000000000000000020 /* ShareContextStore.swift in Sources */,
+				D40000000000000000000005 /* IntakeHashIndex.swift in Sources */,
+				A30000000000000000000022 /* ShareSheetView.swift in Sources */,
+				A30000000000000000000024 /* ShareItemLoader.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

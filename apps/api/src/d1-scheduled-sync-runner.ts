@@ -47,6 +47,7 @@ export async function runD1ScheduledYnabSync(options: {
     const result = await importYnabFromApi(repo, {
       token,
       planId,
+      baseUrl: config.ynabBaseUrl,
       lastKnowledgeOfServer: acquisition.serverKnowledge > 0 ? acquisition.serverKnowledge : undefined,
       minSimilarity: config.ynabMinSimilarity,
       warn: (message) => logger.warn(message),

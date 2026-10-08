@@ -16,6 +16,17 @@ import type {
   CategoryGroup,
   PlanSettings,
 } from "../api/types";
+import {
+  buildPlanSeed,
+  CURRENCY_CHOICES,
+  DATE_FORMAT_CHOICES,
+  DATE_FORMAT_LABELS,
+  DEFAULT_CURRENCY,
+  guessCurrency,
+  guessDateFormat,
+  type DateFormatChoice,
+} from "../lib/locale-plan-seed";
+import { configureDateFormat } from "../lib/dates";
 import { configureMoney } from "../lib/money";
 import { parseTransactionDeepLink } from "../lib/transaction-deep-link";
 import { HalationMark } from "../components/Brand";
@@ -268,6 +279,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
         const paintedCache = cached?.planId === hint && !requestedPlanId ? cached : null;
         if (paintedCache && hint && !cancelled) {
           configureMoney(paintedCache.data.settings.currency_format);
+          configureDateFormat(paintedCache.data.settings.date_format);
           setValue(provisionalPlanValue(hint, paintedCache, { reload, logout: signOut }));
         }
         const requests = planBootstrapRequests({
@@ -384,6 +396,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
           return;
         }
         configureMoney(settings.currency_format);
+        configureDateFormat(settings.date_format);
         savePrefs({ planId });
         // Tagged with the knowledge the accounts were actually read at, not
         // the plans list's, so a write landing between the two reads leaves
@@ -557,6 +570,8 @@ function AuthForm({
   const [password, setPassword] = useState("");
   const [bootstrapToken, setBootstrapToken] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [currency, setCurrency] = useState(() => guessCurrency() ?? DEFAULT_CURRENCY);
+  const [dateFormat, setDateFormat] = useState<DateFormatChoice>(() => guessDateFormat());
   const setup = mode === "setup";
 
   return (
@@ -567,7 +582,7 @@ function AuthForm({
         setSubmitting(true);
         try {
           const session = setup
-            ? await api.setup(username, password, bootstrapToken)
+            ? await api.setup(username, password, bootstrapToken, buildPlanSeed(currency, dateFormat))
             : await api.login(username, password);
           // Recorded now so the next load can tell, without asking, whether
           // this browser still holds a live session before it paints anything.
@@ -624,6 +639,23 @@ function AuthForm({
             required
           />
         </label>
+      )}
+      {setup && (
+        <>
+          <label>
+            <span>Currency</span>
+            <select value={currency} onChange={(event) => setCurrency(event.target.value)}>
+              {CURRENCY_CHOICES.map((code) => <option key={code} value={code}>{code}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Date format</span>
+            <select value={dateFormat} onChange={(event) => setDateFormat(event.target.value as DateFormatChoice)}>
+              {DATE_FORMAT_CHOICES.map((format) => <option key={format} value={format}>{DATE_FORMAT_LABELS[format]}</option>)}
+            </select>
+          </label>
+          <p className="boot-hint">You can change the currency and date format later in Settings.</p>
+        </>
       )}
       <button
         type="submit"

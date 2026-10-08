@@ -1,6 +1,6 @@
 # iOS capture reply typewriter
 
-Date: 2026-09-09. Darwin `yjmbpro.local`, Xcode 26.6 (17F113).
+Date: 2026-09-09. Darwin `<host>.local`, Xcode 26.6 (17F113).
 Branch: `cursor/capture-rename-payee-a557` @ `29f42e7`.
 Simulator: HowMuch Verification `BA2CAD1A-0977-4290-8486-760091B333AE` (iOS 26.5).
 API: `http://127.0.0.1:60500` (verify stack `20260908T084259-43409`). Never `howmuch.soon.sg`.

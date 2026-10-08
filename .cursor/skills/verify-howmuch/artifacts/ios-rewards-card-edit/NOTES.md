@@ -1,7 +1,7 @@
 # ios-rewards-card-edit proof
 
 - Feature: `ios-rewards-card-edit`
-- Machine: howmuch-mac (`yjmbpro.local`), Darwin 25.6.0, macOS 26.6.2, Xcode 26.6 (17F113)
+- Machine: howmuch-mac (`<host>.local`), Darwin 25.6.0, macOS 26.6.2, Xcode 26.6 (17F113)
 - Branch: `cursor/rewards-ios-manage-4825`
 - Simulator: HowMuch Verification (`BA2CAD1A-0977-4290-8486-760091B333AE`), bundle `sg.soon.howmuch`
 - Instance: `control-howmuch` run `20260908T084259-43409`
