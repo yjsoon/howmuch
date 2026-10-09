@@ -1223,9 +1223,16 @@ final class IntakeSkillStore {
     needsReload = loaded.unreadable
   }
 
-  /// What to tell the owner when a save fails.
+  /// What to tell the owner when a save fails. A file that could not be read is
+  /// tried again on the next save; one that does not decode is kept, never
+  /// cleared, in case a newer Halation wrote it.
   func saveFailureMessage(_ fallback: String) -> String {
-    isReadOnly ? "Couldn’t read your skill file. Changes weren’t saved." : fallback
+    guard isReadOnly else {
+      return fallback
+    }
+    return needsReload
+      ? "Couldn’t read your skill file. Changes weren’t saved. Try again."
+      : "Couldn’t read your skill file, so changes weren’t saved. If you recently went back to an older Halation, update it."
   }
 
   nonisolated static func decoder() -> JSONDecoder {

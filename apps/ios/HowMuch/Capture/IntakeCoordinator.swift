@@ -772,7 +772,7 @@ final class IntakeCoordinator {
           plans[proposal.id] = .skip("Couldn’t find the original transaction")
           continue
         case .unavailable:
-          plans[proposal.id] = .skip("Couldn’t check the original transaction. Try again when you’re online.")
+          plans[proposal.id] = .skip("Couldn’t check the original transaction. Try again later.")
           continue
         }
         let fields = IntakeMatcher.pendingFixFields(
@@ -1131,7 +1131,7 @@ final class IntakeCoordinator {
       model.showSaveMessage("Couldn’t read that transaction. Try again.", kind: .failure)
       return false
     case .unavailable:
-      model.showSaveMessage("Couldn’t check that transaction. Try again when you’re online.", kind: .failure)
+      model.showSaveMessage("Couldn’t check that transaction. Try again later.", kind: .failure)
       return false
     }
     var flipped = false

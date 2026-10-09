@@ -3746,10 +3746,13 @@ final class AppModel {
     }
   }
 
+  /// The API's detail for a transaction that is not there, as against a missing plan.
+  nonisolated static let transactionNotFoundDetail = "Transaction not found"
+
   /// True for the server's answer to a transaction it does not have, and
   /// only that: a plan the session can no longer see is also a 404.
   private static func isTransactionNotFound(_ reply: OutboxReply) -> Bool {
-    reply.status == 404 && reply.message == "Transaction not found"
+    reply.status == 404 && reply.message == transactionNotFoundDetail
   }
 
   private func send(_ command: OutboxCommand, client: APIClient, planID: String) async -> WireResult {
@@ -4626,11 +4629,9 @@ extension AppModel {
         return .gone
       }
       return overlaying([row]).first.map(IntakeLiveRow.found) ?? .gone
-    } catch APIClientError.httpStatus(404) {
-      return .gone
-    } catch APIClientError.server {
-      // A JSON error body (404 `resource_not_found` and friends): the server
-      // answered and has no row to give.
+    } catch APIClientError.notFound(let detail) where detail == Self.transactionNotFoundDetail {
+      // The server answered and has no such row. A missing plan, a 404 with no
+      // JSON body (a proxy, a wrong address) or a 5xx is not that answer.
       return .gone
     } catch {
       // Unreachable or failing: the row cannot be checked right now.

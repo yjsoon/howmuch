@@ -25,6 +25,9 @@ enum APIClientError: LocalizedError {
   case invalidBaseURL
   case invalidResponse
   case server(String)
+  /// 404 `resource_not_found`: the server answered and the record is not
+  /// there. Its message is the server's, exactly as `.server` would show it.
+  case notFound(String)
   /// 409 `conflict`: the entity already exists or changed underneath the
   /// request. Its message is the server's, exactly as `.server` would show it.
   case conflict(String)
@@ -51,7 +54,7 @@ enum APIClientError: LocalizedError {
       return "Enter a valid API base URL."
     case .invalidResponse:
       return "The API returned an invalid response."
-    case .server(let message), .conflict(let message):
+    case .server(let message), .notFound(let message), .conflict(let message):
       return message
     case .reconciliationMismatch(let detail):
       return detail.message
@@ -817,6 +820,9 @@ struct APIClient {
         }
         if httpResponse.statusCode == 409, serverError.error.name == "conflict" {
           throw APIClientError.conflict(serverError.error.detail)
+        }
+        if httpResponse.statusCode == 404, serverError.error.name == "resource_not_found" {
+          throw APIClientError.notFound(serverError.error.detail)
         }
         if path.hasSuffix("/import_snapshot") {
           switch (httpResponse.statusCode, serverError.error.name) {
