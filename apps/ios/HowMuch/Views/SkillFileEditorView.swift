@@ -47,7 +47,7 @@ struct SkillFileEditorView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
         settingsCard
-        SkillNotesField(text: $notes, limit: IntakeSkill.notesLimit) {
+        SkillNotesField(text: $notes, limit: IntakeSkill.notesLimit, readLimit: IntakeSkill.promptGuidanceLimit) {
           notes += Self.example(fittingAfter: notes, limit: IntakeSkill.notesLimit)
         }
         Text("Plain instructions. Halation reads this before every document, alongside per-account notes and learned rules. Apple Intelligence reads only the first \(IntakeSkill.promptGuidanceLimit.formatted()) characters, after any notes for the account; without it, only the duplicate window and learned rules apply.")
@@ -267,11 +267,40 @@ struct AccountSkillEditorView: View {
 struct SkillNotesField: View {
   @Binding var text: String
   let limit: Int
+  /// Where Apple Intelligence stops reading, when that is short of `limit`.
+  /// The count says so once the text runs past it.
+  var readLimit: Int?
   /// Shown as "Insert example" when set.
   var onInsertExample: (() -> Void)?
 
   private var isOver: Bool {
     text.count > limit
+  }
+
+  /// Nil until the text runs past what Apple Intelligence reads.
+  private var readLimitExceeded: Int? {
+    guard let readLimit, text.count > readLimit else {
+      return nil
+    }
+    return readLimit
+  }
+
+  private var countText: String {
+    let base = "\(text.count.formatted()) / \(limit.formatted()) characters"
+    guard let read = readLimitExceeded else {
+      return base
+    }
+    return "\(base) · first \(read.formatted()) read"
+  }
+
+  private var countAccessibilityLabel: String {
+    let base = isOver
+      ? "Over the limit: \(text.count) of \(limit) characters"
+      : "\(text.count) of \(limit) characters"
+    guard let read = readLimitExceeded else {
+      return base
+    }
+    return "\(base). Apple Intelligence reads the first \(read.formatted()) characters."
   }
 
   var body: some View {
@@ -285,15 +314,11 @@ struct SkillNotesField: View {
         .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         .accessibilityLabel("Notes")
       HStack {
-        Text("\(text.count.formatted()) / \(limit.formatted()) characters")
+        Text(countText)
           .font(.subheadline)
           .monospacedDigit()
           .foregroundStyle(isOver ? Theme.outflow : Color.secondary)
-          .accessibilityLabel(
-            isOver
-              ? "Over the limit: \(text.count) of \(limit) characters"
-              : "\(text.count) of \(limit) characters"
-          )
+          .accessibilityLabel(countAccessibilityLabel)
         Spacer(minLength: 8)
         if let onInsertExample {
           Button("Insert example", action: onInsertExample)
