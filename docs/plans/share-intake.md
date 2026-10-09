@@ -92,7 +92,7 @@ Duplicate share: hash the payload (the clipboard offer already SHA-256s images).
 Local notifications only (no remote push, no server device registry), category `halation.inbox`, one thread per batch.
 
 - Ready: "Ready to review" · "1 correction found · 1 new, from 2 DBS screenshots". Actions **Review**, **Later**.
-- Needs you: "Halation needs you" · "Couldn't tell which account this receipt belongs to."
+- Needs you: "Halation needs you" · "Couldn’t tell which account this belongs to."
 - Statement: "Statement read" · "Sep 2026 · 41 matched · 2 missing · 1 extra".
 - Auto-saved: "Saved 2 as new" · "Approve them in the register when you're ready."
 - Failed: "Couldn't read this" · "The PDF was password protected." Actions **Open Inbox**, **Discard**.

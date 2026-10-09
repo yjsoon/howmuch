@@ -290,7 +290,7 @@ struct SkillNotesField: View {
     guard let read = readLimitExceeded else {
       return base
     }
-    return "\(base) · first \(read.formatted()) read"
+    return "\(base) · up to \(read.formatted()) read"
   }
 
   private var countAccessibilityLabel: String {
@@ -300,7 +300,7 @@ struct SkillNotesField: View {
     guard let read = readLimitExceeded else {
       return base
     }
-    return "\(base). Apple Intelligence reads the first \(read.formatted()) characters."
+    return "\(base). Apple Intelligence reads at most the first \(read.formatted()) characters."
   }
 
   var body: some View {
