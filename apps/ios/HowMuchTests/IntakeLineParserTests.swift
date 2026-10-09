@@ -460,6 +460,10 @@ final class IntakeLineParserTests: XCTestCase {
       [Row("Delivery from Kopitiam", "9.00", .outflow, nil)]
     )
     XCTAssertEqual(extract("GrabFood order\nCancelled\n-$8.90"), [Row("GrabFood order", "8.90", .outflow, nil)])
+    // An address or terminal under an order line is not the merchant either.
+    XCTAssertEqual(extract("GrabFood order\nTerminal 3\n-$12.30"), [Row("GrabFood order", "12.30", .outflow, nil)])
+    XCTAssertEqual(extract("GrabMart order\nAng Mo Kio Ave 3\n-$9.00"), [Row("GrabMart order", "9.00", .outflow, nil)])
+    XCTAssertEqual(extract("GrabMart order\n7-Eleven\n-$9.00"), [Row("7-Eleven", "9.00", .outflow, nil)])
   }
 
   // MARK: Dates
