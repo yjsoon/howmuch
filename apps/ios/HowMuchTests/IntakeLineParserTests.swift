@@ -247,6 +247,10 @@ final class IntakeLineParserTests: XCTestCase {
       extract("05 OCT ADOBE 12.00 USD 16.20"),
       [Row("ADOBE", "16.20", .outflow, "2026-10-05")]
     )
+    // A typographic minus or en dash on the SGD amount: USD 12.00 must still not be saved as dollars.
+    for line in ["05 OCT ADOBE 12.00 USD \u{2212}16.20", "05 OCT ADOBE 12.00 USD \u{2013}16.20"] {
+      XCTAssertEqual(extract(line), [Row("ADOBE", "16.20", .outflow, "2026-10-05")], line)
+    }
   }
 
   func testCodeAfterAnSGDAmountBelongsToTheForeignAmountThatFollows() {
@@ -433,6 +437,29 @@ final class IntakeLineParserTests: XCTestCase {
 
   func testAServiceDescriptorAloneAboveAnAmountIsStillThePayee() {
     XCTAssertEqual(extract("GrabFood order\n-$4.50"), [Row("GrabFood order", "4.50", .outflow, nil)])
+  }
+
+  func testACategoryLabelAboveAServiceLineGivesWayToIt() {
+    // A label is the payee only when it is alone above an amount.
+    XCTAssertEqual(
+      extract("Transport\nRide to Changi Airport\n-$12.30"),
+      [Row("Ride to Changi Airport", "12.30", .outflow, nil)]
+    )
+    XCTAssertEqual(extract("Food & Drink\nGrabFood order\n-$8.90"), [Row("GrabFood order", "8.90", .outflow, nil)])
+  }
+
+  func testLinesUnderARideOrDeliveryLineDoNotReplaceIt() {
+    // Only an "… order" line is replaced by the merchant below it; a ride or
+    // delivery line keeps its place over an address, terminal or wallet line.
+    XCTAssertEqual(
+      extract("Ride to Changi Airport\nTerminal 3\n-$12.30"),
+      [Row("Ride to Changi Airport", "12.30", .outflow, nil)]
+    )
+    XCTAssertEqual(
+      extract("Delivery from Kopitiam\nAng Mo Kio Ave 3\n-$9.00"),
+      [Row("Delivery from Kopitiam", "9.00", .outflow, nil)]
+    )
+    XCTAssertEqual(extract("GrabFood order\nCancelled\n-$8.90"), [Row("GrabFood order", "8.90", .outflow, nil)])
   }
 
   // MARK: Dates
