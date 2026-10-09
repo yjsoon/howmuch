@@ -259,6 +259,16 @@ final class IntakeLineParserTests: XCTestCase {
     }
   }
 
+  func testSignedSGDAmountBeforeAForeignAmountIsTheOutflow() {
+    for line in ["S$-21.70 USD 15.99", "-S$21.70 USD 15.99", "SGD -21.70 USD 15.99", "S$ -21.70 USD 15.99"] {
+      XCTAssertEqual(
+        extract("05 OCT NETFLIX \(line)"),
+        [Row("NETFLIX", "21.70", .outflow, "2026-10-05")],
+        line
+      )
+    }
+  }
+
   func testMerchantsThatStartWithACurrencyWordAreNormalRows() {
     XCTAssertEqual(extract("05 OCT YUAN CHUN LOR MEE 5.00"), [Row("YUAN CHUN LOR MEE", "5.00", .outflow, "2026-10-05")])
     XCTAssertEqual(extract("05 OCT EURO SPORTS 45.00"), [Row("EURO SPORTS", "45.00", .outflow, "2026-10-05")])
@@ -386,7 +396,8 @@ final class IntakeLineParserTests: XCTestCase {
 
   func testListHeadingsAboveTheFirstRowAreNotPayees() {
     for heading in ["Transactions", "All Transactions", "Recent transactions", "Transaction history",
-                    "Activity", "History", "Statement", "Unbilled", "Current", "Pending"] {
+                    "Recent activity", "RECENT ACTIVITY", "Activity", "History", "Statement", "Unbilled", "Current",
+                    "Pending"] {
       XCTAssertEqual(
         extract("\(heading)\nGrab\n-$8.90"),
         [Row("Grab", "8.90", .outflow, nil)],
@@ -402,11 +413,23 @@ final class IntakeLineParserTests: XCTestCase {
     XCTAssertEqual(extract("QuickRide\nTransportation\n-$18.40"), [Row("QuickRide", "18.40", .outflow, nil)])
   }
 
-  func testAFollowUpRowKeepsItsOwnFirstLineAsThePayee() {
+  func testAServiceDescriptorLineIsNotThePayeeWhenAMerchantFollowsIt() {
+    // "GrabFood order" describes the Grab row above it; Kopitiam is the next row's merchant.
     XCTAssertEqual(
       extract("Grab\n-$8.90\nGrabFood order\nKopitiam\n-$4.50"),
-      [Row("Grab", "8.90", .outflow, nil), Row("GrabFood order", "4.50", .outflow, nil)]
+      [Row("Grab", "8.90", .outflow, nil), Row("Kopitiam", "4.50", .outflow, nil)]
     )
+  }
+
+  func testAServiceDescriptorAfterThePayeeAndADateLineDoesNotReplaceIt() {
+    XCTAssertEqual(
+      extract("Grab\nToday\nRide to Changi\n-$12.30"),
+      [Row("Grab", "12.30", .outflow, "today")]
+    )
+  }
+
+  func testAServiceDescriptorAloneAboveAnAmountIsStillThePayee() {
+    XCTAssertEqual(extract("GrabFood order\n-$4.50"), [Row("GrabFood order", "4.50", .outflow, nil)])
   }
 
   // MARK: Dates
