@@ -33,7 +33,7 @@ final class LocalModeTests: XCTestCase {
     do {
       _ = try await client.fetchTransaction(planID: settings.planID, transactionID: "missing")
       XCTFail("Expected a not-found error")
-    } catch APIClientError.server(let message) {
+    } catch APIClientError.notFound(let message) {
       XCTAssertFalse(message.isEmpty)
     }
   }

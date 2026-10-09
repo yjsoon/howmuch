@@ -4628,12 +4628,11 @@ extension AppModel {
       return overlaying([row]).first.map(IntakeLiveRow.found) ?? .gone
     } catch APIClientError.httpStatus(404) {
       return .gone
-    } catch APIClientError.server {
-      // A JSON error body (404 `resource_not_found` and friends): the server
-      // answered and has no row to give.
+    } catch APIClientError.notFound {
+      // A JSON 404 `resource_not_found`: the server answered and has no row.
       return .gone
     } catch {
-      // Unreachable or failing: the row cannot be checked right now.
+      // Unreachable or failing, including a 5xx with a JSON error body: the row cannot be checked right now.
       return .unavailable
     }
   }
