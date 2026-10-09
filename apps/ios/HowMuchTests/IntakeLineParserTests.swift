@@ -260,7 +260,10 @@ final class IntakeLineParserTests: XCTestCase {
   }
 
   func testSignedSGDAmountBeforeAForeignAmountIsTheOutflow() {
-    for line in ["S$-21.70 USD 15.99", "-S$21.70 USD 15.99", "SGD -21.70 USD 15.99", "S$ -21.70 USD 15.99"] {
+    for line in [
+      "S$-21.70 USD 15.99", "-S$21.70 USD 15.99", "SGD -21.70 USD 15.99", "S$ -21.70 USD 15.99",
+      "S$ - 21.70 USD 15.99", "SGD - 21.70 USD 15.99",
+    ] {
       XCTAssertEqual(
         extract("05 OCT NETFLIX \(line)"),
         [Row("NETFLIX", "21.70", .outflow, "2026-10-05")],
