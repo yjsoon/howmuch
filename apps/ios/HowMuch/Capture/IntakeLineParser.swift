@@ -136,10 +136,15 @@ enum IntakeLineParser {
           continue
         }
         // The first text line of a block is the payee; later lines (the
-        // descriptor) do not replace it.
+        // descriptor) do not replace it. A service line ("GrabFood order") is
+        // not a merchant: it never replaces a payee, and a merchant line that
+        // follows it takes its place.
         let payee = cleanPayee(line)
         if let existing = pending {
-          if existing.replaceable, hasWords(payee) {
+          if matches(serviceDescriptor, payee) {
+            continue
+          }
+          if existing.replaceable || matches(serviceDescriptor, existing.payee), hasWords(payee) {
             pending = Pending(payee: payee, date: existing.date ?? rowDate)
           }
         } else if hasWords(payee) {
@@ -195,11 +200,16 @@ enum IntakeLineParser {
   }
 
   private static let noise = regex(
-    #"^(?:completed|successful|success|paid|pending|approved|declined|posted)$|^(?:ref|reference|txn|trans(?:action)? id|card (?:no|number|ending)|account (?:no|number))\b|^(?:singapore|sg|spore)\s*\d{6}$|\bexchange rate\b|\bfx rate\b|^rate\b|\bconversion fee\b|\bcurrency conversion\b|\bforex\b|^(?:credit|debit)\s+[\d\s]+$|^(?:all transactions|recent transactions|transactions|transaction history|activity|history|statement|unbilled|current|pending)$"#
+    #"^(?:completed|successful|success|paid|pending|approved|declined|posted)$|^(?:ref|reference|txn|trans(?:action)? id|card (?:no|number|ending)|account (?:no|number))\b|^(?:singapore|sg|spore)\s*\d{6}$|\bexchange rate\b|\bfx rate\b|^rate\b|\bconversion fee\b|\bcurrency conversion\b|\bforex\b|^(?:credit|debit)\s+[\d\s]+$|^(?:all transactions|recent transactions|recent activity|transactions|transaction history|activity|history|statement|unbilled|current|pending)$"#
   )
   /// A category label under a payee. It is the payee only when it is alone above an amount.
   private static let categoryLabel = regex(
     #"^(?:transportation|transport|groceries|food (?:&|and) drink|dining|shopping|bills|entertainment|travel|health|credit card payments|transfers?)$"#
+  )
+  /// A service or order line under a wallet row ("GrabFood order", "Ride to Changi").
+  /// It describes the row, so it is not a payee when a merchant line follows it.
+  private static let serviceDescriptor = regex(
+    #"^[A-Za-z]+ order$|^(?:ride|trip|delivery) (?:to|from) .+$"#
   )
   private static let postingDate = regex(
     #"^(?:posting date|posted on|posted|transaction date|trans(?:action)? date|value date)\b"#
@@ -212,9 +222,10 @@ enum IntakeLineParser {
     #"^(?:u\.?\s*s\.?\s*dollars?|euros?|japanese yen|pounds? sterling|british pounds?|australian dollars?|malaysian ringgit|ringgit|thai baht|rupiah|renminbi|yuan|korean won)\b\s*[\d,]+(?:\.\d+)?$"#
   )
   /// A code between two amounts ("12.00 USD 16.20"): it belongs to the first,
-  /// unless that one carries its own `$`, `S$` or `SGD` prefix.
+  /// unless that one carries its own `$`, `S$` or `SGD` prefix, with or without
+  /// a sign between the prefix and the number ("S$-21.70 USD 15.99").
   private static let codeBetweenAmounts = regex(
-    #"(?<!\$)(?<!\$ )(?<!SGD)(?<!SGD )(?<![\d,.])((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{1,2})\s*("# + #"(?:USD|EUR|GBP|AUD|MYR|JPY|HKD|CNY|RMB|THB|IDR|NZD|CAD|CHF|KRW|INR|PHP|TWD|VND)"# + #")\s+(?=(?:[-+]\s*)?\d)"#
+    #"(?<!\$)(?<!\$ )(?<!SGD)(?<!SGD )(?<!\$[-+\u2212\u2013])(?<!\$ [-+\u2212\u2013])(?<!SGD[-+\u2212\u2013])(?<!SGD [-+\u2212\u2013])(?<![\d,.])((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{1,2})\s*("# + #"(?:USD|EUR|GBP|AUD|MYR|JPY|HKD|CNY|RMB|THB|IDR|NZD|CAD|CHF|KRW|INR|PHP|TWD|VND)"# + #")\s+(?=(?:[-+]\s*)?\d)"#
   )
   private static let time = regex(#"\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\b"#)
   private static let foreignAmount = regex(
