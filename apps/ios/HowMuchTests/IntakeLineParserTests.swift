@@ -247,12 +247,29 @@ final class IntakeLineParserTests: XCTestCase {
       extract("05 OCT ADOBE 12.00 USD 16.20"),
       [Row("ADOBE", "16.20", .outflow, "2026-10-05")]
     )
+    // A typographic minus or en dash on the SGD amount: USD 12.00 must still not be saved as dollars.
+    for line in ["05 OCT ADOBE 12.00 USD \u{2212}16.20", "05 OCT ADOBE 12.00 USD \u{2013}16.20"] {
+      XCTAssertEqual(extract(line), [Row("ADOBE", "16.20", .outflow, "2026-10-05")], line)
+    }
   }
 
   func testCodeAfterAnSGDAmountBelongsToTheForeignAmountThatFollows() {
     for line in ["NETFLIX S$21.70 USD 15.99", "NETFLIX SGD 21.70 USD 15.99"] {
       XCTAssertEqual(
         extract("05 OCT \(line)"),
+        [Row("NETFLIX", "21.70", .outflow, "2026-10-05")],
+        line
+      )
+    }
+  }
+
+  func testSignedSGDAmountBeforeAForeignAmountIsTheOutflow() {
+    for line in [
+      "S$-21.70 USD 15.99", "-S$21.70 USD 15.99", "SGD -21.70 USD 15.99", "S$ -21.70 USD 15.99",
+      "S$ - 21.70 USD 15.99", "SGD - 21.70 USD 15.99",
+    ] {
+      XCTAssertEqual(
+        extract("05 OCT NETFLIX \(line)"),
         [Row("NETFLIX", "21.70", .outflow, "2026-10-05")],
         line
       )
@@ -386,7 +403,8 @@ final class IntakeLineParserTests: XCTestCase {
 
   func testListHeadingsAboveTheFirstRowAreNotPayees() {
     for heading in ["Transactions", "All Transactions", "Recent transactions", "Transaction history",
-                    "Activity", "History", "Statement", "Unbilled", "Current", "Pending"] {
+                    "Recent activity", "RECENT ACTIVITY", "Activity", "History", "Statement", "Unbilled", "Current",
+                    "Pending"] {
       XCTAssertEqual(
         extract("\(heading)\nGrab\n-$8.90"),
         [Row("Grab", "8.90", .outflow, nil)],
@@ -402,11 +420,50 @@ final class IntakeLineParserTests: XCTestCase {
     XCTAssertEqual(extract("QuickRide\nTransportation\n-$18.40"), [Row("QuickRide", "18.40", .outflow, nil)])
   }
 
-  func testAFollowUpRowKeepsItsOwnFirstLineAsThePayee() {
+  func testAServiceDescriptorLineIsNotThePayeeWhenAMerchantFollowsIt() {
+    // "GrabFood order" describes the Grab row above it; Kopitiam is the next row's merchant.
     XCTAssertEqual(
       extract("Grab\n-$8.90\nGrabFood order\nKopitiam\n-$4.50"),
-      [Row("Grab", "8.90", .outflow, nil), Row("GrabFood order", "4.50", .outflow, nil)]
+      [Row("Grab", "8.90", .outflow, nil), Row("Kopitiam", "4.50", .outflow, nil)]
     )
+  }
+
+  func testAServiceDescriptorAfterThePayeeAndADateLineDoesNotReplaceIt() {
+    XCTAssertEqual(
+      extract("Grab\nToday\nRide to Changi\n-$12.30"),
+      [Row("Grab", "12.30", .outflow, "today")]
+    )
+  }
+
+  func testAServiceDescriptorAloneAboveAnAmountIsStillThePayee() {
+    XCTAssertEqual(extract("GrabFood order\n-$4.50"), [Row("GrabFood order", "4.50", .outflow, nil)])
+  }
+
+  func testACategoryLabelAboveAServiceLineGivesWayToIt() {
+    // A label is the payee only when it is alone above an amount.
+    XCTAssertEqual(
+      extract("Transport\nRide to Changi Airport\n-$12.30"),
+      [Row("Ride to Changi Airport", "12.30", .outflow, nil)]
+    )
+    XCTAssertEqual(extract("Food & Drink\nGrabFood order\n-$8.90"), [Row("GrabFood order", "8.90", .outflow, nil)])
+  }
+
+  func testLinesUnderARideOrDeliveryLineDoNotReplaceIt() {
+    // Only an "… order" line is replaced by the merchant below it; a ride or
+    // delivery line keeps its place over an address, terminal or wallet line.
+    XCTAssertEqual(
+      extract("Ride to Changi Airport\nTerminal 3\n-$12.30"),
+      [Row("Ride to Changi Airport", "12.30", .outflow, nil)]
+    )
+    XCTAssertEqual(
+      extract("Delivery from Kopitiam\nAng Mo Kio Ave 3\n-$9.00"),
+      [Row("Delivery from Kopitiam", "9.00", .outflow, nil)]
+    )
+    XCTAssertEqual(extract("GrabFood order\nCancelled\n-$8.90"), [Row("GrabFood order", "8.90", .outflow, nil)])
+    // An address or terminal under an order line is not the merchant either.
+    XCTAssertEqual(extract("GrabFood order\nTerminal 3\n-$12.30"), [Row("GrabFood order", "12.30", .outflow, nil)])
+    XCTAssertEqual(extract("GrabMart order\nAng Mo Kio Ave 3\n-$9.00"), [Row("GrabMart order", "9.00", .outflow, nil)])
+    XCTAssertEqual(extract("GrabMart order\n7-Eleven\n-$9.00"), [Row("7-Eleven", "9.00", .outflow, nil)])
   }
 
   // MARK: Dates
