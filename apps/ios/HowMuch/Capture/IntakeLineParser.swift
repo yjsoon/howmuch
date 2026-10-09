@@ -147,7 +147,8 @@ enum IntakeLineParser {
             }
             continue
           }
-          if existing.replaceable || matches(orderLine, existing.payee), hasWords(payee) {
+          let replacesOrder = matches(orderLine, existing.payee) && !matches(placeLine, payee)
+          if existing.replaceable || replacesOrder, hasWords(payee) {
             pending = Pending(payee: payee, date: existing.date ?? rowDate)
           }
         } else if hasWords(payee) {
@@ -216,6 +217,8 @@ enum IntakeLineParser {
   )
   /// The service lines a merchant line below replaces ("GrabFood order" over "Kopitiam").
   private static let orderLine = regex(#"^[A-Za-z]+ order$"#)
+  /// An address, terminal or unit line ("Terminal 3", "Ang Mo Kio Ave 3"): it ends in a bare number.
+  private static let placeLine = regex(#"\s\d+[A-Za-z]?$"#)
   private static let postingDate = regex(
     #"^(?:posting date|posted on|posted|transaction date|trans(?:action)? date|value date)\b"#
   )
