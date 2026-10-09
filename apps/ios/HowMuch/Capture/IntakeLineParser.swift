@@ -223,9 +223,9 @@ enum IntakeLineParser {
   )
   /// A code between two amounts ("12.00 USD 16.20"): it belongs to the first,
   /// unless that one carries its own `$`, `S$` or `SGD` prefix, with or without
-  /// a sign between the prefix and the number ("S$-21.70 USD 15.99").
+  /// a sign between the prefix and the number ("S$-21.70 USD 15.99", "S$ - 21.70").
   private static let codeBetweenAmounts = regex(
-    #"(?<!\$)(?<!\$ )(?<!SGD)(?<!SGD )(?<!\$[-+\u2212\u2013])(?<!\$ [-+\u2212\u2013])(?<!SGD[-+\u2212\u2013])(?<!SGD [-+\u2212\u2013])(?<![\d,.])((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{1,2})\s*("# + #"(?:USD|EUR|GBP|AUD|MYR|JPY|HKD|CNY|RMB|THB|IDR|NZD|CAD|CHF|KRW|INR|PHP|TWD|VND)"# + #")\s+(?=(?:[-+]\s*)?\d)"#
+    #"(?<!\$)(?<!\$ )(?<!SGD)(?<!SGD )(?<!\$[-+\u2212\u2013])(?<!\$ [-+\u2212\u2013])(?<!SGD[-+\u2212\u2013])(?<!SGD [-+\u2212\u2013])(?<!\$[-+\u2212\u2013] )(?<!\$ [-+\u2212\u2013] )(?<!SGD[-+\u2212\u2013] )(?<!SGD [-+\u2212\u2013] )(?<![\d,.])((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{1,2})\s*("# + #"(?:USD|EUR|GBP|AUD|MYR|JPY|HKD|CNY|RMB|THB|IDR|NZD|CAD|CHF|KRW|INR|PHP|TWD|VND)"# + #")\s+(?=(?:[-+]\s*)?\d)"#
   )
   private static let time = regex(#"\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\b"#)
   private static let foreignAmount = regex(
