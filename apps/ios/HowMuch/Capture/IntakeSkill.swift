@@ -1223,15 +1223,15 @@ final class IntakeSkillStore {
     needsReload = loaded.unreadable
   }
 
-  /// What to tell the owner when a save fails. Clearing memory is refused while
-  /// the file is unreadable, so a bad file points at a restart rather than at it.
+  /// What to tell the owner when a save fails. A file that does not decode was
+  /// most likely written by a newer Halation, so it is kept and never cleared.
   func saveFailureMessage(_ fallback: String) -> String {
     guard isReadOnly else {
       return fallback
     }
     return needsReload
       ? "Couldn’t read your skill file yet. Unlock your iPhone and try again."
-      : "Your skill file couldn’t be read, so changes weren’t saved. Try restarting HowMuch."
+      : "Your skill file couldn’t be read, so changes weren’t saved. Update Halation and try again."
   }
 
   nonisolated static func decoder() -> JSONDecoder {
