@@ -42,6 +42,8 @@ export interface Exposure {
   ridgesApart: boolean;
   /** Where a first showing starts: a card with a minimum sweeps across and then rises. */
   journeyStart: Pose;
+  /** Where in the period the minimum was met, 0 to 1: where the phone's two slopes meet. Null when unknown. */
+  metAt: number | null;
 }
 
 /** A plain amount: finite and positive, else 0. */
@@ -130,6 +132,7 @@ export function exposure(p: RewardRowProjection): Exposure | null {
     markerX: stage === "gate" ? pose.h : null,
     ridgesApart: stage === "failed" || stage === "calm",
     journeyStart,
+    metAt: p.minimumMetAt,
   };
 }
 
@@ -137,7 +140,7 @@ export function exposure(p: RewardRowProjection): Exposure | null {
 export function stillExposure(miles: boolean): Exposure {
   return {
     stage: "calm", pose: { h: 1, v: 0 }, miles, hasMinimum: false, target: "range", light: "even",
-    hasMarker: false, hasSun: false, markerX: null, ridgesApart: true, journeyStart: { h: 1, v: 0 },
+    hasMarker: false, hasSun: false, markerX: null, ridgesApart: true, journeyStart: { h: 1, v: 0 }, metAt: null,
   };
 }
 

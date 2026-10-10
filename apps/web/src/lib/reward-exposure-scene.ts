@@ -145,13 +145,22 @@ export function exposureScene(layout: SceneLayout, ex: Exposure, pose: Pose, opt
   // On the strip a card with no minimum keeps the pair apart: the convergence is the minimum's own read.
   const across = ex.ridgesApart || (strip && !ex.hasMinimum) ? 0 : pose.h;
 
+  // On the strip the lower slope is anchored at the left, as low as the words allow, and only its far end
+  // rises: with the fill, until the minimum is met, when it meets the target where in the period that
+  // happened (metAt) and runs with it from there. So the meeting point reads as when the minimum was met.
+  const metAt = across >= 1 ? Math.max(0, Math.min(1, ex.metAt ?? 1)) : 1;
+  const stripLower = (ux: number, up: number, fl: number) =>
+    across <= 0 ? fl
+      : across < 1 ? fl - (fl - up) * across * ux
+      : metAt <= 0 ? up
+      : fl - (fl - up) * Math.min(1, ux / metAt);
   const backPts: Array<[number, number]> = [];
   const lowerPts: Array<[number, number]> = [];
   for (let i = 0; i <= SEGMENTS; i++) {
     const ux = i / SEGMENTS;
     const up = upper(ux), fl = floor(ux);
     backPts.push([ux * w, up]);
-    lowerPts.push([ux * w, fl + across * (up - fl)]);
+    lowerPts.push([ux * w, strip ? stripLower(ux, up, fl) : fl + across * (up - fl)]);
   }
   const closed = (pts: Array<[number, number]>, edge: number) => `${polyline(pts)} L${w},${edge} L0,${edge} Z`;
   const merged = across >= 1;

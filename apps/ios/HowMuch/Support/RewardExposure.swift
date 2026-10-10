@@ -38,6 +38,8 @@ struct RewardExposure: Equatable {
   var hasMinimum: Bool
   /// Changes when the target does: another action kind, basis target or deadline end.
   var target: String
+  /// Where in the period the minimum was met, 0…1: where the phone's two slopes meet. Nil when unknown.
+  var metAt: Double?
 
   var light: Light { stage == .failed ? .overcast : stage == .calm ? .even : .journey }
   var hasMarker: Bool { stage == .gate }
@@ -106,6 +108,7 @@ struct RewardExposure: Equatable {
     needsMinimum = p.tone == .needsMinimum
     hasMinimum = minimum > 0
     target = "\(Self.kind(p.action))|\(p.basis?.target ?? 0)|\(p.deadline?.end ?? "")"
+    metAt = p.minimumMetAt
   }
 
   /// A plain amount: finite and positive, else 0.
@@ -201,8 +204,8 @@ struct ExposureScene {
   }
 
   /// How far below the target horizon the spend floor runs: the floor is the horizon's own shape, as far
-  /// down as the words allow (3pt above the foot at its lowest, the left edge), so the two slopes start
-  /// equidistant and converge as the minimum fills.
+  /// down as the words allow (3pt above the foot at its lowest, the left edge). The lower slope starts
+  /// there and its far end rises as the minimum fills.
   private var floorGap: Double {
     switch layout {
     case .strip(_, let footTop):
@@ -221,14 +224,22 @@ struct ExposureScene {
   /// The spend floor `Fl(x)`: the target horizon's shape, `floorGap` below it.
   func floorY(at u: Double) -> Double { horizonY(at: u) + floorGap }
 
-  /// How far the spend horizon has lifted: the fill of the minimum journey. Failed and untargeted
+  /// How far the spend horizon's far end has lifted: the fill of the minimum journey. Failed and untargeted
   /// cards, and cards with no minimum, keep the pair apart: the convergence is the minimum's own read.
   private var across: Double { exposure.ridgesApart || !exposure.hasMinimum ? 0 : pose.h }
 
-  /// The spend horizon: a blend of the floor and the target horizon, lifting as `h` grows.
+  /// The spend horizon. The lower slope is anchored at the left, as low as the words allow, and only its
+  /// far end rises: with the fill, until the minimum is met, when it meets the target where in the period
+  /// that happened (`metAt`) and runs with it from there. So the meeting point reads as when the minimum
+  /// was met.
   func spendY(at u: Double) -> Double {
     let floor = floorY(at: u)
-    return floor + across * (horizonY(at: u) - floor)
+    let horizon = horizonY(at: u)
+    if across <= 0 { return floor }
+    if across < 0.999 { return floor - (floor - horizon) * across * u }
+    let metAt = min(1, max(0, exposure.metAt ?? 1))
+    if metAt <= 0 { return horizon }
+    return floor - (floor - horizon) * min(1, u / metAt)
   }
 
   /// Both ridges are one: the minimum is met, so the spend horizon has met the target.

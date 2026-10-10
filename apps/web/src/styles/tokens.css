@@ -88,8 +88,9 @@
   --face-crest-target: 0.4; --face-crest-spend: 0.75; --face-crest-merged: 0.9;
   --face-scrim: transparent;
   /* Gold laid over the blue to the marker, the cool dim beyond it, and the contrail (miles). */
-  --face-lit: #ffd98c; --face-contrail: #ffffff73; --face-veil-dim: #6a4a3826;   /* the dim beyond the edge is a warm brown, not a blue */
-  --face-veil-cashback: #ffffff; --face-veil-miles: #ffffff; --face-veil-grey: transparent; --face-bloom: transparent;
+  /* Beyond the lit edge, the prints' shift: half way to grey, then the brand's rose-mauve cast. No separate dim. */
+  --face-lit: #ffd98c; --face-contrail: #ffffff73; --face-veil-dim: transparent;
+  --face-veil-cashback: #d4cbd4; --face-veil-miles: #c9c6d4; --face-veil-grey: #808080; --face-bloom: transparent;
   --face-cashback-blend: screen; --face-pour-cashback: 0.65; --face-pour-miles: 0.65;
   /* One warm white line on the sky and the ground alike, over a faint dark edge. */
   --face-marker-cashback: #fff8e6d9; --face-marker-miles: #fff8e6d9; --face-marker-ridge: #fff8e6d9; --face-marker-edge: #1c1b181f;
@@ -159,7 +160,7 @@
   --ridge-back: #2a6648; --ridge-front: #1e4433;
   --face-scrim: #1e44338c;
   --face-lit: transparent; --face-contrail: transparent; --face-veil-dim: transparent;
-  --face-veil-cashback: #b0a6b6; --face-veil-miles: #8a8496; --face-veil-grey: #808080; --face-bloom: #ffe3ac;
+  --face-veil-cashback: #d4cbd4; --face-veil-miles: #8a8496; --face-veil-grey: #808080; --face-bloom: #ffe3ac;
   --face-cashback-blend: screen; --face-pour-cashback: 0.45; --face-pour-miles: 0.65;
   --face-marker-cashback: #ffd98c59; --face-marker-miles: #ffd98c59; --face-marker-ridge: #f7f5ef33; --face-marker-edge: transparent;
   /* The prints' sun is a gold going to orange, not the daytime's near-white: lighter than its amber sky, never glaring on it. */

@@ -69,6 +69,8 @@ export interface RewardRowProjection {
   minimumAmount: number;
   /** The spend threshold of the active spending tier, 0 with none. Picture only. */
   reachedTierThreshold: number;
+  /** Where in the period the minimum was met, 0 to 1 by day; null when it was not, or is unknown. Picture only. */
+  minimumMetAt: number | null;
 }
 
 // ---------------------------------------------------------------- civil dates
@@ -81,6 +83,13 @@ function parts(iso: string): [number, number, number] | null {
 }
 
 /** `to - from` in whole civil days. */
+/** A day's place in a period, 0 to 1 by whole days (the first day counts as one): the met day's x on the face. */
+export function periodShare(start: string, end: string, day: string): number | null {
+  const length = daysBetween(start, end), at = daysBetween(start, day);
+  if (length == null || at == null || length < 0) return null;
+  return clamp01((at + 1) / (length + 1));
+}
+
 export function daysBetween(from: string, to: string): number | null {
   const a = parts(from), b = parts(to);
   if (!a || !b) return null;
@@ -146,6 +155,7 @@ export function projectRow(row: RewardsRow, asOf: string | null | undefined, isR
       // Picture-only; range rows carry 0 and 0, as on iOS.
       minimumAmount: isRange ? 0 : amount(calc.minimum_spend),
       reachedTierThreshold: !isRange && calc.active_spending_tier_id ? amount(tier?.spendThreshold) : 0,
+      minimumMetAt: isRange ? null : metAt,
     };
   };
 
@@ -160,6 +170,8 @@ export function projectRow(row: RewardsRow, asOf: string | null | undefined, isR
     return gap == null ? null : { end, days: gap + 1, kind };
   };
   const periodEnd = period?.end;
+  const metOn = period?.calculation?.minimum_met_on ?? calc.minimum_met_on ?? null;
+  const metAt = period && metOn ? periodShare(period.start, period.end, metOn) : null;
   const status = calc.qualification_status;
   const activeMonth = asOf ? calc.monthly_qualifications?.find((m) => m.start <= asOf && asOf <= m.end) : undefined;
   const qualificationDay = asOf ?? today;

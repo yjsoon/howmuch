@@ -2566,6 +2566,8 @@ struct RewardsCalculation: Codable, Sendable {
   let minimumSpend: Double?
   let minimumSpendMet: Bool
   let minimumSpendProgress: Double?
+  /// The first day of the period on which the minimum was met; nil when not met or there is none.
+  var minimumMetOn: String? = nil
   let maximumSpend: Double?
   let maximumSpendExceeded: Bool
   let maximumSpendProgress: Double?

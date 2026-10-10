@@ -331,34 +331,23 @@ private struct ExposurePainter {
   /// Underexposes the art right of the marker in the minimum journey, and everything when failed.
   private func drawVeil(in context: inout GraphicsContext) {
     guard let edge = scene.veilEdge else { return }
-    let failed = exposure.stage == .failed
     let strength = scene.veilStrength
     guard strength > 0 else { return }
     let from = CGPoint(x: edge.from, y: 0), to = CGPoint(x: edge.to, y: 0)
     var veil = context
-    switch scene.appearance {
-    case .print:
-      // Half way to grey, then a dusk cast taken from the brand's rose-mauve.
-      veil.blendMode = .saturation
-      veil.fill(
-        Path(frame),
-        with: .linearGradient(
-          Gradient.smoothRamp(Theme.Face.veilGrey, peak: 0.5 * strength),
-          startPoint: from, endPoint: to))
-      veil.blendMode = .multiply
-      let cast = exposure.miles ? Theme.Face.veilMiles : Theme.Face.veilCashback
-      veil.fill(
-        Path(frame),
-        with: .linearGradient(Gradient.smoothRamp(cast, peak: strength), startPoint: from, endPoint: to))
-    case .daytime:
-      // A cool dim that never darkens enough to break a floor.
-      let alpha = (failed ? 0.14 : 0.15) * strength
-      veil.fill(
-        Path(frame),
-        with: .linearGradient(
-          Gradient.smoothRamp(Theme.Face.veilDim, peak: alpha),
-          startPoint: from, endPoint: to))
-    }
+    // Half way to grey, then a dusk cast taken from the brand's rose-mauve: the same shift by day and
+    // on the prints, so the lit edge is a step from light to shade, not from one sky to another.
+    veil.blendMode = .saturation
+    veil.fill(
+      Path(frame),
+      with: .linearGradient(
+        Gradient.smoothRamp(Theme.Face.veilGrey, peak: 0.5 * strength),
+        startPoint: from, endPoint: to))
+    veil.blendMode = .multiply
+    let cast = exposure.miles ? Theme.Face.veilMiles : Theme.Face.veilCashback
+    veil.fill(
+      Path(frame),
+      with: .linearGradient(Gradient.smoothRamp(cast, peak: strength), startPoint: from, endPoint: to))
   }
 
   // MARK: Sun
