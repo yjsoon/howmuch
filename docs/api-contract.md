@@ -569,6 +569,26 @@ Transaction response fields:
 - `deleted`
 - `subtransactions`
 
+### Export everything
+
+`GET /v1/plans/{plan_id}/export`
+
+`GET /v1/plans/{plan_id}/export/transactions.csv`
+
+Owners and editors (and the default-plan API token) may export; viewers get `403`. Both responses are files, not `{ "data": … }` envelopes: they carry `Content-Disposition: attachment` (`halation-export-YYYY-MM-DD.json`, `halation-transactions-YYYY-MM-DD.csv`) and `Cache-Control: no-store`. Web **Settings → Export everything** and iOS **Settings → Export everything** download them.
+
+The JSON archive (`format: "howmuch-export"`, `version: 1`) has:
+
+- `exported_at`: ISO timestamp.
+- `plan` and `settings`: as `GET /v1/plans/{plan_id}` and `GET /v1/plans/{plan_id}/settings` return them.
+- `snapshot` and `server_knowledge`: exactly what `export_snapshot` returns (below).
+- `account_preferences`: the caller's own account organisation, or `null` for the API token or when none was saved. Other members' preferences are not included.
+- `rewards`: `cards` (the Rewards card set), `tracker_snapshot` (the stored Rewards Tracker import, or `null`), `imported_at`, `updated_at`. Both copies drop, at any depth, keys that look like credentials (`token`, `secret`, `password`, `mnemonic`, `credential`, `api key`, `private key`, `cloud sync`, `pat`, `authorization`) and cached YNAB data (`cachedData`), as the portable Rewards export does.
+
+Passwords, sessions, API tokens and other users are never included. Because `import_snapshot` reads the `snapshot` key of its body, the archive file can be posted to it unchanged to restore the ledger into an empty plan. `import_snapshot` accepts at most 8 MiB, so when Rewards data pushes an archive past that, post `{ "snapshot": … }` with just the archive's `snapshot` instead. Preferences and Rewards cards are then restored through their own endpoints.
+
+The CSV is UTF-8 with a byte-order mark and CRLF line endings, one row per live transaction, oldest first: `Date`, `Account`, `Payee`, `Category group`, `Category`, `Memo`, `Amount`, `Cleared`, `Approved`, `Flag`, `Transfer account`, `Transaction ID`, `Split of`. A split is written as one row per line, with the parent's id in `Split of` and no parent row, so the amounts sum to the ledger. `Amount` is a decimal in the plan currency's decimal places, widened to three when a milliunit would otherwise be lost. Text cells starting with `=`, `+`, `-`, `@`, tab or carriage return get a leading `'` so spreadsheets do not run them as formulas.
+
 ### Plan snapshots
 
 A snapshot moves a whole ledger between installs, for example from a phone's local database to a self-hosted server.
@@ -600,7 +620,7 @@ Snapshot format, version 1. Every section is an array and may be omitted. Amount
 
 `payee_name` (optional, at most 500 characters) is the free-text payee of a row or split line that has no payee row. Export sets it only when `payee_id` is null; import ignores it when `payee_id` is set and takes the name from that payee, as reads do. It was added without a version bump: the parser rejects unknown top-level sections but not unknown fields inside a row, so a server that predates it accepts a snapshot carrying it and simply drops the name, as before.
 
-Export writes live accounts, transactions and schedules, and every group, category and payee (tombstones included, because live transactions may still name them). An account's `opening_balance` is exported as the value that reproduces its displayed balance from its live transactions. Budgeting data, YNAB raw objects, account preferences (per user) and Rewards Tracker configuration are not included; set preferences and rewards cards through their own endpoints after importing. Some derived or server-side state is also not carried:
+Export writes live accounts, transactions and schedules, and every group, category and payee (tombstones included, because live transactions may still name them). An account's `opening_balance` is exported as the value that reproduces its displayed balance from its live transactions. Budgeting data, YNAB raw objects, account preferences (per user) and Rewards Tracker configuration are not included; set preferences and rewards cards through their own endpoints after importing. The [Export everything](#export-everything) archive carries the caller's preferences and the Rewards cards alongside the snapshot. Some derived or server-side state is also not carried:
 
 - `last_reconciled_date` on an account comes from the reconciliation history, which is not exported. After import it is the date of the latest reconciled transaction, which is earlier than the original when the last statement date fell after that transaction.
 - `direct_import_linked` and `direct_import_in_error` are YNAB bank-link flags; imported accounts read `false`.

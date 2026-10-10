@@ -76,6 +76,11 @@ enum APIClientError: LocalizedError {
   }
 }
 
+enum ExportEverythingFormat {
+  case archive
+  case transactionsCSV
+}
+
 struct APIClient {
   let settings: APISettings
   private static let transactionPageSize = 100
@@ -653,6 +658,16 @@ struct APIClient {
   func exportSnapshot(planID: String) async throws -> Data {
     let data = try await executeRawRequest(path: "/v1/plans/\(planID)/export_snapshot", bodyData: nil)
     return try SnapshotImport.snapshot(fromExportResponse: data)
+  }
+
+  /// "Export everything": the plan as one `howmuch-export` JSON archive, or
+  /// every live transaction as CSV. The bytes are the server's file, unchanged.
+  func exportEverything(planID: String, format: ExportEverythingFormat) async throws -> Data {
+    try await executeRawRequest(
+      path: "/v1/plans/\(planID)/export",
+      appendedPathSegments: format == .transactionsCSV ? ["transactions.csv"] : [],
+      bodyData: nil
+    )
   }
 
   /// Imports snapshot bytes (from `exportSnapshot`) into an empty plan.

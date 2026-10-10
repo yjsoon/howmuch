@@ -48,6 +48,7 @@ import {
   parseCategoryPatch,
 } from "./category-management";
 import { MAX_SNAPSHOT_BYTES, PlanNotEmptyError, SnapshotValidationError } from "./plan-snapshot";
+import { buildPlanExport, transactionsCsv } from "./plan-export";
 import { parseSeedCurrencyFormat, parseSeedDateFormat } from "./plan-settings-seed";
 
 type HandlerOptions = {
@@ -340,6 +341,19 @@ async function handleV1(
       return apiError(403, "forbidden", "Plan owner or editor access is required");
     }
     return json({ data: await repo.exportPlanSnapshot(planId) });
+  }
+
+  if (resource === "export" && (segments.length === 4 || (segments.length === 5 && segments[4] === "transactions.csv")) && method === "GET") {
+    if (principal.kind !== "api-token" && principal.roles[planId] === "viewer") {
+      return apiError(403, "forbidden", "Plan owner or editor access is required");
+    }
+    const archive = await buildPlanExport(repo, planId, principal.kind === "api-token" ? null : principal.id);
+    const day = archive.exported_at.slice(0, 10);
+    if (segments.length === 5) {
+      const decimalDigits = Number((archive.settings as any)?.currency_format?.decimal_digits ?? 2);
+      return download(transactionsCsv(archive.snapshot, { decimalDigits }), "text/csv; charset=utf-8", `halation-transactions-${day}.csv`);
+    }
+    return download(JSON.stringify(archive, null, 2), "application/json; charset=utf-8", `halation-export-${day}.json`);
   }
 
   if (resource === "import_snapshot" && segments.length === 4 && method === "POST") {
@@ -1478,6 +1492,16 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
+    },
+  });
+}
+
+function download(body: string, contentType: string, filename: string): Response {
+  return new Response(body, {
+    headers: {
+      "content-type": contentType,
+      "content-disposition": `attachment; filename="${filename}"`,
+      "cache-control": "no-store",
     },
   });
 }

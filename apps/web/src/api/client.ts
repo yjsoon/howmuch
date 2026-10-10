@@ -279,6 +279,32 @@ async function request<T>(path: string, init?: RequestInit, options?: ApiRequest
   }
 }
 
+/** A file the server names itself (Content-Disposition), such as an export. */
+export interface DownloadedFile {
+  blob: Blob;
+  filename: string;
+}
+
+async function downloadFile(path: string, fallbackName: string): Promise<DownloadedFile> {
+  const startedEpoch = requestEpoch;
+  const response = await fetch(path, { credentials: "same-origin" });
+  if (!response.ok) {
+    if (response.status === 401 && shouldHandleUnauthorized(path, startedEpoch)) {
+      bumpRequestEpoch();
+      onUnauthorized?.();
+    }
+    let detail: string | undefined;
+    try {
+      detail = (await response.json())?.error?.detail;
+    } catch {
+      detail = undefined;
+    }
+    throw new ApiError(detail ?? `${response.status} ${response.statusText}`, response.status);
+  }
+  const named = /filename="([^"]+)"/.exec(response.headers.get("content-disposition") ?? "")?.[1];
+  return { blob: await response.blob(), filename: named ?? fallbackName };
+}
+
 /**
  * Announce a write made outside `request` — see `lib/reward-tools.ts`, which
  * calls `fetch` directly so it can carry its own abort and timeout handling.
@@ -404,6 +430,11 @@ export const api = {
     }).then((data) => data.token),
   plans: (options?: ApiRequestOptions) =>
     request<{ plans: Plan[] }>("/v1/plans", undefined, options).then((d) => d.plans),
+  /** Everything in the plan as one JSON archive, or every live transaction as CSV. */
+  exportPlan: (planId: string, kind: "archive" | "transactions-csv") =>
+    kind === "archive"
+      ? downloadFile(planUrl(planId, "export"), "halation-export.json")
+      : downloadFile(planUrl(planId, "export", "transactions.csv"), "halation-transactions.csv"),
   settings: (planId: string, options?: ApiRequestOptions) =>
     request<{ settings: PlanSettings }>(planUrl(planId, "settings"), undefined, options).then((d) => d.settings),
   updatePlanFormats: (planId: string, formats: Pick<LocalePlanSeed, "currency_format" | "date_format">) =>

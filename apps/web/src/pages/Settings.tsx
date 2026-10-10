@@ -55,7 +55,8 @@ export function SettingsPage() {
   // the owner-only section reflects what the server will actually accept.
   const account = useApi(`settings-account:${planId}`, async () => {
     const [status, settings] = await Promise.all([api.authStatus(), api.settings(planId)]);
-    return { isOwner: status.roles?.[planId] === "owner", settings };
+    const role = status.roles?.[planId];
+    return { isOwner: role === "owner", canExport: role === "owner" || role === "editor", settings };
   });
 
   return (
@@ -81,6 +82,7 @@ export function SettingsPage() {
       {account.data?.isOwner && (
         <PlanFormatsSection settings={saved ?? account.data.settings} onSaved={setSaved} />
       )}
+      {account.data?.canExport && <ExportSection />}
 
       <section className="report-section" aria-labelledby="settings-appearance-heading">
         <div className="section-heading">
@@ -292,6 +294,58 @@ function PlanFormatsSection({ settings, onSaved }: { settings: PlanSettings; onS
       </form>
       {error && <div className="status-panel status-panel-error" role="alert"><p className="status-detail">{error}</p></div>}
       {done && <div className="status-panel status-panel-success" role="status"><p className="status-detail">Formats saved. Amounts and dates here now use the new settings. The iOS app shows the new currency after its next refresh and always shows dates as 24 May 2026.</p></div>}
+    </section>
+  );
+}
+
+function ExportSection() {
+  const { planId } = usePlan();
+  const [busy, setBusy] = useState<"archive" | "transactions-csv" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+
+  const download = async (kind: "archive" | "transactions-csv") => {
+    setBusy(kind);
+    setError(null);
+    setSaved(null);
+    try {
+      const file = await api.exportPlan(planId, kind);
+      const url = URL.createObjectURL(file.blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = file.filename;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setSaved(file.filename);
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <section className="report-section" aria-labelledby="settings-export-heading">
+      <div className="section-heading settings-heading">
+        <div>
+          <span className="section-title" id="settings-export-heading">Export everything</span>
+          <span className="section-meta">
+            The archive holds every account, transaction, split, schedule, category and payee, the plan formats, your account
+            organisation and the Rewards cards. Its ledger can be imported into an empty plan. The CSV lists every transaction for a
+            spreadsheet, one row per split line. Passwords and API tokens are never included.
+          </span>
+        </div>
+      </div>
+      <div className="settings-form">
+        <button type="button" className="save-button settings-form-button" disabled={busy !== null} onClick={() => void download("archive")}>
+          {busy === "archive" ? "Preparing…" : "Download archive (JSON)"}
+        </button>
+        <button type="button" className="save-button settings-form-button" disabled={busy !== null} onClick={() => void download("transactions-csv")}>
+          {busy === "transactions-csv" ? "Preparing…" : "Download transactions (CSV)"}
+        </button>
+      </div>
+      {error && <div className="status-panel status-panel-error" role="alert"><p className="status-detail">{error}</p></div>}
+      {saved && <div className="status-panel status-panel-success" role="status"><p className="status-detail">Saved {saved}.</p></div>}
     </section>
   );
 }
