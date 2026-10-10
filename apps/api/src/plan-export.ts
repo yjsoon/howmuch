@@ -67,7 +67,7 @@ export async function buildPlanExport(repo: LedgerStore, planId: string, userId:
  */
 function withoutCredentials<T>(value: T): T {
   return JSON.parse(JSON.stringify(value, (key, entry) =>
-    /token|secret|password|mnemonic|credential|api.?key|cloud.?sync|^pat$|^authorization$|^cachedData$/i.test(key) ? undefined : entry)) as T;
+    /token|secret|password|mnemonic|credential|api.?key|private.?key|cloud.?sync|^pat$|^authorization$|^cachedData$/i.test(key) ? undefined : entry)) as T;
 }
 
 const CSV_COLUMNS = [

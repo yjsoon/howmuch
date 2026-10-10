@@ -22,7 +22,7 @@ describe.each(BACKENDS)("export everything on %s", (backend) => {
       cards: [{
         id: "card-1", name: "Rewards Card", issuer: "UOB", type: "cashback", ynabAccountId: "acct-rewards", earningRate: 1,
         apiKey: MARKER,
-        extras: { nested: { password: MARKER, accessToken: MARKER, keep: "visible" } },
+        extras: { nested: { password: MARKER, accessToken: MARKER, privateKey: MARKER, private_key: MARKER, keep: "visible" } },
       }],
       rules: [{ id: "rule-1", cardId: "card-1", name: "Dining", formatter: { api_key: MARKER, model: "kept" } }],
       tagMappings: [],
