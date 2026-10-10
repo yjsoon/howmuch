@@ -183,7 +183,7 @@ Risks:
 
 ## Decision Points
 
-- Is HowMuch meant to be self-hosted for the user, or centrally hosted for other people?
+- Is HowMuch meant to be self-hosted for the user, or centrally hosted for other people? Decided 2026-10-10: self-hosted only. The owner will not host other people's financial data, so the multi-tenant and shared hosted options above are not being pursued.
 - For the first beta, is one database/deployment per user acceptable?
 - Is Cloudflare Workers a hard platform requirement, or is Cloudflare only needed as the public edge?
 - Is iOS/OpenClaw auth allowed to remain token-based, or should beta require account login from day one?
