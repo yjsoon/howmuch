@@ -61,6 +61,15 @@ function crestTable(source: { start: [number, number]; segments: Cubic[] }): num
 export const BACK_CREST = crestTable(BACK_SOURCE);
 export const FRONT_CREST = crestTable(FRONT_SOURCE);
 
+/** A crest as 0 to 1 over its own range: 1 at its lowest (the left) and 0 at its highest (the right). */
+function normalised(table: readonly number[]): number[] {
+  const lo = Math.min(...table), hi = Math.max(...table);
+  return table.map((y) => (y - lo) / (hi - lo));
+}
+/** The brand ridges' rise, 1 at the left edge and 0 at the right: the phone strip's horizons take their shape. */
+export const BACK_RISE = normalised(BACK_CREST);
+export const FRONT_RISE = normalised(FRONT_CREST);
+
 function crestAt(table: readonly number[], x: number): number {
   const f = Math.min(1, Math.max(0, x)) * (table.length - 1);
   const i = Math.min(table.length - 2, Math.floor(f));
@@ -121,16 +130,20 @@ export function exposureScene(layout: SceneLayout, ex: Exposure, pose: Pose, opt
   const strip = layout.kind === "strip";
   const r = strip ? 10 : 0.045 * w;
   const wiggle = (ux: number) => Math.sin(ux * 8.2 + 0.4);
-  // Upper line: the target horizon. Brand ridge on the face, level on the strip.
+  // Upper line: the target horizon. The brand back ridge on the face; on the strip the same rise, 12pt
+  // deep, from 14pt under the name at the left to 2pt under it at the right, where the sun's column is.
   const upper = strip
-    ? (_ux: number) => layout.nameBottom + 12
+    ? (ux: number) => layout.nameBottom + 2 + 12 * crestAt(BACK_RISE, ux)
     : (ux: number) => H * crestAt(BACK_CREST, ux);
-  // The level floor the spend horizon lifts from, or the brand front ridge for a card with no journey.
+  // The floor the spend horizon lifts from: level on the face (or the brand front ridge for a card with
+  // no journey); on the strip the brand front ridge's rise, 12pt deep, from 5pt above the foot at the left.
   const level = strip
-    ? (ux: number) => Math.max(layout.footTop - 5, layout.nameBottom + 12 + 4) + wiggle(ux)
+    ? (ux: number) => Math.max(layout.footTop - 17 + 12 * crestAt(FRONT_RISE, ux), upper(ux) + 4)
     : (ux: number) => H * (0.8 + 0.01 * wiggle(ux));
   const floor = ex.ridgesApart && !strip ? (ux: number) => H * crestAt(FRONT_CREST, ux) : level;
-  const across = ex.ridgesApart ? 0 : pose.h;
+  // The strip's spend ridge starts a third of the way up the gap, as the icon's front ridge sits, so an
+  // empty card is still the icon's two slopes; the face lifts from the floor.
+  const across = ex.ridgesApart ? (strip ? 1 / 3 : 0) : strip ? 1 / 3 + (2 / 3) * pose.h : pose.h;
 
   const backPts: Array<[number, number]> = [];
   const lowerPts: Array<[number, number]> = [];

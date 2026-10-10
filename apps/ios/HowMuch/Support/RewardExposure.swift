@@ -156,6 +156,22 @@ enum ExposureLayout: Equatable {
   case band
 }
 
+/// The brand ridges' rise (the app icon's two slopes), sampled at 65 even x from the web's shipped
+/// paths (`reward-exposure-scene.ts` BACK_RISE and FRONT_RISE) and kept in step with them: 1 at the
+/// left edge, where each ridge is lowest, and 0 at the right, where it is highest. The phone's
+/// horizons take this shape.
+enum BrandRise {
+  static let back: [Double] = [1, 0.989, 0.977, 0.964, 0.95, 0.935, 0.92, 0.905, 0.889, 0.874, 0.859, 0.845, 0.833, 0.822, 0.813, 0.806, 0.801, 0.799, 0.8, 0.803, 0.801, 0.795, 0.783, 0.766, 0.744, 0.719, 0.69, 0.659, 0.627, 0.596, 0.567, 0.539, 0.515, 0.494, 0.476, 0.462, 0.448, 0.433, 0.416, 0.399, 0.38, 0.361, 0.341, 0.321, 0.3, 0.28, 0.259, 0.24, 0.22, 0.201, 0.183, 0.166, 0.151, 0.138, 0.127, 0.119, 0.111, 0.104, 0.097, 0.089, 0.08, 0.067, 0.05, 0.028, 0]
+  static let front: [Double] = [1, 0.99, 0.979, 0.967, 0.955, 0.942, 0.93, 0.918, 0.907, 0.896, 0.887, 0.88, 0.875, 0.872, 0.872, 0.874, 0.88, 0.885, 0.881, 0.868, 0.846, 0.816, 0.781, 0.743, 0.706, 0.671, 0.641, 0.617, 0.597, 0.583, 0.575, 0.573, 0.578, 0.587, 0.6, 0.613, 0.625, 0.633, 0.635, 0.63, 0.618, 0.601, 0.579, 0.555, 0.527, 0.497, 0.464, 0.429, 0.391, 0.352, 0.313, 0.274, 0.236, 0.201, 0.17, 0.143, 0.121, 0.104, 0.091, 0.08, 0.07, 0.06, 0.047, 0.028, 0]
+
+  /// The rise at `u`, a share of the width, interpolated between samples.
+  static func at(_ table: [Double], _ u: Double) -> Double {
+    let f = min(1, max(0, u)) * Double(table.count - 1)
+    let i = min(table.count - 2, Int(f))
+    return table[i] + (table[i + 1] - table[i]) * (f - Double(i))
+  }
+}
+
 /// The scene's geometry for one frame, in points. Pure: the Canvas draws it.
 struct ExposureScene {
   let width: Double
@@ -173,39 +189,49 @@ struct ExposureScene {
     }
   }
 
-  private var horizonBase: Double {
+  /// The target horizon's range: the brand back ridge's rise, from `low` at the left edge to
+  /// `high` at the right, where the sun's column is. On the strip it runs from 14pt under the
+  /// name to 2pt under it.
+  private var horizonRange: (high: Double, low: Double) {
     switch layout {
-    case .strip(let nameBottom, _): return (nameBottom ?? 0.31 * height) + 12
-    case .band: return 0.52 * height
+    case .strip(let nameBottom, _):
+      let name = nameBottom ?? 0.28 * height
+      return (name + 2, name + 14)
+    case .band: return (0.42 * height, 0.56 * height)
     }
   }
 
-  private var floorBase: Double {
+  /// The spend floor's range: the brand front ridge's rise, from 5pt above the foot at the left edge
+  /// to 17pt above it at the right.
+  private var floorRange: (high: Double, low: Double) {
     switch layout {
-    case .strip(_, let footTop): return (footTop ?? 0.54 * height) - 5
-    case .band: return 0.80 * height
+    case .strip(_, let footTop):
+      let foot = footTop ?? 0.58 * height
+      return (foot - 17, foot - 5)
+    case .band: return (0.70 * height, 0.82 * height)
     }
   }
 
-  private var wobble: Double {
-    switch layout {
-    case .strip: return 1
-    case .band: return 0.01 * height
-    }
+  /// The target horizon `U(x)` at `u`, a share of the width: the icon's back slope.
+  func horizonY(at u: Double) -> Double {
+    let range = horizonRange
+    return range.high + (range.low - range.high) * BrandRise.at(BrandRise.back, u)
   }
 
-  /// The target horizon `U(x)` at `u`, a share of the width: level, give or take a little.
-  func horizonY(at u: Double) -> Double { horizonBase + wobble * sin(u * 8.2 + 1.3) }
+  /// The spend floor `Fl(x)`: the icon's front slope, never within 4pt of the target horizon, so the
+  /// two cannot cross.
+  func floorY(at u: Double) -> Double {
+    let range = floorRange
+    return max(range.high + (range.low - range.high) * BrandRise.at(BrandRise.front, u), horizonY(at: u) + 4)
+  }
 
-  /// The spend floor `Fl(x)`, never above the target horizon, so the two cannot cross.
-  func floorY(at u: Double) -> Double { max(floorBase + wobble * sin(u * 8.2 + 0.4), horizonY(at: u)) }
-
-  /// The spend horizon: a blend of the floor and the target horizon, lifting as `h` grows.
-  /// Failed and untargeted cards draw the pair apart at rest.
+  /// The spend horizon: a blend of the floor and the target horizon, lifting as `h` grows. It starts
+  /// a third of the way up the gap, as the icon's front ridge sits, so an empty card is still the
+  /// icon's two slopes; failed and untargeted cards draw the pair apart there.
   func spendY(at u: Double) -> Double {
     let h = exposure.ridgesApart ? 0 : pose.h
     let floor = floorY(at: u)
-    return floor + h * (horizonY(at: u) - floor)
+    return floor + (1 / 3 + 2 / 3 * h) * (horizonY(at: u) - floor)
   }
 
   /// Both ridges are one: the minimum is met, so the spend horizon has met the target.

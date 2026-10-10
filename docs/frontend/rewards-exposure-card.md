@@ -265,9 +265,9 @@ Text is never inside the scene. Each layout sets:
 
 | Layout | Sun's column `X` | Target horizon `U(x)` | Spend floor `Fl(x)` | `r` |
 | --- | --- | --- | --- | --- |
-| Strip | 0.85 W | `N + 12pt`, ±1pt, level across the width | `F − 5pt`, ±1pt | 10pt |
+| Strip | 0.85 W | Brand back rise: `N + 14pt` at the left to `N + 2pt` at the right | Brand front rise: `F − 5pt` at the left to `F − 17pt` at the right | 10pt |
 | Print, 90 × 60 | 0.85 W | Brand back ridge | 0.82 h, ±0.01 h | 4pt |
-| Band, 64pt | 0.85 W | 0.52 h, ±0.01 h, level | 0.80 h | 7pt |
+| Band, 64pt | 0.85 W | Brand back rise: 0.56 h to 0.42 h | Brand front rise: 0.82 h to 0.70 h | 7pt |
 | Hero | 0.85 W | Brand back ridge: 0.665 h at the left, 0.42 h at the right | 0.80 h, ±0.01 h | 0.045 W |
 | Web face, desktop 3:2 | As Hero | As Hero | As Hero | 4.5% of the width (shipped) |
 | Web strip, phones | As Strip | | | |
@@ -277,7 +277,8 @@ Text is never inside the scene. Each layout sets:
 **The phone cut (10 Oct 2026).** The strip and the band are a different picture from the hero, not a smaller one: a 104pt row has no room for the whole landscape, and the owner found the first cut's sun a bead on a line with clipped rings and stray hairlines. The phone layouts therefore draw the same scene with four changes, and the hero and the web's 3:2 face keep the full treatment:
 
 - **The sun is the marker.** No hairline. The disc rides at the fill (0.07 to 0.85 W) and the lit edge and the ridge gap carry the exact point. A hairline from the sky through the foot text read as a scratch, and beside the column it read as a pole the sun was skewered on.
-- **A half-sun on the horizon.** The disc is 10pt (7pt on the band) and its centre sits exactly on the target horizon while it rides, so the sky clip leaves a clean semicircle. It lifts clear from there, as before. The horizon is 12pt under the name so the half-sun's top stays 2pt under the name's line box, and the sky band is 28pt.
+- **A half-sun on the horizon.** The disc is 10pt (7pt on the band) and its centre sits exactly on the target horizon while it rides, so the sky clip leaves a clean semicircle. It lifts clear from there, as before. Under the name the horizon is at least 12pt below it, so the half-sun's top stays clear of the name's line box.
+- **The icon's two slopes.** The owner asked for the app icon's pair of rising ridges. The strip's horizons are no longer level: the target horizon takes the brand back ridge's rise (`BACK_RISE`, the shipped path normalised to 0 at its highest, right, and 1 at its lowest, left), 12pt deep, from 14pt under the name at the left to 2pt under it at the right, where the sun's column is; the spend floor takes the front ridge's rise from 5pt above the foot at the left to 17pt above it at the right. The spend ridge starts a third of the way up the gap, as the icon's front ridge sits, and lifts to the target as `h` fills: `Fl + (1/3 + 2h/3) × (U − Fl)`. So an empty card is still the icon's two slopes, and the band between them is what is left. The sky band is 34pt; the row is about 114pt.
 - **One soft glow, no rings.** The halo is one radial falloff in the rings' palette (Ring1 at the centre, Ring2 at 30%, Ring3 at 60%, Ring4 at 82%, clear at the edge) over the core glow, with the rings' radius `R` and opacity. Posterised rings clipped by a short frame's top edge and by the ridges read as concentric arcs; a falloff clipped the same way still reads as light.
 - **No unlit sliver.** As the sun lifts (`h` 0.85 to 1) the veil's peak falls by `lift` and the gold beyond the lit edge rises by `lift`, so the last of the band lights with the lift instead of leaving a 4% strip of dusk at the card's edge.
 
@@ -285,7 +286,7 @@ The lab's 12pt disc was the right instinct; 10pt fits the 28pt band without grow
 
 **Brand ridge.** Use the web SVG paths verbatim (`apps/web/src/pages/Rewards.tsx:697-702`, viewBox `0 400 1024 624`, stretched into the bottom 58% of the frame). A SwiftUI `Path` cannot be asked for y at a given x, so sample the back crest once into a static 65-point table and interpolate. The web port uses the same table. "The brand pair" is the back and front ridges as the web ships them, which is what a card without a journey (failed, no target) draws.
 
-**Level where it can be.** The strip and the band have level horizons, so the minimum journey is purely horizontal there and the climb is as tall as the frame allows. The print and the hero keep the brand ridge, so the sun follows its slope as it travels; it is still sitting on the horizon, not rising above it.
+**The brand ridge everywhere (10 Oct 2026).** Version 3 gave the strip and the band level horizons. The phone cut replaced them with the icon's two slopes (see above), so on every layout the sun follows the ridge's slope as it rides; it is still sitting on the horizon, not rising above it. The phone's slope is gentle (12pt across the width), so its minimum journey is nearly horizontal and the climb keeps most of the frame.
 
 ### The sun's path
 
@@ -339,7 +340,7 @@ The art is lit from the left edge to the marker and underexposed to its right wh
 
 ### The ridge pair
 
-The upper line is the **target horizon**, in the brand's ridgeline shape (level on the strip and the band). The lower line is the **spend horizon**: stylised, nearly level, spanning the full width, so it never ends abruptly. The band of `RidgeBack` showing between them is what is left to the minimum.
+The upper line is the **target horizon**, in the brand's ridgeline shape (a gentle 12pt rise on the strip and the band). The lower line is the **spend horizon**: stylised, the brand front ridge's rise on the phone and nearly level on the face, spanning the full width, so it never ends abruptly. The band of `RidgeBack` showing between them is what is left to the minimum.
 
 #### Level (specified)
 
@@ -347,7 +348,7 @@ The upper line is the **target horizon**, in the brand's ridgeline shape (level 
 - Lower line: `Fl(x) + h × (U(x) − Fl(x))`. `h` is the fill in the minimum journey, 1 in every later stage, and a failed card or one without a target draws the brand pair apart at rest. Fill `RidgeFront` to the bottom. Crest stroke `SpendCrest`: `Crest` at 75%, 1.5pt.
 - The lower line is a blend of the level floor and the target horizon, so it lifts towards the upper line everywhere at once and cannot cross it. At `h` 0 it is level; as it rises it takes on the horizon's shape; at `h` 1 the two coincide.
 - **Merged:** one crest stroke at 90%, brightening to 100% with `v`. From there the merged ridge stays put. It does not lift with the climb: the sun carries that read, and a second encoding would compete with it.
-- The gap at any x is `(1 − h) × (Fl(x) − U(x))`. On the strip it is 9pt at `h` 0, everywhere across the width.
+- The gap at any x is `(1 − h) × (Fl(x) − U(x))` on the face and the hero. On the strip and the band the spend ridge starts a third of the way up, so the gap is `(2/3) × (1 − h) × (Fl(x) − U(x))`: about 11pt at `h` 0 on the strip, a little deeper to the right.
 - The veil greys and cools the crest strokes right of the marker, so the lit part of the spend crest glows and the rest reads cold.
 
 #### Literal (alternative)
@@ -407,7 +408,7 @@ Past the minimum (card P, climbing after its tier):
    The sun climbs straight up the column at 0.85 W: resting (v 0), halfway (0.5), off the top edge (1).
 ```
 
-Height budget at `.large`: top padding 9, name 23, sky band 28 (12pt to the target horizon, 11pt of gap at `h` 0, 5pt of ridge above the headline), headline 22, 2, basis 15, bottom 9. That is about 108pt, 4pt more than the first cut, so about 5 rows still fit on an iPhone 16.
+Height budget at `.large`: top padding 9, name 23, sky band 34 (the two slopes: the target horizon 14pt to 2pt under the name, the spend floor 5pt to 17pt above the headline, the gap between them two thirds of that at `h` 0), headline 22, 2, basis 15, bottom 9. That is about 114pt, 10pt more than the first cut, so about 5 rows still fit on an iPhone 16.
 
 | Element | Type | Ink |
 | --- | --- | --- |
@@ -1272,4 +1273,4 @@ The owner's 7 Oct review answered version 1's questions on the sun's horizontal 
 12. **Zoom from row to sheet.** Try `matchedTransitionSource` with `.navigationTransition(.zoom)` on a device, and keep it only if the sheet keeps its content-height detent? Or stay with the plain sheet?
 13. **An existing VoiceOver repeat.** Cards with no basis (Highest tier active, No cap, failed) speak the earned amount twice. Fix it in this change, with a failing test first, or leave it?
 14. **More than one tier.** The projection carries one reached-tier threshold, so on a card with several tiers the sun stays at halfway between the first tier and the cap (specified), and never sinks. Or spread the lower half of the climb across the tiers, which means carrying every tier threshold in the projection?
-15. **The strip's sun.** Settled on 10 Oct 2026 by the phone cut: a 10pt half-sun on the horizon, the sky band 28pt, no hairline and one soft glow on the phone layouts.
+15. **The strip's sun.** Settled on 10 Oct 2026 by the phone cut: a 10pt half-sun on the horizon, the sky band 34pt with the icon's two slopes, no hairline and one soft glow on the phone layouts.

@@ -726,9 +726,10 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The phone strip (about 108px): the name on the sky, the headline and basis line on the spend ridge.
+/* The phone strip (about 114px): the name on the sky, the headline and basis line on the spend ridge.
    The scene places the ridges from the measured bottom of the name and top of the foot. The sky band
-   under the name is 28px: 12px to the target horizon, where a 10px half-sun sits, and the gap below. */
+   under the name is 34px: the brand's two rising slopes, the target horizon 14px to 2px under the name
+   and the spend ridge lifting towards it, with a 10px half-sun on the horizon at the right. */
 .rw-face[data-variant="strip"] {
   aspect-ratio: auto;
   display: flex;
@@ -738,7 +739,7 @@
 
 .rw-face[data-variant="strip"] .rw-face-name {
   align-self: flex-start;
-  margin: 0 0 28px;
+  margin: 0 0 34px;
   max-width: 50%;
 }
 
