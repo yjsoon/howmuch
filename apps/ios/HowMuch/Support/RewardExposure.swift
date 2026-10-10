@@ -134,8 +134,10 @@ extension RewardExposure.Pose {
   /// The share of the full gap between the ridges that is left.
   var gap: Double { 1 - h }
   /// The sun's centre y for a target horizon at `horizon` and a disc of radius `r` (y points down).
-  func sunY(horizon: Double, r: Double) -> Double {
-    let sit = horizon + 0.08 * r
+  /// `seat` is how far below the horizon the centre sits while the sun rides it, as a share of `r`:
+  /// a hair below on the hero, and exactly on it on the phone strip, where the disc is a clean half-sun.
+  func sunY(horizon: Double, r: Double, seat: Double = 0.08) -> Double {
+    let sit = horizon + seat * r
     let rest = horizon - 1.15 * r
     return h < 1 ? sit + (rest - sit) * lift : rest + (-1.05 * r - rest) * v
   }
@@ -166,14 +168,14 @@ struct ExposureScene {
   /// The sun's radius.
   var sunRadius: Double {
     switch layout {
-    case .strip: return 8
-    case .band: return 6
+    case .strip: return 10
+    case .band: return 7
     }
   }
 
   private var horizonBase: Double {
     switch layout {
-    case .strip(let nameBottom, _): return (nameBottom ?? 0.31 * height) + 10
+    case .strip(let nameBottom, _): return (nameBottom ?? 0.31 * height) + 12
     case .band: return 0.52 * height
     }
   }
@@ -209,17 +211,23 @@ struct ExposureScene {
   /// Both ridges are one: the minimum is met, so the spend horizon has met the target.
   var isMerged: Bool { !exposure.ridgesApart && pose.h >= 0.999 }
 
-  /// The sun's centre, nil when there is none.
+  /// The sun's centre, nil when there is none. On the phone it sits exactly on the horizon, a clean
+  /// half-sun, and lifts clear from there.
   var sun: (x: Double, y: Double)? {
     guard exposure.hasSun else { return nil }
     let u = pose.sunX
-    return (u * width, pose.sunY(horizon: horizonY(at: u), r: sunRadius))
+    return (u * width, pose.sunY(horizon: horizonY(at: u), r: sunRadius, seat: 0))
   }
 
-  /// The rings' base radius `R`: grows with the climb, capped by the frame's height.
+  /// The glow's radius `R`: grows with the climb, capped by the frame's height. The phone draws one
+  /// smooth falloff rather than the posterised rings, which a short frame clips into arcs.
   var ringRadius: Double {
     min((0.14 + 0.24 * pose.v) * width, (0.42 + 0.6 * pose.v) * height)
   }
+
+  /// How far the sun has lifted clear of the horizon. The phone has no room for a hairline marker or
+  /// an unlit sliver at the edge, so the last of the band lights as the sun lifts.
+  var lifted: Double { pose.lift }
 
   var haloOpacity: Double { 0.4 + 0.6 * pose.v }
 
@@ -228,9 +236,6 @@ struct ExposureScene {
   /// marker goes with it, instead of the whole band lighting at once.
   var inMinimumJourney: Bool { exposure.light == .journey && pose.h < 0.999 }
 
-  /// The marker's share of the width: exactly the fill, in the minimum journey only.
-  var markerShare: Double? { inMinimumJourney ? pose.h : nil }
-
   /// The veil's soft edge, in points: full light to the left of `from`, full veil right of `to`.
   /// A failed card is veiled everywhere. Nil once there is no minimum journey to show.
   var veilEdge: (from: Double, to: Double)? {
@@ -238,6 +243,9 @@ struct ExposureScene {
     guard inMinimumJourney else { return nil }
     return ((pose.h - 0.04) * width, (pose.h + 0.04) * width)
   }
+
+  /// The veil's peak, 0 to 1: full while the sun rides, fading as it lifts; a failed card keeps it.
+  var veilStrength: Double { exposure.stage == .failed ? 1 : 1 - lifted }
 
   /// Light mode: the gold over the sky and the ground as peak alphas, or nil when there is none.
   var litAlpha: (sky: Double, ground: Double)? {
@@ -266,44 +274,4 @@ struct ExposureScene {
 
   /// Rings and glow add light by screen blend, except on the dusk print.
   var glowScreens: Bool { appearance == .daytime || exposure.miles }
-
-  /// One piece of the marker's hairline.
-  struct MarkerSegment: Equatable {
-    var y0: Double
-    var y1: Double
-    /// Above the target horizon: dark mode tints the sky part and the ridge part differently.
-    var onSky: Bool
-  }
-
-  /// The marker's x in points, snapped to the device pixel grid so its two-pixel line stays crisp.
-  func markerX(scale: Double) -> Double? {
-    guard let x = markerShare, scale > 0 else { return nil }
-    return (x * width * scale).rounded() / scale
-  }
-
-  /// The marker runs from 0.06 of the height to the bottom edge and breaks across the sun's disc,
-  /// as in the brand mark. Dark mode also splits it at the target horizon.
-  var markerSegments: [MarkerSegment] {
-    guard let x = markerShare else { return [] }
-    let top = 0.06 * height
-    var pieces: [(Double, Double)] = [(top, height)]
-    if let sun, abs(x * width - sun.x) < sunRadius + 0.004 * width {
-      let clear = 0.003 * width
-      let lo = sun.y - sunRadius - clear
-      // Only the half of the disc above the target horizon shows, so the gap ends there.
-      let hi = min(sun.y + sunRadius, horizonY(at: x)) + clear
-      pieces = [(top, min(height, lo)), (max(top, hi), height)].filter { $0.1 > $0.0 }
-    }
-    let split = horizonY(at: x)
-    var segments: [MarkerSegment] = []
-    for (y0, y1) in pieces {
-      if y0 < split, y1 > split {
-        segments.append(MarkerSegment(y0: y0, y1: split, onSky: true))
-        segments.append(MarkerSegment(y0: split, y1: y1, onSky: false))
-      } else {
-        segments.append(MarkerSegment(y0: y0, y1: y1, onSky: y1 <= split))
-      }
-    }
-    return segments
-  }
 }

@@ -1,4 +1,4 @@
-import { COLUMN, sunX, sunY, type Exposure, type Pose } from "./reward-exposure";
+import { COLUMN, lift, sunX, sunY, type Exposure, type Pose } from "./reward-exposure";
 
 /*
  * The Sun Arc scene as plain numbers and path strings (docs/frontend/rewards-exposure-card.md
@@ -81,11 +81,14 @@ export interface Scene {
   /** One merged ridge: the target horizon and the spend horizon coincide. */
   merged: boolean;
   sun: { visible: boolean; x: number; y: number; r: number; rising: boolean };
-  halo: { visible: boolean; opacity: number; rings: [number, number, number, number]; core: number };
-  /** Gold laid over the sky and the ground: peak alphas and the gradient offsets (shares of the width). */
-  gold: { sky: number; ground: number; from: number; to: number; whole: boolean };
-  /** The underexposure right of the marker (the minimum journey), or everywhere when failed. */
-  veil: { on: boolean; from: number; to: number; whole: boolean; failed: boolean };
+  /** `soft`: one smooth glow of radius `rings[0]` in place of the posterised rings (the phone strip). */
+  halo: { visible: boolean; opacity: number; soft: boolean; rings: [number, number, number, number]; core: number };
+  /** Gold laid over the sky and the ground: peak alphas and the gradient offsets (shares of the width).
+   *  `beyond` is the share of the peak kept right of the marker (the strip's lift; 0 elsewhere). */
+  gold: { sky: number; ground: number; from: number; to: number; whole: boolean; beyond: number };
+  /** The underexposure right of the marker (the minimum journey), or everywhere when failed. `strength` is its
+   *  peak, 0 to 1: the strip lets the last of the band light as the sun lifts, so no sliver is left at the edge. */
+  veil: { on: boolean; from: number; to: number; whole: boolean; failed: boolean; strength: number };
   /** Dark mode only (the token is transparent in light): the bloom's opacity and the extra horizon warmth. */
   bloom: number;
   horizonBoost: number;
@@ -116,15 +119,15 @@ function polyline(points: Array<[number, number]>): string {
 export function exposureScene(layout: SceneLayout, ex: Exposure, pose: Pose, options: SceneOptions = {}): Scene {
   const { w, h: H } = layout;
   const strip = layout.kind === "strip";
-  const r = strip ? 8 : 0.045 * w;
+  const r = strip ? 10 : 0.045 * w;
   const wiggle = (ux: number) => Math.sin(ux * 8.2 + 0.4);
   // Upper line: the target horizon. Brand ridge on the face, level on the strip.
   const upper = strip
-    ? (_ux: number) => layout.nameBottom + 10
+    ? (_ux: number) => layout.nameBottom + 12
     : (ux: number) => H * crestAt(BACK_CREST, ux);
   // The level floor the spend horizon lifts from, or the brand front ridge for a card with no journey.
   const level = strip
-    ? (ux: number) => Math.max(layout.footTop - 5, layout.nameBottom + 10 + 4) + wiggle(ux)
+    ? (ux: number) => Math.max(layout.footTop - 5, layout.nameBottom + 12 + 4) + wiggle(ux)
     : (ux: number) => H * (0.8 + 0.01 * wiggle(ux));
   const floor = ex.ridgesApart && !strip ? (ux: number) => H * crestAt(FRONT_CREST, ux) : level;
   const across = ex.ridgesApart ? 0 : pose.h;
@@ -143,8 +146,12 @@ export function exposureScene(layout: SceneLayout, ex: Exposure, pose: Pose, opt
   // The sun.
   const column = sunX(pose);
   const horizon = upper(column);
-  const sunPx = { x: column * w, y: sunY(pose, horizon, r) };
+  // On the strip the disc sits exactly on the horizon, a clean half-sun, and lifts clear from there.
+  const sunPx = { x: column * w, y: sunY(pose, horizon, r, strip ? 0 : 0.08) };
   const v = clamp01(pose.v);
+  // The strip has no room for a hairline or a sliver: the sun is the marker, and the last of the band
+  // lights as the sun lifts.
+  const lifted = strip ? lift(pose) : 0;
 
   // Rings grow continuously with v; on the strip they are also capped by the frame's height.
   let R = (0.14 + 0.24 * v) * w;
@@ -161,7 +168,7 @@ export function exposureScene(layout: SceneLayout, ex: Exposure, pose: Pose, opt
     : { sky: 0.76 + 0.16 * v, ground: 0.24 + 0.12 * v };
 
   const sunOn = ex.hasSun;
-  const markerOn = ex.hasMarker && pose.h < 1;
+  const markerOn = ex.hasMarker && pose.h < 1 && !strip;
   const mx = pose.h * w;
   const pad = Math.max(1, w * 0.003);
   const onDisc = Math.abs(mx - sunPx.x) < r + 4;
@@ -183,9 +190,9 @@ export function exposureScene(layout: SceneLayout, ex: Exposure, pose: Pose, opt
     skyClip: `M0,0 ${backPts.map(([x, y]) => `L${x.toFixed(1)},${y.toFixed(1)}`).join(" ")} L${w},0 Z`,
     merged,
     sun: { visible: sunOn, x: sunPx.x, y: sunPx.y, r, rising: gate },
-    halo: { visible: sunOn, opacity: 0.4 + 0.6 * v, rings: [R * 0.92, R * 0.68, R * 0.46, R * 0.27], core: R * 0.15 },
-    gold: { ...gold, from: whole ? 0 : from, to: whole ? 1 : to, whole },
-    veil: { on: gate || failed, from, to, whole: failed, failed },
+    halo: { visible: sunOn, opacity: 0.4 + 0.6 * v, soft: strip, rings: [R * 0.92, R * 0.68, R * 0.46, R * 0.27], core: R * 0.15 },
+    gold: { ...gold, from: whole ? 0 : from, to: whole ? 1 : to, whole, beyond: lifted },
+    veil: { on: gate || failed, from, to, whole: failed, failed, strength: failed ? 1 : 1 - lifted },
     bloom: sunOn ? 0.3 * v : 0,
     horizonBoost: sunOn ? 0.5 * v : 0,
     pour: {

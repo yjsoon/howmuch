@@ -265,14 +265,23 @@ Text is never inside the scene. Each layout sets:
 
 | Layout | Sun's column `X` | Target horizon `U(x)` | Spend floor `Fl(x)` | `r` |
 | --- | --- | --- | --- | --- |
-| Strip | 0.85 W | `N + 10pt`, ±1pt, level across the width | `F − 5pt`, ±1pt | 8pt |
+| Strip | 0.85 W | `N + 12pt`, ±1pt, level across the width | `F − 5pt`, ±1pt | 10pt |
 | Print, 90 × 60 | 0.85 W | Brand back ridge | 0.82 h, ±0.01 h | 4pt |
-| Band, 64pt | 0.85 W | 0.52 h, ±0.01 h, level | 0.80 h | 6pt |
+| Band, 64pt | 0.85 W | 0.52 h, ±0.01 h, level | 0.80 h | 7pt |
 | Hero | 0.85 W | Brand back ridge: 0.665 h at the left, 0.42 h at the right | 0.80 h, ±0.01 h | 0.045 W |
 | Web face, desktop 3:2 | As Hero | As Hero | As Hero | 4.5% of the width (shipped) |
 | Web strip, phones | As Strip | | | |
 
-`N` is the bottom of the name's line box and `F` the top of the headline, both measured in the row. So long names and large text move the ridges rather than overlap them. The lab draws the strip's disc at 3.4% of its width, 12pt on a 361pt row; at that size the disc does not fit above the target horizon at halfway on a 104pt strip, so the strip uses 8pt. Tune it by eye.
+`N` is the bottom of the name's line box and `F` the top of the headline, both measured in the row. So long names and large text move the ridges rather than overlap them.
+
+**The phone cut (10 Oct 2026).** The strip and the band are a different picture from the hero, not a smaller one: a 104pt row has no room for the whole landscape, and the owner found the first cut's sun a bead on a line with clipped rings and stray hairlines. The phone layouts therefore draw the same scene with four changes, and the hero and the web's 3:2 face keep the full treatment:
+
+- **The sun is the marker.** No hairline. The disc rides at the fill (0.07 to 0.85 W) and the lit edge and the ridge gap carry the exact point. A hairline from the sky through the foot text read as a scratch, and beside the column it read as a pole the sun was skewered on.
+- **A half-sun on the horizon.** The disc is 10pt (7pt on the band) and its centre sits exactly on the target horizon while it rides, so the sky clip leaves a clean semicircle. It lifts clear from there, as before. The horizon is 12pt under the name so the half-sun's top stays 2pt under the name's line box, and the sky band is 28pt.
+- **One soft glow, no rings.** The halo is one radial falloff in the rings' palette (Ring1 at the centre, Ring2 at 30%, Ring3 at 60%, Ring4 at 82%, clear at the edge) over the core glow, with the rings' radius `R` and opacity. Posterised rings clipped by a short frame's top edge and by the ridges read as concentric arcs; a falloff clipped the same way still reads as light.
+- **No unlit sliver.** As the sun lifts (`h` 0.85 to 1) the veil's peak falls by `lift` and the gold beyond the lit edge rises by `lift`, so the last of the band lights with the lift instead of leaving a 4% strip of dusk at the card's edge.
+
+The lab's 12pt disc was the right instinct; 10pt fits the 28pt band without growing the row more than 4pt.
 
 **Brand ridge.** Use the web SVG paths verbatim (`apps/web/src/pages/Rewards.tsx:697-702`, viewBox `0 400 1024 624`, stretched into the bottom 58% of the frame). A SwiftUI `Path` cannot be asked for y at a given x, so sample the back crest once into a static 65-point table and interpolate. The web port uses the same table. "The brand pair" is the back and front ridges as the web ships them, which is what a card without a journey (failed, no target) draws.
 
@@ -281,7 +290,7 @@ Text is never inside the scene. Each layout sets:
 ### The sun's path
 
 - **Across.** `sunX(h) = clamp(h, 0.07, 0.85) × W` while `h` is below 1, and `0.85 × W` from then on. The marker is at exactly `h × W`, so the sun rides it from 0.07 to 0.85 and waits at 0.07 before that. The disc never clips at the left.
-- **On the horizon** (`h` up to 0.85): the disc's centre a hair below the target horizon, `y = U(X) + 0.08 r`, so a half disc peeks over the ground line. It does not rise during this part of the minimum journey.
+- **On the horizon** (`h` up to 0.85): the disc's centre a hair below the target horizon, `y = U(X) + 0.08 r`, so a half disc peeks over the ground line. On the strip and the band the centre is exactly on the horizon (`seat` 0), a clean half-sun. It does not rise during this part of the minimum journey.
 - **Lifting** (`h` from 0.85 to 1): `y` runs from the horizon position to the resting position as `lift` goes from 0 to 1, while the last of the band fills.
 - **Resting** (`h` 1, `v` 0): the disc's bottom 0.15 `r` above the merged ridge, `y = U(X) − 1.15 r`.
 - **Climbing:** `y = lerp(U(X) − 1.15 r, −1.05 r, v)`. At `v` 1 the disc's bottom is 0.05 `r` above the top edge: fully off screen. The halo and the rings stay centred on it, so their lower arcs pour down into the frame.
@@ -318,6 +327,7 @@ The art is lit from the left edge to the marker and underexposed to its right wh
 
 ### The progress marker
 
+- **Where.** The hero and the web's 3:2 face only. The strip and the band draw no hairline (see The phone cut): there the sun rides at the fill and is the marker.
 - **Position.** `x = h × W`, exactly. Drawn in the minimum journey only. It goes with the minimum, and never shows in any other stage.
 - **Extent.** From 0.06 h to the bottom edge. It breaks across the visible half of the sun's disc, 3 units clear of the rim on a 1,000-wide scene (about 1pt on the strip), as in the brand mark (`assets/icon/halation-light.svg`), where the scrub line passes behind the sun.
 - **Tones by appearance.**
@@ -358,7 +368,7 @@ The literal reading is phase two at most, and then only in the sheet's hero. In 
 
 ### Rings
 
-- Always four soft rings around the sun, plus a core glow, whenever there is a sun. They grow continuously with `v`: with `R = (0.14 + 0.24 × v) × W`, ring k is a filled disc centred on the sun with radius `R` times 0.27, 0.46, 0.68 and 0.92 for rings 1 to 4, inner to outer, and the core glow is 0.15 `R`. On the strip and the band, `R` is also capped at `(0.42 + 0.6 × v) × H`, so the rings stay inside the frame's height. The discs are stacked, largest first, so each step reads as posterised light, not a drawn line.
+- On the hero and the web face: always four soft rings around the sun, plus a core glow, whenever there is a sun. The strip and the band draw one smooth glow in the same palette instead (see The phone cut). They grow continuously with `v`: with `R = (0.14 + 0.24 × v) × W`, ring k is a filled disc centred on the sun with radius `R` times 0.27, 0.46, 0.68 and 0.92 for rings 1 to 4, inner to outer, and the core glow is 0.15 `R`. On the strip and the band, `R` is also capped at `(0.42 + 0.6 × v) × H`, so the rings stay inside the frame's height. The discs are stacked, largest first, so each step reads as posterised light, not a drawn line.
 - Colours: `Ring1` to `Ring4`, inner to outer. On the night print and on every light-mode face, draw the rings and the core glow with the screen blend mode, as web does on the night sky, so they add light: warm rather than olive on the night, glare rather than mud on the gold. The dusk print keeps the normal blend.
 - Halo opacity: `0.4 + 0.6 × v`. The core glow under the disc always draws when there is a sun.
 - At rest the outer ring reaches 0.13 W either side of the column, and at the cap 0.35 W. At the cap the sun is off screen, so only the rings' lower arcs show.
@@ -373,13 +383,13 @@ In the minimum journey (card A, `h` 0.63):
 ┌──────────────────────────────────────────────────────────────┐  top padding 9
 │ Exposure Below                        ┊░░░░░░░░░░░░░░░░░░░░░░│  name, line ~23pt, at most 0.50 W; the sky is lit up to the marker
 │                                       ┊░░░░░░░░░░░░░░░░░░░░░░│
-│‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾(◒)‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾│  target horizon, level, 10pt under the name; the sun rides the marker
+│‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾(◒)‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾│  target horizon, level, 12pt under the name; the half-sun rides at the fill (no hairline on the phone)
 │                                       ┊   gap: what is left  │
 │‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾┊‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾│  spend horizon, lifted 63% of the way up to the target
 │ $184.50 to minimum                    ┊         8 days left  │  headline line ~22pt
 │ $315.50 / $500.00 · $0.00 earned                             │  2, basis line ~15, bottom 9
 └──────────────────────────────────────────────────────────────┘  about 104pt
-      lit ◄────────────────────┤ marker at x = h × W, h = 0.63 ├────► underexposed (░)
+      lit ◄────────────────────┤ lit edge at x = h × W, h = 0.63 ├────► underexposed (░)
 ```
 
 Past the minimum (card P, climbing after its tier):
@@ -389,7 +399,7 @@ Past the minimum (card P, climbing after its tier):
 │ Exposure Journey                                             │  name, line ~23pt; the whole band is lit and there is no marker
 │                                        ·  (◉)  ·             │  v = 0.69: the sun is high in its column, ringed and haloed
 │                                                              │
-│‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾│  one merged ridge, level, 10pt under the name
+│‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾│  one merged ridge, level, 12pt under the name
 │                                                              │
 │ $184.50 left before bonus cap                   8 days left  │  headline line ~22pt
 │ $315.50 / $500.00 · $0.00 earned                             │  basis line
@@ -397,7 +407,7 @@ Past the minimum (card P, climbing after its tier):
    The sun climbs straight up the column at 0.85 W: resting (v 0), halfway (0.5), off the top edge (1).
 ```
 
-Height budget at `.large`: top padding 9, name 23, sky band 24 (10pt to the target horizon, 9pt of gap at `h` 0, 5pt of ridge above the headline), headline 22, 2, basis 15, bottom 9. That is about 104pt, today's row height, so about 5 rows still fit on an iPhone 16.
+Height budget at `.large`: top padding 9, name 23, sky band 28 (12pt to the target horizon, 11pt of gap at `h` 0, 5pt of ridge above the headline), headline 22, 2, basis 15, bottom 9. That is about 108pt, 4pt more than the first cut, so about 5 rows still fit on an iPhone 16.
 
 | Element | Type | Ink |
 | --- | --- | --- |
@@ -1262,4 +1272,4 @@ The owner's 7 Oct review answered version 1's questions on the sun's horizontal 
 12. **Zoom from row to sheet.** Try `matchedTransitionSource` with `.navigationTransition(.zoom)` on a device, and keep it only if the sheet keeps its content-height detent? Or stay with the plain sheet?
 13. **An existing VoiceOver repeat.** Cards with no basis (Highest tier active, No cap, failed) speak the earned amount twice. Fix it in this change, with a failing test first, or leave it?
 14. **More than one tier.** The projection carries one reached-tier threshold, so on a card with several tiers the sun stays at halfway between the first tier and the cap (specified), and never sinks. Or spread the lower half of the climb across the tiers, which means carrying every tier threshold in the projection?
-15. **The strip's sun.** The lab draws the disc at 3.4% of the row width, 12pt on a 361pt strip. At that size it does not fit above the target horizon at halfway on a 104pt strip, so the spec uses 8pt. Keep the smaller sun, or take the lab's size and let the strip grow by about 10pt?
+15. **The strip's sun.** Settled on 10 Oct 2026 by the phone cut: a 10pt half-sun on the horizon, the sky band 28pt, no hairline and one soft glow on the phone layouts.

@@ -181,6 +181,12 @@ const SceneSvg = memo(function SceneSvg({ uid, svgRef, w, h }: { uid: string; sv
         <linearGradient id={`${uid}-vd`} gradientUnits="userSpaceOnUse" x1="0" y1="0" data-p="vdGrad" x2="1" y2="0">{stops("vd", "var(--face-veil-dim)")}</linearGradient>
         <linearGradient id={`${uid}-vg`} gradientUnits="userSpaceOnUse" x1="0" y1="0" data-p="vgGrad" x2="1" y2="0">{stops("vg", "var(--face-veil-grey)")}</linearGradient>
         <linearGradient id={`${uid}-vm`} gradientUnits="userSpaceOnUse" x1="0" y1="0" data-p="vmGrad" x2="1" y2="0">{stops("vm", "var(--rw-veil-multiply)")}</linearGradient>
+        {/* The strip's glow: the rings' palette as one smooth falloff, so nothing clips into arcs on a short frame. */}
+        <radialGradient id={`${uid}-glow`} cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0" style={{ stopColor: "var(--face-ring-1)" }} /><stop offset="0.3" style={{ stopColor: "var(--face-ring-2)" }} />
+          <stop offset="0.6" style={{ stopColor: "var(--face-ring-3)" }} /><stop offset="0.82" style={{ stopColor: "var(--face-ring-4)" }} />
+          <stop offset="1" style={{ stopColor: "var(--face-ring-4)" }} stopOpacity="0" />
+        </radialGradient>
         <radialGradient id={`${uid}-pour`} gradientUnits="userSpaceOnUse" data-p="pourGrad" cx="0" cy="0" r="1">
           <stop offset="0" style={{ stopColor: "var(--sun-disc-1)" }} /><stop offset="0.3" style={{ stopColor: "var(--sun-core)" }} />
           <stop offset="1" style={{ stopColor: "var(--sun-core)" }} stopOpacity="0" />
@@ -204,6 +210,7 @@ const SceneSvg = memo(function SceneSvg({ uid, svgRef, w, h }: { uid: string; sv
       </g>
       <g data-p="halo" className="rw-halo">
         <g data-p="haloAt">
+          <circle data-p="glow" className="rw-glow" r="0" fill={ref("glow")} />
           <circle data-p="ring0" className="rw-ring-4" r="0" /><circle data-p="ring1" className="rw-ring-3" r="0" />
           <circle data-p="ring2" className="rw-ring-2" r="0" /><circle data-p="ring3" className="rw-ring-1" r="0" />
           <circle data-p="core" className="rw-core" r="0" />
@@ -269,7 +276,9 @@ function paint(e: Record<string, SVGElement>, svg: SVGSVGElement, s: Scene, uid:
   show("halo", s.halo.visible);
   set("haloAt", "transform", `translate(${n(s.sun.x)} ${n(s.sun.y)})`);
   (e.halo as SVGElement).style.opacity = n(s.halo.opacity);
-  s.halo.rings.forEach((r, i) => set(`ring${i}`, "r", n(r)));
+  show("glow", s.halo.soft);
+  set("glow", "r", n(s.halo.rings[0]));
+  s.halo.rings.forEach((r, i) => { show(`ring${i}`, !s.halo.soft); set(`ring${i}`, "r", n(r)); });
   set("core", "r", n(s.halo.core));
   set("pourGrad", "cx", n(s.pour.cx));
   set("pourGrad", "r", n(s.pour.radius));
@@ -280,12 +289,13 @@ function paint(e: Record<string, SVGElement>, svg: SVGSVGElement, s: Scene, uid:
   // Light: gold to the marker (daytime) and the underexposure beyond it.
   const g = s.gold;
   const goldOffsets = [0, g.from, g.to, 1];
-  setStops(e, "gs", goldOffsets, [g.sky, g.sky, g.whole ? g.sky : 0, g.whole ? g.sky : 0]);
-  setStops(e, "gg", goldOffsets, [g.ground, g.ground, g.whole ? g.ground : 0, g.whole ? g.ground : 0]);
+  const past = g.whole ? 1 : g.beyond;
+  setStops(e, "gs", goldOffsets, [g.sky, g.sky, g.sky * past, g.sky * past]);
+  setStops(e, "gg", goldOffsets, [g.ground, g.ground, g.ground * past, g.ground * past]);
   for (const name of ["gsGrad", "ggGrad", "vdGrad", "vgGrad", "vmGrad"]) set(name, "x2", n(s.w));
   const v = s.veil;
   const veilOffsets = [0, v.from, v.to, 1];
-  const ramp = v.whole ? [1, 1, 1, 1] : [0, 0, 1, 1];
+  const ramp = (v.whole ? [1, 1, 1, 1] : [0, 0, 1, 1]).map((k) => k * v.strength);
   setStops(e, "vd", veilOffsets, ramp.map((k) => k * (v.failed ? 14 / 15 : 1)));
   setStops(e, "vg", veilOffsets, ramp.map((k) => k * 0.5));
   setStops(e, "vm", veilOffsets, ramp);

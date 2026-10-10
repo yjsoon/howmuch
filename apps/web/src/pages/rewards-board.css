@@ -726,8 +726,9 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The phone strip (about 104px): the name on the sky, the headline and basis line on the spend ridge.
-   The scene places the ridges from the measured bottom of the name and top of the foot. */
+/* The phone strip (about 108px): the name on the sky, the headline and basis line on the spend ridge.
+   The scene places the ridges from the measured bottom of the name and top of the foot. The sky band
+   under the name is 28px: 12px to the target horizon, where a 10px half-sun sits, and the gap below. */
 .rw-face[data-variant="strip"] {
   aspect-ratio: auto;
   display: flex;
@@ -737,7 +738,7 @@
 
 .rw-face[data-variant="strip"] .rw-face-name {
   align-self: flex-start;
-  margin: 0 0 24px;
+  margin: 0 0 28px;
   max-width: 50%;
 }
 

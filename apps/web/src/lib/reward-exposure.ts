@@ -161,9 +161,13 @@ export function gap(pose: Pose): number {
   return 1 - pose.h;
 }
 
-/** The sun's centre y for a target horizon at `horizon` and a disc of radius `r` (y points down). */
-export function sunY(pose: Pose, horizon: number, r: number): number {
-  const sit = horizon + 0.08 * r;
+/**
+ * The sun's centre y for a target horizon at `horizon` and a disc of radius `r` (y points down).
+ * `seat` is how far below the horizon the disc's centre sits while it rides it, as a share of `r`:
+ * a hair below on the face, and exactly on it on the phone strip, where the disc is a clean half-sun.
+ */
+export function sunY(pose: Pose, horizon: number, r: number, seat = 0.08): number {
+  const sit = horizon + seat * r;
   const rest = horizon - 1.15 * r;
   return pose.h < 1 ? sit + (rest - sit) * lift(pose) : rest + (-1.05 * r - rest) * pose.v;
 }

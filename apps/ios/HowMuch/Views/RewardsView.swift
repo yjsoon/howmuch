@@ -839,7 +839,8 @@ struct RewardFilledRow: View {
   @ScaledMetric(relativeTo: .body) private var stripPadding = 9.0
   @ScaledMetric(relativeTo: .body) private var paperPadding = 14.0
   @ScaledMetric(relativeTo: .body) private var horizontalPadding = 16.0
-  @ScaledMetric(relativeTo: .body) private var skyBand = 24.0
+  /// 12pt to the target horizon, where a 10pt half-sun sits, and the ridge gap below it.
+  @ScaledMetric(relativeTo: .body) private var skyBand = 28.0
   /// The ridges follow the measured bottom of the name and top of the headline.
   @State private var nameBottom: CGFloat?
   @State private var footTop: CGFloat?
