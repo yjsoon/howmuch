@@ -106,8 +106,8 @@ export async function importYnabFromApi(
     const fetchedMonths = fullPlan?.months ?? [];
     const fetchedCategories = categories.data.categories ?? flatten(categories.data.category_groups ?? [], "categories");
     const rawCounts: Record<string, number> = {};
-    const record = async (type: string, id: string, payload: any, knowledge?: number) => {
-      await repo.upsertYnabRawObject(options.planId, type, id, payload, knowledge);
+    const record = async (type: string, id: string, payload: any, knowledge?: number, ownedLines: unknown[] = []) => {
+      await repo.upsertYnabRawObject(options.planId, type, id, payload, knowledge, ownedLines);
       rawCounts[type] = (rawCounts[type] ?? 0) + 1;
       await options.progress?.();
     };
@@ -167,7 +167,10 @@ export async function importYnabFromApi(
       await record("month", monthId, withoutArrays(month), serverKnowledge);
       for (const category of month.categories ?? []) await record("month_category", compositeId(monthId, String(category.id)), category, serverKnowledge);
     }
-    for (const scheduled of fetchedScheduledTransactions) await record("scheduled_transaction", String(scheduled.id), scheduled, serverKnowledge);
+    for (const scheduled of fetchedScheduledTransactions) {
+      const lines = fetchedScheduledSubtransactions.filter((line: any) => String(line.scheduled_transaction_id) === String(scheduled.id));
+      await record("scheduled_transaction", String(scheduled.id), scheduled, serverKnowledge, lines);
+    }
     for (const subtransaction of fetchedScheduledSubtransactions) await record("scheduled_subtransaction", compositeId(String(subtransaction.scheduled_transaction_id ?? "unknown"), String(subtransaction.id)), subtransaction, serverKnowledge);
     for (const movement of moneyMovements?.data?.money_movements ?? []) await record("money_movement", String(movement.id), movement, moneyMovements?.data?.server_knowledge);
     for (const group of moneyMovementGroups?.data?.money_movement_groups ?? []) await record("money_movement_group", String(group.id), group, moneyMovementGroups?.data?.server_knowledge);

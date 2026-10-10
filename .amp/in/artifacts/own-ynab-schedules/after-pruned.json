@@ -1,0 +1,252 @@
+{
+  "list": [
+    {
+      "id": "created-local",
+      "account_id": "cash",
+      "date_first": "2026-08-01",
+      "frequency": "monthly",
+      "amount": -3000,
+      "deleted": false,
+      "date_next": "2026-08-01",
+      "account_name": "Cash",
+      "subtransactions": [
+        {
+          "amount": -2000,
+          "category_id": "rent",
+          "id": "scheduled_sub_73e3deee",
+          "scheduled_transaction_id": "created-local",
+          "category_name": "Rent",
+          "deleted": false
+        },
+        {
+          "amount": -1000,
+          "category_id": "food",
+          "id": "scheduled_sub_74e3e081",
+          "scheduled_transaction_id": "created-local",
+          "category_name": "Food",
+          "deleted": false
+        }
+      ]
+    },
+    {
+      "id": "sched-split",
+      "account_id": "card",
+      "date_first": "2026-02-01",
+      "date_next": "2026-11-01",
+      "frequency": "everyOtherWeek",
+      "amount": -90000,
+      "payee_id": "grocer",
+      "category_id": null,
+      "memo": "split",
+      "deleted": false,
+      "subtransactions": []
+    },
+    {
+      "id": "sched-monthly",
+      "account_id": "cash",
+      "date_first": "2026-01-05",
+      "date_next": "2026-11-05",
+      "frequency": "monthly",
+      "amount": -2500000,
+      "payee_id": "landlord",
+      "category_id": "rent",
+      "memo": "rent",
+      "flag_color": "red",
+      "deleted": false,
+      "extra_ynab_field": {
+        "keep": [
+          "me"
+        ]
+      },
+      "subtransactions": []
+    },
+    {
+      "id": "sched-transfer",
+      "account_id": "cash",
+      "date_first": "2026-05-01",
+      "date_next": "2026-11-15",
+      "frequency": "twiceAMonth",
+      "amount": -100000,
+      "transfer_account_id": "savings",
+      "deleted": false,
+      "subtransactions": []
+    },
+    {
+      "id": "sched-edited",
+      "account_id": "cash",
+      "date_first": "2026-06-01",
+      "date_next": "2026-12-20",
+      "frequency": "weekly",
+      "amount": -700,
+      "payee_id": "grocer",
+      "category_id": "food",
+      "memo": "after edit",
+      "deleted": false,
+      "account_name": "Cash",
+      "payee_name": "Grocer",
+      "category_name": "Food",
+      "subtransactions": []
+    },
+    {
+      "id": "sched-ghost-refs",
+      "account_id": "cash",
+      "date_first": "2026-04-01",
+      "date_next": "2026-12-24",
+      "frequency": "never",
+      "amount": -4200,
+      "payee_id": "no-such-payee",
+      "category_id": "retired",
+      "deleted": false,
+      "subtransactions": []
+    }
+  ],
+  "subtransactions": [
+    {
+      "amount": -2000,
+      "category_id": "rent",
+      "id": "scheduled_sub_73e3deee",
+      "scheduled_transaction_id": "created-local",
+      "category_name": "Rent",
+      "deleted": false
+    },
+    {
+      "amount": -1000,
+      "category_id": "food",
+      "id": "scheduled_sub_74e3e081",
+      "scheduled_transaction_id": "created-local",
+      "category_name": "Food",
+      "deleted": false
+    }
+  ],
+  "singles": {
+    "sched-monthly": {
+      "status": 200,
+      "body": {
+        "id": "sched-monthly",
+        "account_id": "cash",
+        "date_first": "2026-01-05",
+        "date_next": "2026-11-05",
+        "frequency": "monthly",
+        "amount": -2500000,
+        "payee_id": "landlord",
+        "category_id": "rent",
+        "memo": "rent",
+        "flag_color": "red",
+        "deleted": false,
+        "extra_ynab_field": {
+          "keep": [
+            "me"
+          ]
+        },
+        "subtransactions": []
+      }
+    },
+    "sched-split": {
+      "status": 200,
+      "body": {
+        "id": "sched-split",
+        "account_id": "card",
+        "date_first": "2026-02-01",
+        "date_next": "2026-11-01",
+        "frequency": "everyOtherWeek",
+        "amount": -90000,
+        "payee_id": "grocer",
+        "category_id": null,
+        "memo": "split",
+        "deleted": false,
+        "subtransactions": []
+      }
+    },
+    "sched-deleted": {
+      "status": 404,
+      "body": null
+    },
+    "sched-ghost-refs": {
+      "status": 200,
+      "body": {
+        "id": "sched-ghost-refs",
+        "account_id": "cash",
+        "date_first": "2026-04-01",
+        "date_next": "2026-12-24",
+        "frequency": "never",
+        "amount": -4200,
+        "payee_id": "no-such-payee",
+        "category_id": "retired",
+        "deleted": false,
+        "subtransactions": []
+      }
+    },
+    "sched-transfer": {
+      "status": 200,
+      "body": {
+        "id": "sched-transfer",
+        "account_id": "cash",
+        "date_first": "2026-05-01",
+        "date_next": "2026-11-15",
+        "frequency": "twiceAMonth",
+        "amount": -100000,
+        "transfer_account_id": "savings",
+        "deleted": false,
+        "subtransactions": []
+      }
+    },
+    "sched-edited": {
+      "status": 200,
+      "body": {
+        "id": "sched-edited",
+        "account_id": "cash",
+        "date_first": "2026-06-01",
+        "date_next": "2026-12-20",
+        "frequency": "weekly",
+        "amount": -700,
+        "payee_id": "grocer",
+        "category_id": "food",
+        "memo": "after edit",
+        "deleted": false,
+        "account_name": "Cash",
+        "payee_name": "Grocer",
+        "category_name": "Food",
+        "subtransactions": []
+      }
+    },
+    "sched-removed": {
+      "status": 404,
+      "body": null
+    },
+    "created-local": {
+      "status": 200,
+      "body": {
+        "id": "created-local",
+        "account_id": "cash",
+        "date_first": "2026-08-01",
+        "frequency": "monthly",
+        "amount": -3000,
+        "deleted": false,
+        "date_next": "2026-08-01",
+        "account_name": "Cash",
+        "subtransactions": [
+          {
+            "amount": -2000,
+            "category_id": "rent",
+            "id": "scheduled_sub_73e3deee",
+            "scheduled_transaction_id": "created-local",
+            "category_name": "Rent",
+            "deleted": false
+          },
+          {
+            "amount": -1000,
+            "category_id": "food",
+            "id": "scheduled_sub_74e3e081",
+            "scheduled_transaction_id": "created-local",
+            "category_name": "Food",
+            "deleted": false
+          }
+        ]
+      }
+    }
+  },
+  "guard": {
+    "ynabPlanStatus": 409,
+    "nativePlanStatus": 201
+  }
+}

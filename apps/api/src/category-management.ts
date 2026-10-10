@@ -32,9 +32,13 @@ export class CategoryInUseError extends Error {
 
 export class EntityConflictError extends Error {}
 
-/** Plan-level: one YNAB month object anywhere makes the whole plan a mirror. */
+/**
+ * Plan-level: a plan imported from a YNAB export that carried months keeps
+ * YNAB's category structure, so category edits are refused. The importer sets
+ * `plans.ynab_sourced`; the raw mirror is not consulted.
+ */
 export const YNAB_MONTH_PRESENT_SQL =
-  "SELECT 1 AS present FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month' LIMIT 1";
+  "SELECT 1 AS present FROM plans WHERE id = ? AND ynab_sourced = 1";
 
 /**
  * True while any live ledger row or live schedule still names the category.
@@ -275,7 +279,7 @@ export function ynabMirrorGuard(commandId: string, planId: string): PlannedSql {
     commandId,
     planId,
     "ynab-mirror-plan",
-    "EXISTS (SELECT 1 FROM ynab_raw_objects WHERE plan_id = ? AND object_type = 'month')",
+    "EXISTS (SELECT 1 FROM plans WHERE id = ? AND ynab_sourced = 1)",
     [planId],
   );
 }

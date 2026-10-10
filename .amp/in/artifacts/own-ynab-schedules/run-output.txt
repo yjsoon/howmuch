@@ -1,0 +1,35 @@
+Preparing worktree (detached HEAD 13668ff)
+base revision: 13668ff7f5f328f150bde7e91809fa5b3bc57e3b (code that seeds the database)
+this checkout: 13668ff + working tree
+schema before: 022_own_imported_ynab_schedules
+schema after: 022_own_imported_ynab_schedules
+edits by origin: [{"origin":"howmuch-local","n":1},{"origin":"ynab-overlay","n":7}]
+sub edits: 4
+plans marked ynab_sourced: [{"id":"plan-native","ynab_sourced":0},{"id":"plan-ynab","ynab_sourced":1}]
+IDENTICAL: API output before and after the migration
+pruned mirror rows: 12
+IDENTICAL: API output after pruning schedule, month and transaction mirror rows
+{
+  "statuses": {
+    "patch": 200,
+    "delete": 200
+  },
+  "patchedMemo": "edited after prune",
+  "deletedStillListed": false,
+  "reimportKeptEdit": {
+    "memo": "after edit",
+    "amount": -700
+  },
+  "splitAfterLineReplacingReimport": {
+    "lines": [
+      "a",
+      "b"
+    ],
+    "total": -90000,
+    "amount": -90000
+  },
+  "newFromSync": {
+    "amount": -1234,
+    "lines": 1
+  }
+}

@@ -36,15 +36,21 @@ describe("YNAB-compatible API", () => {
   test("reads mirrored scheduled transactions and payee locations, but no longer serves money movements", async () => {
     const repo = new LedgerRepository(db, "plan-test");
     await repo.upsertPlan("plan-test", { id: "plan-test", name: "Plan" });
-    await repo.upsertYnabRawObject("plan-test", "scheduled_transaction", "scheduled-1", { id: "scheduled-1", date_next: "2026-07-01" });
-    await repo.upsertYnabRawObject("plan-test", "scheduled_subtransaction", "scheduled-1\u001fsub-1", { id: "sub-1", scheduled_transaction_id: "scheduled-1", amount: -100 });
+    await repo.upsertAccount("plan-test", { id: "cash", name: "Cash" });
+    const line = { id: "sub-1", scheduled_transaction_id: "scheduled-1", amount: -100 };
+    await repo.upsertYnabRawObject("plan-test", "scheduled_transaction", "scheduled-1", { id: "scheduled-1", account_id: "cash", date_first: "2026-07-01", date_next: "2026-07-01", frequency: "never", amount: -100 }, undefined, [line]);
+    await repo.upsertYnabRawObject("plan-test", "scheduled_subtransaction", "scheduled-1\u001fsub-1", line);
     await repo.upsertYnabRawObject("plan-test", "payee_location", "location-1", { id: "location-1", payee_id: "payee-1", latitude: "1.2" });
     await repo.upsertYnabRawObject("plan-test", "money_movement", "movement-1", { id: "movement-1", month: "2026-06-01", amount: 100 });
 
     const scheduled = await (await request("/v1/plans/plan-test/scheduled_transactions")).json();
     expect(scheduled.data.scheduled_transactions).toEqual([{
       id: "scheduled-1",
+      account_id: "cash",
+      date_first: "2026-07-01",
       date_next: "2026-07-01",
+      frequency: "never",
+      amount: -100,
       deleted: false,
       subtransactions: [{ id: "sub-1", scheduled_transaction_id: "scheduled-1", amount: -100, deleted: false }],
     }]);
@@ -120,17 +126,13 @@ describe("YNAB-compatible API", () => {
       frequency: "never", amount: -100, deleted: false,
     });
     await repo.upsertYnabRawObject("plan-test", "scheduled_transaction", "absent-deleted", {
-      id: "absent-deleted", date_next: "2026-09-10",
+      id: "absent-deleted", account_id: "cash", date_first: "2026-09-10", date_next: "2026-09-10", frequency: "never", amount: -100,
     });
+    const live = { id: "live", scheduled_transaction_id: "split-parent", amount: -100, deleted: false };
+    const dead = { id: "dead", scheduled_transaction_id: "split-parent", amount: -200, deleted: true };
     await repo.upsertYnabRawObject("plan-test", "scheduled_transaction", "split-parent", {
-      id: "split-parent", date_next: "2026-09-11",
-    });
-    await repo.upsertYnabRawObject("plan-test", "scheduled_subtransaction", "split-parent\u001flive", {
-      id: "live", scheduled_transaction_id: "split-parent", amount: -100, deleted: false,
-    });
-    await repo.upsertYnabRawObject("plan-test", "scheduled_subtransaction", "split-parent\u001fdead", {
-      id: "dead", scheduled_transaction_id: "split-parent", amount: -200, deleted: true,
-    });
+      id: "split-parent", account_id: "cash", date_first: "2026-09-11", date_next: "2026-09-11", frequency: "never", amount: -100,
+    }, undefined, [live, dead]);
 
     const listed = await repo.listScheduledTransactions("plan-test");
     const byId = Object.fromEntries(listed.map((row: { id: string }) => [row.id, row]));

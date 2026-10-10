@@ -47,7 +47,7 @@ MAX_BYTES="${HOWMUCH_BACKUP_MAX_BYTES:-1073741824}"
 # Count-only comparison set. Schema-level table count is compared exactly;
 # these row counts are allowed to drift by COUNT_TOLERANCE because production
 # may accept a few writes during a backup run.
-COUNT_TABLES="plans accounts categories payees transactions subtransactions source_events ynab_raw_objects"
+COUNT_TABLES="plans accounts categories payees transactions subtransactions source_events ynab_raw_objects scheduled_transaction_edits scheduled_subtransaction_edits"
 
 fail() { echo "backup-d1: $*" >&2; exit 1; }
 

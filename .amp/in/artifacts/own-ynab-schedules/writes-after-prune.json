@@ -1,0 +1,21 @@
+{
+  "statuses": {
+    "patch": 200,
+    "delete": 200
+  },
+  "patchedMemo": "edited after prune",
+  "deletedStillListed": false,
+  "reimportKeptEdit": {
+    "memo": "after edit",
+    "amount": -700
+  },
+  "splitAfterLineReplacingReimport": {
+    "lines": [],
+    "total": 0,
+    "amount": -90000
+  },
+  "newFromSync": {
+    "amount": -1234,
+    "lines": 1
+  }
+}

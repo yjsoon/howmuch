@@ -78,6 +78,25 @@ environment `tk` in `wrangler.jsonc`:
   applies D1 migrations. If a release includes a migration, apply it manually
   (`wrangler d1 migrations apply DB --env tk --remote --profile tinkertanker`)
   before tagging, following the verification order in this document.
+- Migration `0019_own_imported_ynab_schedules.sql` copies every mirrored YNAB
+  schedule into HowMuch's own schedule tables and adds `plans.ynab_sourced`. It
+  must be applied **before** the Worker that reads them is deployed (the new
+  code needs the column; the old code keeps working against the new schema).
+  Run `scripts/backup-d1.sh` first. The migration is atomic and fails, changing
+  nothing, if a mirrored schedule cannot be copied. Afterwards, with
+  `wrangler d1 execute DB --env tk --remote --profile tinkertanker --command`,
+  check that the two counts match and that the plan is marked:
+  `SELECT (SELECT count(*) FROM ynab_raw_objects WHERE object_type='scheduled_transaction') AS mirrored, (SELECT count(*) FROM scheduled_transaction_edits WHERE origin='ynab-overlay') AS owned, (SELECT group_concat(ynab_sourced) FROM plans) AS plan_marked`.
+  It leaves `ynab_raw_objects` untouched; pruning it is a separate decision (#161).
+  Before applying, run this read-only preflight; every count must be 0, because
+  a schedule the migration cannot copy makes it abort (atomically, so nothing
+  is lost, but the release stalls):
+  `SELECT (SELECT count(*) FROM ynab_raw_objects r WHERE r.object_type='scheduled_transaction' AND (json_extract(r.payload_json,'$.account_id') IS NULL OR json_extract(r.payload_json,'$.date_first') IS NULL OR json_extract(r.payload_json,'$.date_next') IS NULL OR json_extract(r.payload_json,'$.frequency') IS NULL OR json_extract(r.payload_json,'$.amount') IS NULL OR NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id=json_extract(r.payload_json,'$.account_id')))) AS bad_schedules, (SELECT count(*) FROM ynab_raw_objects s WHERE s.object_type='scheduled_subtransaction' AND COALESCE(json_extract(s.payload_json,'$.deleted'),0)=0 AND (json_extract(s.payload_json,'$.amount') IS NULL OR json_extract(s.payload_json,'$.scheduled_transaction_id') IS NULL)) AS bad_lines`.
+  Do not run a YNAB import between applying the migration and deploying the
+  Worker: the old Worker would write a new schedule only to the mirror, where
+  the new code does not look. Production has no YNAB configuration, so this
+  only matters if one is added.
+  Once a schedule is owned, a later YNAB import does not change or delete it.
 - Before building or deploying, the workflow runs
   `scripts/check-d1-migrations.sh --env tk --remote`. It reads the
   `d1_migrations` table with a single `SELECT` and fails the run, without

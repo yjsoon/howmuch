@@ -1,0 +1,8 @@
+== case 1: all schedules copyable
+│ 0019_own_imported_ynab_schedules.sql │ ✅     │
+[{'id': 's1', 'origin': 'ynab-overlay', 'account_id': 'cash', 'payee_id': 'grocer', 'category_id': 'food', 'deleted': 0}, {'id': 's2', 'origin': 'ynab-overlay', 'account_id': 'card', 'payee_id': None, 'category_id': None, 'deleted': 0}, {'id': 's3', 'origin': 'ynab-overlay', 'account_id': 'cash', 'payee_id': None, 'category_id': None, 'deleted': 1}]
+[{'id': 'a', 'scheduled_transaction_id': 's2', 'amount_milli': -100}, {'id': 'b', 'scheduled_transaction_id': 's2', 'amount_milli': -200}]
+[{'id': 'p', 'ynab_sourced': 1}]
+== case 2: a schedule names an account that does not exist
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mFOREIGN KEY constraint failed: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_FOREIGNKEY)[0m
+[{'edits': 0, 'marker_column': 0, 'migration_recorded': 0}]
