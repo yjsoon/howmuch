@@ -23,7 +23,7 @@ The button sets up the same Worker and D1 database as the manual steps below, wi
 3. On the setup page, name the repository, the Worker and the database, or keep the defaults.
 4. For `HOWMUCH_API_TOKEN`, enter a long random value, for example the output of `openssl rand -hex 32`, and keep a copy in a password manager. It is your setup token (see [step 4](#4-create-the-setup-token)).
 5. Deploy. Cloudflare creates the database, builds the web app, applies the database migrations and deploys the Worker, then shows its `workers.dev` address.
-6. In the Cloudflare dashboard, open the Worker's **Settings**, then **Variables and Secrets**, and set `HOWMUCH_TIME_ZONE` to your IANA time zone, such as `Europe/London`. It starts as `UTC`.
+6. In your copy of the repository, edit `wrangler.jsonc` and set `HOWMUCH_TIME_ZONE` to your IANA time zone, such as `Europe/London`, then commit and push. It starts as `UTC`, and the push redeploys with the new value. Do not change it only in the Cloudflare dashboard: every deploy sets it from `wrangler.jsonc`, so the next push would reset it.
 7. Carry on from [first-owner setup](#5-first-owner-setup).
 
 Scheduled transactions are entered daily at 00:05 UTC. To run them at your local midnight instead, change `triggers.crons` in `wrangler.jsonc` in your copy of the repository, as described in [step 2](#2-create-your-config).

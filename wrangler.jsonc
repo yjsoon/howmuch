@@ -26,16 +26,13 @@
     "run_worker_first": true
   },
 
-  // Keep variables edited in the Cloudflare dashboard (such as the time zone)
-  // when a later push redeploys.
-  "keep_vars": true,
-
   "vars": {
     // Every deployment gets its own database, so sharing this plan id between
     // separate instances is harmless. Never change it after setup.
     "HOWMUCH_DEFAULT_PLAN_ID": "0d4f2c1e-6b8a-4e57-9a3c-5f1b7e2d9c40",
     // IANA time zone that decides what "today" means for scheduled
-    // transactions. Change it in the dashboard after deploying.
+    // transactions. Change it here in your copy and push: every deploy sets
+    // it from this file, so a value changed only in the dashboard is reset.
     "HOWMUCH_TIME_ZONE": "UTC",
     // Must be "false" so the instance accepts writes.
     "HOWMUCH_TRANSITION_READ_ONLY": "false"
