@@ -18,7 +18,9 @@ Halation is self-hosted only. There is no hosted service and no public sign-up: 
 You have two options:
 
 - **On your iPhone alone.** Choose **Start on this iPhone** when the app first opens and the ledger lives on the device.
-- **On your own Cloudflare account.** Follow the [self-hosting guide](docs/self-hosting.md) to run the web app and API as a Cloudflare Worker with a D1 database. One instance serves one person or household, and the iPhone app can connect to it.
+- **On your own Cloudflare account.** Run the web app and API as a Cloudflare Worker with a D1 database. One instance serves one person or household, and the iPhone app can connect to it. Use the button below, or follow the [self-hosting guide](docs/self-hosting.md) for the manual route and what to do after deploying.
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/yjsoon/howmuch)
 
 Moving from YNAB? The [YNAB migration guide](docs/ynab-migration.md) covers both import routes: `bun run import:ynab` for the API and `bun run import:ynab-export` for a web export.
 

@@ -19,6 +19,8 @@
 
 Halation is self-hosted only. The owner does not host other people's financial data: there is no hosted service, no public sign-up and no multi-tenant plan. `https://howmuch.tk.sg` is the owner's personal instance, not a service for others. Other people run Halation on their own iPhone (local mode) or their own Cloudflare account ([self-hosting](docs/self-hosting.md)). Do not add features, copy or docs that offer hosting, accounts or data storage for other users.
 
+The root `wrangler.jsonc`, `.dev.vars.example` and `scripts/deploy-button.sh` are the Deploy to Cloudflare button template for self-hosters. The owner's stacks never use them; they deploy from `apps/worker`. The root `bun run deploy` refuses to run outside Cloudflare Workers Builds. Keep the template's vars, cron and migrations in step with `apps/worker/wrangler.self-host.example.jsonc`.
+
 ## Cloudflare deployments
 
 HowMuch's primary stack runs in the Tinkertanker Cloudflare account at
@@ -35,7 +37,7 @@ Cloudflare Email Routing) stays in the YJ account — do not move it.
 - The `tk` environment has one cron, `5 16 * * *` (00:05 Asia/Singapore), which materialises due scheduled transactions. It has no YNAB configuration. `HOWMUCH_API_TOKEN` is an encrypted secret on this Worker. `TYPESAFE_API_KEY` (optional encrypted secret) enables Jev category suggestions; never put it in `wrangler.jsonc` or the repo.
 - Do not add `HOWMUCH_REDIRECT_TARGET` to the `tk` env. Wrangler warns that top-level vars are not inherited; that warning is expected, and setting the var here would make production redirect to itself.
 - Production deploys automatically when a `v*` tag is pushed (`.github/workflows/deploy.yml`), using the `CLOUDFLARE_API_TOKEN` repo secret pinned to this account. The workflow never applies D1 migrations; migrations follow the order in `docs/deployment.md` and are run manually before tagging. It refuses to deploy while any migration is pending (`scripts/check-d1-migrations.sh`, a read-only check), using the separate `CLOUDFLARE_D1_READ_TOKEN` repo secret with only Account > D1 > Read, mapped to `CLOUDFLARE_API_TOKEN` for that step only. Do not broaden the deployment token for this check.
-- This is the only environment that accepts writes. The iOS app's `productionBaseURL` points at `howmuch.tk.sg`; installs still carrying the former `howmuch.soon.sg` default migrate on launch, and the legacy `soon.sg` host stays reachable as a redirect.
+- This is the only environment that accepts writes. The iOS app's `productionBaseURL` points at `howmuch.tk.sg` but is no longer the default for new installs, which start with an empty server field; installs still carrying the former `howmuch.soon.sg` default migrate to it on launch, and the legacy `soon.sg` host stays reachable as a redirect.
 
 ### Legacy redirect + backup (profile `yj`, account `YJ`)
 

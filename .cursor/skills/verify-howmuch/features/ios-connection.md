@@ -4,7 +4,7 @@ iOS talks to HowMuch over a stored Server URL and a Keychain session. First-owne
 
 ## Sub-features
 
-- `ios-conn-default` on a fresh install shows Connection with Server defaulting to `https://howmuch.tk.sg`, not the verify API.
+- `ios-conn-default` on a fresh install shows Connection with an empty Server field (placeholder `https://halation.example.com`), not production and not the verify API.
 - `ios-conn-setup-required` against a database with no owner explains that setup must finish on the website and has no Setup token field.
 - `ios-conn-sign-in` against a launched verify stack signs in as `verifier` and lands on Accounts with Everyday Account.
 - `ios-conn-plan` selects the only plan (`HowMuch Demo` / `local-plan`) without asking.
@@ -36,6 +36,6 @@ Preconditions:
 
 - iOS never stores the bootstrap token. Creating the owner via Connection is not a path.
 - HTTP is only for this device or this LAN. The self-hosted API listens on `127.0.0.1` by default; reaching it from a physical device on the LAN needs `HOWMUCH_HOST=0.0.0.0` plus `HOWMUCH_API_TOKEN` (the server refuses to start otherwise). `http://127.0.0.1:{port}` is valid in Simulator. A public http host is refused.
-- New installs default to production. Leaving that URL and signing in with `verifier` will fail or, worse, hit the real site. Always set Server from `control-howmuch state`.
+- New installs start with an empty Server. An install that saved a former default may still read production; signing in there with `verifier` will fail or, worse, hit the real site. Always set Server from `control-howmuch state`.
 - A leftover production Keychain token from a previous Simulator run is not this stack. Sign out, then sign in to `{api_url}`.
 - Do not use a Debug launch-environment connection bootstrap. That path is production-only.
