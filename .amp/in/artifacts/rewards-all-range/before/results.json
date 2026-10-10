@@ -1,0 +1,94 @@
+{
+  "expected": {
+    "first": "2026-03-11",
+    "spend": 830.8
+  },
+  "results": [
+    {
+      "name": "1440: Historical range stays pressed",
+      "ok": false,
+      "observed": "false"
+    },
+    {
+      "name": "1440: All preset pressed",
+      "ok": false,
+      "observed": "rail gone"
+    },
+    {
+      "name": "1440: hero reads All time",
+      "ok": false,
+      "observed": "Card periods as of 10 Oct 2026 · All accounts"
+    },
+    {
+      "name": "1440: URL keeps range mode",
+      "ok": false,
+      "observed": "/rewards?range=all"
+    },
+    {
+      "name": "1440: report covers history from the first spend",
+      "ok": false,
+      "observed": "Current card periods as of 2026-10-10"
+    },
+    {
+      "name": "1440: qualifying spend equals every Travel Card spend",
+      "ok": false,
+      "observed": {
+        "report": 0,
+        "ledger": 830.8
+      }
+    },
+    {
+      "name": "1440: hero shows non-zero spend",
+      "ok": false,
+      "observed": "VALUE EARNED $0.00 QUALIFYING SPEND $0.00"
+    },
+    {
+      "name": "390: Historical range stays pressed",
+      "ok": false,
+      "observed": "false"
+    },
+    {
+      "name": "390: All preset pressed",
+      "ok": false,
+      "observed": "rail gone"
+    },
+    {
+      "name": "390: hero reads All time",
+      "ok": false,
+      "observed": "Card periods as of 10 Oct 2026 · All accounts"
+    },
+    {
+      "name": "390: URL keeps range mode",
+      "ok": false,
+      "observed": "/rewards?range=all"
+    },
+    {
+      "name": "390: report covers history from the first spend",
+      "ok": false,
+      "observed": "Current card periods as of 2026-10-10"
+    },
+    {
+      "name": "390: qualifying spend equals every Travel Card spend",
+      "ok": false,
+      "observed": {
+        "report": 0,
+        "ledger": 830.8
+      }
+    },
+    {
+      "name": "390: hero shows non-zero spend",
+      "ok": false,
+      "observed": "VALUE EARNED $0.00 QUALIFYING SPEND $0.00"
+    },
+    {
+      "name": "Card periods returns to card-period view",
+      "ok": true,
+      "observed": "Card periods as of 10 Oct 2026 · All accounts"
+    },
+    {
+      "name": "Card periods drops mode from URL",
+      "ok": true,
+      "observed": "/rewards?range=all"
+    }
+  ]
+}

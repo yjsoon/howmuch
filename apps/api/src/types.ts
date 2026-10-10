@@ -257,4 +257,6 @@ export type ReportFilters = {
   interval?: "day" | "week" | "month" | "year";
   topPayeesLimit?: number;
   groupBy?: "flag" | "payee" | "category" | "memo";
+  /** Rewards only: historical attribution even without `from` (all history). */
+  rewardsRange?: boolean;
 };

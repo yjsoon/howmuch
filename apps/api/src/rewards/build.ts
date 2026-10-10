@@ -22,6 +22,8 @@ export function buildRewardsReport(input: {
   settings: AppSettings;
   from: string | null;
   to: string | null;
+  /** Historical attribution without `from`: the range starts at the earliest transaction. */
+  range?: boolean;
   groupBy: RewardGroupBy;
   accountIds: string[];
 }): RewardsReport {
@@ -41,17 +43,20 @@ export function buildRewardsReport(input: {
   });
   const today = rewardsToday();
   const asOf = input.to && input.to < today ? input.to : today;
+  const from = input.from ?? (input.range
+    ? input.transactions.reduce((earliest, t) => t.date < earliest ? t.date : earliest, asOf)
+    : null);
   const inRange = new Map<string, Transaction>();
   const rewardByTransaction = new Map<string, { reward: number; rewardDollars: number }>();
   const cardRows: RewardsCardRow[] = cards.map((card) => {
     validatePeriodConfiguration(card);
     const history = input.transactions.filter((t) => t.account_id === card.ynabAccountId && t.date <= asOf);
     const current = cardPeriod(card, asOf, asOf);
-    const selectedTransactions = history.filter((t) => t.date >= (input.from ?? current.start));
+    const selectedTransactions = history.filter((t) => t.date >= (from ?? current.start));
     const periods = new Map<string, CalculationPeriod>([[periodKey(current), current]]);
     const assigned = new Map<string, Transaction[]>();
     for (const transaction of selectedTransactions) {
-      const period = input.from ? cardPeriod(card, transaction.date, asOf) : current;
+      const period = from ? cardPeriod(card, transaction.date, asOf) : current;
       const key = periodKey(period);
       periods.set(key, period);
       const bucket = assigned.get(key) ?? [];
@@ -71,7 +76,7 @@ export function buildRewardsReport(input: {
       return {
         period,
         full,
-        attributed: input.from ? attributeCalculation(card, periodHistory, transactions, period, calculation, input.settings) : full,
+        attributed: from ? attributeCalculation(card, periodHistory, transactions, period, calculation, input.settings) : full,
       };
     });
     const latest = results.find((result) => periodKey(result.period) === periodKey(current))!;
@@ -98,7 +103,7 @@ export function buildRewardsReport(input: {
       account_name: input.accountNames[card.ynabAccountId] ?? card.name,
       calculation: {
         ...calculation,
-        period: input.from ? `${input.from}:${asOf}` : current.label,
+        period: from ? `${from}:${asOf}` : current.label,
         flags: [...flags.values()],
         periods: results.map(({ period, full }) => ({ start: period.start, end: period.end, calculation: full })),
       },
@@ -111,7 +116,7 @@ export function buildRewardsReport(input: {
     from: input.from,
     to: input.to,
     as_of: asOf,
-    period: input.from ? `${input.from}:${asOf}` : `Current card periods as of ${asOf}`,
+    period: from ? `${from}:${asOf}` : `Current card periods as of ${asOf}`,
     transaction_rewards: Object.fromEntries([...rewardByTransaction].map(([id, result]) => [id, { reward: result.reward, reward_dollars: result.rewardDollars }])),
     group_by: input.groupBy,
     miles_valuation: input.settings.milesValuation ?? 0.01,
