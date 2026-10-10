@@ -15,7 +15,7 @@ The page records the exact HEAD commit and the containing branch/tag name. Local
 
 ## Version and install page
 
-iOS will not replace an installed IPA that has the same marketing version and build number. Before every Speedflight cut, increment `CURRENT_PROJECT_VERSION` in `apps/ios/HowMuch.xcodeproj/project.pbxproj`. There are six occurrences (HowMuch, HowMuchTests, HowMuchShare × Debug/Release); they must stay in lockstep. Leave `MARKETING_VERSION` unless the user asked for a new marketing version.
+iOS will not replace an installed IPA that has the same marketing version and build number. Before every Speedflight cut, increment `CURRENT_PROJECT_VERSION` in `apps/ios/HowMuch.xcodeproj/project.pbxproj` above the last build on the install page. Check the page, not just `main`: `main` may already carry a bump that was never published. There are six occurrences (HowMuch, HowMuchTests, HowMuchShare × Debug/Release); they must stay in lockstep. Leave `MARKETING_VERSION` unless the user asked for a new marketing version.
 
 The install page id is the first 32 hex characters of SHA-256 over `bundleId`, a newline, then `SPEEDFLIGHT_SECRET`. That URL is stable across cuts. Do not mint a new `SPEEDFLIGHT_SECRET` unless the user explicitly wants a new page. A request for a “new link” means a new build on the existing page, not a new page.
 
@@ -25,7 +25,7 @@ Commit and push the version bump (and any other authorized revision changes) bef
 
 Confirm these checks without printing secrets or private provisioning/device data. The script checks required values, key-file existence, and Git provenance; Darwin, key permissions/ownership, signing readiness, and device registration remain operator preflight duties.
 
-1. `uname` is Darwin and `xcodebuild -version` works. Do not run Speedflight on Linux or a cloud VM without Xcode. There is currently no Speedflight GitHub Actions workflow; creating or triggering a CI publication path requires an explicit request.
+1. `uname` is Darwin and `xcodebuild -version` works (a hosted macOS VM with Xcode qualifies). Do not run Speedflight on Linux or any VM without Xcode. If the operator has private guidance naming a preferred publishing Mac, follow it. There is currently no Speedflight GitHub Actions workflow; creating or triggering a CI publication path requires an explicit request.
 2. Gitignored `.env.speedflight` defines `ASC_KEY_ID`, `ASC_ISSUER_ID` (not `ASC_ISSSUER_ID`), `ASC_PRIVATE_KEY_PATH`, `SPEEDFLIGHT_SECRET`, `SPEEDFLIGHT_DEEP_LINK=howmuch://`, and `SPEEDFLIGHT_AUTHOR`.
 3. The `.p8` at the configured `ASC_PRIVATE_KEY_PATH` exists and is mode `600`. Set the path explicitly rather than rely on the script's `$HOME/private_keys/AuthKey_$ASC_KEY_ID.p8` fallback. Historical Mac example: `~/Dropbox/private_keys/AuthKey_TinkertankerAdmin_K3832HFK5M.p8` (key ID `K3832HFK5M`); do not assume it exists on another runner.
 4. The key belongs to **Tinkertanker `PQ6U5ESLN2`**, which owns **`sg.soon.howmuch`**. Verify the key's team and bundle using ASC authentication and bundle-ID inspection (`asc auth login` / `asc bundle-ids`, `seedId` and identifier). A **T Krobot `XL5JK4F896`** key may authenticate but cannot sign this bundle. Never change `DEVELOPMENT_TEAM` to make a wrong-team key work.

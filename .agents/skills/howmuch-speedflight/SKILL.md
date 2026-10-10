@@ -45,8 +45,9 @@ Never cut an IPA from a stale local checkout.
 Confirm without printing secrets. Full checklist and blocker table:
 `docs/speedflight.md` ("Preflight" and "Blockers and owner setup").
 
-1. Darwin with working `xcodebuild`. No Linux/cloud VM, and no CI workflow
-   exists — creating one requires an explicit request.
+1. Darwin with working `xcodebuild`; a hosted macOS VM with Xcode is fine,
+   Linux is not. If an operator-specific publishing skill is available,
+   follow it. No CI workflow exists; creating one requires an explicit request.
 2. Gitignored `.env.speedflight` defines `ASC_KEY_ID`, `ASC_ISSUER_ID`,
    `ASC_PRIVATE_KEY_PATH` (explicit path, mode `600`), `SPEEDFLIGHT_SECRET`,
    `SPEEDFLIGHT_DEEP_LINK=howmuch://`, `SPEEDFLIGHT_AUTHOR`.
