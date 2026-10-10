@@ -52,7 +52,7 @@ Confirm without printing secrets. Full checklist and blocker table:
    `ASC_PRIVATE_KEY_PATH` (explicit path, mode `600`), `SPEEDFLIGHT_SECRET`,
    `SPEEDFLIGHT_DEEP_LINK=howmuch://`, `SPEEDFLIGHT_AUTHOR`.
 3. The `.p8` belongs to **Tinkertanker `PQ6U5ESLN2`**, which owns
-   **`sg.soon.howmuch`**. A **T Krobot `XL5JK4F896`** key may authenticate
+   **`sg.soon.howmuch`**. A key from another team may authenticate
    but cannot sign this bundle. **Never** change `DEVELOPMENT_TEAM` to make
    a wrong-team key work, never archive unsigned, and never create or
    revoke certificates/profiles by hand.
