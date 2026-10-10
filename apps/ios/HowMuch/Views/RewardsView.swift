@@ -96,8 +96,13 @@ enum RewardsSheet: Identifiable {
 
   var id: String {
     switch self {
-    case .detail(let cardID): return "detail-\(cardID)"
-    case .editor(let destination): return "editor-\(destination.id)"
+    case .detail(let cardID):
+      return "card-\(cardID)"
+    case .editor(let destination):
+      if let cardID = destination.cardID {
+        return "card-\(cardID)"
+      }
+      return "editor-\(destination.id)"
     case .customise: return "customise"
     case .valuation: return "valuation"
     case .importExport: return "import-export"
@@ -214,8 +219,8 @@ struct RewardsView: View {
     }
     .sheet(item: $sheet) { sheet in
       sheetContent(sheet)
-        .blocksCapturePresentation()
     }
+    .blocksCapturePresentation(when: sheet != nil)
     .task(id: fetchKey) {
       await fetch()
     }
@@ -1853,7 +1858,7 @@ struct RegisterRewardRow: View {
     case detail
     case editor
 
-    var id: Self { self }
+    var id: String { "rewards" }
   }
 
   var body: some View {
@@ -1884,8 +1889,8 @@ struct RegisterRewardRow: View {
           RewardCardEditorView(cardID: row.id)
         }
       }
-      .blocksCapturePresentation()
     }
+    .blocksCapturePresentation(when: sheet != nil)
     .onChange(of: model.settings.planID) { _, _ in
       sheet = nil
     }

@@ -580,6 +580,17 @@ enum RootChrome {
     idiom == .pad && horizontalSizeClass == .regular
   }
 
+  /// Compact iPhone / iPad-compact tab bar. Regular-width sidebar is unchanged.
+  /// Includes a pushed Assistant conversation so this hide cannot restore
+  /// `.automatic` over `AssistantView` / `AddTransactionsView`.
+  static func hidesCompactTabBar(
+    usesSidebar: Bool,
+    hidesTabRowOverlay: Bool,
+    pendingAssistantSessionID: UUID?
+  ) -> Bool {
+    !usesSidebar && (hidesTabRowOverlay || pendingAssistantSessionID != nil)
+  }
+
   static func addControlInsets(
     idiom: UIUserInterfaceIdiom,
     horizontalSizeClass: UserInterfaceSizeClass?
@@ -732,6 +743,21 @@ struct RootChromeScope<Content: View>: View {
   }
 }
 
+/// Writes tab-bar visibility only on the compact path. The sidebar tree
+/// must not get an explicit `.toolbar(..., for: .tabBar)`.
+private struct CompactTabBarVisibility: ViewModifier {
+  var hidden: Bool
+  var enabled: Bool = true
+
+  func body(content: Content) -> some View {
+    if enabled {
+      content.toolbar(hidden ? .hidden : .automatic, for: .tabBar)
+    } else {
+      content
+    }
+  }
+}
+
 /// Phone and iPad need separate TabView trees. `sidebarAdaptable` plus a
 /// selection that is not in the current tab set fatal-errors on launch.
 struct RootTabView: View {
@@ -742,6 +768,8 @@ struct RootTabView: View {
   var presentingManually: (() -> Void)?
 
   var body: some View {
+    @Bindable var router = CaptureRouter.shared
+    @Bindable var workspace = workspace
     if usesSidebar {
       TabView(selection: $chrome.tab) {
         Tab(AppTab.accounts.title, systemImage: AppTab.accounts.systemImage, value: AppTab.accounts) {
@@ -789,6 +817,17 @@ struct RootTabView: View {
       }
       .tabViewStyle(.tabBarOnly)
       .tabBarMinimizeBehavior(.onScrollDown)
+      // TabView owns the iOS 26 pill/Add. RootTabHost writes the same
+      // visibility: iOS 18+ keeps the value nearest the tab root, and
+      // `.automatic` there would restore the bar over a pushed Assistant
+      // conversation.
+      .modifier(CompactTabBarVisibility(
+        hidden: RootChrome.hidesCompactTabBar(
+          usesSidebar: false,
+          hidesTabRowOverlay: router.hidesTabRowOverlay,
+          pendingAssistantSessionID: workspace.pendingAssistantSessionID
+        )
+      ))
       .overlay {
         RootTabBarFloatingAssistant(
           // The button lives on the window, above every SwiftUI overlay, so
@@ -1245,12 +1284,18 @@ struct RootTabHost<Content: View>: View {
   }
 
   var body: some View {
+    @Bindable var router = CaptureRouter.shared
+    @Bindable var workspace = workspace
     let usesSidebar = RootChrome.usesSidebar(
       idiom: UIDevice.current.userInterfaceIdiom,
       horizontalSizeClass: horizontalSizeClass
     )
     let overflow = usesSidebar ? nil : chrome.overflow(on: hostedTab)
-    let router = CaptureRouter.shared
+    let hidesTabBar = RootChrome.hidesCompactTabBar(
+      usesSidebar: usesSidebar,
+      hidesTabRowOverlay: router.hidesTabRowOverlay,
+      pendingAssistantSessionID: workspace.pendingAssistantSessionID
+    )
     ZStack(alignment: .bottom) {
       ZStack {
         content
@@ -1263,6 +1308,7 @@ struct RootTabHost<Content: View>: View {
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .animation(Theme.Motion.standard, value: overflow)
+      .modifier(CompactTabBarVisibility(hidden: hidesTabBar, enabled: !usesSidebar))
       .safeAreaInset(edge: .bottom, spacing: 0) {
         if !usesSidebar,
            !router.hidesTabRowOverlay,

@@ -185,6 +185,7 @@ struct AddTransactionsView: View {
       }
       .sheet(isPresented: $isShowingPlus) {
         plusMenu
+          .blocksCapturePresentation()
       }
       .photosPicker(isPresented: $isShowingLibraryPicker, selection: $photoItems, matching: .images)
       .onChange(of: photoItems) { _, items in
@@ -194,15 +195,19 @@ struct AddTransactionsView: View {
         CameraPicker { image in
           beginIngest(images: [image], filenamePrefix: "camera")
         }
+        .blocksCapturePresentation()
       }
       .sheet(item: $inspectAttachment) { attachment in
-        if let image = UIImage(data: attachment.data) {
-          Image(uiImage: image)
-            .resizable()
-            .scaledToFit()
-            .padding()
-            .presentationDetents([.large])
+        Group {
+          if let image = UIImage(data: attachment.data) {
+            Image(uiImage: image)
+              .resizable()
+              .scaledToFit()
+              .padding()
+              .presentationDetents([.large])
+          }
         }
+        .blocksCapturePresentation()
       }
       .alert(
         "Camera unavailable",

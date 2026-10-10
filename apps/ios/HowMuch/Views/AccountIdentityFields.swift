@@ -144,6 +144,7 @@ struct AccountIdentityFields: View {
         icon = .custom(picked)
         isPickingIcon = false
       }
+      .blocksCapturePresentation()
     }
   }
 }

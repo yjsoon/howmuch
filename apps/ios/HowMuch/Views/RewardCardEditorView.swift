@@ -840,6 +840,7 @@ struct RewardCardEditorView: View {
         }
       }
     }
+    .padding(.bottom, 24)
   }
 
   private func ruleForm(_ rule: Rule) -> some View {
