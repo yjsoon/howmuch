@@ -89,8 +89,14 @@ if (mode === "seed") {
   const patch = await call("/v1/plans/plan-ynab/scheduled_transactions/sched-monthly", "PATCH", { scheduled_transaction: { memo: "edited after prune" } }, "post-prune-patch");
   const del = await call("/v1/plans/plan-ynab/scheduled_transactions/sched-transfer", "DELETE", undefined, "post-prune-delete");
   await repo.upsertYnabRawObject("plan-ynab", "scheduled_transaction", "sched-edited", { id: "sched-edited", account_id: "cash", date_first: "2026-06-01", date_next: "2026-11-20", frequency: "weekly", amount: -999, memo: "YNAB says otherwise", deleted: false }, 43);
-  await repo.upsertYnabRawObject("plan-ynab", "scheduled_transaction", "sched-new-from-sync", { id: "sched-new-from-sync", account_id: "card", date_first: "2026-09-01", date_next: "2026-12-01", frequency: "monthly", amount: -1234, payee_id: "grocer", category_id: "food", deleted: false }, 43);
-  await repo.upsertYnabRawObject("plan-ynab", "scheduled_subtransaction", "sched-new-from-sync\u001fx", { id: "x", scheduled_transaction_id: "sched-new-from-sync", amount: -1234, category_id: "food", deleted: false }, 43);
+  const newLine = { id: "x", scheduled_transaction_id: "sched-new-from-sync", amount: -1234, category_id: "food", deleted: false };
+  await repo.upsertYnabRawObject("plan-ynab", "scheduled_transaction", "sched-new-from-sync", { id: "sched-new-from-sync", account_id: "card", date_first: "2026-09-01", date_next: "2026-12-01", frequency: "monthly", amount: -1234, payee_id: "grocer", category_id: "food", deleted: false }, 43, [newLine]);
+  // A later export replaces the split lines of an already imported split schedule.
+  const replaced = [
+    { id: "c", scheduled_transaction_id: "sched-split", amount: -45000, category_id: "food", deleted: false },
+    { id: "d", scheduled_transaction_id: "sched-split", amount: -45000, category_id: "rent", deleted: false },
+  ];
+  await repo.upsertYnabRawObject("plan-ynab", "scheduled_transaction", "sched-split", { id: "sched-split", account_id: "card", date_first: "2026-02-01", date_next: "2026-11-01", frequency: "everyOtherWeek", amount: -90000, payee_id: "grocer", category_id: null, memo: "split", deleted: false }, 43, replaced);
   const list = (await (await call("/v1/plans/plan-ynab/scheduled_transactions")).json()).data.scheduled_transactions;
   const pick = (id: string) => list.find((row: any) => row.id === id);
   writeFileSync(out, JSON.stringify({
@@ -98,6 +104,7 @@ if (mode === "seed") {
     patchedMemo: pick("sched-monthly")?.memo,
     deletedStillListed: Boolean(pick("sched-transfer")),
     reimportKeptEdit: { memo: pick("sched-edited")?.memo, amount: pick("sched-edited")?.amount },
+    splitAfterLineReplacingReimport: { lines: pick("sched-split")?.subtransactions?.map((row: any) => row.id), total: pick("sched-split")?.subtransactions?.reduce((sum: number, row: any) => sum + row.amount, 0), amount: pick("sched-split")?.amount },
     newFromSync: { amount: pick("sched-new-from-sync")?.amount, lines: pick("sched-new-from-sync")?.subtransactions?.length },
   }, null, 2));
 }

@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { mkdirSync } from "node:fs";
 
-const COPY_TABLES = ["plans", "category_groups", "categories", "payees", "accounts", "import_sessions", "transactions", "subtransactions", "source_events", "import_rows", "ynab_raw_objects"] as const;
+const COPY_TABLES = ["plans", "category_groups", "categories", "payees", "accounts", "import_sessions", "transactions", "subtransactions", "source_events", "import_rows", "ynab_raw_objects", "scheduled_transaction_edits", "scheduled_subtransaction_edits"] as const;
 const EMPTY_TABLES = ["plans","category_groups","categories","payees","accounts","transactions","subtransactions","source_events","import_sessions","import_rows","ynab_raw_objects","plan_month_assignments","plan_month_category_targets","scheduled_transaction_edits","scheduled_subtransaction_edits","scheduled_transaction_snapshot_assertions","account_reconciliation_assertions","ynab_sync_state","sync_runs","sync_attempts","sync_transition_receipts","sync_renewal_receipts","audit_events","write_commands","write_assertions","users","auth_identities","sessions","personal_api_tokens","plan_memberships","password_credentials","auth_setup","login_rate_limits"];
 const SOURCE_AUTH_TABLES = ["users", "auth_identities", "sessions", "personal_api_tokens", "plan_memberships", "password_credentials", "auth_setup", "login_rate_limits"];
 // `wrangler d1 execute --file` is checkpointed through a Durable Object.
@@ -144,6 +144,7 @@ function generateBootstrap(inputPath: string, outputPath: string, mode: "single"
       for (const row of tableRows) validateScalars(row, table);
       rows.set(table, tableRows);
     }
+    materialiseOwnedSchedules(source, rows, String(plan.id));
     (rows.get("transactions")!).forEach((r, i) => r.ledger_sequence = i + 1);
     (rows.get("subtransactions")!).forEach((r, i) => r.ledger_sequence = i + 1);
 
@@ -238,6 +239,8 @@ function validateStatementGroups(source: Database, statementGroups: string[][], 
     checkZero(db, "SELECT count(*) n FROM transactions t LEFT JOIN accounts a ON a.id=t.account_id LEFT JOIN payees p ON p.id=t.payee_id LEFT JOIN categories c ON c.id=t.category_id WHERE a.plan_id<>t.plan_id OR (p.id IS NOT NULL AND p.plan_id<>t.plan_id) OR (c.id IS NOT NULL AND c.plan_id<>t.plan_id)", "transaction ownership");
     checkZero(db, "SELECT count(*) n FROM categories c JOIN category_groups g ON g.id=c.category_group_id WHERE c.plan_id<>g.plan_id", "category ownership");
     checkZero(db, "SELECT count(*) n FROM ynab_raw_objects r WHERE r.plan_id<>? OR r.object_type='' OR r.object_id='' OR json_valid(r.payload_json)=0", "YNAB raw-object ownership", [planId]);
+    checkZero(db, "SELECT count(*) n FROM ynab_raw_objects r WHERE r.object_type='scheduled_transaction' AND NOT EXISTS (SELECT 1 FROM scheduled_transaction_edits e WHERE e.plan_id=r.plan_id AND e.id=r.object_id)", "mirrored schedules owned by HowMuch");
+    checkZero(db, "SELECT count(*) n FROM ynab_raw_objects r WHERE r.object_type='month' AND NOT EXISTS (SELECT 1 FROM plans p WHERE p.id=r.plan_id AND p.ynab_sourced=1)", "YNAB plan marker");
     checkZero(db, "SELECT count(*) n FROM accounts a WHERE a.deleted=0 AND (a.transfer_payee_id IS NULL OR NOT EXISTS(SELECT 1 FROM payees p WHERE p.id=a.transfer_payee_id AND p.transfer_account_id=a.id AND p.plan_id=a.plan_id AND p.deleted=0))", "account transfer payees");
     checkZero(db, "SELECT count(*) n FROM subtransactions s JOIN transactions t ON t.id=s.transaction_id LEFT JOIN payees p ON p.id=s.payee_id LEFT JOIN categories c ON c.id=s.category_id LEFT JOIN accounts a ON a.id=s.transfer_account_id WHERE (p.id IS NOT NULL AND p.plan_id<>t.plan_id) OR (c.id IS NOT NULL AND c.plan_id<>t.plan_id) OR (a.id IS NOT NULL AND a.plan_id<>t.plan_id)", "subtransaction ownership");
     checkZero(db, "SELECT count(*) n FROM transactions WHERE ledger_sequence IS NULL OR ledger_sequence<1", "transaction sequence");
@@ -321,9 +324,51 @@ function validateStatementGroups(source: Database, statementGroups: string[][], 
 function columns(db: Database, table: string): string[] { return (db.query(`PRAGMA table_info(${table})`).all() as any[]).map(r => r.name); }
 function copyColumns(db: Database, table: string): string[] {
   const sourceColumns = columns(db, table);
+  if (table === "plans" && !sourceColumns.includes("ynab_sourced")) return [...sourceColumns, "ynab_sourced"];
   return table === "transactions" || table === "subtransactions"
     ? [...sourceColumns, "ledger_sequence"]
     : sourceColumns;
+}
+
+/**
+ * The target is built from empty tables, so migration 0019 has nothing to
+ * copy. Do here what it does: every mirrored YNAB schedule and its live lines
+ * becomes a HowMuch-owned row (unless the source already holds one), and a
+ * plan with YNAB months is marked. The app reads only those tables.
+ */
+function materialiseOwnedSchedules(source: Database, rows: Map<string, Row[]>, planId: string) {
+  const raw = rows.get("ynab_raw_objects")!;
+  const edits = rows.get("scheduled_transaction_edits")!;
+  const lines = rows.get("scheduled_subtransaction_edits")!;
+  const has = (table: "payees" | "categories" | "accounts") => new Set(rows.get(table)!.map((row) => String(row.id)));
+  const known = { payee_id: has("payees"), category_id: has("categories"), transfer_account_id: has("accounts") };
+  const resolve = (payload: Record<string, any>, field: keyof typeof known): string | null =>
+    typeof payload[field] === "string" && known[field].has(payload[field]) ? payload[field] : null;
+  const owned = new Set(edits.map((row) => String(row.id)));
+  const copied = new Set<string>();
+  for (const object of raw) {
+    if (object.object_type !== "scheduled_transaction" || owned.has(String(object.object_id))) continue;
+    const payload = JSON.parse(String(object.payload_json));
+    edits.push({
+      plan_id: planId, id: object.object_id, origin: "ynab-overlay", payload_json: object.payload_json,
+      account_id: payload.account_id ?? null, date_first: payload.date_first ?? null, date_next: payload.date_next ?? null, frequency: payload.frequency ?? null,
+      amount_milli: payload.amount ?? null, payee_id: resolve(payload, "payee_id"), category_id: resolve(payload, "category_id"),
+      transfer_account_id: resolve(payload, "transfer_account_id"), deleted: object.deleted, created_at: object.updated_at, updated_at: object.updated_at,
+    });
+    copied.add(String(object.object_id));
+  }
+  for (const object of raw) {
+    if (object.object_type !== "scheduled_subtransaction") continue;
+    const payload = JSON.parse(String(object.payload_json));
+    if (!copied.has(String(payload.scheduled_transaction_id)) || payload.deleted) continue;
+    lines.push({
+      plan_id: planId, id: payload.id ?? object.object_id, scheduled_transaction_id: payload.scheduled_transaction_id, payload_json: object.payload_json,
+      amount_milli: payload.amount ?? null, payee_id: resolve(payload, "payee_id"), category_id: resolve(payload, "category_id"),
+      transfer_account_id: resolve(payload, "transfer_account_id"), created_at: object.updated_at, updated_at: object.updated_at,
+    });
+  }
+  const marked = raw.some((object) => object.object_type === "month") ? 1 : 0;
+  for (const plan of rows.get("plans")!) plan.ynab_sourced = Number(plan.ynab_sourced ?? 0) || marked;
 }
 function inserts(table: string, cols: string[], rows: Row[]): DataStatement[] {
   const result: DataStatement[] = []; let values: string[] = [];

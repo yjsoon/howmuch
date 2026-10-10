@@ -2035,8 +2035,8 @@ export class LedgerRepository {
    * Stores an exact source object from YNAB.  The normalised ledger remains
    * the write model; this mirror keeps fields that HowMuch does not yet model
    * (targets, notes, scheduling metadata, locations, and future API fields).
-   * Objects HowMuch serves (schedules, the plan marker) are also written to
-   * its own tables, see `ynab-owned-records.ts`.
+   * Objects HowMuch serves (schedules with their `ownedLines`, the plan
+   * marker) are also written to its own tables, see `ynab-owned-records.ts`.
    */
   async upsertYnabRawObject(
     planId: string,
@@ -2044,12 +2044,13 @@ export class LedgerRepository {
     objectId: string,
     payload: unknown,
     serverKnowledge?: number,
+    ownedLines: readonly unknown[] = [],
   ): Promise<void> {
     await this.ensurePlan(planId);
     const json = JSON.stringify(payload);
     if (json === undefined) throw new ValidationError("YNAB raw object payload must be JSON serialisable");
     const deleted = Boolean((payload as Record<string, unknown> | null)?.deleted) ? 1 : 0;
-    const owned = ownedRecordStatements(planId, objectType, objectId, json, deleted);
+    const owned = ownedRecordStatements(planId, objectType, objectId, json, deleted, ownedLines);
     await this.db.transaction(async () => {
       await this.db
         .query(

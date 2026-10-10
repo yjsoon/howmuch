@@ -17,7 +17,8 @@ Date: 2026-10-10. Synthetic data only; no production access, no backup taken her
    category guard 409 on the YNAB plan, 201 on the native plan).
 3. **Writes after pruning.** PATCH and DELETE of imported schedules work; re-importing
    an edited schedule does not overwrite the edit; a schedule new from sync appears,
-   with its line.
+   with its line; re-importing a split schedule whose lines YNAB replaced keeps the
+   original lines (no accumulation).
 4. **D1 migration, wrangler local D1 (`d1-local.sh`).** 0001-0018, fixture rows, then
    0019. A copyable fixture gives the expected rows; a schedule naming a missing account
    makes the migration fail with nothing changed (no rows, no column, not recorded).
@@ -28,7 +29,7 @@ Date: 2026-10-10. Synthetic data only; no production access, no backup taken her
 .amp/in/artifacts/own-ynab-schedules/run.sh          # 1-3, output in run-output.txt
 .amp/in/artifacts/own-ynab-schedules/d1-local.sh     # 4, output in d1-local-output.txt
 cd apps/api && bun test                              # 441 pass
-bun test                                             # repository root: 883 pass
+bun test scripts/ynab-d1-bootstrap.test.ts           # 8 pass (copies owned schedules, parity-checked)
 ```
 
 ## Observed
@@ -38,6 +39,7 @@ bun test                                             # repository root: 883 pass
   migration and **IDENTICAL** after pruning 12 mirror rows. `before.json` holds the
   compared output (6 listed schedules, 4 lines, guard 409/201).
 - Writes after pruning: patch 200, delete 200, edit kept on re-import (`after edit`, -700),
+  split schedule re-imported with replacement lines still has lines a, b totalling -90000,
   new schedule with 1 line.
 - `d1-local.sh`: case 1 copies 3 schedules (one tombstone) and the 2 live lines, nulls the
   unresolvable payee reference, marks the plan; case 2 fails with

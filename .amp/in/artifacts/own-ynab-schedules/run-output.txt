@@ -1,7 +1,7 @@
-Preparing worktree (detached HEAD 86ec867)
-base revision: 86ec867f720a455ffc2df77b0b5f3ae6238074fe (code that seeds the database)
-this checkout: 86ec867 + working tree
-schema before: 021_account_month_balances
+Preparing worktree (detached HEAD 13668ff)
+base revision: 13668ff7f5f328f150bde7e91809fa5b3bc57e3b (code that seeds the database)
+this checkout: 13668ff + working tree
+schema before: 022_own_imported_ynab_schedules
 schema after: 022_own_imported_ynab_schedules
 edits by origin: [{"origin":"howmuch-local","n":1},{"origin":"ynab-overlay","n":7}]
 sub edits: 4
@@ -19,6 +19,14 @@ IDENTICAL: API output after pruning schedule, month and transaction mirror rows
   "reimportKeptEdit": {
     "memo": "after edit",
     "amount": -700
+  },
+  "splitAfterLineReplacingReimport": {
+    "lines": [
+      "a",
+      "b"
+    ],
+    "total": -90000,
+    "amount": -90000
   },
   "newFromSync": {
     "amount": -1234,

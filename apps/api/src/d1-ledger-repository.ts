@@ -173,7 +173,7 @@ export class D1LedgerRepository extends LedgerRepository {
   }
   override async ensurePayee(planId:string,payeeId:string,name?:string):Promise<void>{await this.metadata.upsertPayee(planId,{id:payeeId,name:name??`Imported payee ${payeeId.slice(0,8)}`},this.context("payee.ensure",planId,payeeId));}
   override async upsertPayee(planId:string,payee:any):Promise<void>{await this.metadata.upsertPayee(planId,payee,this.context("payee.upsert",planId,payee.id));}
-  override async upsertYnabRawObject(planId:string,objectType:string,objectId:string,payload:unknown,serverKnowledge?:number):Promise<void>{await this.metadata.upsertYnabRawObject(planId,objectType,objectId,payload,serverKnowledge,this.context("ynab-raw.upsert",planId,`${objectType}:${objectId}`));}
+  override async upsertYnabRawObject(planId:string,objectType:string,objectId:string,payload:unknown,serverKnowledge?:number,ownedLines:readonly unknown[]=[]):Promise<void>{await this.metadata.upsertYnabRawObject(planId,objectType,objectId,payload,serverKnowledge,this.context("ynab-raw.upsert",planId,`${objectType}:${objectId}`),ownedLines);}
   override async ensureCategory(planId:string,categoryId:string,name?:string,groupId?:string|null):Promise<void>{await this.metadata.ensureCategory(planId,categoryId,name,groupId??"uncategorized-group",this.context("category.ensure",planId,categoryId));}
   override async upsertCategoryGroup(planId:string,group:any):Promise<void>{await this.metadata.upsertCategoryGroup(planId,group,this.context("category-group.upsert",planId,group.id));}
   override async upsertCategory(planId:string,category:any,groupId?:string|null):Promise<void>{await this.metadata.upsertCategory(planId,category,groupId,this.context("category.upsert",planId,category.id));}

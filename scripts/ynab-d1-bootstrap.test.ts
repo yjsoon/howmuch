@@ -36,13 +36,17 @@ function fixture(dir: string): string {
       ('p','plan','p','{"id":"p","name":"Private plan"}',0,50),
       ('p','month','2026-01-01','{"month":"2026-01-01","budgeted":10}',0,50),
       ('p','month_category','2026-01-01\u001fc','{"id":"c","budgeted":10,"goal_type":"TB"}',0,50),
-      ('p','scheduled_transaction','scheduled-1','{"id":"scheduled-1","amount":-10,"date_next":"2026-02-01"}',0,50),
+      ('p','scheduled_transaction','scheduled-1','{"id":"scheduled-1","account_id":"a","amount":-10,"date_first":"2026-02-01","date_next":"2026-02-01","frequency":"never"}',0,50),
       ('p','transaction','split','{"id":"split"}',0,50),
       ('p','transaction','split-mirror','{"id":"split-mirror"}',0,50),
       ('p','transaction','ta','{"id":"ta","date":"2026-01-02","amount":-20,"category_id":"c"}',0,50),
       ('p','transaction','tb','{"id":"tb"}',0,50),
       ('p','transaction','gone','{"id":"gone","date":"2026-01-03","amount":-999,"category_id":"c","deleted":true}',1,50),
       ('p','transaction','duplicate-payee','{"id":"duplicate-payee"}',0,50);
+    INSERT INTO scheduled_transaction_edits(plan_id,id,origin,payload_json,account_id,date_first,date_next,frequency,amount_milli)
+      VALUES('p','local-split','howmuch-local','{"id":"local-split","account_id":"a","date_first":"2026-03-01","date_next":"2026-03-01","frequency":"monthly","amount":-30}','a','2026-03-01','2026-03-01','monthly',-30);
+    INSERT INTO scheduled_subtransaction_edits(plan_id,id,scheduled_transaction_id,payload_json,amount_milli)
+      VALUES('p','l1','local-split','{"id":"l1","amount":-10}',-10),('p','l2','local-split','{"id":"l2","amount":-20}',-20);
     UPDATE transactions SET memo='O''Brien;
 -- still data' WHERE id='ta';
     UPDATE import_sessions SET summary_json='{"imported_transactions":6,"server_knowledge":50,"raw_objects":{"plan":1,"month":1,"month_category":1,"scheduled_transaction":1,"transaction":6}}' WHERE id='i';

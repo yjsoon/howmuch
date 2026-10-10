@@ -9,6 +9,14 @@
     "memo": "after edit",
     "amount": -700
   },
+  "splitAfterLineReplacingReimport": {
+    "lines": [
+      "a",
+      "b"
+    ],
+    "total": -90000,
+    "amount": -90000
+  },
   "newFromSync": {
     "amount": -1234,
     "lines": 1
