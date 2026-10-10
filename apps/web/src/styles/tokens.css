@@ -78,8 +78,8 @@
   /* Brand artwork: Rewards card faces (Sun Arc v3). They follow the mode and never the look: daytime
      faces here, the night (miles) and dusk (cashback) prints in the dark block below. rewards-board.css
      has no data-mode selector; these tokens carry the mode. */
-  --face-cashback-sky: linear-gradient(165deg, #c6bcae 0%, #d9d1c5 48%, #ece6dc 100%);   /* a warm haze: a sand grey, so the gold's edge is a step of warmth */
-  --face-miles-sky: linear-gradient(165deg, #aab7c2 0%, #c6ced5 48%, #e0e0dc 100%);      /* higher and cooler, a dusty blue that still sits near the gold */
+  --face-cashback-sky: linear-gradient(165deg, #8db6d8 0%, #bad2e3 48%, #ebe6dd 100%);   /* a warm, soft haze */
+  --face-miles-sky: linear-gradient(165deg, #6ea6da 0%, #a6c9e9 48%, #dcebf6 100%);      /* higher, cooler and clearer */
   --face-overcast: linear-gradient(165deg, #d6d8d9 0%, #e1e2e0 48%, #ecebe7 100%);       /* the failed sky */
   /* Dark ink on every daytime sky and on the sunlit ground. */
   --face-cashback-ink: #1c1b18; --face-miles-ink: #1c1b18; --face-foot-ink: #1c1b18;
@@ -88,9 +88,9 @@
   --face-crest-target: 0.4; --face-crest-spend: 0.75; --face-crest-merged: 0.9;
   --face-scrim: transparent;
   /* Gold laid over the blue to the marker, the cool dim beyond it, and the contrail (miles). */
-  /* Beyond the lit edge, the prints' shift: half way to grey, then the brand's rose-mauve cast. No separate dim. */
-  --face-lit: #ffd98c; --face-contrail: #ffffff73; --face-veil-dim: transparent;
-  --face-veil-cashback: #d4cbd4; --face-veil-miles: #c9c6d4; --face-veil-grey: #808080; --face-bloom: transparent;
+  /* Gold laid over the blue to the marker and the cool dim beyond it; each side carries a share of the other (the scene). */
+  --face-lit: #ffd98c; --face-contrail: #ffffff73; --face-veil-dim: #3d567426;
+  --face-veil-cashback: #ffffff; --face-veil-miles: #ffffff; --face-veil-grey: transparent; --face-bloom: transparent;
   --face-cashback-blend: screen; --face-pour-cashback: 0.65; --face-pour-miles: 0.65;
   /* One warm white line on the sky and the ground alike, over a faint dark edge. */
   --face-marker-cashback: #fff8e6d9; --face-marker-miles: #fff8e6d9; --face-marker-ridge: #fff8e6d9; --face-marker-edge: #1c1b181f;

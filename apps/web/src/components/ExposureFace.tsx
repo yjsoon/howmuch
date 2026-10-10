@@ -1,7 +1,7 @@
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
 import { cssEase, cssTime, tweenPose } from "../lib/exposure-tween";
 import { falls, type Exposure, type Pose } from "../lib/reward-exposure";
-import { exposureScene, type Scene, type SceneLayout } from "../lib/reward-exposure-scene";
+import { exposureScene, type Scene, type SceneLayout, MEET } from "../lib/reward-exposure-scene";
 
 /*
  * The Rewards card's face: a sky, a pair of ridges and a sun, drawn as one SVG (docs/frontend/
@@ -289,14 +289,16 @@ function paint(e: Record<string, SVGElement>, svg: SVGSVGElement, s: Scene, uid:
   // Light: gold to the marker (daytime) and the underexposure beyond it.
   const g = s.gold;
   const goldOffsets = [0, g.from, g.to, 1];
-  const past = g.whole ? 1 : g.beyond;
-  setStops(e, "gs", goldOffsets, [g.sky, g.sky, g.sky * past, g.sky * past]);
-  setStops(e, "gg", goldOffsets, [g.ground, g.ground, g.ground * past, g.ground * past]);
+  const pastSky = g.whole ? 1 : g.beyond.sky, pastGround = g.whole ? 1 : g.beyond.ground;
+  setStops(e, "gs", goldOffsets, [g.sky, g.sky, g.sky * pastSky, g.sky * pastSky]);
+  setStops(e, "gg", goldOffsets, [g.ground, g.ground, g.ground * pastGround, g.ground * pastGround]);
   for (const name of ["gsGrad", "ggGrad", "vdGrad", "vgGrad", "vmGrad"]) set(name, "x2", n(s.w));
   const v = s.veil;
   const veilOffsets = [0, v.from, v.to, 1];
   const ramp = (v.whole ? [1, 1, 1, 1] : [0, 0, 1, 1]).map((k) => k * v.strength);
-  setStops(e, "vd", veilOffsets, ramp.map((k) => k * (v.failed ? 14 / 15 : 1)));
+  // The daytime dim meets the gold the same way: a tenth of it on the lit side, nine tenths beyond.
+  const dim = (v.whole ? [1, 1, 1, 1] : [MEET.sky, MEET.sky, 1 - MEET.sky, 1 - MEET.sky]).map((k) => k * v.strength);
+  setStops(e, "vd", veilOffsets, dim.map((k) => k * (v.failed ? 14 / 15 : 1)));
   setStops(e, "vg", veilOffsets, ramp.map((k) => k * 0.5));
   setStops(e, "vm", veilOffsets, ramp);
   show("vDim", v.on); show("vGrey", v.on); show("vMult", v.on);

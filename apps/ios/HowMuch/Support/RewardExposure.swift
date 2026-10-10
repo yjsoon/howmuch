@@ -286,10 +286,16 @@ struct ExposureScene {
     guard appearance == .daytime else { return nil }
     switch exposure.light {
     case .overcast: return nil
-    case .even: return (0.3, 0.12)
-    case .journey: return (0.5 + 0.12 * pose.v, 0.16 + 0.08 * pose.v)
+    // Version 3's peaks with each side of the lit edge moved towards the other as a colour: the lit side
+    // keeps 0.9 (sky) and 0.8 (ground) of its gold; the unlit side carries the rest (`ExposureScene.meet`).
+    case .even: return (0.42 * 0.9, 0.16 * 0.8)
+    case .journey: return ((0.76 + 0.16 * pose.v) * 0.9, (0.24 + 0.12 * pose.v) * 0.8)
     }
   }
+
+  /// How far each side of the lit edge is moved towards the other, as a colour: the unlit side carries this
+  /// share of the gold and the lit side this share of the dim. A tenth on the sky, a fifth on the ground.
+  static let meet = (sky: 0.1, ground: 0.2)
 
   /// Dark mode: the bloom's alpha over the sky.
   var bloomAlpha: Double {

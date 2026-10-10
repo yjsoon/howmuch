@@ -190,7 +190,7 @@ private struct ExposurePainter {
   /// A wash of `colour` across the whole frame: to the lit edge in the minimum
   /// journey, with the soft falloff, and end to end from then on. Beyond the edge it
   /// keeps the share the sun's lift has already lit, so no sliver is left at the edge.
-  private func wash(_ colour: Color, alpha: Double) -> GraphicsContext.Shading {
+  private func wash(_ colour: Color, alpha: Double, meet: Double) -> GraphicsContext.Shading {
     let solid = colour.opacity(alpha)
     guard scene.inMinimumJourney else {
       return .color(solid)
@@ -198,7 +198,7 @@ private struct ExposurePainter {
     // The wash falls to the same colour at a lower alpha, never to clear, so the falloff does not pass through grey.
     let lo = min(1, max(0, pose.h - 0.04))
     let hi = min(1, max(0, pose.h + 0.04))
-    let beyond = alpha * scene.lifted
+    let beyond = alpha * max(meet, scene.lifted)
     // Smoothstep between lo and hi: quarter points sit at 15.6% and 84.4% of the way.
     let quarter = lo + 0.25 * (hi - lo), threeQuarter = lo + 0.75 * (hi - lo)
     let gradient = Gradient(stops: [
@@ -215,7 +215,7 @@ private struct ExposurePainter {
       // The contrail first, so the gold is laid over it and it shows only on the blue.
       if exposure.miles, exposure.stage != .failed { drawContrail(in: &context) }
       if let alpha = scene.litAlpha?.sky {
-        context.fill(Path(frame), with: wash(Theme.Face.skyLit, alpha: alpha))
+        context.fill(Path(frame), with: wash(Theme.Face.skyLit, alpha: alpha, meet: ExposureScene.meet.sky))
       }
     } else if scene.bloomAlpha > 0 {
       var bloom = context
@@ -315,7 +315,7 @@ private struct ExposurePainter {
       guard let alpha = scene.litAlpha?.ground else { return }
       var ground = context
       ground.clip(to: below { scene.horizonY(at: $0) })
-      ground.fill(Path(frame), with: wash(Theme.Face.skyLit, alpha: alpha))
+      ground.fill(Path(frame), with: wash(Theme.Face.skyLit, alpha: alpha, meet: ExposureScene.meet.ground))
     } else if case .strip(_, let footTop) = scene.layout {
       let top = (footTop ?? 0.54 * height) - 8
       let scrim = Gradient(colors: [Theme.Face.ridgeFront.opacity(0), Theme.Face.ridgeFront.opacity(0.55)])
@@ -335,19 +335,31 @@ private struct ExposurePainter {
     guard strength > 0 else { return }
     let from = CGPoint(x: edge.from, y: 0), to = CGPoint(x: edge.to, y: 0)
     var veil = context
-    // Half way to grey, then a dusk cast taken from the brand's rose-mauve: the same shift by day and
-    // on the prints, so the lit edge is a step from light to shade, not from one sky to another.
-    veil.blendMode = .saturation
-    veil.fill(
-      Path(frame),
-      with: .linearGradient(
-        Gradient.smoothRamp(Theme.Face.veilGrey, peak: 0.5 * strength),
-        startPoint: from, endPoint: to))
-    veil.blendMode = .multiply
-    let cast = exposure.miles ? Theme.Face.veilMiles : Theme.Face.veilCashback
-    veil.fill(
-      Path(frame),
-      with: .linearGradient(Gradient.smoothRamp(cast, peak: strength), startPoint: from, endPoint: to))
+    switch scene.appearance {
+    case .print:
+      // Half way to grey, then a dusk cast taken from the brand's rose-mauve.
+      veil.blendMode = .saturation
+      veil.fill(
+        Path(frame),
+        with: .linearGradient(
+          Gradient.smoothRamp(Theme.Face.veilGrey, peak: 0.5 * strength),
+          startPoint: from, endPoint: to))
+      veil.blendMode = .multiply
+      let cast = exposure.miles ? Theme.Face.veilMiles : Theme.Face.veilCashback
+      veil.fill(
+        Path(frame),
+        with: .linearGradient(Gradient.smoothRamp(cast, peak: strength), startPoint: from, endPoint: to))
+    case .daytime:
+      // A cool dim that never darkens enough to break a floor. It meets the gold the same way the gold
+      // meets it: a tenth of it on the lit side, nine tenths beyond.
+      let alpha = (exposure.stage == .failed ? 0.14 : 0.15) * strength
+      let meet = ExposureScene.meet.sky
+      veil.fill(
+        Path(frame),
+        with: .linearGradient(
+          Gradient.smoothRamp(Theme.Face.veilDim, base: alpha * meet, peak: alpha * (1 - meet)),
+          startPoint: from, endPoint: to))
+    }
   }
 
   // MARK: Sun
@@ -481,13 +493,14 @@ struct RewardExposureAnimator: View {
 extension Gradient {
   /// A ramp from clear to `colour` at `peak` opacity, shaped like smoothstep so the veil's
   /// edge is soft at both ends rather than a straight line.
-  fileprivate static func smoothRamp(_ colour: Color, peak: Double) -> Gradient {
-    Gradient(stops: [
-      .init(color: colour.opacity(0), location: 0),
-      .init(color: colour.opacity(peak * 0.156), location: 0.25),
-      .init(color: colour.opacity(peak * 0.5), location: 0.5),
-      .init(color: colour.opacity(peak * 0.844), location: 0.75),
-      .init(color: colour.opacity(peak), location: 1),
+  fileprivate static func smoothRamp(_ colour: Color, base: Double = 0, peak: Double) -> Gradient {
+    let at = { (k: Double) in colour.opacity(base + (peak - base) * k) }
+    return Gradient(stops: [
+      .init(color: at(0), location: 0),
+      .init(color: at(0.156), location: 0.25),
+      .init(color: at(0.5), location: 0.5),
+      .init(color: at(0.844), location: 0.75),
+      .init(color: at(1), location: 1),
     ])
   }
 }
