@@ -41,6 +41,7 @@ extension Theme {
     static let horizon = named("Horizon")
 
     static let veilDim = named("VeilDim")
+    static let veilSky = named("VeilSky")
     static let veilGrey = named("VeilGrey")
     static let veilCashback = named("VeilCashback")
     static let veilMiles = named("VeilMiles")
@@ -112,6 +113,7 @@ private struct ExposurePainter {
     drawSky(in: &context)
     drawLight(in: &context)
     drawPour(in: &context)
+    drawSkyVeil(in: &context)
     drawHalo(in: &context)
     drawRidges(in: &context)
     drawGround(in: &context)
@@ -328,6 +330,23 @@ private struct ExposurePainter {
 
   // MARK: Veil
 
+  /// Light mode's unlit sky goes to white rather than a dimmed blue: a white wash clipped to the
+  /// sky, with the lit edge's shares (a tenth on the lit side, nine tenths beyond), under the halo,
+  /// the ridges and the sun. The failed sky stays overcast.
+  private func drawSkyVeil(in context: inout GraphicsContext) {
+    guard daytime, exposure.stage != .failed, let edge = scene.veilEdge else { return }
+    let strength = scene.veilStrength
+    guard strength > 0 else { return }
+    let meet = ExposureScene.meet.sky
+    var sky = context
+    sky.clip(to: above { scene.horizonY(at: $0) })
+    sky.fill(
+      Path(frame),
+      with: .linearGradient(
+        Gradient.smoothRamp(Theme.Face.veilSky, base: strength * meet, peak: strength * (1 - meet)),
+        startPoint: CGPoint(x: edge.from, y: 0), endPoint: CGPoint(x: edge.to, y: 0)))
+  }
+
   /// Underexposes the art right of the marker in the minimum journey, and everything when failed.
   private func drawVeil(in context: inout GraphicsContext) {
     guard let edge = scene.veilEdge else { return }
@@ -350,10 +369,12 @@ private struct ExposurePainter {
         Path(frame),
         with: .linearGradient(Gradient.smoothRamp(cast, peak: strength), startPoint: from, endPoint: to))
     case .daytime:
-      // A cool dim that never darkens enough to break a floor. It meets the gold the same way the gold
-      // meets it: a tenth of it on the lit side, nine tenths beyond.
+      // A cool dim on the ground (the sky goes to white instead, in drawSkyVeil) that never darkens
+      // enough to break a floor. It meets the gold the same way the gold meets it: a tenth of it on
+      // the lit side, nine tenths beyond.
       let alpha = (exposure.stage == .failed ? 0.14 : 0.15) * strength
       let meet = ExposureScene.meet.sky
+      veil.clip(to: below { scene.horizonY(at: $0) })
       veil.fill(
         Path(frame),
         with: .linearGradient(

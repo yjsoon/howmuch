@@ -316,12 +316,12 @@ The art is lit from the left edge to the marker and underexposed to its right wh
 - **Dark mode: dim and desaturate.** A dusk cast taken from the brand's rose-mauve:
   - one full-frame fill with blend mode `.saturation`, colour `VeilGrey` #808080 at alpha 0.5 × `veil` (half way to grey);
   - one full-frame fill with blend mode `.multiply`, from white to `VeilCashback` #D4CBD4 on the dusk print or `VeilMiles` #8A8496 on the night print, by `veil`.
-- **Light mode: gold over blue, on light ground.** The same `veil(x)` lays light on the lit side and a cool dim on the other, so progress reads as a change of hue (gold against blue) as well as of brightness. Since 10 Oct 2026 each side carries a share of the other (a tenth on the sky, a fifth on the ground), so with `m` that share:
-  - the sky is the daytime blue, and the unlit sky stays that blue under the dim;
+- **Light mode: gold over blue, white beyond the edge, on light ground.** The same `veil(x)` lays light on the lit side and a cool dim on the other, so progress reads as a change of hue (gold against blue, then white) as well as of brightness. Since 10 Oct 2026 each side carries a share of the other (a tenth on the sky, a fifth on the ground), so with `m` that share:
+  - the sky is the daytime blue; beyond the lit edge it goes to white (the owner's ask, 10 Oct 2026): a `VeilSky` #FFFFFF fill clipped to the sky at alpha `m + (1 − m) × veil`, `m` 0.1, drawn after the gold and the pour and before the halo and the ridges, so the unlit sky is white with a tenth of the blue left in it, and the lit sky takes a tenth of white. The failed sky stays overcast and gets none of it;
   - straight after the sky, one full-frame fill of `SkyLit` #FFD98C at alpha `(0.76 + 0.16 × v) × 0.9 × (1 − (1 − m) × veil)`, `m` 0.1: full on the lit side, a tenth of that beyond (more as the strip's sun lifts). The ridges are drawn over it, so it only shows on the sky;
   - after the ridges, a second `SkyLit` fill at `(0.24 + 0.12 × v) × 0.8 × (1 − (1 − m) × veil)`, `m` 0.2, clipped to the ridges, so the ground is sunlit to the marker and a fifth as much beyond it;
-  - after those, one full-frame fill of `VeilDim` #3D5674 at alpha 0.15 × (m + (1 − m) × `veil`) with `m` 0.1 (14% when failed): the unlit side cools and dims a little, and the lit side takes a tenth of that, but it never darkens enough to break a floor.
-- **Veil limits.** The dusk veil is deliberately gentle: it is capped so `InkCashback` keeps 6.6:1 on the darkest veiled dusk stop, because a long name can sit on the dim side. The night veil can be darker: it only raises contrast for light inks. In light mode the dim is 15% at most, which leaves dark ink at 5.8:1 or more on the dimmed sky and `UrgentInk` at 4.7:1 on the dimmed ground; the shares moved across the edge only lower contrast between the two sides, never against the ink.
+  - after those, one fill of `VeilDim` #3D5674 clipped to the ground at alpha 0.15 × (m + (1 − m) × `veil`) with `m` 0.1 (14% when failed): the unlit ground cools and dims a little, and the lit side takes a tenth of that, but it never darkens enough to break a floor. The sky gets no dim: it is white there instead.
+- **Veil limits.** The dusk veil is deliberately gentle: it is capped so `InkCashback` keeps 6.6:1 on the darkest veiled dusk stop, because a long name can sit on the dim side. The night veil can be darker: it only raises contrast for light inks. In light mode the dim is 15% at most, which leaves `UrgentInk` at 4.7:1 on the dimmed ground; the white unlit sky only raises contrast for the dark name ink; the shares moved across the edge only lower contrast between the two sides, never against the ink.
 - **Brightness grows with the climb.** Light mode: the gold deepens from 76% to 92% over the sky and from 24% to 36% over the ground. Dark mode: `Bloom` #FFE3AC at 30% × `v` over the sky (screen blend on the night print), and the horizon warmth × `(1 + 0.5 × v)`. Both: the crest strokes from 90% to 100% and the halo from 40% to 100%. At rest the band is lit but plain; at the cap it is at its brightest.
 - **The pour.** From `v` 0.4 a radial gradient centred on the sun's column at the top edge, from `SunDiscTop` at the centre through `SunCore` at 30% of the radius to nothing at the radius: the glow pouring down from a sun that has left the frame. Its alpha is `peak × clamp((v − 0.4) / 0.6)`, drawn over the sky only. Peak is 0.65 in light mode, 0.55 on the dusk print and 0.65 on the night print. Radius is 0.62 W on the strip, print and band and 0.78 W on the hero, except on the night print, where it is 0.35 W on every layout: the lab's wider pour takes `InkMiles` to 2.6:1 at the end of the name over the bloom, and 0.35 W keeps it at 5.0:1 or more. Light ink on the night print is the only pair that a pour can break; dark ink only gains.
 - **Calm:** no veil, no bloom and no pour, an even, softer light. In light mode, `SkyLit` at a steady 30% across the sky and 12% on the ground. **Failed:** `veil` 1 everywhere, plus the face's saturation 0.15. In light mode the sky is `SkyOvercast`, gets no gold, and the dim is 14% everywhere.
@@ -776,7 +776,8 @@ Each colour set is named for its role and, where it matters, the reward type, so
 | `SunCore` | #FFD382 | same | same | `--sun-core` |
 | `Ring1` to `Ring4` | #FFD27A at 78%, #FFA452 at 28%, #F08446 at 14%, #D8604A at 7% | same | same | `--face-ring-1` to `--face-ring-4` |
 | `Horizon` | #FFAD5C at 17%; over the blue it reads as a warm haze | same | same | `--face-horizon` |
-| `VeilDim` | #3D5674 at 15% × (0.1 + 0.9 × `veil`) (14% when failed): the cool dim right of the marker, a tenth of it left of it | same; not drawn | same | new `--face-veil-dim` |
+| `VeilDim` | #3D5674 at 15% × (0.1 + 0.9 × `veil`) (14% when failed), clipped to the ground: the cool dim right of the marker, a tenth of it left of it | same; not drawn | same | new `--face-veil-dim` |
+| `VeilSky` | #FFFFFF at (0.1 + 0.9 × `veil`), clipped to the sky: the unlit sky goes to white; not drawn when failed | same; not drawn | same | new `--face-veil-sky` |
 | `VeilGrey` | #808080 (saturation blend, alpha 0.5 × `veil`); not drawn | #808080, saturation blend, alpha 0.5 × `veil` | same | new `--face-veil-grey` |
 | `VeilCashback` | #FFFFFF; not drawn | #D4CBD4, multiply, whole frame | same | new `--face-veil-cashback` |
 | `VeilMiles` | #FFFFFF; not drawn | #8A8496, multiply, whole frame | same | new `--face-veil-miles` |
@@ -797,7 +798,7 @@ Version 1's `Afterglow`, `Dim`, `PaceDay` and `PaceNight` are not needed. Versio
 | Contrail | Miles, unless failed: after the sky, before the sky's gold | None |
 | Gold on the sky | `SkyLit` at `(0.76 + 0.16 × v) × (1 − veil)`; 0.42 evenly when calm; none when failed | None |
 | Gold on the ground | `SkyLit` at `(0.24 + 0.12 × v) × (1 − veil)`, clipped to the ridges; 0.16 evenly when calm; none when failed | None |
-| Veil | `VeilDim` at 15%, whole frame, normal blend | Whole frame, desaturation and multiply |
+| Veil | `VeilSky` white on the sky, `VeilDim` at 15% on the ground, normal blend | Whole frame, desaturation and multiply |
 | Foot scrim | None | `RidgeFront` at 55%, strip only |
 | Rings and core glow | Screen | Screen on miles, normal on cashback |
 | Bloom | None | `Bloom` at 30% × `v`: screen on miles, normal on cashback |
@@ -1062,6 +1063,7 @@ The rounding and Singapore-day rules have edge cases no fixture reaches.
   | `--face-lit` | `#ffd98c` | `transparent` |
   | `--face-contrail` | `#ffffff73` | `transparent` |
   | `--face-veil-dim` | `#3d567426` | `transparent` |
+  | `--face-veil-sky` | `#ffffff` | `transparent` |
   | `--face-veil-cashback` | `#ffffff` | `#d4cbd4` |
   | `--face-veil-miles` | `#ffffff` | `#8a8496` |
   | `--face-veil-grey` | `transparent` | `#808080` |
@@ -1090,7 +1092,7 @@ The rounding and Singapore-day rules have edge cases no fixture reaches.
 
 - **The pour.** One `<rect>` over the sky filled with a radial gradient centred at the sun's column on the top edge (`--sun-disc-1` at the centre, `--sun-core` at 30% of the radius, nothing at the radius); the tween writes its opacity (`peak × clamp((v − 0.4) / 0.6)`, the peak from `--face-pour-cashback` or `--face-pour-miles`) and its radius (0.62 W, hero and desktop face 0.78 W, miles in dark mode 0.35 W). The bloom's own opacity is `0.3 × v`, dark mode only.
 - **Rings.** The halo's radius is `R = (0.14 + 0.24 × v) × W` (on the phone strip also capped at `(0.42 + 0.6 × v)` of the height), so there is no ring gating attribute: the tween writes `--halo-r`.
-- **Veil.** Light mode: one `<rect>` across the face with a horizontal gradient from `(h − 0.04)` to `(h + 0.04)` of the width, filled with `--face-veil-dim` (`transparent` in dark mode). Dark mode: two `<rect>`s with the same gradient, one with `mix-blend-mode: saturation` (`--face-veil-grey`), one with `mix-blend-mode: multiply` (`--face-veil-cashback` or `--face-veil-miles` by `data-type`; white in light mode, where the pair is not drawn). The face is already `isolation: isolate`. Every stage but `gate` and `failed` hides them; `[data-stage="failed"]` sets them to full strength everywhere, with the light-mode dim at 14%.
+- **Veil.** Light mode: one `<rect>` clipped to the sky with a horizontal gradient from `(h − 0.04)` to `(h + 0.04)` of the width, filled with `--face-veil-sky` (white; `transparent` in dark mode), and one clipped to the ground filled with `--face-veil-dim` (`transparent` in dark mode). Dark mode: two `<rect>`s with the same gradient, one with `mix-blend-mode: saturation` (`--face-veil-grey`), one with `mix-blend-mode: multiply` (`--face-veil-cashback` or `--face-veil-miles` by `data-type`; white in light mode, where the pair is not drawn). The face is already `isolation: isolate`. Every stage but `gate` and `failed` hides them; `[data-stage="failed"]` sets them to full strength everywhere, with the light-mode dim at 14%.
 - **States.**
   - Delete the `[data-tone="complete"]` sunset rules (`:649-664`): a cap is now `[data-stage="capped"]`, with the sun off the top, the gold and the pour, and no dim.
   - `[data-mono]` replaces `saturate(0.35)` (`:666-668`) with 0.15, and hides the sun and halo.

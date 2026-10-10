@@ -91,6 +91,7 @@
   /* Gold laid over the blue to the marker and the cool dim beyond it; each side carries a share of the other (the scene). */
   --face-lit: #ffd98c; --face-contrail: #ffffff73; --face-veil-dim: #3d567426;
   --face-veil-cashback: #ffffff; --face-veil-miles: #ffffff; --face-veil-grey: transparent; --face-bloom: transparent;
+  --face-veil-sky: #ffffff; /* the unlit sky goes to white, not to a dimmed blue */
   --face-cashback-blend: screen; --face-pour-cashback: 0.65; --face-pour-miles: 0.65;
   /* One warm white line on the sky and the ground alike, over a faint dark edge. */
   --face-marker-cashback: #fff8e6d9; --face-marker-miles: #fff8e6d9; --face-marker-ridge: #fff8e6d9; --face-marker-edge: #1c1b181f;
@@ -161,6 +162,7 @@
   --face-scrim: #1e44338c;
   --face-lit: transparent; --face-contrail: transparent; --face-veil-dim: transparent;
   --face-veil-cashback: #d4cbd4; --face-veil-miles: #8a8496; --face-veil-grey: #808080; --face-bloom: #ffe3ac;
+  --face-veil-sky: transparent;
   --face-cashback-blend: screen; --face-pour-cashback: 0.45; --face-pour-miles: 0.65;
   --face-marker-cashback: #ffd98c59; --face-marker-miles: #ffd98c59; --face-marker-ridge: #f7f5ef33; --face-marker-edge: transparent;
   /* The prints' sun is a gold going to orange, not the daytime's near-white: lighter than its amber sky, never glaring on it. */
