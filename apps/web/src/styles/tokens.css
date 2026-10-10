@@ -78,8 +78,8 @@
   /* Brand artwork: Rewards card faces (Sun Arc v3). They follow the mode and never the look: daytime
      faces here, the night (miles) and dusk (cashback) prints in the dark block below. rewards-board.css
      has no data-mode selector; these tokens carry the mode. */
-  --face-cashback-sky: linear-gradient(165deg, #b3c5d1 0%, #cdd8df 48%, #ebe6dd 100%);   /* a warm, soft haze: a grey-blue close to the gold's value */
-  --face-miles-sky: linear-gradient(165deg, #9fbad2 0%, #bfd3e3 48%, #dcebf6 100%);      /* higher, cooler, clearer, but still soft against the gold */
+  --face-cashback-sky: linear-gradient(165deg, #c6bcae 0%, #d9d1c5 48%, #ece6dc 100%);   /* a warm haze: a sand grey, so the gold's edge is a step of warmth */
+  --face-miles-sky: linear-gradient(165deg, #aab7c2 0%, #c6ced5 48%, #e0e0dc 100%);      /* higher and cooler, a dusty blue that still sits near the gold */
   --face-overcast: linear-gradient(165deg, #d6d8d9 0%, #e1e2e0 48%, #ecebe7 100%);       /* the failed sky */
   /* Dark ink on every daytime sky and on the sunlit ground. */
   --face-cashback-ink: #1c1b18; --face-miles-ink: #1c1b18; --face-foot-ink: #1c1b18;
@@ -88,7 +88,7 @@
   --face-crest-target: 0.4; --face-crest-spend: 0.75; --face-crest-merged: 0.9;
   --face-scrim: transparent;
   /* Gold laid over the blue to the marker, the cool dim beyond it, and the contrail (miles). */
-  --face-lit: #ffd98c; --face-contrail: #ffffff73; --face-veil-dim: #3d567426;
+  --face-lit: #ffd98c; --face-contrail: #ffffff73; --face-veil-dim: #6a4a3826;   /* the dim beyond the edge is a warm brown, not a blue */
   --face-veil-cashback: #ffffff; --face-veil-miles: #ffffff; --face-veil-grey: transparent; --face-bloom: transparent;
   --face-cashback-blend: screen; --face-pour-cashback: 0.65; --face-pour-miles: 0.65;
   /* One warm white line on the sky and the ground alike, over a faint dark edge. */
@@ -151,21 +151,21 @@
   --tone-needs: #f1b566; --tone-needs-wash: #46351a;
 
   /* Rewards faces, dark mode: the night print (miles) and the dusk print (cashback), the deep ridges, light foot inks. */
-  --face-cashback-sky: linear-gradient(165deg, #efe2cf 0%, #ead4ad 48%, #e2c48f 100%);
+  --face-cashback-sky: linear-gradient(165deg, #7a4420 0%, #5a3016 48%, #3f2211 100%);   /* the dusk print: a deep amber, never a pale cream against the dark chrome */
   --face-miles-sky: linear-gradient(165deg, #1c2013 0%, #141c12 48%, #0b1710 100%);
   --face-overcast: none;
-  --face-cashback-ink: #1c1b18; --face-miles-ink: #f7f5ef; --face-foot-ink: #f7f5ef;
+  --face-cashback-ink: #f7f5ef; --face-miles-ink: #f7f5ef; --face-foot-ink: #f7f5ef;
   --face-foot-soft: #d4e2d9; --face-urgent-ink: #ffd98c; --face-failed-ink: #ffabae;
   --ridge-back: #2a6648; --ridge-front: #1e4433;
   --face-scrim: #1e44338c;
   --face-lit: transparent; --face-contrail: transparent; --face-veil-dim: transparent;
-  --face-veil-cashback: #d4cbd4; --face-veil-miles: #8a8496; --face-veil-grey: #808080; --face-bloom: #ffe3ac;
-  --face-cashback-blend: normal; --face-pour-cashback: 0.55; --face-pour-miles: 0.65;
-  --face-marker-cashback: #94591a8c; --face-marker-miles: #ffd98c59; --face-marker-ridge: #f7f5ef33; --face-marker-edge: transparent;
-  /* The prints' sun is a dark orange, not the daytime's near-white: it must not be the brightest thing on a dusk sky. */
-  --sun-core: #d9823a; --sun-rim: #7a3a0f;
-  --sun-disc-1: #f0a24e; --sun-disc-2: #c4651c; --sun-rise-1: #e58f3c; --sun-rise-2: #ad4f18;
-  --sun-gate-core: #c96a1f;
+  --face-veil-cashback: #b0a6b6; --face-veil-miles: #8a8496; --face-veil-grey: #808080; --face-bloom: #ffe3ac;
+  --face-cashback-blend: screen; --face-pour-cashback: 0.45; --face-pour-miles: 0.65;
+  --face-marker-cashback: #ffd98c59; --face-marker-miles: #ffd98c59; --face-marker-ridge: #f7f5ef33; --face-marker-edge: transparent;
+  /* The prints' sun is a gold going to orange, not the daytime's near-white: lighter than its amber sky, never glaring on it. */
+  --sun-core: #f0b35a; --sun-rim: #8a4a18;
+  --sun-disc-1: #ffd27a; --sun-disc-2: #e8923a; --sun-rise-1: #f7b35c; --sun-rise-2: #c4651c;
+  --sun-gate-core: #d9823a;
 }
 
 /* Increase Contrast: the Rewards faces' High Contrast colours. Light mode lightens the ground and darkens its foot inks;

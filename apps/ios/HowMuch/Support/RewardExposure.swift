@@ -289,12 +289,13 @@ struct ExposureScene {
   var pour: (alpha: Double, radius: Double)? {
     guard exposure.hasSun, exposure.light == .journey else { return nil }
     let night = appearance == .print && exposure.miles
-    let peak = appearance == .print && !exposure.miles ? 0.55 : 0.65
+    let peak = appearance == .print && !exposure.miles ? 0.45 : 0.65
     let alpha = peak * min(1, max(0, (pose.v - 0.4) / 0.6))
     guard alpha > 0 else { return nil }
     return (alpha, (night ? 0.35 : 0.62) * width)
   }
 
   /// Rings and glow add light by screen blend, except on the dusk print.
-  var glowScreens: Bool { appearance == .daytime || exposure.miles }
+  /// Every face adds light: the daytime skies, the night print and, since it went amber, the dusk print.
+  var glowScreens: Bool { true }
 }

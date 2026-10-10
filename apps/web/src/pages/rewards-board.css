@@ -616,7 +616,7 @@
   fill: var(--sun-core);
 }
 
-/* Light adds: screen on every daytime face and on the night print; the dusk print keeps the normal blend. */
+/* Light adds: screen on every face (the token carries the dusk print's blend, screen since it went amber). */
 .rw-halo,
 .rw-pour,
 .rw-bloom {
