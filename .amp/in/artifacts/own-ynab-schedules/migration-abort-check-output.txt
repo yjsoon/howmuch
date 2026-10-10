@@ -1,0 +1,3 @@
+good lines applied; lines: 2
+null-amount line ABORTED SQLiteError: CHECK constraint failed: ynab_sourced IN (0, 1) | recorded: 0
+deleted line only applied; lines: 0

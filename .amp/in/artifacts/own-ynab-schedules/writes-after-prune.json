@@ -10,11 +10,8 @@
     "amount": -700
   },
   "splitAfterLineReplacingReimport": {
-    "lines": [
-      "a",
-      "b"
-    ],
-    "total": -90000,
+    "lines": [],
+    "total": 0,
     "amount": -90000
   },
   "newFromSync": {

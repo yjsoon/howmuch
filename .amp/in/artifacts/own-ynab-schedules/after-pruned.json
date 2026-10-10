@@ -39,25 +39,7 @@
       "category_id": null,
       "memo": "split",
       "deleted": false,
-      "subtransactions": [
-        {
-          "id": "a",
-          "scheduled_transaction_id": "sched-split",
-          "amount": -60000,
-          "category_id": "food",
-          "payee_id": "grocer",
-          "memo": "line a",
-          "deleted": false
-        },
-        {
-          "id": "b",
-          "scheduled_transaction_id": "sched-split",
-          "amount": -30000,
-          "category_id": "rent",
-          "memo": "line b",
-          "deleted": false
-        }
-      ]
+      "subtransactions": []
     },
     {
       "id": "sched-monthly",
@@ -134,23 +116,6 @@
       "scheduled_transaction_id": "created-local",
       "category_name": "Food",
       "deleted": false
-    },
-    {
-      "id": "a",
-      "scheduled_transaction_id": "sched-split",
-      "amount": -60000,
-      "category_id": "food",
-      "payee_id": "grocer",
-      "memo": "line a",
-      "deleted": false
-    },
-    {
-      "id": "b",
-      "scheduled_transaction_id": "sched-split",
-      "amount": -30000,
-      "category_id": "rent",
-      "memo": "line b",
-      "deleted": false
     }
   ],
   "singles": {
@@ -189,25 +154,7 @@
         "category_id": null,
         "memo": "split",
         "deleted": false,
-        "subtransactions": [
-          {
-            "id": "a",
-            "scheduled_transaction_id": "sched-split",
-            "amount": -60000,
-            "category_id": "food",
-            "payee_id": "grocer",
-            "memo": "line a",
-            "deleted": false
-          },
-          {
-            "id": "b",
-            "scheduled_transaction_id": "sched-split",
-            "amount": -30000,
-            "category_id": "rent",
-            "memo": "line b",
-            "deleted": false
-          }
-        ]
+        "subtransactions": []
       }
     },
     "sched-deleted": {

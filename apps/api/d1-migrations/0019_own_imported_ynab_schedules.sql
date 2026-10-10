@@ -138,12 +138,16 @@ WHERE s.object_type = 'scheduled_subtransaction'
 
 UPDATE scheduled_transaction_edits SET created_at = updated_at WHERE created_at = 'ynab-schedule-copy';
 
--- 4. Refuse to finish with a mirrored schedule that has no edit row. Keep this
--- the last statement: some runners report only the last statement's error, so
--- an earlier INSERT that failed is caught here by its effect. It sets an
--- impossible `ynab_sourced` value, which the column's CHECK rejects, only if
--- the copy missed a schedule; otherwise it matches no row. A failure aborts
--- and rolls back the whole migration.
+-- 4. Refuse to finish with a mirrored schedule or live line that has no owned
+-- row. Keep this the last statement: some runners report only the last
+-- statement's error, so an earlier INSERT that failed is caught here by its
+-- effect. It sets an impossible `ynab_sourced` value, which the column's CHECK
+-- rejects, only if something was missed; otherwise it matches no row. A failure
+-- aborts and rolls back the whole migration.
+--
+-- A schedule copied above is recognisable by its payload equal to the mirror's
+-- and its timestamps equal to the mirror row's; an overlay written by the app
+-- has a later `updated_at`, so its own set of lines is not second-guessed.
 UPDATE plans SET ynab_sourced = 2
 WHERE EXISTS (
   SELECT 1 FROM ynab_raw_objects r
@@ -151,5 +155,24 @@ WHERE EXISTS (
     AND NOT EXISTS (
       SELECT 1 FROM scheduled_transaction_edits e
       WHERE e.plan_id = r.plan_id AND e.id = r.object_id
+    )
+)
+OR EXISTS (
+  SELECT 1 FROM ynab_raw_objects s
+  JOIN ynab_raw_objects r
+    ON r.plan_id = s.plan_id AND r.object_type = 'scheduled_transaction'
+   AND r.object_id = json_extract(s.payload_json, '$.scheduled_transaction_id')
+  JOIN scheduled_transaction_edits e
+    ON e.plan_id = r.plan_id AND e.id = r.object_id
+   AND e.payload_json = r.payload_json
+   AND e.updated_at = r.updated_at
+   AND e.created_at = e.updated_at
+  WHERE s.object_type = 'scheduled_subtransaction'
+    AND COALESCE(json_extract(s.payload_json, '$.deleted'), 0) = 0
+    AND NOT EXISTS (
+      SELECT 1 FROM scheduled_subtransaction_edits l
+      WHERE l.plan_id = s.plan_id
+        AND l.scheduled_transaction_id = e.id
+        AND l.id = COALESCE(json_extract(s.payload_json, '$.id'), s.object_id)
     )
 );
