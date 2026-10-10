@@ -583,7 +583,7 @@ The JSON archive (`format: "howmuch-export"`, `version: 1`) has:
 - `plan` and `settings`: as `GET /v1/plans/{plan_id}` and `GET /v1/plans/{plan_id}/settings` return them.
 - `snapshot` and `server_knowledge`: exactly what `export_snapshot` returns (below).
 - `account_preferences`: the caller's own account organisation, or `null` for the API token or when none was saved. Other members' preferences are not included.
-- `rewards`: `cards` (the Rewards card set), `tracker_snapshot` (the stored Rewards Tracker import, or `null`), `imported_at`, `updated_at`.
+- `rewards`: `cards` (the Rewards card set), `tracker_snapshot` (the stored Rewards Tracker import, or `null`), `imported_at`, `updated_at`. Both copies drop, at any depth, keys that look like credentials (`token`, `secret`, `password`, `mnemonic`, `credential`, `api key`, `cloud sync`, `pat`, `authorization`) and cached YNAB data (`cachedData`), as the portable Rewards export does.
 
 Passwords, sessions, API tokens and other users are never included. Because `import_snapshot` reads the `snapshot` key of its body, the archive file can be posted to it unchanged to restore the ledger into an empty plan. Preferences and Rewards cards are then restored through their own endpoints.
 
