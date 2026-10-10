@@ -84,14 +84,14 @@
   /* Dark ink on every daytime sky and on the sunlit ground. */
   --face-cashback-ink: #1c1b18; --face-miles-ink: #1c1b18; --face-foot-ink: #1c1b18;
   --face-foot-soft: #2c3832; --face-urgent-ink: #5a2f00; --face-failed-ink: #701510;
-  --ridge-back: #a9d6b1; --ridge-front: #86c396; --ridge-crest: #ffd98c;
+  --ridge-back: #9dc5a8; --ridge-front: #80b591; --ridge-crest: #ffd98c;   /* the former unlit greens, now the whole floor */
   --face-crest-target: 0.4; --face-crest-spend: 0.75; --face-crest-merged: 0.9;
   --face-scrim: transparent;
   /* Gold laid over the blue to the marker, the cool dim beyond it, and the contrail (miles). */
   /* Gold laid over the blue to the marker and the cool dim beyond it; each side carries a share of the other (the scene). */
   --face-lit: #ffd98c; --face-contrail: #ffffff73; --face-veil-dim: #3d567426;
   --face-veil-cashback: #ffffff; --face-veil-miles: #ffffff; --face-veil-grey: transparent; --face-bloom: transparent;
-  --face-veil-sky: #ffffff; /* the unlit sky goes to white, not to a dimmed blue */
+  --face-veil-sky: #ec9440; /* the unlit sky goes to orange, not to a dimmed blue */
   --face-cashback-blend: screen; --face-pour-cashback: 0.65; --face-pour-miles: 0.65;
   /* One warm white line on the sky and the ground alike, over a faint dark edge. */
   --face-marker-cashback: #fff8e6d9; --face-marker-miles: #fff8e6d9; --face-marker-ridge: #fff8e6d9; --face-marker-edge: #1c1b181f;

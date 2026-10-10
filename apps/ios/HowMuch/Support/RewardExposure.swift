@@ -281,21 +281,21 @@ struct ExposureScene {
   /// The veil's peak, 0 to 1: full while the sun rides, fading as it lifts; a failed card keeps it.
   var veilStrength: Double { exposure.stage == .failed ? 1 : 1 - lifted }
 
-  /// Light mode: the gold over the sky and the ground as peak alphas, or nil when there is none.
-  var litAlpha: (sky: Double, ground: Double)? {
+  /// Light mode: the gold over the sky as a peak alpha, or nil when there is none. The ground is never lit.
+  var litAlpha: Double? {
     guard appearance == .daytime else { return nil }
     switch exposure.light {
     case .overcast: return nil
-    // Version 3's peaks with each side of the lit edge moved towards the other as a colour: the lit side
-    // keeps 0.9 (sky) and 0.8 (ground) of its gold; the unlit side carries the rest (`ExposureScene.meet`).
-    case .even: return (0.42 * 0.9, 0.16 * 0.8)
-    case .journey: return ((0.76 + 0.16 * pose.v) * 0.9, (0.24 + 0.12 * pose.v) * 0.8)
+    // Version 3's peak with each side of the lit edge moved towards the other as a colour: the lit sky
+    // keeps 0.9 of its gold; the unlit sky carries the rest (`ExposureScene.meet`).
+    case .even: return 0.42 * 0.9
+    case .journey: return (0.76 + 0.16 * pose.v) * 0.9
     }
   }
 
-  /// How far each side of the lit edge is moved towards the other, as a colour: the unlit side carries this
-  /// share of the gold and the lit side this share of the dim. A tenth on the sky, a fifth on the ground.
-  static let meet = (sky: 0.1, ground: 0.2)
+  /// How far each side of the lit edge is moved towards the other, as a colour: the unlit sky carries this
+  /// share of the gold and the lit sky this share of the orange. A tenth.
+  static let meet = 0.1
 
   /// Dark mode: the bloom's alpha over the sky.
   var bloomAlpha: Double {

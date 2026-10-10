@@ -66,9 +66,9 @@ function normalised(table: readonly number[]): number[] {
   const lo = Math.min(...table), hi = Math.max(...table);
   return table.map((y) => (y - lo) / (hi - lo));
 }
-/** How far each side of the lit edge is moved towards the other, as a colour: the unlit side carries this share of
- *  the gold, and the lit side this share of the dim. A tenth on the sky, a fifth on the ground (the owner's ask). */
-export const MEET = { sky: 0.1, ground: 0.2 } as const;
+/** How far each side of the lit edge is moved towards the other, as a colour: the unlit sky carries this share of
+ *  the gold, and the lit sky this share of the orange. A tenth (the owner's ask). The ground is not lit. */
+export const MEET = 0.1;
 
 /** The brand back ridge's rise, 1 at the left edge and 0 at the right: the phone strip's horizons take its shape. */
 export const BACK_RISE = normalised(BACK_CREST);
@@ -97,7 +97,7 @@ export interface Scene {
   halo: { visible: boolean; opacity: number; soft: boolean; rings: [number, number, number, number]; core: number };
   /** Gold laid over the sky and the ground: peak alphas and the gradient offsets (shares of the width).
    *  `beyond` is the share of each peak kept right of the marker: the meeting share, or the strip's lift once larger. */
-  gold: { sky: number; ground: number; from: number; to: number; whole: boolean; beyond: { sky: number; ground: number } };
+  gold: { sky: number; from: number; to: number; whole: boolean; beyond: number };
   /** The underexposure right of the marker (the minimum journey), or everywhere when failed. `strength` is its
    *  peak, 0 to 1: the strip lets the last of the band light as the sun lifts, so no sliver is left at the edge. */
   veil: { on: boolean; from: number; to: number; whole: boolean; failed: boolean; strength: number };
@@ -189,14 +189,12 @@ export function exposureScene(layout: SceneLayout, ex: Exposure, pose: Pose, opt
   const even = ex.light === "even";
   const from = clamp01(pose.h - 0.04), to = clamp01(pose.h + 0.04);
   const whole = !gate;
-  // The gold's peaks are version 3's (sky 0.76 + 0.16 v, ground 0.24 + 0.12 v; calm 0.42 and 0.16) with each
-  // side of the lit edge moved towards the other as a colour: by a tenth on the sky and a fifth on the ground.
-  // So the lit side keeps 0.9 (0.8) of its gold, and the unlit side carries 0.1 (0.2) of it; the dim does the
-  // same the other way (ExposureFace). The strip's lift lets more of the gold past the edge as the sun clears.
-  const gold = failed ? { sky: 0, ground: 0 }
-    : even ? { sky: 0.42 * 0.9, ground: 0.16 * 0.8 }
-    : { sky: (0.76 + 0.16 * v) * 0.9, ground: (0.24 + 0.12 * v) * 0.8 };
-  const beyond = { sky: Math.max(MEET.sky, lifted), ground: Math.max(MEET.ground, lifted) };
+  // The gold's peak is version 3's (0.76 + 0.16 v; calm 0.42) with each side of the lit edge moved towards the
+  // other as a colour, by a tenth: the lit sky keeps 0.9 of its gold and the unlit sky carries 0.1 of it, and the
+  // orange does the same the other way (ExposureFace). The ground is never lit: it keeps the former unlit greens
+  // across the whole floor (the owner's ask). The strip's lift lets more of the gold past the edge as the sun clears.
+  const gold = failed ? 0 : even ? 0.42 * 0.9 : (0.76 + 0.16 * v) * 0.9;
+  const beyond = Math.max(MEET, lifted);
 
   const sunOn = ex.hasSun;
   const markerOn = ex.hasMarker && pose.h < 1 && !strip;
@@ -222,7 +220,7 @@ export function exposureScene(layout: SceneLayout, ex: Exposure, pose: Pose, opt
     merged,
     sun: { visible: sunOn, x: sunPx.x, y: sunPx.y, r, rising: gate },
     halo: { visible: sunOn, opacity: 0.4 + 0.6 * v, soft: strip, rings: [R * 0.92, R * 0.68, R * 0.46, R * 0.27], core: R * 0.15 },
-    gold: { ...gold, from: whole ? 0 : from, to: whole ? 1 : to, whole, beyond },
+    gold: { sky: gold, from: whole ? 0 : from, to: whole ? 1 : to, whole, beyond },
     veil: { on: gate || failed, from, to, whole: failed, failed, strength: failed ? 1 : 1 - lifted },
     bloom: sunOn ? 0.3 * v : 0,
     horizonBoost: sunOn ? 0.5 * v : 0,

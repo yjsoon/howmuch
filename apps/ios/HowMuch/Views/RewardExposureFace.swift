@@ -192,7 +192,7 @@ private struct ExposurePainter {
   /// A wash of `colour` across the whole frame: to the lit edge in the minimum
   /// journey, with the soft falloff, and end to end from then on. Beyond the edge it
   /// keeps the share the sun's lift has already lit, so no sliver is left at the edge.
-  private func wash(_ colour: Color, alpha: Double, meet: Double) -> GraphicsContext.Shading {
+  private func wash(_ colour: Color, alpha: Double) -> GraphicsContext.Shading {
     let solid = colour.opacity(alpha)
     guard scene.inMinimumJourney else {
       return .color(solid)
@@ -200,7 +200,7 @@ private struct ExposurePainter {
     // The wash falls to the same colour at a lower alpha, never to clear, so the falloff does not pass through grey.
     let lo = min(1, max(0, pose.h - 0.04))
     let hi = min(1, max(0, pose.h + 0.04))
-    let beyond = alpha * max(meet, scene.lifted)
+    let beyond = alpha * max(ExposureScene.meet, scene.lifted)
     // Smoothstep between lo and hi: quarter points sit at 15.6% and 84.4% of the way.
     let quarter = lo + 0.25 * (hi - lo), threeQuarter = lo + 0.75 * (hi - lo)
     let gradient = Gradient(stops: [
@@ -216,8 +216,8 @@ private struct ExposurePainter {
     if daytime {
       // The contrail first, so the gold is laid over it and it shows only on the blue.
       if exposure.miles, exposure.stage != .failed { drawContrail(in: &context) }
-      if let alpha = scene.litAlpha?.sky {
-        context.fill(Path(frame), with: wash(Theme.Face.skyLit, alpha: alpha, meet: ExposureScene.meet.sky))
+      if let alpha = scene.litAlpha {
+        context.fill(Path(frame), with: wash(Theme.Face.skyLit, alpha: alpha))
       }
     } else if scene.bloomAlpha > 0 {
       var bloom = context
@@ -310,14 +310,11 @@ private struct ExposurePainter {
     context.stroke(line(spend), with: .color(Theme.Face.crest.opacity(crest)), lineWidth: 1.5)
   }
 
-  /// Light mode: the ground is sunlit to the marker. Dark mode, strip only: a scrim
-  /// keeps light ink off a light sky wherever the foot ends up.
+  /// Dark mode, strip only: a scrim keeps light ink off a light sky wherever the foot ends up.
+  /// Light mode's ground is never lit: it keeps one pair of greens across the whole floor.
   private func drawGround(in context: inout GraphicsContext) {
     if daytime {
-      guard let alpha = scene.litAlpha?.ground else { return }
-      var ground = context
-      ground.clip(to: below { scene.horizonY(at: $0) })
-      ground.fill(Path(frame), with: wash(Theme.Face.skyLit, alpha: alpha, meet: ExposureScene.meet.ground))
+      return
     } else if case .strip(_, let footTop) = scene.layout {
       let top = (footTop ?? 0.54 * height) - 8
       let scrim = Gradient(colors: [Theme.Face.ridgeFront.opacity(0), Theme.Face.ridgeFront.opacity(0.55)])
@@ -330,14 +327,14 @@ private struct ExposurePainter {
 
   // MARK: Veil
 
-  /// Light mode's unlit sky goes to white rather than a dimmed blue: a white wash clipped to the
+  /// Light mode's unlit sky goes to orange rather than a dimmed blue: an orange wash clipped to the
   /// sky, with the lit edge's shares (a tenth on the lit side, nine tenths beyond), under the halo,
   /// the ridges and the sun. The failed sky stays overcast.
   private func drawSkyVeil(in context: inout GraphicsContext) {
     guard daytime, exposure.stage != .failed, let edge = scene.veilEdge else { return }
     let strength = scene.veilStrength
     guard strength > 0 else { return }
-    let meet = ExposureScene.meet.sky
+    let meet = ExposureScene.meet
     var sky = context
     sky.clip(to: above { scene.horizonY(at: $0) })
     sky.fill(
@@ -369,17 +366,11 @@ private struct ExposurePainter {
         Path(frame),
         with: .linearGradient(Gradient.smoothRamp(cast, peak: strength), startPoint: from, endPoint: to))
     case .daytime:
-      // A cool dim on the ground (the sky goes to white instead, in drawSkyVeil) that never darkens
-      // enough to break a floor. It meets the gold the same way the gold meets it: a tenth of it on
-      // the lit side, nine tenths beyond.
-      let alpha = (exposure.stage == .failed ? 0.14 : 0.15) * strength
-      let meet = ExposureScene.meet.sky
-      veil.clip(to: below { scene.horizonY(at: $0) })
-      veil.fill(
-        Path(frame),
-        with: .linearGradient(
-          Gradient.smoothRamp(Theme.Face.veilDim, base: alpha * meet, peak: alpha * (1 - meet)),
-          startPoint: from, endPoint: to))
+      // The failed face only: a cool 14% dim over the whole frame, which never darkens enough to break
+      // a floor. The minimum journey's unlit sky goes to orange instead (drawSkyVeil) and the ground
+      // is one pair of greens throughout, so nothing else is dimmed.
+      guard exposure.stage == .failed else { return }
+      veil.fill(Path(frame), with: .color(Theme.Face.veilDim.opacity(0.14 * strength)))
     }
   }
 

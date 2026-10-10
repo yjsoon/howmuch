@@ -177,7 +177,6 @@ const SceneSvg = memo(function SceneSvg({ uid, svgRef, w, h }: { uid: string; sv
           <stop offset="0" style={{ stopColor: "var(--sun-rise-1)" }} /><stop offset="1" style={{ stopColor: "var(--sun-rise-2)" }} />
         </linearGradient>
         <linearGradient id={`${uid}-gs`} gradientUnits="userSpaceOnUse" x1="0" y1="0" data-p="gsGrad" x2="1" y2="0">{stops("gs", "var(--face-lit)")}</linearGradient>
-        <linearGradient id={`${uid}-gg`} gradientUnits="userSpaceOnUse" x1="0" y1="0" data-p="ggGrad" x2="1" y2="0">{stops("gg", "var(--face-lit)")}</linearGradient>
         <linearGradient id={`${uid}-vs`} gradientUnits="userSpaceOnUse" x1="0" y1="0" data-p="vsGrad" x2="1" y2="0">{stops("vs", "var(--face-veil-sky)")}</linearGradient>
         <linearGradient id={`${uid}-vd`} gradientUnits="userSpaceOnUse" x1="0" y1="0" data-p="vdGrad" x2="1" y2="0">{stops("vd", "var(--face-veil-dim)")}</linearGradient>
         <linearGradient id={`${uid}-vg`} gradientUnits="userSpaceOnUse" x1="0" y1="0" data-p="vgGrad" x2="1" y2="0">{stops("vg", "var(--face-veil-grey)")}</linearGradient>
@@ -222,8 +221,7 @@ const SceneSvg = memo(function SceneSvg({ uid, svgRef, w, h }: { uid: string; sv
       <path data-p="bcrest" className="rw-crest-target" d="" />
       <path data-p="front" className="rw-ridge-front" d="" />
       <path data-p="crest" className="rw-crest" d="" />
-      <g clipPath={ref("ground")}><rect data-p="goldGround" className="rw-gold" width={w} height={h} fill={ref("gg")} /></g>
-      <g clipPath={ref("ground")}><rect data-p="vDim" className="rw-veil-dim" width={w} height={h} fill={ref("vd")} /></g>
+      <rect data-p="vDim" className="rw-veil-dim" width={w} height={h} fill={ref("vd")} />
       <rect data-p="vGrey" className="rw-veil-grey" width={w} height={h} fill={ref("vg")} />
       <rect data-p="vMult" className="rw-veil-multiply" width={w} height={h} fill={ref("vm")} />
       <g clipPath={ref("sky")}>
@@ -291,19 +289,17 @@ function paint(e: Record<string, SVGElement>, svg: SVGSVGElement, s: Scene, uid:
   // Light: gold to the marker (daytime) and the underexposure beyond it.
   const g = s.gold;
   const goldOffsets = [0, g.from, g.to, 1];
-  const pastSky = g.whole ? 1 : g.beyond.sky, pastGround = g.whole ? 1 : g.beyond.ground;
-  setStops(e, "gs", goldOffsets, [g.sky, g.sky, g.sky * pastSky, g.sky * pastSky]);
-  setStops(e, "gg", goldOffsets, [g.ground, g.ground, g.ground * pastGround, g.ground * pastGround]);
-  for (const name of ["gsGrad", "ggGrad", "vsGrad", "vdGrad", "vgGrad", "vmGrad"]) set(name, "x2", n(s.w));
+  const past = g.whole ? 1 : g.beyond;
+  setStops(e, "gs", goldOffsets, [g.sky, g.sky, g.sky * past, g.sky * past]);
+  for (const name of ["gsGrad", "vsGrad", "vdGrad", "vgGrad", "vmGrad"]) set(name, "x2", n(s.w));
   const v = s.veil;
   const veilOffsets = [0, v.from, v.to, 1];
   const ramp = (v.whole ? [1, 1, 1, 1] : [0, 0, 1, 1]).map((k) => k * v.strength);
-  // The daytime dim meets the gold the same way: a tenth of it on the lit side, nine tenths beyond.
-  const dim = (v.whole ? [1, 1, 1, 1] : [MEET.sky, MEET.sky, 1 - MEET.sky, 1 - MEET.sky]).map((k) => k * v.strength);
-  setStops(e, "vd", veilOffsets, dim.map((k) => k * (v.failed ? 14 / 15 : 1)));
-  // Light mode's unlit sky goes to white (the owner's ask) with the same shares, and the dim keeps to the
-  // ground; the failed sky stays overcast.
-  setStops(e, "vs", veilOffsets, v.failed ? [0, 0, 0, 0] : dim);
+  // Light mode's unlit sky goes to orange (the owner's ask), meeting the gold the same way the gold meets it: a
+  // tenth of it on the lit side, nine tenths beyond. The daytime dim is for the failed face only, at 14%.
+  const orange = (v.whole ? [1, 1, 1, 1] : [MEET, MEET, 1 - MEET, 1 - MEET]).map((k) => k * v.strength);
+  setStops(e, "vs", veilOffsets, v.failed ? [0, 0, 0, 0] : orange);
+  setStops(e, "vd", veilOffsets, v.failed ? ramp.map((k) => k * 14 / 15) : [0, 0, 0, 0]);
   setStops(e, "vg", veilOffsets, ramp.map((k) => k * 0.5));
   setStops(e, "vm", veilOffsets, ramp);
   show("vSky", v.on); show("vDim", v.on); show("vGrey", v.on); show("vMult", v.on);
