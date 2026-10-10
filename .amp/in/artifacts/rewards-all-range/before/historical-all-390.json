@@ -1,0 +1,20 @@
+{
+  "request": "/api/reports/rewards?plan_id=local-plan",
+  "period": "Current card periods as of 2026-10-10",
+  "as_of": "2026-10-10",
+  "totals": {
+    "spend": 0,
+    "reward_dollars": 0,
+    "cashback": 0,
+    "miles": 0
+  },
+  "cards": [
+    {
+      "id": "card-travel",
+      "period": "2026-10",
+      "total_spend": 0,
+      "reward_earned": 0
+    }
+  ],
+  "groups": 0
+}

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { api, useApi } from "../api/client";
 import type { CreditCard, RewardsReport } from "../api/types";
 import { ExposureFace } from "../components/ExposureFace";
@@ -14,7 +14,7 @@ import { boardSummary, projectRow, rowText, type RewardRowProjection, type RowTe
 import { useDismiss } from "../lib/use-dismiss";
 import { useIsPhone } from "../lib/use-is-phone";
 import { withViewTransition } from "../lib/view-transition";
-import { useFilters } from "../state/filters";
+import { applyFilterPatch, useFilters } from "../state/filters";
 import { usePlan } from "../state/plan";
 import "./rewards-board.css";
 
@@ -71,8 +71,18 @@ function RewardsBoard({ planId }: { planId: string }) {
   const location = useLocation();
   const { accounts } = usePlan();
   const { filters, setFilters, reportQuery } = useFilters({ defaultRange: ALL_TIME });
+  // The mode is its own param: Historical range with no `from` (the All preset)
+  // means all history, not card periods.
+  const [params, setParams] = useSearchParams();
+  const range = Boolean(filters.from) || params.get("mode") === "range";
+  const setMode = (mode: "current" | "range", dates: { from?: string; to?: string }) => setParams((previous) => {
+    const next = applyFilterPatch(previous, dates);
+    if (mode === "range") next.set("mode", "range");
+    else next.delete("mode");
+    return next;
+  }, { replace: true });
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Singapore", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-  const query = { ...reportQuery, to: !filters.from && filters.to && filters.to > today ? today : reportQuery.to, category_ids: undefined, interval: undefined };
+  const query = { ...reportQuery, to: !filters.from && filters.to && filters.to > today ? today : reportQuery.to, category_ids: undefined, interval: undefined, mode: range ? "range" : undefined };
   useEffect(() => {
     if (!filters.from && filters.to && filters.to > today) setFilters({ to: today });
   }, [filters.from, filters.to, today, setFilters]);
@@ -127,7 +137,6 @@ function RewardsBoard({ planId }: { planId: string }) {
   const milesValue = milesText ?? (shown ? String(shown.miles_valuation) : "");
   const hiddenCount = storedCards.filter((row) => isHidden(row.card.id)).length;
   const featuredCount = storedCards.filter((row) => row.card.featured).length;
-  const range = Boolean(filters.from);
   // One projection per card, for the whole report: Featured and hidden choices never change the summary.
   const projections = new Map(storedCards.map((row) => [row.card.id, projectRow(row, shown?.as_of, range, today)]));
   const summary = shown ? boardSummary(shown, [...projections.values()]) : null;
@@ -249,9 +258,9 @@ function RewardsBoard({ planId }: { planId: string }) {
       <section className="rw-toolbar" aria-label="Rewards board controls">
         <div className="segmented" role="group" aria-label="Period mode">
           <button type="button" aria-pressed={!range} className={!range ? "segment segment-active" : "segment"}
-            onClick={() => setFilters({ from: undefined, to: undefined })}>Card periods</button>
+            onClick={() => setMode("current", { from: undefined, to: undefined })}>Card periods</button>
           <button type="button" aria-pressed={range} className={range ? "segment segment-active" : "segment"}
-            onClick={() => setFilters({ from: `${asOf.slice(0, 7)}-01`, to: asOf })}>Historical range</button>
+            onClick={() => setMode("range", { from: `${asOf.slice(0, 7)}-01`, to: asOf })}>Historical range</button>
         </div>
         {!range && <>
           <div className="rw-stepper" role="group" aria-label="As of date" data-past={asOf < today || undefined}>

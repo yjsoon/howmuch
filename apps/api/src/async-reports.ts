@@ -384,6 +384,7 @@ export class AsyncReportService {
       settings: parseAppSettings(parsedSnapshot?.settings),
       from: filters.from ?? null,
       to: filters.to ?? null,
+      range: filters.rewardsRange,
       groupBy: parseRewardGroupBy(filters.groupBy),
       accountIds: filters.accountIds ?? [],
     });

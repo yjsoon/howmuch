@@ -670,6 +670,7 @@ Rewards has two date modes:
 
 - **No `from`:** each card's own current calendar, billing, promotional or anchored reward period, evaluated as of `to` (or today). `as_of` is clamped to today's **Asia/Singapore** date; future purchases never earn early.
 - **With `from`:** historical attribution from that date through `to` (or today). Calculations retain the complete history within each actual reward period before attributing rewards to the selected transactions. A range boundary does not reset caps, minimums or spending tiers.
+- **`mode=range` without `from`:** historical attribution across all history, starting at the earliest selected transaction (or `as_of` when there is none). The response `from` stays `null`; `period` names the dates used.
 
 Dates must be real `YYYY-MM-DD` dates and `from` must not follow an explicit `to`; invalid values return 400. Account filters select cards. Reward rules use transaction flags, not the general report category/transfer filters described below.
 
@@ -709,6 +710,7 @@ Extra filters:
 - `include_closed_accounts` on Net Worth
 - `top_payees_limit` on Spending Breakdown
 - `group` on Rewards (`flag`, `payee`, `category`, `memo`)
+- `mode=range` on Rewards (historical attribution when `from` is absent)
 
 ### Mobile Quick Entry
 
