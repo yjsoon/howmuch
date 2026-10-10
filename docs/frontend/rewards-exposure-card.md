@@ -21,7 +21,7 @@ Read it with [the agreed filled-rows spec](../plans/rewards-filled-rows-agreed-s
 | No projection additions | The projection gains two plain amounts: `minimumAmount` and `reachedTierThreshold` | The climbs start at the minimum or the reached tier, which the projection did not carry |
 | The strip's target horizon rose at the right | Level across the strip | The minimum journey stays horizontal, and the climb gets about 41pt instead of 26pt |
 
-**Still standing from version 2.** Across the card is never time: no pace line, no day ticks. The marker is the brand mark's faint vertical hairline. The ridge pair reads level, and its gap is what is left to the minimum. "Featured" is a word in a caps line, never a glyph. The strip stays about 104pt. Faces follow the appearance: daytime faces in light mode, the night and dusk prints in dark mode. Capped is done, not failed. Every word and VoiceOver string is unchanged.
+**Still standing from version 2.** Across the card is never time: no pace line, no day ticks. The marker is the brand mark's faint vertical hairline (on the hero and the web face; the phone cut of 10 Oct 2026 drops it from the strip and the band). The ridge pair's gap is what is left to the minimum. "Featured" is a word in a caps line, never a glyph. The strip is about 114pt since the phone cut. Faces follow the appearance: daytime faces in light mode, the night and dusk prints in dark mode. Capped is done, not failed. Every word and VoiceOver string is unchanged.
 
 ## Goal and non-goals
 
@@ -242,7 +242,7 @@ The "✦" after "DBS · MILES" on the web face and in the lab is the Featured fl
 
 | Layout | Used for | Size at the default text size (`.large`) |
 | --- | --- | --- |
-| **Strip** | Rewards board rows | Full row width, about 104pt tall. The row is the frame. |
+| **Strip** | Rewards board rows | Full row width, about 114pt tall since the phone cut (104pt before it). The row is the frame. |
 | **Paper row with print** | Account register strip | About 96pt, with a 90 × 60pt print on the trailing side |
 | **Paper row with band** | Board and register rows at accessibility text sizes | A 64pt scene band above the text |
 | **Paper row, plain** | Range Report "Cards" section | As today, no picture |
@@ -297,7 +297,7 @@ The lab's 12pt disc was the right instinct; 10pt fits the 28pt band without grow
 - **Climbing:** `y = lerp(U(X) − 1.15 r, −1.05 r, v)`. At `v` 1 the disc's bottom is 0.05 `r` above the top edge: fully off screen. The halo and the rings stay centred on it, so their lower arcs pour down into the frame.
 - **Failed:** no sun.
 
-The y axis points down. On the strip at `.large`, with `N` about 32pt and `U` therefore 42pt, the sun sits at about 42.6pt, rests with its centre about 33pt from the top, is halfway at about 12pt and leaves at −8pt: a 41pt climb. On the hero (349 × 233pt), the target horizon is about 105pt down at the column, so the sun rests at about 87pt, is halfway at about 35pt (0.15 h) and leaves at −16.5pt. While the sun is on the horizon under the name column, its top sits 2.6pt below the name's line box (never less than 1pt with the ±1pt ridge), which is why the strip's target horizon sits 10pt below the name.
+The y axis points down. On the strip at `.large`, with `N` about 32pt, `U` at the column is about 34.6pt (the back rise is 0.05 there), so the 10pt sun sits at 34.6pt, rests with its centre about 23pt from the top, is halfway at about 6pt and leaves at −10.5pt: a 34pt climb. On the hero (349 × 233pt), the target horizon is about 105pt down at the column, so the sun rests at about 87pt, is halfway at about 35pt (0.15 h) and leaves at −16.5pt. While the sun is on the horizon under the name column, its top sits at least 2pt below the name's line box, which is why the strip's target horizon is never less than 12pt below the name.
 
 **Why the column is at 0.85.** It has to clear everything at the top right and the bottom right without crowding the right edge.
 
@@ -384,12 +384,12 @@ In the minimum journey (card A, `h` 0.63):
 ┌──────────────────────────────────────────────────────────────┐  top padding 9
 │ Exposure Below                        ┊░░░░░░░░░░░░░░░░░░░░░░│  name, line ~23pt, at most 0.50 W; the sky is lit up to the marker
 │                                       ┊░░░░░░░░░░░░░░░░░░░░░░│
-│‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾(◒)‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾│  target horizon, level, 12pt under the name; the half-sun rides at the fill (no hairline on the phone)
+│‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾(◒)‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾│  target horizon, the icon's back slope, 14pt to 2pt under the name; the half-sun rides at the fill (no hairline)
 │                                       ┊   gap: what is left  │
 │‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾┊‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾│  spend horizon, lifted 63% of the way up to the target
 │ $184.50 to minimum                    ┊         8 days left  │  headline line ~22pt
 │ $315.50 / $500.00 · $0.00 earned                             │  2, basis line ~15, bottom 9
-└──────────────────────────────────────────────────────────────┘  about 104pt
+└──────────────────────────────────────────────────────────────┘  about 114pt
       lit ◄────────────────────┤ lit edge at x = h × W, h = 0.63 ├────► underexposed (░)
 ```
 
@@ -400,7 +400,7 @@ Past the minimum (card P, climbing after its tier):
 │ Exposure Journey                                             │  name, line ~23pt; the whole band is lit and there is no marker
 │                                        ·  (◉)  ·             │  v = 0.69: the sun is high in its column, ringed and haloed
 │                                                              │
-│‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾│  one merged ridge, level, 12pt under the name
+│‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾│  one merged ridge, the icon's back slope, 14pt to 2pt under the name
 │                                                              │
 │ $184.50 left before bonus cap                   8 days left  │  headline line ~22pt
 │ $315.50 / $500.00 · $0.00 earned                             │  basis line
@@ -468,7 +468,7 @@ The foot inks resolve by appearance: dark in light mode, on the light ground; li
 | xSmall to xxxLarge | Strip. Above `.large` the name wraps to 2 lines, the deadline drops below the action, and the basis line wraps. The sky and the foot grow with the text, and the ridges follow the measured `N` and `F`; the art never scales text. | Paper row with print | Hero and slip |
 | AX1 to AX5 | Paper row with band: a full-width 64pt scene band (radius 16 on the top corners), with the text below on paper, full width | Paper row with band | Hero without the in-frame label; the slip text scales |
 
-Estimates: the strip is about 104pt at `.large` and 140 to 160pt at xxxLarge; the band row is about 280pt at AX1 with a two-line name. **Widths:** iPhone SE (3rd generation) gives W 343, iPhone 16 gives 361 and Pro Max gives 398. On iPad the row content is capped at 640pt and centred, because the board has no readable-width limit today and a 700pt-wide strip turns into a thin ribbon.
+Estimates: the strip is about 114pt at `.large` and 140 to 160pt at xxxLarge; the band row is about 280pt at AX1 with a two-line name. **Widths:** iPhone SE (3rd generation) gives W 343, iPhone 16 gives 361 and Pro Max gives 398. On iPad the row content is capped at 640pt and centred, because the board has no readable-width limit today and a 700pt-wide strip turns into a thin ribbon.
 
 ## SwiftUI architecture
 
