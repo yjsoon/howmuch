@@ -1,14 +1,15 @@
 # Halation
 
-Halation is a personal ledger for people who want to know where their money went. You record transactions, tag them with categories and read clear reports on spending, income, net worth and card rewards. There is no budgeting: categories describe spending rather than ration it.
+Halation is a personal ledger built around credit card rewards. You record transactions, tag them with categories and flags, and Halation shows how each card is earning: how far you are from its minimum spend, how much headroom is left before its cap, and what you have earned in miles or cashback this period. It also reports on spending, income and net worth. There is no budgeting: categories describe spending rather than ration it.
 
-It has three parts:
+It has four parts:
 
+- **Card rewards tracking.** Each card's rules live alongside the ledger: cashback or miles rates, flag-based bonus categories, minimum and maximum spend, spending tiers, earning blocks, and billing, calendar, promotional or repeating reward periods. The Rewards board shows every card in its own current period, and you can look back to any past date or range. Halation uses the same calculation rules as [Rewards Tracker for YNAB](https://github.com/yjsoon/ynab-rewards-tracker), so you can import its settings or exchange one card's configuration at a time. An optional tool drafts reward rules from a bank's terms using your own AI provider key, for you to review before saving. See [rewards](docs/rewards.md).
 - **A ledger with a YNAB-compatible API.** The `/v1` endpoints follow YNAB's API shapes for plans, accounts, categories, payees, transactions and scheduled transactions, so tools written for YNAB can talk to Halation. Native `/api` endpoints add reports and imports. Every instance serves its API documentation at `/docs`; the source is [the API contract](docs/api-contract.md).
-- **A native iPhone app.** A SwiftUI app with account registers, quick capture from text, photos and the share sheet, scheduled transactions, reconciliation and the Reflect reports. It can keep the ledger on the phone or connect to your own Halation server, and it queues new transactions offline when the connection drops.
+- **A native iPhone app.** A SwiftUI app with account registers, quick capture from text, photos and the share sheet, scheduled transactions, reconciliation, the Rewards board and the Reflect reports. It can keep the ledger on the phone or connect to your own Halation server, and it queues new transactions offline when the connection drops.
 - **Straightforward CSV import.** Send rows of date, payee, memo, outflow and inflow to `POST /api/import/csv` and Halation adds them to an account, skipping duplicates and recording each row's outcome. The web app's statement formatter turns statement images into those rows using your own AI provider key, and YNAB users can bring their history across from the YNAB API or a YNAB web export.
 
-Halation also runs in the browser, with the same register and reports as the iPhone app.
+Halation also runs in the browser, with the same register, Rewards board and reports as the iPhone app.
 
 ## Getting started
 
