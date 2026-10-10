@@ -43,6 +43,9 @@ private struct ExportEverythingDocument: FileDocument {
 /// Saves the whole current plan as a file: the JSON archive (ledger, formats,
 /// account organisation, Rewards cards) or a transactions CSV.
 private struct ExportEverythingSection: View {
+  /// False while Settings holds an unsaved server or plan: export reads the
+  /// saved connection, so it waits until the selection is saved.
+  var isSelectionSaved = true
   @Environment(AppModel.self) private var model
   @State private var exportDocument: ExportEverythingDocument?
   @State private var exportFormat: ExportEverythingFormat = .archive
@@ -66,9 +69,13 @@ private struct ExportEverythingSection: View {
     } header: {
       Text("Export everything")
     } footer: {
-      Text("The archive holds every account, transaction, schedule, category and payee, the plan formats, your account organisation and the Rewards cards. The CSV lists every transaction, one row per split line. Passwords and tokens are never included.")
+      if isSelectionSaved {
+        Text("The archive holds every account, transaction, schedule, category and payee, the plan formats, your account organisation and the Rewards cards. The CSV lists every transaction, one row per split line. Passwords and tokens are never included.")
+      } else {
+        Text("Save to export the plan you have selected.")
+      }
     }
-    .disabled(isWorking)
+    .disabled(isWorking || !isSelectionSaved)
     .fileExporter(
       isPresented: $isExporting,
       document: exportDocument,
@@ -243,6 +250,15 @@ struct SettingsView: View {
       && draft.username == authenticatedUsername
   }
 
+  /// Export uses the saved connection, so it is offered only when the draft
+  /// still names that server, account and plan.
+  private var exportSelectionSaved: Bool {
+    draft.trimmedBaseURL == model.settings.trimmedBaseURL
+      && draft.username == model.settings.username
+      && draft.planID == model.settings.planID
+      && model.settings.isAuthenticated
+  }
+
   private var hasValidPlanSelection: Bool {
     guard case .loaded(let plans) = planState else {
       return false
@@ -407,7 +423,7 @@ struct SettingsView: View {
           } footer: {
             Text("Import or export Rewards Tracker settings. Does not connect to live YNAB.")
           }
-          ExportEverythingSection()
+          ExportEverythingSection(isSelectionSaved: exportSelectionSaved)
         }
 
         if let localArchive {
