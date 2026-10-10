@@ -15,6 +15,10 @@
 - If isolation is necessary, first write down the system's plausible failure modes and which ones existing E2E checks miss. Then write the smallest failing tests for those gaps, and only then write the implementation. State the failure modes beside the tests or in the task discussion; do not add a separate report by default.
 - An isolated test must catch a concrete bug the E2E checks would miss, such as a race, partial failure, unsafe migration, or malformed external input. Derive expectations independently of the implementation. Do not add tests for constants, getters, mock call shapes, source spelling, or happy paths already proven end to end. When pruning, verify actual coverage: a recipe that delegates a check to a unit test does not replace that test, and an unexecuted recipe is not passing evidence.
 
+## Hosting stance
+
+Halation is self-hosted only. The owner does not host other people's financial data: there is no hosted service, no public sign-up and no multi-tenant plan. `https://howmuch.tk.sg` is the owner's personal instance, not a service for others. Other people run Halation on their own iPhone (local mode) or their own Cloudflare account ([self-hosting](docs/self-hosting.md)). Do not add features, copy or docs that offer hosting, accounts or data storage for other users.
+
 ## Cloudflare deployments
 
 HowMuch's primary stack runs in the Tinkertanker Cloudflare account at

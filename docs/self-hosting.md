@@ -2,6 +2,8 @@
 
 Halation runs as one Cloudflare Worker (web app and API on the same address) with one D1 database. This guide takes you from nothing to a working instance on your own Cloudflare account. It does not touch the owner's production deployment.
 
+Self-hosting is the only way to run Halation on a server. There is no hosted service: the owner's instance is personal and does not take other users.
+
 ## Limits, stated plainly
 
 - One instance serves one person or household. It is not multi-tenant.
