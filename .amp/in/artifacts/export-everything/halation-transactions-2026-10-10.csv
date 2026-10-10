@@ -1,0 +1,23 @@
+﻿Date,Account,Payee,Category group,Category,Memo,Amount,Cleared,Approved,Flag,Transfer account,Transaction ID,Split of
+2026-03-01,Everyday Account,Tinkermind Payroll,Income,Salary,March salary,4850.00,uncleared,yes,,,txn-2026-03-pay,
+2026-03-03,Everyday Account,Straits View Residences,Home,Utilities,Rent and service charge,-1850.00,uncleared,yes,,,txn-2026-03-rent,
+2026-03-05,Everyday Account,FairPrice Finest,Home,Groceries,Weekly shop,-142.30,uncleared,yes,,,txn-2026-03-fairprice,
+2026-03-08,Everyday Account,Maxwell Food Centre,Home,Dining Out,Lunch with Jo,-38.80,uncleared,yes,,,txn-2026-03-hawker,
+2026-03-11,Travel Card,Grab,Living,Transport,Airport run,-26.40,uncleared,yes,Dining,,txn-2026-03-grab,
+2026-03-15,Rainy Day Saver,Broker transfer,Future,Investing,Top-up from cash buffer,650.00,uncleared,yes,,,txn-2026-03-invest,
+2026-04-01,Everyday Account,Tinkermind Payroll,Income,Salary,April salary,4850.00,uncleared,yes,,,txn-2026-04-pay,
+2026-04-06,Everyday Account,Workshop client,Income,Freelance,Cohort facilitation,920.00,uncleared,yes,,,txn-2026-04-freelance,
+2026-04-07,Everyday Account,Tekka Market,Home,Groceries,Fresh produce,-96.10,uncleared,yes,,,txn-2026-04-market,
+2026-04-09,Everyday Account,SP Services,Home,Utilities,Utilities,-124.50,uncleared,yes,,,txn-2026-04-utilities,
+2026-04-12,Travel Card,Scoot,Travel,Holiday,Taipei flights,-488.90,uncleared,yes,Dining,,txn-2026-04-flight,
+2026-04-18,Everyday Account,Raffles Medical,Living,Health,GP visit,-73.50,uncleared,yes,,,txn-2026-04-clinic,
+2026-05-01,Everyday Account,Tinkermind Payroll,Income,Salary,May salary,4850.00,uncleared,yes,,,txn-2026-05-pay,
+2026-05-04,Travel Card,MUJI,Living,Shopping,Home bits,-228.90,uncleared,yes,Online,,txn-2026-05-shop,
+2026-05-08,Everyday Account,Cold Storage,Home,Groceries,Top-up shop,-118.70,uncleared,yes,,,txn-2026-05-cold-storage,
+2026-05-13,Travel Card,Candlenut,Home,Dining Out,Birthday supper,-86.60,uncleared,yes,Dining,,txn-2026-05-restaurant,
+2026-05-19,Everyday Account,SimplyGo,Living,Transport,Commuting,-17.60,uncleared,yes,,,txn-2026-05-bus,
+2026-05-24,Rainy Day Saver,Broker transfer,Future,Investing,ETF top-up,850.00,uncleared,yes,,,txn-2026-05-invest,
+2026-10-01,Everyday Account,"'=HYPERLINK(""http://example.invalid"")",Future,Investing,"Lunch, ""team""
+second line",-4.50,uncleared,no,,,txn_2f01eaa4-50a1-4d1d-a6c9-bfe497d27184,
+2026-10-02,Everyday Account,Market,Future,Investing,veg,-10.00,uncleared,no,,,sub_89c98cc1-fe4d-4833-a3dd-0db1c9482f6c,txn_931ba466-b0ad-4862-a8e8-7088662103b5
+2026-10-02,Everyday Account,Market,Home,Dining Out,fish,-20.00,uncleared,no,,,sub_ad412957-2d85-481d-9bd3-0298354203bb,txn_931ba466-b0ad-4862-a8e8-7088662103b5

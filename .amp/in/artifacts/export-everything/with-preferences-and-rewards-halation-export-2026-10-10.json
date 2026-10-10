@@ -1,0 +1,814 @@
+{
+  "format": "howmuch-export",
+  "version": 1,
+  "exported_at": "2026-10-10T02:11:45.979Z",
+  "plan": {
+    "id": "local-plan",
+    "name": "HowMuch Demo",
+    "last_modified_on": "2026-10-10 02:10:46",
+    "first_month": "2026-10",
+    "last_month": "2026-10",
+    "date_format": {
+      "format": "DD/MM/YYYY"
+    },
+    "currency_format": {
+      "iso_code": "SGD",
+      "example_format": "$123,456.78",
+      "decimal_digits": 2,
+      "decimal_separator": ".",
+      "symbol_first": true,
+      "group_separator": ",",
+      "currency_symbol": "$",
+      "display_symbol": true
+    },
+    "server_knowledge": 40
+  },
+  "settings": {
+    "date_format": {
+      "format": "DD/MM/YYYY"
+    },
+    "currency_format": {
+      "iso_code": "SGD",
+      "example_format": "$123,456.78",
+      "decimal_digits": 2,
+      "decimal_separator": ".",
+      "symbol_first": true,
+      "group_separator": ",",
+      "currency_symbol": "$",
+      "display_symbol": true
+    },
+    "display": {
+      "flag_names": {}
+    }
+  },
+  "server_knowledge": 40,
+  "snapshot": {
+    "format": "howmuch-plan-snapshot",
+    "version": 1,
+    "category_groups": [
+      {
+        "id": "grp-future",
+        "name": "Future",
+        "hidden": false,
+        "internal": false,
+        "deleted": false
+      },
+      {
+        "id": "grp-home",
+        "name": "Home",
+        "hidden": false,
+        "internal": false,
+        "deleted": false
+      },
+      {
+        "id": "grp-income",
+        "name": "Income",
+        "hidden": false,
+        "internal": false,
+        "deleted": false
+      },
+      {
+        "id": "grp-living",
+        "name": "Living",
+        "hidden": false,
+        "internal": false,
+        "deleted": false
+      },
+      {
+        "id": "grp-travel",
+        "name": "Travel",
+        "hidden": false,
+        "internal": false,
+        "deleted": false
+      }
+    ],
+    "categories": [
+      {
+        "id": "cat-dining",
+        "category_group_id": "grp-home",
+        "name": "Dining Out",
+        "hidden": false,
+        "internal": false,
+        "deleted": false
+      },
+      {
+        "id": "cat-freelance",
+        "category_group_id": "grp-income",
+        "name": "Freelance",
+        "hidden": false,
+        "internal": false,
+        "deleted": false
+      },
+      {
+        "id": "cat-groceries",
+        "category_group_id": "grp-home",
+        "name": "Groceries",
+        "hidden": false,
+        "internal": false,
+        "deleted": false
+      },
+      {
+        "id": "cat-health",
+        "category_group_id": "grp-living",
+        "name": "Health",
+        "hidden": false,
+        "internal": false,
+        "deleted": false
+      },
+      {
+        "id": "cat-holiday",
+        "category_group_id": "grp-travel",
+        "name": "Holiday",
+        "hidden": false,
+        "internal": false,
+        "deleted": false
+      },
+      {
+        "id": "cat-investing",
+        "category_group_id": "grp-future",
+        "name": "Investing",
+        "hidden": false,
+        "internal": false,
+        "deleted": false
+      },
+      {
+        "id": "cat-salary",
+        "category_group_id": "grp-income",
+        "name": "Salary",
+        "hidden": false,
+        "internal": false,
+        "deleted": false
+      },
+      {
+        "id": "cat-shopping",
+        "category_group_id": "grp-living",
+        "name": "Shopping",
+        "hidden": false,
+        "internal": false,
+        "deleted": false
+      },
+      {
+        "id": "cat-transport",
+        "category_group_id": "grp-living",
+        "name": "Transport",
+        "hidden": false,
+        "internal": false,
+        "deleted": false
+      },
+      {
+        "id": "cat-utilities",
+        "category_group_id": "grp-home",
+        "name": "Utilities",
+        "hidden": false,
+        "internal": false,
+        "deleted": false
+      }
+    ],
+    "payees": [
+      {
+        "id": "payee_115fa58a-e6bb-4d76-987e-4f9d4814957b",
+        "name": "Straits View Residences",
+        "transfer_account_id": null,
+        "deleted": false
+      },
+      {
+        "id": "payee_1a70adb9-1752-4c26-accb-0eb0f11f58af",
+        "name": "Transfer : Travel Card",
+        "transfer_account_id": "acct-credit",
+        "deleted": false
+      },
+      {
+        "id": "payee_1aa1511b-2945-4c8d-b518-3944a126c6da",
+        "name": "Market",
+        "transfer_account_id": null,
+        "deleted": false
+      },
+      {
+        "id": "payee_262e17a3-b850-4865-92fe-31e301182a3f",
+        "name": "SimplyGo",
+        "transfer_account_id": null,
+        "deleted": false
+      },
+      {
+        "id": "payee_27e3cb32-27f5-4496-9dc9-686620db73bb",
+        "name": "Workshop client",
+        "transfer_account_id": null,
+        "deleted": false
+      },
+      {
+        "id": "payee_2a883814-2d1e-4d4a-9c00-2f27851bba7c",
+        "name": "Transfer : Everyday Account",
+        "transfer_account_id": "acct-everyday",
+        "deleted": false
+      },
+      {
+        "id": "payee_2ad392ed-5aef-403d-b115-2590b730a7af",
+        "name": "Transfer : Rainy Day Saver",
+        "transfer_account_id": "acct-saver",
+        "deleted": false
+      },
+      {
+        "id": "payee_3efdb739-055a-4cb5-bf11-ef6deb764531",
+        "name": "Broker transfer",
+        "transfer_account_id": null,
+        "deleted": false
+      },
+      {
+        "id": "payee_5e7c0295-5c0d-4a34-890b-b866b41c08f5",
+        "name": "SP Services",
+        "transfer_account_id": null,
+        "deleted": false
+      },
+      {
+        "id": "payee_8ae35a58-3ef2-4322-9bbb-fb7d54377e4e",
+        "name": "Candlenut",
+        "transfer_account_id": null,
+        "deleted": false
+      },
+      {
+        "id": "payee_8b8a4188-919f-4866-a3a8-0a7d7cdd60ba",
+        "name": "Tinkermind Payroll",
+        "transfer_account_id": null,
+        "deleted": false
+      },
+      {
+        "id": "payee_8fce80a0-041b-4633-956b-6520b7b104a8",
+        "name": "=HYPERLINK(\"http://example.invalid\")",
+        "transfer_account_id": null,
+        "deleted": false
+      },
+      {
+        "id": "payee_9f351c01-baf3-444e-8441-ec059709a893",
+        "name": "Maxwell Food Centre",
+        "transfer_account_id": null,
+        "deleted": false
+      },
+      {
+        "id": "payee_bf90b650-4e4e-45b9-8885-5f347e944d79",
+        "name": "FairPrice Finest",
+        "transfer_account_id": null,
+        "deleted": false
+      },
+      {
+        "id": "payee_d4cdb636-e35e-4d95-a5ac-caf8d445b0d6",
+        "name": "Scoot",
+        "transfer_account_id": null,
+        "deleted": false
+      },
+      {
+        "id": "payee_d7e05fb4-6314-4e50-98f3-ea611ea83dca",
+        "name": "Cold Storage",
+        "transfer_account_id": null,
+        "deleted": false
+      },
+      {
+        "id": "payee_e1a49aca-bd19-4387-a7b8-5424d4c9f19c",
+        "name": "Grab",
+        "transfer_account_id": null,
+        "deleted": false
+      },
+      {
+        "id": "payee_f727b6c8-788b-4ca1-be6b-474a5785f82d",
+        "name": "MUJI",
+        "transfer_account_id": null,
+        "deleted": false
+      },
+      {
+        "id": "payee_f7c1cb64-24df-4452-8bf5-058e4179edc4",
+        "name": "Tekka Market",
+        "transfer_account_id": null,
+        "deleted": false
+      },
+      {
+        "id": "payee_f7fd6510-6330-416b-b5bf-1b3f2242bfc3",
+        "name": "Raffles Medical",
+        "transfer_account_id": null,
+        "deleted": false
+      }
+    ],
+    "accounts": [
+      {
+        "id": "acct-credit",
+        "name": "Travel Card",
+        "icon": "💳",
+        "type": "creditCard",
+        "on_budget": true,
+        "closed": false,
+        "opening_balance": -64000000,
+        "transfer_payee_id": "payee_1a70adb9-1752-4c26-accb-0eb0f11f58af"
+      },
+      {
+        "id": "acct-everyday",
+        "name": "Everyday Account",
+        "icon": "🏦",
+        "type": "checking",
+        "on_budget": true,
+        "closed": false,
+        "opening_balance": 185000000,
+        "transfer_payee_id": "payee_2a883814-2d1e-4d4a-9c00-2f27851bba7c"
+      },
+      {
+        "id": "acct-saver",
+        "name": "Rainy Day Saver",
+        "icon": "💰",
+        "type": "savings",
+        "on_budget": true,
+        "closed": false,
+        "opening_balance": 420000000,
+        "transfer_payee_id": "payee_2ad392ed-5aef-403d-b115-2590b730a7af"
+      }
+    ],
+    "transactions": [
+      {
+        "id": "txn-2026-03-fairprice",
+        "account_id": "acct-everyday",
+        "date": "2026-03-05",
+        "amount": -142300,
+        "memo": "Weekly shop",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": null,
+        "flag_name": null,
+        "payee_id": "payee_bf90b650-4e4e-45b9-8885-5f347e944d79",
+        "payee_name": null,
+        "category_id": "cat-groceries",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn-2026-03-grab",
+        "account_id": "acct-credit",
+        "date": "2026-03-11",
+        "amount": -26400,
+        "memo": "Airport run",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": "red",
+        "flag_name": "Dining",
+        "payee_id": "payee_e1a49aca-bd19-4387-a7b8-5424d4c9f19c",
+        "payee_name": null,
+        "category_id": "cat-transport",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn-2026-03-hawker",
+        "account_id": "acct-everyday",
+        "date": "2026-03-08",
+        "amount": -38800,
+        "memo": "Lunch with Jo",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": null,
+        "flag_name": null,
+        "payee_id": "payee_9f351c01-baf3-444e-8441-ec059709a893",
+        "payee_name": null,
+        "category_id": "cat-dining",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn-2026-03-invest",
+        "account_id": "acct-saver",
+        "date": "2026-03-15",
+        "amount": 650000,
+        "memo": "Top-up from cash buffer",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": null,
+        "flag_name": null,
+        "payee_id": "payee_3efdb739-055a-4cb5-bf11-ef6deb764531",
+        "payee_name": null,
+        "category_id": "cat-investing",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn-2026-03-pay",
+        "account_id": "acct-everyday",
+        "date": "2026-03-01",
+        "amount": 4850000,
+        "memo": "March salary",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": null,
+        "flag_name": null,
+        "payee_id": "payee_8b8a4188-919f-4866-a3a8-0a7d7cdd60ba",
+        "payee_name": null,
+        "category_id": "cat-salary",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn-2026-03-rent",
+        "account_id": "acct-everyday",
+        "date": "2026-03-03",
+        "amount": -1850000,
+        "memo": "Rent and service charge",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": null,
+        "flag_name": null,
+        "payee_id": "payee_115fa58a-e6bb-4d76-987e-4f9d4814957b",
+        "payee_name": null,
+        "category_id": "cat-utilities",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn-2026-04-clinic",
+        "account_id": "acct-everyday",
+        "date": "2026-04-18",
+        "amount": -73500,
+        "memo": "GP visit",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": null,
+        "flag_name": null,
+        "payee_id": "payee_f7fd6510-6330-416b-b5bf-1b3f2242bfc3",
+        "payee_name": null,
+        "category_id": "cat-health",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn-2026-04-flight",
+        "account_id": "acct-credit",
+        "date": "2026-04-12",
+        "amount": -488900,
+        "memo": "Taipei flights",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": "red",
+        "flag_name": "Dining",
+        "payee_id": "payee_d4cdb636-e35e-4d95-a5ac-caf8d445b0d6",
+        "payee_name": null,
+        "category_id": "cat-holiday",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn-2026-04-freelance",
+        "account_id": "acct-everyday",
+        "date": "2026-04-06",
+        "amount": 920000,
+        "memo": "Cohort facilitation",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": null,
+        "flag_name": null,
+        "payee_id": "payee_27e3cb32-27f5-4496-9dc9-686620db73bb",
+        "payee_name": null,
+        "category_id": "cat-freelance",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn-2026-04-market",
+        "account_id": "acct-everyday",
+        "date": "2026-04-07",
+        "amount": -96100,
+        "memo": "Fresh produce",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": null,
+        "flag_name": null,
+        "payee_id": "payee_f7c1cb64-24df-4452-8bf5-058e4179edc4",
+        "payee_name": null,
+        "category_id": "cat-groceries",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn-2026-04-pay",
+        "account_id": "acct-everyday",
+        "date": "2026-04-01",
+        "amount": 4850000,
+        "memo": "April salary",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": null,
+        "flag_name": null,
+        "payee_id": "payee_8b8a4188-919f-4866-a3a8-0a7d7cdd60ba",
+        "payee_name": null,
+        "category_id": "cat-salary",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn-2026-04-utilities",
+        "account_id": "acct-everyday",
+        "date": "2026-04-09",
+        "amount": -124500,
+        "memo": "Utilities",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": null,
+        "flag_name": null,
+        "payee_id": "payee_5e7c0295-5c0d-4a34-890b-b866b41c08f5",
+        "payee_name": null,
+        "category_id": "cat-utilities",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn-2026-05-bus",
+        "account_id": "acct-everyday",
+        "date": "2026-05-19",
+        "amount": -17600,
+        "memo": "Commuting",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": null,
+        "flag_name": null,
+        "payee_id": "payee_262e17a3-b850-4865-92fe-31e301182a3f",
+        "payee_name": null,
+        "category_id": "cat-transport",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn-2026-05-cold-storage",
+        "account_id": "acct-everyday",
+        "date": "2026-05-08",
+        "amount": -118700,
+        "memo": "Top-up shop",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": null,
+        "flag_name": null,
+        "payee_id": "payee_d7e05fb4-6314-4e50-98f3-ea611ea83dca",
+        "payee_name": null,
+        "category_id": "cat-groceries",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn-2026-05-invest",
+        "account_id": "acct-saver",
+        "date": "2026-05-24",
+        "amount": 850000,
+        "memo": "ETF top-up",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": null,
+        "flag_name": null,
+        "payee_id": "payee_3efdb739-055a-4cb5-bf11-ef6deb764531",
+        "payee_name": null,
+        "category_id": "cat-investing",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn-2026-05-pay",
+        "account_id": "acct-everyday",
+        "date": "2026-05-01",
+        "amount": 4850000,
+        "memo": "May salary",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": null,
+        "flag_name": null,
+        "payee_id": "payee_8b8a4188-919f-4866-a3a8-0a7d7cdd60ba",
+        "payee_name": null,
+        "category_id": "cat-salary",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn-2026-05-restaurant",
+        "account_id": "acct-credit",
+        "date": "2026-05-13",
+        "amount": -86600,
+        "memo": "Birthday supper",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": "red",
+        "flag_name": "Dining",
+        "payee_id": "payee_8ae35a58-3ef2-4322-9bbb-fb7d54377e4e",
+        "payee_name": null,
+        "category_id": "cat-dining",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn-2026-05-shop",
+        "account_id": "acct-credit",
+        "date": "2026-05-04",
+        "amount": -228900,
+        "memo": "Home bits",
+        "cleared": "uncleared",
+        "approved": true,
+        "flag_color": "blue",
+        "flag_name": "Online",
+        "payee_id": "payee_f727b6c8-788b-4ca1-be6b-474a5785f82d",
+        "payee_name": null,
+        "category_id": "cat-shopping",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn_2f01eaa4-50a1-4d1d-a6c9-bfe497d27184",
+        "account_id": "acct-everyday",
+        "date": "2026-10-01",
+        "amount": -4500,
+        "memo": "Lunch, \"team\"\nsecond line",
+        "cleared": "uncleared",
+        "approved": false,
+        "flag_color": null,
+        "flag_name": null,
+        "payee_id": "payee_8fce80a0-041b-4633-956b-6520b7b104a8",
+        "payee_name": null,
+        "category_id": "cat-investing",
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": []
+      },
+      {
+        "id": "txn_931ba466-b0ad-4862-a8e8-7088662103b5",
+        "account_id": "acct-everyday",
+        "date": "2026-10-02",
+        "amount": -30000,
+        "memo": null,
+        "cleared": "uncleared",
+        "approved": false,
+        "flag_color": null,
+        "flag_name": null,
+        "payee_id": "payee_1aa1511b-2945-4c8d-b518-3944a126c6da",
+        "payee_name": null,
+        "category_id": null,
+        "transfer_account_id": null,
+        "transfer_transaction_id": null,
+        "matched_transaction_id": null,
+        "import_id": null,
+        "import_payee_name": null,
+        "import_payee_name_original": null,
+        "subtransactions": [
+          {
+            "id": "sub_89c98cc1-fe4d-4833-a3dd-0db1c9482f6c",
+            "amount": -10000,
+            "memo": "veg",
+            "payee_id": null,
+            "payee_name": null,
+            "category_id": "cat-investing",
+            "transfer_account_id": null,
+            "transfer_transaction_id": null
+          },
+          {
+            "id": "sub_ad412957-2d85-481d-9bd3-0298354203bb",
+            "amount": -20000,
+            "memo": "fish",
+            "payee_id": null,
+            "payee_name": null,
+            "category_id": "cat-dining",
+            "transfer_account_id": null,
+            "transfer_transaction_id": null
+          }
+        ]
+      }
+    ],
+    "scheduled_transactions": []
+  },
+  "account_preferences": {
+    "favourite_account_ids": [
+      "acct-everyday"
+    ],
+    "account_order": [],
+    "account_order_by_group": {},
+    "account_group_sorts": {},
+    "custom_account_groups": []
+  },
+  "rewards": {
+    "cards": [
+      {
+        "id": "card_2012131e-9a73-42e7-a8d1-03b2048a1123",
+        "name": "E2E cashback",
+        "issuer": "Test",
+        "type": "cashback",
+        "ynabAccountId": "acct-everyday",
+        "featured": true,
+        "earningRate": 1
+      }
+    ],
+    "tracker_snapshot": {
+      "ynab": {
+        "trackedAccountIds": [
+          "acct-everyday"
+        ]
+      },
+      "cards": [
+        {
+          "id": "card_2012131e-9a73-42e7-a8d1-03b2048a1123",
+          "name": "E2E cashback",
+          "issuer": "Test",
+          "type": "cashback",
+          "ynabAccountId": "acct-everyday",
+          "featured": true,
+          "earningRate": 1
+        }
+      ],
+      "rules": [],
+      "tagMappings": [],
+      "calculations": [],
+      "themeGroups": [],
+      "hiddenCards": [],
+      "settings": {}
+    },
+    "imported_at": "2026-10-10 02:11:45",
+    "updated_at": "2026-10-10 02:11:45"
+  }
+}
