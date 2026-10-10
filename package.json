@@ -33,12 +33,23 @@
     "test": "bun test",
     "verify:worker": "bun run --cwd apps/worker build",
     "build:ios-engine": "bun scripts/build-ios-engine.ts build",
-    "check:ios-engine": "bun scripts/build-ios-engine.ts check"
+    "check:ios-engine": "bun scripts/build-ios-engine.ts check",
+    "deploy": "./scripts/deploy-button.sh"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260718.1",
     "@types/bun": "^1.3.14",
     "typescript": "^7.0.2",
     "wrangler": "^4.112.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "HOWMUCH_API_TOKEN": {
+        "description": "Setup token for creating the first owner. Use a long random value, such as the output of `openssl rand -hex 32`, and keep a copy in a password manager."
+      },
+      "DB": {
+        "description": "Your Halation ledger. It lives only in your Cloudflare account."
+      }
+    }
   }
 }

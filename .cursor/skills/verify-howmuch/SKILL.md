@@ -91,7 +91,7 @@ xcrun simctl launch "$UDID" sg.soon.howmuch
 Computer-use drives the Simulator window, not `{web_url}`. This local installation does not prove or authorize physical-device distribution.
 
 3. Connection (**More → Connection settings** on Accounts, Rewards, or Reflect):
-   - **Server** = `{api_url}` from `control-howmuch state` (Simulator: `http://127.0.0.1:{api_port}`). New installs default to `https://howmuch.tk.sg` — change it. HTTP is allowed only for this device or this LAN.
+   - **Server** = `{api_url}` from `control-howmuch state` (Simulator: `http://127.0.0.1:{api_port}`). New installs start empty; an older install may still read `https://howmuch.tk.sg`, so set it. HTTP is allowed only for this device or this LAN.
    - **Username** `verifier`, **Password** `howmuch-verify-15`. Choose **Sign in**.
    - Plan becomes `HowMuch Demo` / `local-plan` automatically (only plan on this stack).
    - If the sheet says setup is required, you skipped web first-owner setup. Finish that, then **Retry Setup Check**. iOS has no Setup token field.

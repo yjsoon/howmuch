@@ -1,0 +1,4 @@
+# Secrets for the Deploy to Cloudflare button (see docs/self-hosting.md).
+# The setup token for first-owner setup. Generate a long random value, for
+# example with `openssl rand -hex 32`, and keep a copy in a password manager.
+HOWMUCH_API_TOKEN=

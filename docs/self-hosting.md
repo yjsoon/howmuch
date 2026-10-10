@@ -12,6 +12,33 @@ Self-hosting is the only way to run Halation on a server. There is no hosted ser
 - You operate it: you apply migrations, take backups and keep the Worker updated.
 - The Bun and SQLite server (`bun run dev:stack`) is for local development only. It is not a supported way to self-host.
 
+## One-click install
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/yjsoon/howmuch)
+
+The button sets up the same Worker and D1 database as the manual steps below, without a terminal.
+
+1. You need a Cloudflare account on the Workers Paid plan (see [Costs](#costs)) and a GitHub or GitLab account.
+2. Click the button. Cloudflare copies this repository into your GitHub or GitLab account, so updates you make later come from your copy.
+3. On the setup page, name the repository, the Worker and the database, or keep the defaults.
+4. For `HOWMUCH_API_TOKEN`, enter a long random value, for example the output of `openssl rand -hex 32`, and keep a copy in a password manager. It is your setup token (see [step 4](#4-create-the-setup-token)).
+5. Deploy. Cloudflare creates the database, builds the web app, applies the database migrations and deploys the Worker, then shows its `workers.dev` address.
+6. In your copy of the repository, edit `wrangler.jsonc` and set `HOWMUCH_TIME_ZONE` to your IANA time zone, such as `Europe/London`, then commit and push. It starts as `UTC`, and the push redeploys with the new value. Do not change it only in the Cloudflare dashboard: every deploy sets it from `wrangler.jsonc`, so the next push would reset it.
+7. Carry on from [first-owner setup](#5-first-owner-setup).
+
+Scheduled transactions are entered daily at 00:05 UTC. To run them at your local midnight instead, change `triggers.crons` in `wrangler.jsonc` in your copy of the repository, as described in [step 2](#2-create-your-config).
+
+Each push to your copy's main branch rebuilds and redeploys, applying any new migrations first. To update, bring the latest release tag from `yjsoon/howmuch` into your copy and push it. Your copy's `wrangler.jsonc` holds your database ID, so keep yours when the two differ. For backups, clone your copy and run this from its root, so the export lands in the gitignored `data/` folder:
+
+```sh
+mkdir -p data/backups
+bunx wrangler d1 export <db-name> --remote --output data/backups/backup-$(date +%F).sql --config wrangler.jsonc
+```
+
+If a build stops at the migration step with an authentication or permission error, the build's API token lacks D1 access. In the Cloudflare dashboard, open **My Profile**, then **API Tokens**, edit the token Workers Builds created for this Worker, add **Account, D1, Edit**, and retry the build.
+
+The rest of this guide is the manual route, which gives you a local clone and full control of the config.
+
 ## Prerequisites
 
 - A Cloudflare account with the Workers Paid plan (US$5 a month). See [Costs](#costs) for why the free Workers plan is not enough.

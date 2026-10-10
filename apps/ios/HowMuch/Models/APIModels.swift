@@ -21,6 +21,9 @@ struct ServerError: Decodable {
 
 struct APISettings: Codable, Equatable {
   static let userDefaultsKey = "HowMuch.APISettings"
+  /// The owner's personal instance. Halation is self-hosted only, so this is
+  /// no longer the default for new installs; it stays so installs that saved
+  /// an earlier hosted default keep following it.
   static let productionBaseURL = "https://howmuch.tk.sg"
   /// The development-only default from before the app shipped against a
   /// hosted API. Its session never authenticated with production, so the
@@ -37,7 +40,8 @@ struct APISettings: Codable, Equatable {
   private static let debugBootstrapAppliedKey = "HowMuch.DebugBootstrapApplied"
 #endif
 
-  var baseURLString = productionBaseURL
+  /// Empty on a fresh install: the person enters their own server.
+  var baseURLString = ""
   var username = ""
   var sessionToken = ""
   var authenticatedUserID = ""

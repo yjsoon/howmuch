@@ -256,7 +256,7 @@ struct SettingsView: View {
     NavigationStack {
       Form {
         Section {
-          TextField("http://192.168.1.10:8787", text: $draft.baseURLString)
+          TextField("https://halation.example.com", text: $draft.baseURLString)
             .keyboardType(.URL)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
@@ -269,7 +269,7 @@ struct SettingsView: View {
               : "Enter a complete HTTP or HTTPS URL with a host.")
               .foregroundStyle(Theme.outflow)
           } else {
-            Text("New installs connect to Halation. HTTP is allowed only for this device or this network. First-time setup must be opened from the website.")
+            Text("Enter the address of your own Halation server. HTTP is allowed only for this device or this network. First-time setup must be opened from the website.")
           }
         }
         .disabled(isTesting)

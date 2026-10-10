@@ -1,0 +1,60 @@
+// Deploy to Cloudflare button template for self-hosting Halation.
+//
+// This file exists only for https://deploy.workers.cloudflare.com, which reads
+// a Wrangler config at the repository root. Cloudflare copies the repository
+// into the deployer's own GitHub account, creates a new D1 database in their
+// own Cloudflare account and replaces database_id below with its ID, then runs
+// `bun run deploy` (scripts/deploy-button.sh) on Workers Builds.
+//
+// The owner's stacks never use this file: they deploy from apps/worker with
+// its own wrangler.jsonc. scripts/deploy-button.sh refuses to run outside
+// Workers Builds, so `bun run deploy` here cannot reach the owner's accounts.
+// See docs/self-hosting.md.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+
+  "name": "halation",
+  "main": "apps/worker/src/index.ts",
+  "workers_dev": true,
+  "compatibility_date": "2026-07-18",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "assets": {
+    "directory": "apps/web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+
+  "vars": {
+    // Every deployment gets its own database, so sharing this plan id between
+    // separate instances is harmless. Never change it after setup.
+    "HOWMUCH_DEFAULT_PLAN_ID": "0d4f2c1e-6b8a-4e57-9a3c-5f1b7e2d9c40",
+    // IANA time zone that decides what "today" means for scheduled
+    // transactions. Change it here in your copy and push: every deploy sets
+    // it from this file, so a value changed only in the dashboard is reset.
+    "HOWMUCH_TIME_ZONE": "UTC",
+    // Must be "false" so the instance accepts writes.
+    "HOWMUCH_TRANSITION_READ_ONLY": "false"
+    // Deliberately absent: YNAB variables, HOWMUCH_REDIRECT_TARGET and
+    // HOWMUCH_APPLE_APP_IDS (see apps/worker/wrangler.self-host.example.jsonc).
+    // HOWMUCH_API_TOKEN is a secret, prompted for from .dev.vars.example.
+  },
+
+  // Daily materialisation of due scheduled transactions at 00:05 UTC.
+  "triggers": { "crons": ["5 0 * * *"] },
+
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "halation",
+    // Placeholder: the Deploy to Cloudflare flow creates a database and
+    // writes its ID here in the deployer's copy of the repository.
+    "database_id": "00000000-0000-4000-8000-000000000000",
+    "migrations_dir": "apps/api/d1-migrations"
+  }],
+
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1
+  }
+}
