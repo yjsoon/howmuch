@@ -672,7 +672,7 @@
 
 /* The amber disc and its core while a minimum is still to be met. */
 .rw-card[data-stage="gate"] {
-  --sun-core: var(--glow-edge);
+  --sun-core: var(--sun-gate-core);
 }
 
 .rw-face-top {

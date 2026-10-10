@@ -265,9 +265,9 @@ Text is never inside the scene. Each layout sets:
 
 | Layout | Sun's column `X` | Target horizon `U(x)` | Spend floor `Fl(x)` | `r` |
 | --- | --- | --- | --- | --- |
-| Strip | 0.85 W | Brand back rise: `N + 14pt` at the left to `N + 2pt` at the right | Brand front rise: `F − 5pt` at the left to `F − 17pt` at the right | 10pt |
+| Strip | 0.85 W | Brand back rise: `N + 14pt` at the left to `N + 2pt` at the right | `U(x)` + (`F − 3pt` − (`N + 14pt`)): the same shape, 3pt above the foot at the left | 10pt |
 | Print, 90 × 60 | 0.85 W | Brand back ridge | 0.82 h, ±0.01 h | 4pt |
-| Band, 64pt | 0.85 W | Brand back rise: 0.56 h to 0.42 h | Brand front rise: 0.82 h to 0.70 h | 7pt |
+| Band, 64pt | 0.85 W | Brand back rise: 0.56 h to 0.42 h | `U(x)` + 0.26 h | 7pt |
 | Hero | 0.85 W | Brand back ridge: 0.665 h at the left, 0.42 h at the right | 0.80 h, ±0.01 h | 0.045 W |
 | Web face, desktop 3:2 | As Hero | As Hero | As Hero | 4.5% of the width (shipped) |
 | Web strip, phones | As Strip | | | |
@@ -278,7 +278,9 @@ Text is never inside the scene. Each layout sets:
 
 - **The sun is the marker.** No hairline. The disc rides at the fill (0.07 to 0.85 W) and the lit edge and the ridge gap carry the exact point. A hairline from the sky through the foot text read as a scratch, and beside the column it read as a pole the sun was skewered on.
 - **A half-sun on the horizon.** The disc is 10pt (7pt on the band) and its centre sits exactly on the target horizon while it rides, so the sky clip leaves a clean semicircle. It lifts clear from there, as before. Under the name the horizon is at least 12pt below it, so the half-sun's top stays clear of the name's line box.
-- **The icon's two slopes.** The owner asked for the app icon's pair of rising ridges. The strip's horizons are no longer level: the target horizon takes the brand back ridge's rise (`BACK_RISE`, the shipped path normalised to 0 at its highest, right, and 1 at its lowest, left), 12pt deep, from 14pt under the name at the left to 2pt under it at the right, where the sun's column is; the spend floor takes the front ridge's rise from 5pt above the foot at the left to 17pt above it at the right. The spend ridge starts a third of the way up the gap, as the icon's front ridge sits, and lifts to the target as `h` fills: `Fl + (1/3 + 2h/3) × (U − Fl)`. So an empty card is still the icon's two slopes, and the band between them is what is left. The sky band is 34pt; the row is about 114pt.
+- **The icon's two slopes.** The owner asked for the app icon's pair of rising ridges. The strip's horizons are no longer level: the target horizon takes the brand back ridge's rise (`BACK_RISE`, the shipped path normalised to 0 at its highest, right, and 1 at its lowest, left), 12pt deep, from 14pt under the name at the left to 2pt under it at the right, where the sun's column is. The spend floor is the same shape, as far down as the words allow: 3pt above the foot at its lowest point, the left edge, so the two slopes start equidistant and converge as the minimum fills, `Fl + h × (U − Fl)`. Where they meet is how far along the minimum was reached. A card with no minimum keeps the pair apart: the convergence is the minimum's own read, and the climb is the sun's. The sky band is 34pt; the row is about 114pt.
+- **A dark orange sun on the prints.** In dark mode the disc, its rim and its core are a dark orange (`SunDiscTop` #F0A24E to `SunDiscBottom` #C4651C, the rise disc #E58F3C to #AD4F18, rim #7A3A0F, core #D9823A), so the sun is never the brightest thing on the dusk print's pale sky. The daytime faces keep the near-white disc.
+- **Softer daytime light.** The daytime skies are a grey-blue close to the gold's value (cashback #B3C5D1 to #EBE6DD, miles #9FBAD2 to #DCEBF6) and the gold wash peaks lower (sky 0.50 + 0.12 `v`, ground 0.16 + 0.08 `v`; calm 0.30 and 0.12), so the lit edge is a step of warmth, not a yellow against a blue.
 - **One soft glow, no rings.** The halo is one radial falloff in the rings' palette (Ring1 at the centre, Ring2 at 30%, Ring3 at 60%, Ring4 at 82%, clear at the edge) over the core glow, with the rings' radius `R` and opacity. Posterised rings clipped by a short frame's top edge and by the ridges read as concentric arcs; a falloff clipped the same way still reads as light.
 - **No unlit sliver.** As the sun lifts (`h` 0.85 to 1) the veil's peak falls by `lift` and the gold beyond the lit edge rises by `lift`, so the last of the band lights with the lift instead of leaving a 4% strip of dusk at the card's edge.
 
@@ -315,14 +317,14 @@ The art is lit from the left edge to the marker and underexposed to its right wh
   - one full-frame fill with blend mode `.saturation`, colour `VeilGrey` #808080 at alpha 0.5 × `veil` (half way to grey);
   - one full-frame fill with blend mode `.multiply`, from white to `VeilCashback` #D4CBD4 on the dusk print or `VeilMiles` #8A8496 on the night print, by `veil`.
 - **Light mode: gold over blue, on light ground.** The same `veil(x)` lays light on the lit side and a cool dim on the other, so progress reads as a change of hue (gold against blue) as well as of brightness:
-  - the sky is the daytime blue, and the unlit sky stays that blue under a light cool dim;
-  - straight after the sky, one full-frame fill of `SkyLit` #FFD98C at alpha `(0.76 + 0.16 × v) × (1 − veil)`. The ridges are drawn over it, so it only shows on the sky;
-  - after the ridges, a second `SkyLit` fill at `(0.24 + 0.12 × v) × (1 − veil)`, clipped to the ridges, so the ground is sunlit to the marker;
+  - the sky is the daytime grey-blue (softened on 10 Oct 2026 so it sits close to the gold), and the unlit sky stays that blue under a light cool dim;
+  - straight after the sky, one full-frame fill of `SkyLit` #FFD98C at alpha `(0.50 + 0.12 × v) × (1 − veil)` (0.76 + 0.16 × v before 10 Oct 2026). The ridges are drawn over it, so it only shows on the sky;
+  - after the ridges, a second `SkyLit` fill at `(0.16 + 0.08 × v) × (1 − veil)`, clipped to the ridges, so the ground is sunlit to the marker;
   - after those, one full-frame fill of `VeilDim` #3D5674 at alpha 0.15 × `veil`: the unlit side cools and dims a little but never darkens enough to break a floor, so the foot inks keep one floor across the lit and the unlit side.
 - **Veil limits.** The dusk veil is deliberately gentle: it is capped so `InkCashback` keeps 6.6:1 on the darkest veiled dusk stop, because a long name can sit on the dim side. The night veil can be darker: it only raises contrast for light inks. In light mode the dim is 15%, which leaves dark ink at 5.8:1 or more on the dimmed sky and `UrgentInk` at 4.7:1 on the dimmed ground.
 - **Brightness grows with the climb.** Light mode: the gold deepens from 76% to 92% over the sky and from 24% to 36% over the ground. Dark mode: `Bloom` #FFE3AC at 30% × `v` over the sky (screen blend on the night print), and the horizon warmth × `(1 + 0.5 × v)`. Both: the crest strokes from 90% to 100% and the halo from 40% to 100%. At rest the band is lit but plain; at the cap it is at its brightest.
 - **The pour.** From `v` 0.4 a radial gradient centred on the sun's column at the top edge, from `SunDiscTop` at the centre through `SunCore` at 30% of the radius to nothing at the radius: the glow pouring down from a sun that has left the frame. Its alpha is `peak × clamp((v − 0.4) / 0.6)`, drawn over the sky only. Peak is 0.65 in light mode, 0.55 on the dusk print and 0.65 on the night print. Radius is 0.62 W on the strip, print and band and 0.78 W on the hero, except on the night print, where it is 0.35 W on every layout: the lab's wider pour takes `InkMiles` to 2.6:1 at the end of the name over the bloom, and 0.35 W keeps it at 5.0:1 or more. Light ink on the night print is the only pair that a pour can break; dark ink only gains.
-- **Calm:** no veil, no bloom and no pour, an even, softer light. In light mode, `SkyLit` at a steady 42% across the sky and 16% on the ground. **Failed:** `veil` 1 everywhere, plus the face's saturation 0.15. In light mode the sky is `SkyOvercast`, gets no gold, and the dim is 14% everywhere.
+- **Calm:** no veil, no bloom and no pour, an even, softer light. In light mode, `SkyLit` at a steady 30% across the sky and 12% on the ground. **Failed:** `veil` 1 everywhere, plus the face's saturation 0.15. In light mode the sky is `SkyOvercast`, gets no gold, and the dim is 14% everywhere.
 - **Cost.** Two gradient fills for the veil, one bloom or gold fill and one pour fill in the same Canvas pass; light mode adds the second gold wash and a clip to the ridge path. No offscreen layer, no blur, no second draw of the scene. Blend modes act on what the context has already drawn. The lit washes fade to `SkyLit` at zero alpha, never to `.clear`, so the falloff does not pass through grey.
 - **Differentiate Without Colour.** In dark mode the veil darkens as well as desaturates, so the lit edge reads in luminance alone. In light mode the edge is first a hue step; on the sky it is also a luminance step of 1.3 to 2.1:1, on the ground a smaller one (1.3:1), and the marker carries the exact point. In the climb the read is the sun's position, which needs no colour.
 
@@ -348,7 +350,7 @@ The upper line is the **target horizon**, in the brand's ridgeline shape (a gent
 - Lower line: `Fl(x) + h × (U(x) − Fl(x))`. `h` is the fill in the minimum journey, 1 in every later stage, and a failed card or one without a target draws the brand pair apart at rest. Fill `RidgeFront` to the bottom. Crest stroke `SpendCrest`: `Crest` at 75%, 1.5pt.
 - The lower line is a blend of the level floor and the target horizon, so it lifts towards the upper line everywhere at once and cannot cross it. At `h` 0 it is level; as it rises it takes on the horizon's shape; at `h` 1 the two coincide.
 - **Merged:** one crest stroke at 90%, brightening to 100% with `v`. From there the merged ridge stays put. It does not lift with the climb: the sun carries that read, and a second encoding would compete with it.
-- The gap at any x is `(1 − h) × (Fl(x) − U(x))` on the face and the hero. On the strip and the band the spend ridge starts a third of the way up, so the gap is `(2/3) × (1 − h) × (Fl(x) − U(x))`: about 11pt at `h` 0 on the strip, a little deeper to the right.
+- The gap at any x is `(1 − h) × (Fl(x) − U(x))`. On the strip the floor is the horizon's own shape, so the gap is the same across the width: about 17pt at `h` 0 at `.large`.
 - The veil greys and cools the crest strokes right of the marker, so the lit part of the spend crest glows and the rest reads cold.
 
 #### Literal (alternative)
@@ -408,7 +410,7 @@ Past the minimum (card P, climbing after its tier):
    The sun climbs straight up the column at 0.85 W: resting (v 0), halfway (0.5), off the top edge (1).
 ```
 
-Height budget at `.large`: top padding 9, name 23, sky band 34 (the two slopes: the target horizon 14pt to 2pt under the name, the spend floor 5pt to 17pt above the headline, the gap between them two thirds of that at `h` 0), headline 22, 2, basis 15, bottom 9. That is about 114pt, 10pt more than the first cut, so about 5 rows still fit on an iPhone 16.
+Height budget at `.large`: top padding 9, name 23, sky band 34 (the two slopes: the target horizon 14pt to 2pt under the name, the spend floor the same shape 17pt below it, 3pt above the headline at the left), headline 22, 2, basis 15, bottom 9. That is about 114pt, 10pt more than the first cut, so about 5 rows still fit on an iPhone 16.
 
 | Element | Type | Ink |
 | --- | --- | --- |

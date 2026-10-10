@@ -66,9 +66,8 @@ function normalised(table: readonly number[]): number[] {
   const lo = Math.min(...table), hi = Math.max(...table);
   return table.map((y) => (y - lo) / (hi - lo));
 }
-/** The brand ridges' rise, 1 at the left edge and 0 at the right: the phone strip's horizons take their shape. */
+/** The brand back ridge's rise, 1 at the left edge and 0 at the right: the phone strip's horizons take its shape. */
 export const BACK_RISE = normalised(BACK_CREST);
-export const FRONT_RISE = normalised(FRONT_CREST);
 
 function crestAt(table: readonly number[], x: number): number {
   const f = Math.min(1, Math.max(0, x)) * (table.length - 1);
@@ -136,14 +135,15 @@ export function exposureScene(layout: SceneLayout, ex: Exposure, pose: Pose, opt
     ? (ux: number) => layout.nameBottom + 2 + 12 * crestAt(BACK_RISE, ux)
     : (ux: number) => H * crestAt(BACK_CREST, ux);
   // The floor the spend horizon lifts from: level on the face (or the brand front ridge for a card with
-  // no journey); on the strip the brand front ridge's rise, 12pt deep, from 5pt above the foot at the left.
+  // no journey). On the strip it is the target horizon's own shape, as far down as the words allow (3pt
+  // above the foot at its lowest, the left edge), so the two slopes start equidistant and converge.
+  const stripGap = strip ? Math.max(4, layout.footTop - 3 - (layout.nameBottom + 14)) : 0;
   const level = strip
-    ? (ux: number) => Math.max(layout.footTop - 17 + 12 * crestAt(FRONT_RISE, ux), upper(ux) + 4)
+    ? (ux: number) => upper(ux) + stripGap
     : (ux: number) => H * (0.8 + 0.01 * wiggle(ux));
   const floor = ex.ridgesApart && !strip ? (ux: number) => H * crestAt(FRONT_CREST, ux) : level;
-  // The strip's spend ridge starts a third of the way up the gap, as the icon's front ridge sits, so an
-  // empty card is still the icon's two slopes; the face lifts from the floor.
-  const across = ex.ridgesApart ? (strip ? 1 / 3 : 0) : strip ? 1 / 3 + (2 / 3) * pose.h : pose.h;
+  // On the strip a card with no minimum keeps the pair apart: the convergence is the minimum's own read.
+  const across = ex.ridgesApart || (strip && !ex.hasMinimum) ? 0 : pose.h;
 
   const backPts: Array<[number, number]> = [];
   const lowerPts: Array<[number, number]> = [];
@@ -154,7 +154,7 @@ export function exposureScene(layout: SceneLayout, ex: Exposure, pose: Pose, opt
     lowerPts.push([ux * w, fl + across * (up - fl)]);
   }
   const closed = (pts: Array<[number, number]>, edge: number) => `${polyline(pts)} L${w},${edge} L0,${edge} Z`;
-  const merged = !ex.ridgesApart && pose.h >= 1;
+  const merged = across >= 1;
 
   // The sun.
   const column = sunX(pose);
@@ -177,8 +177,8 @@ export function exposureScene(layout: SceneLayout, ex: Exposure, pose: Pose, opt
   const from = clamp01(pose.h - 0.04), to = clamp01(pose.h + 0.04);
   const whole = !gate;
   const gold = failed ? { sky: 0, ground: 0 }
-    : even ? { sky: 0.42, ground: 0.16 }
-    : { sky: 0.76 + 0.16 * v, ground: 0.24 + 0.12 * v };
+    : even ? { sky: 0.3, ground: 0.12 }
+    : { sky: 0.5 + 0.12 * v, ground: 0.16 + 0.08 * v };
 
   const sunOn = ex.hasSun;
   const markerOn = ex.hasMarker && pose.h < 1 && !strip;
