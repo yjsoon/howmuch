@@ -984,6 +984,7 @@ function reportFilters(url: URL) {
     interval: (url.searchParams.get("interval") as any) ?? "month",
     topPayeesLimit: parseNumber(url.searchParams.get("top_payees_limit")),
     groupBy: parseRewardGroupBy(url.searchParams.get("group")),
+    rewardsRange: url.searchParams.get("mode") === "range",
   };
 }
 

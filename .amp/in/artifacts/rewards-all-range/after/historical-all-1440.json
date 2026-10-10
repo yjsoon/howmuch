@@ -1,0 +1,20 @@
+{
+  "request": "/api/reports/rewards?plan_id=local-plan&mode=range",
+  "period": "2026-03-11:2026-10-10",
+  "as_of": "2026-10-10",
+  "totals": {
+    "spend": 830.8,
+    "reward_dollars": 44.830499999999994,
+    "cashback": 0,
+    "miles": 2988.7
+  },
+  "cards": [
+    {
+      "id": "card-travel",
+      "period": "2026-03-11:2026-10-10",
+      "total_spend": 830.8,
+      "reward_earned": 2988.7
+    }
+  ],
+  "groups": 2
+}

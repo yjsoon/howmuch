@@ -308,6 +308,8 @@ export interface ReportQuery {
   category_ids?: string;
   interval?: string;
   group?: string;
+  /** Rewards only: `range` keeps historical attribution when `from` is empty (all history). */
+  mode?: string;
 }
 
 export interface AuthUser {
