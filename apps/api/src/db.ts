@@ -115,6 +115,10 @@ export function applyMigrations(db: Database): void {
       version: "021_account_month_balances",
       path: join(migrationsDir, "021_account_month_balances.sql"),
     },
+    {
+      version: "022_own_imported_ynab_schedules",
+      path: join(migrationsDir, "022_own_imported_ynab_schedules.sql"),
+    },
   ];
 
   for (const migration of migrations) {
@@ -130,7 +134,11 @@ export function applyMigrations(db: Database): void {
     if (migration.rebuildsForeignKeyTarget) db.run("PRAGMA foreign_keys = OFF");
     try {
       db.transaction(() => {
-        db.run(sql);
+        // bun:sqlite reports an error from the last statement of a multi-statement
+        // string only when nothing but the semicolon follows it, so a trailing
+        // newline would hide a failing final statement (a migration's own
+        // consistency check).
+        db.run(sql.trimEnd());
         db.query("INSERT INTO schema_migrations (version) VALUES (?)").run(migration.version);
       })();
     } finally {

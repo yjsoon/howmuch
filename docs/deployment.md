@@ -78,6 +78,16 @@ environment `tk` in `wrangler.jsonc`:
   applies D1 migrations. If a release includes a migration, apply it manually
   (`wrangler d1 migrations apply DB --env tk --remote --profile tinkertanker`)
   before tagging, following the verification order in this document.
+- Migration `0019_own_imported_ynab_schedules.sql` copies every mirrored YNAB
+  schedule into HowMuch's own schedule tables and adds `plans.ynab_sourced`. It
+  must be applied **before** the Worker that reads them is deployed (the new
+  code needs the column; the old code keeps working against the new schema).
+  Run `scripts/backup-d1.sh` first. The migration is atomic and fails, changing
+  nothing, if a mirrored schedule cannot be copied. Afterwards, with
+  `wrangler d1 execute DB --env tk --remote --profile tinkertanker --command`,
+  check that the two counts match and that the plan is marked:
+  `SELECT (SELECT count(*) FROM ynab_raw_objects WHERE object_type='scheduled_transaction') AS mirrored, (SELECT count(*) FROM scheduled_transaction_edits WHERE origin='ynab-overlay') AS owned, (SELECT group_concat(ynab_sourced) FROM plans) AS plan_marked`.
+  It leaves `ynab_raw_objects` untouched; pruning it is a separate decision (#161).
 - Before building or deploying, the workflow runs
   `scripts/check-d1-migrations.sh --env tk --remote`. It reads the
   `d1_migrations` table with a single `SELECT` and fails the run, without

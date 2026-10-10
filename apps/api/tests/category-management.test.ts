@@ -265,7 +265,7 @@ describe("D1 category commands re-check their preconditions inside the batch", (
     const plan = racing.planCreateCategoryGroup.bind(racing);
     racing.planCreateCategoryGroup = async (...args: unknown[]) => {
       const command = await plan(...args);
-      if (!db.query("SELECT 1 FROM ynab_raw_objects WHERE object_type = 'month'").get()) markYnabMirror(db);
+      if (!db.query("SELECT 1 FROM plans WHERE ynab_sourced = 1").get()) markYnabMirror(db);
       return command;
     };
     const response = await request("/v1/plans/p/category_groups", { method: "POST", body: { category_group: { id: "grp", name: "Living" } } });

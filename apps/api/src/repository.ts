@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { createId } from "./ids";
+import { ownedRecordStatements } from "./ynab-owned-records";
 import type { SeedCurrencyFormat, SeedDateFormat } from "./plan-settings-seed";
 import { SqliteRepositoryDatabase, type RepositoryDatabase } from "./repository-db";
 import {
@@ -982,7 +983,7 @@ export class LedgerRepository {
 
   /** The plan's ledger in `howmuch-plan-snapshot` form, read in one consistent batch. */
   async exportPlanSnapshot(planId: string): Promise<{ snapshot: PlanSnapshot; server_knowledge: number }> {
-    const [groups, categories, payees, accounts, transactions, subtransactions, rawParents, rawSubs, editRows, editSubRows, knowledge] = await this.db.batchRead([
+    const [groups, categories, payees, accounts, transactions, subtransactions, editRows, editSubRows, knowledge] = await this.db.batchRead([
       { sql: "SELECT id, name, hidden, internal, deleted FROM category_groups WHERE plan_id = ? ORDER BY id", values: [planId] },
       { sql: "SELECT id, category_group_id, name, hidden, internal, deleted FROM categories WHERE plan_id = ? ORDER BY id", values: [planId] },
       { sql: "SELECT id, name, transfer_account_id, deleted FROM payees WHERE plan_id = ? ORDER BY id", values: [planId] },
@@ -1018,7 +1019,7 @@ export class LedgerRepository {
         accounts: accounts ?? [],
         transactions: transactions ?? [],
         subtransactions: subtransactions ?? [],
-        scheduledTransactions: assembleScheduledTransactions(rawParents ?? [], rawSubs ?? [], editRows ?? [], editSubRows ?? []),
+        scheduledTransactions: assembleScheduledTransactions(editRows ?? [], editSubRows ?? []),
       }),
       server_knowledge: knowledgeFrom(knowledge),
     };
@@ -2034,6 +2035,8 @@ export class LedgerRepository {
    * Stores an exact source object from YNAB.  The normalised ledger remains
    * the write model; this mirror keeps fields that HowMuch does not yet model
    * (targets, notes, scheduling metadata, locations, and future API fields).
+   * Objects HowMuch serves (schedules, the plan marker) are also written to
+   * its own tables, see `ynab-owned-records.ts`.
    */
   async upsertYnabRawObject(
     planId: string,
@@ -2046,17 +2049,21 @@ export class LedgerRepository {
     const json = JSON.stringify(payload);
     if (json === undefined) throw new ValidationError("YNAB raw object payload must be JSON serialisable");
     const deleted = Boolean((payload as Record<string, unknown> | null)?.deleted) ? 1 : 0;
-    await this.db
-      .query(
-        `INSERT INTO ynab_raw_objects(plan_id, object_type, object_id, payload_json, deleted, server_knowledge, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-         ON CONFLICT(plan_id, object_type, object_id) DO UPDATE SET
-           payload_json = excluded.payload_json,
-           deleted = excluded.deleted,
-           server_knowledge = excluded.server_knowledge,
-           updated_at = CURRENT_TIMESTAMP`,
-      )
-      .run(planId, objectType, objectId, json, deleted, serverKnowledge ?? null);
+    const owned = ownedRecordStatements(planId, objectType, objectId, json, deleted);
+    await this.db.transaction(async () => {
+      await this.db
+        .query(
+          `INSERT INTO ynab_raw_objects(plan_id, object_type, object_id, payload_json, deleted, server_knowledge, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(plan_id, object_type, object_id) DO UPDATE SET
+             payload_json = excluded.payload_json,
+             deleted = excluded.deleted,
+             server_knowledge = excluded.server_knowledge,
+             updated_at = CURRENT_TIMESTAMP`,
+        )
+        .run(planId, objectType, objectId, json, deleted, serverKnowledge ?? null);
+      for (const statement of owned) await this.db.query(statement.sql).run(...(statement.values as any[]));
+    })();
   }
 
   async listYnabRawObjects(planId: string, objectType: string): Promise<any[]> {
@@ -2066,27 +2073,27 @@ export class LedgerRepository {
     return rows.map((row) => parseRawYnabObject(row.payload_json, objectType));
   }
 
-  /** Effective schedules: immutable YNAB rows plus HowMuch-owned overlays. */
+  /** Effective schedules: imported YNAB schedules and local ones, all in HowMuch's tables. */
   async listScheduledTransactions(planId: string): Promise<any[]> {
     const rows = await Promise.all(SCHEDULED_SQL.map((sql) => this.db.query(sql).all(planId) as Promise<Row[]>));
-    return assembleScheduledTransactions(rows[0]!, rows[1]!, rows[2]!, rows[3]!);
+    return assembleScheduledTransactions(rows[0]!, rows[1]!);
   }
 
   /**
    * Schedules and the knowledge value in one round trip, for the HTTP route.
-   * The method above keeps its four separate statements because write paths
+   * The method above keeps its separate statements because write paths
    * call it from inside an open transaction, where a batch cannot nest.
    */
   async listScheduledTransactionsWithKnowledge(
     planId: string,
   ): Promise<{ scheduled_transactions: any[]; server_knowledge: number }> {
     const values = [planId];
-    const [rawParents, rawSubs, editRows, editSubRows, knowledgeRows] = await this.db.batchRead([
+    const [editRows, editSubRows, knowledgeRows] = await this.db.batchRead([
       ...SCHEDULED_SQL.map((sql) => ({ sql, values })),
       { sql: SERVER_KNOWLEDGE_SQL, values },
     ]);
     return {
-      scheduled_transactions: assembleScheduledTransactions(rawParents ?? [], rawSubs ?? [], editRows ?? [], editSubRows ?? []),
+      scheduled_transactions: assembleScheduledTransactions(editRows ?? [], editSubRows ?? []),
       server_knowledge: knowledgeFrom(knowledgeRows),
     };
   }
@@ -2115,10 +2122,7 @@ export class LedgerRepository {
     if (await this.replayedScheduleMutation(planId, id, "scheduled_transaction.create", options.operationId, fingerprint)) {
       return projectScheduledRead(await this.readScheduledTransaction(planId, id, true));
     }
-    const collision = await this.db.query(
-      `SELECT 1 FROM scheduled_transaction_edits WHERE plan_id=? AND id=?
-       UNION ALL SELECT 1 FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_transaction' AND object_id=? LIMIT 1`,
-    ).get(planId, id, planId, id);
+    const collision = await this.db.query("SELECT 1 FROM scheduled_transaction_edits WHERE plan_id=? AND id=?").get(planId, id);
     if (collision) throw new ValidationError("Scheduled transaction already exists");
     const transaction = scheduledTransactionMutation(id, input as Record<string, unknown>, null, [], options.operationId);
     await this.validateScheduledReferences(planId, transaction);
@@ -2448,12 +2452,7 @@ export class LedgerRepository {
       const payload = { ...parseRawYnabObject(edit.payload_json, "scheduled transaction"), deleted: Boolean(edit.deleted) };
       return { ...payload, payload, payloadJson: String(edit.payload_json), subtransactions, origin: edit.origin as "howmuch-local" | "ynab-overlay" } as any;
     }
-    const source = await this.db.query("SELECT payload_json,deleted FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_transaction' AND object_id=?").get(planId, id) as Row | null;
-    if (!source || (Boolean(source.deleted) && !includeDeleted)) throw new NotFoundError("Scheduled transaction not found");
-    const rows = await this.db.query("SELECT payload_json FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_subtransaction' ORDER BY object_id").all(planId) as Row[];
-    const subtransactions = rows.map((row) => parseRawYnabObject(row.payload_json, "scheduled subtransaction")).filter((row) => row.scheduled_transaction_id === id);
-    const payload = { ...parseRawYnabObject(source.payload_json, "scheduled transaction"), deleted: Boolean(source.deleted) };
-    return { ...payload, payload, payloadJson: String(source.payload_json), subtransactions, origin: "ynab-overlay" };
+    throw new NotFoundError("Scheduled transaction not found");
   }
 
   private async validateScheduledReferences(planId: string, transaction: EffectiveScheduledTransaction): Promise<void> {
@@ -3432,10 +3431,8 @@ const LIST_PAYEES_SQL = "SELECT id, name, transfer_account_id, deleted FROM paye
 const LIST_CATEGORY_GROUPS_SQL = "SELECT * FROM category_groups WHERE plan_id = ? AND deleted = 0 ORDER BY name";
 const LIST_CATEGORIES_SQL = "SELECT * FROM categories WHERE plan_id = ? AND deleted = 0 ORDER BY name";
 
-/** The four row sets an effective schedule list is projected from, in order. */
+/** The two row sets an effective schedule list is projected from, in order. */
 const SCHEDULED_SQL = [
-  "SELECT object_id,payload_json,deleted FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_transaction' ORDER BY object_id",
-  "SELECT payload_json FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_subtransaction' ORDER BY object_id",
   "SELECT id,payload_json,deleted FROM scheduled_transaction_edits WHERE plan_id=? ORDER BY id",
   "SELECT scheduled_transaction_id,payload_json FROM scheduled_subtransaction_edits WHERE plan_id=? ORDER BY scheduled_transaction_id,id",
 ];
@@ -3465,25 +3462,12 @@ function assembleCategoryGroups(groups: Row[], categories: Row[]): any[] {
   }));
 }
 
-/** Pure projection of the four schedule row sets into effective schedules. */
-function assembleScheduledTransactions(rawParents: Row[], rawSubs: Row[], editRows: Row[], editSubRows: Row[]): any[] {
-    const sourceSubs = groupScheduledSubtransactions(rawSubs.map((row) => parseRawYnabObject(row.payload_json, "scheduled subtransaction")));
+/** Pure projection of the two schedule row sets into effective schedules. */
+function assembleScheduledTransactions(editRows: Row[], editSubRows: Row[]): any[] {
     const editedSubs = groupScheduledSubtransactions(editSubRows.map((row) => parseRawYnabObject(row.payload_json, "scheduled subtransaction")));
-    const edits = new Map(editRows.map((row) => [String(row.id), row]));
     const result: any[] = [];
-
-    for (const row of rawParents) {
-      const id = String(row.object_id);
-      const edit = edits.get(id);
-      edits.delete(id);
-      if (edit) {
-        if (!Boolean(edit.deleted)) result.push(projectScheduledPayload(edit.payload_json, editedSubs.get(id) ?? [], edit.deleted));
-      } else if (!Boolean(row.deleted)) {
-        result.push(projectScheduledPayload(row.payload_json, sourceSubs.get(id) ?? [], row.deleted));
-      }
-    }
-    for (const [id, edit] of edits) {
-      if (!Boolean(edit.deleted)) result.push(projectScheduledPayload(edit.payload_json, editedSubs.get(id) ?? [], edit.deleted));
+    for (const edit of editRows) {
+      if (!Boolean(edit.deleted)) result.push(projectScheduledPayload(edit.payload_json, editedSubs.get(String(edit.id)) ?? [], edit.deleted));
     }
     return result.sort((left, right) => String(left.date_next ?? left.date_first ?? "9999-12-31").localeCompare(String(right.date_next ?? right.date_first ?? "9999-12-31")) || String(left.id).localeCompare(String(right.id)));
 }

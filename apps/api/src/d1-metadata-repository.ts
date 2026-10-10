@@ -7,10 +7,11 @@ import type { EffectiveScheduledTransaction } from "./scheduled-transactions";
 import { resolveAccountPresentation } from "./account-icon";
 import { onBudgetForKind, type AccountUpdatePatch } from "./account-kind";
 import { ynabMirrorGuard, type PlannedSql } from "./category-management";
+import { ownedRecordStatements } from "./ynab-owned-records";
 
 /** Exact effective-source snapshot required to merge a scheduled mutation. */
 export type ScheduledMutationSnapshot = Readonly<{
-  source: "edit" | "raw";
+  source: "edit";
   payloadJson: string;
   subtransactionsJson: string;
   deleted: number;
@@ -180,6 +181,7 @@ export class D1MetadataRepository {
     const deleted=Boolean((payload as Record<string,unknown>|null)?.deleted)?1:0; const commandId=this.id(context);
     await this.run("ynab.raw.upsert",planId,`${objectType}:${objectId}`,{objectType,objectId,payload,serverKnowledge:serverKnowledge??null},context,[
       assertion(commandId,"metadata_plan_exists",planId,planId),
+      ...ownedRecordStatements(planId,objectType,objectId,json,deleted).map((owned)=>statement(owned.sql,owned.values)),
       statement(`INSERT INTO ynab_raw_objects(plan_id,object_type,object_id,payload_json,deleted,server_knowledge,updated_at) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)
         ON CONFLICT(plan_id,object_type,object_id) DO UPDATE SET payload_json=excluded.payload_json,deleted=excluded.deleted,server_knowledge=excluded.server_knowledge,updated_at=CURRENT_TIMESTAMP`,[planId,objectType,objectId,json,deleted,serverKnowledge??null]),
     ]);

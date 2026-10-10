@@ -83,8 +83,9 @@ export async function nativeHarness(
   };
 }
 
-/** Makes plan `p` a YNAB mirror: one `month` raw object is enough. */
+/** Makes plan `p` a YNAB mirror the way the importer does: a `month` raw object and the plan marker. */
 export function markYnabMirror(db: Database, planId = "p"): void {
+  db.run("UPDATE plans SET ynab_sourced = 1 WHERE id = ?", [planId]);
   db.run(
     "INSERT INTO ynab_raw_objects (plan_id, object_type, object_id, payload_json) VALUES (?, 'month', '2026-01-01', ?)",
     [planId, JSON.stringify({ month: "2026-01-01", categories: [] })],

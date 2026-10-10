@@ -227,6 +227,7 @@ function validateStatementGroups(source: Database, statementGroups: string[][], 
     db.exec(readFileSync(new URL("../../apps/api/d1-migrations/0015_rewards_tracker.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../apps/api/d1-migrations/0016_query_covering_indexes.sql", import.meta.url), "utf8"));
     db.exec(readFileSync(new URL("../../apps/api/d1-migrations/0017_ynab_source_month_activity.sql", import.meta.url), "utf8"));
+    db.exec(readFileSync(new URL("../../apps/api/d1-migrations/0019_own_imported_ynab_schedules.sql", import.meta.url), "utf8"));
     for (const statements of statementGroups) db.exec(statements.join("\n"));
     if ((db.query("PRAGMA foreign_key_check").all() as any[]).length) throw new Error("Generated database has foreign-key violations");
     for (const table of COPY_TABLES) {

@@ -70,6 +70,7 @@ function migratedTarget(): Database {
   target.exec(readFileSync(new URL("../apps/api/d1-migrations/0015_rewards_tracker.sql", import.meta.url), "utf8"));
   target.exec(readFileSync(new URL("../apps/api/d1-migrations/0016_query_covering_indexes.sql", import.meta.url), "utf8"));
   target.exec(readFileSync(new URL("../apps/api/d1-migrations/0017_ynab_source_month_activity.sql", import.meta.url), "utf8"));
+  target.exec(readFileSync(new URL("../apps/api/d1-migrations/0019_own_imported_ynab_schedules.sql", import.meta.url), "utf8"));
   return target;
 }
 

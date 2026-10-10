@@ -287,11 +287,7 @@ export class D1LedgerRepository extends LedgerRepository {
     const context = this.context("scheduled_transaction.create", planId, id, options.operationId);
     const receipt = options.operationId ? await this.d1.get("SELECT 1 FROM write_commands WHERE id=?", [context.operationId]) : null;
     if (!receipt) {
-      const collision = await this.d1.get(
-        `SELECT 1 FROM scheduled_transaction_edits WHERE plan_id=? AND id=?
-         UNION ALL SELECT 1 FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_transaction' AND object_id=? LIMIT 1`,
-        [planId, id, planId, id],
-      );
+      const collision = await this.d1.get("SELECT 1 FROM scheduled_transaction_edits WHERE plan_id=? AND id=?", [planId, id]);
       if (collision) throw new ValidationError("Scheduled transaction already exists");
     }
     const transaction = scheduledTransactionMutation(id, input as Record<string, unknown>, null, [], options.operationId);
@@ -355,24 +351,7 @@ export class D1LedgerRepository extends LedgerRepository {
         },
       };
     }
-    const source = await this.d1.get<Record<string, any>>("SELECT payload_json,deleted FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_transaction' AND object_id=?", [planId, id]);
-    if (!source || (Boolean(source.deleted) && !includeDeleted)) throw new NotFoundError("Scheduled transaction not found");
-    const rawSubs = await this.d1.all<Record<string, any>>("SELECT payload_json FROM ynab_raw_objects WHERE plan_id=? AND object_type='scheduled_subtransaction' ORDER BY object_id", [planId]);
-    const sourceSubtransactions = rawSubs.filter((row) => {
-      const subtransaction = JSON.parse(row.payload_json) as Record<string, any>;
-      return subtransaction.scheduled_transaction_id === id && !subtransaction.deleted;
-    });
-    return {
-      payload: { ...JSON.parse(source.payload_json), deleted: Boolean(source.deleted) },
-      subtransactions: sourceSubtransactions.map((row) => JSON.parse(row.payload_json)),
-      origin: "ynab-overlay",
-      snapshot: {
-        source: "raw",
-        payloadJson: String(source.payload_json),
-        subtransactionsJson: JSON.stringify(sourceSubtransactions.map((row) => String(row.payload_json))),
-        deleted: Number(Boolean(source.deleted)),
-      },
-    };
+    throw new NotFoundError("Scheduled transaction not found");
   }
 
   private async validateD1ScheduledReferences(planId: string, transaction: EffectiveScheduledTransaction): Promise<void> {

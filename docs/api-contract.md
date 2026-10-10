@@ -195,7 +195,7 @@ statement date, and only when their projected reconciled balance exactly matches
 the supplied statement balance. A mismatch returns `409 reconciliation_mismatch`
 with the current, projected, statement, and difference values; no rows change.
 Successful retries return the original receipt. Reconciliation is a cutover-only
-Halation write: it does not alter the immutable YNAB raw mirror and a later YNAB
+Halation write: it does not alter the YNAB raw mirror and a later YNAB
 re-import must not be used to overwrite local ledger state.
 
 ### Payees
@@ -249,7 +249,7 @@ SQLite checks and writes in one immediate transaction. D1 repeats every check in
 
 Halation has no budgeting. The YNAB month routes (`GET /v1/plans/{plan_id}/months/{month}`, `PATCH …/months/{month}/categories/{category_id}` for assignments and targets, and `GET …/months/{month}/transactions`) and the money-movement routes now return `404`.
 
-The YNAB importer still mirrors months, month categories and money movements into `ynab_raw_objects`. The tables behind the old overlays (`plan_month_assignments`, `plan_month_category_targets`) and the materialised `ynab_source_month_activity` baseline are retained legacy tables: no migration drops them and no code reads or writes them.
+The YNAB importer still mirrors months, month categories and money movements into `ynab_raw_objects`, which is provenance only: nothing that serves schedules or gates category edits reads it. The importer records a plan that carried months in `plans.ynab_sourced`. The tables behind the old overlays (`plan_month_assignments`, `plan_month_category_targets`) and the materialised `ynab_source_month_activity` baseline are retained legacy tables: no migration drops them and no code reads or writes them.
 
 ### Scheduled transactions
 
@@ -259,7 +259,7 @@ The YNAB importer still mirrors months, month categories and money movements int
 
 `GET /v1/plans/{plan_id}/scheduled_subtransactions`
 
-The collection is an effective view: untouched imported schedules are returned exactly from the YNAB mirror with their subtransactions, while Halation-local schedules and overlays replace source objects with the same ID. A tombstoned overlay hides its imported schedule. The source rows in `ynab_raw_objects` are never updated or deleted.
+Every schedule, imported or created here, is a row in `scheduled_transaction_edits` (with its lines in `scheduled_subtransaction_edits`), and the collection reads only those tables. An imported schedule is stored with `origin = ynab-overlay` and its payload exactly as YNAB sent it; a delete hides it with a tombstone. The importer adds a schedule only when none with that ID exists, so a later import never overwrites a local change. Migration `0019` (SQLite `022`) copied the schedules imported before that. The source rows in `ynab_raw_objects` are not read or changed by schedule requests.
 
 Create, replace, update, or delete an effective schedule with:
 
