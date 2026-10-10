@@ -38,6 +38,8 @@ struct RewardExposure: Equatable {
   var hasMinimum: Bool
   /// Changes when the target does: another action kind, basis target or deadline end.
   var target: String
+  /// Where in the period the minimum was met, 0…1: where the phone's two slopes meet. Nil when unknown.
+  var metAt: Double?
 
   var light: Light { stage == .failed ? .overcast : stage == .calm ? .even : .journey }
   var hasMarker: Bool { stage == .gate }
@@ -106,6 +108,7 @@ struct RewardExposure: Equatable {
     needsMinimum = p.tone == .needsMinimum
     hasMinimum = minimum > 0
     target = "\(Self.kind(p.action))|\(p.basis?.target ?? 0)|\(p.deadline?.end ?? "")"
+    metAt = p.minimumMetAt
   }
 
   /// A plain amount: finite and positive, else 0.
@@ -134,8 +137,10 @@ extension RewardExposure.Pose {
   /// The share of the full gap between the ridges that is left.
   var gap: Double { 1 - h }
   /// The sun's centre y for a target horizon at `horizon` and a disc of radius `r` (y points down).
-  func sunY(horizon: Double, r: Double) -> Double {
-    let sit = horizon + 0.08 * r
+  /// `seat` is how far below the horizon the centre sits while the sun rides it, as a share of `r`:
+  /// a hair below on the hero, and exactly on it on the phone strip, where the disc is a clean half-sun.
+  func sunY(horizon: Double, r: Double, seat: Double = 0.08) -> Double {
+    let sit = horizon + seat * r
     let rest = horizon - 1.15 * r
     return h < 1 ? sit + (rest - sit) * lift : rest + (-1.05 * r - rest) * v
   }
@@ -154,6 +159,21 @@ enum ExposureLayout: Equatable {
   case band
 }
 
+/// The brand ridges' rise (the app icon's two slopes), sampled at 65 even x from the web's shipped
+/// paths (`reward-exposure-scene.ts` BACK_RISE) and kept in step with them: 1 at the
+/// left edge, where the ridge is lowest, and 0 at the right, where it is highest. The phone's
+/// horizons take this shape.
+enum BrandRise {
+  static let back: [Double] = [1, 0.989, 0.977, 0.964, 0.95, 0.935, 0.92, 0.905, 0.889, 0.874, 0.859, 0.845, 0.833, 0.822, 0.813, 0.806, 0.801, 0.799, 0.8, 0.803, 0.801, 0.795, 0.783, 0.766, 0.744, 0.719, 0.69, 0.659, 0.627, 0.596, 0.567, 0.539, 0.515, 0.494, 0.476, 0.462, 0.448, 0.433, 0.416, 0.399, 0.38, 0.361, 0.341, 0.321, 0.3, 0.28, 0.259, 0.24, 0.22, 0.201, 0.183, 0.166, 0.151, 0.138, 0.127, 0.119, 0.111, 0.104, 0.097, 0.089, 0.08, 0.067, 0.05, 0.028, 0]
+
+  /// The rise at `u`, a share of the width, interpolated between samples.
+  static func at(_ table: [Double], _ u: Double) -> Double {
+    let f = min(1, max(0, u)) * Double(table.count - 1)
+    let i = min(table.count - 2, Int(f))
+    return table[i] + (table[i + 1] - table[i]) * (f - Double(i))
+  }
+}
+
 /// The scene's geometry for one frame, in points. Pure: the Canvas draws it.
 struct ExposureScene {
   let width: Double
@@ -166,60 +186,82 @@ struct ExposureScene {
   /// The sun's radius.
   var sunRadius: Double {
     switch layout {
-    case .strip: return 8
-    case .band: return 6
+    case .strip: return 10
+    case .band: return 7
     }
   }
 
-  private var horizonBase: Double {
+  /// The target horizon's range: the brand back ridge's rise, from `low` at the left edge to
+  /// `high` at the right, where the sun's column is. On the strip it runs from 14pt under the
+  /// name to 2pt under it.
+  private var horizonRange: (high: Double, low: Double) {
     switch layout {
-    case .strip(let nameBottom, _): return (nameBottom ?? 0.31 * height) + 10
-    case .band: return 0.52 * height
+    case .strip(let nameBottom, _):
+      let name = nameBottom ?? 0.28 * height
+      return (name + 2, name + 14)
+    case .band: return (0.42 * height, 0.56 * height)
     }
   }
 
-  private var floorBase: Double {
+  /// How far below the target horizon the spend floor runs: the floor is the horizon's own shape, as far
+  /// down as the words allow (3pt above the foot at its lowest, the left edge). The lower slope starts
+  /// there and its far end rises as the minimum fills.
+  private var floorGap: Double {
     switch layout {
-    case .strip(_, let footTop): return (footTop ?? 0.54 * height) - 5
-    case .band: return 0.80 * height
+    case .strip(_, let footTop):
+      let foot = footTop ?? 0.58 * height
+      return max(4, foot - 3 - horizonRange.low)
+    case .band: return 0.26 * height
     }
   }
 
-  private var wobble: Double {
-    switch layout {
-    case .strip: return 1
-    case .band: return 0.01 * height
-    }
+  /// The target horizon `U(x)` at `u`, a share of the width: the icon's back slope.
+  func horizonY(at u: Double) -> Double {
+    let range = horizonRange
+    return range.high + (range.low - range.high) * BrandRise.at(BrandRise.back, u)
   }
 
-  /// The target horizon `U(x)` at `u`, a share of the width: level, give or take a little.
-  func horizonY(at u: Double) -> Double { horizonBase + wobble * sin(u * 8.2 + 1.3) }
+  /// The spend floor `Fl(x)`: the target horizon's shape, `floorGap` below it.
+  func floorY(at u: Double) -> Double { horizonY(at: u) + floorGap }
 
-  /// The spend floor `Fl(x)`, never above the target horizon, so the two cannot cross.
-  func floorY(at u: Double) -> Double { max(floorBase + wobble * sin(u * 8.2 + 0.4), horizonY(at: u)) }
+  /// How far the spend horizon's far end has lifted: the fill of the minimum journey. Failed and untargeted
+  /// cards, and cards with no minimum, keep the pair apart: the convergence is the minimum's own read.
+  private var across: Double { exposure.ridgesApart || !exposure.hasMinimum ? 0 : pose.h }
 
-  /// The spend horizon: a blend of the floor and the target horizon, lifting as `h` grows.
-  /// Failed and untargeted cards draw the pair apart at rest.
+  /// The spend horizon. The lower slope is anchored at the left, as low as the words allow, and only its
+  /// far end rises: with the fill, until the minimum is met, when it meets the target where in the period
+  /// that happened (`metAt`) and runs with it from there. So the meeting point reads as when the minimum
+  /// was met.
   func spendY(at u: Double) -> Double {
-    let h = exposure.ridgesApart ? 0 : pose.h
     let floor = floorY(at: u)
-    return floor + h * (horizonY(at: u) - floor)
+    let horizon = horizonY(at: u)
+    if across <= 0 { return floor }
+    if across < 0.999 { return floor - (floor - horizon) * across * u }
+    let metAt = min(1, max(0, exposure.metAt ?? 1))
+    if metAt <= 0 { return horizon }
+    return floor - (floor - horizon) * min(1, u / metAt)
   }
 
   /// Both ridges are one: the minimum is met, so the spend horizon has met the target.
-  var isMerged: Bool { !exposure.ridgesApart && pose.h >= 0.999 }
+  var isMerged: Bool { across >= 0.999 }
 
-  /// The sun's centre, nil when there is none.
+  /// The sun's centre, nil when there is none. On the phone it sits exactly on the horizon, a clean
+  /// half-sun, and lifts clear from there.
   var sun: (x: Double, y: Double)? {
     guard exposure.hasSun else { return nil }
     let u = pose.sunX
-    return (u * width, pose.sunY(horizon: horizonY(at: u), r: sunRadius))
+    return (u * width, pose.sunY(horizon: horizonY(at: u), r: sunRadius, seat: 0))
   }
 
-  /// The rings' base radius `R`: grows with the climb, capped by the frame's height.
+  /// The glow's radius `R`: grows with the climb, capped by the frame's height. The phone draws one
+  /// smooth falloff rather than the posterised rings, which a short frame clips into arcs.
   var ringRadius: Double {
     min((0.14 + 0.24 * pose.v) * width, (0.42 + 0.6 * pose.v) * height)
   }
+
+  /// How far the sun has lifted clear of the horizon. The phone has no room for a hairline marker or
+  /// an unlit sliver at the edge, so the last of the band lights as the sun lifts.
+  var lifted: Double { pose.lift }
 
   var haloOpacity: Double { 0.4 + 0.6 * pose.v }
 
@@ -227,9 +269,6 @@ struct ExposureScene {
   /// the stage, so when the minimum is met the lit edge sweeps to the right edge and the
   /// marker goes with it, instead of the whole band lighting at once.
   var inMinimumJourney: Bool { exposure.light == .journey && pose.h < 0.999 }
-
-  /// The marker's share of the width: exactly the fill, in the minimum journey only.
-  var markerShare: Double? { inMinimumJourney ? pose.h : nil }
 
   /// The veil's soft edge, in points: full light to the left of `from`, full veil right of `to`.
   /// A failed card is veiled everywhere. Nil once there is no minimum journey to show.
@@ -239,15 +278,24 @@ struct ExposureScene {
     return ((pose.h - 0.04) * width, (pose.h + 0.04) * width)
   }
 
-  /// Light mode: the gold over the sky and the ground as peak alphas, or nil when there is none.
-  var litAlpha: (sky: Double, ground: Double)? {
+  /// The veil's peak, 0 to 1: full while the sun rides, fading as it lifts; a failed card keeps it.
+  var veilStrength: Double { exposure.stage == .failed ? 1 : 1 - lifted }
+
+  /// Light mode: the gold over the sky as a peak alpha, or nil when there is none. The ground is never lit.
+  var litAlpha: Double? {
     guard appearance == .daytime else { return nil }
     switch exposure.light {
     case .overcast: return nil
-    case .even: return (0.42, 0.16)
-    case .journey: return (0.76 + 0.16 * pose.v, 0.24 + 0.12 * pose.v)
+    // Version 3's peak with each side of the lit edge moved towards the other as a colour: the lit sky
+    // keeps 0.9 of its gold; the unlit sky carries the rest (`ExposureScene.meet`).
+    case .even: return 0.42 * 0.9
+    case .journey: return (0.76 + 0.16 * pose.v) * 0.9
     }
   }
+
+  /// How far each side of the lit edge is moved towards the other, as a colour: the unlit sky carries this
+  /// share of the gold and the lit sky this share of the orange. A tenth.
+  static let meet = 0.1
 
   /// Dark mode: the bloom's alpha over the sky.
   var bloomAlpha: Double {
@@ -258,52 +306,13 @@ struct ExposureScene {
   var pour: (alpha: Double, radius: Double)? {
     guard exposure.hasSun, exposure.light == .journey else { return nil }
     let night = appearance == .print && exposure.miles
-    let peak = appearance == .print && !exposure.miles ? 0.55 : 0.65
+    let peak = appearance == .print && !exposure.miles ? 0.45 : 0.65
     let alpha = peak * min(1, max(0, (pose.v - 0.4) / 0.6))
     guard alpha > 0 else { return nil }
     return (alpha, (night ? 0.35 : 0.62) * width)
   }
 
   /// Rings and glow add light by screen blend, except on the dusk print.
-  var glowScreens: Bool { appearance == .daytime || exposure.miles }
-
-  /// One piece of the marker's hairline.
-  struct MarkerSegment: Equatable {
-    var y0: Double
-    var y1: Double
-    /// Above the target horizon: dark mode tints the sky part and the ridge part differently.
-    var onSky: Bool
-  }
-
-  /// The marker's x in points, snapped to the device pixel grid so its two-pixel line stays crisp.
-  func markerX(scale: Double) -> Double? {
-    guard let x = markerShare, scale > 0 else { return nil }
-    return (x * width * scale).rounded() / scale
-  }
-
-  /// The marker runs from 0.06 of the height to the bottom edge and breaks across the sun's disc,
-  /// as in the brand mark. Dark mode also splits it at the target horizon.
-  var markerSegments: [MarkerSegment] {
-    guard let x = markerShare else { return [] }
-    let top = 0.06 * height
-    var pieces: [(Double, Double)] = [(top, height)]
-    if let sun, abs(x * width - sun.x) < sunRadius + 0.004 * width {
-      let clear = 0.003 * width
-      let lo = sun.y - sunRadius - clear
-      // Only the half of the disc above the target horizon shows, so the gap ends there.
-      let hi = min(sun.y + sunRadius, horizonY(at: x)) + clear
-      pieces = [(top, min(height, lo)), (max(top, hi), height)].filter { $0.1 > $0.0 }
-    }
-    let split = horizonY(at: x)
-    var segments: [MarkerSegment] = []
-    for (y0, y1) in pieces {
-      if y0 < split, y1 > split {
-        segments.append(MarkerSegment(y0: y0, y1: split, onSky: true))
-        segments.append(MarkerSegment(y0: split, y1: y1, onSky: false))
-      } else {
-        segments.append(MarkerSegment(y0: y0, y1: y1, onSky: y1 <= split))
-      }
-    }
-    return segments
-  }
+  /// Every face adds light: the daytime skies, the night print and, since it went amber, the dusk print.
+  var glowScreens: Bool { true }
 }

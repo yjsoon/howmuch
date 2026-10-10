@@ -839,7 +839,9 @@ struct RewardFilledRow: View {
   @ScaledMetric(relativeTo: .body) private var stripPadding = 9.0
   @ScaledMetric(relativeTo: .body) private var paperPadding = 14.0
   @ScaledMetric(relativeTo: .body) private var horizontalPadding = 16.0
-  @ScaledMetric(relativeTo: .body) private var skyBand = 24.0
+  /// The icon's two rising slopes: the target horizon 14pt to 2pt under the name, the spend ridge
+  /// lifting towards it, and a 10pt half-sun on the horizon at the right.
+  @ScaledMetric(relativeTo: .body) private var skyBand = 34.0
   /// The ridges follow the measured bottom of the name and top of the headline.
   @State private var nameBottom: CGFloat?
   @State private var footTop: CGFloat?

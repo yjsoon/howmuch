@@ -616,7 +616,7 @@
   fill: var(--sun-core);
 }
 
-/* Light adds: screen on every daytime face and on the night print; the dusk print keeps the normal blend. */
+/* Light adds: screen on every face (the token carries the dusk print's blend, screen since it went amber). */
 .rw-halo,
 .rw-pour,
 .rw-bloom {
@@ -672,7 +672,7 @@
 
 /* The amber disc and its core while a minimum is still to be met. */
 .rw-card[data-stage="gate"] {
-  --sun-core: var(--glow-edge);
+  --sun-core: var(--sun-gate-core);
 }
 
 .rw-face-top {
@@ -726,8 +726,10 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The phone strip (about 104px): the name on the sky, the headline and basis line on the spend ridge.
-   The scene places the ridges from the measured bottom of the name and top of the foot. */
+/* The phone strip (about 114px): the name on the sky, the headline and basis line on the spend ridge.
+   The scene places the ridges from the measured bottom of the name and top of the foot. The sky band
+   under the name is 34px: the brand's two rising slopes, the target horizon 14px to 2px under the name
+   and the spend ridge lifting towards it, with a 10px half-sun on the horizon at the right. */
 .rw-face[data-variant="strip"] {
   aspect-ratio: auto;
   display: flex;
@@ -737,7 +739,7 @@
 
 .rw-face[data-variant="strip"] .rw-face-name {
   align-self: flex-start;
-  margin: 0 0 24px;
+  margin: 0 0 34px;
   max-width: 50%;
 }
 

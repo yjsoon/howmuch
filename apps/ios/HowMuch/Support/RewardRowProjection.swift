@@ -143,6 +143,8 @@ struct RewardRowProjection: Equatable {
   let minimumAmount: Double
   /// The spend threshold of the active spending tier, 0 with none. Picture only.
   let reachedTierThreshold: Double
+  /// Where in the period the minimum was met, 0…1 by day; nil when it was not, or is unknown. Picture only.
+  var minimumMetAt: Double? = nil
 
   var isBelowMinimum: Bool {
     switch action {
@@ -162,6 +164,15 @@ struct RewardRowProjection: Equatable {
     let minimumAmount = isRange ? 0 : plainAmount(calc.minimumSpend)
     let activeTier = row.card.spendingTiers?.first(where: { $0.id == calc.activeSpendingTierId })
     let reachedTierThreshold = isRange ? 0 : plainAmount(activeTier?.spendThreshold)
+    // Where in the period the minimum was met, by whole days (the first day counts as one).
+    let metAt: Double? = {
+      guard let asOf, let period = calc.periods?.last(where: { $0.start <= asOf && asOf <= $0.end }),
+        let metOn = period.calculation.minimumMetOn ?? calc.minimumMetOn,
+        let length = RewardsCalendar.days(from: period.start, to: period.end), length >= 0,
+        let at = RewardsCalendar.days(from: period.start, to: metOn)
+      else { return nil }
+      return min(1, max(0, Double(at + 1) / Double(length + 1)))
+    }()
     func build(
       _ action: Action,
       _ tone: Tone,
@@ -186,7 +197,8 @@ struct RewardRowProjection: Equatable {
         exceptions: exceptions,
         missedMinimumPeriod: missedMinimumPeriod,
         minimumAmount: minimumAmount,
-        reachedTierThreshold: reachedTierThreshold
+        reachedTierThreshold: reachedTierThreshold,
+        minimumMetAt: isRange ? nil : metAt
       )
     }
 

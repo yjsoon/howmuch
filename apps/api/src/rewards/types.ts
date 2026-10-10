@@ -191,6 +191,8 @@ export interface RewardsCardCalculation {
   minimum_spend: number | null;
   minimum_spend_met: boolean;
   minimum_spend_progress: number | null;
+  /** The first day of the period on which the minimum was met; null when not met or there is none. */
+  minimum_met_on?: string | null;
   maximum_spend: number | null;
   maximum_spend_exceeded: boolean;
   maximum_spend_progress: number | null;

@@ -73,6 +73,7 @@ export function buildRewardsReport(input: {
         rewardByTransaction.set(transaction.id, { reward: result?.reward ?? 0, rewardDollars: result?.rewardDollars ?? 0 });
       }
       const full = serializeCalculation(card, calculation);
+      full.minimum_met_on = minimumMetOn(card, periodHistory, period, calculation, input.settings);
       return {
         period,
         full,
@@ -168,6 +169,22 @@ function validatePeriodConfiguration(card: CreditCard): void {
   if (card.billingCycle?.type === "billing" && day != null && (!Number.isInteger(day) || day < 1 || day > 31)) {
     throw new ValidationError(`Invalid billing cycle for card ${card.id}`);
   }
+}
+
+/** The first day of the period on which the minimum was met, for the face's converging slopes; null when it was not met or there is none. */
+function minimumMetOn(
+  card: CreditCard,
+  history: Transaction[],
+  period: CalculationPeriod,
+  calculation: SimplifiedCalculation,
+  settings: AppSettings,
+): string | null {
+  if (!calculation.minimumSpendMet || !((calculation.minimumSpend ?? 0) > 0)) return null;
+  for (const date of [...new Set(history.map((t) => t.date))].sort()) {
+    const through = SimpleRewardsCalculator.calculateCardRewards(card, history.filter((t) => t.date <= date), period, settings);
+    if (through.minimumSpendMet) return date;
+  }
+  return null;
 }
 
 function serializeCalculation(card: CreditCard, calculation: SimplifiedCalculation): RewardsCardCalculation {

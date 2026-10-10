@@ -21,7 +21,7 @@ Read it with [the agreed filled-rows spec](../plans/rewards-filled-rows-agreed-s
 | No projection additions | The projection gains two plain amounts: `minimumAmount` and `reachedTierThreshold` | The climbs start at the minimum or the reached tier, which the projection did not carry |
 | The strip's target horizon rose at the right | Level across the strip | The minimum journey stays horizontal, and the climb gets about 41pt instead of 26pt |
 
-**Still standing from version 2.** Across the card is never time: no pace line, no day ticks. The marker is the brand mark's faint vertical hairline. The ridge pair reads level, and its gap is what is left to the minimum. "Featured" is a word in a caps line, never a glyph. The strip stays about 104pt. Faces follow the appearance: daytime faces in light mode, the night and dusk prints in dark mode. Capped is done, not failed. Every word and VoiceOver string is unchanged.
+**Still standing from version 2.** Across the card is never time: no pace line, no day ticks. The marker is the brand mark's faint vertical hairline (on the hero and the web face; the phone cut of 10 Oct 2026 drops it from the strip and the band). The ridge pair's gap is what is left to the minimum. "Featured" is a word in a caps line, never a glyph. The strip is about 114pt since the phone cut. Faces follow the appearance: daytime faces in light mode, the night and dusk prints in dark mode. Capped is done, not failed. Every word and VoiceOver string is unchanged.
 
 ## Goal and non-goals
 
@@ -178,11 +178,11 @@ Values are in Colour assets. "Gold" is `SkyLit` laid over the blue at `0.76 + 0.
 
 | # | State | Sky and light | Sun and rings | Ground and marker | Text |
 | --- | --- | --- | --- | --- | --- |
-| 1, 2 | Gate | Blue sky, gold from the left edge to the marker, then blue under a cool 15% dim. At `h` 0 only a sliver at the left is gold; at 0.2 a fifth of the width is. | A half disc on the horizon at the marker, with the amber `SunRise` disc, which reads as a sunrise against the blue; small rings | Apart. Light greens, gold-washed to the marker, cooled and dimmed beyond but never dark. The warm white marker with its faint dark edge, on the sky and the ground alike. | Name in dark ink on the gold and the blue alike. Foot in dark ink; `UrgentInk` dark umber when urgent. |
-| 3, 4, 5 | Climb | The whole band gold at `0.76 + 0.16 × v`, deepening as the sun climbs; the pour fades in from `v` 0.4 | In the column, climbing; the rings grow and, with the core glow, are screened over the sky, so they read as glare, never as mud on the gold | Merged, gold-washed end to end; no marker | As 1 |
+| 1, 2 | Gate | Blue sky, gold from the left edge to the marker, then orange. At `h` 0 only a sliver at the left is gold; at 0.2 a fifth of the width is. | A half disc on the horizon at the marker, with the amber `SunRise` disc, which reads as a sunrise against the blue; small rings | Apart. One pair of greens throughout, never dark. The warm white marker with its faint dark edge, on the sky and the ground alike. | Name in dark ink on the gold and the blue alike. Foot in dark ink; `UrgentInk` dark umber when urgent. |
+| 3, 4, 5 | Climb | The whole band gold at `0.76 + 0.16 × v`, deepening as the sun climbs; the pour fades in from `v` 0.4 | In the column, climbing; the rings grow and, with the core glow, are screened over the sky, so they read as glare, never as mud on the gold | Merged, the same greens; no marker | As 1 |
 | 6, 7 | Rest | The whole band gold: 0.76 at rest (6), 0.84 at halfway (7) | Resting (6) or halfway (7) in the column | Merged | As 1 |
 | 8, 9, 10 | Capped | Gold at 0.92 with the pour at full strength from the top edge over the sun's column: a warm, bright noon | Off the top edge; the rings' lower arcs show at the top | Merged; crest bright end to end | Headline in foot ink |
-| 12, 13 | Calm: no target, locked or withheld | Even, no split: gold at a steady 42% across the whole sky, softer than any lit band. Miles keeps its contrail. | Resting in the column; small rings | The brand pair, apart; the ground's gold at a steady 16% | As 1 |
+| 12, 13 | Calm: no target, locked or withheld | Even, no split: gold at a steady 42% across the whole sky, softer than any lit band. Miles keeps its contrail. | Resting in the column; small rings | The brand pair, apart; the same greens | As 1 |
 | 11 | Failed | `SkyOvercast`, a pale flat grey, instead of the blue; no gold, no contrail | No sun, no rings | The brand pair, apart and cooled end to end; then the whole face at saturation 0.15; no marker | `FailedInk`, a dark red, on the headline only, where it is today |
 | 14 | Neutral with a target | By its action | By its action | By its action | Only the ink changes |
 | 15 | Range | No picture | | | Paper row without a print |
@@ -242,7 +242,7 @@ The "✦" after "DBS · MILES" on the web face and in the lab is the Featured fl
 
 | Layout | Used for | Size at the default text size (`.large`) |
 | --- | --- | --- |
-| **Strip** | Rewards board rows | Full row width, about 104pt tall. The row is the frame. |
+| **Strip** | Rewards board rows | Full row width, about 114pt tall since the phone cut (104pt before it). The row is the frame. |
 | **Paper row with print** | Account register strip | About 96pt, with a 90 × 60pt print on the trailing side |
 | **Paper row with band** | Board and register rows at accessibility text sizes | A 64pt scene band above the text |
 | **Paper row, plain** | Range Report "Cards" section | As today, no picture |
@@ -256,7 +256,7 @@ Every layout draws the same scene, back to front:
 2. halo: the four rings and the core glow;
 3. upper ridge (target horizon) with its crest stroke;
 4. lower ridge (spend horizon) with its crest stroke, or one merged crest;
-5. light mode: the ground's gold wash, clipped to the ridges; dark mode: the foot scrim (strip only);
+5. dark mode: the foot scrim (strip only); light mode draws nothing here;
 6. the veil (the underexposure right of the marker, in the minimum journey only);
 7. the sun disc, clipped to the sky, so it sits behind the target horizon until it climbs clear, and is never veiled;
 8. the marker (minimum journey only).
@@ -265,29 +265,42 @@ Text is never inside the scene. Each layout sets:
 
 | Layout | Sun's column `X` | Target horizon `U(x)` | Spend floor `Fl(x)` | `r` |
 | --- | --- | --- | --- | --- |
-| Strip | 0.85 W | `N + 10pt`, ±1pt, level across the width | `F − 5pt`, ±1pt | 8pt |
+| Strip | 0.85 W | Brand back rise: `N + 14pt` at the left to `N + 2pt` at the right | `U(x)` + (`F − 3pt` − (`N + 14pt`)): the same shape, 3pt above the foot at the left | 10pt |
 | Print, 90 × 60 | 0.85 W | Brand back ridge | 0.82 h, ±0.01 h | 4pt |
-| Band, 64pt | 0.85 W | 0.52 h, ±0.01 h, level | 0.80 h | 6pt |
+| Band, 64pt | 0.85 W | Brand back rise: 0.56 h to 0.42 h | `U(x)` + 0.26 h | 7pt |
 | Hero | 0.85 W | Brand back ridge: 0.665 h at the left, 0.42 h at the right | 0.80 h, ±0.01 h | 0.045 W |
 | Web face, desktop 3:2 | As Hero | As Hero | As Hero | 4.5% of the width (shipped) |
 | Web strip, phones | As Strip | | | |
 
-`N` is the bottom of the name's line box and `F` the top of the headline, both measured in the row. So long names and large text move the ridges rather than overlap them. The lab draws the strip's disc at 3.4% of its width, 12pt on a 361pt row; at that size the disc does not fit above the target horizon at halfway on a 104pt strip, so the strip uses 8pt. Tune it by eye.
+`N` is the bottom of the name's line box and `F` the top of the headline, both measured in the row. So long names and large text move the ridges rather than overlap them.
+
+**The phone cut (10 Oct 2026).** The strip and the band are a different picture from the hero, not a smaller one: a 104pt row has no room for the whole landscape, and the owner found the first cut's sun a bead on a line with clipped rings and stray hairlines. The phone layouts therefore draw the same scene with four changes, and the hero and the web's 3:2 face keep the full treatment:
+
+- **The sun is the marker.** No hairline. The disc rides at the fill (0.07 to 0.85 W) and the lit edge and the ridge gap carry the exact point. A hairline from the sky through the foot text read as a scratch, and beside the column it read as a pole the sun was skewered on.
+- **A half-sun on the horizon.** The disc is 10pt (7pt on the band) and its centre sits exactly on the target horizon while it rides, so the sky clip leaves a clean semicircle. It lifts clear from there, as before. Under the name the horizon is at least 12pt below it, so the half-sun's top stays clear of the name's line box.
+- **The icon's two slopes.** The owner asked for the app icon's pair of rising ridges. The strip's horizons are no longer level: the target horizon takes the brand back ridge's rise (`BACK_RISE`, the shipped path normalised to 0 at its highest, right, and 1 at its lowest, left), 12pt deep, from 14pt under the name at the left to 2pt under it at the right, where the sun's column is. The spend floor is the same shape, as far down as the words allow: 3pt above the foot at its lowest point, the left edge. The lower slope is anchored there and only its far end rises (later on 10 Oct 2026, after the owner's pins): in the minimum journey it is `Fl − (Fl − U) × h × x/W`, so at `h` 0 the pair is equidistant and at the right edge the gap is `(1 − h)` of the floor's; once the minimum is met it is `Fl − (Fl − U) × min(1, x/(m W))`, where `m` is the day of the period the minimum was met as a share of its days (`minimum_met_on` from the API, 1 when unknown), so the two slopes meet at that day and run as one from there. Where they meet is when the minimum was reached. A card with no minimum keeps the pair apart: the convergence is the minimum's own read, and the climb is the sun's. The sky band is 34pt; the row is about 114pt.
+- **An amber dusk print.** In dark mode the cashback sky is a deep amber (`SkyCashback1` #7A4420 to #5A3016 to #3F2211), not the former pale cream that sat like a lit window in the dark chrome; its name ink goes light (`InkCashback` #F7F5EF in dark), its marker takes the night print's gold (`MarkerCashback` #FFD98C at 35%), its veil cast stays #D4CBD4, the pour peaks at 0.45 and the halo adds light with the screen blend like every other face. The prints' sun is a gold going to orange (`SunDiscTop` #FFD27A to `SunDiscBottom` #E8923A, the rise disc #F7B35C to #C4651C, rim #8A4A18, core #F0B35A): lighter than its sky, never glaring on it. The daytime faces keep the near-white disc.
+- **The lit edge: gold to orange, each side moved towards the other.** The daytime skies are version 3's blues again (cashback #8DB6D8 to #EBE6DD, miles #6EA6DA to #DCEBF6) and the gold its version 3 peak, after two tries at softening them (a grey-blue sky, then the prints' shade) that the owner found either still too contrasty or too drastic a changeover, and one try at a white unlit sky. Beyond the lit edge the sky goes to orange (`VeilSky` #EC9440, `--face-veil-sky`), so the step is gold to orange, two neighbouring hues, not gold to blue. Each side of the edge is moved towards the other as a colour, by a tenth (`MEET` in the scene, `ExposureScene.meet` on iOS): the lit sky keeps 0.9 of its gold and takes 0.1 of the orange, the unlit sky keeps 0.9 of the orange and takes 0.1 of the gold. The edge stays a clean vertical step.
+- **One floor.** The light-mode ground is no longer lit to the edge and dimmed beyond it: the owner preferred the unlit side's two bands and asked for them throughout, so `RidgeBack` and `RidgeFront` take those values in light mode (#9DC5A8 and #80B591, the sunlit greens under the former 15% dim) across the whole floor, and the ground gets no gold and no dim. The lit edge is the sky's alone, as on the prints.
+- **One soft glow, no rings.** The halo is one radial falloff in the rings' palette (Ring1 at the centre, Ring2 at 30%, Ring3 at 60%, Ring4 at 82%, clear at the edge) over the core glow, with the rings' radius `R` and opacity. Posterised rings clipped by a short frame's top edge and by the ridges read as concentric arcs; a falloff clipped the same way still reads as light.
+- **No unlit sliver.** As the sun lifts (`h` 0.85 to 1) the veil's peak falls by `lift` and the gold beyond the lit edge rises by `lift`, so the last of the band lights with the lift instead of leaving a 4% strip of dusk at the card's edge.
+
+The lab's 12pt disc was the right instinct; 10pt fits the 28pt band without growing the row more than 4pt.
 
 **Brand ridge.** Use the web SVG paths verbatim (`apps/web/src/pages/Rewards.tsx:697-702`, viewBox `0 400 1024 624`, stretched into the bottom 58% of the frame). A SwiftUI `Path` cannot be asked for y at a given x, so sample the back crest once into a static 65-point table and interpolate. The web port uses the same table. "The brand pair" is the back and front ridges as the web ships them, which is what a card without a journey (failed, no target) draws.
 
-**Level where it can be.** The strip and the band have level horizons, so the minimum journey is purely horizontal there and the climb is as tall as the frame allows. The print and the hero keep the brand ridge, so the sun follows its slope as it travels; it is still sitting on the horizon, not rising above it.
+**The brand ridge everywhere (10 Oct 2026).** Version 3 gave the strip and the band level horizons. The phone cut replaced them with the icon's two slopes (see above), so on every layout the sun follows the ridge's slope as it rides; it is still sitting on the horizon, not rising above it. The phone's slope is gentle (12pt across the width), so its minimum journey is nearly horizontal and the climb keeps most of the frame.
 
 ### The sun's path
 
 - **Across.** `sunX(h) = clamp(h, 0.07, 0.85) × W` while `h` is below 1, and `0.85 × W` from then on. The marker is at exactly `h × W`, so the sun rides it from 0.07 to 0.85 and waits at 0.07 before that. The disc never clips at the left.
-- **On the horizon** (`h` up to 0.85): the disc's centre a hair below the target horizon, `y = U(X) + 0.08 r`, so a half disc peeks over the ground line. It does not rise during this part of the minimum journey.
+- **On the horizon** (`h` up to 0.85): the disc's centre a hair below the target horizon, `y = U(X) + 0.08 r`, so a half disc peeks over the ground line. On the strip and the band the centre is exactly on the horizon (`seat` 0), a clean half-sun. It does not rise during this part of the minimum journey.
 - **Lifting** (`h` from 0.85 to 1): `y` runs from the horizon position to the resting position as `lift` goes from 0 to 1, while the last of the band fills.
 - **Resting** (`h` 1, `v` 0): the disc's bottom 0.15 `r` above the merged ridge, `y = U(X) − 1.15 r`.
 - **Climbing:** `y = lerp(U(X) − 1.15 r, −1.05 r, v)`. At `v` 1 the disc's bottom is 0.05 `r` above the top edge: fully off screen. The halo and the rings stay centred on it, so their lower arcs pour down into the frame.
 - **Failed:** no sun.
 
-The y axis points down. On the strip at `.large`, with `N` about 32pt and `U` therefore 42pt, the sun sits at about 42.6pt, rests with its centre about 33pt from the top, is halfway at about 12pt and leaves at −8pt: a 41pt climb. On the hero (349 × 233pt), the target horizon is about 105pt down at the column, so the sun rests at about 87pt, is halfway at about 35pt (0.15 h) and leaves at −16.5pt. While the sun is on the horizon under the name column, its top sits 2.6pt below the name's line box (never less than 1pt with the ±1pt ridge), which is why the strip's target horizon sits 10pt below the name.
+The y axis points down. On the strip at `.large`, with `N` about 32pt, `U` at the column is about 34.6pt (the back rise is 0.05 there), so the 10pt sun sits at 34.6pt, rests with its centre about 23pt from the top, is halfway at about 6pt and leaves at −10.5pt: a 34pt climb. On the hero (349 × 233pt), the target horizon is about 105pt down at the column, so the sun rests at about 87pt, is halfway at about 35pt (0.15 h) and leaves at −16.5pt. While the sun is on the horizon under the name column, its top sits at least 2pt below the name's line box, which is why the strip's target horizon is never less than 12pt below the name.
 
 **Why the column is at 0.85.** It has to clear everything at the top right and the bottom right without crowding the right edge.
 
@@ -304,24 +317,25 @@ The art is lit from the left edge to the marker and underexposed to its right wh
 - **Dark mode: dim and desaturate.** A dusk cast taken from the brand's rose-mauve:
   - one full-frame fill with blend mode `.saturation`, colour `VeilGrey` #808080 at alpha 0.5 × `veil` (half way to grey);
   - one full-frame fill with blend mode `.multiply`, from white to `VeilCashback` #D4CBD4 on the dusk print or `VeilMiles` #8A8496 on the night print, by `veil`.
-- **Light mode: gold over blue, on light ground.** The same `veil(x)` lays light on the lit side and a cool dim on the other, so progress reads as a change of hue (gold against blue) as well as of brightness:
-  - the sky is the daytime blue, and the unlit sky stays that blue under a light cool dim;
-  - straight after the sky, one full-frame fill of `SkyLit` #FFD98C at alpha `(0.76 + 0.16 × v) × (1 − veil)`. The ridges are drawn over it, so it only shows on the sky;
-  - after the ridges, a second `SkyLit` fill at `(0.24 + 0.12 × v) × (1 − veil)`, clipped to the ridges, so the ground is sunlit to the marker;
-  - after those, one full-frame fill of `VeilDim` #3D5674 at alpha 0.15 × `veil`: the unlit side cools and dims a little but never darkens enough to break a floor, so the foot inks keep one floor across the lit and the unlit side.
-- **Veil limits.** The dusk veil is deliberately gentle: it is capped so `InkCashback` keeps 6.6:1 on the darkest veiled dusk stop, because a long name can sit on the dim side. The night veil can be darker: it only raises contrast for light inks. In light mode the dim is 15%, which leaves dark ink at 5.8:1 or more on the dimmed sky and `UrgentInk` at 4.7:1 on the dimmed ground.
-- **Brightness grows with the climb.** Light mode: the gold deepens from 76% to 92% over the sky and from 24% to 36% over the ground. Dark mode: `Bloom` #FFE3AC at 30% × `v` over the sky (screen blend on the night print), and the horizon warmth × `(1 + 0.5 × v)`. Both: the crest strokes from 90% to 100% and the halo from 40% to 100%. At rest the band is lit but plain; at the cap it is at its brightest.
-- **The pour.** From `v` 0.4 a radial gradient centred on the sun's column at the top edge, from `SunDiscTop` at the centre through `SunCore` at 30% of the radius to nothing at the radius: the glow pouring down from a sun that has left the frame. Its alpha is `peak × clamp((v − 0.4) / 0.6)`, drawn over the sky only. Peak is 0.65 in light mode, 0.55 on the dusk print and 0.65 on the night print. Radius is 0.62 W on the strip, print and band and 0.78 W on the hero, except on the night print, where it is 0.35 W on every layout: the lab's wider pour takes `InkMiles` to 2.6:1 at the end of the name over the bloom, and 0.35 W keeps it at 5.0:1 or more. Light ink on the night print is the only pair that a pour can break; dark ink only gains.
-- **Calm:** no veil, no bloom and no pour, an even, softer light. In light mode, `SkyLit` at a steady 42% across the sky and 16% on the ground. **Failed:** `veil` 1 everywhere, plus the face's saturation 0.15. In light mode the sky is `SkyOvercast`, gets no gold, and the dim is 14% everywhere.
+- **Light mode: gold over blue, orange beyond the edge, on one floor.** The same `veil(x)` lays gold on the lit side of the sky and orange on the other, so progress reads as a change of hue (gold to orange) as well as of brightness. Since 10 Oct 2026 each side carries a share of the other (a tenth), so with `m` that share:
+  - the sky is the daytime blue; beyond the lit edge it goes to orange (the owner's ask, 10 Oct 2026): a `VeilSky` #EC9440 fill clipped to the sky at alpha `m + (1 − 2m) × veil`, `m` 0.1, drawn after the gold and the pour and before the halo and the ridges, so the unlit sky is orange with a tenth of the blue left in it, and the lit sky takes a tenth of orange. The failed sky stays overcast and gets none of it;
+  - straight after the sky, one full-frame fill of `SkyLit` #FFD98C at alpha `(0.76 + 0.16 × v) × 0.9 × (1 − (1 − m) × veil)`, `m` 0.1: full on the lit side, a tenth of that beyond (more as the strip's sun lifts). The ridges are drawn over it, so it only shows on the sky;
+  - the ground gets no gold and no dim: it is one pair of greens throughout;
+  - when failed only, one full-frame fill of `VeilDim` #3D5674 at 14%, which never darkens enough to break a floor.
+- **Veil limits.** The dusk veil is deliberately gentle: it is capped so `InkCashback` keeps 6.6:1 on the darkest veiled dusk stop, because a long name can sit on the dim side. The night veil can be darker: it only raises contrast for light inks. In light mode the dim is the failed face's 14%, which leaves `UrgentInk` at 4.7:1 on the dimmed ground; the orange unlit sky keeps the dark name ink at 6.5:1 or more; the shares moved across the edge only lower contrast between the two sides, never against the ink.
+- **Brightness grows with the climb.** Light mode: the gold deepens from 76% to 92% over the sky. Dark mode: `Bloom` #FFE3AC at 30% × `v` over the sky (screen blend on the night print), and the horizon warmth × `(1 + 0.5 × v)`. Both: the crest strokes from 90% to 100% and the halo from 40% to 100%. At rest the band is lit but plain; at the cap it is at its brightest.
+- **The pour.** From `v` 0.4 a radial gradient centred on the sun's column at the top edge, from `SunDiscTop` at the centre through `SunCore` at 30% of the radius to nothing at the radius: the glow pouring down from a sun that has left the frame. Its alpha is `peak × clamp((v − 0.4) / 0.6)`, drawn over the sky only. Peak is 0.65 in light mode, 0.45 on the dusk print and 0.65 on the night print. Radius is 0.62 W on the strip, print and band and 0.78 W on the hero, except on the night print, where it is 0.35 W on every layout: the lab's wider pour takes `InkMiles` to 2.6:1 at the end of the name over the bloom, and 0.35 W keeps it at 5.0:1 or more. Light ink on the night print is the only pair that a pour can break; dark ink only gains.
+- **Calm:** no veil, no bloom and no pour, an even, softer light. In light mode, `SkyLit` at a steady 30% across the sky and 12% on the ground. **Failed:** `veil` 1 everywhere, plus the face's saturation 0.15. In light mode the sky is `SkyOvercast`, gets no gold, and the dim is 14% everywhere.
 - **Cost.** Two gradient fills for the veil, one bloom or gold fill and one pour fill in the same Canvas pass; light mode adds the second gold wash and a clip to the ridge path. No offscreen layer, no blur, no second draw of the scene. Blend modes act on what the context has already drawn. The lit washes fade to `SkyLit` at zero alpha, never to `.clear`, so the falloff does not pass through grey.
 - **Differentiate Without Colour.** In dark mode the veil darkens as well as desaturates, so the lit edge reads in luminance alone. In light mode the edge is first a hue step; on the sky it is also a luminance step of 1.3 to 2.1:1, on the ground a smaller one (1.3:1), and the marker carries the exact point. In the climb the read is the sun's position, which needs no colour.
 
 ### The progress marker
 
+- **Where.** The hero and the web's 3:2 face only. The strip and the band draw no hairline (see The phone cut): there the sun rides at the fill and is the marker.
 - **Position.** `x = h × W`, exactly. Drawn in the minimum journey only. It goes with the minimum, and never shows in any other stage.
 - **Extent.** From 0.06 h to the bottom edge. It breaks across the visible half of the sun's disc, 3 units clear of the rim on a 1,000-wide scene (about 1pt on the strip), as in the brand mark (`assets/icon/halation-light.svg`), where the scrub line passes behind the sun.
 - **Tones by appearance.**
-  - Dark mode: two tones split at the target horizon, as in the brand mark. On the sky, `MarkerCashback` #94591A at 55% on the dusk print or `MarkerMiles` #FFD98C at 35% on the night print. On the ridges, `MarkerRidge`, pale #F7F5EF at 20%.
+  - Dark mode: two tones split at the target horizon, as in the brand mark. On the sky, `MarkerCashback` and `MarkerMiles`, both #FFD98C at 35%, on the dusk and the night print. On the ridges, `MarkerRidge`, pale #F7F5EF at 20%.
   - Light mode: one warm white line, #FFF8E6 at 85%, on the sky and the ground alike, over a faint dark edge (`MarkerEdge`, #1C1B18 at 12%, one device pixel either side of the line). The edge gives the line its definition on the gold and the pale sky. The owner approved warm white; the umber and dark-ridge markers proposed for light mode are withdrawn.
 - **Crisp.** Two device pixels wide (1pt at 2x, 0.67pt at 3x), with its x snapped to the device pixel grid through `displayScale`, so it never smears across three pixels.
 - **Faint but findable.** Dark mode: about 2:1 against the dusk sky, 2.7:1 against the night sky and 1.55 to 1.75:1 on the ridges. Light mode: the warm white is faint by design, 1.1 to 1.3:1 on the pale sky and the gold, up to 2.5:1 on the saturated blue, 1.6 to 2.0:1 on the front ridge and 1.4 to 1.7:1 on the back ridge, with the dark edge adding a 1.25:1 shadow either side. That is below the 3:1 WCAG 1.4.11 asks of a graphic needed to understand content. It is acceptable because the marker is decorative and non-text: the figures, the lit edge, the ridge gap and the sun carry the same read, and nothing depends on the line alone.
@@ -329,15 +343,15 @@ The art is lit from the left edge to the marker and underexposed to its right wh
 
 ### The ridge pair
 
-The upper line is the **target horizon**, in the brand's ridgeline shape (level on the strip and the band). The lower line is the **spend horizon**: stylised, nearly level, spanning the full width, so it never ends abruptly. The band of `RidgeBack` showing between them is what is left to the minimum.
+The upper line is the **target horizon**, in the brand's ridgeline shape (a gentle 12pt rise on the strip and the band). The lower line is the **spend horizon**: stylised, the brand front ridge's rise on the phone and nearly level on the face, spanning the full width, so it never ends abruptly. The band of `RidgeBack` showing between them is what is left to the minimum.
 
 #### Level (specified)
 
 - Upper line: `U(x)`. Fill `RidgeBack`. Crest stroke `TargetCrest`: `Crest` at 40%, 1pt.
-- Lower line: `Fl(x) + h × (U(x) − Fl(x))`. `h` is the fill in the minimum journey, 1 in every later stage, and a failed card or one without a target draws the brand pair apart at rest. Fill `RidgeFront` to the bottom. Crest stroke `SpendCrest`: `Crest` at 75%, 1.5pt.
-- The lower line is a blend of the level floor and the target horizon, so it lifts towards the upper line everywhere at once and cannot cross it. At `h` 0 it is level; as it rises it takes on the horizon's shape; at `h` 1 the two coincide.
+- Lower line, hero and web face: `Fl(x) + h × (U(x) − Fl(x))`. Strip and band: anchored at the floor at the left edge, `Fl − (Fl − U) × h × x/W` in the journey and `Fl − (Fl − U) × min(1, x/(m W))` once met, `m` the met day's share of the period (see the phone cut). `h` is the fill in the minimum journey, 1 in every later stage, and a failed card or one without a target draws the brand pair apart at rest. Fill `RidgeFront` to the bottom. Crest stroke `SpendCrest`: `Crest` at 75%, 1.5pt.
+- On the hero and the web face the lower line is a blend of the level floor and the target horizon, so it lifts towards the upper line everywhere at once and cannot cross it. At `h` 0 it is level; as it rises it takes on the horizon's shape; at `h` 1 the two coincide. On the phone it pivots from its left anchor instead, and the meeting point is a date.
 - **Merged:** one crest stroke at 90%, brightening to 100% with `v`. From there the merged ridge stays put. It does not lift with the climb: the sun carries that read, and a second encoding would compete with it.
-- The gap at any x is `(1 − h) × (Fl(x) − U(x))`. On the strip it is 9pt at `h` 0, everywhere across the width.
+- On the hero and the web face the gap at any x is `(1 − h) × (Fl(x) − U(x))`. On the strip the floor is the horizon's own shape (about 17pt below it at `.large`) and the gap narrows from the left edge towards the right: `(1 − h x/W)` of the floor's in the journey, closed from the met day on once met.
 - The veil greys and cools the crest strokes right of the marker, so the lit part of the spend crest glows and the rest reads cold.
 
 #### Literal (alternative)
@@ -358,8 +372,8 @@ The literal reading is phase two at most, and then only in the sheet's hero. In 
 
 ### Rings
 
-- Always four soft rings around the sun, plus a core glow, whenever there is a sun. They grow continuously with `v`: with `R = (0.14 + 0.24 × v) × W`, ring k is a filled disc centred on the sun with radius `R` times 0.27, 0.46, 0.68 and 0.92 for rings 1 to 4, inner to outer, and the core glow is 0.15 `R`. On the strip and the band, `R` is also capped at `(0.42 + 0.6 × v) × H`, so the rings stay inside the frame's height. The discs are stacked, largest first, so each step reads as posterised light, not a drawn line.
-- Colours: `Ring1` to `Ring4`, inner to outer. On the night print and on every light-mode face, draw the rings and the core glow with the screen blend mode, as web does on the night sky, so they add light: warm rather than olive on the night, glare rather than mud on the gold. The dusk print keeps the normal blend.
+- On the hero and the web face: always four soft rings around the sun, plus a core glow, whenever there is a sun. The strip and the band draw one smooth glow in the same palette instead (see The phone cut). They grow continuously with `v`: with `R = (0.14 + 0.24 × v) × W`, ring k is a filled disc centred on the sun with radius `R` times 0.27, 0.46, 0.68 and 0.92 for rings 1 to 4, inner to outer, and the core glow is 0.15 `R`. On the strip and the band, `R` is also capped at `(0.42 + 0.6 × v) × H`, so the rings stay inside the frame's height. The discs are stacked, largest first, so each step reads as posterised light, not a drawn line.
+- Colours: `Ring1` to `Ring4`, inner to outer. On every face, draw the rings and the core glow with the screen blend mode, as web does, so they add light: warm rather than olive on the prints, glare rather than mud on the gold. (The dusk print kept the normal blend while it was a pale cream; it is amber since 10 Oct 2026.)
 - Halo opacity: `0.4 + 0.6 × v`. The core glow under the disc always draws when there is a sun.
 - At rest the outer ring reaches 0.13 W either side of the column, and at the cap 0.35 W. At the cap the sun is off screen, so only the rings' lower arcs show.
 - The rings are art behind text: ring 3 and ring 4 are at 14% and 7% alpha, and the contrast tables cover them.
@@ -373,13 +387,13 @@ In the minimum journey (card A, `h` 0.63):
 ┌──────────────────────────────────────────────────────────────┐  top padding 9
 │ Exposure Below                        ┊░░░░░░░░░░░░░░░░░░░░░░│  name, line ~23pt, at most 0.50 W; the sky is lit up to the marker
 │                                       ┊░░░░░░░░░░░░░░░░░░░░░░│
-│‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾(◒)‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾│  target horizon, level, 10pt under the name; the sun rides the marker
+│‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾(◒)‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾│  target horizon, the icon's back slope, 14pt to 2pt under the name; the half-sun rides at the fill (no hairline)
 │                                       ┊   gap: what is left  │
 │‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾┊‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾│  spend horizon, lifted 63% of the way up to the target
 │ $184.50 to minimum                    ┊         8 days left  │  headline line ~22pt
 │ $315.50 / $500.00 · $0.00 earned                             │  2, basis line ~15, bottom 9
-└──────────────────────────────────────────────────────────────┘  about 104pt
-      lit ◄────────────────────┤ marker at x = h × W, h = 0.63 ├────► underexposed (░)
+└──────────────────────────────────────────────────────────────┘  about 114pt
+      lit ◄────────────────────┤ lit edge at x = h × W, h = 0.63 ├────► underexposed (░)
 ```
 
 Past the minimum (card P, climbing after its tier):
@@ -389,7 +403,7 @@ Past the minimum (card P, climbing after its tier):
 │ Exposure Journey                                             │  name, line ~23pt; the whole band is lit and there is no marker
 │                                        ·  (◉)  ·             │  v = 0.69: the sun is high in its column, ringed and haloed
 │                                                              │
-│‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾│  one merged ridge, level, 10pt under the name
+│‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾│  one merged ridge, the icon's back slope, 14pt to 2pt under the name
 │                                                              │
 │ $184.50 left before bonus cap                   8 days left  │  headline line ~22pt
 │ $315.50 / $500.00 · $0.00 earned                             │  basis line
@@ -397,11 +411,11 @@ Past the minimum (card P, climbing after its tier):
    The sun climbs straight up the column at 0.85 W: resting (v 0), halfway (0.5), off the top edge (1).
 ```
 
-Height budget at `.large`: top padding 9, name 23, sky band 24 (10pt to the target horizon, 9pt of gap at `h` 0, 5pt of ridge above the headline), headline 22, 2, basis 15, bottom 9. That is about 104pt, today's row height, so about 5 rows still fit on an iPhone 16.
+Height budget at `.large`: top padding 9, name 23, sky band 34 (the two slopes: the target horizon 14pt to 2pt under the name, the spend floor the same shape 17pt below it, 3pt above the headline at the left), headline 22, 2, basis 15, bottom 9. That is about 114pt, 10pt more than the first cut, so about 5 rows still fit on an iPhone 16.
 
 | Element | Type | Ink |
 | --- | --- | --- |
-| Account emoji and name | Instrument Serif Italic 19pt, relative to `.title3`; at most 2 lines, then a tail truncation; at most 0.50 W | `InkCashback` or `InkMiles`, which resolve by appearance: dark on every light-mode sky and on the dusk print, light on the night print |
+| Account emoji and name | Instrument Serif Italic 19pt, relative to `.title3`; at most 2 lines, then a tail truncation; at most 0.50 W | `InkCashback` or `InkMiles`, which resolve by appearance: dark on every light-mode sky, light on both prints |
 | Amount | IBM Plex Mono SemiBold 17pt, relative to `.headline` | `FootInk`, or `FailedInk` for a failed card |
 | Action label | IBM Plex Sans 15pt, relative to `.subheadline` | `FootInk` |
 | Deadline, trailing | IBM Plex Sans 13pt, relative to `.footnote`; SemiBold when urgent | `FootInkSoft`; `UrgentInk` when urgent |
@@ -411,7 +425,7 @@ The foot inks resolve by appearance: dark in light mode, on the light ground; li
 
 - The headline line keeps today's `ViewThatFits` behaviour (`RewardsView.swift:920-958`): if the action and the deadline do not fit on one line, the deadline drops below. The action never wraps mid-phrase.
 - Padding is `@ScaledMetric(relativeTo: .body)`: 16 horizontal, 9 vertical.
-- **Foot scrim, dark mode only.** A `RidgeFront` gradient at 55% runs under the foot text block, from its top edge down. The foot always sits on the spend ridge, so the scrim is a guard: no layout or text size can put light ink on a light sky (the dusk print). Light mode draws none: its foot ink is dark, and dark ink clears 4.5:1 on the light ground, the gold, the desaturated side and every sky alike, so there is nothing to guard against.
+- **Foot scrim, dark mode only.** A `RidgeFront` gradient at 55% runs under the foot text block, from its top edge down. The foot always sits on the spend ridge, so the scrim is a guard: no layout or text size can put light ink on a light pour or bloom. Light mode draws none: its foot ink is dark, and dark ink clears 4.5:1 on the light ground, the gold, the desaturated side and every sky alike, so there is nothing to guard against.
 - **Exceptions** go on a paper slip tucked under the frame, as on the web. The slip is 8pt narrower on each side, starts 10pt under the frame's bottom edge, uses `Theme.card` and has 12pt bottom corners. Lines are IBM Plex Sans Medium 13pt with today's triangle icon and inks (`RewardsView.swift:885-897`): at most 2, then "+N more". Each line adds about 20pt. The frame's height never changes for exceptions.
 - The strip leaves out the chevron that today's title line has, and does not take the web face's issuer and type caps line or a Featured mark. See The Featured mark and open question 4. The sun's column leaves room for the chevron if it comes back.
 
@@ -457,7 +471,7 @@ The foot inks resolve by appearance: dark in light mode, on the light ground; li
 | xSmall to xxxLarge | Strip. Above `.large` the name wraps to 2 lines, the deadline drops below the action, and the basis line wraps. The sky and the foot grow with the text, and the ridges follow the measured `N` and `F`; the art never scales text. | Paper row with print | Hero and slip |
 | AX1 to AX5 | Paper row with band: a full-width 64pt scene band (radius 16 on the top corners), with the text below on paper, full width | Paper row with band | Hero without the in-frame label; the slip text scales |
 
-Estimates: the strip is about 104pt at `.large` and 140 to 160pt at xxxLarge; the band row is about 280pt at AX1 with a two-line name. **Widths:** iPhone SE (3rd generation) gives W 343, iPhone 16 gives 361 and Pro Max gives 398. On iPad the row content is capped at 640pt and centred, because the board has no readable-width limit today and a 700pt-wide strip turns into a thin ribbon.
+Estimates: the strip is about 114pt at `.large` and 140 to 160pt at xxxLarge; the band row is about 280pt at AX1 with a two-line name. **Widths:** iPhone SE (3rd generation) gives W 343, iPhone 16 gives 361 and Pro Max gives 398. On iPad the row content is capped at 640pt and centred, because the board has no readable-width limit today and a 700pt-wide strip turns into a thin ribbon.
 
 ## SwiftUI architecture
 
@@ -636,7 +650,7 @@ struct RewardExposureFace: View, Animatable {
       scene.drawSky(in: &context)       // sky, horizon warmth, contrail and gold (light) or bloom (dark), the pour
       scene.drawHalo(in: &context)      // rings and core glow; nothing when failed
       scene.drawRidges(in: &context)    // target horizon, spend horizon, crests
-      scene.drawGround(in: &context)    // light mode: the ground's gold; dark mode, strip only: the scrim
+      scene.drawGround(in: &context)    // dark mode, strip only: the scrim; light mode draws nothing
       scene.drawVeil(in: &context)      // minimum journey only
       scene.drawSun(in: &context)       // the disc, clipped to the sky, above the veil
       scene.drawMarker(in: &context)    // minimum journey only
@@ -734,7 +748,7 @@ Add a `Face` folder to `Assets.xcassets` with **Provides Namespace** checked, an
 
 **Faces follow the appearance.** Version 2 first made the faces prints, constant across looks and modes. Light mode has daytime faces of its own, on both platforms:
 
-- **Light mode: daytime.** The part still to go is a clear, slightly hazy blue sky. Progress is golden light in the halation amber (`SkyLit`, the `--glow` #FFD98C) laid over it from the left, with the same soft falloff. At `h` 0 the sky is blue with a sliver of gold at the left; from the minimum on, the whole band is a warm golden sky with no blue left, deepening as the sun climbs. The ground is a lighter, sunlit green (#A9D6B1 far, #86C396 near): gold-washed to the marker, cooled and dimmed a little beyond, never dark, so the foot text sits in dark ink.
+- **Light mode: daytime.** The part still to go is a clear, slightly hazy blue sky. Progress is golden light in the halation amber (`SkyLit`, the `--glow` #FFD98C) laid over it from the left, with the same soft falloff. At `h` 0 the sky is blue with a sliver of gold at the left; from the minimum on, the whole band is a warm golden sky with no blue left, deepening as the sun climbs. The ground is a lighter green (#9DC5A8 far, #80B591 near), the same across the whole floor and never dark, so the foot text sits in dark ink.
 - **Dark mode: today's prints, unchanged.** Miles is the night sky. Cashback is the warm sky version 2 called "day", now called dusk, because light mode owns the day. The ground stays the deep green with light foot ink.
 - **Miles against cashback** in light mode: altitude. Miles is a higher, cooler, clearer blue with a faint contrail; cashback a warmer, softer haze with none.
 - **Within a mode, faces are identical in every look** (Dusk Ridge, Ridge Charcoal, Overexposed) and on both platforms. Only the chrome differs between looks.
@@ -743,10 +757,10 @@ Each colour set is named for its role and, where it matters, the reward type, so
 
 | Colour set (`Face/…`) | Any (light mode) | Dark | Increase Contrast | Web token |
 | --- | --- | --- | --- | --- |
-| `SkyCashback1`, `2`, `3` | #8DB6D8, #BAD2E3, #EBE6DD: a warm, soft haze (stops 0, 0.48, 1 at 165°) | #EFE2CF, #EAD4AD, #E2C48F: the dusk print | same | `--face-cashback-sky` (renames `--face-day`) |
+| `SkyCashback1`, `2`, `3` | #8DB6D8, #BAD2E3, #EBE6DD: a warm, soft haze (stops 0, 0.48, 1 at 165°) | #7A4420, #5A3016, #3F2211: the amber dusk print | same | `--face-cashback-sky` (renames `--face-day`) |
 | `SkyMiles1`, `2`, `3` | #6EA6DA, #A6C9E9, #DCEBF6: higher, cooler and clearer | #1C2013, #141C12, #0B1710: the night print | same | `--face-miles-sky` (renames `--face-night`) |
 | `SkyOvercast1`, `2`, `3` | #D6D8D9, #E1E2E0, #ECEBE7: the failed sky | same; not drawn (dark mode veils the print) | same | new `--face-overcast` |
-| `SkyLit` | #FFD98C, with its alpha set in code: on the sky `0.76 + 0.16 × v` (0.42 when calm), on the ground `0.24 + 0.12 × v` (0.16 when calm) | same; not drawn | same | new `--face-lit` |
+| `SkyLit` | #FFD98C, with its alpha set in code: on the sky `(0.76 + 0.16 × v) × 0.9` (0.42 × 0.9 when calm), on the ground `(0.24 + 0.12 × v) × 0.8` (0.16 × 0.8 when calm); a tenth and a fifth of that beyond the edge | same; not drawn | same | new `--face-lit` |
 | `Contrail` | #FFFFFF at 45%; miles only | same; not drawn | same | new `--face-contrail` |
 | `InkCashback` | #1C1B18 | #1C1B18 | same | `--face-cashback-ink` (renames `--face-day-ink`) |
 | `InkMiles` | #1C1B18 | #F7F5EF | same | `--face-miles-ink` (renames `--face-night-ink`) |
@@ -754,8 +768,8 @@ Each colour set is named for its role and, where it matters, the reward type, so
 | `FootInkSoft` | #2C3832 | #D4E2D9 | #1F2924 / #EEF4F0 | new `--face-foot-soft` |
 | `UrgentInk` | #5A2F00, a dark umber | #FFD98C | #4A2600 / #FFE7B5 | new `--face-urgent-ink` |
 | `FailedInk` | #701510, a dark red | #FFABAE | #5E100C / #FFD1D3 | new `--face-failed-ink` |
-| `RidgeBack` | #A9D6B1, the far slope, sunlit | #2A6648 | #B8E0BF / #235741 | `--ridge-back` |
-| `RidgeFront` | #86C396, the near ground, sunlit | #1E4433 | #96CCA4 / #163527 | `--ridge-front` |
+| `RidgeBack` | #9DC5A8, the far slope (the former unlit green, now the whole floor) | #2A6648 | #B8E0BF / #235741 | `--ridge-back` |
+| `RidgeFront` | #80B591, the near ground (likewise) | #1E4433 | #96CCA4 / #163527 | `--ridge-front` |
 | `Crest` | #FFD98C; the target crest at 40%, the spend crest at 75%, merged at 90% rising to 100% with `v` | same | 70%, 100%, 100% | `--ridge-crest` |
 | `SunDiscTop`, `SunDiscBottom` | #FFFDF6, #F8E6BA | same | same | `--sun-disc-1`, `--sun-disc-2` |
 | `SunRiseTop`, `SunRiseBottom` | #FFE3AE, #F0B55E: the disc while the tone is needs-minimum | same | same | `--sun-rise-1`, `--sun-rise-2` |
@@ -763,13 +777,14 @@ Each colour set is named for its role and, where it matters, the reward type, so
 | `SunCore` | #FFD382 | same | same | `--sun-core` |
 | `Ring1` to `Ring4` | #FFD27A at 78%, #FFA452 at 28%, #F08446 at 14%, #D8604A at 7% | same | same | `--face-ring-1` to `--face-ring-4` |
 | `Horizon` | #FFAD5C at 17%; over the blue it reads as a warm haze | same | same | `--face-horizon` |
-| `VeilDim` | #3D5674 at 15% × `veil` (14% when failed): the cool dim right of the marker | same; not drawn | same | new `--face-veil-dim` |
+| `VeilDim` | #3D5674 at 14%, whole frame, the failed face only | same; not drawn | same | new `--face-veil-dim` |
+| `VeilSky` | #EC9440 at (0.1 + 0.8 × `veil`), clipped to the sky: the unlit sky goes to orange; not drawn when failed | same; not drawn | same | new `--face-veil-sky` |
 | `VeilGrey` | #808080 (saturation blend, alpha 0.5 × `veil`); not drawn | #808080, saturation blend, alpha 0.5 × `veil` | same | new `--face-veil-grey` |
 | `VeilCashback` | #FFFFFF; not drawn | #D4CBD4, multiply, whole frame | same | new `--face-veil-cashback` |
 | `VeilMiles` | #FFFFFF; not drawn | #8A8496, multiply, whole frame | same | new `--face-veil-miles` |
 | `Bloom` | #FFE3AC; not drawn | #FFE3AC at 30% × `v` over the sky | same | new `--face-bloom` |
-| `Pour` | `SunDiscTop` through `SunCore` to nothing; peak alpha 0.65, set in code | peak alpha 0.55 on the dusk print, 0.65 on the night print | same | new `--face-pour` (the peak alpha) |
-| `MarkerCashback` | #FFF8E6 at 85% | #94591A at 55% | 100% / 65% | new `--face-marker-cashback` |
+| `Pour` | `SunDiscTop` through `SunCore` to nothing; peak alpha 0.65, set in code | peak alpha 0.45 on the dusk print, 0.65 on the night print | same | new `--face-pour` (the peak alpha) |
+| `MarkerCashback` | #FFF8E6 at 85% | #FFD98C at 35% | 100% / 45% | new `--face-marker-cashback` |
 | `MarkerMiles` | #FFF8E6 at 85% | #FFD98C at 35% | 100% / 40% | new `--face-marker-miles` |
 | `MarkerRidge` | #FFF8E6 at 85% | #F7F5EF at 20% | 100% / 26% | new `--face-marker-ridge` |
 | `MarkerEdge` | #1C1B18 at 12%, one device pixel either side of the line | clear; not drawn | 20% / clear | new `--face-marker-edge` |
@@ -783,13 +798,13 @@ Version 1's `Afterglow`, `Dim`, `PaceDay` and `PaceNight` are not needed. Versio
 | Sky | `SkyCashback` or `SkyMiles`; `SkyOvercast` when failed | `SkyCashback` or `SkyMiles`, failed included |
 | Contrail | Miles, unless failed: after the sky, before the sky's gold | None |
 | Gold on the sky | `SkyLit` at `(0.76 + 0.16 × v) × (1 − veil)`; 0.42 evenly when calm; none when failed | None |
-| Gold on the ground | `SkyLit` at `(0.24 + 0.12 × v) × (1 − veil)`, clipped to the ridges; 0.16 evenly when calm; none when failed | None |
-| Veil | `VeilDim` at 15%, whole frame, normal blend | Whole frame, desaturation and multiply |
+| Gold on the ground | None: one pair of greens throughout | None |
+| Veil | `VeilSky` orange on the sky; `VeilDim` at 14% over the whole frame when failed | Whole frame, desaturation and multiply |
 | Foot scrim | None | `RidgeFront` at 55%, strip only |
-| Rings and core glow | Screen | Screen on miles, normal on cashback |
+| Rings and core glow | Screen | Screen |
 | Bloom | None | `Bloom` at 30% × `v`: screen on miles, normal on cashback |
-| Pour | Screen, peak 0.65, radius 0.62 W (hero 0.78 W) | Screen on miles (peak 0.65, radius 0.35 W), normal on cashback (peak 0.55, radius 0.62 W; hero 0.78 W) |
-| Marker | One warm white line (`MarkerCashback`, `MarkerMiles` and `MarkerRidge` are all #FFF8E6) over `MarkerEdge` | Two tones: `MarkerCashback` (umber) or `MarkerMiles` (gold) on the sky, `MarkerRidge` (pale) on the ridges; no edge |
+| Pour | Screen, peak 0.65, radius 0.62 W (hero 0.78 W) | Screen on miles (peak 0.65, radius 0.35 W) and on cashback (peak 0.45, radius 0.62 W; hero 0.78 W) |
+| Marker | One warm white line (`MarkerCashback`, `MarkerMiles` and `MarkerRidge` are all #FFF8E6) over `MarkerEdge` | Two tones: `MarkerCashback` or `MarkerMiles` (both gold) on the sky, `MarkerRidge` (pale) on the ridges; no edge |
 | Title ink | `InkCashback` or `InkMiles`, both dark | `InkCashback` (dark) or `InkMiles` (light) |
 | Foot inks | `FootInk`, `FootInkSoft`, `UrgentInk`, `FailedInk`: all dark | All light |
 
@@ -824,7 +839,7 @@ extension ExposureScene {
   /// The pour's peak alpha and radius (a share of the width).
   var pour: (peak: Double, radius: Double) {
     let night = appearance == .print && exposure.miles
-    let peak = appearance == .print && !exposure.miles ? 0.55 : 0.65
+    let peak = appearance == .print && !exposure.miles ? 0.45 : 0.65
     return (peak, night ? 0.35 : layout.isHero ? 0.78 : 0.62)
   }
   var drawsScrim: Bool { appearance == .print && layout.isStrip }
@@ -873,7 +888,7 @@ Re-measure every pair in the contrast tables when a value changes; a value that 
 | Ridge gap (non-text) | `RidgeBack` against `RidgeFront`; Increase Contrast | 1.26:1; 1.26:1 |
 | Skyline (non-text) | `RidgeBack` against the lower blue; against the lower gold; the merged `RidgeFront` against the gold | 1.0 to 1.3:1; 1.1 to 1.2:1; 1.4 to 1.6:1, with the hue step from gold to green |
 | `Contrail` (non-text) | `SkyMiles1` | 1.6:1 |
-| Lit against unlit (non-text) | the gold against the dimmed blue; the gold-washed ground against the dimmed ground | 1.3 to 2.1:1; 1.3:1, a hue step |
+| Lit against unlit (non-text) | the gold against the orange; the ground has no edge | 1.4 to 1.8:1, a hue step; none |
 
 The ridge gap and the skyline are decorative too: the gap is the remainder the headline states, and the crest strokes and the sun carry the same read.
 
@@ -1034,7 +1049,7 @@ The rounding and Singapore-day rules have edge cases no fixture reaches.
 
   | Token | `:root` (light) | `:root[data-mode="dark"]` |
   | --- | --- | --- |
-  | `--face-cashback-sky` (was `--face-day`) | `linear-gradient(165deg, #8db6d8 0%, #bad2e3 48%, #ebe6dd 100%)` | `linear-gradient(165deg, #efe2cf 0%, #ead4ad 48%, #e2c48f 100%)` |
+  | `--face-cashback-sky` (was `--face-day`) | `linear-gradient(165deg, #8db6d8 0%, #bad2e3 48%, #ebe6dd 100%)` | `linear-gradient(165deg, #7a4420 0%, #5a3016 48%, #3f2211 100%)` |
   | `--face-miles-sky` (was `--face-night`) | `linear-gradient(165deg, #6ea6da 0%, #a6c9e9 48%, #dcebf6 100%)` | `linear-gradient(165deg, #1c2013 0%, #141c12 48%, #0b1710 100%)` |
   | `--face-overcast` | `linear-gradient(165deg, #d6d8d9 0%, #e1e2e0 48%, #ecebe7 100%)` | `none` |
   | `--face-cashback-ink` (was `--face-day-ink`) | `#1c1b18` | `#1c1b18` |
@@ -1049,21 +1064,22 @@ The rounding and Singapore-day rules have edge cases no fixture reaches.
   | `--face-lit` | `#ffd98c` | `transparent` |
   | `--face-contrail` | `#ffffff73` | `transparent` |
   | `--face-veil-dim` | `#3d567426` | `transparent` |
+  | `--face-veil-sky` | `#ffffff` | `transparent` |
   | `--face-veil-cashback` | `#ffffff` | `#d4cbd4` |
   | `--face-veil-miles` | `#ffffff` | `#8a8496` |
   | `--face-veil-grey` | `transparent` | `#808080` |
   | `--face-bloom` | `transparent` | `#ffe3ac` |
   | `--face-cashback-blend` | `screen` | `normal` |
-  | `--face-pour-cashback` | `0.65` | `0.55` |
+  | `--face-pour-cashback` | `0.65` | `0.45` |
   | `--face-pour-miles` | `0.65` | `0.65` |
-  | `--face-marker-cashback` | `#fff8e6d9` | `#94591a8c` |
+  | `--face-marker-cashback` | `#fff8e6d9` | `#ffd98c59` |
   | `--face-marker-miles` | `#fff8e6d9` | `#ffd98c59` |
   | `--face-marker-ridge` | `#fff8e6d9` | `#f7f5ef33` |
   | `--face-marker-edge` | `#1c1b181f` | `transparent` |
 
   The Increase Contrast values follow the colour-asset table through the existing `prefers-contrast: more` blocks. Constant, on `:root` only: `--sun-rise-1` #ffe3ae and `--sun-rise-2` #f0b55e, beside the shipped `--ridge-crest`, `--sun-core`, `--sun-disc-1`, `--sun-disc-2`, `--sun-rim`, `--face-ring-1` to `--face-ring-4` and `--face-horizon`. The foot inks, which version 2 kept constant, now follow the mode. How the face uses the switches:
   - `.rw-face` paints `var(--face-cashback-sky)`, and miles `var(--face-miles-sky)`. `[data-stage="failed"]` layers `var(--face-overcast)` over the type's sky, so `none` in dark mode leaves the print.
-  - The sky's gold is one `<rect>` in the sky layer, under the ridges, and the ground's gold one `<rect>` clipped to the ridges, both filled with a horizontal gradient of `--face-lit`. The tween writes their stop opacities (on the sky `0.76 + 0.16 × v`, on the ground `0.24 + 0.12 × v`, to `(h − 0.04)` of the width, falling to nothing by `(h + 0.04)`; 0.42 and 0.16 evenly when calm), and the end stop keeps the colour at zero opacity. In dark mode `transparent` draws nothing.
+  - The sky's gold is one `<rect>` in the sky layer, under the ridges, filled with a horizontal gradient of `--face-lit`. The tween writes its stop opacities (`0.76 + 0.16 × v` to `(h − 0.04)` of the width, falling to a tenth by `(h + 0.04)`; 0.42 evenly when calm). The ground gets no gold. In dark mode `transparent` draws nothing.
   - The contrail is two parallel `<line>`s stroked with `--face-contrail`, faded at both ends, drawn before the sky's gold and only for `[data-type="miles"]`.
   - The cashback halo and rings take `mix-blend-mode: var(--face-cashback-blend)`; miles keeps its screen rule (`rewards-board.css:548`).
   - The foot scrim is the shipped gradient under the foot, now `var(--face-scrim)`, so light mode draws none.
@@ -1077,7 +1093,7 @@ The rounding and Singapore-day rules have edge cases no fixture reaches.
 
 - **The pour.** One `<rect>` over the sky filled with a radial gradient centred at the sun's column on the top edge (`--sun-disc-1` at the centre, `--sun-core` at 30% of the radius, nothing at the radius); the tween writes its opacity (`peak × clamp((v − 0.4) / 0.6)`, the peak from `--face-pour-cashback` or `--face-pour-miles`) and its radius (0.62 W, hero and desktop face 0.78 W, miles in dark mode 0.35 W). The bloom's own opacity is `0.3 × v`, dark mode only.
 - **Rings.** The halo's radius is `R = (0.14 + 0.24 × v) × W` (on the phone strip also capped at `(0.42 + 0.6 × v)` of the height), so there is no ring gating attribute: the tween writes `--halo-r`.
-- **Veil.** Light mode: one `<rect>` across the face with a horizontal gradient from `(h − 0.04)` to `(h + 0.04)` of the width, filled with `--face-veil-dim` (`transparent` in dark mode). Dark mode: two `<rect>`s with the same gradient, one with `mix-blend-mode: saturation` (`--face-veil-grey`), one with `mix-blend-mode: multiply` (`--face-veil-cashback` or `--face-veil-miles` by `data-type`; white in light mode, where the pair is not drawn). The face is already `isolation: isolate`. Every stage but `gate` and `failed` hides them; `[data-stage="failed"]` sets them to full strength everywhere, with the light-mode dim at 14%.
+- **Veil.** Light mode: one `<rect>` clipped to the sky with a horizontal gradient from `(h − 0.04)` to `(h + 0.04)` of the width, filled with `--face-veil-sky` (orange; `transparent` in dark mode), and one across the face filled with `--face-veil-dim` (`transparent` in dark mode), lit only when failed. Dark mode: two `<rect>`s with the same gradient, one with `mix-blend-mode: saturation` (`--face-veil-grey`), one with `mix-blend-mode: multiply` (`--face-veil-cashback` or `--face-veil-miles` by `data-type`; white in light mode, where the pair is not drawn). The face is already `isolation: isolate`. Every stage but `gate` and `failed` hides them; `[data-stage="failed"]` sets them to full strength everywhere, with the light-mode dim at 14%.
 - **States.**
   - Delete the `[data-tone="complete"]` sunset rules (`:649-664`): a cap is now `[data-stage="capped"]`, with the sun off the top, the gold and the pour, and no dim.
   - `[data-mono]` replaces `saturate(0.35)` (`:666-668`) with 0.15, and hides the sun and halo.
@@ -1262,4 +1278,4 @@ The owner's 7 Oct review answered version 1's questions on the sun's horizontal 
 12. **Zoom from row to sheet.** Try `matchedTransitionSource` with `.navigationTransition(.zoom)` on a device, and keep it only if the sheet keeps its content-height detent? Or stay with the plain sheet?
 13. **An existing VoiceOver repeat.** Cards with no basis (Highest tier active, No cap, failed) speak the earned amount twice. Fix it in this change, with a failing test first, or leave it?
 14. **More than one tier.** The projection carries one reached-tier threshold, so on a card with several tiers the sun stays at halfway between the first tier and the cap (specified), and never sinks. Or spread the lower half of the climb across the tiers, which means carrying every tier threshold in the projection?
-15. **The strip's sun.** The lab draws the disc at 3.4% of the row width, 12pt on a 361pt strip. At that size it does not fit above the target horizon at halfway on a 104pt strip, so the spec uses 8pt. Keep the smaller sun, or take the lab's size and let the strip grow by about 10pt?
+15. **The strip's sun.** Settled on 10 Oct 2026 by the phone cut: a 10pt half-sun on the horizon, the sky band 34pt with the icon's two slopes, no hairline and one soft glow on the phone layouts.

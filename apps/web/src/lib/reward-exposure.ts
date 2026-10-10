@@ -42,6 +42,8 @@ export interface Exposure {
   ridgesApart: boolean;
   /** Where a first showing starts: a card with a minimum sweeps across and then rises. */
   journeyStart: Pose;
+  /** Where in the period the minimum was met, 0 to 1: where the phone's two slopes meet. Null when unknown. */
+  metAt: number | null;
 }
 
 /** A plain amount: finite and positive, else 0. */
@@ -130,6 +132,7 @@ export function exposure(p: RewardRowProjection): Exposure | null {
     markerX: stage === "gate" ? pose.h : null,
     ridgesApart: stage === "failed" || stage === "calm",
     journeyStart,
+    metAt: p.minimumMetAt,
   };
 }
 
@@ -137,7 +140,7 @@ export function exposure(p: RewardRowProjection): Exposure | null {
 export function stillExposure(miles: boolean): Exposure {
   return {
     stage: "calm", pose: { h: 1, v: 0 }, miles, hasMinimum: false, target: "range", light: "even",
-    hasMarker: false, hasSun: false, markerX: null, ridgesApart: true, journeyStart: { h: 1, v: 0 },
+    hasMarker: false, hasSun: false, markerX: null, ridgesApart: true, journeyStart: { h: 1, v: 0 }, metAt: null,
   };
 }
 
@@ -161,9 +164,13 @@ export function gap(pose: Pose): number {
   return 1 - pose.h;
 }
 
-/** The sun's centre y for a target horizon at `horizon` and a disc of radius `r` (y points down). */
-export function sunY(pose: Pose, horizon: number, r: number): number {
-  const sit = horizon + 0.08 * r;
+/**
+ * The sun's centre y for a target horizon at `horizon` and a disc of radius `r` (y points down).
+ * `seat` is how far below the horizon the disc's centre sits while it rides it, as a share of `r`:
+ * a hair below on the face, and exactly on it on the phone strip, where the disc is a clean half-sun.
+ */
+export function sunY(pose: Pose, horizon: number, r: number, seat = 0.08): number {
+  const sit = horizon + seat * r;
   const rest = horizon - 1.15 * r;
   return pose.h < 1 ? sit + (rest - sit) * lift(pose) : rest + (-1.05 * r - rest) * pose.v;
 }
