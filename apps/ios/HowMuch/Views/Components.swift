@@ -860,10 +860,13 @@ struct RootTabView: View {
 /// The compact action stays separate from the destination pill.
 struct RootCaptureTab: TabContent {
   private var role: TabRole {
+    // `TabRole.prominent` ships in the iOS 27 SDK; Xcode 26 must still build.
+    #if compiler(>=6.4)
     if #available(iOS 27.0, *) {
       // Search no longer guarantees the separate prominent treatment.
       return .prominent
     }
+    #endif
     return .search
   }
 
