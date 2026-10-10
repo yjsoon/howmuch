@@ -13,7 +13,7 @@ Halation also runs in the browser, with the same register, Rewards board and rep
 
 ## Getting started
 
-Halation is self-hosted only. There is no hosted service and no public sign-up: your financial data stays on your phone or in your own Cloudflare account, never on anyone else's server.
+Halation is self-hosted only. There is no hosted service and no public sign-up: your ledger lives on your phone or in your own Cloudflare account. Optional AI features, such as the statement formatter, reward terms drafting and category suggestions, send the content you choose to the AI provider you configure, and that provider's retention policies apply.
 
 You have two options:
 
